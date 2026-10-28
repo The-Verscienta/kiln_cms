@@ -511,6 +511,13 @@ msgid_plural "%{count} tasks assigned to you"
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} term"
+msgid_plural "%{count} terms"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} unresolved comment"
@@ -1351,6 +1358,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "A plain box, stored exactly as typed — for a note or a code."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "A point on a map: latitude, longitude and zoom. For a shop, a venue or where a photo was taken."
 msgstr ""
 
@@ -1426,6 +1438,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "A single option — a status, a size."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "A single row — a product's specifications, a venue's address."
 msgstr ""
 
@@ -1457,6 +1474,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "A tier's audience can't change — existing members would keep an entitlement nothing would revoke. Retire this tier and create a new one instead."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A toolbar for bold, italic, links and lists. Stored as HTML."
 msgstr ""
 
 #: lib/kiln_cms_web/live/feed_settings_live.ex
@@ -1861,6 +1883,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add a tag…"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Add a term to %{field}"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Add a term…"
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -2737,6 +2769,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "As many as the editor picks, as tags, in the order they arrange them."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "As many rows as the editor adds, in the order they arrange them — dosages, steps."
 msgstr ""
 
@@ -2814,6 +2851,11 @@ msgstr[1] ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "At most the number you set — three speakers per panel."
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "At the limit of %{max} terms."
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
@@ -3684,6 +3726,11 @@ msgstr ""
 msgid "Choose a task…"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a term…"
+msgstr ""
+
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a user…"
@@ -3781,6 +3828,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose…"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Chosen terms"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/block_params.ex
@@ -6351,6 +6403,11 @@ msgstr ""
 msgid "Editable types"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editing"
+msgstr ""
+
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editing in place"
@@ -6400,6 +6457,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editorial — serif, narrower reading column"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editors can add new terms"
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -7462,6 +7524,11 @@ msgstr ""
 msgid "For"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "For a vocabulary that grows, like properties or keywords. The options become suggestions, and terms already used on this type are suggested too. A new term does not join the options."
+msgstr ""
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "For an outside opinion on deliverability (SPF/DKIM/DMARC scoring), send a test to a service like mail-tester.com."
@@ -7518,9 +7585,19 @@ msgstr ""
 msgid "Form submission"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Formatted text"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Formatted text with bold, italic, and lists"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Formatting for %{field}"
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
@@ -8134,6 +8211,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "How many rows"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "How many terms"
 msgstr ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex
@@ -11302,7 +11384,17 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "One choice"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "One choice from a fixed list, which you type into Options below. For a size, a status or a category."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "One choice per line. Editors pick any number of these."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -11347,6 +11439,11 @@ msgstr[1] ""
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "One per line. Matched case-insensitively on whole words, so \"free\" does not match \"freedom\". Whitespace between words is flexible, so a phrase still matches text the editor wrapped across a line."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "One per line. Suggested to editors, who can also add their own; may be left empty."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -12113,6 +12210,11 @@ msgstr ""
 msgid "Plain CSS, served inside a <style> element on every public page — no <style> tags here, and no HTML. Use it to go beyond the theme presets in Branding."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Plain text"
+msgstr ""
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Planned"
@@ -12255,6 +12357,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Presentation: %{title}"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Press Enter or comma to add one of the options."
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Press Enter or comma to add. New terms are welcome."
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -13181,6 +13293,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove %{path} from the 404 list"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{term}"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
@@ -14247,6 +14364,11 @@ msgstr ""
 msgid "Saving keeps only the first row of each list already filled in. The other rows are removed from the content."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saving keeps only the first term of each list already filled in. The other terms are removed from the content."
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saving this sends this site's content to the URL below."
@@ -14865,6 +14987,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Several records, in the order the editor arranges them."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Several terms"
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -21117,6 +21244,11 @@ msgstr ""
 msgid "sent by email"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "several"
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "signed by a key we no longer hold"
@@ -21181,6 +21313,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "tag group"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "tags, open"
 msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
@@ -21323,6 +21460,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "under an hour left"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "unformatted"
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex

@@ -1229,3 +1229,124 @@ function buildEditor(hook, extensions, content = null) {
   toolbarEl.appendChild(hook.tableControls.el)
   syncToolbar()
 }
+
+// --- Rich `:text` custom fields ---------------------------------------------
+//
+// A rich `:text` field (`FieldDefinition.format == :rich`) edits its HTML with
+// TipTap and mirrors it into the field's hidden form input, so it saves through
+// the editor form like any other custom field; the server sanitizes it on
+// write (`KilnCMS.CMS.TextFormat`) to the rich-text block's allowlist.
+//
+// The schema is the block's — headings, quotes, tables included — so a value
+// an importer wrote with those keeps them when an author edits a word of it.
+// The toolbar is short (paragraphs, bold, italic, links, lists): a field is a
+// slot in a page section, not a page. Nothing is written back until the author
+// changes something, so merely opening a record never rewrites a stored value
+// into TipTap's normal form.
+const FIELD_TOOLBAR = TOOLBAR.filter(item =>
+  ["B", "I", "Link", "• List", "1. List", "↺", "↻"].includes(item.label),
+)
+
+const MARKUP = /<[a-z][\s\S]*>/i
+
+// What the editor is seeded with. A value with no markup is plain text an
+// earlier textarea stored: its blank lines become paragraphs and its single
+// line breaks `<br>`s, rather than TipTap folding it into one paragraph.
+function fieldContent(value) {
+  if (!value || MARKUP.test(value)) return value || ""
+  const escape = s =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  return value
+    .split(/\n{2,}/)
+    .map(p => `<p>${escape(p).replace(/\n/g, "<br>")}</p>`)
+    .join("")
+}
+
+export function mountField(hook) {
+  const input = hook.el.querySelector("[data-field-value]")
+  const host = hook.el.querySelector("[data-field-editor]")
+  const toolbarEl = hook.el.querySelector("[data-toolbar]")
+  // A button must not take focus from the editor (see buildEditor).
+  toolbarEl.addEventListener("mousedown", e => e.preventDefault())
+
+  hook.fieldInput = input
+  hook._written = input.value
+
+  const sync = () => syncFieldToolbar(hook)
+
+  hook.editor = new Editor({
+    element: host,
+    extensions: [
+      StarterKit.configure(STARTER_KIT),
+      ...LINK_EXTENSIONS,
+      ...TABLE_EXTENSIONS,
+      ListDetect,
+    ],
+    content: fieldContent(input.value),
+    editable: !input.disabled,
+    editorProps: {
+      attributes: {
+        "aria-labelledby": hook.el.dataset.labelId,
+        "aria-multiline": "true",
+        role: "textbox",
+      },
+    },
+    onUpdate: () => {
+      sync()
+      clearTimeout(hook._debounce)
+      hook._debounce = setTimeout(() => writeField(hook), 250)
+    },
+    onSelectionUpdate: sync,
+    // A toggle on an empty selection changes neither the doc nor the selection.
+    onTransaction: ({transaction}) => {
+      if (transaction.storedMarksSet) sync()
+    },
+    onBlur: () => {
+      clearTimeout(hook._debounce)
+      if (hook._dirty) writeField(hook)
+    },
+  })
+  hook.editor.on("update", () => (hook._dirty = true))
+
+  hook.linkPrompt = new LinkPrompt(hook.editor)
+  hook.toolbarButtons = FIELD_TOOLBAR.map(item => {
+    const b = toolbarButton(hook, item)
+    toolbarEl.appendChild(b)
+    return {item, b}
+  })
+  sync()
+}
+
+// The server patched the hidden input (a restore, a reload after a save
+// elsewhere, a shared field locked on a translation): follow it, without
+// counting that as the author's edit.
+export function updateField(hook) {
+  if (!hook.editor) return
+  const input = hook.fieldInput
+  hook.editor.setEditable(!input.disabled, false)
+  if (input.value !== hook._written) {
+    hook._written = input.value
+    hook.editor.commands.setContent(fieldContent(input.value), {emitUpdate: false})
+    syncFieldToolbar(hook)
+  }
+}
+
+function writeField(hook) {
+  hook._dirty = false
+  const html = hook.editor.isEmpty ? "" : hook.editor.getHTML()
+  if (html === hook._written) return
+  hook._written = html
+  hook.fieldInput.value = html
+  // The editor form's phx-change listens for `input` on its controls.
+  hook.fieldInput.dispatchEvent(new Event("input", {bubbles: true}))
+}
+
+function syncFieldToolbar(hook) {
+  if (!hook.toolbarButtons) return
+  hook.toolbarButtons.forEach(({item, b}) => {
+    if (!item.active) return
+    const on = item.active(hook.editor)
+    b.classList.toggle("bg-base-300", on)
+    b.setAttribute("aria-pressed", on ? "true" : "false")
+  })
+}

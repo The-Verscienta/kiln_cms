@@ -3,8 +3,9 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   Keeps the `custom_fields` keys stored on content in step with the
   `FieldDefinition` rows that govern them: **destroying** a definition purges
   its key, **renaming** one moves the values to the new key, and flipping a
-  media or reference field's `multiple` flag **reshapes** its values between a
-  single snapshot and a list (a gallery, a list of references).
+  media, reference or select field's `multiple` flag **reshapes** its values
+  between a single value and a list (a gallery, a list of references, several
+  terms).
 
   Both cases otherwise leave records holding a key no definition declares, and
   such a key is on borrowed time. `Changes.ApplyCustomFields` folds the stored
@@ -129,6 +130,12 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     reshape =
       cond do
         was_list? == list? -> []
+        # Retyping a field *into* a multiple select (a `:text` holding JSON
+        # strings, say) is not a flip of the same values: wrapping each string
+        # in a list would store `["[\"a\",\"b\"]"]`. The values stay as they
+        # are — the next write of each reports them — and
+        # `mix kiln.fields.convert` is the tool that moves them.
+        list? and definition.field_type == :select and previous.field_type != :select -> []
         list? -> [{:reshape, definition.name, :to_list}]
         true -> [{:reshape, definition.name, :to_single}]
       end
@@ -229,7 +236,8 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     |> query([from, to | params], "moved #{inspect(from)} to #{inspect(to)} on")
   end
 
-  # Single → list wraps each stored snapshot in a one-item list — lossless.
+  # Single → list wraps each stored snapshot (or select term) in a one-item
+  # list — lossless.
   # List → single keeps each list's first snapshot and clears an empty one;
   # the rest of a list has nowhere to go, which the fields admin says before
   # the admin saves. Only values already in the other shape are touched.
@@ -239,7 +247,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     UPDATE #{table}
        SET custom_fields = jsonb_set(custom_fields, ARRAY[$1::text],
                                      jsonb_build_array(custom_fields -> $1::text))
-     WHERE jsonb_typeof(custom_fields -> $1::text) = 'object'#{filter.(1)}
+     WHERE jsonb_typeof(custom_fields -> $1::text) IN ('object', 'string')#{filter.(1)}
     """
     |> query([name | params], "made #{inspect(name)} a list on")
   end
@@ -466,17 +474,23 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     end
   end
 
-  # The table holding the records this definition governs, and a `WHERE` tail
-  # built after however many keys the statement bound first. A dynamic type's
-  # fields all live on the shared `entries` table (D17), so that one narrows by
-  # type as well as by org.
-  defp target(%{type_definition_id: id} = definition) when not is_nil(id) do
+  @doc """
+  The table holding the records `definition` governs, a function building the
+  `WHERE` tail (` AND …`) whose placeholders start after the `n` parameters a
+  statement bound first, and that tail's parameters — or `:error` when the
+  owner no longer resolves. A dynamic type's fields all live on the shared
+  `entries` table (D17), so that one narrows by type as well as by org.
+  Shared with `KilnCMS.CMS.SelectTerms`, which reads the same rows.
+  """
+  @spec target(KilnCMS.CMS.FieldDefinition.t()) ::
+          {:ok, String.t(), (non_neg_integer() -> String.t()), list()} | :error
+  def target(%{type_definition_id: id} = definition) when not is_nil(id) do
     {:ok, table(KilnCMS.CMS.Entry),
      fn n -> " AND org_id = $#{n + 1} AND type_definition_id = $#{n + 2}" end,
      [uuid(definition.org_id), uuid(id)]}
   end
 
-  defp target(%{content_type: type} = definition) when not is_nil(type) do
+  def target(%{content_type: type} = definition) when not is_nil(type) do
     case KilnCMS.CMS.ContentTypes.get(type, definition.org_id) do
       %{resource: resource} ->
         {:ok, table(resource), fn n -> " AND org_id = $#{n + 1}" end, [uuid(definition.org_id)]}
@@ -486,7 +500,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     end
   end
 
-  defp target(_definition), do: :error
+  def target(_definition), do: :error
 
   defp table(resource), do: AshPostgres.DataLayer.Info.table(resource)
 

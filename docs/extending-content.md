@@ -17,6 +17,7 @@ UI" workflow, scoped to fields.
 
 - **Define**: `KilnCMS.CMS.FieldDefinition` rows describe each field
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
+  `allow_custom`, `format`,
   `target_type`, `target_types`, `multiple`, `min_items`, `max_items`,
   `max_sources`, `on_target_delete`, `inverse_label`, `inverse_name`,
   `schema_org_property`,
@@ -52,6 +53,35 @@ UI" workflow, scoped to fields.
   from the library drawer's multi-select and reordered tile by tile. Flipping
   the setting reshapes stored values: a single image becomes a one-image
   gallery, and a gallery keeps only its first image.
+- **One choice or several terms**: a `:select` field holds one of its
+  `options` by default. With `multiple: true` it holds **several terms**: a
+  JSON list of strings, in the order the editor arranges them, picked in a
+  tag-style picker (chips, a text box with suggestions, drag to reorder) and
+  bounded by `min_items` / `max_items`. Terms are trimmed, blanks and repeats
+  drop out, and each must be one of the `options` — unless `allow_custom` is
+  set, which makes the vocabulary **open**: editors add new terms, `options`
+  become suggestions (and may be empty), and the picker also suggests the
+  terms already used on the type (`KilnCMS.CMS.SelectTerms`). A new term
+  never joins `options`; that list stays the admin's. A JSON-encoded list
+  sent as a string (`"[\"a\",\"b\"]"`) is refused rather than stored as one
+  term. `custom_filter[<field>]=<term>` asks whether the list contains the
+  term (`in` for any of several, `not_eq` for none); the field is not
+  sortable. Flipping the setting reshapes stored values (one choice → a
+  one-term list; a list → its first term). Only a record-level select can
+  hold several terms — not a link field or a group sub-field. To move terms
+  stored as JSON in a `:text` field, see
+  [field-conversion.md](field-conversion.md).
+- **Rich or plain text**: a `:text` field's `format` is `:rich` by default —
+  the editor shows TipTap with a short toolbar (paragraphs, bold, italic,
+  links, bulleted and numbered lists), and the HTML is sanitized on write to
+  the rich-text block's allow-list (`KilnCMS.CMS.TextFormat`). Text with no
+  markup, a value that is JSON data, and markup the sanitizer removes nothing
+  from are stored byte for byte; the editor
+  keeps the plain textarea for JSON data, and seeds TipTap from plain text by
+  paragraph. Opening a record never rewrites a value: only an edit does.
+  `format: :plain` keeps the textarea and stores the text as typed, for a
+  note or a code. The value is a string either way; the schema export marks a
+  rich one `contentMediaType: text/html`.
 - **One reference or a list**: a `:reference` field holds one record by
   default (an `%{"id", "type", "slug", "title"}` snapshot). With
   `multiple: true` it holds a **list of references**: an ordered list of

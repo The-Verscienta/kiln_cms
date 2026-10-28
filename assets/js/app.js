@@ -547,6 +547,60 @@ const Hooks = {
       this.editor && this.editor.destroy()
     },
   },
+  // A rich `:text` custom field: TipTap over the field's hidden form input
+  // (see `mountField` in ./rich_text). Same lazy chunk as the block editor.
+  RichTextField: {
+    mounted() {
+      import("./rich_text").then(({mountField}) => {
+        if (!this._destroyed) mountField(this)
+      })
+    },
+    updated() {
+      if (this.editor) import("./rich_text").then(({updateField}) => updateField(this))
+    },
+    destroyed() {
+      this._destroyed = true
+      clearTimeout(this._debounce)
+      this.linkPrompt && this.linkPrompt.destroy()
+      this.editor && this.editor.destroy()
+    },
+  },
+  // The text box of a multiple select's tag picker. Enter or a comma adds what
+  // is typed (several, comma-separated, at once); picking a `<datalist>`
+  // suggestion adds it straight away; Backspace in an empty box removes the
+  // last chip. The terms themselves live in the form — the server edits them
+  // (`select_term_add` / `select_term_remove`) and re-renders the chips.
+  TermPicker: {
+    mounted() {
+      const add = () => {
+        const field = this.el.dataset.field
+        this.el.value
+          .split(",")
+          .map(term => term.trim())
+          .filter(Boolean)
+          .forEach(term => this.pushEvent("select_term_add", {field, term}))
+        this.el.value = ""
+      }
+      this.el.addEventListener("keydown", e => {
+        if (e.isComposing) return
+        if (e.key === "Enter" || e.key === ",") {
+          e.preventDefault()
+          add()
+        } else if (e.key === "Backspace" && this.el.value === "") {
+          const count = Number(this.el.dataset.count || 0)
+          if (count > 0) {
+            e.preventDefault()
+            this.pushEvent("select_term_remove", {field: this.el.dataset.field, index: String(count - 1)})
+          }
+        }
+      })
+      // A datalist pick arrives as an input event with no inputType (Safari,
+      // Firefox) or "insertReplacementText" (Chromium).
+      this.el.addEventListener("input", e => {
+        if (!e.inputType || e.inputType === "insertReplacementText") add()
+      })
+    },
+  },
   // Type-to-filter over the sectioned tag picker. The server renders every tag
   // it wants submittable (see `tag_picker/1` — an unrendered checkbox would be
   // *detached* on save), so narrowing happens purely client-side: matching is

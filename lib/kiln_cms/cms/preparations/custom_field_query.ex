@@ -30,7 +30,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   `media`/`reference` fields filter by their snapshot's stable `id`
   (equality-shaped operators only) and are not sortable. On a `multiple` one
   (a gallery, a list of references) `eq` means "contains this id", `not_eq`
-  "does not", and `in` "contains any of them". A reference also takes the
+  "does not", and `in` "contains any of them" — and a multiple `select`
+  reads the same way for its terms (`custom_filter[properties]=tonic`). A
+  reference also takes the
   relationship operators `has` / `has_all` / `has_none` / `count`, which
   read its `content_links` edges rather than the snapshot, and so do the
   built-in `tags` and `related_<type>s` (the set operators only) — see
@@ -421,6 +423,34 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     end
   end
 
+  # A multiple select holds a list of terms, so — as for a gallery — `eq` asks
+  # whether the list contains the term, `not_eq` whether it does not, and `in`
+  # whether it contains any of them: jsonb containment against a one-term
+  # array, bound as text and cast in SQL for the same reason.
+  defp condition(%{field_type: :select, multiple: true, name: name}, op, raw) do
+    contains = fn term ->
+      probe = Jason.encode!([to_string(term)])
+      expr(fragment("(? -> ?::text) @> ?::text::jsonb", ^ref(:custom_fields), ^name, ^probe))
+    end
+
+    case op do
+      "eq" ->
+        {:ok, contains.(raw)}
+
+      "not_eq" ->
+        {:ok, expr(not (^contains.(raw)))}
+
+      "in" ->
+        cast_list(raw, nil, name, fn
+          [] -> expr(false)
+          values -> values |> Enum.map(contains) |> Enum.reduce(&expr(^&2 or ^&1))
+        end)
+
+      _ ->
+        {:error, "custom field #{inspect(name)} (several terms) only supports eq/not_eq/in/null"}
+    end
+  end
+
   # media/reference snapshots: match on the stable id inside the map.
   defp condition(%{field_type: type, name: name}, op, raw) when type in [:media, :reference] do
     field = expr(get_path(custom_fields, [^name, "id"]))
@@ -505,6 +535,13 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         # snapshot — refuse rather than return a 200 in nonsense order.
         {:ok, %{field_type: type}} when type in [:media, :reference, :geolocation, :group] ->
           invalid(query, :custom_sort, "custom field #{inspect(name)} (#{type}) is not sortable")
+
+        {:ok, %{field_type: :select, multiple: true}} ->
+          invalid(
+            query,
+            :custom_sort,
+            "custom field #{inspect(name)} (several terms) is not sortable"
+          )
 
         {:ok, definition} ->
           Ash.Query.sort(query, [{sort_expr(definition), direction}])

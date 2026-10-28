@@ -1,25 +1,28 @@
 defmodule Mix.Tasks.Kiln.Fields.Convert do
-  @shortdoc "Move JSON-in-text custom-field values into a :group field"
+  @shortdoc "Move JSON-in-text custom-field values into a :group or multiple :select field"
 
   @moduledoc """
   Parses a custom field that holds a JSON string (an array of objects, one
   object, or either encoded twice) and writes the rows to a `:group` field —
-  see `KilnCMS.CMS.FieldConversion` and docs/field-conversion.md.
+  or a JSON array of strings, written as the terms of a multiple `:select`
+  field — see `KilnCMS.CMS.FieldConversion` and docs/field-conversion.md.
 
       mix kiln.fields.convert herb dosages_json --to dosages                # dry run
       mix kiln.fields.convert herb dosages_json --to dosages --apply
       mix kiln.fields.convert herb dosages_json --to dosages --map dose=amount --map units=unit
       mix kiln.fields.convert herb dosages_json --to dosages --apply --skip-invalid --report out.json
+      mix kiln.fields.convert herb western_properties --to properties          # terms + counts
 
   Options:
 
-      --to FIELD         the target group (it and its sub-fields must exist)
+      --to FIELD         the target group (it and its sub-fields must exist), or
+                         a select holding several terms
       --org SLUG         the organization (default: the default org)
       --apply            write; without it the run is a dry run
       --skip-invalid     write the valid records even when others are invalid
                          (those keep only their string)
       --overwrite        also rewrite records whose group already has rows
-      --map OLD=NEW      rename a key in every row (repeatable)
+      --map OLD=NEW      rename a key in every row (repeatable; groups only)
       --report PATH      also write the report as JSON
       --batch N          records read per page (default 100)
 
@@ -43,7 +46,7 @@ defmodule Mix.Tasks.Kiln.Fields.Convert do
     batch: :integer
   ]
 
-  @usage "Usage: mix kiln.fields.convert <content_type> <source_field> --to <group_field> [--apply]"
+  @usage "Usage: mix kiln.fields.convert <content_type> <source_field> --to <group_or_select_field> [--apply]"
 
   @impl Mix.Task
   def run(args) do

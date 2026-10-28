@@ -469,6 +469,19 @@ defmodule KilnCMS.SchemaExport do
   # `null` that same type admits. And it would disclose: the option list is
   # admin-authored editorial vocabulary, which this endpoint has no reason to
   # publish anonymously.
+  #
+  # A multiple select is a list of those strings, in the editor's order — the
+  # same stance on `enum`, and doubly so with `allow_custom`.
+  defp base_custom_field_schema(:select, %{multiple: true} = d) do
+    %{
+      "type" => ["array", "null"],
+      "items" => %{"type" => "string"},
+      "uniqueItems" => true,
+      "description" => "The chosen terms, in the order the editor arranged them."
+    }
+    |> put_item_bounds(d)
+  end
+
   defp base_custom_field_schema(:select, _d), do: %{"type" => ["string", "null"]}
 
   # The item shape is `Media.Snapshot`'s — the same one an `image` block's
@@ -532,8 +545,15 @@ defmodule KilnCMS.SchemaExport do
     |> put_sub_field_names(d)
   end
 
-  defp base_custom_field_schema(type, _d) when type in [:string, :text],
-    do: %{"type" => ["string", "null"]}
+  # A rich `:text` field (the default `format`) holds sanitized HTML; saying
+  # so lets a client pick its renderer without guessing. A plain one is text.
+  defp base_custom_field_schema(:text, d) do
+    if Map.get(d, :format, :rich) == :rich,
+      do: %{"type" => ["string", "null"], "contentMediaType" => "text/html"},
+      else: %{"type" => ["string", "null"]}
+  end
+
+  defp base_custom_field_schema(:string, _d), do: %{"type" => ["string", "null"]}
 
   # Everything else is a `Kiln.FieldType` — a built-in (geolocation, computed,
   # the event pair) or a plugin's. Ask the module: it may declare its delivered

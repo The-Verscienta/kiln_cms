@@ -649,6 +649,126 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
+  # A multiple select (several terms): the chosen terms as removable chips,
+  # each carried by a hidden `name[]` input so the order on screen is the
+  # order submitted, and a text box that adds one. The box suggests the
+  # field's options plus — on an open vocabulary (`allow_custom`) — the terms
+  # already in use on the type (`options`, from `KilnCMS.CMS.SelectTerms`),
+  # less the ones already chosen. Enter, a comma or picking a suggestion adds
+  # the term (the `TermPicker` hook); the chips' × and a drag by the handle
+  # remove and reorder. All of it is server-side edits of the form params, as
+  # a gallery's are, so the chips never hold state the form doesn't. A term
+  # outside a fixed vocabulary is still added and then refused by the field's
+  # validation, which says which term and why.
+  #
+  # The leading blank `name[]` input makes an emptied field submit at all (see
+  # the gallery above); `ApplyCustomFields` drops it. The text box has no
+  # `name`, so what is half-typed in it is never submitted.
+  def custom_field_input(%{definition: %{field_type: :select, multiple: true}} = assigns) do
+    terms = select_terms(assigns.value)
+
+    assigns =
+      assigns
+      |> assign(:terms, terms)
+      |> assign(:suggestions, Enum.reject(assigns.options, &(&1 in terms)))
+      |> assign(:full?, full?(assigns.definition, length(terms)))
+
+    ~H"""
+    <div
+      id={cf_id(@definition)}
+      role="group"
+      aria-labelledby={"#{cf_id(@definition)}-label"}
+      aria-describedby={@errors != [] && cf_errors_id(@definition)}
+    >
+      <div class="mb-1 flex items-baseline justify-between gap-2">
+        <span id={"#{cf_id(@definition)}-label"} class="text-sm font-medium">
+          {@definition.label}
+        </span>
+        <span :if={@terms != []} class="text-xs tabular-nums text-base-content/60">
+          {ngettext("%{count} term", "%{count} terms", length(@terms))}
+        </span>
+      </div>
+      <input type="hidden" name={"#{@name}[]"} value="" />
+      <div class={[
+        "field-input flex min-h-10 flex-wrap items-center gap-1.5 py-1.5 transition-shadow focus-within:ring-2 focus-within:ring-primary/30",
+        @errors != [] && "border-error"
+      ]}>
+        <ul
+          :if={@terms != []}
+          id={"#{cf_id(@definition)}-terms"}
+          phx-hook="Sortable"
+          data-sort-event="select_term_reorder"
+          data-sort-field={@definition.name}
+          aria-label={gettext("Chosen terms")}
+          class="contents"
+        >
+          <li
+            :for={{term, index} <- Enum.with_index(@terms)}
+            id={"cf-term-#{@definition.name}-#{index}"}
+            data-sort-id={index}
+            class="group inline-flex max-w-full items-center gap-0.5 rounded-full border border-primary/20 bg-primary/10 py-0.5 pl-1 pr-0.5 text-sm text-base-content transition-colors hover:border-primary/40"
+          >
+            <input type="hidden" name={"#{@name}[]"} value={term} />
+            <span
+              data-drag-handle
+              title={gettext("Drag to reorder")}
+              class="cursor-grab text-base-content/30 transition-colors group-hover:text-base-content/60 active:cursor-grabbing"
+            >
+              <.icon name="hero-bars-2" class="size-3" />
+            </span>
+            <span class="truncate px-0.5">{term}</span>
+            <button
+              type="button"
+              phx-click="select_term_remove"
+              phx-value-field={@definition.name}
+              phx-value-index={index}
+              aria-label={gettext("Remove %{term}", term: term)}
+              class="rounded-full p-0.5 text-base-content/50 transition-colors hover:bg-error/15 hover:text-error focus-visible:bg-error/15 focus-visible:text-error"
+            >
+              <.icon name="hero-x-mark" class="size-3.5" />
+            </button>
+          </li>
+        </ul>
+        <input
+          :if={!@full?}
+          type="text"
+          id={"#{cf_id(@definition)}-entry"}
+          phx-hook="TermPicker"
+          data-field={@definition.name}
+          data-count={length(@terms)}
+          list={"#{cf_id(@definition)}-suggestions"}
+          autocomplete="off"
+          enterkeyhint="enter"
+          placeholder={
+            if(@definition.allow_custom,
+              do: gettext("Add a term…"),
+              else: gettext("Choose a term…")
+            )
+          }
+          aria-label={gettext("Add a term to %{field}", field: @definition.label)}
+          class="min-w-32 flex-1 border-0 bg-transparent p-0.5 text-sm outline-none placeholder:text-base-content/40 focus:ring-0"
+        />
+        <datalist id={"#{cf_id(@definition)}-suggestions"}>
+          <option :for={suggestion <- @suggestions} value={suggestion} />
+        </datalist>
+      </div>
+      <p class="mt-1 text-xs text-base-content/60">
+        <span :if={@definition.help_text}>{@definition.help_text}</span>
+        <span :if={!@full?}>
+          {if(@definition.allow_custom,
+            do: gettext("Press Enter or comma to add. New terms are welcome."),
+            else: gettext("Press Enter or comma to add one of the options.")
+          )}
+        </span>
+        <span :if={@full?}>
+          {gettext("At the limit of %{max} terms.", max: @definition.max_items)}
+        </span>
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
   def custom_field_input(%{definition: %{field_type: :select}} = assigns) do
     ~H"""
     <div>
@@ -721,27 +841,24 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
-  def custom_field_input(%{definition: %{field_type: :text}} = assigns) do
-    ~H"""
-    <div>
-      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
-        {@definition.label}
-      </label>
-      <textarea
-        id={cf_id(@definition)}
-        name={@name}
-        required={@definition.required}
-        aria-invalid={@errors != [] && "true"}
-        aria-describedby={@errors != [] && cf_errors_id(@definition)}
-        class="field-input"
-      >{@value}</textarea>
-      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
-        {@definition.help_text}
-      </p>
-      <.custom_field_errors_list definition={@definition} errors={@errors} />
-    </div>
-    """
+  # A rich `:text` field (the default `format`): the TipTap field editor over
+  # a hidden input holding the HTML (`RichTextField` hook, `mountField` in
+  # rich_text.js). The editor and its toolbar are the hook's, behind
+  # `phx-update="ignore"`; the hidden input stays outside it, so a patch from
+  # the server (a restore, a lock) still reaches it and the hook follows.
+  #
+  # A value that is JSON data (a list stored as text, awaiting
+  # `mix kiln.fields.convert`) keeps the plain textarea — TipTap would wrap it
+  # in a paragraph — as does a `:plain` field.
+  def custom_field_input(%{definition: %{field_type: :text} = definition} = assigns)
+      when not is_map_key(definition, :format) or definition.format == :rich do
+    if KilnCMS.CMS.TextFormat.json_data?(assigns.value),
+      do: plain_text_input(assigns),
+      else: rich_text_input(assigns)
   end
+
+  def custom_field_input(%{definition: %{field_type: :text}} = assigns),
+    do: plain_text_input(assigns)
 
   # A `:group` field (structured rows): its sub-fields' own inputs, one set
   # for a single group and one per row for a repeating one. The wire shape —
@@ -792,6 +909,62 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
         </div>
         """
     end
+  end
+
+  defp rich_text_input(assigns) do
+    ~H"""
+    <div
+      id={"cf-rich-#{@definition.name}"}
+      phx-hook="RichTextField"
+      data-label-id={"#{cf_id(@definition)}-label"}
+      aria-describedby={@errors != [] && cf_errors_id(@definition)}
+    >
+      <span id={"#{cf_id(@definition)}-label"} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </span>
+      <input type="hidden" id={cf_id(@definition)} name={@name} value={@value} data-field-value />
+      <div
+        id={"cf-rich-#{@definition.name}-editor"}
+        phx-update="ignore"
+        class={["rt-field", @errors != [] && "rt-field-invalid"]}
+      >
+        <div
+          data-toolbar
+          role="toolbar"
+          aria-label={gettext("Formatting for %{field}", field: @definition.label)}
+          class="rt-field-toolbar"
+        >
+        </div>
+        <div data-field-editor></div>
+      </div>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
+  defp plain_text_input(assigns) do
+    ~H"""
+    <div>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
+      <textarea
+        id={cf_id(@definition)}
+        name={@name}
+        required={@definition.required}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        class="field-input"
+      >{@value}</textarea>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
   end
 
   # A single group: one fieldset of its sub-fields' inputs.
@@ -1273,6 +1446,18 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     </div>
     """
   end
+
+  # The chosen terms of a multiple select, from the stored list or the posted
+  # one (blank sentinel included); a single string stored while the field was
+  # single is its one term.
+  defp select_terms(value) when is_list(value),
+    do: value |> Enum.map(&to_string/1) |> Enum.reject(&(String.trim(&1) == ""))
+
+  defp select_terms(value) when is_binary(value) and value != "", do: [value]
+  defp select_terms(_value), do: []
+
+  defp full?(%{max_items: max}, count) when is_integer(max), do: count >= max
+  defp full?(_definition, _count), do: false
 
   defp cf_id(definition), do: "custom-field-#{definition.name}"
   # Its own prefix: `custom-field-<name>-<x>` is already the part-id space.

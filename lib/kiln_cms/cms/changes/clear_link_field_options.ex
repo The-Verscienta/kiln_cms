@@ -9,8 +9,9 @@ defmodule KilnCMS.CMS.Changes.ClearLinkFieldOptions do
 
   The same stance as `KilnCMS.CMS.Changes.ClearMultiple`: the fields admin
   never renders those controls for a sub-field, so clearing beats an error
-  on a control nobody can see. `multiple` needs nothing here — no sub-field
-  type can hold a list, so `ClearMultiple` already clears it.
+  on a control nobody can see. `multiple` needs nothing here: `ClearMultiple`
+  clears it on every sub-field, the one list type a sub-field may have
+  (`:select`) included.
   """
   use Ash.Resource.Change
 

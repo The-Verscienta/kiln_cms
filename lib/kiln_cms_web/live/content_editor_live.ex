@@ -598,6 +598,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:field_definitions, field_definitions)
     # Who a `:user` field may name (#2044); read only when the type has one.
     |> assign(:site_people, site_people(org, field_definitions))
+    # Terms already in use on an open-vocabulary multiple select, which its
+    # tag picker suggests beside the options; read only when the type has one.
+    |> assign(:select_terms, KilnCMS.CMS.SelectTerms.used(field_definitions))
     # CRDT collab prototype: when enabled, rich-text blocks sync live
     # between editors over the collab channel (see KilnCMS.Collab.Crdt).
     |> assign(:collab_token, collab_token(actor))
@@ -2862,6 +2865,36 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, update_field_gallery(socket, name, &move_id(&1, id, dir))}
   end
 
+  # A multiple select's terms (the `TermPicker` hook and the chips' ×, plus a
+  # drag through the shared `Sortable` hook): server-side edits of the form
+  # params, as a gallery's are.
+  def handle_event("select_term_add", %{"field" => name, "term" => term}, socket)
+      when is_binary(name) and is_binary(term) do
+    {:noreply,
+     update_select_terms(socket, name, fn terms, definition ->
+       add_term(terms, String.trim(term), definition)
+     end)}
+  end
+
+  def handle_event("select_term_remove", %{"field" => name, "index" => index}, socket)
+      when is_binary(name) and is_binary(index) do
+    case Integer.parse(index) do
+      {index, ""} ->
+        {:noreply,
+         update_select_terms(socket, name, fn terms, _def -> List.delete_at(terms, index) end)}
+
+      _other ->
+        {:noreply, socket}
+    end
+  end
+
+  # Pushed by the `Sortable` hook with the chips' old positions in their new
+  # order; anything that is not a permutation of them is ignored.
+  def handle_event("select_term_reorder", %{"field" => name, "order" => order}, socket)
+      when is_binary(name) and is_list(order) do
+    {:noreply, update_select_terms(socket, name, &reorder_terms(&1, order, &2))}
+  end
+
   # A repeating group's rows (`GroupRows`): add, remove, move and a dragged
   # order, each a rewrite of the posted rows through the same
   # params-then-validate path a gallery takes, so a row edit is dirty and
@@ -3973,6 +4006,61 @@ defmodule KilnCMSWeb.ContentEditorLive do
     else
       socket
     end
+  end
+
+  # Rewrite a multiple select's terms through `fun` — given the terms as
+  # posted (or stored) and the definition — and re-validate. Only a field this
+  # view may change (`custom_field_editable?/3`), as for a gallery. The leading
+  # `""` keeps an emptied field present in the params.
+  defp update_select_terms(socket, name, fun) do
+    editable? =
+      custom_field_editable?(socket, name, &match?(%{field_type: :select, multiple: true}, &1))
+
+    if editable? do
+      definition = Enum.find(socket.assigns.field_definitions, &(&1.name == name))
+
+      terms =
+        socket.assigns.form
+        |> custom_field_value(name)
+        |> List.wrap()
+        |> Enum.map(&to_string/1)
+        |> Enum.reject(&(String.trim(&1) == ""))
+
+      put_custom_field_param(socket, name, ["" | fun.(terms, definition)])
+    else
+      socket
+    end
+  end
+
+  # A blank term, a repeat, or one past `max_items` adds nothing; a term
+  # outside a fixed vocabulary is added, and the field's validation names it.
+  defp add_term(terms, term, definition) do
+    cond do
+      term == "" or term in terms -> terms
+      is_integer(definition.max_items) and length(terms) >= definition.max_items -> terms
+      true -> terms ++ [term]
+    end
+  end
+
+  defp reorder_terms(terms, order, _definition) do
+    indexes =
+      Enum.flat_map(order, fn
+        index when is_integer(index) ->
+          [index]
+
+        index when is_binary(index) ->
+          case Integer.parse(index) do
+            {index, ""} -> [index]
+            _other -> []
+          end
+
+        _other ->
+          []
+      end)
+
+    if Enum.sort(indexes) == Enum.to_list(0..(length(terms) - 1)//1),
+      do: Enum.map(indexes, &Enum.at(terms, &1)),
+      else: terms
   end
 
   # Rewrite a repeating group's rows through `fun` — given the rows as posted
@@ -7223,6 +7311,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               kind={@kind}
               media={@media}
               people={@site_people}
+              select_terms={@select_terms}
               actor={@actor}
               tenant={@current_org}
               broken_references={@broken_references}

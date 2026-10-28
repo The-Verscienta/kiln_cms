@@ -1,7 +1,8 @@
 defmodule KilnCMS.CMS.FieldConversion do
   @moduledoc """
-  Moves JSON-in-text custom-field values into a `:group` field —
-  `mix kiln.fields.convert` (docs/field-conversion.md).
+  Moves JSON-in-text custom-field values into a `:group` field, or into a
+  multiple `:select` (several terms) — `mix kiln.fields.convert`
+  (docs/field-conversion.md).
 
   Lists that predate `:group` were stored as JSON strings in `:text` fields,
   in whatever shape the importer left: an array of objects, one object, or an
@@ -12,6 +13,16 @@ defmodule KilnCMS.CMS.FieldConversion do
   exactly as an editor's save of the group would, so the rules are the
   field's own: sub-field types, `required`, `:select` options and
   `min_items`/`max_items`.
+
+  A multiple `:select` target takes the same source shapes, but its rows are
+  terms: `["adaptogen","tonic"]`, or that encoded again. Each term must be one
+  of the field's `options` unless it takes terms of its own (`allow_custom`),
+  so the report lists every **distinct term** with its count, and the ones
+  not yet in `options` — what an admin reviews before deciding whether to
+  add them as options or open the vocabulary. Renames do not apply.
+
+  Every report counts the **published** records a run would write (or wrote):
+  each of those writes re-fires the record's artifact.
 
   ## All or nothing, unless told otherwise
 
@@ -68,6 +79,11 @@ defmodule KilnCMS.CMS.FieldConversion do
   A run's outcome. `convertible` counts the records whose write is valid;
   `written` the ones actually written (always 0 on a dry run, or when
   `blocked?` — an invalid record stopped the run before any write).
+  `published` counts the convertible records that are published. For a
+  multiple `:select` target, `terms` counts each distinct term across the
+  convertible and invalid records' values (live and held), and `new_terms`
+  lists the ones not in the field's `options`, most used first; both are
+  empty for a group.
   """
   @type report :: %{
           type: String.t(),
@@ -80,6 +96,9 @@ defmodule KilnCMS.CMS.FieldConversion do
           written: non_neg_integer(),
           empty: non_neg_integer(),
           kept: non_neg_integer(),
+          published: non_neg_integer(),
+          terms: %{String.t() => pos_integer()},
+          new_terms: [String.t()],
           problems: [problem()]
         }
 
@@ -101,6 +120,7 @@ defmodule KilnCMS.CMS.FieldConversion do
          {:ok, group} <- target_definition(definitions, target),
          renames = Map.new(Keyword.get(opts, :renames, %{})),
          :ok <- check_renames(renames, group) do
+      # `group` is the target either way: a group, or a multiple select.
       plan = %{
         descriptor: descriptor,
         org_id: org_id,
@@ -122,7 +142,9 @@ defmodule KilnCMS.CMS.FieldConversion do
         end
 
       {:ok,
-       Map.merge(report, %{
+       report
+       |> put_terms(group)
+       |> Map.merge(%{
          type: to_string(descriptor.type),
          source: source_def.name,
          target: group.name,
@@ -211,9 +233,25 @@ defmodule KilnCMS.CMS.FieldConversion do
       end)
 
     "#{report.type}: #{report.source} → #{report.target}: scanned #{report.scanned}, " <>
-      "#{verb(report)}, #{report.empty} empty, #{report.kept} already converted, " <>
+      "#{verb(report)} (#{report.published} published), #{report.empty} empty, " <>
+      "#{report.kept} already converted, " <>
       "#{length(report.problems)} invalid" <>
-      if(report.problems == [], do: ".", else: ":") <> Enum.join(problems) <> hint(report)
+      if(report.problems == [], do: ".", else: ":") <>
+      Enum.join(problems) <> terms_summary(report) <> hint(report)
+  end
+
+  defp terms_summary(%{terms: terms}) when map_size(terms) == 0, do: ""
+
+  defp terms_summary(%{terms: terms, new_terms: new_terms}) do
+    "\n#{map_size(terms)} distinct term(s)" <>
+      case new_terms do
+        [] ->
+          ", all of them options."
+
+        new ->
+          ", #{length(new)} not in the options:" <>
+            Enum.map_join(new, "", &"\n  #{&1} (#{Map.fetch!(terms, &1)})")
+      end
   end
 
   defp verb(%{dry_run?: true} = report), do: "would convert #{report.convertible}"
@@ -274,10 +312,21 @@ defmodule KilnCMS.CMS.FieldConversion do
           do: {:error, "The group #{target} has no sub-fields yet"},
           else: {:ok, group}
 
+      %{field_type: :select, multiple: true} = select ->
+        {:ok, select}
+
+      %{field_type: :select} ->
+        {:error, "#{target} is a select that holds one choice — make it hold several terms first"}
+
       %{field_type: type} ->
-        {:error, "#{target} is a #{type} field, not a group"}
+        {:error, "#{target} is a #{type} field, not a group or a multiple select"}
     end
   end
+
+  defp check_renames(renames, _select) when map_size(renames) == 0, do: :ok
+
+  defp check_renames(_renames, %{field_type: :select} = select),
+    do: {:error, "--map renames the keys of rows; #{select.name} holds terms, which have none"}
 
   defp check_renames(renames, group) do
     subs = group |> FieldDefinition.group_fields() |> Enum.map(& &1.name)
@@ -318,6 +367,8 @@ defmodule KilnCMS.CMS.FieldConversion do
         written: 0,
         empty: 0,
         kept: 0,
+        published: 0,
+        terms: %{},
         problems: []
       },
       &tally/2
@@ -351,7 +402,37 @@ defmodule KilnCMS.CMS.FieldConversion do
     |> Stream.flat_map(& &1)
   end
 
+  # Each outcome is tagged with the record's terms (a multiple select target
+  # only) and whether it is published, for the report's counts.
   defp visit(record, plan, write?) do
+    {visited(record, plan, write?), terms(record, plan), record_published?(record)}
+  end
+
+  defp record_published?(record), do: Map.get(record, :state) == :published
+
+  defp terms(_record, %{group: %{field_type: :group}}), do: []
+
+  defp terms(record, plan) do
+    held =
+      case held_rows(record, plan) do
+        {:ok, rows} -> rows
+        _other -> []
+      end
+
+    live =
+      case rows((record.custom_fields || %{})[plan.source], plan) do
+        {:ok, rows} -> rows
+        _other -> []
+      end
+
+    (live ++ held)
+    |> Enum.filter(&(is_binary(&1) or is_number(&1)))
+    |> Enum.map(&(&1 |> to_string() |> String.trim()))
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp visited(record, plan, write?) do
     stored = record.custom_fields || %{}
 
     if converted?(stored[plan.group.name]) and not plan.overwrite? do
@@ -461,6 +542,22 @@ defmodule KilnCMS.CMS.FieldConversion do
   defp message(error) when is_exception(error), do: Exception.message(error)
   defp message(error), do: inspect(error)
 
+  defp tally({outcome, terms, published?}, acc) do
+    acc = tally(outcome, acc)
+
+    acc =
+      if outcome in [:kept, :empty],
+        do: acc,
+        else: %{
+          acc
+          | terms: Enum.reduce(terms, acc.terms, &Map.update(&2, &1, 1, fn n -> n + 1 end))
+        }
+
+    if published? and outcome in [:convertible, :written],
+      do: %{acc | published: acc.published + 1},
+      else: acc
+  end
+
   defp tally(:kept, acc), do: %{acc | scanned: acc.scanned + 1, kept: acc.kept + 1}
   defp tally(:empty, acc), do: %{acc | scanned: acc.scanned + 1, empty: acc.empty + 1}
 
@@ -477,4 +574,17 @@ defmodule KilnCMS.CMS.FieldConversion do
 
   defp tally({:problem, problem}, acc),
     do: %{acc | scanned: acc.scanned + 1, problems: [problem | acc.problems]}
+
+  # The terms not yet options, most used first — empty for a group target.
+  defp put_terms(report, %{field_type: :select, options: options}) do
+    new_terms =
+      report.terms
+      |> Enum.reject(fn {term, _count} -> term in options end)
+      |> Enum.sort_by(fn {term, count} -> {-count, term} end)
+      |> Enum.map(&elem(&1, 0))
+
+    Map.put(report, :new_terms, new_terms)
+  end
+
+  defp put_terms(report, _group), do: Map.merge(report, %{terms: %{}, new_terms: []})
 end

@@ -863,6 +863,11 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
        when type in [:media, :reference] and is_list(value),
        do: Enum.all?(value, &blank?/1)
 
+  # A multiple select's picker posts the same leading `""`, so the same rule —
+  # and a single select handed a list follows it too.
+  defp blank_for?(%{field_type: :select}, value) when is_list(value),
+    do: Enum.all?(value, &blank?/1)
+
   defp blank_for?(_def, value), do: blank?(value)
 
   defp composite?(%{field_type: type} = def) do
@@ -908,6 +913,15 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   defp coerce(value, %{field_type: :user}, read_opts), do: coerce_user(value, read_opts)
 
+  defp coerce(value, %{field_type: :select, multiple: true} = def, _read_opts) do
+    with {:ok, terms} <- coerce_terms(value, def), do: within_bounds(terms, def)
+  end
+
+  # A single select handed a list (stored while the field was multiple) keeps
+  # its first term, as a single media field does.
+  defp coerce(value, %{field_type: :select} = def, _read_opts) when is_list(value),
+    do: value |> Enum.reject(&blank?/1) |> List.first() |> coerce(def)
+
   defp coerce(value, def, _read_opts), do: coerce(value, def)
 
   # A console account (#2044): the user's id, which must name one of the
@@ -933,7 +947,19 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   # --- coercion to JSON-native values ----------------------------------------
 
-  defp coerce(value, %{field_type: type}) when type in [:string, :text, :url] do
+  # A rich `:text` field (the default `format`) is HTML the TipTap field
+  # editor wrote, or an importer did: sanitized to the rich-text block's
+  # allow-list (`KilnCMS.CMS.TextFormat`), so the field is no wider a hole
+  # than a block. A plain one is stored as typed.
+  defp coerce(value, %{field_type: :text} = def) do
+    text = value |> to_string() |> String.trim()
+
+    if Map.get(def, :format, :rich) == :rich,
+      do: {:ok, KilnCMS.CMS.TextFormat.sanitize(text)},
+      else: {:ok, text}
+  end
+
+  defp coerce(value, %{field_type: type}) when type in [:string, :url] do
     {:ok, value |> to_string() |> String.trim()}
   end
 
@@ -1005,6 +1031,52 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         end
     end
   end
+
+  # A multiple select's terms: each a string (a number is taken as its text),
+  # trimmed, blanks and repeats dropped, order kept. Each must be one of the
+  # `options` unless the field takes terms of its own (`allow_custom`), and
+  # none may be a JSON-encoded list — the string form this type replaces, which
+  # an old client sending `"[\"a\",\"b\"]"` would otherwise store as one
+  # term named after the whole list.
+  defp coerce_terms(value, def) do
+    terms =
+      value
+      |> List.wrap()
+      |> Enum.reject(&blank?/1)
+
+    case Enum.find(terms, &(not (is_binary(&1) or is_number(&1)))) do
+      nil ->
+        terms
+        |> Enum.map(&(&1 |> to_string() |> String.trim()))
+        |> Enum.uniq()
+        |> check_terms(def)
+
+      other ->
+        {:error, "must be a list of terms (got #{inspect(other)})"}
+    end
+  end
+
+  defp check_terms(terms, def) do
+    line = KilnCMS.Limits.line()
+
+    cond do
+      Enum.any?(terms, &json_list?/1) ->
+        {:error, "holds a JSON-encoded list — send the terms as a list instead"}
+
+      Enum.any?(terms, &(String.length(&1) > line)) ->
+        {:error, "has a term longer than #{line} characters"}
+
+      not Map.get(def, :allow_custom, false) and Enum.any?(terms, &(&1 not in def.options)) ->
+        stray = Enum.reject(terms, &(&1 in def.options))
+        {:error, "has terms that are not allowed options: #{Enum.join(stray, ", ")}"}
+
+      true ->
+        {:ok, terms}
+    end
+  end
+
+  defp json_list?("[" <> _ = term), do: match?({:ok, list} when is_list(list), Jason.decode(term))
+  defp json_list?(_term), do: false
 
   # A media field: the editor submits a MediaItem id; the stored value is a
   # snapshot (`KilnCMS.Media.Snapshot`: id, url, alt, dimensions, focal point,

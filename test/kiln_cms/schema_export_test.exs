@@ -384,6 +384,41 @@ defmodule KilnCMS.SchemaExportTest do
     assert {:ok, _json} = Jason.encode(SchemaExport.json_schema(org_id: org.id))
   end
 
+  describe "a select holding several terms and a :text field's format" do
+    test "a multiple select is an array of strings with its bounds; a rich text is HTML",
+         %{actor: actor, org: org} do
+      for attrs <- [
+            %{
+              name: "props",
+              label: "Props",
+              field_type: :select,
+              multiple: true,
+              options: ["tonic"],
+              allow_custom: true,
+              max_items: 5
+            },
+            %{name: "uses", label: "Uses", field_type: :text},
+            %{name: "code", label: "Code", field_type: :text, format: :plain}
+          ] do
+        CMS.create_field_definition!(Map.put(attrs, :content_type, :page),
+          actor: actor,
+          tenant: org
+        )
+      end
+
+      fields = custom_fields(org, "content_page")["properties"]
+
+      assert fields["props"]["type"] == ["array", "null"]
+      assert fields["props"]["items"] == %{"type" => "string"}
+      assert fields["props"]["x-kiln-max-items"] == 5
+      refute Jason.encode!(fields["props"]) =~ "tonic"
+
+      assert fields["uses"] == %{"type" => ["string", "null"], "contentMediaType" => "text/html"}
+      assert fields["code"]["type"] == ["string", "null"]
+      refute Map.has_key?(fields["code"], "contentMediaType")
+    end
+  end
+
   defp custom_fields(org, def_name) do
     SchemaExport.json_schema(org_id: org.id)["$defs"][def_name]["properties"]["custom_fields"]
   end
