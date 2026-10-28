@@ -6,13 +6,8 @@ defmodule KilnCMSWeb.GraphqlSchema do
   # project overlay (see projects/README.md) exposes its content domain on the
   # GraphQL surface purely via `config/project.exs` — no core edit. The default
   # keeps a clean core build referencing only domains that exist in this repo.
-  #
-  # `KilnCMSWeb.GraphqlDefaultOffset` makes an omitted `offset` mean `0`, so
-  # `hasNextPage` stays a boolean on an offset-paginated query (#1883). It
-  # works around an AshGraphql defect; its moduledoc says when to remove it.
   use AshGraphql,
-    domains: Application.compile_env(:kiln_cms, :content_domains, [KilnCMS.CMS]),
-    action_middleware: [KilnCMSWeb.GraphqlDefaultOffset]
+    domains: Application.compile_env(:kiln_cms, :content_domains, [KilnCMS.CMS])
 
   require KilnCMSWeb.Graphql.ContentRecord.Notation
   require KilnCMSWeb.Graphql.ReferenceWrites.Notation

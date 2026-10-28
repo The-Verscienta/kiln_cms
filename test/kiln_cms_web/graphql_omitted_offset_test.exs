@@ -1,7 +1,8 @@
-defmodule KilnCMSWeb.GraphqlDefaultOffsetTest do
+defmodule KilnCMSWeb.GraphqlOmittedOffsetTest do
   @moduledoc """
   #1883 over HTTP `/gql`, the transport the issue reproduced on: an omitted
   `offset` means `0`, so `hasNextPage` is a boolean, not a nulled field.
+  AshGraphql 1.13.0 defaults the offset itself (ash-project/ash_graphql#480).
   `KilnCMSWeb.DeliveryGraphqlTest` covers every offset query via `Absinthe.run/3`.
   """
   use KilnCMSWeb.ConnCase, async: true

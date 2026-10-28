@@ -148,6 +148,10 @@ Every summary line below that was shortened links to its own entry there.
   Nx/EXLA 1.0, clearing Axon's type-checker warnings.**
   ([#2067](https://github.com/The-Verscienta/kiln_cms/pull/2067) · [long form](docs/changelog/unreleased.md#ml-stack-nx-1))
 
+- **ash_graphql 1.13.0 defaults an omitted `offset` to `0`, replacing Kiln's
+  #1883 workaround and fixing offset-paged relationship lists too.**
+  ([ash_graphql#480](https://github.com/ash-project/ash_graphql/issues/480))
+
 ### Fixed
 
 - **Similar content (near-duplicates, tag suggestions) reads a page's searchable
