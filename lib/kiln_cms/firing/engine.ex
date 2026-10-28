@@ -471,29 +471,46 @@ defmodule KilnCMS.Firing.Engine do
   defp persist(document, type, org_id, artifacts) do
     fired_at = DateTime.utc_now()
 
-    Enum.each(@surfaces, fn surface ->
-      {:ok, _} =
-        Firing.upsert_artifact(
-          %{
-            document_type: type,
-            document_id: document.id,
-            surface: surface,
-            format_version: @format_version,
-            body: artifacts[surface],
-            source_version_id: Map.get(document, :published_version_id),
-            fired_at: fired_at
-          },
-          # `org_id` is set from the tenant (writable? false), so pass it as the
-          # tenant rather than in the attrs map. System actor (#1402): the
-          # engine is the only writer `PublishedArtifact` has.
-          actor: system_actor(),
-          tenant: org_id
-        )
-
-      Cache.put(org_id, type, document.id, surface, artifacts[surface])
+    # One key resolution for every surface's manifest, not one per signature.
+    KilnCMS.Provenance.KeyRegistry.with_cache(fn ->
+      Enum.each(@surfaces, &persist_surface(document, type, org_id, artifacts, &1, fired_at))
     end)
 
     Phoenix.PubSub.broadcast(KilnCMS.PubSub, "firing", {:fired, type, document.id})
+  end
+
+  defp persist_surface(document, type, org_id, artifacts, surface, fired_at) do
+    source_version_id = Map.get(document, :published_version_id)
+
+    # Signed as it is fired (#1929), so `/api/provenance/verify` compares the
+    # served body with what was signed rather than with itself. nil when
+    # provenance is off or there is no key: the artifact is served `unsigned`.
+    manifest =
+      KilnCMS.Provenance.sign_fired(document, surface, artifacts[surface],
+        fired_at: fired_at,
+        source_version_id: source_version_id
+      )
+
+    {:ok, _} =
+      Firing.upsert_artifact(
+        %{
+          document_type: type,
+          document_id: document.id,
+          surface: surface,
+          format_version: @format_version,
+          body: artifacts[surface],
+          source_version_id: source_version_id,
+          fired_at: fired_at,
+          manifest: manifest
+        },
+        # `org_id` is set from the tenant (writable? false), so pass it as the
+        # tenant rather than in the attrs map. System actor (#1402): the
+        # engine is the only writer `PublishedArtifact` has.
+        actor: system_actor(),
+        tenant: org_id
+      )
+
+    Cache.put(org_id, type, document.id, surface, artifacts[surface])
   end
 
   # The plain-text rendition of the `deliver_plain` `:text` fields

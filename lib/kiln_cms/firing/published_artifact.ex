@@ -74,7 +74,8 @@ defmodule KilnCMS.Firing.PublishedArtifact do
         :format_version,
         :body,
         :source_version_id,
-        :fired_at
+        :fired_at,
+        :manifest
       ]
     end
 
@@ -210,6 +211,13 @@ defmodule KilnCMS.Firing.PublishedArtifact do
     attribute :body, :map, allow_nil?: false, default: %{}, public?: true
     attribute :source_version_id, :uuid, public?: true
     attribute :fired_at, :utc_datetime_usec, allow_nil?: false, public?: true
+
+    # The signed provenance manifest made when this body was fired (#1929), or
+    # nil: fired before 1.7, with provenance off, or with no signing key. Kept
+    # beside the body so a later read can tell an unaltered artifact from a
+    # tampered one (`KilnCMS.Provenance.verdict/1`); a manifest re-derived from
+    # the current body would always match it.
+    attribute :manifest, :map
   end
 
   relationships do

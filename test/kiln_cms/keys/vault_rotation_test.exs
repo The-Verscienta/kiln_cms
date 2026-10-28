@@ -102,6 +102,7 @@ defmodule KilnCMS.Keys.VaultRotationTest do
       {KilnCMS.CMS.WebhookEndpoint, :secret_encrypted},
       {KilnCMS.Federation.SiteFederation, :private_key_encrypted},
       {KilnCMS.Mail.Settings, :dkim_private_key_encrypted},
+      {KilnCMS.Provenance.Settings, :private_key_encrypted},
       {KilnCMS.Social.Account, :credential_encrypted}
     ]
 

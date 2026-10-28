@@ -18,21 +18,39 @@ detached manifest + a signed artifact hash + a signer claim — to HTML/JSON
 **content** artifacts. It is genuinely provenance, but it is **not** drop-in
 C2PA compliance for a webpage; the manifest shape below is Kiln's own.
 
-## Off by default
+## On by default
 
-With `enabled: false` (the default) no manifest is produced and every
-`/api/provenance/*` endpoint returns `404` — the lean install pays nothing.
-Configuring a signing key does **not** turn it on: the key by itself signs
-history anchors (#356), and the provenance endpoints stay `404` until `enabled`
-is set. That surprise is why the switch is reachable from the environment.
+Since 1.7, every fire signs. Each fired artifact is stored with its signed manifest
+(#1929), so a reader can ask whether what it is served is still what was
+signed, and a fresh install does that from its first publish:
 
-On a released image, set the environment (see
+- **A new install** gets a signing key at `/setup`, generated and stored
+  encrypted in the database (`KilnCMS.Provenance.Settings`, AES-256-GCM under
+  `secret_key_base`, re-encrypted by `mix kiln.vault.reencrypt` like every
+  other stored key). Nothing to configure.
+- **A mounted key wins.** `KILN_PROVENANCE_KEY_FILE`, or the
+  `KILN_PROVENANCE_PRIVATE_KEY` variable the compiled config names, is used
+  whenever it is set, generated key or not. A mounted file that cannot be read
+  is an error, never a quiet fall back to the generated key.
+- **An install with no key keeps working.** An install upgraded to 1.7 without
+  a key, or one whose `/setup` could not make one, serves its artifacts
+  `unsigned`. Nothing is refused. A platform admin sees a strip on the console
+  overview naming `KILN_PROVENANCE_KEY_FILE`, with a button that generates the
+  key `/setup` would have.
+- **Off is still available.** `KILN_PROVENANCE_ENABLED=false` produces no
+  manifest and every `/api/provenance/*` endpoint returns `404`, as before 1.7.
+
+Artifacts fired before a key existed stay `unsigned` until they are fired
+again. `mix kiln.refire_all` (or `KilnCMS.Firing.Sweep.run()` over `rpc`) signs
+them all.
+
+On a released image, the knobs are environment variables (see
 [environment-variables.md](environment-variables.md)):
 
 ```bash
-KILN_PROVENANCE_ENABLED=true
-KILN_PROVENANCE_KEY_FILE=/run/secrets/kiln-provenance.pem
+KILN_PROVENANCE_KEY_FILE=/run/secrets/kiln-provenance.pem   # optional: a key of your own
 KILN_PROVENANCE_RETIRED_KEY_FILES=/etc/kiln/keys/2025.pub.pem
+KILN_PROVENANCE_ENABLED=false                               # only to switch it all off
 ```
 
 From source, the same knobs plus the claim fields:
@@ -108,7 +126,35 @@ Match a manifest's `signature.key_id` against `keys[]` — that is what keeps
 manifests published before a key rotation verifiable (see
 [Key rotation](#key-rotation)).
 
-**Server-side verify** — a convenience verdict for the live artifact:
+**Is this what was signed?** — the question a reader actually has, answered
+for every published document whether it was signed or not:
+
+```
+GET /api/provenance/verify/post/my-post?surface=json
+→ {
+    "status": "verified",            ← or "tampered", "unsigned", "unverifiable"
+    "type": "post", "slug": "my-post", "locale": "en", "surface": "json",
+    "version": "…", "fired_at": "…", "key_id": "sha256:…",
+    "unaltered": true, "authentic": true,
+    "claim": { … }
+  }
+```
+
+The served body is checked against the manifest **stored when it was
+fired**:
+
+| `status` | Meaning |
+|---|---|
+| `verified` | The body hashes to the manifest's hash, and the signature verifies against the key it names |
+| `tampered` | Either check fails against a key this instance holds: the body was changed after it was signed, or the manifest was |
+| `unsigned` | No manifest was stored: fired before 1.7, or while no key resolved. Fire it again to sign it |
+| `unverifiable` | Signed with a key this instance no longer holds. Register the key's public half as retired ([Key rotation](#key-rotation)); this is never reported as tampering |
+
+Anonymous, `Cache-Control: public, max-age=60`, and covered by the 1.0 API
+contract ([overlay-contract.md](overlay-contract.md)).
+
+**Server-side verify** — the older convenience verdict, which re-derives the
+manifest from the live body and so cannot report tampering:
 
 ```
 GET /api/provenance/post/my-post/verify
@@ -137,8 +183,14 @@ never "whatever is signing today". Rotating the signing key would otherwise
 blind everything signed before the rotation, which is the opposite of what an
 audit trail is for.
 
-So when you rotate, register the outgoing key's **public half** — from the
-environment:
+**Moving off the generated key needs no step.** Mount a key of your own and
+it signs from then on; the key `/setup` generated stays in the database and
+`KeyRegistry` lists it as retired, so everything it signed keeps verifying.
+The generated key itself has no rotate action: replacing it in place would
+blind what it signed.
+
+Rotating a key you mounted is the case below. Register the outgoing key's
+**public half** — from the environment:
 
 ```bash
 KILN_PROVENANCE_RETIRED_KEY_FILES=/etc/kiln/keys/2025-provenance.pub.pem,/etc/kiln/keys/2024.pub.pem
@@ -189,11 +241,29 @@ read from `custom_fields` (invalid values normalize to `human`).
 
 ## How it works
 
-Manifests are derived **statelessly** from the immutable artifact
-(`KilnCMS.Provenance.manifest_for/2`): the firing hot path is untouched, and
-re-deriving a manifest for the same artifact yields the same bytes (the artifact
-is immutable per publish and PKCS#1-v1_5 signing is deterministic). Signing
-reuses the DKIM RSA helpers in `KilnCMS.Keys`.
+Each surface's manifest is made as it is fired (`KilnCMS.Provenance.sign_fired/4`)
+and stored on the artifact row (`published_artifacts.manifest`). Signing costs
+one RSA signature per surface, with the key resolved once per fire. The
+manifest endpoint serves the stored manifest; an artifact fired before 1.7 has
+none and gets one derived from its body, as before
+(`KilnCMS.Provenance.manifest_for/2`, deterministic: PKCS#1-v1_5 signing over
+an immutable body). Signing reuses the DKIM RSA helpers in `KilnCMS.Keys`.
+
+## How much is signed
+
+The share of published artifacts carrying a verifiable manifest — one per
+published document, counted on the `json` surface — is
+`KilnCMS.Provenance.coverage/1`:
+
+```bash
+mix kiln.provenance.coverage
+/app/bin/kiln_cms rpc "IO.inspect(KilnCMS.Provenance.coverage())"
+```
+
+It is also emitted every five minutes as `kiln_cms.provenance.coverage.share`
+(with `.verifiable` and `.total`) telemetry, and exported with the other
+metrics when `KILN_METRICS_ENABLED` is on. A manifest whose key this instance
+no longer holds counts as signed but not verifiable.
 
 - `KilnCMS.Provenance` — config + manifest build/verify.
 - `KilnCMS.Provenance.Canonical` — deterministic JSON + SHA-256 digest.
@@ -205,9 +275,5 @@ reuses the DKIM RSA helpers in `KilnCMS.Keys`.
 
 Multi-key verification shipped (see [Key rotation](#key-rotation)). Still open:
 
-- **Stateless derivation.** Persisting the manifest at fire-time would pin the
-  signer/key/disclosure *as of publish* (audit-grade, survives config changes)
-  and let `/verify` detect server-side drift — a natural Phase-2 upgrade that
-  slots behind the same API.
 - **Signer identity** is a configured string. Tying it to the authenticated
   publisher (per-user keys) is future work.
