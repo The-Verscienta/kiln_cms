@@ -12,6 +12,13 @@ defmodule KilnCMSWeb.ProvenanceController do
     returns a verdict plus the attested claim.
   - `GET /api/provenance/public-key` — the signing key's public half (PEM +
     base64 SPKI DER + fingerprint) for offline verification.
+  - `GET /api/provenance/verify/:type/:slug?surface=json` (#1929) — the
+    served artifact checked against the manifest stored when it was fired:
+    `verified`, `tampered`, `unsigned` (nothing was signed) or `unverifiable`
+    (signed with a key this instance no longer holds). Anonymous and
+    cacheable, and it answers for every published document, signed or not.
+    Unlike `…/verify` above, it can fail: that one re-derives the manifest
+    from the body it then checks.
 
   All routes 404 when provenance is disabled (`KilnCMS.Provenance.enabled?/0`).
   """
@@ -44,9 +51,11 @@ defmodule KilnCMSWeb.ProvenanceController do
     end
   end
 
+  # The manifest stored at fire time when there is one (#1929). An artifact
+  # fired before 1.7 has none and gets one derived from its body, as before.
   def manifest(conn, params) do
     with_artifact(conn, params, fn record, artifact ->
-      case Provenance.manifest_for(artifact, record) do
+      case stored_or_derived(artifact, record) do
         {:ok, manifest} ->
           conn
           |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
@@ -57,6 +66,36 @@ defmodule KilnCMSWeb.ProvenanceController do
       end
     end)
   end
+
+  # Short: a re-fire replaces the artifact and its manifest, and a verdict
+  # should not outlive the body it describes by long.
+  @status_max_age_seconds 60
+
+  def status(conn, params) do
+    with_artifact(conn, params, fn record, artifact ->
+      {status, result} = Provenance.verdict(artifact)
+      manifest = artifact.manifest || %{}
+
+      conn
+      |> put_resp_header("cache-control", "public, max-age=#{@status_max_age_seconds}")
+      |> json(%{
+        "status" => Atom.to_string(status),
+        "type" => Engine.public_type(record),
+        "slug" => record.slug,
+        "locale" => record.locale,
+        "surface" => Atom.to_string(artifact.surface),
+        "version" => artifact.source_version_id,
+        "fired_at" => artifact.fired_at,
+        "key_id" => get_in(manifest, ["signature", "key_id"]),
+        "unaltered" => result && result["unaltered"],
+        "authentic" => result && result["authentic"],
+        "claim" => manifest["claim"]
+      })
+    end)
+  end
+
+  defp stored_or_derived(%{manifest: %{} = manifest}, _record), do: {:ok, manifest}
+  defp stored_or_derived(artifact, record), do: Provenance.manifest_for(artifact, record)
 
   def verify(conn, params) do
     with_artifact(conn, params, fn record, artifact ->

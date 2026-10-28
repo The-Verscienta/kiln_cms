@@ -54,7 +54,17 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Breaking
+
+- **`KILN_PROVENANCE_ENABLED` now defaults to `true`: every fire signs, and `/api/provenance/*`
+  answers. Set it to `false` to keep 1.6's behaviour; with no key, nothing is refused.**
+  ([#2119](https://github.com/The-Verscienta/kiln_cms/pull/2119) · [long form](docs/changelog/unreleased.md#provenance-default-upgrade))
+
 ### Added
+
+- **`GET /api/provenance/verify/:type/:slug` says whether a published artifact
+  is `verified`, `tampered` or `unsigned`, checked against the manifest stored when it fired.**
+  ([#2119](https://github.com/The-Verscienta/kiln_cms/pull/2119) · [long form](docs/changelog/unreleased.md#provenance-on-by-default))
 
 - **A plain-text field can keep its paragraph breaks: "Keep paragraph breaks"
   delivers `custom_fields_plain.<name>` with `\n\n` between paragraphs.**
@@ -92,6 +102,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2103](https://github.com/The-Verscienta/kiln_cms/pull/2103) · [long form](docs/changelog/unreleased.md#rich-text-fields-as-portable-text))
 
 ### Changed
+
+- **Moving a section in the content tree reads only its subtree (recursive CTE),
+  not the whole type: a 10,000-document move peaks at 27 MB, not 180 MB.**
+  ([#2117](https://github.com/The-Verscienta/kiln_cms/pull/2117) · [benchmark](docs/benchmarks.md#content-tree-moving-a-large-subtree))
 
 - **A bare `GET /api` redirects (302) to `/developers`, the API summary,
   instead of answering 404; every `/api/*` route is unchanged.**

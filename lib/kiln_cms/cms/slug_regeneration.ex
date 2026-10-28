@@ -125,7 +125,11 @@ defmodule KilnCMS.CMS.SlugRegeneration do
         # comes out of the same `(id, parent_id, slug)` rows. Walking per record
         # would make a subtree regeneration cost N × depth reads, which is the
         # fan-out D21 said to measure rather than assume.
-        context = Map.put(context, :ancestors, ancestor_chains(ct, context))
+        #
+        # A caller that already holds the chains — a subtree move, which read
+        # only its subtree (#1903) — passes them as `ancestors:` and the read is
+        # skipped.
+        context = Map.put(context, :ancestors, opts[:ancestors] || ancestor_chains(ct, context))
 
         ct
         |> records(tenant, context.ids)

@@ -13,6 +13,33 @@ decision, not an automatic blocker: the maintainer decides.
 | [Headless API p95 under 50 ms](#headless-api-p95-under-50-ms) | **Partly met** (measured 2026-09-27). Delivery, JSON:API and GraphQL reads: p95 under 43 ms with 50 concurrent clients. Search, re-measured 2026-10-02 after #1725: 14–19 ms alone and 18–60 ms with 10 clients (a common word misses, a rare one meets), 197–231 ms with 50 ([search, after #1725](#search-after-1725)). The sync API initial page, which missed from 10, is under 15 ms p95 from 10 since #1713 (re-measured 2026-10-02) |
 | [Zero-downtime releases](#zero-downtime-releases) | **Not shown.** Migrations are now held to expand/contract in CI (#1716), but no swap has been run under traffic. The maintainer accepted shipping 1.0 without it (decision 2026-10-02) |
 
+## Provenance: share of published artifacts signed
+
+The number release 1.7 of the
+[path forward](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/path-forward.md)
+has to produce (#1929): of the published documents' fired artifacts, the
+share carrying a manifest this instance can verify.
+
+**First reading: pending.** It is taken on kilncms.dev after the 1.7 deploy
+and its re-fire sweep, then recorded here. Until then the expectation is
+structural: an install that has a key and has re-fired is at 100%, because
+every fire signs, and an install with no key is at 0% and shows a banner.
+
+### How it is measured
+
+`KilnCMS.Provenance.coverage/1` counts `published_artifacts` rows on the
+`json` surface (one per published document): every row, the rows with a
+stored manifest, and the rows whose manifest names a key the instance can
+resolve (active or registered retired). The share is the last over the first.
+
+```bash
+mix kiln.provenance.coverage
+/app/bin/kiln_cms rpc "IO.inspect(KilnCMS.Provenance.coverage())"
+```
+
+The same three numbers are emitted every five minutes as
+`kiln_cms.provenance.coverage.{share,verifiable,total}` telemetry.
+
 ## Live delivery: unpublish to last endpoint
 
 The path forward's first claim is that a correction reaches every page a site
@@ -217,6 +244,79 @@ update.
 ```bash
 scripts/benchmarks/live_blog.sh                                         # ~1 h 45 min
 BENCH_DURATION=120 BENCH_SUBSCRIBERS=0,1000 scripts/benchmarks/live_blog.sh   # a smoke run
+```
+
+## Content tree: moving a large subtree
+
+Moving a section in the content tree (D21, #1597) re-derives the
+`[ancestors]` path alias of every document beneath it, in one background job
+(`RegenerateSubtreeAliases`), so the editor's save never waits for it. D21
+bounded that fan-out but never measured it; #1903 did, on a dynamic type with
+50,000 documents and a published section of 100, 1,000 and 10,000.
+
+Measured on 2026-10-28, `main` at `1a9637394` against the #1903 branch at
+`8198d0a79`, with
+[`scripts/benchmarks/subtree_move.sh`](https://github.com/The-Verscienta/kiln_cms/blob/main/scripts/benchmarks/README.md#subtree-move-benchmark).
+
+**In short:**
+
+- **The cost is the rewrites, and it is linear.** Each document moved costs
+  one `:update` through the type: a 301, a version, a re-fire, about 29
+  queries. That is 6–9 ms a document, so a 1,000-document section settles in
+  about 6 s and a 10,000-document one in about a minute.
+- **The read no longer depends on the type's size.** Before #1903 the job read
+  `(id, parent_id, slug)` for every row of the storage table, twice: once in
+  the worker and again in `SlugRegeneration`. For a dynamic type that is every
+  entry of every dynamic type in the site. That cost 300–350 ms at 50,000 rows
+  whatever the subtree's size. The recursive CTE reads the subtree alone:
+  3 ms for 100 documents, 33 ms for 10,000.
+- **Memory dropped by an order of magnitude.** The old job held both
+  whole-type reads: 125–180 MB peak in the job's process, about 300 MB of BEAM
+  growth. Now the peak is 2 MB for 100 documents and 27 MB for 10,000.
+- **No chunking needed.** The job never holds a transaction across the
+  subtree (each rewrite commits on its own), a crash retries idempotently (a
+  rewritten alias already matches its new derivation and is skipped), and
+  nothing waits on it except the old paths' redirects, which serve throughout.
+  Past roughly 50,000 documents in one moved subtree (several minutes of job)
+  it would be worth splitting the job per child. No site Kiln knows of has a
+  section that large.
+
+### How it was measured
+
+| | |
+|---|---|
+| Machine | Apple M5 Pro, 18 cores, 24 GB, macOS; Kiln and PostgreSQL 17.10 on the same machine |
+| Other load | Shared with other work: load average 9–14 at the start of each run |
+| Build | `MIX_ENV=prod`, Erlang/OTP 29, Elixir 1.20.4, `POOL_SIZE=10`, lean build (no ML) |
+| Database | Its own, created for the run and dropped after it |
+| Tree | A dynamic type with `alias_pattern: "/[ancestors]/[slug]"`. The section and its subtree are published (children of 100, two levels deep); the rest of the 50,000 are draft roots. Every alias is what the pattern derives where the document sits |
+| Move | The section is re-parented under another root, then the job runs in a task exactly as Oban runs it |
+
+### Results
+
+Milliseconds unless marked. "Queues idle" runs from the job's start until no
+Oban job is available or executing: the re-fires and index updates the
+rewrites enqueued. Queries and their time are the job's own process.
+
+| Subtree | Build | Read (whole type) | Read (subtree CTE) | Job | Per document | Queues idle | Redirects | Queries | Query time | Job peak | BEAM growth |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 100 | before | 332 ×2 | – | 1,503 | 15.0 | 1,611 | 100 | 2,904 | 437 | 180 MB | 297 MB |
+| 100 | after | – | 3.2 | 731 | 7.3 | 838 | 100 | 2,905 | 366 | 1.7 MB | 25 MB |
+| 1,000 | before | 340 ×2 | – | 6,918 | 6.9 | 7,025 | 1,000 | 29,022 | 2,825 | 180 MB | 329 MB |
+| 1,000 | after | – | 5.4 | 5,724 | 5.7 | 5,831 | 1,000 | 29,023 | 2,672 | 4.5 MB | 21 MB |
+| 10,000 | before | 350 ×2 | – | 86,411 | 8.6 | 86,527 | 10,000 | 290,202 | 41,791 | 126 MB | 285 MB |
+| 10,000 | after | – | 32.8 | 63,432 | 6.3 | 63,544 | 10,000 | 290,203 | 29,720 | 27 MB | 89 MB |
+
+Every document in the subtree was rewritten and left one redirect, on both
+builds. The difference in job time between the builds is within the noise of
+a shared machine except at 100 documents, where the two whole-type reads were
+most of the job. The memory columns are not noise.
+
+### Rerunning
+
+```bash
+scripts/benchmarks/subtree_move.sh                                     # ~10 min
+BENCH_ROWS=2000 BENCH_SUBTREES=100,500 scripts/benchmarks/subtree_move.sh   # a smoke run
 ```
 
 ## Headless API p95 under 50 ms

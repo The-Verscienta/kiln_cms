@@ -51,7 +51,13 @@ defmodule KilnCMSWeb.Telemetry do
         [
           # Telemetry poller will execute the given period measurements
           # every 10_000ms. Learn more here: https://telemetry-metrics.hexdocs.pm
-          {:telemetry_poller, measurements: periodic_measurements(), period: 10_000}
+          {:telemetry_poller, measurements: periodic_measurements(), period: 10_000},
+          # Its own, slower poller: a GROUP BY over every published artifact
+          # is not a ten-second measurement (#1929).
+          {:telemetry_poller,
+           name: :kiln_provenance_coverage_poller,
+           measurements: [{KilnCMS.Provenance, :emit_coverage, []}],
+           period: :timer.minutes(5)}
         ]
 
     Supervisor.init(children, strategy: :one_for_one)
@@ -237,6 +243,17 @@ defmodule KilnCMSWeb.Telemetry do
       ),
 
       # VM Metrics (from telemetry_poller's default poller)
+      # Provenance coverage (#1929): the share of published artifacts carrying
+      # a manifest this instance can verify, and the counts behind it.
+      last_value("kiln_cms.provenance.coverage.share",
+        description: "Share of published artifacts carrying a verifiable manifest"
+      ),
+      last_value("kiln_cms.provenance.coverage.verifiable",
+        description: "Published artifacts carrying a verifiable manifest"
+      ),
+      last_value("kiln_cms.provenance.coverage.total",
+        description: "Published artifacts (one per document)"
+      ),
       last_value("vm.memory.total", unit: {:byte, :kilobyte}),
       last_value("vm.total_run_queue_lengths.total"),
       last_value("vm.total_run_queue_lengths.cpu"),
