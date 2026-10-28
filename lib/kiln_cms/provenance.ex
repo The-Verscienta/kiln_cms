@@ -231,7 +231,7 @@ defmodule KilnCMS.Provenance do
   to `document`. Returns `{:ok, manifest_map}` or `{:error, reason}` when the
   signing key can't be resolved.
   """
-  @spec manifest_for(struct(), struct()) :: {:ok, map()} | {:error, term()}
+  @spec manifest_for(map(), struct()) :: {:ok, map()} | {:error, term()}
   def manifest_for(artifact, document) do
     surface = to_string(artifact.surface)
     fired_at = DateTime.to_iso8601(artifact.fired_at)
@@ -340,15 +340,8 @@ defmodule KilnCMS.Provenance do
         params
       )
 
-    known? = &match?({:ok, _}, KilnCMS.Provenance.KeyRegistry.verifier(&1))
-
     {total, signed, verifiable} =
-      KilnCMS.Provenance.KeyRegistry.with_cache(fn ->
-        Enum.reduce(rows, {0, 0, 0}, fn
-          [nil, n], {t, s, v} -> {t + n, s, v}
-          [key_id, n], {t, s, v} -> {t + n, s + n, if(known?.(key_id), do: v + n, else: v)}
-        end)
-      end)
+      KilnCMS.Provenance.KeyRegistry.with_cache(fn -> Enum.reduce(rows, {0, 0, 0}, &tally/2) end)
 
     %{
       total: total,
@@ -357,6 +350,17 @@ defmodule KilnCMS.Provenance do
       share: if(total == 0, do: 0.0, else: verifiable / total)
     }
   end
+
+  # One `coverage/1` row: `[key_id | nil, count]` into `{total, signed, verifiable}`.
+  defp tally([nil, n], {total, signed, verifiable}), do: {total + n, signed, verifiable}
+
+  defp tally([key_id, n], {total, signed, verifiable}) do
+    known = if key_known?(key_id), do: n, else: 0
+    {total + n, signed + n, verifiable + known}
+  end
+
+  defp key_known?(key_id),
+    do: match?({:ok, _}, KilnCMS.Provenance.KeyRegistry.verifier(key_id))
 
   @doc """
   `[:kiln_cms, :provenance, :coverage]` with `coverage/1`'s numbers for the
