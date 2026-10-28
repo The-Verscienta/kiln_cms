@@ -129,6 +129,7 @@ swiftc_exclusion =
 # kotlinx.serialization compiler plugin but not its runtime, so the test also
 # needs `KOTLINX_SERIALIZATION_CLASSPATH` naming the core and json jars (see
 # `KilnCMS.SchemaExport.KotlinCompileTest`); without all three it is excluded.
+# CI's `kotlin_models` job provides all three and runs the tag on its own.
 kotlinc_exclusion =
   if System.find_executable("kotlinc") && System.find_executable("kotlin") &&
        System.get_env("KOTLINX_SERIALIZATION_CLASSPATH") not in [nil, ""] do
