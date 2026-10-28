@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Overlays: run `mix ash.codegen` for your content types. Every content table
+  gains a nullable `path_alias_derived` column; reads fail until it exists.**
+  ([#2118](https://github.com/The-Verscienta/kiln_cms/pull/2118) · [long form](docs/changelog/unreleased.md#alias-derivation-overlays))
+
 ### Breaking
 
 - **`KILN_PROVENANCE_ENABLED` now defaults to `true`: every fire signs, and `/api/provenance/*`
@@ -102,6 +108,14 @@ Every summary line below that was shortened links to its own entry there.
   ([#2103](https://github.com/The-Verscienta/kiln_cms/pull/2103) · [long form](docs/changelog/unreleased.md#rich-text-fields-as-portable-text))
 
 ### Changed
+
+- **Whether a path alias was derived is recorded when it is written, so a move
+  rewrites a stale derived path beneath it instead of mistaking it for a pinned one.**
+  ([#2118](https://github.com/The-Verscienta/kiln_cms/pull/2118) · [long form](docs/changelog/unreleased.md#alias-derivation-recorded))
+
+- **JSON:API `/by-slug/:slug` and GraphQL `*BySlug` no longer require `locale`:
+  left out, the walk starts at the site's default locale, as the delivery API did.**
+  ([#2115](https://github.com/The-Verscienta/kiln_cms/pull/2115))
 
 - **Moving a section in the content tree reads only its subtree (recursive CTE),
   not the whole type: a 10,000-document move peaks at 27 MB, not 180 MB.**

@@ -74,10 +74,15 @@ defmodule KilnCMS.CMS.SlugRegeneration do
       # when the run was enqueued (`SlugRegenLive`, #1160), and the mix task is
       # an operator at the host's shell, which has no actor at all. `actor:` is
       # attribution for the version history only.
+      #
+      # The context marks a rewritten alias as the pattern's own (#1890):
+      # without it `Changes.TrackAliasDerivation` would record the
+      # regeneration's write as a person's, and the next move would skip it.
       case ContentTypes.update(ct, record, %{field => change.new},
              actor: actor,
              tenant: tenant,
-             authorize?: false
+             authorize?: false,
+             context: %{path_alias_derived: field == :path_alias}
            ) do
         {:ok, _updated} -> :ok
         {:error, _error} -> :error
@@ -184,14 +189,13 @@ defmodule KilnCMS.CMS.SlugRegeneration do
     was_derived = derive.(Map.get(context.prior_ancestors, record.id, chain))
 
     current = Map.get(record, :path_alias)
+    pinned? = alias_pinned?(record, current, was_derived)
 
     cond do
       is_nil(derived) ->
         nil
 
-      # The author's value is one the pattern would not have produced at either
-      # point. `-2` dedupe variants count as derived, as they do for slugs.
-      not Slugs.underived?(current, was_derived) and not include_pinned? ->
+      pinned? and not include_pinned? ->
         :pinned
 
       true ->
@@ -208,7 +212,7 @@ defmodule KilnCMS.CMS.SlugRegeneration do
             state: record.state,
             current: current,
             new: new,
-            pinned?: not Slugs.underived?(current, was_derived)
+            pinned?: pinned?
           }
         end
     end
@@ -248,6 +252,17 @@ defmodule KilnCMS.CMS.SlugRegeneration do
         end
     end
   end
+
+  # Recorded at write time since 1.7 (#1890), so a fact, whatever moved the
+  # pattern's inputs since. A row written before then has no record (`nil`) and
+  # falls back to the inference: the author's value is one the pattern would
+  # not have produced at either point, `-2` dedupe variants counting as
+  # derived, as they do for slugs.
+  defp alias_pinned?(%{path_alias_derived: true}, _current, _was_derived), do: false
+  defp alias_pinned?(%{path_alias_derived: false}, _current, _was_derived), do: true
+
+  defp alias_pinned?(_record, current, was_derived),
+    do: not Slugs.underived?(current, was_derived)
 
   # Every chain in the type, from one read: `id => [ancestor slug, …]` root
   # first. Only when an alias run's pattern actually names `[ancestors]` —

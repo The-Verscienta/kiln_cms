@@ -1033,7 +1033,16 @@ defmodule KilnCMS.CMS.Content do
           read :public_by_slug do
             get? true
             argument :slug, :string, allow_nil?: false
-            argument :locale, :string, allow_nil?: false
+            # Optional (#1884): a missing `?locale=` starts the walk at the
+            # site's default locale, as the delivery API's `DeliveryLocale.parse/1`
+            # already did. It used to be a 400 on JSON:API and GraphQL only.
+            # `allow_nil?: true` because AshJsonApi requires a non-nil argument
+            # on the query string whatever its default; an explicit nil still
+            # fails `Preparations.LocaleFallback`'s supported-locale check.
+            argument :locale, :string,
+              allow_nil?: true,
+              default: &KilnCMS.I18n.default_locale/0
+
             argument :type_definition_id, :uuid, allow_nil?: false
 
             # Audiences the CALLER has already established the reader holds.
@@ -1171,7 +1180,15 @@ defmodule KilnCMS.CMS.Content do
           read :public_by_slug do
             get? true
             argument :slug, :string, allow_nil?: false
-            argument :locale, :string, allow_nil?: false
+            # Optional (#1884): a missing `?locale=` starts the walk at the
+            # site's default locale, as the delivery API's `DeliveryLocale.parse/1`
+            # already did. It used to be a 400 on JSON:API and GraphQL only.
+            # `allow_nil?: true` because AshJsonApi requires a non-nil argument
+            # on the query string whatever its default; an explicit nil still
+            # fails `Preparations.LocaleFallback`'s supported-locale check.
+            argument :locale, :string,
+              allow_nil?: true,
+              default: &KilnCMS.I18n.default_locale/0
 
             # See the dynamic tier above: default `[]` keeps every existing
             # caller unchanged, and the argument is hidden from GraphQL.
@@ -3497,6 +3514,12 @@ defmodule KilnCMS.CMS.Content do
         # `scheduled_at`, or publishing, clears the proposal.
         change KilnCMS.CMS.Changes.ClearProposedPublishAt, on: [:update]
 
+        # A `path_alias` written by anyone but `Changes.DeriveAlias` is a
+        # person's (#1890): every action that writes one records it, so an
+        # alias set through the working copy, a restore or an import is never
+        # later mistaken for a derived one and rewritten by a move.
+        change KilnCMS.CMS.Changes.TrackAliasDerivation, on: [:create, :update]
+
         # Block field policies (#51): `editable_by` on a `Kiln.Block` field was
         # enforced only by the editor filtering the fields it renders, so the
         # write API / MCP / GraphQL could set an admin-only field as an editor.
@@ -3832,6 +3855,15 @@ defmodule KilnCMS.CMS.Content do
         attribute :path_alias, :string,
           public?: true,
           constraints: [max_length: KilnCMS.Limits.url()]
+
+        # Whether Kiln derived `path_alias` from the type's alias pattern
+        # (`true`) or a person wrote it (`false`), recorded at write time
+        # (#1890) instead of inferred by re-deriving and comparing. `nil` on a
+        # row saved before 1.7, or with no alias: unknown, and a regeneration
+        # falls back to the inference (`KilnCMS.CMS.Slugs.underived?/2`).
+        # Written only by `Changes.DeriveAlias` and
+        # `Changes.TrackAliasDerivation`; no action accepts it.
+        attribute :path_alias_derived, :boolean
 
         # og:image URL and rel=canonical for SEO/social.
         attribute :seo_image, :string,
