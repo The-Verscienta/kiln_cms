@@ -80,6 +80,26 @@ defmodule KilnCMS.SchemaExport.TypeScriptTest do
       assert ts =~ ~s(layout?: "grid" | "masonry";)
     end
 
+    test "a nullable $ref (anyOf with null) is its target or null" do
+      ts =
+        emit(%{
+          "geo_point" => %{"type" => "object", "properties" => %{}},
+          "block_thing" => %{
+            "type" => "object",
+            "properties" => %{
+              "at" => %{
+                "anyOf" => [%{"$ref" => "#/$defs/geo_point"}, %{"type" => "null"}],
+                "type" => ["object", "null"]
+              }
+            },
+            "required" => ["at"],
+            "additionalProperties" => false
+          }
+        })
+
+      assert ts =~ "at: GeoPoint | null;"
+    end
+
     test "a property name that is not an identifier is quoted" do
       ts =
         emit(%{

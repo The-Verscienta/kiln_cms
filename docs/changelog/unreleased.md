@@ -459,6 +459,24 @@ carries the reasoning.
 
 ## Changed
 
+<a id="media-snapshot-def"></a>
+
+- **One `$defs` entry for the media snapshot.** `GET /api/schema` and `mix
+  kiln.export.schema` used to repeat `Media.Snapshot`'s shape wherever it is
+  delivered: a `:media` field, a `:media` gallery's items, an `image` block's
+  `media`, each gallery image's `media`. Every one is now a `$ref` to
+  `#/$defs/media_snapshot`. A JSON Schema validator accepts exactly what it
+  accepted before. The `.d.ts` and Swift emitters each produce one
+  `MediaSnapshot` type, where they used to produce an anonymous copy per use.
+  A nullable use is `anyOf: [{"$ref": …}, {"type": "null"}]`, the only way
+  2020-12 expresses a nullable `$ref`. The old `["object", "null"]` type list
+  stays beside it, so a generator that predates `anyOf` gets a loose but true
+  type instead of a broken one. `kiln-types` before this release writes
+  `Record<string, unknown> | null`; the next one reads the pair (its
+  CHANGELOG). The hoist happens over the assembled document rather than in
+  `Kiln.Block.JsonSchema`, whose per-block schemas are still validated on
+  their own by the block suite and `mix kiln.plugins.doctor`.
+
 <a id="related-links-ordered"></a>
 
 - **Related content comes back in the order the editor set: JSON:API

@@ -44,6 +44,7 @@ defmodule KilnCMS.SchemaExport do
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldTypes
   alias KilnCMS.CMS.ReverseFields
+  alias KilnCMS.Media
 
   @dialect "https://json-schema.org/draft/2020-12/schema"
 
@@ -136,10 +137,82 @@ defmodule KilnCMS.SchemaExport do
         # careful to skip.
         "blocks" => Enum.map(model.block_modules, &to_string(Kiln.Block.Info.name(&1)))
       },
-      "$defs" => Map.merge(JsonSchema.defs(model.block_modules), content_defs)
+      "$defs" =>
+        model.block_modules |> JsonSchema.defs() |> Map.merge(content_defs) |> hoist_media()
     }
     |> put_id(Keyword.get(opts, :base_url))
     |> put_root(root_refs)
+  end
+
+  @media_def "media_snapshot"
+
+  # `Media.Snapshot`'s shape is one thing in delivery — a `:media` field, a
+  # gallery's items, an `image` block's and each gallery image's `media` — so
+  # it is one `$defs` entry, and a generated client gets one type for it
+  # rather than a copy per place it appears.
+  #
+  # Hoisted here, over the assembled `$defs`, rather than at each source: the
+  # block schemas come from `Kiln.Block.JsonSchema.defs/1`, which the block
+  # conformance suite and `mix kiln.plugins.doctor` validate on their own,
+  # without this document — a `$ref` there would dangle.
+  #
+  # A nullable use is `anyOf: [$ref, null]` (2020-12 has no nullable `$ref`),
+  # with the `["object", "null"]` type list kept beside it. A generator that
+  # does not read `anyOf` — `kiln-types` before it learned to — then falls
+  # back to a loose but true `Record<string, unknown> | null`, where a
+  # `oneOf` with a null member would have broken its output.
+  defp hoist_media(defs) do
+    {defs, hoisted?} =
+      Enum.map_reduce(defs, false, fn {name, schema}, acc ->
+        {schema, found?} = hoist(schema)
+        {{name, schema}, acc or found?}
+      end)
+
+    defs = Map.new(defs)
+    if hoisted?, do: Map.put(defs, @media_def, Media.Snapshot.json_schema()), else: defs
+  end
+
+  defp hoist(%{} = schema) do
+    if media_snapshot?(schema) do
+      {media_ref(schema), true}
+    else
+      Enum.map_reduce(schema, false, fn {key, value}, acc ->
+        {value, found?} = hoist(value)
+        {{key, value}, acc or found?}
+      end)
+      |> then(fn {pairs, found?} -> {Map.new(pairs), found?} end)
+    end
+  end
+
+  defp hoist(list) when is_list(list) do
+    Enum.map_reduce(list, false, fn value, acc ->
+      {value, found?} = hoist(value)
+      {value, acc or found?}
+    end)
+  end
+
+  defp hoist(other), do: {other, false}
+
+  @snapshot_shape_keys ~w(properties required additionalProperties)
+
+  defp media_snapshot?(schema) do
+    Map.has_key?(schema, "properties") and
+      Map.take(schema, @snapshot_shape_keys) ==
+        Map.take(Media.Snapshot.json_schema(), @snapshot_shape_keys)
+  end
+
+  defp media_ref(schema) do
+    ref = %{"$ref" => "#/$defs/#{@media_def}"}
+
+    base =
+      if Map.get(schema, "type") == ["object", "null"],
+        do: %{"anyOf" => [ref, %{"type" => "null"}], "type" => ["object", "null"]},
+        else: ref
+
+    case Map.fetch(schema, "description") do
+      {:ok, description} -> Map.put(base, "description", description)
+      :error -> base
+    end
   end
 
   # What `json_schema/1` resolves before it formats anything: the block modules,

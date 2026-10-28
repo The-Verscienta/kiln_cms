@@ -22,6 +22,7 @@
 interface JsonSchema {
   $ref?: string;
   oneOf?: JsonSchema[];
+  anyOf?: JsonSchema[];
   type?: string | string[];
   const?: unknown;
   enum?: unknown[];
@@ -121,7 +122,7 @@ function emitInterface(name: string, schema: JsonSchema): string {
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([key, value]) => {
       const optional = required.has(key) ? "" : "?";
-      return `  ${propertyKey(key)}${optional}: ${tsType(value)};`;
+      return `  ${propertyKey(key)}${optional}: ${annotation(value)}${tsType(value)};`;
     })
     .join("\n");
 
@@ -143,6 +144,14 @@ function tsType(schema: JsonSchema): string {
 
   if (schema.oneOf !== undefined) {
     return schema.oneOf.map((ref) => typeName(refTarget(ref))).join(" | ");
+  }
+
+  // A nullable `$ref` (`anyOf: [$ref, null]`, the shared media snapshot).
+  // Its sibling `type` list is the fallback for generators that predate this
+  // clause; read here, the pair names the target.
+  const [target, nullable] = schema.anyOf ?? [];
+  if (schema.anyOf?.length === 2 && target?.$ref !== undefined && nullable?.type === "null") {
+    return `${typeName(refTarget(target))} | null`;
   }
 
   // Ahead of `const`/`enum`, not after. A nullable enum carries both keywords,
@@ -188,10 +197,21 @@ function inlineObject(properties: Record<string, JsonSchema>, required: Set<stri
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([key, value]) => {
       const optional = required.has(key) ? "" : "?";
-      return `${propertyKey(key)}${optional}: ${tsType(value)}`;
+      return `${propertyKey(key)}${optional}: ${annotation(value)}${tsType(value)}`;
     })
     .join("; ");
   return `{ ${body} }`;
+}
+
+// A `:reference` custom field's allowed target types (R2) ride along as an
+// inline comment ahead of its type. Not a literal union on the snapshot's
+// `type`: the JSON Schema states them as an annotation, not an `enum`, since
+// a stored value may name a type the field has since stopped allowing.
+function annotation(schema: JsonSchema): string {
+  const types = schema["x-kiln-target-types"];
+  if (!Array.isArray(types) || types.length === 0) return "";
+  const list = types.map(literal).join(" | ").replaceAll("*/", "*\\/");
+  return `/* links to: ${list} */ `;
 }
 
 function literal(value: unknown): string {

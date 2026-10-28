@@ -4,7 +4,7 @@ defmodule KilnCMS.JsonSchemaValidator do
   exported schema (#430) describes Kiln's own output.
 
   Not a general-purpose implementation: it covers exactly the keywords
-  `KilnCMS.SchemaExport` emits — `$ref`, `oneOf`, `const`, `enum`, `type`
+  `KilnCMS.SchemaExport` emits — `$ref`, `oneOf`, `anyOf`, `const`, `enum`, `type`
   (including type arrays), `properties`, `required`, `items`,
   `additionalProperties: false`. Anything else is treated as satisfied.
 
@@ -65,6 +65,17 @@ defmodule KilnCMS.JsonSchemaValidator do
       end
 
     one_of ++ check(value, Map.delete(schema, "oneOf"), root, path)
+  end
+
+  # Alongside its siblings too: a nullable `$ref` is exported as
+  # `anyOf: [$ref, null]` beside a `type` list (`KilnCMS.SchemaExport`).
+  defp check(value, %{"anyOf" => branches} = schema, root, path) do
+    any_of =
+      if Enum.any?(branches, &(check(value, &1, root, path) == [])),
+        do: [],
+        else: ["#{path}: matched none of the #{length(branches)} anyOf branches"]
+
+    any_of ++ check(value, Map.delete(schema, "anyOf"), root, path)
   end
 
   defp check(value, schema, root, path) do

@@ -280,10 +280,17 @@ defmodule KilnCMS.SchemaExportTest do
       schema = SchemaExport.json_schema(org_id: org.id)
       fields = schema["$defs"]["content_page"]["properties"]["custom_fields"]["properties"]
       shape = KilnCMS.Media.Snapshot.json_schema()
+      ref = %{"$ref" => "#/$defs/media_snapshot"}
 
+      # One `$defs` entry, referenced from every place the shape appears.
+      assert schema["$defs"]["media_snapshot"] == shape
+      refute Jason.encode!(Map.delete(schema["$defs"], "media_snapshot")) =~ ~s("mime_type")
+
+      # Nullable as `anyOf: [$ref, null]`, the type list kept beside it for a
+      # generator that does not read `anyOf`.
+      assert fields["hero"]["anyOf"] == [ref, %{"type" => "null"}]
       assert fields["hero"]["type"] == ["object", "null"]
-      assert fields["hero"]["properties"] == shape["properties"]
-      assert fields["shots"]["items"] == shape
+      assert fields["shots"]["items"] == ref
 
       variant = shape["properties"]["variants"]["items"]["properties"]
 
@@ -294,17 +301,18 @@ defmodule KilnCMS.SchemaExportTest do
       assert shape["required"] == ["id", "url"]
 
       image = schema["$defs"]["block_image"]["properties"]["media"]
-      assert image["type"] == ["object", "null"]
-      assert image["properties"] == shape["properties"]
+      assert image["anyOf"] == [ref, %{"type" => "null"}]
+      assert image["description"] =~ "library item"
 
       gallery_item = schema["$defs"]["block_gallery"]["properties"]["images"]["items"]
-      assert gallery_item["properties"]["media"]["properties"] == shape["properties"]
+      assert gallery_item["properties"]["media"]["anyOf"] == [ref, %{"type" => "null"}]
       # Only firing adds it, so it is not required of every gallery image.
       refute "media" in gallery_item["required"]
 
       ts = SchemaExport.TypeScript.emit(schema)
-      assert ts =~ "variants"
-      assert ts =~ "cropped"
+      assert ts =~ "export interface MediaSnapshot {"
+      assert ts =~ "hero?: MediaSnapshot | null"
+      assert ts =~ "shots?: Array<MediaSnapshot> | null"
     end
   end
 
