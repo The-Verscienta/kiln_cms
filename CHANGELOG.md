@@ -165,6 +165,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Security
 
+- **bandit 1.14.1 fixes EEF-CVE-2026-116078 (HIGH): HTTP/2 request bodies sent
+  as 1-byte DATA frames amplified memory use. Kiln serves HTTP/2, so upgrade.**
+  ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099))
+
 - **ash 3.37.1 and ash_postgres 2.15.2 fix three tenancy advisories
   (EEF-CVE-2026-115627, -115635, -114214); Kiln was not exposed.**
   ([#2091](https://github.com/The-Verscienta/kiln_cms/pull/2091) · [long form](docs/changelog/unreleased.md#ash-tenancy-advisories))

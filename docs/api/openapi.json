@@ -3650,6 +3650,10 @@
             "additionalProperties": false,
             "description": "An attributes object for a field_definition",
             "properties": {
+              "allow_custom": {
+                "description": "Field included by default.",
+                "type": "boolean"
+              },
               "compute": {
                 "anyOf": [
                   {
@@ -3692,6 +3696,14 @@
               },
               "field_type": {
                 "description": "Field included by default.",
+                "type": "string"
+              },
+              "format": {
+                "description": "Field included by default.",
+                "enum": [
+                  "rich",
+                  "plain"
+                ],
                 "type": "string"
               },
               "group_of_id": {
@@ -3895,6 +3907,8 @@
               "field_type",
               "required",
               "options",
+              "allow_custom",
+              "format",
               "target_types",
               "multiple",
               "on_target_delete",
@@ -4069,6 +4083,9 @@
         "description": "Filters the query to results matching the given filter object",
         "example": "",
         "properties": {
+          "allow_custom": {
+            "$ref": "#/components/schemas/field_definition-filter-allow_custom"
+          },
           "and": {
             "items": {
               "$ref": "#/components/schemas/field_definition-filter"
@@ -4090,6 +4107,9 @@
           },
           "field_type": {
             "$ref": "#/components/schemas/field_definition-filter-field_type"
+          },
+          "format": {
+            "$ref": "#/components/schemas/field_definition-filter-format"
           },
           "group_fields": {
             "$ref": "#/components/schemas/field_definition-filter"
@@ -4181,6 +4201,45 @@
           }
         },
         "type": "deepObject"
+      },
+      "field_definition-filter-allow_custom": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "type": "boolean"
+          },
+          "greater_than": {
+            "type": "boolean"
+          },
+          "greater_than_or_equal": {
+            "type": "boolean"
+          },
+          "in": {
+            "items": {
+              "type": "boolean"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "boolean"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "boolean"
+          },
+          "less_than": {
+            "type": "boolean"
+          },
+          "less_than_or_equal": {
+            "type": "boolean"
+          },
+          "not_eq": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
       },
       "field_definition-filter-compute": {
         "additionalProperties": false,
@@ -4402,6 +4461,69 @@
             "type": "string"
           },
           "not_eq": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-format": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "enum": [
+              "rich",
+              "plain"
+            ],
+            "type": "string"
+          },
+          "greater_than": {
+            "enum": [
+              "rich",
+              "plain"
+            ],
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "enum": [
+              "rich",
+              "plain"
+            ],
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "enum": [
+              "rich",
+              "plain"
+            ],
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "enum": [
+              "rich",
+              "plain"
+            ],
+            "type": "string"
+          },
+          "not_eq": {
+            "enum": [
+              "rich",
+              "plain"
+            ],
             "type": "string"
           }
         },
