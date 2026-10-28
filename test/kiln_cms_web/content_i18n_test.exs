@@ -3,7 +3,14 @@ defmodule KilnCMSWeb.ContentI18nTest do
   Locale-aware public delivery: a `/<locale>/…` prefix serves that locale, with
   fallback to the default locale, hreflang alternates, and a localized sitemap.
   """
-  use KilnCMSWeb.ConnCase, async: true
+  # async: false — the fallback cases read the DEFAULT org's locale chain,
+  # which resolves through `KilnCMS.Cache.fetch/3` (Cachex), and Cachex runs
+  # the read once per key in its own worker, sharing it with every concurrent
+  # caller. Async, that read could run under another test's sandbox, fail, and
+  # degrade this request to "no fallback": `/es/<slug>` 404'd intermittently in
+  # CI (2026-10-28, two PRs). A shared sandbox lets the worker use this test's
+  # connection, and nothing async runs beside it.
+  use KilnCMSWeb.ConnCase, async: false
 
   alias KilnCMS.CMS.Page
   alias KilnCMS.CMS.Post
