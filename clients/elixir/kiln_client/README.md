@@ -90,7 +90,7 @@ its visibility follows the credential, which is why viewer-minted keys matter.
 {:ok, %{items: posts, total: total}} =
   KilnClient.list("posts", filter: %{locale: "en"}, include: ["tags"], limit: 10)
 
-# First match or {:error, :not_found}
+# First match, or {:error, %KilnClient.Error{reason: :not_found}}
 {:ok, post} = KilnClient.one("posts", %{slug: "hello-world", locale: "en"})
 
 # By id, in the order given; misses are dropped (chunked at the server's 100-row cap)
@@ -320,14 +320,14 @@ the payload's own `errors` field next to `result: nil` — so select
 
 ## Errors
 
-Writes and `graphql/3` return `{:error, %KilnClient.Error{}}`. Branch on
-`:reason`:
+Every function returns `{:error, %KilnClient.Error{}}` on failure, reads and
+writes alike. Branch on `:reason`:
 
 | `:reason` | When |
 |---|---|
 | `:no_api_key` | a write with no key configured or passed — nothing was sent |
 | `:unauthorized` / `:forbidden` | 401 (no/invalid/expired key) / 403 (the key's owner lacks the right) |
-| `:not_found` | 404 |
+| `:not_found` | 404, or `one/3` matched nothing (reported as 404 too) |
 | `:validation` | 400 / 422 — `KilnClient.Error.pointers/1`, `field_errors/1`. AshJsonApi answers most attribute errors with 400, not 422 |
 | `:conflict` | 409 — a transition from the wrong state (`code: "invalid_state_transition"`, `KilnClient.Error.current_state/1`) or a lost race |
 | `:rate_limited` | 429 — wait `:retry_after` seconds |
@@ -342,10 +342,22 @@ Every error also carries `:status`, `:code` (the first error's) and `:errors`
 (the JSON:API `errors` list). The API key is only ever sent as the
 `Authorization` header — no error carries it.
 
-**Reads use a different shape:** `list/2` and the other read functions return
-`{:error, {:http_status, status, body}}` (or a transport exception), kept for
-compatibility. `KilnClient.Error.normalize/1` converts one into the struct, so
-a single error handler can cover both.
+```elixir
+case KilnClient.one("posts", %{slug: slug}) do
+  {:ok, post} -> render(post)
+  {:error, %KilnClient.Error{reason: :not_found}} -> not_found()
+  {:error, %KilnClient.Error{reason: :rate_limited, retry_after: s}} -> retry_in(s)
+  {:error, error} -> raise error
+end
+```
+
+**Upgrading from 0.4:** reads used to return `{:error, {:http_status, status,
+body}}`, a bare transport exception, or (from `one/3`) `{:error, :not_found}`.
+Match on the struct instead: `{:http_status, 404, _}` becomes
+`%KilnClient.Error{status: 404}`, `:not_found` becomes
+`%KilnClient.Error{reason: :not_found}`, and an exception becomes
+`%KilnClient.Error{reason: :transport, exception: e}`.
+`KilnClient.Error.normalize/1` still accepts the old shapes.
 
 ## Testing your integration
 
