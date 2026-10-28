@@ -92,12 +92,20 @@
         "featured": { "type": "boolean" },
         "tier": { "type": ["string", "null"], "enum": ["free", "pro"] },
         "location": { "oneOf": [{ "$ref": "#/$defs/geo_point" }] },
+        "venue": {
+          "anyOf": [{ "$ref": "#/$defs/geo_point" }, { "type": "null" }],
+          "type": ["object", "null"]
+        },
         "custom_fields": {
           "type": "object",
           "properties": {
             "weird key!": { "type": "string" },
             "badge": { "enum": ["say \"hi\"", "C:\\reports", "line\nbreak\tand tab"] },
-            "rating": { "type": ["number", "null"] }
+            "rating": { "type": ["number", "null"] },
+            "author": {
+              "type": ["object", "null"],
+              "x-kiln-target-types": ["person", "team*/"]
+            }
           },
           "required": []
         }
