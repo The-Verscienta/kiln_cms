@@ -7,8 +7,8 @@ defmodule KilnCMS.SchemaExport.Kotlin do
   `KilnCMS.SchemaExport.Walk`, so the emitters cannot disagree about what a
   field is, and it names and nests types the same way. What is Kotlin's own:
 
-    * Every content type, block, shared definition and inline object (a
-      `:group` row, a media snapshot, a `columns` column) becomes a
+    * Every content type, block, shared definition (`MediaSnapshot`) and
+      inline object (a `:group` row, a `columns` column) becomes a
       `@Serializable public data class`. Inline objects nest inside the class
       that holds them, named after their key (`custom_fields` →
       `CustomFields`; an array's items take an `Item` suffix). An object with

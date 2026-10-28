@@ -7,9 +7,10 @@ defmodule KilnCMS.SchemaExport.Walk do
   block registry — so they cannot disagree with the JSON Schema about what a
   field is. This module is the one reading of that document: it resolves
   `$ref`/`$defs`, splits nullability out of a `["T", "null"]` type list,
-  recognises `const`/`enum`, the `oneOf` block union, closed versus open
-  objects and arrays, and hands each emitter the same small, language-neutral
-  model. An emitter only decides how to *spell*
+  recognises `const`/`enum`, the `oneOf` block union, a nullable `$ref`
+  (`anyOf: [$ref, null]`), closed versus open objects and arrays, and hands
+  each emitter the same small, language-neutral model. An emitter only
+  decides how to *spell*
   it, which is why a new target language is a formatting module and not a
   second schema reader that might read `nullable` differently.
 
@@ -135,6 +136,12 @@ defmodule KilnCMS.SchemaExport.Walk do
   def type(%{"$ref" => ref}), do: {:ref, ref_target(ref)}
 
   def type(%{"oneOf" => members}), do: {:union, Enum.map(members, &type/1)}
+
+  # A nullable `$ref` — 2020-12 has no other way to say it. The sibling `type`
+  # list is there for generators that don't read `anyOf`; the pair is what
+  # names the target.
+  def type(%{"anyOf" => [%{"$ref" => _} = ref, %{"type" => "null"}]}),
+    do: {:nullable, type(ref)}
 
   def type(%{"type" => types} = schema) when is_list(types) do
     {nulls, rest} = Enum.split_with(types, &(&1 == "null"))

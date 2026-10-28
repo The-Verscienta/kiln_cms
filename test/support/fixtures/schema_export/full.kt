@@ -29,6 +29,35 @@ import kotlinx.serialization.json.jsonObject
 
 // region Shared
 
+@Serializable
+public data class MediaSnapshot(
+    public val alt: String? = null,
+    public val focal: Focal? = null,
+    public val height: Long? = null,
+    public val id: String,
+    @SerialName("mime_type") public val mimeType: String? = null,
+    public val url: String? = null,
+    public val variants: List<VariantsItem>? = null,
+    public val width: Long? = null,
+) {
+    @Serializable
+    public data class Focal(
+        public val x: Double,
+        public val y: Double,
+    )
+
+    @Serializable
+    public data class VariantsItem(
+        public val bytes: Long? = null,
+        public val cropped: Boolean,
+        public val format: String? = null,
+        public val height: Long? = null,
+        public val label: String,
+        public val url: String,
+        public val width: Long? = null,
+    )
+}
+
 /** One Portable Text node (D12). Open by design: Portable Text is an extensible convention rather than a fixed schema, and a consumer that does not recognize a node's `_type` is expected to skip it. */
 @Serializable
 public data class PortableTextBlock(
@@ -219,39 +248,10 @@ public data class GalleryBlock(
         public val alt: String,
         public val caption: String,
         /** The library item behind the block, as fired; null when none. */
-        public val media: Media? = null,
+        public val media: MediaSnapshot? = null,
         @SerialName("media_id") public val mediaId: String,
         public val url: String,
-    ) {
-        @Serializable
-        public data class Media(
-            public val alt: String? = null,
-            public val focal: Focal? = null,
-            public val height: Long? = null,
-            public val id: String,
-            @SerialName("mime_type") public val mimeType: String? = null,
-            public val url: String? = null,
-            public val variants: List<VariantsItem>? = null,
-            public val width: Long? = null,
-        ) {
-            @Serializable
-            public data class Focal(
-                public val x: Double,
-                public val y: Double,
-            )
-
-            @Serializable
-            public data class VariantsItem(
-                public val bytes: Long? = null,
-                public val cropped: Boolean,
-                public val format: String? = null,
-                public val height: Long? = null,
-                public val label: String,
-                public val url: String,
-                public val width: Long? = null,
-            )
-        }
-    }
+    )
 }
 
 @Serializable
@@ -287,38 +287,9 @@ public data class ImageBlock(
     public val alt: String? = null,
     public val caption: String? = null,
     /** The library item behind the block, as fired; null when none. */
-    public val media: Media? = null,
+    public val media: MediaSnapshot? = null,
     public val url: String? = null,
-) : Block {
-    @Serializable
-    public data class Media(
-        public val alt: String? = null,
-        public val focal: Focal? = null,
-        public val height: Long? = null,
-        public val id: String,
-        @SerialName("mime_type") public val mimeType: String? = null,
-        public val url: String? = null,
-        public val variants: List<VariantsItem>? = null,
-        public val width: Long? = null,
-    ) {
-        @Serializable
-        public data class Focal(
-            public val x: Double,
-            public val y: Double,
-        )
-
-        @Serializable
-        public data class VariantsItem(
-            public val bytes: Long? = null,
-            public val cropped: Boolean,
-            public val format: String? = null,
-            public val height: Long? = null,
-            public val label: String,
-            public val url: String,
-            public val width: Long? = null,
-        )
-    }
-}
+) : Block
 
 @Serializable
 public data class NewsletterSignupBlock(
@@ -531,9 +502,9 @@ public data class PostDocument(
         public val dosages: List<DosagesItem>? = null,
         public val featured: Boolean? = null,
         /** Snapshots of the picked media items, in gallery order. */
-        public val gallery: List<GalleryItem>? = null,
+        public val gallery: List<MediaSnapshot>? = null,
         /** Snapshot of the picked media item. */
-        public val hero: Hero? = null,
+        public val hero: MediaSnapshot? = null,
         public val homepage: String? = null,
         @SerialName("launch_date") public val launchDate: String? = null,
         /**
@@ -567,64 +538,6 @@ public data class PostDocument(
             public val form: String? = null,
             public val unit: String? = null,
         )
-
-        @Serializable
-        public data class GalleryItem(
-            public val alt: String? = null,
-            public val focal: Focal? = null,
-            public val height: Long? = null,
-            public val id: String,
-            @SerialName("mime_type") public val mimeType: String? = null,
-            public val url: String? = null,
-            public val variants: List<VariantsItem>? = null,
-            public val width: Long? = null,
-        ) {
-            @Serializable
-            public data class Focal(
-                public val x: Double,
-                public val y: Double,
-            )
-
-            @Serializable
-            public data class VariantsItem(
-                public val bytes: Long? = null,
-                public val cropped: Boolean,
-                public val format: String? = null,
-                public val height: Long? = null,
-                public val label: String,
-                public val url: String,
-                public val width: Long? = null,
-            )
-        }
-
-        @Serializable
-        public data class Hero(
-            public val alt: String? = null,
-            public val focal: Focal? = null,
-            public val height: Long? = null,
-            public val id: String,
-            @SerialName("mime_type") public val mimeType: String? = null,
-            public val url: String? = null,
-            public val variants: List<VariantsItem>? = null,
-            public val width: Long? = null,
-        ) {
-            @Serializable
-            public data class Focal(
-                public val x: Double,
-                public val y: Double,
-            )
-
-            @Serializable
-            public data class VariantsItem(
-                public val bytes: Long? = null,
-                public val cropped: Boolean,
-                public val format: String? = null,
-                public val height: Long? = null,
-                public val label: String,
-                public val url: String,
-                public val width: Long? = null,
-            )
-        }
 
         @Serializable
         public data class RelatedItem(

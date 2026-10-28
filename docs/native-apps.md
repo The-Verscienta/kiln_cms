@@ -334,8 +334,9 @@ package. What it contains:
   (`PostDocument`), block (`HeadingBlock`) and shared definition, with a public
   memberwise `init` for previews and tests. Inline objects nest inside the
   struct that holds them, named after their key: `PostDocument.CustomFields`,
-  a repeating `:group` row as `CustomFields.DosagesItem`, a media snapshot as
-  `CustomFields.Hero`.
+  and a repeating `:group` row as `CustomFields.DosagesItem`. The media
+  snapshot is one shared `MediaSnapshot`, used by a `:media` field, a
+  gallery, and the `image` and `gallery` blocks alike.
 - Swift names in `lowerCamelCase`, with `CodingKeys` keeping the JSON key
   exact (`readTime = "read_time"`, a block's `type = "_type"`). Keywords are
   back-ticked; a key Swift can't spell is sanitized, and its JSON name is kept.
@@ -406,9 +407,9 @@ What it contains:
 
 - A `@Serializable public data class` per content type (`PostDocument`),
   block (`HeadingBlock`) and shared definition. Inline objects nest inside the
-  class that holds them, named as in Swift: `PostDocument.CustomFields`, a
-  repeating `:group` row as `CustomFields.DosagesItem`, a media snapshot as
-  `CustomFields.Hero`. An object with no keys is a `data object`.
+  class that holds them, named as in Swift: `PostDocument.CustomFields`, and a
+  repeating `:group` row as `CustomFields.DosagesItem`. The media snapshot is
+  the one shared `MediaSnapshot`. An object with no keys is a `data object`.
 - Kotlin names in `lowerCamelCase`, with `@SerialName` keeping the JSON key
   exact (`@SerialName("read_time") val readTime`, a block's
   `@SerialName("_type") val type`). Hard keywords are back-ticked.

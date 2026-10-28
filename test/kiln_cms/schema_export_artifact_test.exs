@@ -152,4 +152,28 @@ defmodule KilnCMS.SchemaExportArtifactTest do
     assert {:error, errors} = JsonSchemaValidator.validate(body, schema, document)
     assert Enum.any?(errors, &(&1 =~ "oneOf"))
   end
+
+  # The shared media snapshot is a nullable `$ref` (`anyOf`); neither `null`
+  # nor a real snapshot may be the only thing it accepts.
+  test "an image block's media must be a snapshot or null" do
+    org_id = KilnCMS.Accounts.default_org_id()
+    document = SchemaExport.json_schema(org_id: org_id)
+    schema = document["$defs"]["block_image"]
+    image = &%{"_type" => "image", "url" => "/a.png", "media" => &1}
+
+    assert :ok = JsonSchemaValidator.validate(image.(nil), schema, document)
+
+    assert :ok =
+             JsonSchemaValidator.validate(
+               image.(%{"id" => Ash.UUID.generate(), "url" => "/a.png"}),
+               schema,
+               document
+             )
+
+    assert {:error, errors} = JsonSchemaValidator.validate(image.(7), schema, document)
+    assert Enum.any?(errors, &(&1 =~ "anyOf"))
+
+    assert {:error, _} =
+             JsonSchemaValidator.validate(image.(%{"url" => "/a.png"}), schema, document)
+  end
 end

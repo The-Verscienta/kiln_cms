@@ -5,6 +5,15 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `client-js-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+- `kiln-types` reads a nullable `$ref` (`anyOf: [$ref, {"type": "null"}]`) as
+  `Target | null`. Kiln's schema export now states the shared media snapshot
+  that way. Before this, such a field typed as `Record<string, unknown> | null`.
+- `kiln-types` writes a `:reference` field's allowed target types as a
+  `/* links to: "post" | "page" */` comment ahead of its type, the same as
+  `mix kiln.export.schema --format ts`. It used to leave the comment out.
+
 ## 0.2.0
 
 ### Added

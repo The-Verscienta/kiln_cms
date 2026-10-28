@@ -673,113 +673,15 @@
                 "type": "string"
               },
               "media": {
-                "additionalProperties": true,
-                "description": "The library item behind the block, as fired; null when none.",
-                "properties": {
-                  "alt": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/media_snapshot"
                   },
-                  "focal": {
-                    "properties": {
-                      "x": {
-                        "type": "number"
-                      },
-                      "y": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "x",
-                      "y"
-                    ],
-                    "type": [
-                      "object",
-                      "null"
-                    ]
-                  },
-                  "height": {
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
-                  },
-                  "id": {
-                    "format": "uuid",
-                    "type": "string"
-                  },
-                  "mime_type": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "url": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "variants": {
-                    "items": {
-                      "additionalProperties": true,
-                      "properties": {
-                        "bytes": {
-                          "type": [
-                            "integer",
-                            "null"
-                          ]
-                        },
-                        "cropped": {
-                          "type": "boolean"
-                        },
-                        "format": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "height": {
-                          "type": [
-                            "integer",
-                            "null"
-                          ]
-                        },
-                        "label": {
-                          "type": "string"
-                        },
-                        "url": {
-                          "type": "string"
-                        },
-                        "width": {
-                          "type": [
-                            "integer",
-                            "null"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "label",
-                        "url",
-                        "cropped"
-                      ],
-                      "type": "object"
-                    },
-                    "type": "array"
-                  },
-                  "width": {
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
+                  {
+                    "type": "null"
                   }
-                },
-                "required": [
-                  "id",
-                  "url"
                 ],
+                "description": "The library item behind the block, as fired; null when none.",
                 "type": [
                   "object",
                   "null"
@@ -929,113 +831,15 @@
           ]
         },
         "media": {
-          "additionalProperties": true,
-          "description": "The library item behind the block, as fired; null when none.",
-          "properties": {
-            "alt": {
-              "type": [
-                "string",
-                "null"
-              ]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/media_snapshot"
             },
-            "focal": {
-              "properties": {
-                "x": {
-                  "type": "number"
-                },
-                "y": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "x",
-                "y"
-              ],
-              "type": [
-                "object",
-                "null"
-              ]
-            },
-            "height": {
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "id": {
-              "format": "uuid",
-              "type": "string"
-            },
-            "mime_type": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "url": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "variants": {
-              "items": {
-                "additionalProperties": true,
-                "properties": {
-                  "bytes": {
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
-                  },
-                  "cropped": {
-                    "type": "boolean"
-                  },
-                  "format": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "height": {
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
-                  },
-                  "label": {
-                    "type": "string"
-                  },
-                  "url": {
-                    "type": "string"
-                  },
-                  "width": {
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
-                  }
-                },
-                "required": [
-                  "label",
-                  "url",
-                  "cropped"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            },
-            "width": {
-              "type": [
-                "integer",
-                "null"
-              ]
+            {
+              "type": "null"
             }
-          },
-          "required": [
-            "id",
-            "url"
           ],
+          "description": "The library item behind the block, as fired; null when none.",
           "type": [
             "object",
             "null"
@@ -1478,113 +1282,7 @@
             "gallery": {
               "description": "Snapshots of the picked media items, in gallery order.",
               "items": {
-                "additionalProperties": true,
-                "properties": {
-                  "alt": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "focal": {
-                    "properties": {
-                      "x": {
-                        "type": "number"
-                      },
-                      "y": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "x",
-                      "y"
-                    ],
-                    "type": [
-                      "object",
-                      "null"
-                    ]
-                  },
-                  "height": {
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
-                  },
-                  "id": {
-                    "format": "uuid",
-                    "type": "string"
-                  },
-                  "mime_type": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "url": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "variants": {
-                    "items": {
-                      "additionalProperties": true,
-                      "properties": {
-                        "bytes": {
-                          "type": [
-                            "integer",
-                            "null"
-                          ]
-                        },
-                        "cropped": {
-                          "type": "boolean"
-                        },
-                        "format": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "height": {
-                          "type": [
-                            "integer",
-                            "null"
-                          ]
-                        },
-                        "label": {
-                          "type": "string"
-                        },
-                        "url": {
-                          "type": "string"
-                        },
-                        "width": {
-                          "type": [
-                            "integer",
-                            "null"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "label",
-                        "url",
-                        "cropped"
-                      ],
-                      "type": "object"
-                    },
-                    "type": "array"
-                  },
-                  "width": {
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
-                  }
-                },
-                "required": [
-                  "id",
-                  "url"
-                ],
-                "type": "object"
+                "$ref": "#/$defs/media_snapshot"
               },
               "type": [
                 "array",
@@ -1592,113 +1290,15 @@
               ]
             },
             "hero": {
-              "additionalProperties": true,
-              "description": "Snapshot of the picked media item.",
-              "properties": {
-                "alt": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/media_snapshot"
                 },
-                "focal": {
-                  "properties": {
-                    "x": {
-                      "type": "number"
-                    },
-                    "y": {
-                      "type": "number"
-                    }
-                  },
-                  "required": [
-                    "x",
-                    "y"
-                  ],
-                  "type": [
-                    "object",
-                    "null"
-                  ]
-                },
-                "height": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
-                },
-                "id": {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                "mime_type": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "url": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "variants": {
-                  "items": {
-                    "additionalProperties": true,
-                    "properties": {
-                      "bytes": {
-                        "type": [
-                          "integer",
-                          "null"
-                        ]
-                      },
-                      "cropped": {
-                        "type": "boolean"
-                      },
-                      "format": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "height": {
-                        "type": [
-                          "integer",
-                          "null"
-                        ]
-                      },
-                      "label": {
-                        "type": "string"
-                      },
-                      "url": {
-                        "type": "string"
-                      },
-                      "width": {
-                        "type": [
-                          "integer",
-                          "null"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "label",
-                      "url",
-                      "cropped"
-                    ],
-                    "type": "object"
-                  },
-                  "type": "array"
-                },
-                "width": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
+                {
+                  "type": "null"
                 }
-              },
-              "required": [
-                "id",
-                "url"
               ],
+              "description": "Snapshot of the picked media item.",
               "type": [
                 "object",
                 "null"
@@ -1933,6 +1533,115 @@
       "type": "object",
       "x-kiln-content-type": "post",
       "x-kiln-content-type-source": "compiled"
+    },
+    "media_snapshot": {
+      "additionalProperties": true,
+      "properties": {
+        "alt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "focal": {
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "mime_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variants": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "cropped": {
+                "type": "boolean"
+              },
+              "format": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "height": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "width": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "label",
+              "url",
+              "cropped"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "url"
+      ],
+      "type": "object"
     },
     "portable_text_block": {
       "additionalProperties": true,

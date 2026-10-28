@@ -12,6 +12,11 @@ defmodule KilnCMS.SchemaExport.TypeScriptParityTest do
   Only the first header line differs by design (each emitter names its own
   entry point), so the comparison drops it.
 
+  The vitest side also compares `kiln-types` against this emitter's
+  `test/support/fixtures/schema_export/full.d.ts`, over the real full export
+  (`KilnCMS.SchemaExport.GoldenTest`). That catches a construct the
+  hand-written fixture never held.
+
   To regenerate after a deliberate, mirrored change to both emitters:
 
       cd clients/js && npm run build && node dist/bin/kiln-types.js \\
