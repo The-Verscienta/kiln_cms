@@ -7,8 +7,8 @@ defmodule KilnCMS.SchemaExport.Swift do
   through `KilnCMS.SchemaExport.Walk`, so the two cannot disagree about what a
   field is. What is Swift's own:
 
-    * Every content type, block, shared definition and inline object (a
-      `:group` row, a media snapshot, a `columns` column) becomes a
+    * Every content type, block, shared definition (`MediaSnapshot`) and
+      inline object (a `:group` row, a `columns` column) becomes a
       `public struct … : Codable, Hashable, Sendable`. Inline objects nest
       inside the struct that holds them, named after their key (`custom_fields`
       → `CustomFields`; an array's items take an `Item` suffix).

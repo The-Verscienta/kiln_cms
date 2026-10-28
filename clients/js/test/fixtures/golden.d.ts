@@ -67,13 +67,14 @@ export interface LandingPageDocument {
 /** A published post's fired `:json` artifact. */
 export interface PostDocument {
   blocks: Array<KilnBlock>;
-  custom_fields?: { badge?: "say \"hi\"" | "C:\\reports" | "line\nbreak\tand tab"; rating?: number | null; "weird key!"?: string };
+  custom_fields?: { author?: /* links to: "person" | "team*\/" */ Record<string, unknown> | null; badge?: "say \"hi\"" | "C:\\reports" | "line\nbreak\tand tab"; rating?: number | null; "weird key!"?: string };
   featured?: boolean;
   location?: GeoPoint;
   slug: string;
   tier?: "free" | "pro" | null;
   title: string;
   type: "post";
+  venue?: GeoPoint | null;
   word_count?: number;
   [k: string]: unknown;
 }

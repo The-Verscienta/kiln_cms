@@ -181,6 +181,25 @@ defmodule KilnCMS.SchemaExport.SwiftTest do
       refute swift =~ "OtherUnion"
     end
 
+    test "a nullable $ref (anyOf with null) is an optional of its target" do
+      swift =
+        emit(%{
+          "geo_point" => object(%{"lat" => %{"type" => "number"}}),
+          "block_thing" =>
+            object(
+              %{
+                "at" => %{
+                  "anyOf" => [%{"$ref" => "#/$defs/geo_point"}, %{"type" => "null"}],
+                  "type" => ["object", "null"]
+                }
+              },
+              ["at"]
+            )
+        })
+
+      assert swift =~ "public let at: GeoPoint?"
+    end
+
     test "a single-member oneOf is its member, and a schema without properties is an alias" do
       swift =
         emit(%{

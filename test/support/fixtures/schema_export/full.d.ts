@@ -8,6 +8,18 @@
 
 // -- Shared ------------------------------------------------------
 
+export interface MediaSnapshot {
+  alt?: string | null;
+  focal?: { x: number; y: number } | null;
+  height?: number | null;
+  id: string;
+  mime_type?: string | null;
+  url: string | null;
+  variants?: Array<{ bytes?: number | null; cropped: boolean; format?: string | null; height?: number | null; label: string; url: string; width?: number | null }>;
+  width?: number | null;
+  [k: string]: unknown;
+}
+
 /** One Portable Text node (D12). Open by design: Portable Text is an extensible convention rather than a fixed schema, and a consumer that does not recognize a node's `_type` is expected to skip it. */
 export interface PortableTextBlock {
   _key?: string;
@@ -132,7 +144,7 @@ export interface FragmentBlock {
 export interface GalleryBlock {
   _id?: string;
   _type: "gallery";
-  images?: Array<{ alt: string; caption: string; media?: { alt?: string | null; focal?: { x: number; y: number } | null; height?: number | null; id: string; mime_type?: string | null; url: string | null; variants?: Array<{ bytes?: number | null; cropped: boolean; format?: string | null; height?: number | null; label: string; url: string; width?: number | null }>; width?: number | null } | null; media_id: string; url: string }>;
+  images?: Array<{ alt: string; caption: string; media?: MediaSnapshot | null; media_id: string; url: string }>;
   layout?: string | null;
   title?: string | null;
 }
@@ -157,7 +169,7 @@ export interface ImageBlock {
   _type: "image";
   alt?: string | null;
   caption?: string | null;
-  media?: { alt?: string | null; focal?: { x: number; y: number } | null; height?: number | null; id: string; mime_type?: string | null; url: string | null; variants?: Array<{ bytes?: number | null; cropped: boolean; format?: string | null; height?: number | null; label: string; url: string; width?: number | null }>; width?: number | null } | null;
+  media?: MediaSnapshot | null;
   url?: string | null;
 }
 
@@ -272,7 +284,7 @@ export interface PageDocument {
 /** A published `Post` as fired to the `:json` surface. */
 export interface PostDocument {
   blocks: Array<KilnBlock>;
-  custom_fields: { code_sample?: string | null; dosages?: Array<{ amount?: number | null; form?: string | null; unit?: string | null }> | null; featured?: boolean | null; gallery?: Array<{ alt?: string | null; focal?: { x: number; y: number } | null; height?: number | null; id: string; mime_type?: string | null; url: string | null; variants?: Array<{ bytes?: number | null; cropped: boolean; format?: string | null; height?: number | null; label: string; url: string; width?: number | null }>; width?: number | null }> | null; hero?: { alt?: string | null; focal?: { x: number; y: number } | null; height?: number | null; id: string; mime_type?: string | null; url: string | null; variants?: Array<{ bytes?: number | null; cropped: boolean; format?: string | null; height?: number | null; label: string; url: string; width?: number | null }>; width?: number | null } | null; homepage?: string | null; launch_date?: string | null; parent?: /* links to: "post" */ Record<string, unknown> | null; properties?: Array<string> | null; published_at?: string | null; rating?: number | null; read_time?: number | null; related?: /* links to: "post" */ Array<{ id: string; slug?: string | null; title?: string | null; type: string }> | null; seo?: { no_index?: boolean | null; title?: string | null } | null; subtitle?: string | null; summary?: string | null; synonyms?: Array<string> | null; tier?: string | null; where?: { label?: string; lat?: number; lng?: number; zoom?: number } | null };
+  custom_fields: { code_sample?: string | null; dosages?: Array<{ amount?: number | null; form?: string | null; unit?: string | null }> | null; featured?: boolean | null; gallery?: Array<MediaSnapshot> | null; hero?: MediaSnapshot | null; homepage?: string | null; launch_date?: string | null; parent?: /* links to: "post" */ Record<string, unknown> | null; properties?: Array<string> | null; published_at?: string | null; rating?: number | null; read_time?: number | null; related?: /* links to: "post" */ Array<{ id: string; slug?: string | null; title?: string | null; type: string }> | null; seo?: { no_index?: boolean | null; title?: string | null } | null; subtitle?: string | null; summary?: string | null; synonyms?: Array<string> | null; tier?: string | null; where?: { label?: string; lat?: number; lng?: number; zoom?: number } | null };
   custom_fields_plain?: { summary?: string | null };
   id: string;
   inherited_fields?: Record<string, unknown>;

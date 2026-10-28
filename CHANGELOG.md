@@ -136,6 +136,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **The schema export states the media snapshot once, as `$defs.media_snapshot`;
+  nullable uses are `anyOf: [$ref, null]`, so generated clients get one type.**
+  ([#2105](https://github.com/The-Verscienta/kiln_cms/pull/2105) · [long form](docs/changelog/unreleased.md#media-snapshot-def))
+
 - **Related content comes back in the order the editor set: JSON:API
   `include=related_<type>s`, GraphQL `related<Type>s` and `related_links`.**
   ([#2061](https://github.com/The-Verscienta/kiln_cms/pull/2061) · [#2064](https://github.com/The-Verscienta/kiln_cms/pull/2064) · [long form](docs/changelog/unreleased.md#related-links-ordered))

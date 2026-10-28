@@ -8,6 +8,69 @@
 
 // MARK: - Shared
 
+public struct MediaSnapshot: Codable, Hashable, Sendable {
+    public let alt: String?
+    public let focal: Focal?
+    public let height: Int?
+    public let id: String
+    public let mimeType: String?
+    public let url: String?
+    public let variants: [VariantsItem]?
+    public let width: Int?
+
+    public init(alt: String? = nil, focal: Focal? = nil, height: Int? = nil, id: String, mimeType: String? = nil, url: String? = nil, variants: [VariantsItem]? = nil, width: Int? = nil) {
+        self.alt = alt
+        self.focal = focal
+        self.height = height
+        self.id = id
+        self.mimeType = mimeType
+        self.url = url
+        self.variants = variants
+        self.width = width
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case alt
+        case focal
+        case height
+        case id
+        case mimeType = "mime_type"
+        case url
+        case variants
+        case width
+    }
+
+    public struct Focal: Codable, Hashable, Sendable {
+        public let x: Double
+        public let y: Double
+
+        public init(x: Double, y: Double) {
+            self.x = x
+            self.y = y
+        }
+    }
+
+    public struct VariantsItem: Codable, Hashable, Sendable {
+        public let bytes: Int?
+        public let cropped: Bool
+        public let format: String?
+        public let height: Int?
+        public let label: String
+        public let url: String
+        public let width: Int?
+
+        public init(bytes: Int? = nil, cropped: Bool, format: String? = nil, height: Int? = nil, label: String, url: String, width: Int? = nil) {
+            self.bytes = bytes
+            self.cropped = cropped
+            self.format = format
+            self.height = height
+            self.label = label
+            self.url = url
+            self.width = width
+        }
+    }
+}
+
 /// One Portable Text node (D12). Open by design: Portable Text is an extensible convention rather than a fixed schema, and a consumer that does not recognize a node's `_type` is expected to skip it.
 public struct PortableTextBlock: Codable, Hashable, Sendable {
     public let key: String?
@@ -443,11 +506,11 @@ public struct GalleryBlock: Codable, Hashable, Sendable {
         public let alt: String
         public let caption: String
         /// The library item behind the block, as fired; null when none.
-        public let media: Media?
+        public let media: MediaSnapshot?
         public let mediaId: String
         public let url: String
 
-        public init(alt: String, caption: String, media: Media? = nil, mediaId: String, url: String) {
+        public init(alt: String, caption: String, media: MediaSnapshot? = nil, mediaId: String, url: String) {
             self.alt = alt
             self.caption = caption
             self.media = media
@@ -461,69 +524,6 @@ public struct GalleryBlock: Codable, Hashable, Sendable {
             case media
             case mediaId = "media_id"
             case url
-        }
-
-        public struct Media: Codable, Hashable, Sendable {
-            public let alt: String?
-            public let focal: Focal?
-            public let height: Int?
-            public let id: String
-            public let mimeType: String?
-            public let url: String?
-            public let variants: [VariantsItem]?
-            public let width: Int?
-
-            public init(alt: String? = nil, focal: Focal? = nil, height: Int? = nil, id: String, mimeType: String? = nil, url: String? = nil, variants: [VariantsItem]? = nil, width: Int? = nil) {
-                self.alt = alt
-                self.focal = focal
-                self.height = height
-                self.id = id
-                self.mimeType = mimeType
-                self.url = url
-                self.variants = variants
-                self.width = width
-            }
-
-            enum CodingKeys: String, CodingKey {
-                case alt
-                case focal
-                case height
-                case id
-                case mimeType = "mime_type"
-                case url
-                case variants
-                case width
-            }
-
-            public struct Focal: Codable, Hashable, Sendable {
-                public let x: Double
-                public let y: Double
-
-                public init(x: Double, y: Double) {
-                    self.x = x
-                    self.y = y
-                }
-            }
-
-            public struct VariantsItem: Codable, Hashable, Sendable {
-                public let bytes: Int?
-                public let cropped: Bool
-                public let format: String?
-                public let height: Int?
-                public let label: String
-                public let url: String
-                public let width: Int?
-
-                public init(bytes: Int? = nil, cropped: Bool, format: String? = nil, height: Int? = nil, label: String, url: String, width: Int? = nil) {
-                    self.bytes = bytes
-                    self.cropped = cropped
-                    self.format = format
-                    self.height = height
-                    self.label = label
-                    self.url = url
-                    self.width = width
-                }
-            }
         }
     }
 }
@@ -592,10 +592,10 @@ public struct ImageBlock: Codable, Hashable, Sendable {
     public let alt: String?
     public let caption: String?
     /// The library item behind the block, as fired; null when none.
-    public let media: Media?
+    public let media: MediaSnapshot?
     public let url: String?
 
-    public init(id: String? = nil, type: String, alt: String? = nil, caption: String? = nil, media: Media? = nil, url: String? = nil) {
+    public init(id: String? = nil, type: String, alt: String? = nil, caption: String? = nil, media: MediaSnapshot? = nil, url: String? = nil) {
         self.id = id
         self.type = type
         self.alt = alt
@@ -611,69 +611,6 @@ public struct ImageBlock: Codable, Hashable, Sendable {
         case caption
         case media
         case url
-    }
-
-    public struct Media: Codable, Hashable, Sendable {
-        public let alt: String?
-        public let focal: Focal?
-        public let height: Int?
-        public let id: String
-        public let mimeType: String?
-        public let url: String?
-        public let variants: [VariantsItem]?
-        public let width: Int?
-
-        public init(alt: String? = nil, focal: Focal? = nil, height: Int? = nil, id: String, mimeType: String? = nil, url: String? = nil, variants: [VariantsItem]? = nil, width: Int? = nil) {
-            self.alt = alt
-            self.focal = focal
-            self.height = height
-            self.id = id
-            self.mimeType = mimeType
-            self.url = url
-            self.variants = variants
-            self.width = width
-        }
-
-        enum CodingKeys: String, CodingKey {
-            case alt
-            case focal
-            case height
-            case id
-            case mimeType = "mime_type"
-            case url
-            case variants
-            case width
-        }
-
-        public struct Focal: Codable, Hashable, Sendable {
-            public let x: Double
-            public let y: Double
-
-            public init(x: Double, y: Double) {
-                self.x = x
-                self.y = y
-            }
-        }
-
-        public struct VariantsItem: Codable, Hashable, Sendable {
-            public let bytes: Int?
-            public let cropped: Bool
-            public let format: String?
-            public let height: Int?
-            public let label: String
-            public let url: String
-            public let width: Int?
-
-            public init(bytes: Int? = nil, cropped: Bool, format: String? = nil, height: Int? = nil, label: String, url: String, width: Int? = nil) {
-                self.bytes = bytes
-                self.cropped = cropped
-                self.format = format
-                self.height = height
-                self.label = label
-                self.url = url
-                self.width = width
-            }
-        }
     }
 }
 
@@ -1102,9 +1039,9 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public let dosages: [DosagesItem]?
         public let featured: Bool?
         /// Snapshots of the picked media items, in gallery order.
-        public let gallery: [GalleryItem]?
+        public let gallery: [MediaSnapshot]?
         /// Snapshot of the picked media item.
-        public let hero: Hero?
+        public let hero: MediaSnapshot?
         public let homepage: String?
         public let launchDate: String?
         /// Write-time snapshot of a referenced record.
@@ -1128,7 +1065,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public let tier: String?
         public let `where`: Where?
 
-        public init(codeSample: String? = nil, dosages: [DosagesItem]? = nil, featured: Bool? = nil, gallery: [GalleryItem]? = nil, hero: Hero? = nil, homepage: String? = nil, launchDate: String? = nil, parent: [String: JSONValue]? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, seo: Seo? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
+        public init(codeSample: String? = nil, dosages: [DosagesItem]? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, parent: [String: JSONValue]? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, seo: Seo? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
             self.codeSample = codeSample
             self.dosages = dosages
             self.featured = featured
@@ -1181,132 +1118,6 @@ public struct PostDocument: Codable, Hashable, Sendable {
                 self.amount = amount
                 self.form = form
                 self.unit = unit
-            }
-        }
-
-        public struct GalleryItem: Codable, Hashable, Sendable {
-            public let alt: String?
-            public let focal: Focal?
-            public let height: Int?
-            public let id: String
-            public let mimeType: String?
-            public let url: String?
-            public let variants: [VariantsItem]?
-            public let width: Int?
-
-            public init(alt: String? = nil, focal: Focal? = nil, height: Int? = nil, id: String, mimeType: String? = nil, url: String? = nil, variants: [VariantsItem]? = nil, width: Int? = nil) {
-                self.alt = alt
-                self.focal = focal
-                self.height = height
-                self.id = id
-                self.mimeType = mimeType
-                self.url = url
-                self.variants = variants
-                self.width = width
-            }
-
-            enum CodingKeys: String, CodingKey {
-                case alt
-                case focal
-                case height
-                case id
-                case mimeType = "mime_type"
-                case url
-                case variants
-                case width
-            }
-
-            public struct Focal: Codable, Hashable, Sendable {
-                public let x: Double
-                public let y: Double
-
-                public init(x: Double, y: Double) {
-                    self.x = x
-                    self.y = y
-                }
-            }
-
-            public struct VariantsItem: Codable, Hashable, Sendable {
-                public let bytes: Int?
-                public let cropped: Bool
-                public let format: String?
-                public let height: Int?
-                public let label: String
-                public let url: String
-                public let width: Int?
-
-                public init(bytes: Int? = nil, cropped: Bool, format: String? = nil, height: Int? = nil, label: String, url: String, width: Int? = nil) {
-                    self.bytes = bytes
-                    self.cropped = cropped
-                    self.format = format
-                    self.height = height
-                    self.label = label
-                    self.url = url
-                    self.width = width
-                }
-            }
-        }
-
-        public struct Hero: Codable, Hashable, Sendable {
-            public let alt: String?
-            public let focal: Focal?
-            public let height: Int?
-            public let id: String
-            public let mimeType: String?
-            public let url: String?
-            public let variants: [VariantsItem]?
-            public let width: Int?
-
-            public init(alt: String? = nil, focal: Focal? = nil, height: Int? = nil, id: String, mimeType: String? = nil, url: String? = nil, variants: [VariantsItem]? = nil, width: Int? = nil) {
-                self.alt = alt
-                self.focal = focal
-                self.height = height
-                self.id = id
-                self.mimeType = mimeType
-                self.url = url
-                self.variants = variants
-                self.width = width
-            }
-
-            enum CodingKeys: String, CodingKey {
-                case alt
-                case focal
-                case height
-                case id
-                case mimeType = "mime_type"
-                case url
-                case variants
-                case width
-            }
-
-            public struct Focal: Codable, Hashable, Sendable {
-                public let x: Double
-                public let y: Double
-
-                public init(x: Double, y: Double) {
-                    self.x = x
-                    self.y = y
-                }
-            }
-
-            public struct VariantsItem: Codable, Hashable, Sendable {
-                public let bytes: Int?
-                public let cropped: Bool
-                public let format: String?
-                public let height: Int?
-                public let label: String
-                public let url: String
-                public let width: Int?
-
-                public init(bytes: Int? = nil, cropped: Bool, format: String? = nil, height: Int? = nil, label: String, url: String, width: Int? = nil) {
-                    self.bytes = bytes
-                    self.cropped = cropped
-                    self.format = format
-                    self.height = height
-                    self.label = label
-                    self.url = url
-                    self.width = width
-                }
             }
         }
 
