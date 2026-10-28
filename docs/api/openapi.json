@@ -17342,7 +17342,7 @@
           {
             "in": "query",
             "name": "locale",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
             },
@@ -21502,7 +21502,7 @@
           {
             "in": "query",
             "name": "locale",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
             },
@@ -24826,7 +24826,7 @@
           {
             "in": "query",
             "name": "locale",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
             },

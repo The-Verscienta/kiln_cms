@@ -3335,7 +3335,7 @@ type RootQueryType {
   """
   contentAsOf(type: String!, asOf: DateTime!, limit: Int): [PointInTimeEntry!]
 
-  pageBySlug(slug: String!, locale: String!, fallback: Boolean, fallbackLocale: String): Page
+  pageBySlug(slug: String!, locale: String, fallback: Boolean, fallbackLocale: String): Page
 
   pageTranslations(
     "How to sort the records in the response"
@@ -3473,7 +3473,7 @@ type RootQueryType {
     locale: String
   ): [Page!]!
 
-  postBySlug(slug: String!, locale: String!, fallback: Boolean, fallbackLocale: String): Post
+  postBySlug(slug: String!, locale: String, fallback: Boolean, fallbackLocale: String): Post
 
   postTranslations(
     "How to sort the records in the response"
@@ -3611,7 +3611,7 @@ type RootQueryType {
     locale: String
   ): [Post!]!
 
-  entryBySlug(slug: String!, locale: String!, typeDefinitionId: ID!, fallback: Boolean, fallbackLocale: String): Entry
+  entryBySlug(slug: String!, locale: String, typeDefinitionId: ID!, fallback: Boolean, fallbackLocale: String): Entry
 
   entryTranslations(
     "How to sort the records in the response"
