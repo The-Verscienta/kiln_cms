@@ -104,7 +104,8 @@ defmodule KilnCMSWeb.PlainFieldsDeliveryTest do
       assert body["custom_fields_plain"] == %{name => @plain}
     end
 
-    test "keeping the breaks re-fires with them, on every surface", %{conn: conn, page: page} = ctx do
+    test "keeping the breaks re-fires with them, on every surface",
+         %{conn: conn, page: page} = ctx do
       update_definition(ctx, %{plain_breaks: true})
       broken = "Bitter & cold.\n\nClears heat."
 

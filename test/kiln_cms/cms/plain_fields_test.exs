@@ -109,12 +109,16 @@ defmodule KilnCMS.CMS.PlainFieldsTest do
     end
 
     test "inline elements never split a word, and entities decode" do
-      assert PlainText.from_html_paragraphs("<p>C<sub>24</sub>H<sub>30</sub> &mdash; AT&amp;T&nbsp;x</p>") ==
+      assert PlainText.from_html_paragraphs(
+               "<p>C<sub>24</sub>H<sub>30</sub> &mdash; AT&amp;T&nbsp;x</p>"
+             ) ==
                "C24H30 — AT&T x"
     end
 
     test "comments go, and empty blocks leave no runs of blank lines" do
-      assert PlainText.from_html_paragraphs("<div><p>a</p><!-- x --><p></p><div></div><p>b</p></div>") ==
+      assert PlainText.from_html_paragraphs(
+               "<div><p>a</p><!-- x --><p></p><div></div><p>b</p></div>"
+             ) ==
                "a\n\nb"
     end
 
