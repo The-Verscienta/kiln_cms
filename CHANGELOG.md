@@ -169,6 +169,10 @@ Every summary line below that was shortened links to its own entry there.
   release; v1.6.0-rc.1 had shipped 87 fixable findings from a cached layer.**
   ([#2097](https://github.com/The-Verscienta/kiln_cms/pull/2097) · [long form](docs/changelog/unreleased.md#image-debian-packages))
 
+- **bandit 1.14.1 fixes EEF-CVE-2026-116078 (HIGH): HTTP/2 request bodies sent
+  as 1-byte DATA frames amplified memory use. Kiln serves HTTP/2, so upgrade.**
+  ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099) · [#2100](https://github.com/The-Verscienta/kiln_cms/pull/2100))
+
 ## [1.5.1] - 2026-10-24
 
 Long form: [docs/changelog/v1.5.1.md](docs/changelog/v1.5.1.md) —
