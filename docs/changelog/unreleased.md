@@ -21,6 +21,39 @@ carries the reasoning.
 
 ## Added
 
+<a id="multiple-select"></a>
+
+- **A `:select` field can hold several terms.** With `multiple: true` its
+  value is a JSON list of strings, edited in a tag-style picker: chips with
+  ×, drag to reorder, and a text box that adds on Enter or comma and
+  suggests the options. `min_items` / `max_items` bound it, as for a
+  gallery. `allow_custom: true` opens the vocabulary: editors add new terms,
+  `options` become suggestions (and may be empty), and the picker also
+  suggests the terms already used on the type. A new term does not join
+  `options`. A JSON-encoded list sent as a string is refused rather than
+  stored as one term. `custom_filter` asks whether the list contains a term;
+  JSON:API, GraphQL and the schema export carry an array of strings, and
+  single selects are unchanged. Flipping `multiple` reshapes stored values
+  as it does for a gallery; retyping a `:text` field into one does not wrap
+  its JSON strings. `mix kiln.fields.convert` now also targets a multiple
+  select: its report lists the distinct terms with counts and the ones not
+  yet options, and every report counts the published records a run writes
+  ([field-conversion.md](../field-conversion.md)). Adds two columns to
+  `field_definitions` (`allow_custom`, `format`), both with defaults.
+
+<a id="rich-text-fields"></a>
+
+- **Rich text on `:text` custom fields.** A `:text` field's new `format` is
+  `:rich` by default: the editor shows TipTap with a short toolbar
+  (paragraphs, bold, italic, links, lists) over the stored HTML, which is
+  sanitized on write to the rich-text block's allow-list. Text with no
+  markup, JSON data, and markup the sanitizer removes nothing from are
+  stored byte for byte, and a field holding JSON data
+  keeps the textarea; opening a record never rewrites its value. `format:
+  :plain` keeps the textarea and stores the text as typed. The value stays
+  an HTML string, so `deliver_plain` and API clients are unaffected; the
+  schema export marks a rich field `contentMediaType: text/html`.
+
 <a id="governance-what-readers-saw"></a>
 
 - **"What readers saw" on the governance trail

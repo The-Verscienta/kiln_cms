@@ -111,6 +111,36 @@ converting 5,000 published herbs enqueues 5,000 fire jobs. That is the same
 re-fire wave as editing each herb once. On a large site, run it at a quiet
 hour, or keep an eye on the `:firing` queue.
 
+## Into a select holding several terms
+
+The task can also target a `:select` field with `multiple: true`. A source
+value is then a JSON array of **terms** (`["adaptogen","tonic"]`), or that
+array encoded again, and each term is coerced as an editor's save of the
+field would be: trimmed, repeats dropped, and each one of the field's
+`options` unless the field takes terms of its own (`allow_custom`). `--map`
+does not apply, since terms have no keys.
+
+Every report — a dry run included — lists the **distinct terms** with their
+counts, and the ones not yet in `options`, most used first:
+
+```text
+herb: western_properties → properties: scanned 412, would convert 398 (391 published), …
+20 distinct term(s), 2 not in the options:
+  nervine (14)
+  anti-spasmodic (3)
+```
+
+That list is what an admin reviews before deciding: add the terms to
+`options`, or open the vocabulary with `allow_custom`. The JSON report
+(`--report`) carries the same `terms` and `new_terms`.
+
+Every report also counts the **published** records a run converts: each of
+those writes re-fires the record's artifact.
+
+Use a **new** field, as for a group. Retyping the old `:text` field into a
+multiple select in place leaves its JSON strings untouched — they are not
+wrapped as one-term lists — and the next save of each record refuses them.
+
 ## Recipe: Verscienta's herb lists
 
 Verscienta stores `dosages`, `safety_warnings`, `drug_interactions` and

@@ -1232,7 +1232,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :target_types, :list, default: []
 
   # Single image or a gallery, for a `:media` field — or one row or repeating
-  # rows, for a `:group` — with the list's optional item bounds. A `:reference` field asks the same question from
+  # rows, for a `:group`, or one term or several, for a `:select` (which then
+  # also asks whether editors may add terms of their own, `allow_custom`) —
+  # with the list's optional item bounds. A `:reference` field asks the same question from
   # both sides in `relationship_counts/1`; this keeps only the warning, shown
   # whenever a stored list is about to become a single item or another type.
   defp multiple_field(assigns) do
@@ -1255,8 +1257,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     # The warning outlives the toggle: retyping a list field to another type
     # narrows it just the same (`SyncFieldValues`), so it shows then too.
     ~H"""
-    <div :if={@type in [:media, :group] || @narrowing} class="sm:col-span-2">
-      <fieldset :if={@type in [:media, :group]}>
+    <div :if={@type in [:media, :group, :select] || @narrowing} class="sm:col-span-2">
+      <fieldset :if={@type in [:media, :group, :select]}>
         <legend class="mb-1 block text-sm font-medium">{gettext("Holds")}</legend>
         <div class="grid gap-2 sm:grid-cols-2">
           <label
@@ -1322,6 +1324,29 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             )}
           </p>
         </fieldset>
+        <label
+          :if={@type == :select and @multiple?}
+          for={"#{@id}-allow-custom"}
+          class="mt-3 flex items-start gap-2 text-sm"
+        >
+          <input type="hidden" name={@form[:allow_custom].name} value="false" />
+          <input
+            type="checkbox"
+            id={"#{@id}-allow-custom"}
+            name={@form[:allow_custom].name}
+            value="true"
+            checked={@form[:allow_custom].value in [true, "true"]}
+            class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
+          />
+          <span>
+            {gettext("Editors can add new terms")}
+            <span class="block text-xs text-base-content/60">
+              {gettext(
+                "For a vocabulary that grows, like properties or keywords. The options become suggestions, and terms already used on this type are suggested too. A new term does not join the options."
+              )}
+            </span>
+          </span>
+        </label>
         <p
           :if={@type == :group}
           id={"#{@id}-sub-fields-hint"}
@@ -2085,12 +2110,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       "media" -> :media
       "reference" -> :reference
       "group" -> :group
+      "select" -> :select
       _other -> nil
     end
   end
 
-  defp list_type(%{field_type: type, multiple: true}) when type in [:media, :reference, :group],
-    do: type
+  defp list_type(%{field_type: type, multiple: true})
+       when type in [:media, :reference, :group, :select],
+       do: type
 
   defp list_type(_stored), do: nil
 
@@ -2123,6 +2150,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   defp bounds_legend(:media, _target), do: gettext("How many images")
   defp bounds_legend(:group, _target), do: gettext("How many rows")
+  defp bounds_legend(:select, _target), do: gettext("How many terms")
   defp bounds_legend(_type, _target), do: gettext("How many items")
 
   defp multiple_choices(:media, _target) do
@@ -2143,6 +2171,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        gettext(
          "As many rows as the editor adds, in the order they arrange them — dosages, steps."
        ), "hero-table-cells"}
+    ]
+  end
+
+  defp multiple_choices(:select, _target) do
+    [
+      {"false", gettext("One choice"), gettext("A single option — a status, a size."),
+       "hero-chevron-up-down"},
+      {"true", gettext("Several terms"),
+       gettext("As many as the editor picks, as tags, in the order they arrange them."),
+       "hero-tag"}
     ]
   end
 
@@ -2180,11 +2218,72 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         "Saving keeps only the first row of each list already filled in. The other rows are removed from the content."
       )
 
+  defp narrowing_warning(:select),
+    do:
+      gettext(
+        "Saving keeps only the first term of each list already filled in. The other terms are removed from the content."
+      )
+
   defp narrowing_warning(:reference),
     do:
       gettext(
         "Saving keeps only the first item of each list already filled in. The others are unlinked from the content; the records themselves are not touched."
       )
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+
+  # How a `:text` field is edited (`format`): with the formatting toolbar, or
+  # as plain text. Shown only for that type; the value is stored on every
+  # definition and read only by a `:text` one.
+  defp text_format_field(assigns) do
+    assigns = assign(assigns, :format, to_string(assigns.form[:format].value || "rich"))
+
+    ~H"""
+    <fieldset :if={to_string(@form[:field_type].value) == "text"} class="sm:col-span-2">
+      <legend class="mb-1 block text-sm font-medium">{gettext("Editing")}</legend>
+      <div class="grid gap-2 sm:grid-cols-2">
+        <label
+          :for={{value, title, hint, icon} <- text_format_choices()}
+          for={"#{@id}-#{value}"}
+          class={[
+            "flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors",
+            if(@format == value,
+              do: "border-primary bg-primary/5",
+              else: "border-base-content/15 hover:border-base-content/30"
+            )
+          ]}
+        >
+          <input
+            type="radio"
+            id={"#{@id}-#{value}"}
+            name={@form[:format].name}
+            value={value}
+            checked={@format == value}
+            class="mt-0.5 size-4 accent-primary"
+          />
+          <span class="min-w-0">
+            <span class="flex items-center gap-1.5 text-sm font-medium">
+              <.icon name={icon} class="size-4 text-base-content/60" />
+              {title}
+            </span>
+            <span class="mt-0.5 block text-xs text-base-content/60">{hint}</span>
+          </span>
+        </label>
+      </div>
+    </fieldset>
+    """
+  end
+
+  defp text_format_choices do
+    [
+      {"rich", gettext("Formatted text"),
+       gettext("A toolbar for bold, italic, links and lists. Stored as HTML."), "hero-bold"},
+      {"plain", gettext("Plain text"),
+       gettext("A plain box, stored exactly as typed — for a note or a code."),
+       "hero-bars-3-bottom-left"}
+    ]
+  end
 
   attr :form, :any, required: true
   attr :id, :string, required: true
@@ -2284,10 +2383,25 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         class="field-input"
       >{options_text(@form)}</textarea>
       <p class="mt-1 text-xs text-base-content/60">
-        {gettext("One choice per line. Editors pick one of these.")}
+        {options_hint(@form)}
       </p>
     </div>
     """
+  end
+
+  defp options_hint(form) do
+    cond do
+      form[:allow_custom].value in [true, "true"] and form[:multiple].value in [true, "true"] ->
+        gettext(
+          "One per line. Suggested to editors, who can also add their own; may be left empty."
+        )
+
+      form[:multiple].value in [true, "true"] ->
+        gettext("One choice per line. Editors pick any number of these.")
+
+      true ->
+        gettext("One choice per line. Editors pick one of these.")
+    end
   end
 
   attr :form, :any, required: true
@@ -2510,6 +2624,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <.localization_input field={@form[:localization]} />
             <.options_field form={@form} id="new-field-options" />
             <.default_field form={@form} />
+            <.text_format_field form={@form} id="new-field-format" />
             <.deliver_plain_field form={@form} id="new-field-deliver-plain" />
             <.private_field form={@form} id="new-field-private" />
             <label class="flex items-center gap-2 self-end text-sm">
@@ -2630,6 +2745,20 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                         class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
                       >
                         {gettext("repeating")}
+                      </span>
+                      <span
+                        :if={definition.field_type == :select and definition.multiple}
+                        class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
+                      >
+                        {if definition.allow_custom,
+                          do: gettext("tags, open"),
+                          else: gettext("several")}
+                      </span>
+                      <span
+                        :if={definition.field_type == :text and definition.format == :plain}
+                        class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
+                      >
+                        {gettext("unformatted")}
                       </span>
                       <span
                         :if={definition.field_type == :text and definition.deliver_plain}
@@ -2835,6 +2964,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   <.localization_input field={@edit.form[:localization]} />
                   <.options_field form={@edit.form} id={"edit-field-options-#{@edit.id}"} />
                   <.default_field form={@edit.form} />
+                  <.text_format_field form={@edit.form} id={"edit-field-format-#{@edit.id}"} />
                   <.deliver_plain_field
                     form={@edit.form}
                     id={"edit-field-deliver-plain-#{@edit.id}"}

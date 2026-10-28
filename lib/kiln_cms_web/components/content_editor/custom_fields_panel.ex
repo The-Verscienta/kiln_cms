@@ -31,6 +31,8 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   attr :media, :list, required: true
   # `{label, id}` for a `:user` field's picker (#2044).
   attr :people, :list, default: []
+  # Terms in use per open-vocabulary multiple select (`KilnCMS.CMS.SelectTerms`).
+  attr :select_terms, :map, default: %{}
   attr :actor, :any, required: true
   attr :tenant, :any, required: true
   attr :broken_references, :list, required: true
@@ -91,12 +93,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
             name={"#{@form.name}[custom_fields][#{definition.name}]"}
             value={input_value(@form, definition)}
             errors={custom_field_errors(@form, definition.name)}
-            options={
-              if(definition.field_type == :user,
-                do: @people,
-                else: custom_field_options(definition, @media)
-              )
-            }
+            options={field_options(definition, assigns)}
           />
           <Localization.localization_note
             localization={@localization}
@@ -129,6 +126,16 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   # "Add row" would add nothing anyone could see.
   defp input_value(form, %{field_type: :group, name: name}), do: GroupRows.posted(form, name)
   defp input_value(form, definition), do: custom_field_value(form, definition.name)
+
+  # What a field's input offers: the site's people for a `:user` field (#2044),
+  # the field's options then the terms in use for a multiple select, the
+  # library for a media field.
+  defp field_options(%{field_type: :user}, assigns), do: assigns.people
+
+  defp field_options(%{field_type: :select, multiple: true} = definition, assigns),
+    do: Enum.uniq(definition.options ++ Map.get(assigns.select_terms, definition.name, []))
+
+  defp field_options(definition, assigns), do: custom_field_options(definition, assigns.media)
 
   # An unsaved draft has no id yet, so nothing can connect to it.
   defp show_reverse?(record, reverse_fields),

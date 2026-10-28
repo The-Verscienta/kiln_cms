@@ -63,6 +63,14 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A `:select` field can hold several terms, in a tag picker; `allow_custom`
+  opens its vocabulary. `mix kiln.fields.convert` moves JSON-string lists in.**
+  ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099) · [long form](docs/changelog/unreleased.md#multiple-select))
+
+- **`:text` custom fields get the TipTap editor (bold, italic, links, lists),
+  sanitized on write; `format: :plain` keeps the textarea.**
+  ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099) · [long form](docs/changelog/unreleased.md#rich-text-fields))
+
 - **The governance trail shows what readers saw: each publish and withdrawal
   with its approver, CDN purge, each endpoint's delivery, `?as_of=` and chain.**
   ([#2086](https://github.com/The-Verscienta/kiln_cms/pull/2086) · [long form](docs/changelog/unreleased.md#governance-what-readers-saw))
@@ -156,6 +164,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2060](https://github.com/The-Verscienta/kiln_cms/pull/2060) · [long form](docs/changelog/unreleased.md#vector-scan-env-replaces-compiled-mode))
 
 ### Security
+
+- **bandit 1.14.1 fixes EEF-CVE-2026-116078 (HIGH): HTTP/2 request bodies sent
+  as 1-byte DATA frames amplified memory use. Kiln serves HTTP/2, so upgrade.**
+  ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099))
 
 - **ash 3.37.1 and ash_postgres 2.15.2 fix three tenancy advisories
   (EEF-CVE-2026-115627, -115635, -114214); Kiln was not exposed.**

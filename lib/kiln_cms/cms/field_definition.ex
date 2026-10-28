@@ -256,6 +256,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :field_type,
       :required,
       :options,
+      :allow_custom,
+      :format,
       :target_type,
       :target_types,
       :multiple,
@@ -384,8 +386,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
     change KilnCMS.CMS.Changes.ClearCompute
 
     # Same for `multiple`: only a `:media` field (a gallery), a `:reference`
-    # field (a list of references) or a `:group` (repeating rows) can hold a
-    # list, so the flag — and the
+    # field (a list of references), a `:group` (repeating rows) or a
+    # top-level `:select` (several terms) can hold a list, so the flag — and
+    # `allow_custom` with it — and the
     # `min_items`/`max_items` bounds that go with it — drop on any other type
     # rather than lingering on a field they mean nothing to.
     change KilnCMS.CMS.Changes.ClearMultiple
@@ -534,6 +537,28 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # Choices for a `:select` field (ignored otherwise).
     attribute :options, {:array, :string}, allow_nil?: false, default: [], public?: true
 
+    # Whether a `multiple` `:select` field takes terms beyond its `options` —
+    # an **open vocabulary** ("Western Properties" grows with every herb).
+    # `options` then seeds the picker's suggestions rather than bounding the
+    # value, and may be empty. A term an editor adds does not join `options`:
+    # the list stays admin-authored, and the picker suggests terms already in
+    # use on the type besides (`KilnCMS.CMS.SelectTerms`). Cleared on every
+    # field that is not a top-level multiple select (`Changes.ClearMultiple`).
+    attribute :allow_custom, :boolean, allow_nil?: false, default: false, public?: true
+
+    # How a `:text` field is edited: `:rich` (the default) puts the TipTap
+    # editor on it — paragraphs, bold, italic, links, lists — and sanitizes
+    # the stored HTML on write to the rich-text block's allow-list; `:plain`
+    # keeps the bare textarea and stores the text as typed, for a field that
+    # must stay plain (a short note, a code). Either way the value is a
+    # string, so delivery is unchanged. Ignored on every other type.
+    attribute :format, :atom do
+      allow_nil? false
+      default :rich
+      constraints one_of: [:rich, :plain]
+      public? true
+    end
+
     # The content type a `:reference` field points at — a type name string
     # ("page", "recipe", …), compiled or dynamic (ignored otherwise).
     attribute :target_type, :string, public?: true
@@ -549,7 +574,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # Whether a `:media` field holds a **gallery** — an ordered list of media
     # snapshots — or a `:reference` field a **list of references** (ordered
     # `{id, type, slug, title}` snapshots), or a `:group` **repeating rows**
-    # (a list of objects), rather than a single one. Off by default, so every
+    # (a list of objects), or a `:select` **several terms** (a list of
+    # strings), rather than a single one. Off by default, so every
     # existing field keeps its single-value shape. Ignored
     # (and cleared, see `Changes.ClearMultiple`) on every other type. Flipping
     # it on an existing field reshapes the stored values

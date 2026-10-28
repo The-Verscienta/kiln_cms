@@ -345,4 +345,70 @@ defmodule KilnCMS.CMS.FieldConversionTest do
       assert {{:error, "No organization with slug nope"}, _out} = release(ctx, org: "nope")
     end
   end
+
+  describe "into a select holding several terms" do
+    setup ctx do
+      terms =
+        field!(ctx.admin, %{
+          name: "properties_#{System.unique_integer([:positive])}",
+          label: "Properties",
+          field_type: :select,
+          multiple: true,
+          options: ["tonic", "adaptogen"]
+        })
+
+      %{ctx | group: terms.name} |> Map.put(:terms, terms)
+    end
+
+    test "reports each distinct term with its count, and the ones not yet options", ctx do
+      post!(ctx, ~s(["tonic","nervine"]))
+      post!(ctx, Jason.encode!(~s(["nervine","adaptogen"])))
+
+      report = convert(ctx)
+
+      assert report.terms == %{"tonic" => 1, "nervine" => 2, "adaptogen" => 1}
+      assert report.new_terms == ["nervine"]
+      assert [_, _] = report.problems
+      assert FieldConversion.describe(report) =~ "3 distinct term(s), 1 not in the options:"
+      assert FieldConversion.describe(report) =~ "nervine (2)"
+    end
+
+    test "writes the terms once they fit — here by opening the vocabulary", ctx do
+      post = post!(ctx, ~s(["tonic","nervine"]))
+      CMS.update_field_definition!(ctx.terms, %{allow_custom: true}, actor: ctx.admin)
+
+      assert %{written: 1, new_terms: ["nervine"]} = convert(ctx, dry_run?: false)
+      assert reload(post).custom_fields[ctx.group] == ["tonic", "nervine"]
+
+      assert %{kept: 1, written: 0} = convert(ctx, dry_run?: false)
+    end
+
+    test "counts the published records a run would write", ctx do
+      published = post!(ctx, ~s(["tonic"]))
+      CMS.publish_post!(published, %{}, actor: ctx.admin)
+      post!(ctx, ~s(["adaptogen"]))
+
+      assert %{convertible: 2, published: 1} = convert(ctx)
+    end
+
+    test "refuses a select holding one choice, and --map", ctx do
+      org = KilnCMS.Accounts.default_org_id()
+
+      single =
+        field!(ctx.admin, %{
+          name: "grade_#{System.unique_integer([:positive])}",
+          label: "Grade",
+          field_type: :select,
+          options: ["a"]
+        })
+
+      assert {:error, message} = FieldConversion.run(org, "post", ctx.source, single.name)
+      assert message =~ "make it hold several terms first"
+
+      assert {:error, message} =
+               FieldConversion.run(org, "post", ctx.source, ctx.group, renames: %{"a" => "b"})
+
+      assert message =~ "holds terms"
+    end
+  end
 end
