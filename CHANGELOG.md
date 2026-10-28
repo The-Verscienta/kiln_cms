@@ -77,7 +77,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Sections in the Custom fields panel: a field's `section` files it under a
   collapsible heading; only sections already holding values start open.**
-  ([long form](docs/changelog/unreleased.md#field-sections))
+  ([#2116](https://github.com/The-Verscienta/kiln_cms/pull/2116) · [long form](docs/changelog/unreleased.md#field-sections))
 
 - **`:select` options can carry labels (`option_labels`): editors see
   "Transforming phlegm" while `transforming_phlegm` stays the stored value.**
