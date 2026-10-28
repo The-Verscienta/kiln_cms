@@ -245,7 +245,7 @@ carries the reasoning.
 
 <a id="portable-text-node-keys"></a>
 
-- **The Portable Text node declares its standard keys (#PR).** The
+- **The Portable Text node declares its standard keys (#2126).** The
   `portable_text_block` definition that a `rich_text` block's `body` and every
   `custom_fields_portable` value point at declared only `_type` and `_key`.
   That is lenient enough for TypeScript, whose index signature keeps the rest,
