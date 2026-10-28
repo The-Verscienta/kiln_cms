@@ -408,7 +408,62 @@ defmodule KilnCMS.CMS.FieldConversionTest do
       assert {:error, message} =
                FieldConversion.run(org, "post", ctx.source, ctx.group, renames: %{"a" => "b"})
 
-      assert message =~ "holds terms"
+      assert message =~ "holds items, which have none"
+    end
+  end
+
+  describe "into a list of phrases (multiple :string)" do
+    setup ctx do
+      list =
+        field!(ctx.admin, %{
+          name: "symptoms_#{System.unique_integer([:positive])}",
+          label: "Symptoms",
+          field_type: :string,
+          multiple: true
+        })
+
+      Map.put(%{ctx | group: list.name}, :list, list)
+    end
+
+    test "writes a JSON array of strings as the items", ctx do
+      post = post!(ctx, ~s(["fatigue","night sweats"]))
+
+      assert %{written: 1, terms: terms} = convert(ctx, dry_run?: false)
+      assert terms == %{}
+      assert reload(post).custom_fields[ctx.group] == ["fatigue", "night sweats"]
+    end
+
+    test "--lines reads text that is not JSON as one item per line; without it, refused", ctx do
+      post = post!(ctx, "Acupuncture\nCupping\n\n  Herbal consults  ")
+
+      assert %{problems: [%{kind: :unparseable}]} = convert(ctx)
+
+      assert %{written: 1} = convert(ctx, dry_run?: false, lines?: true)
+
+      assert reload(post).custom_fields[ctx.group] == [
+               "Acupuncture",
+               "Cupping",
+               "Herbal consults"
+             ]
+    end
+
+    test "refuses a string that holds one line", ctx do
+      single =
+        field!(ctx.admin, %{
+          name: "one_#{System.unique_integer([:positive])}",
+          label: "One",
+          field_type: :string
+        })
+
+      assert {:error, message} =
+               FieldConversion.run(
+                 KilnCMS.Accounts.default_org_id(),
+                 "post",
+                 ctx.source,
+                 single.name
+               )
+
+      assert message =~ "make it a list first"
     end
   end
 end

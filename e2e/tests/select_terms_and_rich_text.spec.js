@@ -1,6 +1,8 @@
 // @ts-check
 //
-// A `:select` holding several terms (the `TermPicker` hook: Enter and comma
+// A list of phrases (`:string` with `multiple`: Enter adds, a pasted block
+// splits into one item per line, items edit in place), a `:select` holding
+// several terms (the `TermPicker` hook: Enter and comma
 // add, Backspace in an empty box removes the last chip, a drag reorders) and a
 // rich `:text` field (the `RichTextField` hook: TipTap over a hidden input,
 // toolbar buttons, the HTML saved). `SelectAndTextFieldEditorTest` pushes the
@@ -58,6 +60,14 @@ test.describe("select terms and rich text fields", () => {
     await page.locator("#new-field-form button[type=submit]").click();
     await expect(page.locator(`code:text-is("${name}_props")`)).toBeVisible();
 
+    // A list of phrases.
+    await page.fill('#new-field-form input[name="field_definition[label]"]', "Symptoms");
+    await page.fill('#new-field-form input[name="field_definition[name]"]', `${name}_symptoms`);
+    await page.selectOption('#new-field-form select[name="field_definition[field_type]"]', "string");
+    await page.locator("#new-field-multiple-true").check();
+    await page.locator("#new-field-form button[type=submit]").click();
+    await expect(page.locator(`code:text-is("${name}_symptoms")`)).toBeVisible();
+
     // Rich text is the default for :text.
     await page.fill('#new-field-form input[name="field_definition[label]"]', "Uses");
     await page.fill('#new-field-form input[name="field_definition[name]"]', `${name}_uses`);
@@ -107,9 +117,31 @@ test.describe("select terms and rich text fields", () => {
     const hidden = uses.locator("input[data-field-value]");
     await expect(hidden).toHaveValue("<p>Calms the <strong>shen</strong></p>");
 
+    // The list of phrases: Enter adds (a comma is part of the phrase); a
+    // pasted block adds one item per line; an item edits in place.
+    const symptoms = `${name}_symptoms`;
+    const itemBox = page.locator(`#custom-field-${symptoms}-entry`);
+    const items = () => page.locator(`#custom-field-${symptoms}-items input[type=text]`).evaluateAll(els => els.map(el => /** @type {HTMLInputElement} */ (el).value));
+
+    await itemBox.fill("dry, hacking cough");
+    await itemBox.press("Enter");
+    await expect.poll(items).toEqual(["dry, hacking cough"]);
+
+    await itemBox.focus();
+    await page.evaluate(id => {
+      const el = document.getElementById(id);
+      const data = new DataTransfer();
+      data.setData("text/plain", "fatigue\nnight sweats\n");
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    }, `custom-field-${symptoms}-entry`);
+    await expect.poll(items).toEqual(["dry, hacking cough", "fatigue", "night sweats"]);
+
+    await page.locator(`#custom-field-${symptoms}-1`).fill("chronic fatigue");
+
     await saveDraft(page, { title: `Terms ${stamp}`, slug: `terms-${stamp}` });
     await page.reload();
 
+    await expect.poll(items).toEqual(["dry, hacking cough", "chronic fatigue", "night sweats"]);
     await expect.poll(terms).toEqual(["nervine", "tonic"]);
     await expect(page.locator(`#cf-rich-${name}_uses .ProseMirror strong`)).toHaveText("shen");
   });

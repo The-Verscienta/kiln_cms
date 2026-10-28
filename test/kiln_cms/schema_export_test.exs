@@ -398,7 +398,8 @@ defmodule KilnCMS.SchemaExportTest do
               max_items: 5
             },
             %{name: "uses", label: "Uses", field_type: :text},
-            %{name: "code", label: "Code", field_type: :text, format: :plain}
+            %{name: "code", label: "Code", field_type: :text, format: :plain},
+            %{name: "symptoms", label: "Symptoms", field_type: :string, multiple: true}
           ] do
         CMS.create_field_definition!(Map.put(attrs, :content_type, :page),
           actor: actor,
@@ -415,6 +416,9 @@ defmodule KilnCMS.SchemaExportTest do
 
       assert fields["uses"] == %{"type" => ["string", "null"], "contentMediaType" => "text/html"}
       assert fields["code"]["type"] == ["string", "null"]
+
+      assert fields["symptoms"]["type"] == ["array", "null"]
+      assert fields["symptoms"]["items"] == %{"type" => "string"}
       refute Map.has_key?(fields["code"], "contentMediaType")
     end
   end

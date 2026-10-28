@@ -137,8 +137,22 @@ That list is what an admin reviews before deciding: add the terms to
 Every report also counts the **published** records a run converts: each of
 those writes re-fires the record's artifact.
 
+## Into a list of phrases
+
+A `:string` field with `multiple: true` takes the same JSON arrays of
+strings, with no vocabulary to check. Some importers kept a list as plain
+text, one item per line ("One service per line"); pass `--lines` to read a
+source that is not JSON that way:
+
+```bash
+mix kiln.fields.convert clinic services_text --to services --lines
+```
+
+Without `--lines`, such a value is reported as unparseable, as for any other
+target: prose would otherwise become a one-item list without a word.
+
 Use a **new** field, as for a group. Retyping the old `:text` field into a
-multiple select in place leaves its JSON strings untouched — they are not
+multiple select or a list in place leaves its JSON strings untouched — they are not
 wrapped as one-term lists — and the next save of each record refuses them.
 
 ## Recipe: Verscienta's herb lists

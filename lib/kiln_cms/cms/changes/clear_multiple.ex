@@ -2,12 +2,13 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
   @moduledoc """
   Clears a `FieldDefinition`'s `multiple` flag whenever its type cannot hold a
   list — only a `:media` field (a gallery), a `:reference` field (a list of
-  references), a `:group` (repeating rows) or a `:select` (several terms) can —
+  references), a `:group` (repeating rows), a `:select` (several terms) or a
+  `:string` (a list of phrases) can —
   and clears the `min_items` / `max_items` bounds whenever the field is not
   `multiple`.
 
-  A multiple `:select` is a record-level field only: a link field (R3) and a
-  group sub-field hold one scalar each (`JoinGraduation` maps a link field to
+  A multiple `:select` or `:string` is a record-level field only: a link
+  field (R3) and a group sub-field hold one scalar each (`JoinGraduation` maps a link field to
   one column, a group row to one value per key), so `multiple` is cleared on
   one. `allow_custom` (the open vocabulary) is cleared on anything that is not
   a multiple select.
@@ -20,7 +21,10 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
   """
   use Ash.Resource.Change
 
-  @list_types [:media, :reference, :group, :select]
+  @list_types [:media, :reference, :group, :select, :string]
+
+  # The list types a link field or group sub-field may also be, as scalars.
+  @scalar_list_types [:select, :string]
 
   @doc "The field types that may set `multiple`."
   @spec list_types() :: [atom()]
@@ -31,7 +35,7 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
     type = Ash.Changeset.get_attribute(changeset, :field_type)
 
     changeset =
-      if type in @list_types and not (type == :select and sub_field?(changeset)) do
+      if type in @list_types and not (type in @scalar_list_types and sub_field?(changeset)) do
         changeset
       else
         Ash.Changeset.force_change_attribute(changeset, :multiple, false)

@@ -125,6 +125,12 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   # value `custom_field_value/2` prefers has already dropped a blank row, so
   # "Add row" would add nothing anyone could see.
   defp input_value(form, %{field_type: :group, name: name}), do: GroupRows.posted(form, name)
+
+  # A list of phrases likewise: an item emptied in place keeps its row while
+  # the form holds it, and the cleaned value has dropped it.
+  defp input_value(form, %{field_type: :string, multiple: true, name: name}),
+    do: GroupRows.posted(form, name)
+
   defp input_value(form, definition), do: custom_field_value(form, definition.name)
 
   # What a field's input offers: the site's people for a `:user` field (#2044),

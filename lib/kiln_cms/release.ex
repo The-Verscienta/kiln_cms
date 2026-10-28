@@ -335,7 +335,7 @@ defmodule KilnCMS.Release do
       bin/kiln_cms rpc 'KilnCMS.Release.convert_field("herb", "dosages_json", "dosages", apply: true)'
 
   Options are the task's flags: `apply: true` writes (a dry run otherwise),
-  `skip_invalid: true`, `overwrite: true`, `map: %{"old" => "new"}`, and
+  `skip_invalid: true`, `overwrite: true`, `lines: true`, `map: %{"old" => "new"}`, and
   `org: "<slug>"` for a site other than the default one. Prints the task's
   report and returns `KilnCMS.CMS.FieldConversion.run/5`'s result.
 
@@ -354,6 +354,7 @@ defmodule KilnCMS.Release do
       dry_run?: opts[:apply] != true,
       skip_invalid?: opts[:skip_invalid] == true,
       overwrite?: opts[:overwrite] == true,
+      lines?: opts[:lines] == true,
       renames: Map.new(opts[:map] || %{})
     ]
 

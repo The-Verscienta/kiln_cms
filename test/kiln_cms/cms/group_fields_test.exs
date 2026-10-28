@@ -197,6 +197,7 @@ defmodule KilnCMS.CMS.GroupFieldsTest do
                    content_type: :post,
                    name: "s_#{System.unique_integer([:positive])}",
                    label: "S",
+                   field_type: :integer,
                    multiple: true,
                    min_items: 1
                  },

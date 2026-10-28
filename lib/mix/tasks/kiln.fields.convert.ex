@@ -1,28 +1,31 @@
 defmodule Mix.Tasks.Kiln.Fields.Convert do
-  @shortdoc "Move JSON-in-text custom-field values into a :group or multiple :select field"
+  @shortdoc "Move JSON-in-text custom-field values into a :group, or a multiple :select or :string"
 
   @moduledoc """
   Parses a custom field that holds a JSON string (an array of objects, one
   object, or either encoded twice) and writes the rows to a `:group` field —
   or a JSON array of strings, written as the terms of a multiple `:select`
-  field — see `KilnCMS.CMS.FieldConversion` and docs/field-conversion.md.
+  field or the items of a multiple `:string` field — see `KilnCMS.CMS.FieldConversion` and docs/field-conversion.md.
 
       mix kiln.fields.convert herb dosages_json --to dosages                # dry run
       mix kiln.fields.convert herb dosages_json --to dosages --apply
       mix kiln.fields.convert herb dosages_json --to dosages --map dose=amount --map units=unit
       mix kiln.fields.convert herb dosages_json --to dosages --apply --skip-invalid --report out.json
       mix kiln.fields.convert herb western_properties --to properties          # terms + counts
+      mix kiln.fields.convert clinic services_text --to services --lines      # one per line
 
   Options:
 
-      --to FIELD         the target group (it and its sub-fields must exist), or
-                         a select holding several terms
+      --to FIELD         the target group (it and its sub-fields must exist), a
+                         select holding several terms, or a list of phrases
       --org SLUG         the organization (default: the default org)
       --apply            write; without it the run is a dry run
       --skip-invalid     write the valid records even when others are invalid
                          (those keep only their string)
       --overwrite        also rewrite records whose group already has rows
       --map OLD=NEW      rename a key in every row (repeatable; groups only)
+      --lines            a list of phrases only: read text that is not JSON as
+                         one item per line
       --report PATH      also write the report as JSON
       --batch N          records read per page (default 100)
 
@@ -41,6 +44,7 @@ defmodule Mix.Tasks.Kiln.Fields.Convert do
     apply: :boolean,
     skip_invalid: :boolean,
     overwrite: :boolean,
+    lines: :boolean,
     map: :keep,
     report: :string,
     batch: :integer
@@ -68,6 +72,7 @@ defmodule Mix.Tasks.Kiln.Fields.Convert do
         dry_run?: opts[:apply] != true,
         skip_invalid?: opts[:skip_invalid] == true,
         overwrite?: opts[:overwrite] == true,
+        lines?: opts[:lines] == true,
         renames: renames
       ] ++ Keyword.take(opts, [:batch])
 

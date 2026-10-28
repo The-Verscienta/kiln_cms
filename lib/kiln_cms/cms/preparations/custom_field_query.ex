@@ -30,8 +30,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   `media`/`reference` fields filter by their snapshot's stable `id`
   (equality-shaped operators only) and are not sortable. On a `multiple` one
   (a gallery, a list of references) `eq` means "contains this id", `not_eq`
-  "does not", and `in` "contains any of them" — and a multiple `select`
-  reads the same way for its terms (`custom_filter[properties]=tonic`). A
+  "does not", and `in` "contains any of them" — and a multiple `select` or
+  `string` reads the same way for its items
+  (`custom_filter[properties]=tonic`). A
   reference also takes the
   relationship operators `has` / `has_all` / `has_none` / `count`, which
   read its `content_links` edges rather than the snapshot, and so do the
@@ -423,11 +424,13 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     end
   end
 
-  # A multiple select holds a list of terms, so — as for a gallery — `eq` asks
-  # whether the list contains the term, `not_eq` whether it does not, and `in`
-  # whether it contains any of them: jsonb containment against a one-term
-  # array, bound as text and cast in SQL for the same reason.
-  defp condition(%{field_type: :select, multiple: true, name: name}, op, raw) do
+  # A multiple select holds a list of terms (and a multiple string a list of
+  # phrases), so — as for a gallery — `eq` asks whether the list contains the
+  # term, `not_eq` whether it does not, and `in` whether it contains any of
+  # them: jsonb containment against a one-term array, bound as text and cast
+  # in SQL for the same reason.
+  defp condition(%{field_type: type, multiple: true, name: name}, op, raw)
+       when type in [:select, :string] do
     contains = fn term ->
       probe = Jason.encode!([to_string(term)])
       expr(fragment("(? -> ?::text) @> ?::text::jsonb", ^ref(:custom_fields), ^name, ^probe))
@@ -447,7 +450,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         end)
 
       _ ->
-        {:error, "custom field #{inspect(name)} (several terms) only supports eq/not_eq/in/null"}
+        {:error, "custom field #{inspect(name)} (a list) only supports eq/not_eq/in/null"}
     end
   end
 
@@ -536,12 +539,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         {:ok, %{field_type: type}} when type in [:media, :reference, :geolocation, :group] ->
           invalid(query, :custom_sort, "custom field #{inspect(name)} (#{type}) is not sortable")
 
-        {:ok, %{field_type: :select, multiple: true}} ->
-          invalid(
-            query,
-            :custom_sort,
-            "custom field #{inspect(name)} (several terms) is not sortable"
-          )
+        {:ok, %{field_type: type, multiple: true}} when type in [:select, :string] ->
+          invalid(query, :custom_sort, "custom field #{inspect(name)} (a list) is not sortable")
 
         {:ok, definition} ->
           Ash.Query.sort(query, [{sort_expr(definition), direction}])
