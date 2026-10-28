@@ -84,6 +84,10 @@ Every summary line below that was shortened links to its own entry there.
   class per type, block and group row, and `Block`/`Document` interfaces with `Unknown`.**
   ([#2109](https://github.com/The-Verscienta/kiln_cms/pull/2109) · [long form](docs/changelog/unreleased.md#kotlin-schema-export))
 
+- **`examples/swiftui-reader`: a SwiftUI app on generated Swift models and a
+  `/api/sync` mirror, with `:group` rows, Portable Text and focal-point crops.**
+  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#swiftui-reader))
+
 - **Sections in the Custom fields panel: a field's `section` files it under a
   collapsible heading; only sections already holding values start open.**
   ([#2116](https://github.com/The-Verscienta/kiln_cms/pull/2116) · [long form](docs/changelog/unreleased.md#field-sections))

@@ -1,0 +1,401 @@
+{
+  "items": [
+    {
+      "id": "09904dd4-e432-43f4-90ce-4179dd9b5387",
+      "type": "recipe",
+      "op": "upsert",
+      "published_at": "2026-10-28T23:27:34.983871Z",
+      "locale": "en",
+      "slug": "shakshuka",
+      "updated_at": "2026-10-28T23:27:35.004312Z",
+      "artifact": {
+        "blocks": [
+          {
+            "_id": "8e55019e-c321-4bb7-9731-ba6bd977e9b4",
+            "_type": "rich_text",
+            "body": [
+              {
+                "_key": "b0",
+                "_type": "block",
+                "children": [
+                  {
+                    "_type": "span",
+                    "marks": [],
+                    "text": "Eggs poached in a peppery tomato sauce."
+                  }
+                ],
+                "markDefs": [],
+                "style": "normal"
+              }
+            ]
+          }
+        ],
+        "custom_fields": {
+          "hero": {
+            "alt": "A plate of shakshuka",
+            "focal": {
+              "x": 0.3,
+              "y": 0.6
+            },
+            "height": 1067,
+            "id": "2989fad7-d3b3-45ff-9d83-08a4c0952116",
+            "mime_type": "image/jpeg",
+            "url": "/uploads/4f24c3f7-63ac-46aa-ac82-0b753a2bf635.jpg",
+            "variants": [
+              {
+                "bytes": 6136,
+                "cropped": false,
+                "format": "image/jpeg",
+                "height": 267,
+                "label": "thumb",
+                "url": "/uploads/827cf991-c634-4959-a894-7bb05889f489.jpg",
+                "width": 400
+              },
+              {
+                "bytes": 2556,
+                "cropped": false,
+                "format": "image/webp",
+                "height": 267,
+                "label": "thumb.webp",
+                "url": "/uploads/a4ce294f-1f23-458d-b658-570623f3297b.webp",
+                "width": 400
+              },
+              {
+                "bytes": 21290,
+                "cropped": false,
+                "format": "image/jpeg",
+                "height": 683,
+                "label": "medium",
+                "url": "/uploads/dc3dcab7-5fbb-4732-962d-40fa105250ba.jpg",
+                "width": 1024
+              },
+              {
+                "bytes": 7272,
+                "cropped": false,
+                "format": "image/webp",
+                "height": 683,
+                "label": "medium.webp",
+                "url": "/uploads/5bc381cb-714c-4e75-848c-e59c819ef527.webp",
+                "width": 1024
+              },
+              {
+                "bytes": 13466,
+                "cropped": false,
+                "format": "image/webp",
+                "height": 1067,
+                "label": "full.webp",
+                "url": "/uploads/1800e020-bf07-46af-8e67-4df084f9a8ee.webp",
+                "width": 1600
+              },
+              {
+                "bytes": 13614,
+                "cropped": true,
+                "format": "image/jpeg",
+                "height": 450,
+                "label": "card",
+                "url": "/uploads/e2d7db64-0897-475e-b7d4-dad5d5c47481.jpg",
+                "width": 800
+              },
+              {
+                "bytes": 5228,
+                "cropped": true,
+                "format": "image/webp",
+                "height": 450,
+                "label": "card.webp",
+                "url": "/uploads/1e423a8c-8b7a-44a1-822e-3c9f7d845398.webp",
+                "width": 800
+              }
+            ],
+            "width": 1600
+          },
+          "ingredients": [
+            {
+              "amount": 400.0,
+              "item": "Chopped tomatoes",
+              "unit": "g"
+            },
+            {
+              "amount": 1.0,
+              "item": "Red pepper",
+              "unit": "pcs"
+            },
+            {
+              "amount": 4.0,
+              "item": "Eggs",
+              "unit": "pcs"
+            },
+            {
+              "amount": 1.0,
+              "item": "Smoked paprika",
+              "unit": "tsp"
+            }
+          ],
+          "method": "<p>Soften the pepper in oil, add the paprika, then the tomatoes. Simmer for <strong>10 minutes</strong>.</p>\n<ul><li>Make four wells.</li><li>Crack in the eggs and cover.</li>\n<ul><li>Runny yolks: 5 minutes.</li></ul></ul>\n<p><s>Stir</s> Don't stir once the eggs are in.</p>",
+          "minutes": 30,
+          "serves": 2
+        },
+        "custom_fields_plain": {
+          "method": "Soften the pepper in oil, add the paprika, then the tomatoes. Simmer for 10 minutes.\n\nMake four wells.\nCrack in the eggs and cover.\n\nRunny yolks: 5 minutes.\n\nStir Don't stir once the eggs are in."
+        },
+        "custom_fields_portable": {
+          "method": [
+            {
+              "_key": "b0",
+              "_type": "block",
+              "children": [
+                {
+                  "_type": "span",
+                  "marks": [],
+                  "text": "Soften the pepper in oil, add the paprika, then the tomatoes. Simmer for "
+                },
+                {
+                  "_type": "span",
+                  "marks": [
+                    "strong"
+                  ],
+                  "text": "10 minutes"
+                },
+                {
+                  "_type": "span",
+                  "marks": [],
+                  "text": "."
+                }
+              ],
+              "markDefs": [],
+              "style": "normal"
+            },
+            {
+              "_key": "b1",
+              "_type": "block",
+              "children": [
+                {
+                  "_type": "span",
+                  "marks": [],
+                  "text": "Make four wells."
+                }
+              ],
+              "level": 1,
+              "listItem": "bullet",
+              "markDefs": [],
+              "style": "normal"
+            },
+            {
+              "_key": "b2",
+              "_type": "block",
+              "children": [
+                {
+                  "_type": "span",
+                  "marks": [],
+                  "text": "Crack in the eggs and cover."
+                }
+              ],
+              "level": 1,
+              "listItem": "bullet",
+              "markDefs": [],
+              "style": "normal"
+            },
+            {
+              "_key": "b3",
+              "_type": "block",
+              "children": [
+                {
+                  "_type": "span",
+                  "marks": [
+                    "strike"
+                  ],
+                  "text": "Stir"
+                },
+                {
+                  "_type": "span",
+                  "marks": [],
+                  "text": " Don't stir once the eggs are in."
+                }
+              ],
+              "markDefs": [],
+              "style": "normal"
+            }
+          ]
+        },
+        "id": "09904dd4-e432-43f4-90ce-4179dd9b5387",
+        "locale": "en",
+        "slug": "shakshuka",
+        "title": "Shakshuka",
+        "type": "recipe"
+      }
+    },
+    {
+      "id": "115a8e01-3164-49f5-a2c6-b7e477a17af9",
+      "type": "recipe",
+      "op": "upsert",
+      "published_at": "2026-10-28T23:28:39.215348Z",
+      "locale": "en",
+      "slug": "green-salad",
+      "updated_at": "2026-10-28T23:28:39.272148Z",
+      "artifact": {
+        "blocks": [
+          {
+            "_id": "bd30b32e-6eb2-4fb1-a602-2a8eb00911fc",
+            "_type": "rich_text",
+            "body": [
+              {
+                "_key": "b0",
+                "_type": "block",
+                "children": [
+                  {
+                    "_type": "span",
+                    "marks": [],
+                    "text": "Crisp leaves, sharp dressing."
+                  }
+                ],
+                "markDefs": [],
+                "style": "normal"
+              }
+            ]
+          }
+        ],
+        "custom_fields": {
+          "hero": {
+            "alt": "A plate of green salad",
+            "focal": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "height": 1067,
+            "id": "2afee739-87bc-4230-8ff3-9719e174d679",
+            "mime_type": "image/jpeg",
+            "url": "/uploads/d52071b2-3cbf-4f5d-a0a1-327abb57e95d.jpg",
+            "variants": [
+              {
+                "bytes": 6331,
+                "cropped": false,
+                "format": "image/jpeg",
+                "height": 267,
+                "label": "thumb",
+                "url": "/uploads/aad3f715-4c1a-4fc7-807d-e1461a8cd8f4.jpg",
+                "width": 400
+              },
+              {
+                "bytes": 2714,
+                "cropped": false,
+                "format": "image/webp",
+                "height": 267,
+                "label": "thumb.webp",
+                "url": "/uploads/507aa129-ecb7-4653-a23d-5d0a2841c11f.webp",
+                "width": 400
+              },
+              {
+                "bytes": 21819,
+                "cropped": false,
+                "format": "image/jpeg",
+                "height": 683,
+                "label": "medium",
+                "url": "/uploads/6dd6745c-41c5-47a9-a569-4856de326e06.jpg",
+                "width": 1024
+              },
+              {
+                "bytes": 7964,
+                "cropped": false,
+                "format": "image/webp",
+                "height": 683,
+                "label": "medium.webp",
+                "url": "/uploads/d4d6e079-a257-432b-8a57-70171b27b599.webp",
+                "width": 1024
+              },
+              {
+                "bytes": 13842,
+                "cropped": false,
+                "format": "image/webp",
+                "height": 1067,
+                "label": "full.webp",
+                "url": "/uploads/3e8d82d2-65b1-48b2-a23d-9c06f09171b3.webp",
+                "width": 1600
+              },
+              {
+                "bytes": 14033,
+                "cropped": true,
+                "format": "image/jpeg",
+                "height": 450,
+                "label": "card",
+                "url": "/uploads/fa037fa2-95ae-40c1-a9a9-f071a16d9954.jpg",
+                "width": 800
+              },
+              {
+                "bytes": 5596,
+                "cropped": true,
+                "format": "image/webp",
+                "height": 450,
+                "label": "card.webp",
+                "url": "/uploads/34087132-8e07-4bb3-9744-7b0fb7821cef.webp",
+                "width": 800
+              }
+            ],
+            "width": 1600
+          },
+          "ingredients": [
+            {
+              "amount": 2.0,
+              "item": "Little gem lettuce",
+              "unit": "pcs"
+            },
+            {
+              "amount": 3.0,
+              "item": "Olive oil",
+              "unit": "tbsp"
+            },
+            {
+              "amount": 1.0,
+              "item": "Lemon juice",
+              "unit": "tbsp"
+            },
+            {
+              "item": "Flaky salt"
+            }
+          ],
+          "method": "Whisk the oil and lemon with a pinch of salt.\n\nDress the leaves just before serving.",
+          "minutes": 10,
+          "serves": 2
+        },
+        "custom_fields_plain": {
+          "method": "Whisk the oil and lemon with a pinch of salt.\n\nDress the leaves just before serving."
+        },
+        "custom_fields_portable": {
+          "method": [
+            {
+              "_key": "b0",
+              "_type": "block",
+              "children": [
+                {
+                  "_type": "span",
+                  "marks": [],
+                  "text": "Whisk the oil and lemon with a pinch of salt."
+                }
+              ],
+              "markDefs": [],
+              "style": "normal"
+            },
+            {
+              "_key": "b1",
+              "_type": "block",
+              "children": [
+                {
+                  "_type": "span",
+                  "marks": [],
+                  "text": "Dress the leaves just before serving."
+                }
+              ],
+              "markDefs": [],
+              "style": "normal"
+            }
+          ]
+        },
+        "id": "115a8e01-3164-49f5-a2c6-b7e477a17af9",
+        "locale": "en",
+        "slug": "green-salad",
+        "title": "Green salad",
+        "type": "recipe"
+      }
+    }
+  ],
+  "cursor": "SFMyNTY.g2gDdAAAAARtAAAAAW9tAAAAJDAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDAwMW0AAAABcGwAAAADbQAAAAFpbgcAtmgN7u5eBmwAAAACbQAAABFLaWxuQ01TLkNNUy5FbnRyeW0AAAAkMTE1YThlMDEtMzE2NC00OWY1LWEyYzYtYjdlNDc3YTE3YWY5amptAAAAAXNtAAAABGpzb25tAAAAAXRtAAAABnJlY2lwZW4GAA6X2IShAWIAAVGA._rmLhCkbW7-wVSL0doVfiFtPBuFQjh-oFZ6wOh0t67I",
+  "has_more": true
+}

@@ -224,6 +224,14 @@ a file cache kept fresh by `/api/sync`. It is smaller than a client SDK, and
 mobile teams evaluating Kiln look for one. Write it after §1 and §3 land, so it
 shows rows and generated types rather than workarounds.
 
+**Done** in #PRNUM: [`examples/swiftui-reader`](https://github.com/The-Verscienta/kiln_cms/tree/main/examples/swiftui-reader).
+It shows `:group` rows, Portable Text rendered to `AttributedString`, the
+media snapshot's variants and focal point, `?fields=`, `ETag` revalidation,
+and the sync cursor and restart rules from [native-apps.md](../native-apps.md).
+One workaround remains. The generated `PortableTextBlock` declares only
+`_type` and `_key`, because `portable_text_block` is an open node in the
+schema. So the example decodes Portable Text into its own node type.
+
 ## Order
 
 1. §2 step 1 (plain rendition): small, helps the apps right away.
