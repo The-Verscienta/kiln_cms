@@ -71,6 +71,19 @@ UI" workflow, scoped to fields.
   hold several terms — not a link field or a group sub-field. To move terms
   stored as JSON in a `:text` field, see
   [field-conversion.md](field-conversion.md).
+- **One line or a list of phrases**: a `:string` field holds one line by
+  default. With `multiple: true` it holds a **list of phrases** — symptoms,
+  indications, synonyms, services — as a JSON list of strings, in the order
+  the editor arranges them, bounded by `min_items` / `max_items`. Each item is
+  free text, edited in its own input (add, remove, drag to reorder); pasting
+  several lines into the add box adds one item per line, and an item written
+  with line breaks (an API client's `"a\nb"`) is stored as one item per line.
+  Items are trimmed, blanks and repeats drop out, and a JSON-encoded list sent
+  as a string is refused. It filters by containment as a multiple select
+  does, is not sortable, and a `names_record` list names the record by each
+  of its items (a list of synonyms). Not a `:group` with one sub-field: that
+  stores `[{"value": "fatigue"}]`, and every client would have to read it so.
+  Record-level fields only, as for a multiple select.
 - **Rich or plain text**: a `:text` field's `format` is `:rich` by default —
   the editor shows TipTap with a short toolbar (paragraphs, bold, italic,
   links, bulleted and numbered lists), and the HTML is sanitized on write to

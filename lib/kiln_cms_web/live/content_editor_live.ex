@@ -2865,34 +2865,35 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, update_field_gallery(socket, name, &move_id(&1, id, dir))}
   end
 
-  # A multiple select's terms (the `TermPicker` hook and the chips' ×, plus a
-  # drag through the shared `Sortable` hook): server-side edits of the form
-  # params, as a gallery's are.
-  def handle_event("select_term_add", %{"field" => name, "term" => term}, socket)
-      when is_binary(name) and is_binary(term) do
+  # The items of a list field — a multiple select's terms, a multiple
+  # string's phrases (the `TermPicker` hook, each item's ×, and a drag through
+  # the shared `Sortable` hook): server-side edits of the form params, as a
+  # gallery's are.
+  def handle_event("list_item_add", %{"field" => name, "item" => item}, socket)
+      when is_binary(name) and is_binary(item) do
     {:noreply,
-     update_select_terms(socket, name, fn terms, definition ->
-       add_term(terms, String.trim(term), definition)
+     update_list_items(socket, name, fn items, definition ->
+       add_item(items, String.trim(item), definition)
      end)}
   end
 
-  def handle_event("select_term_remove", %{"field" => name, "index" => index}, socket)
+  def handle_event("list_item_remove", %{"field" => name, "index" => index}, socket)
       when is_binary(name) and is_binary(index) do
     case Integer.parse(index) do
       {index, ""} ->
         {:noreply,
-         update_select_terms(socket, name, fn terms, _def -> List.delete_at(terms, index) end)}
+         update_list_items(socket, name, fn items, _def -> List.delete_at(items, index) end)}
 
       _other ->
         {:noreply, socket}
     end
   end
 
-  # Pushed by the `Sortable` hook with the chips' old positions in their new
+  # Pushed by the `Sortable` hook with the items' old positions in their new
   # order; anything that is not a permutation of them is ignored.
-  def handle_event("select_term_reorder", %{"field" => name, "order" => order}, socket)
+  def handle_event("list_item_reorder", %{"field" => name, "order" => order}, socket)
       when is_binary(name) and is_list(order) do
-    {:noreply, update_select_terms(socket, name, &reorder_terms(&1, order, &2))}
+    {:noreply, update_list_items(socket, name, &reorder_items(&1, order, &2))}
   end
 
   # A repeating group's rows (`GroupRows`): add, remove, move and a dragged
@@ -4008,23 +4009,31 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # Rewrite a multiple select's terms through `fun` — given the terms as
-  # posted (or stored) and the definition — and re-validate. Only a field this
-  # view may change (`custom_field_editable?/3`), as for a gallery. The leading
-  # `""` keeps an emptied field present in the params.
-  defp update_select_terms(socket, name, fun) do
+  # Rewrite a list field's items through `fun` — given the items as posted
+  # (or stored) less the leading blank sentinel, and the definition — and
+  # re-validate. A tag picker posts no other blank; a list of phrases keeps an
+  # item emptied in place, so its indexes match the rows on screen. Only a
+  # field this view may change (`custom_field_editable?/3`), as for a gallery.
+  # The leading `""` keeps an emptied field present in the params.
+  defp update_list_items(socket, name, fun) do
     editable? =
-      custom_field_editable?(socket, name, &match?(%{field_type: :select, multiple: true}, &1))
+      custom_field_editable?(
+        socket,
+        name,
+        &match?(%{field_type: type, multiple: true} when type in [:select, :string], &1)
+      )
 
     if editable? do
       definition = Enum.find(socket.assigns.field_definitions, &(&1.name == name))
 
+      # As posted, not cleaned: the cleaned value has dropped a list of
+      # phrases' emptied item, so its indexes would not be the rows on screen.
       terms =
         socket.assigns.form
-        |> custom_field_value(name)
+        |> GroupRows.posted(name)
         |> List.wrap()
         |> Enum.map(&to_string/1)
-        |> Enum.reject(&(String.trim(&1) == ""))
+        |> drop_sentinel()
 
       put_custom_field_param(socket, name, ["" | fun.(terms, definition)])
     else
@@ -4032,17 +4041,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # A blank term, a repeat, or one past `max_items` adds nothing; a term
+  defp drop_sentinel(["" | items]), do: items
+  defp drop_sentinel(items), do: items
+
+  # A blank item, a repeat, or one past `max_items` adds nothing; a term
   # outside a fixed vocabulary is added, and the field's validation names it.
-  defp add_term(terms, term, definition) do
+  defp add_item(items, item, definition) do
     cond do
-      term == "" or term in terms -> terms
-      is_integer(definition.max_items) and length(terms) >= definition.max_items -> terms
-      true -> terms ++ [term]
+      item == "" or item in items -> items
+      is_integer(definition.max_items) and length(items) >= definition.max_items -> items
+      true -> items ++ [item]
     end
   end
 
-  defp reorder_terms(terms, order, _definition) do
+  defp reorder_items(terms, order, _definition) do
     indexes =
       Enum.flat_map(order, fn
         index when is_integer(index) ->

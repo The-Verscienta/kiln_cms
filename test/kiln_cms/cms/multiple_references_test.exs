@@ -205,7 +205,7 @@ defmodule KilnCMS.CMS.MultipleReferencesTest do
       retyped =
         admin
         |> list_field!(field_name(), %{max_items: 3})
-        |> CMS.update_field_definition!(%{field_type: :string, target_type: nil}, actor: admin)
+        |> CMS.update_field_definition!(%{field_type: :url, target_type: nil}, actor: admin)
 
       refute retyped.multiple
       assert retyped.max_items == nil

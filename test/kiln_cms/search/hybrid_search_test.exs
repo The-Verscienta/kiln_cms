@@ -1131,6 +1131,39 @@ defmodule KilnCMS.Search.HybridTest do
       end
     end
 
+    test "a flagged list of synonyms names the record by each of its items" do
+      admin = admin()
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "synonyms",
+          label: "Synonyms",
+          field_type: :string,
+          multiple: true,
+          names_record: true
+        },
+        actor: admin
+      )
+
+      huang_qi =
+        CMS.create_page!(
+          %{
+            title: "Huang Qi",
+            slug: slug(),
+            custom_fields: %{"synonyms" => ["Astragalus membranaceus", "milk vetch root"]}
+          },
+          actor: admin
+        )
+
+      KilnCMS.DataCase.drain_oban()
+
+      # The second item, not the first: each item is a name of its own.
+      results = Search.hybrid(:page, "is milk vetch root safe", actor: admin)
+      assert hd(results).id == huang_qi.id
+      assert :alias in Search.hit_legs(hd(results))
+    end
+
     test "a field that is not flagged names nothing, and a flag takes effect at once" do
       admin = admin()
 

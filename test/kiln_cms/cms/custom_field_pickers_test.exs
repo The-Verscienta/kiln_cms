@@ -286,7 +286,7 @@ defmodule KilnCMS.CMS.CustomFieldPickersTest do
           actor: actor
         )
 
-      field = CMS.update_field_definition!(field, %{field_type: :string}, actor: actor)
+      field = CMS.update_field_definition!(field, %{field_type: :url}, actor: actor)
       refute field.multiple
 
       # No list left under a field that is no longer a gallery.

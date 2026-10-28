@@ -67,6 +67,10 @@ Every summary line below that was shortened links to its own entry there.
   type, block and group row, and `Block`/`Document` enums that tolerate unknowns.**
   ([#2105](https://github.com/The-Verscienta/kiln_cms/pull/2105) · [long form](docs/changelog/unreleased.md#swift-schema-export))
 
+- **A `:string` field can hold a list of phrases: one input per item, pasted
+  lines split into items, and a `names_record` list names the record by each.**
+  ([#2101](https://github.com/The-Verscienta/kiln_cms/pull/2101) · [long form](docs/changelog/unreleased.md#string-lists))
+
 - **A `:select` field can hold several terms, in a tag picker; `allow_custom`
   opens its vocabulary. `mix kiln.fields.convert` moves JSON-string lists in.**
   ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099) · [long form](docs/changelog/unreleased.md#multiple-select))

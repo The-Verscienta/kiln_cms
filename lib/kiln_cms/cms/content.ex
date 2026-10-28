@@ -106,6 +106,11 @@ defmodule KilnCMS.CMS.Content do
   # says names this type's records on this site. Nothing flagged, nothing
   # read. Newest first among the named, the way the title leg is longest
   # first: there is no length to prefer across fields.
+  #
+  # A field holding a list (a multiple `:string` of synonyms) names the record
+  # by each item, so the match runs per element: a scalar is read as a
+  # one-item list. Without that, `->>` hands the phrase match the list's JSON
+  # text, which no query ever matches.
   def alias_filter(query) do
     case KilnCMS.CMS.NameFields.for_resource(query.resource, query.tenant) do
       [] ->
@@ -119,12 +124,16 @@ defmodule KilnCMS.CMS.Content do
         |> Enum.map(fn name ->
           Ash.Expr.expr(
             fragment(
-              "(SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), coalesce(? ->> ?, ''))",
+              "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(coalesce(? ->> ?::text, '')) END) AS name_alias(value) WHERE (SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value))",
+              custom_fields,
+              ^name,
+              custom_fields,
+              ^name,
+              custom_fields,
+              ^name,
               ^locale,
               ^text,
-              ^locale,
-              custom_fields,
-              ^name
+              ^locale
             )
           )
         end)

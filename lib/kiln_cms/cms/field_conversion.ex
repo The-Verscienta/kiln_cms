@@ -1,7 +1,8 @@
 defmodule KilnCMS.CMS.FieldConversion do
   @moduledoc """
-  Moves JSON-in-text custom-field values into a `:group` field, or into a
-  multiple `:select` (several terms) — `mix kiln.fields.convert`
+  Moves JSON-in-text custom-field values into a `:group` field, a multiple
+  `:select` (several terms) or a multiple `:string` (a list of phrases) —
+  `mix kiln.fields.convert`
   (docs/field-conversion.md).
 
   Lists that predate `:group` were stored as JSON strings in `:text` fields,
@@ -20,6 +21,13 @@ defmodule KilnCMS.CMS.FieldConversion do
   so the report lists every **distinct term** with its count, and the ones
   not yet in `options` — what an admin reviews before deciding whether to
   add them as options or open the vocabulary. Renames do not apply.
+
+  A multiple `:string` target takes the same JSON arrays of strings, with no
+  vocabulary to check. With `lines?: true` (`--lines`), a source that is not
+  JSON is read as **one item per line** instead of being refused — the
+  convention some importers used for a list kept in a text field
+  ("One service per line"). It is opt-in because prose would otherwise
+  become a one-item list without a word.
 
   Every report counts the **published** records a run would write (or wrote):
   each of those writes re-fires the record's artifact.
@@ -107,7 +115,9 @@ defmodule KilnCMS.CMS.FieldConversion do
   `org_id`.
 
   Options: `dry_run?` (default `true`), `skip_invalid?`, `overwrite?`,
-  `renames` (`%{"old_key" => "new_key"}`) and `:batch` (read page size).
+  `renames` (`%{"old_key" => "new_key"}`), `lines?` (a multiple `:string`
+  target only: read non-JSON text as one item per line) and `:batch` (read
+  page size).
   Returns `{:error, message}` when the fields themselves do not fit (no such
   type or field, a target that is not a group, a rename to no sub-field).
   """
@@ -128,6 +138,7 @@ defmodule KilnCMS.CMS.FieldConversion do
         group: group,
         renames: renames,
         overwrite?: Keyword.get(opts, :overwrite?, false),
+        lines?: Keyword.get(opts, :lines?, false),
         batch: Keyword.get(opts, :batch, @batch)
       }
 
@@ -318,15 +329,21 @@ defmodule KilnCMS.CMS.FieldConversion do
       %{field_type: :select} ->
         {:error, "#{target} is a select that holds one choice — make it hold several terms first"}
 
+      %{field_type: :string, multiple: true} = list ->
+        {:ok, list}
+
+      %{field_type: :string} ->
+        {:error, "#{target} is a string field that holds one line — make it a list first"}
+
       %{field_type: type} ->
-        {:error, "#{target} is a #{type} field, not a group or a multiple select"}
+        {:error, "#{target} is a #{type} field, not a group, a multiple select or a list"}
     end
   end
 
   defp check_renames(renames, _select) when map_size(renames) == 0, do: :ok
 
-  defp check_renames(_renames, %{field_type: :select} = select),
-    do: {:error, "--map renames the keys of rows; #{select.name} holds terms, which have none"}
+  defp check_renames(_renames, %{field_type: type} = list) when type in [:select, :string],
+    do: {:error, "--map renames the keys of rows; #{list.name} holds items, which have none"}
 
   defp check_renames(renames, group) do
     subs = group |> FieldDefinition.group_fields() |> Enum.map(& &1.name)
@@ -410,7 +427,7 @@ defmodule KilnCMS.CMS.FieldConversion do
 
   defp record_published?(record), do: Map.get(record, :state) == :published
 
-  defp terms(_record, %{group: %{field_type: :group}}), do: []
+  defp terms(_record, %{group: %{field_type: type}}) when type in [:group, :string], do: []
 
   defp terms(record, plan) do
     held =
@@ -473,9 +490,21 @@ defmodule KilnCMS.CMS.FieldConversion do
   defp rows(value, plan) do
     case parse(value) do
       {:ok, rows} -> rows |> Enum.map(&rename(&1, plan.renames)) |> fit(plan.group)
+      {:error, _message} = error -> lines(value, plan, error)
       other -> other
     end
   end
+
+  # `--lines`: a list of phrases kept as plain text, one item per line.
+  defp lines(value, %{lines?: true, group: %{field_type: :string}}, _error)
+       when is_binary(value) do
+    case value |> String.split(~r/\R/) |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
+      [] -> :empty
+      items -> {:ok, items}
+    end
+  end
+
+  defp lines(_value, _plan, error), do: error
 
   defp rename(%{} = row, renames) when not is_struct(row) do
     Map.new(row, fn {key, value} ->

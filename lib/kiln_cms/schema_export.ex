@@ -553,6 +553,17 @@ defmodule KilnCMS.SchemaExport do
       else: %{"type" => ["string", "null"]}
   end
 
+  # A list of phrases (`multiple` `:string`): its items in the editor's order.
+  defp base_custom_field_schema(:string, %{multiple: true} = d) do
+    %{
+      "type" => ["array", "null"],
+      "items" => %{"type" => "string"},
+      "uniqueItems" => true,
+      "description" => "The items, in the order the editor arranged them."
+    }
+    |> put_item_bounds(d)
+  end
+
   defp base_custom_field_schema(:string, _d), do: %{"type" => ["string", "null"]}
 
   # Everything else is a `Kiln.FieldType` — a built-in (geolocation, computed,

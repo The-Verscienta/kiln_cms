@@ -129,15 +129,23 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
 
     reshape =
       cond do
-        was_list? == list? -> []
-        # Retyping a field *into* a multiple select (a `:text` holding JSON
+        was_list? == list? ->
+          []
+
+        # Retyping a field *into* a multiple select or list of phrases (a `:text` holding JSON
         # strings, say) is not a flip of the same values: wrapping each string
         # in a list would store `["[\"a\",\"b\"]"]`. The values stay as they
         # are — the next write of each reports them — and
         # `mix kiln.fields.convert` is the tool that moves them.
-        list? and definition.field_type == :select and previous.field_type != :select -> []
-        list? -> [{:reshape, definition.name, :to_list}]
-        true -> [{:reshape, definition.name, :to_single}]
+        list? and definition.field_type in [:select, :string] and
+            previous.field_type != definition.field_type ->
+          []
+
+        list? ->
+          [{:reshape, definition.name, :to_list}]
+
+        true ->
+          [{:reshape, definition.name, :to_single}]
       end
 
     rename ++ reshape
