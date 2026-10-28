@@ -1,13 +1,17 @@
 # Content organization — assessment & phased plan
 
-**Status:** **partly shipped.** Workstreams **A** (#1593, faceted list + saved
-views) and **B** (#1594, references as edges) landed in 1.1. **C** (#1595) is on
-the **v2.0.0** milestone — collapsing `Category` and `Tag` removes two covered
-resources, which the 1.0 contract only allows in a major, so §9's timing
-question was answered by deferring rather than by rushing it. **E** (#1597) is
-decided (**D21** in §7 — content gets a tree) and **D** (#1596) is scheduled
-ahead of C, both on **v1.1.0**; §8 says why that inverts the plan's own
-sequencing on purpose.
+**Status:** **done, except the one part that was deferred on purpose.**
+Workstreams **A** ([#1593](https://github.com/The-Verscienta/kiln_cms/issues/1593), faceted list + saved views), **B**
+([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594), references as edges), **D** ([#1596](https://github.com/The-Verscienta/kiln_cms/issues/1596), derived
+organization) and **E** ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597), the content tree — decision **D21**,
+§7) all shipped from 1.1 onward. **C** ([#1595](https://github.com/The-Verscienta/kiln_cms/issues/1595)) is on the **v2.0.0**
+milestone: collapsing `Category` and `Tag` removes two covered resources, which
+the 1.0 contract allows only in a major, so §9's timing question was answered by
+deferring rather than by rushing it.
+
+One follow-up is live: [#1890](https://github.com/The-Verscienta/kiln_cms/issues/1890) — record whether a slug or alias was
+*derived* instead of inferring it by re-deriving. Two of D21's slices had to work
+around that inference, and §4 and §7 both say where.
 
 This is the design record for issues
 [#1593](https://github.com/The-Verscienta/kiln_cms/issues/1593)–[#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597),
@@ -274,6 +278,28 @@ contradicts the structure view's narrower "not in any menu" badge.
 
 ## 7. Workstream E — the structure decision ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597))
 
+**Status (1.1).** Decided as **D21** below — Option A, content gets a tree — and
+then built, in five slices:
+
+| | |
+|---|---|
+| [#1880](https://github.com/The-Verscienta/kiln_cms/pull/1880) | `parent_id` + `position` on every content type, `has_many :children`, a FK that nilifies so a purged parent never takes a subtree of published documents with it, and `Validations.ContentPlacement` (cycle, cross-site parent, and `ancestors + 1 + subtree height` against the cap, on moves only) |
+| [#1889](https://github.com/The-Verscienta/kiln_cms/pull/1889) | The parent picker in the editor's *Organization & relationships* panel. `ContentTree.candidate_parents/3` repeats the validation's arithmetic so the picker can never propose a move the write refuses — stated there as a contract: **this offers, the validation decides**, and the duplication may only ever be *more* restrictive |
+| [#1891](https://github.com/The-Verscienta/kiln_cms/pull/1891) | The `[ancestors]` alias token, and a move re-deriving the paths of everything beneath it through `SlugRegeneration` extended to aliases. The chain is substituted into the *pattern* before segmentation, so `expand/3`'s rule that no token **value** may contribute path structure still holds |
+| [#1893](https://github.com/The-Verscienta/kiln_cms/pull/1893) | The structure view at `/editor/structure/:type` — drag to reorder, indent/outdent for depth |
+| [#1895](https://github.com/The-Verscienta/kiln_cms/pull/1895) | Published documents no menu links to, badged and counted |
+
+Plus [#1897](https://github.com/The-Verscienta/kiln_cms/pull/1897), which replaced a `MapSet` in `ContentTree` with a plain
+map: OTP 29's dialyzer loses MapSet's opacity through a recursive accumulator,
+and CI runs OTP 27, whose opacity checking is weaker — the class
+`KilnCMS.CMS.Menus` already documents on `rooted?/3`, and which only a local
+`mix dialyzer` catches.
+
+Two things D21 did **not** authorise, and still has not: menus derived from the
+tree, and any change to default URL resolution.
+
+What follows is the decision as argued, kept because the reasoning is the record.
+
 A decision, not a feature. Content is flat; site structure lives in a
 hand-curated nav menu disconnected from the content it points at, so
 reorganizing a section means doing it twice with nothing keeping the two
@@ -343,12 +369,15 @@ deliberately between a recursive CTE and a materialized path, and measuring it.
 | 1 | **A** — faceted saved views (#1593) | Biggest felt change, no schema risk, reuses facets that already exist | **shipped 1.1** |
 | 2 | **B** — references as edges (#1594) | Small refactor against a table already built; unlocks backlinks and the graph | **shipped 1.1** |
 | 3 | **C** — one term vocabulary (#1595) | Schema + deprecation; wants the 1.0 window (below) | **deferred to v2.0.0** |
-| 4 | **D** — derived organization (#1596) | Originally: once C gives it a vocabulary to aim at. **Reversed** — see below | **v1.1.0** |
-| 5 | **E** — the structure decision (#1597) | Decide explicitly; document either way | **decided (D21), v1.1.0** |
+| 4 | **D** — derived organization (#1596) | Originally: once C gives it a vocabulary to aim at. **Reversed** — see below | **shipped 1.1** |
+| 5 | **E** — the structure decision (#1597) | Decide explicitly; document either way | **decided (D21) and shipped 1.1** |
 
-The order held for the two that shipped, and in the direction the table
-predicted: A was the visible change and carried no schema risk, B was small
-because the table was already there.
+The order held for A and B, in the direction the table predicted: A was the
+visible change and carried no schema risk, B was small because the table was
+already there. D and E then shipped ahead of C, which is the inversion the next
+paragraph argues for — and it was the right call: E turned out to be five slices
+of real work, and parking it behind a major release would have parked the whole
+point of the plan.
 
 **D's sequencing problem is resolved: it goes before C, not after.** D was
 placed after C so its suggestions would have a vocabulary worth aiming at. Once
@@ -357,9 +386,9 @@ differentiator behind its one breaking change, so D is on **v1.1.0**, built
 against today's `Category`/`Tag`, and migrated with C later. The second pass
 costs less than a release of delay (see §6).
 
-That leaves the original table's order intact only for A and B. The live order
-is: A and B shipped, **D and E in 1.1**, **C in 2.0** — which inverts the one
-dependency this plan originally asserted, deliberately.
+That leaves the original table's order intact only for A and B. The order as it
+happened: A, B, D and E all in 1.1 onward, **C still in 2.0** — which inverts
+the one dependency this plan originally asserted, deliberately.
 
 ## 9. Timing — C and E were schedule-sensitive
 
