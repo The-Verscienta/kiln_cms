@@ -1,7 +1,7 @@
 defmodule KilnClient.MixProject do
   use Mix.Project
 
-  @version "0.4.0"
+  @version "0.4.1"
   @source_url "https://github.com/The-Verscienta/kiln_cms"
 
   def project do
@@ -28,7 +28,7 @@ defmodule KilnClient.MixProject do
 
   defp deps do
     [
-      {:req, "~> 0.5"},
+      {:req, ">= 0.6.1 and < 1.0.0"},
       # Req.Test's stub transport rides on Plug — tests only.
       {:plug, "~> 1.15", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
