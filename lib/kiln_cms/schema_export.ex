@@ -476,6 +476,7 @@ defmodule KilnCMS.SchemaExport do
     |> put_inverse(definition)
     |> put_link_fields(definition)
     |> put_localization(Map.get(definition, :localization))
+    |> put_section(Map.get(definition, :section))
   end
 
   # A reference's link fields (R3): each connection's snapshot carries their
@@ -561,6 +562,13 @@ defmodule KilnCMS.SchemaExport do
     do: Map.put(schema, "x-kiln-localization", to_string(mode))
 
   defp put_localization(schema, _mode), do: schema
+
+  # The editor heading a field is filed under, for a client that builds its
+  # own form from the schema (absent when the field has none).
+  defp put_section(schema, section) when is_binary(section),
+    do: Map.put(schema, "x-kiln-section", section)
+
+  defp put_section(schema, _none), do: schema
 
   defp base_custom_field_schema(:integer, _d), do: %{"type" => ["integer", "null"]}
   defp base_custom_field_schema(:float, _d), do: %{"type" => ["number", "null"]}
