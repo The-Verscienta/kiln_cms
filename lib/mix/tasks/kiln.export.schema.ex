@@ -1,13 +1,14 @@
 defmodule Mix.Tasks.Kiln.Export.Schema do
-  @shortdoc "Export the delivery JSON Schema (or .d.ts / Swift types) for blocks and content types"
+  @shortdoc "Export the delivery JSON Schema (or .d.ts / Swift / Kotlin types) for blocks and content types"
   @moduledoc """
-  JSON Schema / TypeScript / Swift export of the block union and content types (#430).
+  JSON Schema / TypeScript / Swift / Kotlin export of the block union and content types (#430).
 
   Describes the `:json` fired-artifact shape — what
   `GET /api/content/:type/:slug?surface=json` returns — so a typed client has
   something to generate against. See `KilnCMS.SchemaExport`.
 
-      mix kiln.export.schema [--format json|ts|swift] [--out PATH] [--type NAME,NAME]
+      mix kiln.export.schema [--format json|ts|swift|kotlin] [--out PATH] [--type NAME,NAME]
+                             [--package com.example.kiln]
                              [--org-id UUID | --all-orgs] [--blocks-only]
                              [--base-url URL] [--pretty]
 
@@ -17,6 +18,7 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
       mix kiln.export.schema --out priv/static/schema.json --pretty
       mix kiln.export.schema --format ts --out assets/js/kiln.d.ts
       mix kiln.export.schema --format swift --out Sources/Kiln/Kiln.swift
+      mix kiln.export.schema --format kotlin --package com.example.kiln --out app/src/main/java/com/example/kiln/Kiln.kt
       mix kiln.export.schema --type post,page --org-id 018f…
       mix kiln.export.schema --all-orgs --out ./schemas --pretty
 
@@ -43,10 +45,22 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
   decoding: unknown keys are ignored, and a new block type or select-style
   enum value lands in an `unknown` case rather than failing the decode. See
   `docs/native-apps.md`.
+
+  ## Kotlin
+
+  `--format kotlin` writes one file of kotlinx.serialization models
+  (`KilnCMS.SchemaExport.Kotlin`): a `@Serializable data class` per content
+  type, block and `:group` row, `sealed interface Block` and `Document` with
+  bundled serializers that switch on `_type`/`type` and keep an `Unknown`
+  member, a `@JvmInline value class` per string enum that decodes any value,
+  and a `KilnJson` instance (`ignoreUnknownKeys = true`) to decode with.
+  `--package` sets the file's package (default `kiln`); it applies to
+  `--format kotlin` only. The same regenerate-per-site advice as Swift holds.
   """
   use Mix.Task
 
   alias KilnCMS.SchemaExport
+  alias KilnCMS.SchemaExport.Kotlin
   alias KilnCMS.SchemaExport.Swift
   alias KilnCMS.SchemaExport.TypeScript
 
@@ -60,6 +74,7 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
     all_orgs: :boolean,
     blocks_only: :boolean,
     base_url: :string,
+    package: :string,
     pretty: :boolean
   ]
 
@@ -74,6 +89,7 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
     {opts, _positional} = OptionParser.parse!(args, strict: @switches, aliases: @aliases)
 
     format = parse_format(opts[:format])
+    check_package!(format, opts[:package])
     export_opts = export_opts(opts)
 
     if opts[:all_orgs],
@@ -115,17 +131,20 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
       "#{length(kiln["blocks"])} block type(s), " <>
         "#{length(kiln["content_types"])} content type(s), org #{org}"
 
-    {encode(document, format, opts[:pretty]), summary}
+    {encode(document, format, opts), summary}
   end
 
   # Public for the golden regenerator, which writes its fixture through the
   # same sorted encoder an export does.
   @doc false
-  def encode(document, :ts, _pretty), do: TypeScript.emit(document)
-  def encode(document, :swift, _pretty), do: Swift.emit(document)
+  def encode(document, :ts, _opts), do: TypeScript.emit(document)
+  def encode(document, :swift, _opts), do: Swift.emit(document)
 
-  def encode(document, :json, pretty) do
-    opts = if pretty, do: [pretty: true], else: []
+  def encode(document, :kotlin, opts),
+    do: Kotlin.emit(document, package: opts[:package] || Kotlin.default_package())
+
+  def encode(document, :json, opts) do
+    opts = if opts[:pretty], do: [pretty: true], else: []
     Jason.encode!(sorted(document), opts) <> "\n"
   end
 
@@ -169,12 +188,24 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
   defp parse_format(format) when format in ~w(json), do: :json
   defp parse_format(format) when format in ~w(ts d.ts typescript), do: :ts
   defp parse_format(format) when format in ~w(swift), do: :swift
+  defp parse_format(format) when format in ~w(kotlin kt), do: :kotlin
 
   defp parse_format(other),
-    do: Mix.raise("Unknown format #{inspect(other)} (expected json|ts|swift).")
+    do: Mix.raise("Unknown format #{inspect(other)} (expected json|ts|swift|kotlin).")
+
+  defp check_package!(_format, nil), do: :ok
+
+  defp check_package!(:kotlin, package) do
+    unless Kotlin.valid_package?(package),
+      do: Mix.raise("--package #{inspect(package)} is not a Kotlin package name.")
+  end
+
+  defp check_package!(_format, _package),
+    do: Mix.raise("--package applies to --format kotlin only.")
 
   defp extension(:ts), do: "d.ts"
   defp extension(:swift), do: "swift"
+  defp extension(:kotlin), do: "kt"
   defp extension(:json), do: "json"
 
   defp emit(body, nil), do: IO.write(body)

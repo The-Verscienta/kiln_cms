@@ -15,7 +15,7 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
 
       mix test --only regenerate_schema_goldens test/kiln_cms/schema_export/regenerate_goldens_test.exs
 
-  then review the diff of `full.schema.json`, `full.d.ts` and `full.swift`.
+  then review the diff of `full.schema.json`, `full.d.ts`, `full.swift` and `full.kt`.
   """
   use KilnCMS.DataCase, async: false
 
@@ -94,10 +94,11 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
     # Through the task's own sorted encoder, so the fixture diffs stably.
     File.write!(
       Path.join(@dir, "full.schema.json"),
-      Mix.Tasks.Kiln.Export.Schema.encode(document, :json, true)
+      Mix.Tasks.Kiln.Export.Schema.encode(document, :json, pretty: true)
     )
 
     File.write!(Path.join(@dir, "full.d.ts"), SchemaExport.TypeScript.emit(document))
     File.write!(Path.join(@dir, "full.swift"), SchemaExport.Swift.emit(document))
+    File.write!(Path.join(@dir, "full.kt"), SchemaExport.Kotlin.emit(document))
   end
 end

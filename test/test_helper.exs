@@ -125,6 +125,23 @@ swiftc_exclusion =
     [:swiftc]
   end
 
+# The Kotlin emitter's twin of the above. `kotlinc` bundles the
+# kotlinx.serialization compiler plugin but not its runtime, so the test also
+# needs `KOTLINX_SERIALIZATION_CLASSPATH` naming the core and json jars (see
+# `KilnCMS.SchemaExport.KotlinCompileTest`); without all three it is excluded.
+kotlinc_exclusion =
+  if System.find_executable("kotlinc") && System.find_executable("kotlin") &&
+       System.get_env("KOTLINX_SERIALIZATION_CLASSPATH") not in [nil, ""] do
+    []
+  else
+    IO.puts(
+      :stderr,
+      "note: excluding :kotlinc tests — needs kotlinc and kotlin on PATH and KOTLINX_SERIALIZATION_CLASSPATH"
+    )
+
+    [:kotlinc]
+  end
+
 # Not a test: rewrites the schema-export fixture and goldens. Run it with
 # `--only regenerate_schema_goldens` (see its moduledoc).
 regenerate_exclusion = [:regenerate_schema_goldens]
@@ -140,7 +157,8 @@ else
         ffmpeg_exclusion ++
         no_ffmpeg_exclusion ++
         calibration_exclusion ++
-        table_lock_exclusion ++ swiftc_exclusion ++ regenerate_exclusion
+        table_lock_exclusion ++
+        swiftc_exclusion ++ kotlinc_exclusion ++ regenerate_exclusion
   )
 end
 

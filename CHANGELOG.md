@@ -67,6 +67,10 @@ Every summary line below that was shortened links to its own entry there.
   type, block and group row, and `Block`/`Document` enums that tolerate unknowns.**
   ([#2105](https://github.com/The-Verscienta/kiln_cms/pull/2105) · [long form](docs/changelog/unreleased.md#swift-schema-export))
 
+- **`mix kiln.export.schema --format kotlin` writes kotlinx.serialization models: a data
+  class per type, block and group row, and `Block`/`Document` interfaces with `Unknown`.**
+  ([long form](docs/changelog/unreleased.md#kotlin-schema-export))
+
 - **A `:string` field can hold a list of phrases: one input per item, pasted
   lines split into items, and a `names_record` list names the record by each.**
   ([#2101](https://github.com/The-Verscienta/kiln_cms/pull/2101) · [long form](docs/changelog/unreleased.md#string-lists))
