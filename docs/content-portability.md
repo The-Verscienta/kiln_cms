@@ -39,7 +39,7 @@ docker exec -it <container> /app/bin/kiln_cms rpc 'KilnCMS.Release.import_conten
 | `--site-url URL` (Ghost) / `--type NAME` (CSV) | `site_url: "URL"` / `type: "NAME"` |
 
 The report is the same one the task prints, and it appears in the `rpc`
-terminal. Three differences from the tasks:
+terminal. Four differences from the tasks:
 
 - **Use `rpc`, not `eval`.** The import enqueues media jobs, fetches images
   through SafeFetch and clears the content caches, so it needs the running
@@ -51,6 +51,16 @@ terminal. Three differences from the tasks:
   the Coolify dashboard.
 - **An unknown option is refused.** A keyword list has no option parser, so
   without this check a misspelt `dry_run:` would run a real import.
+- **A failed import still exits 0.** `bin/kiln_cms rpc` reports whether the
+  expression ran, not what it returned, so `{:error, message}` prints the
+  message and exits 0. A mix task exits 1. In a script, match on the result:
+
+  ```bash
+  docker exec <container> /app/bin/kiln_cms rpc '{:ok, _} = KilnCMS.Release.import_wordpress("/tmp/wordpress.xml")'
+  ```
+
+  The message still prints first. The failed match then makes `rpc` exit 1,
+  and the serving node keeps running.
 
 Each call returns `{:ok, report}` or `{:error, message}`. If the connection drops
 during a long import, run the same command again: what already landed is
