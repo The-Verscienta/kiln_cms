@@ -33,6 +33,10 @@ defmodule KilnCMSWeb.PageController do
     )
   end
 
+  def api(conn, _params) do
+    redirect(conn, to: "/developers")
+  end
+
   # GET /gql. Absinthe supports GET-based queries (`?query=…`), so those are
   # re-dispatched to it with the same options as the router's forward; a bare
   # browser GET lands on the developer docs instead of Absinthe's 400 (#319).
