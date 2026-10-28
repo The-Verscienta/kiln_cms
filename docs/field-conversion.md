@@ -164,8 +164,9 @@ Verscienta stores `dosages`, `safety_warnings`, `drug_interactions` and
 **Release N — expand and migrate.**
 
 1. Create the group under a **new** name. A group cannot take the old
-   field's name while that field exists. Add its sub-fields through the
-   code interface or the API:
+   field's name while that field exists. In the fields admin, create a
+   repeating group and add its sub-fields under "Fields in each row". Or
+   create them through the code interface:
 
    ```elixir
    group =
@@ -196,8 +197,8 @@ Verscienta stores `dosages`, `safety_warnings`, `drug_interactions` and
 
    Fix the records it lists. Prose in `dosages` needs a person to turn it
    into rows. Either rewrite the source as JSON, so the next run converts
-   it, or write the rows to the group directly, so later runs skip the
-   record. Values the sub-fields refuse can be fixed at either
+   it, or enter the rows in the group in the content editor (or through
+   the API), so later runs skip the record. Values the sub-fields refuse can be fixed at either
    end. Correct the record, or widen the sub-field (add `"tsp"` to `unit`'s
    options).
 
