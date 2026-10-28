@@ -22,7 +22,7 @@ defmodule KilnCMS.SchemaExport.KotlinCompileTest do
       export KOTLINX_SERIALIZATION_CLASSPATH=/path/kotlinx-serialization-core-jvm-1.12.0.jar:/path/kotlinx-serialization-json-jvm-1.12.0.jar
       mix test test/kiln_cms/schema_export/kotlin_compile_test.exs
 
-  CI runs it in the `kotlin_models` job of `.github/workflows/ci.yml`, which
+  CI runs it in `.github/workflows/kotlin-models.yml`, which
   pins the compiler and both jars. Both jars are on Maven Central under
   `org.jetbrains.kotlinx`. The plugin is
   found next to `kotlinc` (`<kotlin home>/lib`); set `KOTLIN_HOME` if your
