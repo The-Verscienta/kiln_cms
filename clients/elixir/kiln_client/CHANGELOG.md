@@ -5,7 +5,7 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `kiln_client-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
-## Unreleased
+## 0.5.0
 
 ### Changed (breaking)
 
