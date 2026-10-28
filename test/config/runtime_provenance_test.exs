@@ -270,7 +270,8 @@ defmodule KilnCMS.Config.RuntimeProvenanceTest do
     test "with nothing exported the compiled defaults survive untouched" do
       provenance = merged(%{})
 
-      assert Keyword.fetch!(provenance, :enabled) == false
+      # On by default since 1.7 (#1929).
+      assert Keyword.fetch!(provenance, :enabled) == true
 
       assert Keyword.fetch!(provenance, :signing_key) ==
                {:env, %{"var" => "KILN_PROVENANCE_PRIVATE_KEY"}}

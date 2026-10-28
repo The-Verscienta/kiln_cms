@@ -29,7 +29,53 @@ carries the reasoning.
   `undefined_column`. The core's own tables get it from the release's
   migrations. Adding a nullable column takes no table rewrite.
 
+## Breaking
+
+<a id="provenance-default-upgrade"></a>
+
+- **Provenance is on by default (#1929).** `KILN_PROVENANCE_ENABLED` now
+  defaults to `true`. What that means for an install upgrading to 1.7:
+  - **With a key mounted** (`KILN_PROVENANCE_KEY_FILE` or
+    `KILN_PROVENANCE_PRIVATE_KEY`): every fire from now on stores a signed
+    manifest. Run `mix kiln.refire_all` (`KilnCMS.Firing.Sweep.run()` over
+    `rpc`) to sign what was fired before.
+  - **With no key:** nothing is refused. Artifacts are served `unsigned`, the
+    verify endpoint says so, and platform admins see a strip on the console
+    overview naming `KILN_PROVENANCE_KEY_FILE`. Either mount a key and set that
+    variable, or press *Generate a key* there (stored encrypted, as `/setup`
+    does on a new install), then re-fire.
+  - **To keep the pre-1.7 behaviour,** set `KILN_PROVENANCE_ENABLED=false`:
+    no manifests, and every `/api/provenance/*` endpoint `404`s.
+  The release's migrations add `published_artifacts.manifest` (nullable) and
+  the `provenance_settings` table. Both are additive.
+
 ## Added
+
+<a id="provenance-on-by-default"></a>
+
+- **Provenance on by default, with a public verify endpoint (#1929).**
+  Provenance signing existed since #340 but was off by default, and its
+  manifests were derived from the live body each time they were asked for, so
+  "verify" compared a body with itself. Now:
+  - **Every fire stores its manifest** (`published_artifacts.manifest`), made
+    by `KilnCMS.Provenance.sign_fired/4` from the body as it will read back.
+    One RSA signature per surface, the key resolved once per fire. A signing
+    failure leaves the artifact unsigned; it never fails the fire.
+  - **`GET /api/provenance/verify/:type/:slug`** checks the served body
+    against that stored manifest: `verified`, `tampered` (a changed body or a
+    changed manifest, against a key this instance holds), `unsigned` (nothing
+    stored) or `unverifiable` (a key it no longer holds, never reported as
+    tampering). Anonymous, `public, max-age=60`, any `?surface=`, and covered
+    by the API contract. The manifest endpoint now serves the stored manifest.
+  - **`/setup` generates a signing key** unless one is mounted:
+    `KilnCMS.Provenance.Settings`, one row, encrypted under `secret_key_base`
+    like the database DKIM key, platform-admin only, with no rotate action. A
+    mounted key always wins; when one replaces the generated key, the generated
+    key is listed as retired automatically, so what it signed keeps verifying.
+  - **The share signed is measured**: `KilnCMS.Provenance.coverage/1`, `mix
+    kiln.provenance.coverage`, and `kiln_cms.provenance.coverage.*` telemetry
+    every five minutes ([benchmarks.md](../benchmarks.md#provenance-share-of-published-artifacts-signed)).
+  See [provenance.md](../provenance.md#on-by-default).
 
 <a id="plain-text-breaks"></a>
 

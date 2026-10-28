@@ -43,6 +43,8 @@ defmodule KilnCMS.Keys do
   …}} | :dkim`. `:dkim` reuses the mail signing key (the same "this org's RSA
   key" the issue points at); the tuple forms resolve through the env/file
   providers, letting an operator point at a dedicated content-signing key.
+  When the configured variable is unset, the key `/setup` generated and
+  stored encrypted (`KilnCMS.Provenance.Settings`, #1929) is used instead.
 
   `:billing_secret_key` / `:billing_webhook_secret` — the payment-provider API
   key and inbound-webhook signing secret (#337 Phase 2). Provider choice and
@@ -67,10 +69,33 @@ defmodule KilnCMS.Keys do
 
   def fetch(:provenance) do
     case Application.get_env(:kiln_cms, KilnCMS.Provenance, [])[:signing_key] do
-      :dkim -> fetch(:dkim)
-      {provider, config} when provider in @provider_names -> provider!(provider).fetch(config)
-      nil -> {:error, :not_configured}
-      other -> {:error, {:invalid_key_source, other}}
+      :dkim ->
+        fetch(:dkim)
+
+      {provider, config} when provider in @provider_names ->
+        # An unset variable is "no key mounted", so the key `/setup` generated
+        # (#1929) signs instead. Anything else the source answers stands: a
+        # mounted file that cannot be read must fail loudly, not sign with a
+        # different key.
+        case provider!(provider).fetch(config) do
+          {:error, {:env_var_unset, _var}} = unset -> stored_provenance_key(unset)
+          result -> result
+        end
+
+      nil ->
+        stored_provenance_key({:error, :not_configured})
+
+      other ->
+        {:error, {:invalid_key_source, other}}
+    end
+  end
+
+  # The generated key, or the configured source's own error when there is none
+  # (so the operator still reads which variable to set).
+  defp stored_provenance_key(fallback) do
+    case KilnCMS.Provenance.stored_key() do
+      {:ok, pem} -> {:ok, pem}
+      {:error, _none} -> fallback
     end
   end
 

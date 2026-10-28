@@ -383,6 +383,21 @@ delivery pipeline resolves the DKIM key as the **system actor**
 (`KilnCMS.Mail.dkim_config/0`), as does the lazy singleton creation
 (`ensure_settings!/0`); both are admitted for `read` and `init` only.
 
+## Provenance settings — `Provenance.Settings`
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read, `generate` | ✅ | ❌ | ❌ | ❌ |
+
+The instance's generated content-signing key (#1929) is platform-admin-only,
+for the same reason as `Mail.Settings`: the row is tenant-less. `/setup`
+generates it as the admin it has just created, and the overview's "served
+unsigned" strip offers the same action to a platform admin. There is no update
+or destroy: a key that signed manifests is never replaced in place. Signing
+reads the row as the system (`authorize?: false` via
+`KilnCMS.Provenance.stored_key/0`), as the billing checkout reads its
+credentials.
+
 ## Billing settings — `Billing.Settings`
 
 | Action | admin | editor | viewer | anonymous |
