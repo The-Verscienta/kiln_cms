@@ -5,6 +5,19 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `kiln_client-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## 0.4.1
+
+### Security
+
+- **Requires Req 0.6.1 or later** (`>= 0.6.1 and < 1.0.0`, was `~> 0.5`).
+  The old requirement let Mix resolve Req 0.5.x, which has two published
+  advisories: EEF-CVE-2026-49755 (HIGH, a decompression bomb in auto-decoded
+  response bodies) and EEF-CVE-2026-49756 (LOW, header injection in multipart
+  uploads, the encoding `upload_media/2` uses). Both are fixed in Req 0.6.1.
+  Nothing else changes. If your lock already has Req 0.6.1 or later, this
+  release changes nothing for you. If it has 0.5.x, `mix deps.update req`
+  moves it.
+
 ## 0.4.0
 
 ### Added
