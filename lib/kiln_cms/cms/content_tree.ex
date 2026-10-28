@@ -175,6 +175,9 @@ defmodule KilnCMS.CMS.ContentTree do
   @spec subtree(module(), Ecto.UUID.t(), Ecto.UUID.t()) :: [
           %{id: Ecto.UUID.t(), parent_id: Ecto.UUID.t() | nil, slug: String.t() | nil}
         ]
+  # The only interpolation is the table name, from AshPostgres compile-time
+  # metadata; every runtime value is a bound parameter.
+  # sobelow_skip ["SQL.Query"]
   def subtree(resource, id, org_id) do
     %{rows: rows} =
       KilnCMS.Repo.query!(
@@ -207,6 +210,9 @@ defmodule KilnCMS.CMS.ContentTree do
   @spec chain(module(), Ecto.UUID.t() | nil, Ecto.UUID.t()) :: [String.t()]
   def chain(_resource, nil, _org_id), do: []
 
+  # The only interpolation is the table name, from AshPostgres compile-time
+  # metadata; every runtime value is a bound parameter.
+  # sobelow_skip ["SQL.Query"]
   def chain(resource, id, org_id) do
     %{rows: rows} =
       KilnCMS.Repo.query!(
