@@ -150,7 +150,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **JSON:API `/by-slug/:slug` and GraphQL `*BySlug` no longer require `locale`:
   left out, the walk starts at the site's default locale, as the delivery API did.**
-  ([#1884](https://github.com/The-Verscienta/kiln_cms/issues/1884))
+  ([#2115](https://github.com/The-Verscienta/kiln_cms/pull/2115))
 
 - **The schema export states the media snapshot once, as `$defs.media_snapshot`;
   nullable uses are `anyOf: [$ref, null]`, so generated clients get one type.**
