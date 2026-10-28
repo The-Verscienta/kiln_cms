@@ -54,13 +54,6 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
-### Upgrade notes
-
-- **Optional: run `mix kiln.media.resnapshot --apply` once after deploying**
-  so stored `:media` field values gain dimensions, focal point and variants;
-  fired artifacts converge by themselves.
-  ([#2040](https://github.com/The-Verscienta/kiln_cms/pull/2040) · [long form](docs/changelog/unreleased.md#media-resnapshot-upgrade))
-
 ### Added
 
 - **A plain-text field can keep its paragraph breaks: "Keep paragraph breaks"
@@ -95,60 +88,8 @@ Every summary line below that was shortened links to its own entry there.
   sanitized on write; `format: :plain` keeps the textarea.**
   ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099) · [long form](docs/changelog/unreleased.md#rich-text-fields))
 
-- **The governance trail shows what readers saw: each publish and withdrawal
-  with its approver, CDN purge, each endpoint's delivery, `?as_of=` and chain.**
-  ([#2086](https://github.com/The-Verscienta/kiln_cms/pull/2086) · [long form](docs/changelog/unreleased.md#governance-what-readers-saw))
-
-- **Public bylines: a `:reference` field can be the page's schema.org `author`
-  or `contributor`, on the fired JSON-LD and Kiln's own pages; `ProfilePage`.**
-  ([#2087](https://github.com/The-Verscienta/kiln_cms/pull/2087) · [long form](docs/changelog/unreleased.md#bylines))
-
-- **A link-field filter can name the connection it means: `[target]=<id>` beside
-  the operators asks whether *that* record has the value.**
-  ([#2081](https://github.com/The-Verscienta/kiln_cms/pull/2081) · [long form](docs/changelog/unreleased.md#link-filter-target))
-
-- **Private custom fields: a value only the site's editors and admins see; and
-  a `:user` field type that names a person on the site, always private.**
-  ([#2085](https://github.com/The-Verscienta/kiln_cms/pull/2085) · [long form](docs/changelog/unreleased.md#private-fields))
-
-- **A type can fire `LiveBlogPosting`: coverage times plus its published
-  updates as `liveBlogUpdate`, newest first and capped.**
-  ([#2075](https://github.com/The-Verscienta/kiln_cms/pull/2075) · [long form](docs/changelog/unreleased.md#live-blog-posting))
-
-- **A Google News sitemap at `/news-sitemap.xml` for `NewsArticle` types:
-  the last 48 hours, at most 1,000 URLs, listed from `robots.txt`.**
-  ([#2077](https://github.com/The-Verscienta/kiln_cms/pull/2077) · [long form](docs/changelog/unreleased.md#news-sitemap))
-
-- **Headless draft mode: a preview token opens its draft on JSON:API and the fired-artifact read.**
-  ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887) · [long form](docs/changelog/unreleased.md#headless-draft-mode))
-
-- **A public change feed, server side: `KilnCMS.Delivery.Feed` publishes
-  `published` / `updated` / `withdrawn` per site over PubSub.**
-  ([#2069](https://github.com/The-Verscienta/kiln_cms/pull/2069) · [long form](docs/changelog/unreleased.md#change-feed-server))
-
-- **`Kiln.SafeFetch` (`kiln_plugin` 1.3): plugins get a covered, SSRF-safe way to fetch a URL they didn't write.**
-  ([#2070](https://github.com/The-Verscienta/kiln_cms/pull/2070) · [long form](docs/changelog/unreleased.md#plugin-safe-fetch))
-
-- **`mix kiln.fields.convert` moves JSON-in-text values into a `:group` field.**
-  ([#2052](https://github.com/The-Verscienta/kiln_cms/pull/2052) · [long form](docs/changelog/unreleased.md#fields-convert))
-
-- **Media in delivered content carries dimensions, MIME type, focal point and variants.**
-  ([#2040](https://github.com/The-Verscienta/kiln_cms/pull/2040) · [long form](docs/changelog/unreleased.md#media-snapshot-for-apps))
-
 - **A rich `:text` custom field can also be delivered as Portable Text (`custom_fields_portable`).**
   ([#2103](https://github.com/The-Verscienta/kiln_cms/pull/2103) · [long form](docs/changelog/unreleased.md#rich-text-fields-as-portable-text))
-- **A `:text` custom field can also be delivered as plain text.**
-  ([#2037](https://github.com/The-Verscienta/kiln_cms/pull/2037) · [long form](docs/changelog/unreleased.md#a-text-custom-field-can-also-be-delivered-as-plain-text))
-- **`?fields=` trims the fired `json` artifact; a guide to Kiln in a native app.**
-  ([#2039](https://github.com/The-Verscienta/kiln_cms/pull/2039) · [long form](docs/changelog/unreleased.md#fields-trims-the-fired-json-artifact-a-guide-to-kiln-in-a-native-app))
-
-- **A `:group` custom field holds structured rows: one object, or a list of
-  them, keyed by typed sub-fields, with every bad key reported by its path.**
-  ([#2036](https://github.com/The-Verscienta/kiln_cms/pull/2036) · [long form](docs/changelog/unreleased.md#group-custom-field))
-- **Group fields are edited in the fields admin and the content editor: sub-fields under the group, rows added, removed and dragged into order.**
-  ([#2053](https://github.com/The-Verscienta/kiln_cms/pull/2053) · [long form](docs/changelog/unreleased.md#group-field-editor))
-- **`KilnCMS.Firing.refire/3`: a covered way for an overlay to re-fire named records, with their dependents, webhooks and CDN purge.**
-  ([#2068](https://github.com/The-Verscienta/kiln_cms/pull/2068) · [long form](docs/changelog/unreleased.md#overlay-refire))
 
 ### Changed
 
@@ -160,64 +101,137 @@ Every summary line below that was shortened links to its own entry there.
   nullable uses are `anyOf: [$ref, null]`, so generated clients get one type.**
   ([#2106](https://github.com/The-Verscienta/kiln_cms/pull/2106) · [long form](docs/changelog/unreleased.md#media-snapshot-def))
 
-- **Related content comes back in the order the editor set: JSON:API
-  `include=related_<type>s`, GraphQL `related<Type>s` and `related_links`.**
-  ([#2061](https://github.com/The-Verscienta/kiln_cms/pull/2061) · [#2064](https://github.com/The-Verscienta/kiln_cms/pull/2064) · [long form](docs/changelog/unreleased.md#related-links-ordered))
-
-- **A single media custom field is picked from the library drawer, with a
-  thumbnail, instead of a dropdown of filenames.**
-  ([#2055](https://github.com/The-Verscienta/kiln_cms/pull/2055) · [long form](docs/changelog/unreleased.md#single-media-picker))
-
-- **Fired artifacts are gzipped: their `ETag` is now weak (`W/"…"`) and
-  `If-None-Match` is compared weakly.**
-  ([#2041](https://github.com/The-Verscienta/kiln_cms/pull/2041) · [long form](docs/changelog/unreleased.md#fired-artifacts-are-gzipped))
-
-- **The opt-in ML stack (`KILN_ML=1`) moves to Bumblebee 0.8, Axon 0.9 and
-  Nx/EXLA 1.0, clearing Axon's type-checker warnings.**
-  ([#2067](https://github.com/The-Verscienta/kiln_cms/pull/2067) · [long form](docs/changelog/unreleased.md#ml-stack-nx-1))
-
 - **ash_graphql 1.13.0 defaults an omitted `offset` to `0`, replacing Kiln's
   #1883 workaround and fixing offset-paged relationship lists too.**
   ([ash_graphql#480](https://github.com/ash-project/ash_graphql/issues/480))
+
+## [1.6.0] - 2026-10-28
+
+Long form: [docs/changelog/v1.6.0.md](docs/changelog/v1.6.0.md) —
+the 1.6.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
+### Upgrade notes
+
+- **Optional: run `mix kiln.media.resnapshot --apply` once after deploying**
+  so stored `:media` field values gain dimensions, focal point and variants;
+  fired artifacts converge by themselves.
+  ([#2040](https://github.com/The-Verscienta/kiln_cms/pull/2040) · [long form](docs/changelog/v1.6.0.md#media-resnapshot-upgrade))
+
+### Added
+
+- **The governance trail shows what readers saw: each publish and withdrawal
+  with its approver, CDN purge, each endpoint's delivery, `?as_of=` and chain.**
+  ([#2086](https://github.com/The-Verscienta/kiln_cms/pull/2086) · [long form](docs/changelog/v1.6.0.md#governance-what-readers-saw))
+
+- **Public bylines: a `:reference` field can be the page's schema.org `author`
+  or `contributor`, on the fired JSON-LD and Kiln's own pages; `ProfilePage`.**
+  ([#2087](https://github.com/The-Verscienta/kiln_cms/pull/2087) · [long form](docs/changelog/v1.6.0.md#bylines))
+
+- **A link-field filter can name the connection it means: `[target]=<id>` beside
+  the operators asks whether *that* record has the value.**
+  ([#2081](https://github.com/The-Verscienta/kiln_cms/pull/2081) · [long form](docs/changelog/v1.6.0.md#link-filter-target))
+
+- **Private custom fields: a value only the site's editors and admins see; and
+  a `:user` field type that names a person on the site, always private.**
+  ([#2085](https://github.com/The-Verscienta/kiln_cms/pull/2085) · [long form](docs/changelog/v1.6.0.md#private-fields))
+
+- **A type can fire `LiveBlogPosting`: coverage times plus its published
+  updates as `liveBlogUpdate`, newest first and capped.**
+  ([#2075](https://github.com/The-Verscienta/kiln_cms/pull/2075) · [long form](docs/changelog/v1.6.0.md#live-blog-posting))
+
+- **A Google News sitemap at `/news-sitemap.xml` for `NewsArticle` types:
+  the last 48 hours, at most 1,000 URLs, listed from `robots.txt`.**
+  ([#2077](https://github.com/The-Verscienta/kiln_cms/pull/2077) · [long form](docs/changelog/v1.6.0.md#news-sitemap))
+
+- **Headless draft mode: a preview token opens its draft on JSON:API and the fired-artifact read.**
+  ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887) · [long form](docs/changelog/v1.6.0.md#headless-draft-mode))
+
+- **A public change feed, server side: `KilnCMS.Delivery.Feed` publishes
+  `published` / `updated` / `withdrawn` per site over PubSub.**
+  ([#2069](https://github.com/The-Verscienta/kiln_cms/pull/2069) · [long form](docs/changelog/v1.6.0.md#change-feed-server))
+
+- **`Kiln.SafeFetch` (`kiln_plugin` 1.3): plugins get a covered, SSRF-safe way to fetch a URL they didn't write.**
+  ([#2070](https://github.com/The-Verscienta/kiln_cms/pull/2070) · [long form](docs/changelog/v1.6.0.md#plugin-safe-fetch))
+
+- **`mix kiln.fields.convert` moves JSON-in-text values into a `:group` field.**
+  ([#2052](https://github.com/The-Verscienta/kiln_cms/pull/2052) · [long form](docs/changelog/v1.6.0.md#fields-convert))
+
+- **Media in delivered content carries dimensions, MIME type, focal point and variants.**
+  ([#2040](https://github.com/The-Verscienta/kiln_cms/pull/2040) · [long form](docs/changelog/v1.6.0.md#media-snapshot-for-apps))
+
+- **A `:text` custom field can also be delivered as plain text.**
+  ([#2037](https://github.com/The-Verscienta/kiln_cms/pull/2037) · [long form](docs/changelog/v1.6.0.md#a-text-custom-field-can-also-be-delivered-as-plain-text))
+
+- **`?fields=` trims the fired `json` artifact; a guide to Kiln in a native app.**
+  ([#2039](https://github.com/The-Verscienta/kiln_cms/pull/2039) · [long form](docs/changelog/v1.6.0.md#fields-trims-the-fired-json-artifact-a-guide-to-kiln-in-a-native-app))
+
+- **A `:group` custom field holds structured rows: one object, or a list of
+  them, keyed by typed sub-fields, with every bad key reported by its path.**
+  ([#2036](https://github.com/The-Verscienta/kiln_cms/pull/2036) · [long form](docs/changelog/v1.6.0.md#group-custom-field))
+
+- **Group fields are edited in the fields admin and the content editor: sub-fields under the group, rows added, removed and dragged into order.**
+  ([#2053](https://github.com/The-Verscienta/kiln_cms/pull/2053) · [long form](docs/changelog/v1.6.0.md#group-field-editor))
+
+- **`KilnCMS.Firing.refire/3`: a covered way for an overlay to re-fire named records, with their dependents, webhooks and CDN purge.**
+  ([#2068](https://github.com/The-Verscienta/kiln_cms/pull/2068) · [long form](docs/changelog/v1.6.0.md#overlay-refire))
+
+### Changed
+
+- **Related content comes back in the order the editor set: JSON:API
+  `include=related_<type>s`, GraphQL `related<Type>s` and `related_links`.**
+  ([#2061](https://github.com/The-Verscienta/kiln_cms/pull/2061) · [#2064](https://github.com/The-Verscienta/kiln_cms/pull/2064) · [long form](docs/changelog/v1.6.0.md#related-links-ordered))
+
+- **A single media custom field is picked from the library drawer, with a
+  thumbnail, instead of a dropdown of filenames.**
+  ([#2055](https://github.com/The-Verscienta/kiln_cms/pull/2055) · [long form](docs/changelog/v1.6.0.md#single-media-picker))
+
+- **Fired artifacts are gzipped: their `ETag` is now weak (`W/"…"`) and
+  `If-None-Match` is compared weakly.**
+  ([#2041](https://github.com/The-Verscienta/kiln_cms/pull/2041) · [long form](docs/changelog/v1.6.0.md#fired-artifacts-are-gzipped))
+
+- **The opt-in ML stack (`KILN_ML=1`) moves to Bumblebee 0.8, Axon 0.9 and
+  Nx/EXLA 1.0, clearing Axon's type-checker warnings.**
+  ([#2067](https://github.com/The-Verscienta/kiln_cms/pull/2067) · [long form](docs/changelog/v1.6.0.md#ml-stack-nx-1))
 
 ### Fixed
 
 - **Similar content (near-duplicates, tag suggestions) reads a page's searchable
   custom fields, not only its blocks; a fields-only page is no longer "empty".**
-  ([#2096](https://github.com/The-Verscienta/kiln_cms/pull/2096) · [long form](docs/changelog/unreleased.md#similar-content-custom-fields))
+  ([#2096](https://github.com/The-Verscienta/kiln_cms/pull/2096) · [long form](docs/changelog/v1.6.0.md#similar-content-custom-fields))
 
 - **`mix setup` and `mix assets.build` work on macOS 27.2: tailwind 4.3.3, and
   `mix assets.setup` re-signs the binary ad hoc when its signature is invalid.**
-  ([#2082](https://github.com/The-Verscienta/kiln_cms/pull/2082) · [long form](docs/changelog/unreleased.md#tailwind-macos-resign))
+  ([#2082](https://github.com/The-Verscienta/kiln_cms/pull/2082) · [long form](docs/changelog/v1.6.0.md#tailwind-macos-resign))
 
 - **`mix setup`, `mix assets.setup` and `mix deps.compile` work on OTP 29.1.1,
   loading the CI/Docker `httpc` header-limit patch into Mix's VM only.**
-  ([#2080](https://github.com/The-Verscienta/kiln_cms/pull/2080) · [long form](docs/changelog/unreleased.md#httpc-header-limit-local))
+  ([#2080](https://github.com/The-Verscienta/kiln_cms/pull/2080) · [long form](docs/changelog/v1.6.0.md#httpc-header-limit-local))
 
 - **A release that rolls back no longer announces or notifies what it undid; post-publish broadcasts, notifications, audit anchors and cache busts wait for the release to commit, and content and type cache busts now always run after the commit.**
-  ([#2072](https://github.com/The-Verscienta/kiln_cms/pull/2072) · [long form](docs/changelog/unreleased.md#after-commit-effects))
+  ([#2072](https://github.com/The-Verscienta/kiln_cms/pull/2072) · [long form](docs/changelog/v1.6.0.md#after-commit-effects))
 
 - **`KILN_VECTOR_SEARCH_EXACT` / `KILN_HNSW_EF_SEARCH` no longer crash-loop a
   deployment whose compiled config sets the other `vector_scan:` mode.**
-  ([#2060](https://github.com/The-Verscienta/kiln_cms/pull/2060) · [long form](docs/changelog/unreleased.md#vector-scan-env-replaces-compiled-mode))
+  ([#2060](https://github.com/The-Verscienta/kiln_cms/pull/2060) · [long form](docs/changelog/v1.6.0.md#vector-scan-env-replaces-compiled-mode))
 
 ### Security
 
-- **bandit 1.14.1 fixes EEF-CVE-2026-116078 (HIGH): HTTP/2 request bodies sent
-  as 1-byte DATA frames amplified memory use. Kiln serves HTTP/2, so upgrade.**
-  ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099))
-
 - **ash 3.37.1 and ash_postgres 2.15.2 fix three tenancy advisories
   (EEF-CVE-2026-115627, -115635, -114214); Kiln was not exposed.**
-  ([#2091](https://github.com/The-Verscienta/kiln_cms/pull/2091) · [long form](docs/changelog/unreleased.md#ash-tenancy-advisories))
+  ([#2091](https://github.com/The-Verscienta/kiln_cms/pull/2091) · [long form](docs/changelog/v1.6.0.md#ash-tenancy-advisories))
 
 - **bandit 1.14.0, jose 1.11.13 and ash 3.37.2 fix twenty advisories,
   bandit's HTTP/2, HTTP/1 and WebSocket issues among them.**
-  ([#2094](https://github.com/The-Verscienta/kiln_cms/pull/2094) · [long form](docs/changelog/unreleased.md#bandit-jose-ash-advisories))
+  ([#2094](https://github.com/The-Verscienta/kiln_cms/pull/2094) · [long form](docs/changelog/v1.6.0.md#bandit-jose-ash-advisories))
 
 - **The release image upgrades its Debian packages and rebuilds them every
   release; v1.6.0-rc.1 had shipped 87 fixable findings from a cached layer.**
-  ([#2097](https://github.com/The-Verscienta/kiln_cms/pull/2097) · [long form](docs/changelog/unreleased.md#image-debian-packages))
+  ([#2097](https://github.com/The-Verscienta/kiln_cms/pull/2097) · [long form](docs/changelog/v1.6.0.md#image-debian-packages))
+
+- **bandit 1.14.1 fixes EEF-CVE-2026-116078 (HIGH): HTTP/2 request bodies sent
+  as 1-byte DATA frames amplified memory use. Kiln serves HTTP/2, so upgrade.**
+  ([#2099](https://github.com/The-Verscienta/kiln_cms/issues/2099), [#2100](https://github.com/The-Verscienta/kiln_cms/issues/2100))
 
 ## [1.5.1] - 2026-10-24
 
@@ -2983,7 +2997,8 @@ that `mix kiln.update` compares against.
   one that can't be described by a changelog diff.
   ([long form](docs/changelog/v0.1.0.md#if-your-project-pins-a-sha-from-before-this-tag-your-first-update-is-the-only))
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/The-Verscienta/kiln_cms/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.3.0...v1.4.0
