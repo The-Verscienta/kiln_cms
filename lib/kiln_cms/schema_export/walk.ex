@@ -2,14 +2,15 @@ defmodule KilnCMS.SchemaExport.Walk do
   @moduledoc """
   The JSON-Schema walk every type emitter shares.
 
-  `KilnCMS.SchemaExport.TypeScript` and `KilnCMS.SchemaExport.Swift` read the
-  exported **document**, never the block registry — so they cannot disagree
-  with the JSON Schema about what a field is. This module is the one reading
-  of that document: it resolves `$ref`/`$defs`, splits nullability out of a
-  `["T", "null"]` type list, recognises `const`/`enum`, the `oneOf` block
-  union, a nullable `$ref` (`anyOf: [$ref, null]`), closed versus open
-  objects and arrays, and hands each emitter the
-  same small, language-neutral model. An emitter only decides how to *spell*
+  `KilnCMS.SchemaExport.TypeScript`, `KilnCMS.SchemaExport.Swift` and
+  `KilnCMS.SchemaExport.Kotlin` read the exported **document**, never the
+  block registry — so they cannot disagree with the JSON Schema about what a
+  field is. This module is the one reading of that document: it resolves
+  `$ref`/`$defs`, splits nullability out of a `["T", "null"]` type list,
+  recognises `const`/`enum`, the `oneOf` block union, a nullable `$ref`
+  (`anyOf: [$ref, null]`), closed versus open objects and arrays, and hands
+  each emitter the same small, language-neutral model. An emitter only
+  decides how to *spell*
   it, which is why a new target language is a formatting module and not a
   second schema reader that might read `nullable` differently.
 

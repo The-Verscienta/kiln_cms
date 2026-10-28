@@ -57,6 +57,43 @@ carries the reasoning.
   `PATH`, the test suite compiles the output and decodes a real fired
   artifact with it ([native-apps.md → Swift models](../native-apps.md#swift-models)).
 
+<a id="kotlin-schema-export"></a>
+
+- **Kotlin models from the schema export.** `mix kiln.export.schema --format
+  kotlin [--package com.example.kiln] [--out Kiln.kt]` writes one
+  kotlinx.serialization file for an Android or JVM app, on the same shared
+  walker and with the same naming and nesting as the Swift output. Each
+  content type, block, shared definition (`MediaSnapshot`) and inline object
+  (a `:group` row) is a `@Serializable public data class`. Kotlin names are
+  `lowerCamelCase`, with `@SerialName` keeping the JSON keys exact. A nullable
+  or non-required key is nullable with a `= null` default. A string `enum` is
+  a `@JvmInline value class` over `String` with a constant per listed value,
+  so any value decodes. The block union is `sealed interface Block` with a
+  bundled `BlockSerializer` that switches on `_type` and keeps an unknown type
+  as `Block.Unknown(type, raw)`, and the content types are `Document`,
+  switching on `type`. The serializers name every member's serializer
+  directly, so there's no reflection for R8 to break. Open maps are
+  `JsonObject`, integers are `Long`, and the file bundles `KilnJson`
+  (`ignoreUnknownKeys = true`) to decode with. `--package` defaults to `kiln`
+  and is refused for other formats. When `kotlinc`, `kotlin` and
+  `KOTLINX_SERIALIZATION_CLASSPATH` (the runtime jars) are all present, the
+  test suite compiles the output with `-Werror` and decodes a real fired
+  artifact with it ([native-apps.md → Kotlin models](../native-apps.md#kotlin-models)).
+
+<a id="option-labels"></a>
+
+- **Display labels on `:select` options.** A new `option_labels` map on a
+  field definition names what an editor reads for each option — the stored
+  value stays the code, so filters, delivery and API clients are unchanged.
+  The editor's single select, the multiple select's tag picker (its chips
+  and suggestions), and select link fields and group sub-fields show labels,
+  and a write naming a label (case-insensitively) stores its value — so an
+  editor can type "Clear heat" into a tag picker. In the fields admin an
+  option's line takes `value | Label`, and a label may hold commas. Labels
+  are pruned to the current options and cleared off a field that is no
+  longer a select; one longer than a line is refused. Adds
+  `field_definitions.option_labels` (default `{}`).
+
 <a id="string-lists"></a>
 
 - **A `:string` field can hold a list of phrases.** With `multiple: true` its

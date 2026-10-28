@@ -122,6 +122,18 @@
     },
     {
       "allow_nil?": false,
+      "default": "%{}",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "option_labels",
+      "type": "map"
+    },
+    {
+      "allow_nil?": false,
       "default": "false",
       "generated?": false,
       "precision": null,
@@ -529,7 +541,7 @@
   "custom_indexes": [],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "D5B4FBCE93210018A1A149D6BD5A22F2FDE3F41BD4A35D7E3C130A87CCBC97D9",
+  "hash": "6ECCC6CD01AA826BB09EF6A99C00919BEAED7836E30439E9911FB39643446DD5",
   "identities": [
     {
       "all_tenants?": false,

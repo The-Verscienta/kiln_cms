@@ -17335,6 +17335,11 @@ msgstr "El título mide unos %{pixels}px de ancho, por encima de los %{max}px qu
 msgid "The update check is misconfigured: KILN_UPDATE_REPO must be owner/name, and KILN_UPDATE_RELEASES_URL a full http(s) URL. No check was made."
 msgstr "La comprobación de actualizaciones está mal configurada: KILN_UPDATE_REPO debe tener el formato propietario/nombre y KILN_UPDATE_RELEASES_URL ser una URL http(s) completa. No se realizó ninguna comprobación."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "The value before the bar is what is stored and delivered."
+msgstr "El valor antes de la barra es lo que se guarda y se entrega."
+
 #: lib/kiln_cms/cms/computed.ex
 #, elixir-autogen, elixir-format
 msgid "The value, or the fallback when the value is empty."
@@ -18119,6 +18124,11 @@ msgstr "Para enlazar contenido de otros tipos, usa un campo de referencia que en
 #, elixir-autogen, elixir-format
 msgid "To publish checkpoints outside the database, set this on the server:"
 msgstr "Para publicar los puntos de control fuera de la base de datos, define esto en el servidor:"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "To show editors a label, write it after a bar:"
+msgstr "Para mostrar una etiqueta a los editores, escríbala después de una barra:"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

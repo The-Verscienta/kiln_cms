@@ -17335,6 +17335,11 @@ msgstr ""
 msgid "The update check is misconfigured: KILN_UPDATE_REPO must be owner/name, and KILN_UPDATE_RELEASES_URL a full http(s) URL. No check was made."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "The value before the bar is what is stored and delivered."
+msgstr ""
+
 #: lib/kiln_cms/cms/computed.ex
 #, elixir-autogen, elixir-format
 msgid "The value, or the fallback when the value is empty."
@@ -18118,6 +18123,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "To publish checkpoints outside the database, set this on the server:"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "To show editors a label, write it after a bar:"
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex
