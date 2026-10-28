@@ -202,6 +202,13 @@ Block schemas are **versioned in the DSL** (`version N`) with declared **upcast 
 ### D16. Block-granular search & embeddings
 Each block is the natural unit for embedding and indexing. v2 moves from document-level to **per-block embeddings with ancestor context** (section title / parent block type — hierarchical embeddings) in a `BlockEmbedding` resource, plus **hybrid block-level search** (Postgres FTS / optional Meilisearch keyword + pgvector semantic + faceting by `block_type`, fused with RRF). "Find the relevant section" becomes a first-class, high-precision query. Builds on the shipped document-level pipeline (pgvector + Bumblebee `bge-small-en-v1.5`, HNSW; `docs/semantic-search-plan.md`).
 
+### Later decisions, recorded beside their plans
+Decisions after D16 live in the plan that argued them.
+
+- **D17** — dynamic content types alongside compiled ones: [`docs/dynamic-content-types-plan.md`](docs/dynamic-content-types-plan.md).
+- **D18** — the `Kiln.Plugin` behaviour: [`docs/plugin-system-plan.md`](docs/plugin-system-plan.md).
+- **D19–D21** — content organization: one hierarchical term vocabulary (D19, proposed, #1595), references as edges (D20, adopted in capability), and **D21, content gets a tree** (locked, shipped 1.1: `parent_id`/`position`, `[ancestors]` aliases, subtree moves re-derived in a job): [`docs/content-organization-plan.md` §7](docs/content-organization-plan.md#7-workstream-e--the-structure-decision-1597). The subtree-move cost D21 asked to have measured is in [`docs/benchmarks.md`](docs/benchmarks.md#content-tree-moving-a-large-subtree).
+
 ---
 
 ## Kiln v2: The Typed, Addressable Content Tree (Architecture North Star)

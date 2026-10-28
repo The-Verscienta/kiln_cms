@@ -184,3 +184,41 @@ network are 2.2 and are not measured here.
 | `BENCH_WORK` | a `mktemp -d` | where logs, `results.json` and `results.md` go |
 | `POOL_SIZE` | 10 | the Repo pool |
 | corpus | as `api_latency.sh` | `BENCH_PAGES`, `BENCH_POSTS`, `BENCH_DRAFTS` |
+
+# Subtree-move benchmark
+
+What moving a section with a large subtree costs (#1903), on a type with many
+rows: the cost D21 bounded but never measured. The recorded results are in
+[`docs/benchmarks.md`](../../docs/benchmarks.md#content-tree-moving-a-large-subtree).
+
+```bash
+export PATH="/opt/homebrew/opt/erlang/bin:/opt/homebrew/bin:$PATH"
+scripts/benchmarks/subtree_move.sh                                    # ~10 min with a warm _build/prod
+BENCH_ROWS=2000 BENCH_SUBTREES=100,500 scripts/benchmarks/subtree_move.sh   # a smoke run
+```
+
+Same prerequisites and throwaway database as `api_latency.sh`, without the
+corpus: `subtree_move.exs` builds its own tree. Per leg it creates a dynamic
+type with `alias_pattern: "/[ancestors]/[slug]"`, one document through the
+domain actions, and clones that document with SQL into a published section of
+that leg's `BENCH_SUBTREES` size (children of 100, two levels below the section) and
+draft roots padding the type to `BENCH_ROWS`. Every alias is set to what the
+pattern derives where the document sits. It then re-parents the section under
+another root and runs `RegenerateSubtreeAliases.perform/1` in a task, as Oban
+would.
+
+| Number | How |
+|---|---|
+| Job | wall time of `perform/1` |
+| Queues idle | from the job's start until no Oban job is `available` or `executing`: the re-fires and index updates the rewrites enqueued |
+| Aliases rewritten, Redirects | rows whose alias now starts under the new root; `redirects` rows written |
+| Queries, Query ms | `[:kiln_cms, :repo, :query]` events from the job's own process, and their total time |
+| Job peak | the job process's memory, sampled every 2 ms; BEAM growth is `:erlang.memory(:total)` over the same window |
+| Whole-type read, Subtree CTE | the job's read before #1903 (every `(id, parent_id, slug)` of the storage table) and after (`ContentTree.subtree/3`), timed on their own. On a build without `subtree/3` the CTE column is `–` |
+
+| Variable | Default | |
+|---|---|---|
+| `BENCH_ROWS` | 50000 | documents of the type, per leg |
+| `BENCH_SUBTREES` | `100,1000,10000` | one leg per subtree size |
+| `BENCH_WORK` | a `mktemp -d` | where logs, `results.json` and `results.md` go |
+| `POOL_SIZE` | 10 | the Repo pool |

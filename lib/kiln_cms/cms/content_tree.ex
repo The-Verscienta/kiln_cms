@@ -66,6 +66,10 @@ defmodule KilnCMS.CMS.ContentTree do
   here, or a materialized path added as a cache with the walk as its oracle.
   Both are additive. Choosing one now, on a guess about which read gets hot,
   would be the expensive mistake.
+
+  The first bulk reader was the move itself: `subtree/3` and `chain/3` are those
+  CTEs, and a subtree move reads its subtree with them rather than the whole
+  type (#1903). The measured cost of a large move is in `docs/benchmarks.md`.
   """
 
   # Five levels. `/docs/guides/advanced/flags` is four and already a deep site;
@@ -154,6 +158,111 @@ defmodule KilnCMS.CMS.ContentTree do
 
   defp climb(_by_id, _id, acc), do: acc
 
+  @doc """
+  `id` and every document beneath it, as `%{id, parent_id, slug}` rows — one
+  recursive CTE scoped to the subtree (#1903), so a move under a type with tens
+  of thousands of rows reads the rows it moved and not the type.
+
+  `resource` is the storage resource (`KilnCMS.CMS.Slugs.storage_resource/1`).
+  Each level is an index scan on `parent_id`. The recursion stops at
+  `max_depth/0` levels below `id`, so a cycle committed by two concurrent moves
+  terminates rather than spins; a row reached twice that way is returned once.
+
+  Unauthorized and tenant-scoped by `org_id`: a subtree has to be complete to
+  re-derive its paths, a draft included (see
+  `KilnCMS.CMS.Workers.RegenerateSubtreeAliases`). Ids and slugs only.
+  """
+  @spec subtree(module(), Ecto.UUID.t(), Ecto.UUID.t()) :: [
+          %{id: Ecto.UUID.t(), parent_id: Ecto.UUID.t() | nil, slug: String.t() | nil}
+        ]
+  def subtree(resource, id, org_id) do
+    %{rows: rows} =
+      KilnCMS.Repo.query!(
+        """
+        WITH RECURSIVE sub AS (
+          SELECT id, parent_id, slug, 0 AS depth
+          FROM #{table(resource)} WHERE id = $1 AND org_id = $2
+          UNION ALL
+          SELECT c.id, c.parent_id, c.slug, sub.depth + 1
+          FROM #{table(resource)} c JOIN sub ON c.parent_id = sub.id
+          WHERE c.org_id = $2 AND sub.depth < $3
+        )
+        SELECT id, parent_id, slug FROM sub
+        """,
+        [dump_uuid(id), dump_uuid(org_id), @max_depth]
+      )
+
+    rows
+    |> Enum.map(fn [id, parent_id, slug] ->
+      %{id: load_uuid(id), parent_id: parent_id && load_uuid(parent_id), slug: slug}
+    end)
+    |> Enum.uniq_by(& &1.id)
+  end
+
+  @doc """
+  The slugs of `id` and its ancestors, root first — the `[ancestors]` chain of a
+  document whose parent is `id`. `[]` for `nil` (a root). One recursive CTE,
+  bounded like `subtree/3`.
+  """
+  @spec chain(module(), Ecto.UUID.t() | nil, Ecto.UUID.t()) :: [String.t()]
+  def chain(_resource, nil, _org_id), do: []
+
+  def chain(resource, id, org_id) do
+    %{rows: rows} =
+      KilnCMS.Repo.query!(
+        """
+        WITH RECURSIVE up AS (
+          SELECT id, parent_id, slug, 0 AS depth
+          FROM #{table(resource)} WHERE id = $1 AND org_id = $2
+          UNION ALL
+          SELECT p.id, p.parent_id, p.slug, up.depth + 1
+          FROM #{table(resource)} p JOIN up ON p.id = up.parent_id
+          WHERE p.org_id = $2 AND up.depth < $3
+        )
+        SELECT slug FROM up ORDER BY depth DESC
+        """,
+        [dump_uuid(id), dump_uuid(org_id), @max_depth]
+      )
+
+    Enum.map(rows, fn [slug] -> slug end)
+  end
+
+  @doc """
+  `id => [ancestor slug, …]` (root first) for every row of `rows`, a subtree as
+  `subtree/3` returns it rooted at `root_id`, given the chain above the root.
+
+  Linear in the subtree: each row's chain is its parent's plus one segment,
+  walked down from the root with a work list that is prepended to.
+  """
+  @spec subtree_chains([map()], Ecto.UUID.t(), [String.t()]) :: %{Ecto.UUID.t() => [String.t()]}
+  def subtree_chains(rows, root_id, root_chain) do
+    by_parent = Enum.group_by(rows, & &1.parent_id)
+    slugs = Map.new(rows, &{&1.id, &1.slug})
+    descend(by_parent, slugs, [{root_id, root_chain}], %{})
+  end
+
+  defp descend(_by_parent, _slugs, [], acc), do: acc
+
+  defp descend(by_parent, slugs, [{id, chain} | rest], acc) do
+    if Map.has_key?(acc, id) do
+      descend(by_parent, slugs, rest, acc)
+    else
+      below = chain ++ [Map.get(slugs, id)]
+
+      work =
+        by_parent
+        |> Map.get(id, [])
+        |> Enum.reduce(rest, fn child, work -> [{child.id, below} | work] end)
+
+      descend(by_parent, slugs, work, Map.put(acc, id, chain))
+    end
+  end
+
+  defp table(resource), do: AshPostgres.DataLayer.Info.table(resource)
+
+  defp dump_uuid(id), do: Ecto.UUID.dump!(id)
+  defp load_uuid(raw), do: Ecto.UUID.load!(raw)
+
   defp tree_rows(type, opts) do
     KilnCMS.CMS.ContentTypes.list!(
       type,
@@ -191,8 +300,10 @@ defmodule KilnCMS.CMS.ContentTree do
     if Map.has_key?(seen, id) do
       collect(by_parent, rest, seen)
     else
-      children = by_parent |> Map.get(id, []) |> Enum.map(& &1.id)
-      collect(by_parent, rest ++ children, Map.put(seen, id, []))
+      # Prepended, not appended: `rest ++ children` copied the whole work list
+      # per node, quadratic in the subtree (#1903). Order is irrelevant to a set.
+      work = by_parent |> Map.get(id, []) |> Enum.reduce(rest, &[&1.id | &2])
+      collect(by_parent, work, Map.put(seen, id, []))
     end
   end
 
