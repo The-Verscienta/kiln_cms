@@ -126,7 +126,7 @@ carries the reasoning.
 
 <a id="swiftui-reader"></a>
 
-- **A SwiftUI example (#PRNUM).** `examples/swiftui-reader` is a Swift package
+- **A SwiftUI example (#2124).** `examples/swiftui-reader` is a Swift package
   (iOS 17, macOS 14) that reads a Kiln site the way
   [native-apps.md](../native-apps.md) describes, so a mobile team evaluating
   Kiln can see the intended path in code. It checks in the `Kiln.swift` that

@@ -86,7 +86,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`examples/swiftui-reader`: a SwiftUI app on generated Swift models and a
   `/api/sync` mirror, with `:group` rows, Portable Text and focal-point crops.**
-  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#swiftui-reader))
+  ([#2124](https://github.com/The-Verscienta/kiln_cms/pull/2124) · [long form](docs/changelog/unreleased.md#swiftui-reader))
 
 - **Sections in the Custom fields panel: a field's `section` files it under a
   collapsible heading; only sections already holding values start open.**

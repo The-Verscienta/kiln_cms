@@ -224,7 +224,7 @@ a file cache kept fresh by `/api/sync`. It is smaller than a client SDK, and
 mobile teams evaluating Kiln look for one. Write it after §1 and §3 land, so it
 shows rows and generated types rather than workarounds.
 
-**Done** in #PRNUM: [`examples/swiftui-reader`](https://github.com/The-Verscienta/kiln_cms/tree/main/examples/swiftui-reader).
+**Done** in #2124: [`examples/swiftui-reader`](https://github.com/The-Verscienta/kiln_cms/tree/main/examples/swiftui-reader).
 It shows `:group` rows, Portable Text rendered to `AttributedString`, the
 media snapshot's variants and focal point, `?fields=`, `ETag` revalidation,
 and the sync cursor and restart rules from [native-apps.md](../native-apps.md).
