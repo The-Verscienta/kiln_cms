@@ -150,7 +150,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A bare `GET /api` redirects (302) to `/developers`, the API summary,
   instead of answering 404; every `/api/*` route is unchanged.**
-  ([#1885](https://github.com/The-Verscienta/kiln_cms/issues/1885))
+  ([#2114](https://github.com/The-Verscienta/kiln_cms/pull/2114))
 
 - **The schema export states the media snapshot once, as `$defs.media_snapshot`;
   nullable uses are `anyOf: [$ref, null]`, so generated clients get one type.**
