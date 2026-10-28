@@ -5,6 +5,28 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `kiln_client-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+### Changed (breaking)
+
+- **Reads return `%KilnClient.Error{}` too.** `list/2`, `one/3`, `by_ids/3`,
+  the searches, `artifact/3`, `sync/1`, the revision and release reads, and
+  `restore_revision/4` now fail with `{:error, %KilnClient.Error{}}`, the same
+  struct the writes and `graphql/3` already returned, with the same `:reason`,
+  `:status`, `:code`, `:errors`, `:retry_after`, `:method` and `:path`. This
+  is the JS client's model (one `KilnError` hierarchy), and it means one
+  error handler covers every call. Upgrading:
+
+  | Before (0.4) | Now |
+  |---|---|
+  | `{:error, {:http_status, status, body}}` | `{:error, %KilnClient.Error{status: status, body: body}}` |
+  | `{:error, %Req.TransportError{} = e}` (any exception) | `{:error, %KilnClient.Error{reason: :transport, exception: e}}` |
+  | `one/3`: `{:error, :not_found}` | `{:error, %KilnClient.Error{reason: :not_found, status: 404}}` |
+
+  `KilnClient.Error.normalize/1` still converts the old shapes, so code that
+  already normalized keeps working unchanged. A 404 from a read is still not
+  logged.
+
 ## 0.4.1
 
 ### Security

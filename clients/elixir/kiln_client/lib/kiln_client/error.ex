@@ -1,6 +1,6 @@
 defmodule KilnClient.Error do
   @moduledoc """
-  The error the write functions and `KilnClient.graphql/3` return, as
+  The error every `KilnClient` function returns, reads and writes alike, as
   `{:error, %KilnClient.Error{}}` — never raised by the client itself, but an
   exception so a caller can `raise` it as-is.
 
@@ -27,10 +27,9 @@ defmodule KilnClient.Error do
   %{"pointer" => …}, "meta" => …}]`), or the GraphQL errors for `:graphql`;
   `:code` is its first entry's code.
 
-  The read functions keep their original `{:error, {:http_status, status,
-  body}}` shape for compatibility — `normalize/1` converts one of those (or a
-  transport exception, or `:not_found` from `KilnClient.one/3`) into this struct
-  so one error handler can serve both.
+  Before 0.5.0 the read functions returned `{:http_status, status, body}`, a
+  bare transport exception, or (from `KilnClient.one/3`) `:not_found`.
+  `normalize/1` still converts those, for code that stored or wrapped them.
   """
 
   @type reason ::
@@ -153,10 +152,11 @@ defmodule KilnClient.Error do
   end
 
   @doc """
-  Convert any error a `KilnClient` function returns into this struct: the
-  read functions' `{:http_status, status, body}`, a transport exception,
-  `KilnClient.one/3`'s `:not_found`, or an existing `%KilnClient.Error{}`
-  (returned unchanged).
+  Convert an error into this struct. An existing `%KilnClient.Error{}`, which
+  is what every function returns since 0.5.0, comes back unchanged; the
+  pre-0.5.0 read shapes (`{:http_status, status, body}`, a transport
+  exception, `:not_found`) are converted, so code written against them keeps
+  working.
   """
   @spec normalize(term()) :: t()
   def normalize(%__MODULE__{} = error), do: error
