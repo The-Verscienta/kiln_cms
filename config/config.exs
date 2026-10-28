@@ -815,8 +815,10 @@ config :kiln_cms, KilnCMS.Mailer, adapter: Swoosh.Adapters.Local
 # each fired :web/:json/:json_ld artifact gets a C2PA-*style* detached manifest:
 # a signed SHA-256 hash bound to a claim (signer identity, AI-generation
 # disclosure, origin, version, timestamp), verifiable via /api/provenance/*.
-# **Off by default** — no manifest is produced and the verify endpoints 404, so
-# the lean install pays nothing. See docs/provenance.md.
+# **On by default since 1.7** (#1929): /setup generates a signing key unless one
+# is mounted, and an install with no key serves its artifacts `unsigned` rather
+# than refusing them. `enabled: false` (KILN_PROVENANCE_ENABLED=false) produces
+# no manifest and 404s the endpoints. See docs/provenance.md.
 #
 # `signing_key` reuses KilnCMS.Keys (the DKIM signing infra): `:dkim` shares the
 # mail signing key, or point at a dedicated content-signing key with
@@ -829,7 +831,7 @@ config :kiln_cms, KilnCMS.Mailer, adapter: Swoosh.Adapters.Local
 # and register a rotated-out key without a rebuild. Values set there override
 # the defaults below.
 config :kiln_cms, KilnCMS.Provenance,
-  enabled: false,
+  enabled: true,
   # Human-readable signer identity; defaults to :site_name when unset.
   signer: nil,
   # Origin URL recorded in the claim; defaults to :public_base_url when unset.

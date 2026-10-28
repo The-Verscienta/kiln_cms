@@ -7813,6 +7813,7 @@ msgstr "Général"
 msgid "Generate"
 msgstr "Générer"
 
+#: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
 msgid "Generate a key"
@@ -7823,6 +7824,11 @@ msgstr "Générer une clé"
 #, elixir-autogen, elixir-format
 msgid "Generate key"
 msgstr "Générer une clé"
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Generating…"
+msgstr "Génération…"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -8283,6 +8289,11 @@ msgstr "Nombre de mots du texte."
 #, elixir-autogen, elixir-format
 msgid "How often an event repeats, such as every Tuesday. Use it alongside a date & time range, which says when it starts."
 msgstr "La fréquence de répétition d'un événement, par exemple chaque mardi. À utiliser avec un intervalle de date et heure, qui indique le début."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "How provenance works"
+msgstr "Fonctionnement de la provenance"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -9806,6 +9817,11 @@ msgstr "Autres surfaces"
 #, elixir-autogen, elixir-format
 msgid "Most viewed"
 msgstr "Les plus vues"
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Mount a key and set KILN_PROVENANCE_KEY_FILE to its path, or generate one here. Then re-fire existing content to sign it."
+msgstr "Montez une clé et indiquez son chemin dans KILN_PROVENANCE_KEY_FILE, ou générez-en une ici. Régénérez ensuite le contenu existant pour le signer."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -12745,6 +12761,11 @@ msgstr "Publié mais pas encore indexé, il n'y a donc rien à comparer."
 msgid "Published content and fired artifacts are cached in memory and invalidated automatically when you edit. Flush them by hand when something changed that Kiln cannot see — a config change, a template deploy, or an external source feeding a custom block."
 msgstr "Le contenu publié et les artefacts générés sont mis en cache en mémoire et invalidés automatiquement lors d'une modification. Videz-les à la main quand quelque chose a changé que Kiln ne peut pas voir : un changement de configuration, un déploiement de gabarits ou une source externe alimentant un bloc personnalisé."
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Published content is served unsigned: there is no provenance signing key."
+msgstr "Le contenu publié est servi sans signature : il n’y a pas de clé de signature de provenance."
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Published content is taken back to draft at this time."
@@ -15375,6 +15396,11 @@ msgstr "Cette session a été fermée."
 msgid "Signing key"
 msgstr "Clé de signature"
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signing key generated. New publishes are signed; re-fire existing content to sign it too."
+msgstr "Clé de signature générée. Les nouvelles publications sont signées ; régénérez le contenu existant pour le signer aussi."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Signing out…"
@@ -17208,6 +17234,11 @@ msgstr "Le jeu de règles fourni exclut délibérément les mots publicitaires s
 #, elixir-autogen, elixir-format
 msgid "The sidebar could not be changed."
 msgstr "La barre latérale n'a pas pu être modifiée."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "The signing key could not be generated."
+msgstr "La clé de signature n’a pas pu être générée."
 
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format

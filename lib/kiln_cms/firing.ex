@@ -55,6 +55,14 @@ defmodule KilnCMS.Firing do
       define :refire, action: :refire, args: [:document_type, :document_ids]
     end
 
+    # The generated content-signing key (#1929). Read by
+    # `KilnCMS.Provenance.stored_key/0` as the system; generating is
+    # platform-admin (`/setup` does it as the admin it creates).
+    resource KilnCMS.Provenance.Settings do
+      define :generate_provenance_key, action: :generate
+      define :get_provenance_settings, action: :read, get?: true
+    end
+
     resource KilnCMS.Firing.ReferenceEdge do
       define :edges_from, action: :from_source, args: [:from_type, :from_id]
       define :edges_to, action: :to_target, args: [:to_type, :to_id]

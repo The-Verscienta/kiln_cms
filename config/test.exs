@@ -387,3 +387,9 @@ config :kiln_cms, :tenant_org_tracking, false
 # refusing their writes and clamping their served `frame-ancestors` depending
 # on test order. Tests of auto set `:auto` and the verdict themselves.
 config :kiln_cms, :embed_origins_locked, false
+
+# Provenance is on by default from 1.7 (#1929), and with it every fire signs
+# its artifacts when a key resolves. Off here so the suite does not depend on a
+# key in the developer's shell or a generated one left in the test database; the
+# provenance tests turn it on and supply a key themselves.
+config :kiln_cms, KilnCMS.Provenance, enabled: false

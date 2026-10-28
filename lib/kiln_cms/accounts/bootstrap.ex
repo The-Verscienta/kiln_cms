@@ -74,7 +74,7 @@ defmodule KilnCMS.Accounts.Bootstrap do
           {:ok, User.t()} | {:error, :already_bootstrapped | term()}
   def create_first_admin(attrs) when is_map(attrs) do
     case Repo.transaction(fn -> locked_create(attrs) end) do
-      {:ok, user} -> {:ok, reload!(user)}
+      {:ok, user} -> {:ok, user |> reload!() |> ensure_provenance_key()}
       {:error, :already_bootstrapped} -> {:error, :already_bootstrapped}
       {:error, error} -> {:error, error}
     end
@@ -94,6 +94,24 @@ defmodule KilnCMS.Accounts.Bootstrap do
     case User |> Ash.Changeset.for_create(:bootstrap_admin, attrs) |> Ash.create() do
       {:ok, user} -> user
       {:error, error} -> Repo.rollback(error)
+    end
+  end
+
+  # Provenance is on by default (#1929): a new install signs from its first
+  # publish, with a key generated here as the admin just created, unless the
+  # operator mounted one. After the transaction, and never fatal: an install
+  # whose key could not be made still works, serving `unsigned` artifacts with
+  # a console banner, which is exactly what an upgraded install without a key
+  # does.
+  defp ensure_provenance_key(admin) do
+    case KilnCMS.Provenance.ensure_key(admin) do
+      {:ok, _done} ->
+        admin
+
+      {:error, error} ->
+        require Logger
+        Logger.warning("Setup could not generate a provenance signing key: #{inspect(error)}")
+        admin
     end
   end
 

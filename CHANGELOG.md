@@ -61,7 +61,17 @@ Every summary line below that was shortened links to its own entry there.
   fired artifacts converge by themselves.
   ([#2040](https://github.com/The-Verscienta/kiln_cms/pull/2040) · [long form](docs/changelog/unreleased.md#media-resnapshot-upgrade))
 
+### Breaking
+
+- **`KILN_PROVENANCE_ENABLED` now defaults to `true`: every fire signs, and `/api/provenance/*`
+  answers. Set it to `false` to keep 1.6's behaviour; with no key, nothing is refused.**
+  ([#1929](https://github.com/The-Verscienta/kiln_cms/issues/1929) · [long form](docs/changelog/unreleased.md#provenance-default-upgrade))
+
 ### Added
+
+- **`GET /api/provenance/verify/:type/:slug` says whether a published artifact
+  is `verified`, `tampered` or `unsigned`, checked against the manifest stored when it fired.**
+  ([#1929](https://github.com/The-Verscienta/kiln_cms/issues/1929) · [long form](docs/changelog/unreleased.md#provenance-on-by-default))
 
 - **A plain-text field can keep its paragraph breaks: "Keep paragraph breaks"
   delivers `custom_fields_plain.<name>` with `\n\n` between paragraphs.**

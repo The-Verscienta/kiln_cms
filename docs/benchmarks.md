@@ -13,6 +13,33 @@ decision, not an automatic blocker: the maintainer decides.
 | [Headless API p95 under 50 ms](#headless-api-p95-under-50-ms) | **Partly met** (measured 2026-09-27). Delivery, JSON:API and GraphQL reads: p95 under 43 ms with 50 concurrent clients. Search, re-measured 2026-10-02 after #1725: 14–19 ms alone and 18–60 ms with 10 clients (a common word misses, a rare one meets), 197–231 ms with 50 ([search, after #1725](#search-after-1725)). The sync API initial page, which missed from 10, is under 15 ms p95 from 10 since #1713 (re-measured 2026-10-02) |
 | [Zero-downtime releases](#zero-downtime-releases) | **Not shown.** Migrations are now held to expand/contract in CI (#1716), but no swap has been run under traffic. The maintainer accepted shipping 1.0 without it (decision 2026-10-02) |
 
+## Provenance: share of published artifacts signed
+
+The number release 1.7 of the
+[path forward](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/path-forward.md)
+has to produce (#1929): of the published documents' fired artifacts, the
+share carrying a manifest this instance can verify.
+
+**First reading: pending.** It is taken on kilncms.dev after the 1.7 deploy
+and its re-fire sweep, then recorded here. Until then the expectation is
+structural: an install that has a key and has re-fired is at 100%, because
+every fire signs, and an install with no key is at 0% and shows a banner.
+
+### How it is measured
+
+`KilnCMS.Provenance.coverage/1` counts `published_artifacts` rows on the
+`json` surface (one per published document): every row, the rows with a
+stored manifest, and the rows whose manifest names a key the instance can
+resolve (active or registered retired). The share is the last over the first.
+
+```bash
+mix kiln.provenance.coverage
+/app/bin/kiln_cms rpc "IO.inspect(KilnCMS.Provenance.coverage())"
+```
+
+The same three numbers are emitted every five minutes as
+`kiln_cms.provenance.coverage.{share,verifiable,total}` telemetry.
+
 ## Live delivery: unpublish to last endpoint
 
 The path forward's first claim is that a correction reaches every page a site

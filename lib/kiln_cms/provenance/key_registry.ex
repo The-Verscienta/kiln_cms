@@ -173,6 +173,7 @@ defmodule KilnCMS.Provenance.KeyRegistry do
       |> Kernel.++(from(config, :retired_key_files))
       |> Enum.map(fn {from, source} -> resolve(from, source) end)
       |> Enum.reject(&is_nil/1)
+      |> Kernel.++(stored_but_replaced())
       # The same key can legitimately be registered both ways for a deploy or two
       # while an operator moves a retired key out of source config and into the
       # env var. Publishing it twice on /api/provenance/public-key would just tell
@@ -182,6 +183,24 @@ defmodule KilnCMS.Provenance.KeyRegistry do
   end
 
   defp from(config, key), do: Enum.map(Keyword.get(config, key, []), &{key, &1})
+
+  # The key `/setup` generated (#1929), once a mounted key has replaced it as
+  # the signer: everything it signed keeps verifying with no registration step,
+  # because the instance still holds it. While it is still the active key it is
+  # `current/0`'s, not a retired one.
+  defp stored_but_replaced do
+    with {:ok, pem} <- KilnCMS.Provenance.stored_key(),
+         {:ok, private_key} <- Keys.rsa_private_key(pem) do
+      stored = describe(Keys.rsa_public_key(private_key))
+
+      case current() do
+        {:ok, %{key_id: key_id}} when key_id == stored.key_id -> []
+        _replaced_or_none -> [stored]
+      end
+    else
+      _none -> []
+    end
+  end
 
   @doc """
   The public key that should verify a signature bearing `key_id`.

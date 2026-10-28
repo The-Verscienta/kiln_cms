@@ -862,10 +862,13 @@ defmodule KilnCMSWeb.Router do
     get "/ask", AskController, :ask
 
     # Signed / provenance-verified content (#340). C2PA-*style* detached
-    # manifests over fired artifacts; all 404 unless provenance is enabled.
+    # manifests over fired artifacts; all 404 when provenance is switched off.
     # `public-key` is registered before the `:type/:slug` pattern (different
-    # arity — no shadowing, but kept first for clarity).
+    # arity — no shadowing, but kept first for clarity). `verify/:type/:slug`
+    # (#1929) goes first too: a document whose slug is `verify` would
+    # otherwise match `:type/:slug/verify` with its type in the slug's place.
     get "/provenance/public-key", ProvenanceController, :public_key
+    get "/provenance/verify/:type/:slug", ProvenanceController, :status
     get "/provenance/:type/:slug", ProvenanceController, :manifest
     get "/provenance/:type/:slug/verify", ProvenanceController, :verify
   end

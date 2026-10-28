@@ -54,6 +54,7 @@ defmodule KilnCMSWeb.OverviewLive do
      # would advertise a page the reader cannot open.
      |> assign(:platform_admin?, KilnCMSWeb.LiveUserAuth.platform_admin?(socket))
      |> assign_backup_warning()
+     |> assign_provenance_warning()
      |> assign_blocked_experiments()
      |> assign(:page_title, gettext("Home"))
      |> load_metrics()
@@ -108,6 +109,32 @@ defmodule KilnCMSWeb.OverviewLive do
   # The checklist's "Create one" (step 2), for a site with no Home page — one
   # that skipped `/setup` (seeded, or upgraded from before it made one), or
   # whose starter page was deleted.
+  # The strip's button (#1929). The write is the platform-admin-only
+  # `:generate` action run as this user, so the policy is the gate however the
+  # event arrives; `ensure_key/1` also declines when a key already resolves.
+  def handle_event("generate_provenance_key", _params, socket) do
+    case KilnCMS.Provenance.ensure_key(socket.assigns.actor) do
+      {:ok, _done} ->
+        {:noreply,
+         socket
+         |> assign_provenance_warning()
+         |> put_flash(
+           :info,
+           gettext(
+             "Signing key generated. New publishes are signed; re-fire existing content to sign it too."
+           )
+         )}
+
+      {:error, error} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           ash_error_message(error, fallback: gettext("The signing key could not be generated."))
+         )}
+    end
+  end
+
   def handle_event("create_home", _params, socket) do
     %{actor: actor, current_org: org} = socket.assigns
     brand = Branding.for_org(org)
@@ -465,6 +492,47 @@ defmodule KilnCMSWeb.OverviewLive do
             )}
           </span>
           <.backup_strip_links />
+        </.overview_strip>
+
+        <%!-- Unsigned content (#1929): provenance is on but no key resolves,
+              so artifacts are served `unsigned`. A warning, not an error:
+              nothing is refused. Names the one variable to set, and offers the
+              zero-ops alternative /setup takes on a new install. --%>
+        <.overview_strip
+          :if={@provenance_unsigned?}
+          id="overview-provenance-warning"
+          tone_class="border-warning/30 bg-warning/5"
+          icon="hero-finger-print"
+          icon_class="text-warning-ink"
+        >
+          <span class="block text-sm font-medium">
+            {gettext("Published content is served unsigned: there is no provenance signing key.")}
+          </span>
+          <span class="block text-xs text-base-content/70">
+            {gettext(
+              "Mount a key and set KILN_PROVENANCE_KEY_FILE to its path, or generate one here. Then re-fire existing content to sign it."
+            )}
+          </span>
+          <span class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-medium">
+            <button
+              type="button"
+              id="overview-provenance-generate"
+              phx-click="generate_provenance_key"
+              phx-disable-with={gettext("Generating…")}
+              class="underline"
+            >
+              {gettext("Generate a key")}
+            </button>
+            <a
+              href="https://github.com/The-Verscienta/kiln_cms/blob/main/docs/provenance.md"
+              target="_blank"
+              rel="noopener"
+              class="underline"
+            >
+              {gettext("How provenance works")}
+              <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+            </a>
+          </span>
         </.overview_strip>
 
         <%!-- An experiment that cannot convert (#1008). Distinct from the
@@ -944,6 +1012,19 @@ defmodule KilnCMSWeb.OverviewLive do
   # One phrase per reason atom, shared with the experiments panel (#1087) —
   # `KilnCMSWeb.ExperimentPhrases`, so the two surfaces cannot grow separate lists.
   defp blocked_headline(reason), do: KilnCMSWeb.ExperimentPhrases.blocked_headline(reason)
+
+  # Provenance is on by default (#1929), and an install upgraded without a key
+  # serves every artifact `unsigned`. Platform-admin only, like the backup
+  # strip: the key is instance-wide, and neither the variable nor the button is
+  # something an org admin can act on.
+  defp assign_provenance_warning(socket) do
+    assign(
+      socket,
+      :provenance_unsigned?,
+      socket.assigns.platform_admin? and KilnCMS.Provenance.enabled?() and
+        not KilnCMS.Provenance.key_available?()
+    )
+  end
 
   defp assign_backup_warning(socket) do
     status = KilnCMS.Backups.status()

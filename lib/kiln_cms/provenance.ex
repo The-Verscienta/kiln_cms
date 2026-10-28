@@ -15,8 +15,14 @@ defmodule KilnCMS.Provenance do
   and the signature is deterministic. A later phase may persist manifests at
   fire-time to pin the signer/key as-of-publish (see docs/provenance.md).
 
-  **Off by default.** With `enabled: false` no manifest is produced and the
-  verification endpoints 404 — the lean install pays nothing.
+  **On by default since 1.7** (#1929). `/setup` generates a signing key
+  (`KilnCMS.Provenance.Settings`) unless one is mounted, and every fire stores
+  the artifact's signed manifest beside it (`sign_fired/4`), so
+  `GET /api/provenance/verify/:type/:slug` can tell `verified` from `tampered`.
+  An install with no key keeps working: its artifacts are `unsigned`, never
+  refused, and the console says which variable to set. `enabled: false`
+  (`KILN_PROVENANCE_ENABLED=false`) still turns all of it off and 404s the
+  endpoints.
   """
 
   alias KilnCMS.Firing.Engine
@@ -28,7 +34,123 @@ defmodule KilnCMS.Provenance do
 
   @doc "Whether signed provenance is enabled (`config … KilnCMS.Provenance, enabled:`)."
   @spec enabled?() :: boolean()
-  def enabled?, do: Keyword.get(config(), :enabled, false)
+  def enabled?, do: Keyword.get(config(), :enabled, true)
+
+  @doc """
+  The PEM of the key `/setup` generated, decrypted, or `{:error,
+  :no_key_generated}`. Read as the system: signing has no actor of its own.
+
+  Cached once found. The row has no update action, so the key it holds never
+  changes; a miss is not cached, so a key generated later is picked up on the
+  next fire.
+  """
+  @spec stored_key() :: {:ok, binary()} | {:error, term()}
+  def stored_key do
+    case :persistent_term.get({__MODULE__, :stored_key}, nil) do
+      nil -> read_stored_key()
+      pem -> {:ok, pem}
+    end
+  end
+
+  defp read_stored_key do
+    # authorize?: false — the signer reads key material as the system, the
+    # way `KilnCMS.Billing.get_settings/0` reads its credentials; the row's
+    # policy is for people (platform admins).
+    with {:ok, %{private_key_encrypted: encrypted}} <-
+           KilnCMS.Firing.get_provenance_settings(authorize?: false),
+         {:ok, pem} <- KilnCMS.Keys.Vault.decrypt(encrypted) do
+      :persistent_term.put({__MODULE__, :stored_key}, pem)
+      {:ok, pem}
+    else
+      {:error, :decrypt_failed} = error -> error
+      _none -> {:error, :no_key_generated}
+    end
+  rescue
+    # No table yet (a release whose migration has not run): no key.
+    _error in [Postgrex.Error, DBConnection.ConnectionError] -> {:error, :no_key_generated}
+  end
+
+  @doc false
+  # Tests that generate and drop keys.
+  def forget_stored_key, do: :persistent_term.erase({__MODULE__, :stored_key})
+
+  @doc """
+  Whether a signing key resolves right now: a mounted one, or the generated one.
+  """
+  @spec key_available?() :: boolean()
+  def key_available?, do: match?({:ok, _}, KilnCMS.Provenance.KeyRegistry.current())
+
+  @doc """
+  Generate and store the instance's signing key, as `actor` (a platform
+  admin), unless a key already resolves. `/setup` calls it for the admin it
+  has just created. `{:ok, :exists}` when there was nothing to do.
+  """
+  @spec ensure_key(term()) :: {:ok, :exists | :generated} | {:error, term()}
+  def ensure_key(actor) do
+    if enabled?() and not key_available?() do
+      case KilnCMS.Firing.generate_provenance_key(actor: actor) do
+        {:ok, _settings} -> {:ok, :generated}
+        {:error, error} -> {:error, error}
+      end
+    else
+      {:ok, :exists}
+    end
+  end
+
+  @doc """
+  The manifest to store with an artifact as it is fired, or `nil` — provenance
+  off, or no key (the artifact is then served `unsigned`). Never raises: a
+  signing failure must not fail the fire.
+
+  `body` is hashed as it will read back from the database (a JSON round trip),
+  which is what every later verification hashes.
+  """
+  @spec sign_fired(struct(), atom(), map(), keyword()) :: map() | nil
+  def sign_fired(document, surface, body, opts) do
+    if enabled?() do
+      artifact = %{
+        surface: surface,
+        body: body |> Jason.encode!() |> Jason.decode!(),
+        fired_at: Keyword.fetch!(opts, :fired_at),
+        source_version_id: Keyword.get(opts, :source_version_id)
+      }
+
+      case manifest_for(artifact, document) do
+        {:ok, manifest} -> manifest
+        {:error, _no_key} -> nil
+      end
+    end
+  rescue
+    error ->
+      require Logger
+      Logger.warning("Provenance: could not sign a fired artifact: #{Exception.message(error)}")
+      nil
+  end
+
+  @doc """
+  The verdict on a fired artifact against the manifest stored with it:
+
+    * `:verified` — the body hashes to the manifest's hash and the signature
+      verifies against the key it names;
+    * `:tampered` — either check fails against a key we hold;
+    * `:unsigned` — no manifest was stored (fired before 1.7, or with no key);
+    * `:unverifiable` — signed with a key this instance no longer holds
+      (`{:unknown_key_id, _}`). Not holding a key says nothing about the
+      content, so it is never reported as tampering.
+  """
+  @spec verdict(%{manifest: map() | nil, body: map()}) ::
+          {:verified | :tampered | :unsigned | :unverifiable, map() | nil}
+  def verdict(%{manifest: nil}), do: {:unsigned, nil}
+
+  def verdict(%{manifest: manifest, body: body}) do
+    case verify(manifest, body) do
+      {:ok, %{"verified" => true} = result} -> {:verified, result}
+      {:ok, result} -> {:tampered, result}
+      {:error, {:unknown_key_id, _}} -> {:unverifiable, nil}
+      {:error, :malformed_manifest} -> {:tampered, nil}
+      {:error, _other} -> {:unverifiable, nil}
+    end
+  end
 
   @doc """
   Parse a comma-separated list of PEM **file paths**, for
@@ -183,6 +305,74 @@ defmodule KilnCMS.Provenance do
   end
 
   def verify(_manifest, _body), do: {:error, :malformed_manifest}
+
+  @doc """
+  The number 1.7 has to produce (#1929): the share of published artifacts
+  carrying a verifiable manifest.
+
+  Counted over the `:json` surface, one row per published document (every
+  surface is fired and signed together). `verifiable` is a stored manifest
+  whose `key_id` this instance can resolve — the active key or a registered
+  retired one; a manifest naming a key we no longer hold is `signed` but not
+  `verifiable`. `org_id` scopes it to one site; `nil` counts the instance.
+  """
+  @spec coverage(Ecto.UUID.t() | nil) :: %{
+          total: non_neg_integer(),
+          signed: non_neg_integer(),
+          verifiable: non_neg_integer(),
+          share: float()
+        }
+  # The only interpolation is a constant clause; the org id is a bound
+  # parameter.
+  # sobelow_skip ["SQL.Query"]
+  def coverage(org_id \\ nil) do
+    {scope, params} =
+      if org_id, do: {"AND org_id = $1", [Ecto.UUID.dump!(org_id)]}, else: {"", []}
+
+    %{rows: rows} =
+      KilnCMS.Repo.query!(
+        """
+        SELECT manifest -> 'signature' ->> 'key_id', count(*)
+        FROM published_artifacts
+        WHERE surface = 'json' #{scope}
+        GROUP BY 1
+        """,
+        params
+      )
+
+    known? = &match?({:ok, _}, KilnCMS.Provenance.KeyRegistry.verifier(&1))
+
+    {total, signed, verifiable} =
+      KilnCMS.Provenance.KeyRegistry.with_cache(fn ->
+        Enum.reduce(rows, {0, 0, 0}, fn
+          [nil, n], {t, s, v} -> {t + n, s, v}
+          [key_id, n], {t, s, v} -> {t + n, s + n, if(known?.(key_id), do: v + n, else: v)}
+        end)
+      end)
+
+    %{
+      total: total,
+      signed: signed,
+      verifiable: verifiable,
+      share: if(total == 0, do: 0.0, else: verifiable / total)
+    }
+  end
+
+  @doc """
+  `[:kiln_cms, :provenance, :coverage]` with `coverage/1`'s numbers for the
+  instance, for the telemetry poller (`KilnCMSWeb.Telemetry`). Emits nothing
+  when the count cannot be read (no database yet, or a test's sandbox).
+  """
+  @spec emit_coverage() :: :ok
+  def emit_coverage do
+    if enabled?() do
+      :telemetry.execute([:kiln_cms, :provenance, :coverage], coverage(), %{})
+    end
+
+    :ok
+  rescue
+    _unavailable -> :ok
+  end
 
   defp normalize_disclosure(value) when value in @disclosures, do: value
   defp normalize_disclosure(_), do: "human"
