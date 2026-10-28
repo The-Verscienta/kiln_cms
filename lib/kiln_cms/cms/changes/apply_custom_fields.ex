@@ -968,8 +968,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     {:ok, value |> to_string() |> String.trim()}
   end
 
-  defp coerce(value, %{field_type: :select, options: options}) do
-    str = value |> to_string() |> String.trim()
+  # A write may name an option by its label (`option_labels`); the value is
+  # what is stored.
+  defp coerce(value, %{field_type: :select, options: options} = def) do
+    str = FieldDefinition.option_value(def, value |> to_string() |> String.trim())
     if str in options, do: {:ok, str}, else: {:error, "is not one of the allowed options"}
   end
 
@@ -1052,7 +1054,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     case Enum.find(terms, &(not (is_binary(&1) or is_number(&1)))) do
       nil ->
         terms
-        |> Enum.map(&(&1 |> to_string() |> String.trim()))
+        |> Enum.map(&FieldDefinition.option_value(def, &1 |> to_string() |> String.trim()))
         |> Enum.uniq()
         |> check_terms(def)
 

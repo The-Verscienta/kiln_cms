@@ -9,6 +9,7 @@ defmodule KilnCMS.CMS.SelectAndTextFieldsTest do
   use KilnCMS.DataCase, async: true
 
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.SelectTerms
   alias KilnCMS.CMS.TextFormat
 
@@ -361,6 +362,87 @@ defmodule KilnCMS.CMS.SelectAndTextFieldsTest do
       CMS.update_field_definition!(field, %{field_type: :string, multiple: true}, actor: admin)
 
       assert CMS.get_page!(page.id, actor: admin).custom_fields[field.name] == ~s(["a"])
+    end
+  end
+
+  describe "option labels" do
+    defp labelled!(admin, attrs \\ %{}) do
+      define!(
+        Map.merge(
+          %{
+            label: "TCM category",
+            field_type: :select,
+            options: ~w(transforming_phlegm clear_heat tonify),
+            option_labels: %{
+              "transforming_phlegm" => " Transforming phlegm ",
+              "clear_heat" => "Clear heat",
+              "tonify" => "tonify",
+              "gone" => "No such option"
+            }
+          },
+          attrs
+        ),
+        admin
+      )
+    end
+
+    test "are trimmed and pruned to the options; a label that is its value is dropped" do
+      field = labelled!(admin())
+
+      assert field.option_labels == %{
+               "transforming_phlegm" => "Transforming phlegm",
+               "clear_heat" => "Clear heat"
+             }
+
+      assert FieldDefinition.option_label(field, "clear_heat") == "Clear heat"
+      assert FieldDefinition.option_label(field, "tonify") == "tonify"
+    end
+
+    test "follow the options: removing an option drops its label; a retype drops them all" do
+      admin = admin()
+      field = labelled!(admin)
+
+      field =
+        CMS.update_field_definition!(field, %{options: ~w(clear_heat tonify)}, actor: admin)
+
+      assert field.option_labels == %{"clear_heat" => "Clear heat"}
+
+      assert CMS.update_field_definition!(field, %{field_type: :string}, actor: admin).option_labels ==
+               %{}
+    end
+
+    test "a label longer than a line is refused" do
+      assert {:error, error} =
+               CMS.create_field_definition(
+                 %{
+                   content_type: :page,
+                   name: "long#{System.unique_integer([:positive])}",
+                   label: "Long",
+                   field_type: :select,
+                   options: ["a"],
+                   option_labels: %{"a" => String.duplicate("x", KilnCMS.Limits.line() + 1)}
+                 },
+                 actor: admin()
+               )
+
+      assert Exception.message(error) =~ ~s(the label for "a" is longer than)
+    end
+
+    test "a write naming a label stores its value; the value is what is filtered on" do
+      admin = admin()
+      field = labelled!(admin)
+      terms = labelled!(admin, %{multiple: true})
+
+      page = page!(%{field.name => "clear heat", terms.name => ["Clear heat", "tonify"]}, admin)
+
+      assert page.custom_fields[field.name] == "clear_heat"
+      assert page.custom_fields[terms.name] == ["clear_heat", "tonify"]
+
+      assert %{custom_filter: %{field.name => "clear_heat"}}
+             |> CMS.list_pages!(actor: admin)
+             |> Enum.map(& &1.id) == [page.id]
+
+      assert {:error, _} = page(%{field.name => "Warming"}, admin)
     end
   end
 

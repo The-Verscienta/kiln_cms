@@ -63,6 +63,20 @@ carries the reasoning.
   test suite compiles the output with `-Werror` and decodes a real fired
   artifact with it ([native-apps.md → Kotlin models](../native-apps.md#kotlin-models)).
 
+<a id="option-labels"></a>
+
+- **Display labels on `:select` options.** A new `option_labels` map on a
+  field definition names what an editor reads for each option — the stored
+  value stays the code, so filters, delivery and API clients are unchanged.
+  The editor's single select, the multiple select's tag picker (its chips
+  and suggestions), and select link fields and group sub-fields show labels,
+  and a write naming a label (case-insensitively) stores its value — so an
+  editor can type "Clear heat" into a tag picker. In the fields admin an
+  option's line takes `value | Label`, and a label may hold commas. Labels
+  are pruned to the current options and cleared off a field that is no
+  longer a select; one longer than a line is refused. Adds
+  `field_definitions.option_labels` (default `{}`).
+
 <a id="string-lists"></a>
 
 - **A `:string` field can hold a list of phrases.** With `multiple: true` its
