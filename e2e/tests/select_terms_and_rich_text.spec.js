@@ -56,7 +56,7 @@ test.describe("select terms and rich text fields", () => {
     await page.selectOption('#new-field-form select[name="field_definition[field_type]"]', "select");
     await page.locator("#new-field-multiple-true").check();
     await page.locator("#new-field-multiple-allow-custom").check();
-    await page.fill('#new-field-form textarea[name="field_definition[options]"]', "adaptogen\ntonic");
+    await page.fill('#new-field-form textarea[name="field_definition[options]"]', "adaptogen | Adaptogen (stress)\ntonic");
     await page.locator("#new-field-form button[type=submit]").click();
     await expect(page.locator(`code:text-is("${name}_props")`)).toBeVisible();
 
@@ -91,9 +91,11 @@ test.describe("select terms and rich text fields", () => {
     await expect.poll(terms).toEqual(["tonic"]);
 
     // A comma adds too, and a typed list splits.
-    await entry.fill("nervine, adaptogen");
+    // "Adaptogen (stress)" is a label: it adds the option's value.
+    await entry.fill("nervine, Adaptogen (stress)");
     await entry.press(",");
     await expect.poll(terms).toEqual(["tonic", "nervine", "adaptogen"]);
+    await expect(chips.nth(2)).toContainText("Adaptogen (stress)");
     await expect(entry).toHaveValue("");
 
     // Backspace in the empty box drops the last chip.

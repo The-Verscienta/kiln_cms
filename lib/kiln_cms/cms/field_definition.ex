@@ -61,6 +61,42 @@ defmodule KilnCMS.CMS.FieldDefinition do
   end
 
   @doc """
+  What an editor reads for `value` of a `:select` field: its label in
+  `option_labels`, or the value itself.
+  """
+  @spec option_label(map(), String.t()) :: String.t()
+  def option_label(definition, value) do
+    case Map.get(definition, :option_labels) do
+      %{} = labels -> Map.get(labels, value) || value
+      _none -> value
+    end
+  end
+
+  @doc """
+  The stored value an editor's `text` names on a `:select` field: an option
+  itself, else the option whose label it is (ignoring case and surrounding
+  space), else `text` unchanged — a new term on an open vocabulary, or a
+  stray the field's validation will name.
+  """
+  @spec option_value(map(), String.t()) :: String.t()
+  def option_value(definition, text) do
+    options = Map.get(definition, :options) || []
+    labels = Map.get(definition, :option_labels) || %{}
+    wanted = text |> String.trim() |> String.downcase()
+
+    cond do
+      text in options ->
+        text
+
+      found = Enum.find(options, &(labels |> Map.get(&1, "") |> String.downcase() == wanted)) ->
+        found
+
+      true ->
+        text
+    end
+  end
+
+  @doc """
   The value types a custom field may declare: the built-ins plus every
   plugin-contributed `Kiln.FieldType` (see `KilnCMS.CMS.FieldTypes`).
   """
@@ -256,6 +292,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :field_type,
       :required,
       :options,
+      :option_labels,
       :allow_custom,
       :format,
       :target_type,
@@ -393,6 +430,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # `min_items`/`max_items` bounds that go with it — drop on any other type
     # rather than lingering on a field they mean nothing to.
     change KilnCMS.CMS.Changes.ClearMultiple
+
+    # Option labels name options: none outlives its option, and a field that
+    # is no longer a select keeps none.
+    change KilnCMS.CMS.Changes.PruneOptionLabels
 
     # A link field (R3) lives inside its connection's value, and a group
     # sub-field inside its group's, so the options
@@ -541,6 +582,15 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     # Choices for a `:select` field (ignored otherwise).
     attribute :options, {:array, :string}, allow_nil?: false, default: [], public?: true
+
+    # What an editor reads for each option: `%{"transforming_phlegm" =>
+    # "Transforming phlegm"}`, keyed by the stored value. The value stays what
+    # is stored, filtered on and delivered — a label is the editor's view of
+    # it, and a write naming the label stores the value
+    # (`Changes.ApplyCustomFields`). An option with no label is its own label.
+    # Pruned to the current options, and emptied on every other type
+    # (`Changes.PruneOptionLabels`).
+    attribute :option_labels, :map, allow_nil?: false, default: %{}, public?: true
 
     # Whether a `multiple` `:select` field takes terms beyond its `options` —
     # an **open vocabulary** ("Western Properties" grows with every herb).

@@ -823,13 +823,20 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
             >
               <.icon name="hero-bars-2" class="size-3" />
             </span>
-            <span class="truncate px-0.5">{term}</span>
+            <span
+              class="truncate px-0.5"
+              title={if(FieldDefinition.option_label(@definition, term) != term, do: term)}
+            >
+              {FieldDefinition.option_label(@definition, term)}
+            </span>
             <button
               type="button"
               phx-click="list_item_remove"
               phx-value-field={@definition.name}
               phx-value-index={index}
-              aria-label={gettext("Remove %{term}", term: term)}
+              aria-label={
+                gettext("Remove %{term}", term: FieldDefinition.option_label(@definition, term))
+              }
               class="rounded-full p-0.5 text-base-content/50 transition-colors hover:bg-error/15 hover:text-error focus-visible:bg-error/15 focus-visible:text-error"
             >
               <.icon name="hero-x-mark" class="size-3.5" />
@@ -856,7 +863,12 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
           class="min-w-32 flex-1 border-0 bg-transparent p-0.5 text-sm outline-none placeholder:text-base-content/40 focus:ring-0"
         />
         <datalist id={"#{cf_id(@definition)}-suggestions"}>
-          <option :for={suggestion <- @suggestions} value={suggestion} />
+          <%!-- The label is what an editor types and reads; `list_item_add`
+                maps it back to the stored value. --%>
+          <option
+            :for={suggestion <- @suggestions}
+            value={FieldDefinition.option_label(@definition, suggestion)}
+          />
         </datalist>
       </div>
       <p class="mt-1 text-xs text-base-content/60">
@@ -891,7 +903,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       >
         <option value="">{gettext("— None —")}</option>
         <option :for={opt <- @definition.options} value={opt} selected={to_string(@value) == opt}>
-          {opt}
+          {FieldDefinition.option_label(@definition, opt)}
         </option>
       </select>
       <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">

@@ -36,6 +36,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS.ContentLinks
   alias KilnCMS.CMS.ContentTree
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.Mentions
   alias KilnCMS.CMS.PreviewToken
   alias KilnCMS.CMS.ReverseFields
@@ -2871,9 +2872,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # gallery's are.
   def handle_event("list_item_add", %{"field" => name, "item" => item}, socket)
       when is_binary(name) and is_binary(item) do
+    # A label typed or picked in a tag picker names its option's value.
     {:noreply,
      update_list_items(socket, name, fn items, definition ->
-       add_item(items, String.trim(item), definition)
+       add_item(items, FieldDefinition.option_value(definition, String.trim(item)), definition)
      end)}
   end
 

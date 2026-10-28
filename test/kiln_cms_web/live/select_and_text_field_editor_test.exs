@@ -57,8 +57,18 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
       multiple: true,
       allow_custom: true,
       options: ["adaptogen", "tonic"],
+      option_labels: %{"adaptogen" => "Adaptogen (stress)"},
       max_items: 3,
       position: 0
+    })
+
+    define!(admin, %{
+      name: "category",
+      label: "TCM category",
+      field_type: :select,
+      options: ["transforming_phlegm", "clear_heat"],
+      option_labels: %{"transforming_phlegm" => "Transforming phlegm"},
+      position: 5
     })
 
     define!(admin, %{name: "uses", label: "Uses", field_type: :text, position: 1})
@@ -101,7 +111,8 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
             "uses" => "<p>Ren Shen <strong>tonifies</strong></p>",
             "code" => "RS-1",
             "legacy" => ~s(["a","b"]),
-            "symptoms" => ["fatigue", "night sweats"]
+            "symptoms" => ["fatigue", "night sweats"],
+            "category" => "transforming_phlegm"
           }
         },
         actor: admin
@@ -127,9 +138,10 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
              )
 
       # Options, then the terms in use, less what is already chosen.
+      # A labelled option is suggested by its label.
       assert has_element?(
                ctx.lv,
-               ~s(#custom-field-properties-suggestions option[value=adaptogen])
+               ~s{#custom-field-properties-suggestions option[value="Adaptogen (stress)"]}
              )
 
       assert has_element?(ctx.lv, ~s(#custom-field-properties-suggestions option[value=nervine]))
@@ -144,7 +156,7 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
       render_hook(entry, "list_item_add", %{"field" => "properties", "item" => "adaptogen"})
 
       assert has_element?(ctx.lv, chip(1), "nervine")
-      assert has_element?(ctx.lv, chip(2), "adaptogen")
+      assert has_element?(ctx.lv, chip(2), "Adaptogen (stress)")
       refute has_element?(ctx.lv, chip(3))
 
       # Full at max_items: the box goes, and says why.
@@ -166,6 +178,39 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
       ctx.lv |> form("#page-editor") |> render_submit()
 
       refute Map.has_key?(stored(ctx), "properties")
+    end
+  end
+
+  describe "option labels" do
+    test "a select shows each option's label; the value is what is posted", ctx do
+      assert has_element?(
+               ctx.lv,
+               ~s(#custom-field-category option[value=transforming_phlegm][selected]),
+               "Transforming phlegm"
+             )
+
+      assert has_element?(
+               ctx.lv,
+               ~s(#custom-field-category option[value=clear_heat]),
+               "clear_heat"
+             )
+    end
+
+    test "the tag picker suggests labels, and a label picked adds its value", ctx do
+      assert has_element?(
+               ctx.lv,
+               ~s{#custom-field-properties-suggestions option[value="Adaptogen (stress)"]}
+             )
+
+      ctx.lv
+      |> element("#custom-field-properties-entry")
+      |> render_hook("list_item_add", %{"field" => "properties", "item" => "adaptogen (STRESS)"})
+
+      assert has_element?(ctx.lv, ~s(#{chip(1)} input[type=hidden][value=adaptogen]))
+      assert has_element?(ctx.lv, chip(1), "Adaptogen (stress)")
+
+      ctx.lv |> form("#page-editor") |> render_submit()
+      assert stored(ctx)["properties"] == ["tonic", "adaptogen"]
     end
   end
 
@@ -299,6 +344,44 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
 
       assert has_element?(lv, "#new-field-multiple-true")
       assert render(lv) =~ "symptoms, synonyms"
+    end
+
+    test "options take labels after a bar; commas in a label stay in it", ctx do
+      {:ok, lv, _html} = live(ctx.conn, ~p"/editor/fields")
+
+      lv |> form("#new-field-form", field_definition: %{field_type: "select"}) |> render_change()
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{
+          scopes: ["page"],
+          name: "action",
+          label: "Required action",
+          field_type: "select",
+          options: "clear_heat | Clear heat, cool blood\nnourish_yin|Nourish yin\nplain, other"
+        }
+      )
+      |> render_submit()
+
+      field =
+        :page
+        |> CMS.field_definitions_for!(authorize?: false)
+        |> Enum.find(&(&1.name == "action"))
+
+      assert field.options == ["clear_heat", "nourish_yin", "plain", "other"]
+
+      assert field.option_labels == %{
+               "clear_heat" => "Clear heat, cool blood",
+               "nourish_yin" => "Nourish yin"
+             }
+
+      assert render(lv) =~ "Clear heat, cool blood (clear_heat)"
+
+      # The edit form shows them back the same way.
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      assert lv |> element("#edit-field-options-#{field.id}") |> render() =~
+               "clear_heat | Clear heat, cool blood\nnourish_yin | Nourish yin\nplain\nother"
     end
   end
 end

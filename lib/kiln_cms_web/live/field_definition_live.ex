@@ -927,7 +927,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # default keeps none. A select's default must still be one of its options.
   defp normalize(params, scope \\ nil) do
     type = params["field_type"]
-    options = if type in [nil, "select"], do: parse_options(params["options"]), else: []
+    pairs = if type in [nil, "select"], do: parse_option_pairs(params["options"]), else: []
+    options = Enum.map(pairs, &elem(&1, 0))
+    labels = for {value, label} <- pairs, label != nil, into: %{}, do: {value, label}
 
     default =
       cond do
@@ -940,6 +942,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     params
     |> Map.delete("scopes")
     |> Map.put("options", options)
+    |> Map.put("option_labels", labels)
     |> Map.put("default", default)
     |> unpack_targets()
     |> unpack_sources_limit()
@@ -980,14 +983,27 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   defp unpack_targets(params), do: params
 
-  defp parse_options(options) when is_binary(options) do
+  # The options textarea: one option per line, or several on a line split by
+  # commas, as before labels existed. A line holding `value | Label` is one
+  # option with a label (`option_labels`) — the label may hold commas, which
+  # is why such a line is never split.
+  defp parse_option_pairs(options) when is_binary(options) do
     options
-    |> String.split(["\n", ","], trim: true)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
+    |> String.split("\n")
+    |> Enum.flat_map(fn line ->
+      case String.split(line, "|", parts: 2) do
+        [value, label] -> [{String.trim(value), blank_to_nil(String.trim(label))}]
+        [line] -> line |> String.split(",") |> Enum.map(&{String.trim(&1), nil})
+      end
+    end)
+    |> Enum.reject(&(elem(&1, 0) == ""))
+    |> Enum.uniq_by(&elem(&1, 0))
   end
 
-  defp parse_options(_options), do: []
+  defp parse_option_pairs(_options), do: []
+
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(text), do: text
 
   # Whether the options textarea applies: a `:select` field is the only type
   # that reads `options` (#1819).
@@ -1011,12 +1027,44 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     do: params |> Map.put("content_type", type) |> Map.put("type_definition_id", nil)
 
   # Textarea value for the options field: the stored list joined by newlines.
+  # The textarea's text for the stored options: `value | Label` for an option
+  # with a label, the bare value otherwise.
   defp options_text(form) do
+    labels =
+      case form[:option_labels].value do
+        %{} = labels -> labels
+        _none -> %{}
+      end
+
     case form[:options].value do
-      list when is_list(list) -> Enum.join(list, "\n")
+      list when is_list(list) -> Enum.map_join(list, "\n", &option_line(&1, labels))
       str when is_binary(str) -> str
       _ -> ""
     end
+  end
+
+  defp option_line(value, labels) do
+    case Map.get(labels, value) do
+      nil -> value
+      label -> "#{value} | #{label}"
+    end
+  end
+
+  # `{label, value}` pairs for the default-value select.
+  defp option_choices(form) do
+    for {value, label} <- form |> options_text() |> parse_option_pairs(),
+        do: {label || value, value}
+  end
+
+  # The options as an admin reads them in the list: the label, with the stored
+  # value beside it when they differ.
+  defp options_summary(definition) do
+    Enum.map_join(definition.options, ", ", fn value ->
+      case FieldDefinition.option_label(definition, value) do
+        ^value -> value
+        label -> "#{label} (#{value})"
+      end
+    end)
   end
 
   # Core types humanize; plugin field types carry their own label.
@@ -2443,6 +2491,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       <p class="mt-1 text-xs text-base-content/60">
         {options_hint(@form)}
       </p>
+      <p class="mt-0.5 text-xs text-base-content/60">
+        {gettext("To show editors a label, write it after a bar:")}
+        <code class="rounded bg-base-200 px-1">clear_heat | Clear heat</code>. {gettext(
+          "The value before the bar is what is stored and delivered."
+        )}
+      </p>
     </div>
     """
   end
@@ -2492,7 +2546,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         field={@form[:default]}
         type="select"
         label={gettext("Default value")}
-        options={parse_options(options_text(@form))}
+        options={option_choices(@form)}
         prompt={gettext("— No default —")}
         hint={@hint}
       />
@@ -2862,7 +2916,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                       :if={definition.field_type == :select and definition.options != []}
                       class="text-xs text-base-content/60"
                     >
-                      {gettext("Options")}: {Enum.join(definition.options, ", ")}
+                      {gettext("Options")}: {options_summary(definition)}
                     </p>
                     <p
                       :if={definition.field_type == :reference}
@@ -3229,7 +3283,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                 :if={link.field_type == :select and link.options != []}
                 class="text-xs text-base-content/60"
               >
-                {Enum.join(link.options, ", ")}
+                {options_summary(link)}
               </span>
             </div>
             <div class="flex shrink-0 items-center gap-1">
