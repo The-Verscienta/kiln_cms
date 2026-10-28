@@ -15,7 +15,7 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
 
       mix test --only regenerate_schema_goldens test/kiln_cms/schema_export/regenerate_goldens_test.exs
 
-  then review the diff of `full.schema.json`, `full.d.ts` and `full.swift`.
+  then review the diff of `full.schema.json`, `full.d.ts`, `full.swift` and `full.kt`.
   `clients/js/test/parity.test.ts` reads `full.d.ts` too. Run `npm test` in
   `clients/js` as well; if a change to the TypeScript emitter isn't mirrored
   in `kiln-types`, that run fails.
@@ -97,10 +97,11 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
     # Through the task's own sorted encoder, so the fixture diffs stably.
     File.write!(
       Path.join(@dir, "full.schema.json"),
-      Mix.Tasks.Kiln.Export.Schema.encode(document, :json, true)
+      Mix.Tasks.Kiln.Export.Schema.encode(document, :json, pretty: true)
     )
 
     File.write!(Path.join(@dir, "full.d.ts"), SchemaExport.TypeScript.emit(document))
     File.write!(Path.join(@dir, "full.swift"), SchemaExport.Swift.emit(document))
+    File.write!(Path.join(@dir, "full.kt"), SchemaExport.Kotlin.emit(document))
   end
 end

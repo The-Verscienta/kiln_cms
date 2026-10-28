@@ -298,10 +298,10 @@ It is per site, so it includes admin-defined types and custom fields, and it
 changes when an admin edits them, without a redeploy.
 
 - Generate models from it **at build time**, commit the output, and
-  regenerate when the schema changes. Swift has a built-in emitter
-  ([below](#swift-models)); TypeScript has `mix kiln.export.schema --format ts`
-  and the `kiln-types` generator bundled with `@kiln-cms/client`. For Kotlin,
-  use a JSON Schema code generator (quicktype, or one for your stack).
+  regenerate when the schema changes. Swift and Kotlin have built-in emitters
+  ([Swift](#swift-models), [Kotlin](#kotlin-models)); TypeScript has
+  `mix kiln.export.schema --format ts` and the `kiln-types` generator bundled
+  with `@kiln-cms/client`.
 - Use `?type=post,recipe` to export only the types the app reads. An unknown
   name is a `400`.
 - Decode **leniently**. `custom_fields` is an open object and nothing in it is
@@ -377,3 +377,75 @@ file keeps decoding: new keys are ignored, and new block types and enum values
 land in `unknown`. So regenerating is about gaining the new fields, not about
 staying compatible. To catch drift in CI, regenerate and run
 `git diff --exit-code` on the file.
+
+### Kotlin models
+
+`mix kiln.export.schema --format kotlin` writes one Kotlin file of
+[kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization)
+models from the same document:
+
+```bash
+mix kiln.export.schema --format kotlin --package com.example.kiln \
+  --org-id <site uuid> --out app/src/main/java/com/example/kiln/Kiln.kt
+```
+
+`--package` sets the file's `package` and defaults to `kiln`. `--type
+post,recipe` works as it does for Swift. The file needs the serialization
+compiler plugin and the JSON runtime, nothing else. In `build.gradle.kts`:
+
+```kotlin
+plugins {
+    kotlin("plugin.serialization") version "<your Kotlin version>"
+}
+
+dependencies {
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
+}
+```
+
+What it contains:
+
+- A `@Serializable public data class` per content type (`PostDocument`),
+  block (`HeadingBlock`) and shared definition. Inline objects nest inside the
+  class that holds them, named as in Swift: `PostDocument.CustomFields`, and a
+  repeating `:group` row as `CustomFields.DosagesItem`. The media snapshot is
+  the one shared `MediaSnapshot`. An object with no keys is a `data object`.
+- Kotlin names in `lowerCamelCase`, with `@SerialName` keeping the JSON key
+  exact (`@SerialName("read_time") val readTime`, a block's
+  `@SerialName("_type") val type`). Hard keywords are back-ticked.
+- A nullable property with a `= null` default for every key that is nullable
+  **or** not required, so every custom field is optional.
+- `sealed interface Block`, which every block class implements, read by the
+  bundled `BlockSerializer`. It switches on `_type`, and a block type the app
+  doesn't know decodes to `Block.Unknown(type, raw)` while the rest of the
+  document still decodes. `raw` is the block's `JsonObject`, and encoding an
+  `Unknown` writes it back unchanged. `Document` and `DocumentSerializer` do
+  the same for content types, switching on `type`. The serializers name each
+  class's serializer directly, so there is no reflection lookup and nothing
+  for R8 to strip.
+- A string `enum` in the schema becomes a `@JvmInline value class` over
+  `String`, with a companion constant per listed value (`Style.Primary`),
+  `entries` and `isKnown`. Any string decodes, so a new option never breaks
+  decoding. As in Swift, `:select` custom fields are plain `String`s (or
+  `List<String>`), because the schema doesn't publish their options.
+- `Long` for integers (JSON integers are not 32-bit), `JsonObject` for an open
+  map, and `JsonElement` for anything the schema leaves unconstrained.
+
+Decode with the bundled `KilnJson`, which sets `ignoreUnknownKeys = true`.
+A plain `Json` fails on the first key the generated file doesn't list, and a
+delivery gains keys before you regenerate:
+
+```kotlin
+when (val document = KilnJson.decodeFromString(Document.serializer(), body)) {
+    is PostDocument -> document.blocks.forEach { block ->
+        if (block is HeadingBlock) println(block.text)
+    }
+    is Document.Unknown -> Log.w("kiln", "unknown type ${document.type}")
+    else -> Unit
+}
+```
+
+The same things are dropped as in Swift: a `date-time` or `uuid` is a
+`String`, numeric bounds and `const` pins are gone, and unknown keys on an
+open object are ignored rather than kept. The regenerating advice above
+applies unchanged.

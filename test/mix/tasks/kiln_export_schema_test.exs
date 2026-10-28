@@ -69,6 +69,37 @@ defmodule Mix.Tasks.Kiln.Export.SchemaTest do
     assert ts =~ "export type KilnBlock ="
   end
 
+  test "--format kotlin writes kotlinx.serialization models in --package", %{dir: dir} do
+    path = Path.join(dir, "Kiln.kt")
+
+    capture_io(fn ->
+      Schema.run(
+        ["--blocks-only", "--format", "kotlin", "--package", "com.example.kiln"] ++
+          ["--out", path]
+      )
+    end)
+
+    kotlin = File.read!(path)
+    assert kotlin =~ "\npackage com.example.kiln\n"
+    assert kotlin =~ "public data class HeadingBlock("
+    assert kotlin =~ "public sealed interface Block {"
+  end
+
+  test "--format kotlin defaults the package to kiln" do
+    assert capture_io(fn -> Schema.run(["--blocks-only", "--format", "kotlin"]) end) =~
+             "\npackage kiln\n"
+  end
+
+  test "--package is checked, and refused for a format that has none" do
+    assert_raise Mix.Error, ~r/not a Kotlin package name/, fn ->
+      Schema.run(["--blocks-only", "--format", "kotlin", "--package", "com.example-app"])
+    end
+
+    assert_raise Mix.Error, ~r/--format kotlin only/, fn ->
+      Schema.run(["--blocks-only", "--format", "swift", "--package", "kiln"])
+    end
+  end
+
   test "--base-url becomes the document $id" do
     output =
       capture_io(fn ->

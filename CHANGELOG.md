@@ -67,6 +67,10 @@ Every summary line below that was shortened links to its own entry there.
   type, block and group row, and `Block`/`Document` enums that tolerate unknowns.**
   ([#2105](https://github.com/The-Verscienta/kiln_cms/pull/2105) · [long form](docs/changelog/unreleased.md#swift-schema-export))
 
+- **`mix kiln.export.schema --format kotlin` writes kotlinx.serialization models: a data
+  class per type, block and group row, and `Block`/`Document` interfaces with `Unknown`.**
+  ([#2109](https://github.com/The-Verscienta/kiln_cms/pull/2109) · [long form](docs/changelog/unreleased.md#kotlin-schema-export))
+
 - **`:select` options can carry labels (`option_labels`): editors see
   "Transforming phlegm" while `transforming_phlegm` stays the stored value.**
   ([#2107](https://github.com/The-Verscienta/kiln_cms/pull/2107) · [long form](docs/changelog/unreleased.md#option-labels))
