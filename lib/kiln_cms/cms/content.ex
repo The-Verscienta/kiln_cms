@@ -4367,6 +4367,18 @@ defmodule KilnCMS.CMS.Content do
           sortable? false
         end
 
+        # The Portable Text rendition of the rich `:text` custom fields whose
+        # definition sets `deliver_portable` (`KilnCMS.CMS.PortableFields`), for
+        # a native client that renders prose without a browser engine. Served
+        # only on request, like `custom_fields_plain`.
+        calculate :custom_fields_portable,
+                  :map,
+                  KilnCMS.CMS.Calculations.CustomFieldsPortable do
+          public? true
+          filterable? false
+          sortable? false
+        end
+
         calculate :block_ids, {:array, :map}, KilnCMS.CMS.Calculations.BlockIds do
           public? true
           # No `expression/2`, so a filter or sort would raise out of AshSql as

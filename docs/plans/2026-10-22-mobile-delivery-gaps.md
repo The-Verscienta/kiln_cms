@@ -130,15 +130,26 @@ have this problem.
    tags. Store it as a sibling key, not by changing the value, so current
    readers see no difference. This covers today's data without asking anyone
    to re-enter it.
-2. **`:rich_text` field type (M, 1.7).** A custom field edited in the same
+2. **Superseded** by #2099 and #2101 — no new field type. #2099 made
+   `:text` rich by default (`format: :rich`: TipTap editing, HTML sanitized
+   on write with `HTMLSanitizer.sanitize_rich_text/1`, schema
+   `contentMediaType: text/html`), and #2101 adds the structured tree as an
+   opt-in rendition: `deliver_portable: true` adds
+   `custom_fields_portable.<name>`, the value as Portable Text
+   (`KilnCMS.CMS.PortableFields`), typed in the schema by `$ref` to the
+   `rich_text` block's `portable_text_block`. Delivery thus offers the
+   HTML (`custom_fields`), plain (`custom_fields_plain`) and the
+   structured tree, without moving stored values. The original proposal:
+
+   ~~**`:rich_text` field type (M, 1.7).** A custom field edited in the same
    TipTap editor the `rich_text` block uses and stored in the block's
    structured form (the Portable Text array the `rich_text` block body already
    uses). Delivery offers `html`, `plain`, and the structured tree
    that native renderers walk. Sanitizing reuses
    `HTMLSanitizer.sanitize_rich_text/1`. Existing `:text` fields that hold
-   HTML move over with `kiln.fields.convert --to rich_text` from §1.
+   HTML move over with `kiln.fields.convert --to rich_text` from §1.~~
 
-Step 1 does the most for the apps right away. Step 2 removes the cause.
+Step 1 does the most for the apps right away. Step 2, as shipped, gives them the structure.
 
 ## 3. Swift types
 

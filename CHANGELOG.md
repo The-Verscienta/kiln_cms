@@ -111,6 +111,8 @@ Every summary line below that was shortened links to its own entry there.
 - **Media in delivered content carries dimensions, MIME type, focal point and variants.**
   ([#2040](https://github.com/The-Verscienta/kiln_cms/pull/2040) · [long form](docs/changelog/unreleased.md#media-snapshot-for-apps))
 
+- **A rich `:text` custom field can also be delivered as Portable Text (`custom_fields_portable`).**
+  ([long form](docs/changelog/unreleased.md#rich-text-fields-as-portable-text))
 - **A `:text` custom field can also be delivered as plain text.**
   ([#2037](https://github.com/The-Verscienta/kiln_cms/pull/2037) · [long form](docs/changelog/unreleased.md#a-text-custom-field-can-also-be-delivered-as-plain-text))
 - **`?fields=` trims the fired `json` artifact; a guide to Kiln in a native app.**

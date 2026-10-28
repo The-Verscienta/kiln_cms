@@ -1601,6 +1601,11 @@ msgstr ""
 msgid "APIs add a copy with HTML tags removed under custom_fields_plain, for apps that cannot render HTML."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "APIs add the formatting as structured data under custom_fields_portable, for apps that render rich text natively."
+msgstr ""
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "About %{percentage}% of sentences look passive (guideline: %{max}%). This is an estimate — passive voice is often the right choice."
@@ -2353,7 +2358,17 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "Also deliver as Portable Text"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "Also deliver as plain text"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Also delivered as Portable Text (custom_fields_portable)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -21035,6 +21050,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "plain"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "portable"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex

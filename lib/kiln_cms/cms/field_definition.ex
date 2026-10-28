@@ -272,6 +272,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :names_record,
       :searchable,
       :deliver_plain,
+      :deliver_portable,
       :localization,
       :inverse_label,
       :inverse_name,
@@ -406,6 +407,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # `deliver_plain` speaks about a `:text` field's HTML, so it drops on any
     # other type — and on a link field, whose value delivery never projects.
     change KilnCMS.CMS.Changes.ClearDeliverPlain
+
+    # `deliver_portable` converts a rich `:text` field's HTML, so it drops on
+    # any other type, on a `:plain` one, and on a link or group sub-field.
+    change KilnCMS.CMS.Changes.ClearDeliverPortable
 
     # The other side's name (R4) belongs to a top-level `:reference` field,
     # and a label alone suggests its machine name, as a field's label does.
@@ -635,8 +640,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # Whether the value is for the site's editors and admins only (#2044):
     # kept out of every fired artifact and every read below editor
     # (`KilnCMS.CMS.PrivateFields`). Plain top-level types only, and never
-    # with `searchable`, `names_record`, `deliver_plain` or a `:fallback`
-    # localization (`Validations.PrivateField`). Always on for a `:user`
+    # with `searchable`, `names_record`, `deliver_plain`, `deliver_portable`
+    # or a `:fallback` localization (`Validations.PrivateField`). Always on for a `:user`
     # field (`Changes.PrivateUserField`). Flipping it re-fires the type's
     # published documents (`Changes.BustTypeRegistry`).
     attribute :private, :boolean, allow_nil?: false, default: false, public?: true
@@ -691,6 +696,16 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # never rewritten. `:text` only (`Changes.ClearDeliverPlain`). Flipping it
     # re-fires the type's published documents (`Changes.BustTypeRegistry`).
     attribute :deliver_plain, :boolean, allow_nil?: false, default: false, public?: true
+
+    # Whether delivery carries a Portable Text rendition beside a rich `:text`
+    # field's value: `custom_fields_portable.<name>`, the stored HTML as the
+    # same tree a `rich_text` block's `body` delivers
+    # (`KilnCMS.CMS.PortableFields`), for a native app that renders prose
+    # without a browser engine. Off by default, so every existing payload is
+    # unchanged; `custom_fields` itself is never rewritten. Top-level rich
+    # `:text` only (`Changes.ClearDeliverPortable`). Flipping it re-fires the
+    # type's published documents (`Changes.BustTypeRegistry`).
+    attribute :deliver_portable, :boolean, allow_nil?: false, default: false, public?: true
 
     # Field-level localization (#1327): whether this field's value differs
     # between the locale variants of a document. `:localized` (the default) is
