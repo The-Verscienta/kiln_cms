@@ -21,6 +21,25 @@ carries the reasoning.
 
 ## Added
 
+<a id="swift-schema-export"></a>
+
+- **Swift models from the schema export.** `mix kiln.export.schema --format
+  swift [--out Kiln.swift]` writes one standard-library-only file for a native
+  app: a `public struct … : Codable, Hashable, Sendable` per content type,
+  block, shared definition and inline object (a `:group` row, a media
+  snapshot), nested under the struct that holds it. Swift names are
+  `lowerCamelCase`, with `CodingKeys` keeping the JSON keys exact. A nullable
+  or non-required key is an optional. A string `enum` becomes a
+  `String`-backed enum with `unknown(String)`. The block union is `public
+  indirect enum Block`, switching on `_type`, and the content types are
+  `Document`, switching on `type`; both have `.unknown(type:)`. Open maps are
+  `[String: JSONValue]`, with `JSONValue` bundled in the file. `format`,
+  bounds and `const` pins are dropped, as in the `.d.ts`. Both emitters now
+  read the document through one shared walker, `KilnCMS.SchemaExport.Walk`,
+  and the `.d.ts` output is byte-for-byte unchanged. When `swiftc` is on
+  `PATH`, the test suite compiles the output and decodes a real fired
+  artifact with it ([native-apps.md → Swift models](../native-apps.md#swift-models)).
+
 <a id="multiple-select"></a>
 
 - **A `:select` field can hold several terms.** With `multiple: true` its

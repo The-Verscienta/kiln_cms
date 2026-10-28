@@ -249,11 +249,11 @@ discriminated block union ([api.md → Schema discovery](api.md#schema-discovery
 It is per site, so it includes admin-defined types and custom fields, and it
 changes when an admin edits them, without a redeploy.
 
-- Generate Swift `Codable` or Kotlin models from it with a JSON Schema code
-  generator (quicktype, or a generator for your stack) **at build time**. Commit
-  the output, and regenerate when the schema changes. For TypeScript there are
-  built-in emitters: `mix kiln.export.schema --format ts`, and the `kiln-types`
-  generator bundled with `@kiln-cms/client`.
+- Generate models from it **at build time**, commit the output, and
+  regenerate when the schema changes. Swift has a built-in emitter
+  ([below](#swift-models)); TypeScript has `mix kiln.export.schema --format ts`
+  and the `kiln-types` generator bundled with `@kiln-cms/client`. For Kotlin,
+  use a JSON Schema code generator (quicktype, or one for your stack).
 - Use `?type=post,recipe` to export only the types the app reads. An unknown
   name is a `400`.
 - Decode **leniently**. `custom_fields` is an open object and nothing in it is
@@ -268,3 +268,63 @@ The schema is cacheable (`public, max-age=300`). An app can fetch it at runtime
 to detect drift, but it can't change its compiled types. Use it in CI
 instead: fail the build when the live schema no longer matches the committed
 one.
+
+### Swift models
+
+`mix kiln.export.schema --format swift` writes one self-contained Swift file
+from the same document `GET /api/schema` serves:
+
+```bash
+mix kiln.export.schema --format swift --org-id <site uuid> --out Sources/Kiln/Kiln.swift
+```
+
+Add `--type post,recipe` to emit only the types the app reads. The file needs
+only the Swift standard library, so it drops into an app target or a Swift
+package. What it contains:
+
+- A `public struct … : Codable, Hashable, Sendable` per content type
+  (`PostDocument`), block (`HeadingBlock`) and shared definition, with a public
+  memberwise `init` for previews and tests. Inline objects nest inside the
+  struct that holds them, named after their key: `PostDocument.CustomFields`,
+  a repeating `:group` row as `CustomFields.DosagesItem`, a media snapshot as
+  `CustomFields.Hero`.
+- Swift names in `lowerCamelCase`, with `CodingKeys` keeping the JSON key
+  exact (`readTime = "read_time"`, a block's `type = "_type"`). Keywords are
+  back-ticked; a key Swift can't spell is sanitized, and its JSON name is kept.
+- An optional for every key that is nullable **or** not required, so every
+  custom field is optional, as it is on the wire.
+- `public indirect enum Block`, switching on `_type`, and `Document`,
+  switching on `type`. Each has an `.unknown(type: String)` case: a block kind
+  added by an upgrade or a plugin decodes to that case and the rest of the
+  document still decodes.
+- A string `enum` in the schema becomes a `String`-backed enum with an
+  `unknown(String)` case, so a new option never breaks decoding.
+  `:select` custom fields are plain `String`s (or `[String]` for a multiple
+  select), because the schema doesn't publish their options.
+- `[String: JSONValue]` for an open map (a single `:reference` snapshot,
+  `inherited_fields`) and `JSONValue` for anything the schema leaves
+  unconstrained. `JSONValue` is a small enum bundled in the file.
+
+What Swift can't state is dropped, as in the TypeScript emitter. A `uuid` or
+`date-time` is a `String`: pick a date strategy where you decode. Numeric
+bounds and `const` pins are dropped. Unknown keys on an open object are
+ignored rather than kept.
+
+Decode a delivery with `JSONDecoder`:
+
+```swift
+let document = try JSONDecoder().decode(Document.self, from: data)
+if case .post(let post) = document {
+    for block in post.blocks {
+        if case .heading(let heading) = block { print(heading.text) }
+    }
+}
+```
+
+**Regenerating.** The file describes one site at the moment of export, so
+regenerate it when an admin adds or changes a content type or custom field,
+and after a Kiln upgrade or plugin adds a block. An app built against an older
+file keeps decoding: new keys are ignored, and new block types and enum values
+land in `unknown`. So regenerating is about gaining the new fields, not about
+staying compatible. To catch drift in CI, regenerate and run
+`git diff --exit-code` on the file.
