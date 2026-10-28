@@ -80,6 +80,22 @@ carries the reasoning.
   test suite compiles the output with `-Werror` and decodes a real fired
   artifact with it ([native-apps.md → Kotlin models](../native-apps.md#kotlin-models)).
 
+<a id="field-sections"></a>
+
+- **Sections in the Custom fields panel.** A field definition's new
+  `section` (free text, shared by name) files the field under a collapsible
+  heading in the content editor, at the place of the section's first field
+  in `position` order; unsectioned fields render bare where they fall. A
+  section starts open when its fields already hold a stored value (the first
+  section, on a record with none) and whenever one has an error; each heading
+  counts its filled fields, and *Expand all* / *Collapse all* sit in the
+  panel's header. Toggling uses LiveView `JS` commands, so a section stays as
+  the writer left it while they type elsewhere, and a collapsed section's
+  inputs still submit. The fields admin sets the section with the site's
+  headings as suggestions and shows it on each field; the schema export
+  reports it as `x-kiln-section`. Link fields and group sub-fields carry
+  none. Adds `field_definitions.section`.
+
 <a id="option-labels"></a>
 
 - **Display labels on `:select` options.** A new `option_labels` map on a
