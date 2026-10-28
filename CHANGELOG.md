@@ -152,6 +152,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Moving a section in the content tree reads only its subtree (recursive CTE),
+  not the whole type: a 10,000-document move peaks at 27 MB, not 180 MB.**
+  ([#2117](https://github.com/The-Verscienta/kiln_cms/pull/2117) · [benchmark](docs/benchmarks.md#content-tree-moving-a-large-subtree))
+
 - **A bare `GET /api` redirects (302) to `/developers`, the API summary,
   instead of answering 404; every `/api/*` route is unchanged.**
   ([#2114](https://github.com/The-Verscienta/kiln_cms/pull/2114))

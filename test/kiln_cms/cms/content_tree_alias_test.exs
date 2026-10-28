@@ -158,6 +158,66 @@ defmodule KilnCMS.CMS.ContentTreeAliasTest do
     end
   end
 
+  # #1903: a move reads its subtree with a recursive CTE, not the whole type.
+  describe "the subtree read" do
+    defp place(actor, record, parent) do
+      {:ok, moved} = CMS.move_entry(record, %{parent_id: parent.id}, actor: actor)
+      moved
+    end
+
+    test "returns the moved record and its descendants, and nothing else of the type" do
+      actor = admin()
+      type = tree_type(actor)
+
+      [docs, guides, routing, plugs, other] =
+        Enum.map(~w(Docs Guides Routing Plugs Other), &entry(actor, type, &1))
+
+      guides = place(actor, guides, docs)
+      place(actor, routing, guides)
+      place(actor, plugs, guides)
+      drain_oban()
+
+      rows = KilnCMS.CMS.ContentTree.subtree(KilnCMS.CMS.Entry, guides.id, guides.org_id)
+
+      assert rows |> Enum.map(& &1.id) |> Enum.sort() ==
+               Enum.sort([guides.id, routing.id, plugs.id])
+
+      refute Enum.any?(rows, &(&1.id in [docs.id, other.id]))
+
+      assert KilnCMS.CMS.ContentTree.chain(KilnCMS.CMS.Entry, guides.id, guides.org_id) ==
+               ["docs", "guides"]
+
+      assert KilnCMS.CMS.ContentTree.subtree_chains(rows, guides.id, ["docs"]) == %{
+               guides.id => ["docs"],
+               routing.id => ["docs", "guides"],
+               plugs.id => ["docs", "guides"]
+             }
+    end
+
+    test "another org's rows never join the subtree" do
+      actor = admin()
+      type = tree_type(actor)
+      section = entry(actor, type, "Section")
+
+      assert KilnCMS.CMS.ContentTree.subtree(KilnCMS.CMS.Entry, section.id, Ecto.UUID.generate()) ==
+               []
+    end
+
+    test "a wide subtree is walked in linear time and every chain is right" do
+      root = Ecto.UUID.generate()
+      mids = for _ <- 1..200, do: %{id: Ecto.UUID.generate(), parent_id: root, slug: "m"}
+
+      leaves =
+        for m <- mids, _ <- 1..100, do: %{id: Ecto.UUID.generate(), parent_id: m.id, slug: "l"}
+
+      rows = [%{id: root, parent_id: nil, slug: "r"} | mids ++ leaves]
+      chains = KilnCMS.CMS.ContentTree.subtree_chains(rows, root, ["top"])
+
+      assert map_size(chains) == 20_201
+      assert chains[hd(leaves).id] == ["top", "r", "m"]
+    end
+  end
+
   describe "a type with no alias pattern" do
     test "is untouched by a move" do
       actor = admin()

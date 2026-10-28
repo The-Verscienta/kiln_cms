@@ -29,6 +29,7 @@ defmodule KilnCMS.CMS.Workers.RegenerateSubtreeAliases do
   """
   use Oban.Worker, queue: :default, max_attempts: 3
 
+  alias KilnCMS.CMS.ContentTree
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.SlugRegeneration
   alias KilnCMS.CMS.Slugs
@@ -42,78 +43,34 @@ defmodule KilnCMS.CMS.Workers.RegenerateSubtreeAliases do
     if is_nil(ct.alias_pattern) do
       :ok
     else
-      rows = tree_rows(ct, org_id)
+      resource = Slugs.storage_resource(ct)
+
+      # The subtree alone, not the type (#1903): one recursive CTE down from the
+      # moved record, and one up from each of its parents, new and old.
+      # authorize?-free and complete on purpose — a descendant the job could not
+      # read is one whose path would silently keep pointing at the old
+      # structure, and a draft ancestor still contributes its segment.
+      rows = ContentTree.subtree(resource, id, org_id)
+      parent_id = Enum.find_value(rows, &(&1.id == id && &1.parent_id))
 
       SlugRegeneration.run(kind, org_id,
         field: :path_alias,
-        ids: subtree_ids(rows, id),
+        ids: Enum.map(rows, & &1.id),
+        ancestors:
+          ContentTree.subtree_chains(rows, id, ContentTree.chain(resource, parent_id, org_id)),
         # The chains as they were before the move, so the regeneration can tell
         # a stale derived alias from a hand-written one (#1890). Only the moved
-        # record's parent changed, so rewinding that one edge rewinds the whole
-        # subtree.
-        prior_ancestors: chains(rewind(rows, id, args["old_parent_id"]))
+        # record's parent changed, so rooting the same subtree at the OLD
+        # parent's chain rewinds every chain beneath it.
+        prior_ancestors:
+          ContentTree.subtree_chains(
+            rows,
+            id,
+            ContentTree.chain(resource, args["old_parent_id"], org_id)
+          )
       )
 
       :ok
-    end
-  end
-
-  # The subtree's structure is unchanged by the move — only the moved record's
-  # own parent moved — so putting that one edge back gives every pre-move chain.
-  defp rewind(rows, id, old_parent_id) do
-    Enum.map(rows, fn
-      %{id: ^id} = row -> %{row | parent_id: old_parent_id}
-      row -> row
-    end)
-  end
-
-  # `id => [ancestor slug, …]`, root first, for every row.
-  defp chains(rows) do
-    by_id = Map.new(rows, &{&1.id, &1})
-    Map.new(rows, &{&1.id, climb(by_id, &1.parent_id, [], 0)})
-  end
-
-  defp climb(_by_id, nil, acc, _depth), do: acc
-
-  defp climb(by_id, id, acc, depth) do
-    if depth > KilnCMS.CMS.ContentTree.max_depth() do
-      acc
-    else
-      case Map.get(by_id, id) do
-        nil -> acc
-        row -> climb(by_id, row.parent_id, [row.slug | acc], depth + 1)
-      end
-    end
-  end
-
-  defp tree_rows(ct, org_id) do
-    ct
-    |> Slugs.storage_resource()
-    |> Ash.Query.select([:id, :parent_id, :slug])
-    # authorize?: false — the subtree has to be complete. A descendant the job
-    # could not read is one whose path would silently keep pointing at the old
-    # structure, which is the bug this worker exists to prevent; and a draft
-    # ancestor still contributes its segment. A system actor is the wrong tool
-    # here: a refused read returns `{:ok, []}`, so an unreadable row would
-    # flatten a path rather than fail loudly. Ids and slugs only, tenant-scoped.
-    |> Ash.read!(authorize?: false, tenant: org_id)
-  end
-
-  # The moved record and everything beneath it, off the rows already read — a
-  # per-level query would turn one move into a query per level of the subtree.
-  defp subtree_ids(rows, id) do
-    by_parent = Enum.group_by(rows, & &1.parent_id)
-    collect(by_parent, [id], [])
-  end
-
-  defp collect(_by_parent, [], acc), do: acc
-
-  defp collect(by_parent, [id | rest], acc) do
-    if id in acc do
-      collect(by_parent, rest, acc)
-    else
-      children = by_parent |> Map.get(id, []) |> Enum.map(& &1.id)
-      collect(by_parent, rest ++ children, [id | acc])
     end
   end
 end
