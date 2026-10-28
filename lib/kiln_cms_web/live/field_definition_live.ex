@@ -858,6 +858,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     socket
     |> assign(:definitions, definitions)
+    # Every section heading in use on the site, offered as the section
+    # input's suggestions so a second field files under the same spelling.
+    |> assign(
+      :section_names,
+      definitions
+      |> Enum.map(& &1.section)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> Enum.sort()
+    )
     |> assign(:link_fields, Enum.group_by(links, &FieldDefinition.parent_id/1))
     |> assign(:grouped, grouped)
     |> assign(:orphaned, Enum.sort_by(orphaned, &{to_string(&1.content_type), &1.name}))
@@ -2298,6 +2308,31 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         "Saving keeps only the first item of each list already filled in. The others are unlinked from the content; the records themselves are not touched."
       )
 
+  attr :field, Phoenix.HTML.FormField, required: true
+  attr :names, :list, required: true
+
+  # The heading the field is filed under in the content editor (`section`),
+  # with the site's headings in use as suggestions.
+  defp section_input(assigns) do
+    assigns = assign(assigns, :list_id, "#{assigns.field.id}-sections")
+
+    ~H"""
+    <div>
+      <.input
+        field={@field}
+        label={gettext("Section")}
+        list={@list_id}
+        autocomplete="off"
+        placeholder={gettext("e.g. Identity, Safety")}
+        hint={gettext("Editors see fields with the same section under one collapsible heading.")}
+      />
+      <datalist id={@list_id}>
+        <option :for={name <- @names} value={name} />
+      </datalist>
+    </div>
+    """
+  end
+
   attr :form, :any, required: true
   attr :id, :string, required: true
 
@@ -2754,6 +2789,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               <.multiple_field form={@form} id="new-field-multiple" target_types={@target_types} />
             <% end %>
             <.input field={@form[:help_text]} label={gettext("Help text")} />
+            <.section_input field={@form[:section]} names={@section_names} />
             <.localization_input field={@form[:localization]} />
             <.options_field form={@form} id="new-field-options" />
             <.default_field form={@form} />
@@ -2913,6 +2949,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                         class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
                       >
                         {gettext("portable")}
+                      </span>
+                      <span
+                        :if={definition.section}
+                        id={"field-#{definition.id}-section"}
+                        title={gettext("The section editors see it under")}
+                        class="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-xs text-base-content/70"
+                      >
+                        <.icon name="hero-folder" class="size-3" />{definition.section}
                       </span>
                       <span
                         :if={definition.private}
@@ -3108,6 +3152,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     />
                   <% end %>
                   <.input field={@edit.form[:help_text]} label={gettext("Help text")} />
+                  <.section_input field={@edit.form[:section]} names={@section_names} />
                   <.localization_input field={@edit.form[:localization]} />
                   <.options_field form={@edit.form} id={"edit-field-options-#{@edit.id}"} />
                   <.default_field form={@edit.form} />

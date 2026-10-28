@@ -46,7 +46,7 @@ defmodule KilnCMSWeb.SurfaceTest do
   )
 
   @shared ~w(
-    /account /api/ask /api/auth/sign_in /api/auth/sign_in/verify /api/content/:type
+    /account /api /api/ask /api/auth/sign_in /api/auth/sign_in/verify /api/content/:type
     /api/content/:type/:id/preview-token /api/content/:type/:id/revisions
     /api/content/:type/:id/revisions/:version_id
     /api/content/:type/:id/revisions/:version_id/restore /api/content/:type/:slug

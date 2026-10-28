@@ -621,6 +621,11 @@ msgstr ""
 msgid "%{field}, item %{position}"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
+#, elixir-autogen, elixir-format
+msgid "%{filled} of %{count} filled"
+msgstr ""
+
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "%{finding}, %{delivery}"
@@ -4051,6 +4056,11 @@ msgstr ""
 msgid "Code injection saved."
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Collapse all"
+msgstr ""
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Collapse sidebar"
@@ -6555,6 +6565,11 @@ msgstr ""
 msgid "Editors publish their own work. Submitting for review stays available, and admins can always publish."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editors see fields with the same section under one collapsible heading."
+msgstr ""
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editors submit for review, and an admin publishes."
@@ -7061,6 +7076,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #, elixir-autogen, elixir-format
 msgid "Expand"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Expand all"
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
@@ -14707,6 +14727,11 @@ msgstr ""
 msgid "Secret saved."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Section"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Section break — no editable fields."
@@ -17223,6 +17248,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "The search instance could not be saved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "The section editors see it under"
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -20594,6 +20624,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "e.g. Alex Rivera"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. Identity, Safety"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex

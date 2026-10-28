@@ -621,6 +621,11 @@ msgstr "%{field} pointe vers un élément supprimé ou placé dans la corbeille.
 msgid "%{field}, item %{position}"
 msgstr "%{field}, élément %{position}"
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
+#, elixir-autogen, elixir-format
+msgid "%{filled} of %{count} filled"
+msgstr "%{filled} sur %{count} remplis"
+
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "%{finding}, %{delivery}"
@@ -4051,6 +4056,11 @@ msgstr "Injection de code supprimée."
 msgid "Code injection saved."
 msgstr "Injection de code enregistrée."
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Collapse all"
+msgstr "Tout replier"
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Collapse sidebar"
@@ -6555,6 +6565,11 @@ msgstr "Les éditeurs publient leur propre travail"
 msgid "Editors publish their own work. Submitting for review stays available, and admins can always publish."
 msgstr "Les éditeurs publient leur propre travail. L'envoi en relecture reste disponible, et les administrateurs peuvent toujours publier."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editors see fields with the same section under one collapsible heading."
+msgstr "Les éditeurs voient les champs d’une même section sous un seul titre repliable."
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editors submit for review, and an admin publishes."
@@ -7062,6 +7077,11 @@ msgstr "Extrait"
 #, elixir-autogen, elixir-format
 msgid "Expand"
 msgstr "Développer"
+
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Expand all"
+msgstr "Tout déplier"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -14707,6 +14727,11 @@ msgstr "Clé d’accès secrète"
 msgid "Secret saved."
 msgstr "Secret enregistré."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Section"
+msgstr "Section"
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Section break — no editable fields."
@@ -17224,6 +17249,11 @@ msgstr "La clé d’accès secrète enregistrée est illisible. Saisissez-la à 
 #, elixir-autogen, elixir-format
 msgid "The search instance could not be saved."
 msgstr "L'instance de recherche n'a pas pu être enregistrée."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "The section editors see it under"
+msgstr "La section sous laquelle les éditeurs le voient"
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -20595,6 +20625,11 @@ msgstr "ex. Personnel Acme"
 #, elixir-autogen, elixir-format
 msgid "e.g. Alex Rivera"
 msgstr "p. ex. Alex Rivera"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. Identity, Safety"
+msgstr "p. ex. Identité, Sécurité"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format

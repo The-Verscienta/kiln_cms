@@ -1084,6 +1084,8 @@ defmodule KilnCMSWeb.Router do
     # Served summary of the headless API surfaces — the header/footer
     # "GraphQL" / "JSON:API" links land here instead of on raw endpoints (#319).
     get "/developers", PageController, :developers
+    # Exact match: the JSON:API forward and nested API routes stay unchanged.
+    get "/api", PageController, :api
     # UI locale switcher — persists the chosen locale in the session.
     get "/locale/:locale", LocaleController, :update
   end
