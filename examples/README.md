@@ -12,6 +12,7 @@ an external frontend.
 | Example | Stack | Status | Demonstrates |
 |---|---|---|---|
 | [`phoenix_showcase/`](https://github.com/The-Verscienta/kiln_cms/tree/main/examples/phoenix_showcase) | Phoenix / LiveView (no DB) | Full headless showcase | A decoupled Elixir consumer: blog + article pages (typed blocks rendered on the BEAM), search-as-you-type (GraphQL), locale switcher (`/api/locales`), a schema-driven form, and optional API-key auth |
+| [`swiftui-reader/`](https://github.com/The-Verscienta/kiln_cms/tree/main/examples/swiftui-reader) | SwiftUI (iOS 17 / macOS 14, Swift package) | Native-app reference | The path in [native-apps.md](../docs/native-apps.md): models from `mix kiln.export.schema --format swift`, a file mirror kept fresh by `/api/sync` (cursor per page, `invalid_cursor` restart, backoff), `ETag`/`304` and `?fields=`, `:group` rows, Portable Text → `AttributedString`, focal-point image crops |
 | [`astro-blog/`](https://github.com/The-Verscienta/kiln_cms/tree/main/examples/astro-blog) | Astro (static) | Optional headless example (not the primary delivery path) | Content discovery via `sitemap.xml`, the v2 content delivery API (`/api/content/:type/:slug`), and GraphQL search (`/gql`) |
 
 ## The headless API at a glance

@@ -124,6 +124,30 @@ carries the reasoning.
   test suite compiles the output with `-Werror` and decodes a real fired
   artifact with it ([native-apps.md → Kotlin models](../native-apps.md#kotlin-models)).
 
+<a id="swiftui-reader"></a>
+
+- **A SwiftUI example (#2124).** `examples/swiftui-reader` is a Swift package
+  (iOS 17, macOS 14) that reads a Kiln site the way
+  [native-apps.md](../native-apps.md) describes, so a mobile team evaluating
+  Kiln can see the intended path in code. It checks in the `Kiln.swift` that
+  `mix kiln.export.schema --format swift` generates for a demo `recipe` type
+  (`kiln/seed.exs` creates it, `bin/regenerate` regenerates it). A small
+  `KilnClient` reads `/api/sync` and the `json` artifact, with
+  `If-None-Match` and `?fields=`. A file mirror saves each sync page and its
+  cursor in one atomic write. It restarts with `initial=true` only on
+  `invalid_cursor`, keeps local data until the new snapshot ends, and retries
+  everything else with `Retry-After` or jittered backoff. The two screens show
+  a `:group` field's rows as a native grid, render Portable Text to an
+  `AttributedString` with no web view (the plain rendition is the fallback),
+  and crop images around the media snapshot's focal point, choosing a
+  variant by pixel width. `swift test` decodes JSON captured from a real
+  local Kiln and runs the sync loop against a stubbed `URLProtocol`. A macOS
+  CI job runs it when the example or the Swift emitter changes. The docs gain
+  one fix: the generated Swift and Kotlin `PortableTextBlock` is the schema's
+  open node and drops `children`, `style` and `markDefs`, which
+  native-apps.md now says. The api.md sync section now gives the delta
+  window's real lag, 10 seconds.
+
 <a id="field-sections"></a>
 
 - **Sections in the Custom fields panel.** A field definition's new

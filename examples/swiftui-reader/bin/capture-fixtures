@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Capture the test fixtures from a running local Kiln (`mix phx.server`,
+# seeded with kiln/seed.exs). Re-run after regenerating the models, so the
+# tests decode what the server really sends.
+#
+#   bin/capture-fixtures                       # http://localhost:4000
+#   KILN_URL=http://localhost:4001 bin/capture-fixtures
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")/.." && pwd)"
+dir="$here/Tests/KilnReaderTests/Fixtures"
+base="${KILN_URL:-http://localhost:4000}"
+
+get() { curl -fsS "$base$1" | python3 -m json.tool --indent 2 > "$dir/$2"; echo "  $2"; }
+
+get "/api/content/recipe/buttermilk-pancakes?surface=json" recipe-artifact.json
+get "/api/content/recipe/buttermilk-pancakes?fields=custom_fields.hero,custom_fields.minutes,slug,title" recipe-fields.json
+get "/api/sync?initial=true&type=recipe&limit=2" sync-initial-page.json
+
+# A delta that carries a deletion: take a cursor after the full snapshot,
+# unpublish one recipe, read the delta, then publish it again. The delta
+# window trails the clock by 10 seconds (the commit lag), hence the sleep.
+toggle() {
+  (cd "$here/../.." && mix run -e '
+    Logger.configure(level: :warning)
+    [verb, slug] = System.argv()
+    org = KilnCMS.Accounts.default_org_id()
+    {:ok, admin} = KilnCMS.Accounts.get_user_by_email(System.get_env("ADMIN_EMAIL", "admin@kiln.test"), authorize?: false)
+    opts = [actor: admin, tenant: org]
+    [entry] = KilnCMS.CMS.ContentTypes.list!("recipe", Keyword.put(opts, :query, filter: [slug: slug]))
+    KilnCMS.CMS.ContentTypes.transition("recipe", verb, entry, opts)
+  ' "$1" "$2" > /dev/null)
+}
+
+cursor="$(curl -fsS "$base/api/sync?initial=true&type=recipe&limit=500" | python3 -c 'import json,sys; print(json.load(sys.stdin)["cursor"])')"
+toggle unpublish green-salad
+sleep 15
+get "/api/sync?cursor=$cursor" sync-delta-page.json
+toggle publish green-salad

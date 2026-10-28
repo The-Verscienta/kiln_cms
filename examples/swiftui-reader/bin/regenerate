@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Regenerate Sources/KilnModels/Kiln.swift from a local Kiln's schema.
+#
+# Runs `mix kiln.export.schema --format swift` in the Kiln checkout this
+# example lives in (two directories up), for the `recipe` type the demo seed
+# creates (kiln/seed.exs). Uses the dev database, so seed it first.
+#
+#   bin/regenerate                  # the default site
+#   KILN_ORG_ID=<uuid> bin/regenerate
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")/.." && pwd)"
+kiln="$(cd "$here/../.." && pwd)"
+out="$here/Sources/KilnModels/Kiln.swift"
+org="${KILN_ORG_ID:-00000000-0000-0000-0000-000000000001}"
+
+cd "$kiln"
+mix kiln.export.schema --format swift --type recipe --org-id "$org" --out "$out"
+echo "Wrote ${out#"$kiln"/}"

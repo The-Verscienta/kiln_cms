@@ -1,0 +1,66 @@
+name: SwiftUI reader
+
+# `swift test` for examples/swiftui-reader (the decoding, Portable Text,
+# media and sync tests), on its own so it runs only when what it checks can
+# have changed: the example itself, or the Swift emitter and walker its
+# checked-in models come from. An emitter change doesn't regenerate
+# Sources/KilnModels/Kiln.swift here (that needs a seeded database; run
+# `bin/regenerate` and commit the result), but this still proves the example
+# builds against the file it has. Run it by hand from the Actions tab
+# (workflow_dispatch) for anything the filter misses, such as an Xcode bump.
+on:
+  push:
+    branches: [main]
+    # Keep the two lists the same.
+    paths:
+      - "examples/swiftui-reader/**"
+      - "lib/kiln_cms/schema_export/swift.ex"
+      - "lib/kiln_cms/schema_export/walk.ex"
+      - ".github/workflows/swiftui-reader.yml"
+  pull_request:
+    paths:
+      - "examples/swiftui-reader/**"
+      - "lib/kiln_cms/schema_export/swift.ex"
+      - "lib/kiln_cms/schema_export/walk.ex"
+      - ".github/workflows/swiftui-reader.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # macOS, because the example imports SwiftUI. No Elixir and no database:
+  # the tests decode checked-in fixtures and stub the network.
+  #
+  # Never make this a required check: a path-filtered workflow that does not
+  # run never reports, and a required check that never reports blocks the
+  # merge of every PR outside these paths.
+  swift_test:
+    name: SwiftUI reader (swift test)
+    runs-on: macos-15
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: examples/swiftui-reader
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v5
+        with:
+          path: examples/swiftui-reader/.build
+          key: swiftui-reader-${{ runner.os }}-${{ hashFiles('examples/swiftui-reader/Package.swift', 'examples/swiftui-reader/Sources/**', 'examples/swiftui-reader/Tests/**/*.swift') }}
+          restore-keys: swiftui-reader-${{ runner.os }}-
+
+      - name: Build and test
+        run: swift test
