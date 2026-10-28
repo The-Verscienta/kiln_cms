@@ -130,10 +130,10 @@ have this problem.
    tags. Store it as a sibling key, not by changing the value, so current
    readers see no difference. This covers today's data without asking anyone
    to re-enter it.
-2. **Superseded** by #2099 and #2101 — no new field type. #2099 made
+2. **Superseded** by #2099 and #2103 — no new field type. #2099 made
    `:text` rich by default (`format: :rich`: TipTap editing, HTML sanitized
    on write with `HTMLSanitizer.sanitize_rich_text/1`, schema
-   `contentMediaType: text/html`), and #2101 adds the structured tree as an
+   `contentMediaType: text/html`), and #2103 adds the structured tree as an
    opt-in rendition: `deliver_portable: true` adds
    `custom_fields_portable.<name>`, the value as Portable Text
    (`KilnCMS.CMS.PortableFields`), typed in the schema by `$ref` to the
