@@ -3514,6 +3514,12 @@ defmodule KilnCMS.CMS.Content do
         # `scheduled_at`, or publishing, clears the proposal.
         change KilnCMS.CMS.Changes.ClearProposedPublishAt, on: [:update]
 
+        # A `path_alias` written by anyone but `Changes.DeriveAlias` is a
+        # person's (#1890): every action that writes one records it, so an
+        # alias set through the working copy, a restore or an import is never
+        # later mistaken for a derived one and rewritten by a move.
+        change KilnCMS.CMS.Changes.TrackAliasDerivation, on: [:create, :update]
+
         # Block field policies (#51): `editable_by` on a `Kiln.Block` field was
         # enforced only by the editor filtering the fields it renders, so the
         # write API / MCP / GraphQL could set an admin-only field as an editor.
@@ -3849,6 +3855,15 @@ defmodule KilnCMS.CMS.Content do
         attribute :path_alias, :string,
           public?: true,
           constraints: [max_length: KilnCMS.Limits.url()]
+
+        # Whether Kiln derived `path_alias` from the type's alias pattern
+        # (`true`) or a person wrote it (`false`), recorded at write time
+        # (#1890) instead of inferred by re-deriving and comparing. `nil` on a
+        # row saved before 1.7, or with no alias: unknown, and a regeneration
+        # falls back to the inference (`KilnCMS.CMS.Slugs.underived?/2`).
+        # Written only by `Changes.DeriveAlias` and
+        # `Changes.TrackAliasDerivation`; no action accepts it.
+        attribute :path_alias_derived, :boolean
 
         # og:image URL and rel=canonical for SEO/social.
         attribute :seo_image, :string,

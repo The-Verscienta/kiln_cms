@@ -218,6 +218,114 @@ defmodule KilnCMS.CMS.ContentTreeAliasTest do
     end
   end
 
+  # #1890: whether an alias was derived is recorded at write time, not
+  # inferred later by re-deriving and comparing.
+  describe "the recorded derivation" do
+    defp flag(record), do: reload(record).path_alias_derived
+
+    test "a derived alias is recorded as derived, a written one as a person's" do
+      actor = admin()
+      type = tree_type(actor)
+
+      assert flag(entry(actor, type, "Derived")) == true
+
+      written =
+        CMS.create_entry!(
+          %{type_definition_id: type.id, title: "Written", slug: "written", path_alias: "/mine"},
+          actor: actor
+        )
+
+      assert flag(written) == false
+    end
+
+    test "editing the alias pins it, clearing it derives it again, re-saving it changes nothing" do
+      actor = admin()
+      type = tree_type(actor)
+      doc = entry(actor, type, "Doc")
+
+      same = CMS.update_entry!(doc, %{path_alias: doc.path_alias}, actor: actor)
+      assert flag(same) == true
+
+      pinned = CMS.update_entry!(same, %{path_alias: "/by/hand"}, actor: actor)
+      assert flag(pinned) == false
+
+      cleared = CMS.update_entry!(pinned, %{path_alias: ""}, actor: actor)
+      assert reload(cleared).path_alias == "/doc"
+      assert flag(cleared) == true
+    end
+
+    test "a regeneration's rewrite stays derived" do
+      actor = admin()
+      type = tree_type(actor)
+      section = entry(actor, type, "Guides")
+      leaf = entry(actor, type, "Routing")
+
+      {:ok, _} = CMS.move_entry(leaf, %{parent_id: section.id}, actor: actor)
+      drain_oban()
+
+      assert reload(leaf).path_alias == "/guides/routing"
+      assert flag(leaf) == true
+    end
+
+    # The case inference could not answer: an ancestor RENAMED, not moved, so
+    # no move job knows the old chain. Both stored aliases now differ from the
+    # current derivation; only the recorded fact tells them apart.
+    test "after an ancestor's slug changes, a bulk regeneration rewrites derived paths and keeps pinned ones" do
+      actor = admin()
+      type = tree_type(actor)
+      section = entry(actor, type, "Guides")
+      derived = entry(actor, type, "Routing")
+
+      pinned =
+        CMS.create_entry!(
+          %{
+            type_definition_id: type.id,
+            title: "Plugs",
+            slug: "plugs",
+            path_alias: "/hand/plugs"
+          },
+          actor: actor
+        )
+
+      {:ok, _} = CMS.move_entry(derived, %{parent_id: section.id}, actor: actor)
+      {:ok, _} = CMS.move_entry(pinned, %{parent_id: section.id}, actor: actor)
+      drain_oban()
+      assert reload(derived).path_alias == "/guides/routing"
+
+      CMS.update_entry!(reload(section), %{slug: "handbook"}, actor: actor)
+
+      KilnCMS.CMS.SlugRegeneration.run(type.name, section.org_id,
+        field: :path_alias,
+        actor: actor
+      )
+
+      assert reload(derived).path_alias == "/handbook/routing"
+      assert reload(pinned).path_alias == "/hand/plugs"
+    end
+
+    test "a move repairs a path that went stale when its ancestor was renamed" do
+      actor = admin()
+      type = tree_type(actor)
+      top = entry(actor, type, "Docs")
+      section = entry(actor, type, "Guides")
+      leaf = entry(actor, type, "Routing")
+
+      {:ok, _} = CMS.move_entry(leaf, %{parent_id: section.id}, actor: actor)
+      drain_oban()
+
+      # Renaming the section re-derives nothing beneath it: the leaf keeps
+      # /guides/routing, now stale. Inference then read it as hand-written on
+      # every later move, because it matches no derivation, old or new.
+      section = CMS.update_entry!(reload(section), %{slug: "handbook"}, actor: actor)
+      assert reload(leaf).path_alias == "/guides/routing"
+
+      {:ok, _} = CMS.move_entry(section, %{parent_id: top.id}, actor: actor)
+      drain_oban()
+
+      assert reload(leaf).path_alias == "/docs/handbook/routing"
+    end
+  end
+
   describe "a type with no alias pattern" do
     test "is untouched by a move" do
       actor = admin()

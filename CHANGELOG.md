@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Overlays: run `mix ash.codegen` for your content types. Every content table
+  gains a nullable `path_alias_derived` column; reads fail until it exists.**
+  ([#2118](https://github.com/The-Verscienta/kiln_cms/pull/2118) · [long form](docs/changelog/unreleased.md#alias-derivation-overlays))
+
 - **Optional: run `mix kiln.media.resnapshot --apply` once after deploying**
   so stored `:media` field values gain dimensions, focal point and variants;
   fired artifacts converge by themselves.
@@ -161,6 +165,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2068](https://github.com/The-Verscienta/kiln_cms/pull/2068) · [long form](docs/changelog/unreleased.md#overlay-refire))
 
 ### Changed
+
+- **Whether a path alias was derived is recorded when it is written, so a move
+  rewrites a stale derived path beneath it instead of mistaking it for a pinned one.**
+  ([#2118](https://github.com/The-Verscienta/kiln_cms/pull/2118) · [long form](docs/changelog/unreleased.md#alias-derivation-recorded))
 
 - **JSON:API `/by-slug/:slug` and GraphQL `*BySlug` no longer require `locale`:
   left out, the walk starts at the site's default locale, as the delivery API did.**
