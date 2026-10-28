@@ -22,5 +22,16 @@ defmodule KilnCMS.CMS.Changes.ClearDeliverPlain do
     else
       Ash.Changeset.force_change_attribute(changeset, :deliver_plain, false)
     end
+    |> clear_breaks()
+  end
+
+  # `plain_breaks` shapes the plain rendition, so it means nothing without
+  # one — and the fields admin shows it only beside a ticked `deliver_plain`.
+  defp clear_breaks(changeset) do
+    if Ash.Changeset.get_attribute(changeset, :deliver_plain) do
+      changeset
+    else
+      Ash.Changeset.force_change_attribute(changeset, :plain_breaks, false)
+    end
   end
 end

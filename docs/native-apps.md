@@ -222,6 +222,7 @@ adds a sibling map beside `custom_fields`, which never changes:
 | Option | Key | Value |
 |---|---|---|
 | Also deliver as plain text (`deliver_plain`) | `custom_fields_plain` | the text with tags removed and whitespace collapsed (paragraphs run together), for a list row or a search index |
+| … and Keep paragraph breaks (`plain_breaks`) | `custom_fields_plain` | the same, but with `\n\n` between paragraphs and `\n` per line break or list item, for a text view that shows the prose as written; the schema export marks the field `x-kiln-plain-breaks` |
 | Also deliver as Portable Text (`deliver_portable`, rich fields only) | `custom_fields_portable` | the same Portable Text tree a `rich_text` block's `body` holds: paragraphs, `h1`–`h6`, quotes, nested lists (`listItem` + `level`), `strong`/`em`/`code`/`strike`/`underline` marks, links in `markDefs` |
 
 ```json

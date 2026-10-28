@@ -188,6 +188,52 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     refute CMS.get_field_definition!(field.id, authorize?: false).deliver_plain
   end
 
+  test "keeping paragraph breaks is offered once plain text is ticked", %{conn: conn} do
+    admin = authed_user(:admin)
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    breaks = "#new-field-deliver-plain-breaks"
+
+    lv |> form("#new-field-form", field_definition: %{field_type: "text"}) |> render_change()
+    refute has_element?(lv, breaks)
+
+    lv
+    |> form("#new-field-form", field_definition: %{field_type: "text", deliver_plain: "true"})
+    |> render_change()
+
+    assert has_element?(lv, breaks)
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scopes: ["page"],
+        name: "actions",
+        label: "Actions",
+        field_type: "text",
+        deliver_plain: "true",
+        plain_breaks: "true"
+      }
+    )
+    |> render_submit()
+
+    field =
+      :page
+      |> CMS.field_definitions_for!(authorize?: false)
+      |> Enum.find(&(&1.name == "actions"))
+
+    assert field.deliver_plain and field.plain_breaks
+
+    # Unticking plain text takes the breaks with it.
+    lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+    assert has_element?(lv, "#edit-field-deliver-plain-#{field.id}-breaks[checked]")
+
+    lv
+    |> form("#edit-field-#{field.id}", field_definition: %{deliver_plain: "false"})
+    |> render_submit()
+
+    refute CMS.get_field_definition!(field.id, authorize?: false).plain_breaks
+  end
+
   test "an admin delivers a rich text field as Portable Text too, and only a rich one", %{
     conn: conn
   } do

@@ -264,6 +264,30 @@ defmodule KilnCMS.SchemaExportTest do
       ts = SchemaExport.TypeScript.emit(schema)
       assert ts =~ "custom_fields_plain?:"
     end
+
+    test "a field that keeps its breaks says so, and is still a nullable string",
+         %{actor: actor, org: org} do
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "actions",
+          label: "Actions",
+          field_type: :text,
+          deliver_plain: true,
+          plain_breaks: true
+        },
+        actor: actor,
+        tenant: org
+      )
+
+      actions =
+        SchemaExport.json_schema(org_id: org.id)["$defs"]["content_page"]["properties"][
+          "custom_fields_plain"
+        ]["properties"]["actions"]
+
+      assert actions["type"] == ["string", "null"]
+      assert actions["x-kiln-plain-breaks"] == true
+    end
   end
 
   describe "deliver_portable" do

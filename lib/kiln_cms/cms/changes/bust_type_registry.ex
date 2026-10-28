@@ -146,8 +146,10 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   # A `deliver_plain` flip adds or drops `custom_fields_plain.<name>` on the
   # fired `:json` artifact (`KilnCMS.CMS.PlainFields`), which `/api/content`
   # and `/api/sync` serve verbatim — and deleting a flagged field drops it.
+  # A `plain_breaks` flip rewrites the value's whitespace there.
   defp replain?(changeset, record) do
     Ash.Changeset.changing_attribute?(changeset, :deliver_plain) or
+      Ash.Changeset.changing_attribute?(changeset, :plain_breaks) or
       (changeset.action_type == :destroy and Map.get(record, :deliver_plain) == true)
   end
 

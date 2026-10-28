@@ -142,6 +142,9 @@ defmodule KilnCMS.PlainText do
   # `<em>Coptis</em>` next to a parenthesis is `(Coptis)`. Every other tag
   # (a paragraph, a list item, a line break) is a word boundary.
   @inline ~w(a abbr b bdi bdo cite code data dfn em i kbd mark q s samp small span strong sub sup time u var)
+  # Anything `strip_tags/1` would treat as markup: a tag or a comment.
+  @any_tag ~r{<!--|</?[A-Za-z][^>]*>}u
+
   @inline_tag Regex.compile!("</?(?:" <> Enum.join(@inline, "|") <> ")(?:\\s[^>]*)?/?>", "iu")
 
   @doc """
@@ -159,6 +162,56 @@ defmodule KilnCMS.PlainText do
     |> strip_tags()
     |> decode_entities()
     |> String.replace(~r/\s+/u, " ")
+    |> String.trim()
+  end
+
+  @doc ~S"""
+  `html` as plain text that keeps its paragraphs: what `from_html/1` reads,
+  with the breaks a reader sees left in. `nil` is `""`.
+
+  A block element (a paragraph, a heading, a quote, a list, a table row, …)
+  is a paragraph — separated by a blank line, `"\n\n"`. A `<br>` and each
+  list item start a new line, `"\n"`. Whitespace inside a line collapses to
+  one space, as a browser shows it, and raw newlines in the markup are
+  whitespace like any other.
+
+  Text with no markup at all is taken as typed into a textarea: its own
+  newlines are the breaks, so they are kept (trailing spaces trimmed, runs of
+  blank lines folded to one).
+
+  List items carry no marker — an ordered list's numbers would need a
+  parser — so a list reads as one item per line.
+
+      iex> KilnCMS.PlainText.from_html_paragraphs("<p>One &amp;\n two</p><p>Three<br>four</p>")
+      "One & two\n\nThree\nfour"
+      iex> KilnCMS.PlainText.from_html_paragraphs("<ul><li>a</li><li><em>b</em></li></ul>")
+      "a\nb"
+      iex> KilnCMS.PlainText.from_html_paragraphs("Typed\r\nlines\n\n\n\nkept")
+      "Typed\nlines\n\nkept"
+  """
+  @spec from_html_paragraphs(String.t() | nil) :: String.t()
+  def from_html_paragraphs(nil), do: ""
+
+  def from_html_paragraphs(html) when is_binary(html) do
+    text =
+      if Regex.match?(@any_tag, html) do
+        html
+        |> String.replace(~r/\s+/u, " ")
+        |> String.replace(~r|<!--.*?-->|us, " ")
+        |> String.replace(@inline_tag, "")
+        |> String.replace(~r|<br\s*/?>|iu, "\n")
+        |> String.replace(~r|<li(?:\s[^>]*)?>|iu, "\n")
+        |> String.replace(~r|</li\s*>|iu, "")
+        |> String.replace(~r|</?[A-Za-z][^>]*>|u, "\n\n")
+      else
+        String.replace(html, ~r/\r\n?/u, "\n")
+      end
+
+    text
+    |> decode_entities()
+    |> String.split("\n")
+    |> Enum.map_join("\n", &(&1 |> String.replace(~r/\s+/u, " ") |> String.trim()))
+    |> String.replace(~r/\n{3,}/u, "\n\n")
     |> String.trim()
   end
 

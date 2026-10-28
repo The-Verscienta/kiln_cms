@@ -105,7 +105,8 @@ UI" workflow, scoped to fields.
   note or a code. The value is a string either way; the schema export marks a
   rich one `contentMediaType: text/html`. For a client that cannot render
   HTML, two per-field options add a sibling map beside `custom_fields`:
-  `deliver_plain` adds `custom_fields_plain.<name>` (tags removed), and, on
+  `deliver_plain` adds `custom_fields_plain.<name>` (tags removed; one line,
+  or with its paragraph breaks kept when `plain_breaks` is set), and, on
   a rich field, `deliver_portable` adds `custom_fields_portable.<name>`, the
   value as the Portable Text tree a `rich_text` block's `body` holds
   (`KilnCMS.CMS.PortableFields`). Both are off by default and computed when a

@@ -3855,6 +3855,10 @@
                 },
                 "type": "array"
               },
+              "plain_breaks": {
+                "description": "Field included by default.",
+                "type": "boolean"
+              },
               "position": {
                 "description": "Field included by default.",
                 "type": "integer"
@@ -3937,6 +3941,7 @@
               "names_record",
               "searchable",
               "deliver_plain",
+              "plain_breaks",
               "deliver_portable"
             ],
             "type": "object"
@@ -4201,6 +4206,9 @@
             },
             "type": "array",
             "uniqueItems": true
+          },
+          "plain_breaks": {
+            "$ref": "#/components/schemas/field_definition-filter-plain_breaks"
           },
           "position": {
             "$ref": "#/components/schemas/field_definition-filter-position"
@@ -5308,6 +5316,45 @@
           },
           "not_eq": {
             "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-plain_breaks": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "type": "boolean"
+          },
+          "greater_than": {
+            "type": "boolean"
+          },
+          "greater_than_or_equal": {
+            "type": "boolean"
+          },
+          "in": {
+            "items": {
+              "type": "boolean"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "boolean"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "boolean"
+          },
+          "less_than": {
+            "type": "boolean"
+          },
+          "less_than_or_equal": {
+            "type": "boolean"
+          },
+          "not_eq": {
+            "type": "boolean"
           }
         },
         "type": "object"

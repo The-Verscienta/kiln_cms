@@ -373,11 +373,26 @@ defmodule KilnCMS.SchemaExport do
           "description" =>
             "Plain-text renditions of the `:text` custom fields marked `deliver_plain`: " <>
               "the stored value with its HTML tags removed, entities decoded and " <>
-              "whitespace collapsed. `null` where the record holds no value.",
-          "properties" => Map.new(names, &{&1, %{"type" => ["string", "null"]}}),
+              "whitespace collapsed (to one line, unless the field keeps its breaks). " <>
+              "`null` where the record holds no value.",
+          "properties" => Map.new(names, &{&1, plain_field_schema(&1, ct.field_definitions)}),
           "additionalProperties" => false
         })
     end
+  end
+
+  # A field that keeps its breaks (`plain_breaks`) says so: the value is
+  # still a string, but `"\n\n"` separates its paragraphs and `"\n"` its
+  # lines, which a client may want to render rather than collapse.
+  defp plain_field_schema(name, definitions) do
+    if Enum.any?(definitions, &(&1.name == name and Map.get(&1, :plain_breaks) == true)),
+      do: %{
+        "type" => ["string", "null"],
+        "description" =>
+          "Keeps the value's breaks: a blank line between paragraphs, a newline per line break and list item.",
+        "x-kiln-plain-breaks" => true
+      },
+      else: %{"type" => ["string", "null"]}
   end
 
   # `deliver_portable` rich `:text` fields fire a `custom_fields_portable`
