@@ -863,9 +863,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
        when type in [:media, :reference] and is_list(value),
        do: Enum.all?(value, &blank?/1)
 
-  # A multiple select's picker posts the same leading `""`, so the same rule —
-  # and a single select handed a list follows it too.
-  defp blank_for?(%{field_type: :select}, value) when is_list(value),
+  # A multiple select's picker, and a list of phrases, post the same leading
+  # `""`, so the same rule — and a single one handed a list follows it too.
+  defp blank_for?(%{field_type: type}, value) when type in [:select, :string] and is_list(value),
     do: Enum.all?(value, &blank?/1)
 
   defp blank_for?(_def, value), do: blank?(value)
@@ -917,10 +917,15 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     with {:ok, terms} <- coerce_terms(value, def), do: within_bounds(terms, def)
   end
 
-  # A single select handed a list (stored while the field was multiple) keeps
-  # its first term, as a single media field does.
-  defp coerce(value, %{field_type: :select} = def, _read_opts) when is_list(value),
-    do: value |> Enum.reject(&blank?/1) |> List.first() |> coerce(def)
+  defp coerce(value, %{field_type: :string, multiple: true} = def, _read_opts) do
+    with {:ok, items} <- coerce_phrases(value), do: within_bounds(items, def)
+  end
+
+  # A single select or string handed a list (stored while the field was
+  # multiple) keeps its first item, as a single media field does.
+  defp coerce(value, %{field_type: type} = def, _read_opts)
+       when type in [:select, :string] and is_list(value),
+       do: value |> Enum.reject(&blank?/1) |> List.first() |> coerce(def)
 
   defp coerce(value, def, _read_opts), do: coerce(value, def)
 
@@ -1053,6 +1058,21 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
       other ->
         {:error, "must be a list of terms (got #{inspect(other)})"}
+    end
+  end
+
+  # A list of phrases (`multiple` `:string`, "Symptoms"): the terms rules
+  # without a vocabulary — and an item holding several lines is several
+  # items, so a pasted list (or an API client's `"a\nb"`) splits rather than
+  # storing one item with line breaks in it.
+  defp coerce_phrases(value) do
+    with {:ok, items} <- coerce_terms(value, %{allow_custom: true, options: []}) do
+      items
+      |> Enum.flat_map(&String.split(&1, ~r/\R/))
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+      |> then(&{:ok, &1})
     end
   end
 

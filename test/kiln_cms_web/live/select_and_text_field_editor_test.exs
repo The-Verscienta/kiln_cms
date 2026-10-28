@@ -73,6 +73,14 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
 
     define!(admin, %{name: "legacy", label: "Legacy", field_type: :text, position: 3})
 
+    define!(admin, %{
+      name: "symptoms",
+      label: "Symptoms",
+      field_type: :string,
+      multiple: true,
+      position: 4
+    })
+
     # A term in use on another record, which the picker suggests.
     CMS.create_page!(
       %{
@@ -92,7 +100,8 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
             "properties" => ["tonic"],
             "uses" => "<p>Ren Shen <strong>tonifies</strong></p>",
             "code" => "RS-1",
-            "legacy" => ~s(["a","b"])
+            "legacy" => ~s(["a","b"]),
+            "symptoms" => ["fatigue", "night sweats"]
           }
         },
         actor: admin
@@ -130,9 +139,9 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
     test "adds, removes and reorders terms, and saves them as an ordered list", ctx do
       entry = element(ctx.lv, "#custom-field-properties-entry")
 
-      render_hook(entry, "select_term_add", %{"field" => "properties", "term" => " nervine "})
-      render_hook(entry, "select_term_add", %{"field" => "properties", "term" => "tonic"})
-      render_hook(entry, "select_term_add", %{"field" => "properties", "term" => "adaptogen"})
+      render_hook(entry, "list_item_add", %{"field" => "properties", "item" => " nervine "})
+      render_hook(entry, "list_item_add", %{"field" => "properties", "item" => "tonic"})
+      render_hook(entry, "list_item_add", %{"field" => "properties", "item" => "adaptogen"})
 
       assert has_element?(ctx.lv, chip(1), "nervine")
       assert has_element?(ctx.lv, chip(2), "adaptogen")
@@ -144,19 +153,77 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
 
       ctx.lv
       |> element("#custom-field-properties-terms")
-      |> render_hook("select_term_reorder", %{"field" => "properties", "order" => ["2", "0", "1"]})
+      |> render_hook("list_item_reorder", %{"field" => "properties", "order" => ["2", "0", "1"]})
 
-      ctx.lv |> element("#{chip(2)} button[phx-click=select_term_remove]") |> render_click()
+      ctx.lv |> element("#{chip(2)} button[phx-click=list_item_remove]") |> render_click()
 
       ctx.lv |> form("#page-editor") |> render_submit()
       assert stored(ctx)["properties"] == ["adaptogen", "tonic"]
     end
 
     test "removing every term clears the field", ctx do
-      ctx.lv |> element("#{chip(0)} button[phx-click=select_term_remove]") |> render_click()
+      ctx.lv |> element("#{chip(0)} button[phx-click=list_item_remove]") |> render_click()
       ctx.lv |> form("#page-editor") |> render_submit()
 
       refute Map.has_key?(stored(ctx), "properties")
+    end
+  end
+
+  describe "the list of phrases" do
+    defp item(lv, n),
+      do: lv |> element("#custom-field-symptoms-#{n}") |> render() |> Floki.parse_fragment!()
+
+    defp item_value(lv, n), do: lv |> item(n) |> Floki.attribute("value") |> List.first()
+
+    test "shows each item as an editable input, with an add box in lines mode", ctx do
+      assert item_value(ctx.lv, 0) == "fatigue"
+      assert item_value(ctx.lv, 1) == "night sweats"
+
+      assert has_element?(
+               ctx.lv,
+               ~s(#custom-field-symptoms-0[name="form[custom_fields][symptoms][]"])
+             )
+
+      assert has_element?(
+               ctx.lv,
+               ~s(#custom-field-symptoms-items[phx-hook=Sortable][data-sort-event=list_item_reorder])
+             )
+
+      assert has_element?(
+               ctx.lv,
+               ~s(#custom-field-symptoms-entry[phx-hook=TermPicker][data-split=lines][data-count="2"])
+             )
+    end
+
+    test "adds, edits in place, reorders and removes; saves the list", ctx do
+      ctx.lv
+      |> element("#custom-field-symptoms-entry")
+      |> render_hook("list_item_add", %{"field" => "symptoms", "item" => "dry, hacking cough"})
+
+      assert item_value(ctx.lv, 2) == "dry, hacking cough"
+
+      # An item emptied in place keeps its row while the form holds it.
+      ctx.lv
+      |> form("#page-editor", %{
+        "form" => %{
+          "custom_fields" => %{"symptoms" => ["", "", "night sweats", "dry, hacking cough"]}
+        }
+      })
+      |> render_change()
+
+      assert item_value(ctx.lv, 0) in [nil, ""]
+      assert item_value(ctx.lv, 2) == "dry, hacking cough"
+
+      ctx.lv
+      |> element("#custom-field-symptoms-items")
+      |> render_hook("list_item_reorder", %{"field" => "symptoms", "order" => ["2", "1", "0"]})
+
+      ctx.lv
+      |> element("#cf-item-symptoms-1 button[phx-click=list_item_remove]")
+      |> render_click()
+
+      ctx.lv |> form("#page-editor") |> render_submit()
+      assert stored(ctx)["symptoms"] == ["dry, hacking cough"]
     end
   end
 
@@ -225,6 +292,13 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
 
       assert has_element?(lv, "#new-field-format-rich[checked]")
       assert has_element?(lv, "#new-field-format-plain")
+
+      lv
+      |> form("#new-field-form", %{"field_definition" => %{"field_type" => "string"}})
+      |> render_change()
+
+      assert has_element?(lv, "#new-field-multiple-true")
+      assert render(lv) =~ "symptoms, synonyms"
     end
   end
 end

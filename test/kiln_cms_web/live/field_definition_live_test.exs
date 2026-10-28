@@ -196,7 +196,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
     gallery_radio = "#new-field-form input[name='field_definition[multiple]'][value=true]"
 
-    lv |> form("#new-field-form", field_definition: %{field_type: "string"}) |> render_change()
+    lv |> form("#new-field-form", field_definition: %{field_type: "url"}) |> render_change()
     refute has_element?(lv, gallery_radio)
 
     lv |> form("#new-field-form", field_definition: %{field_type: "media"}) |> render_change()

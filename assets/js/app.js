@@ -565,40 +565,59 @@ const Hooks = {
       this.editor && this.editor.destroy()
     },
   },
-  // The text box of a multiple select's tag picker. Enter or a comma adds what
-  // is typed (several, comma-separated, at once); picking a `<datalist>`
+  // The "add" box of a list field: a multiple select's tag picker, or a
+  // multiple string's list of phrases (`data-split="lines"`). Enter adds what
+  // is typed. In a tag picker a comma does too, and a typed comma list splits
+  // into terms; phrases may hold commas, so there only line breaks split —
+  // pasting several lines adds one item per line. Picking a `<datalist>`
   // suggestion adds it straight away; Backspace in an empty box removes the
-  // last chip. The terms themselves live in the form — the server edits them
-  // (`select_term_add` / `select_term_remove`) and re-renders the chips.
+  // last item. The items themselves live in the form — the server edits them
+  // (`list_item_add` / `list_item_remove`) and re-renders the list.
   TermPicker: {
     mounted() {
-      const add = () => {
+      const lines = this.el.dataset.split === "lines"
+      const push = text => {
         const field = this.el.dataset.field
-        this.el.value
-          .split(",")
-          .map(term => term.trim())
+        text
+          .split(lines ? /\r?\n/ : /[,\n]/)
+          .map(item => item.trim())
           .filter(Boolean)
-          .forEach(term => this.pushEvent("select_term_add", {field, term}))
+          .forEach(item => this.pushEvent("list_item_add", {field, item}))
+      }
+      const add = () => {
+        push(this.el.value)
         this.el.value = ""
       }
       this.el.addEventListener("keydown", e => {
         if (e.isComposing) return
-        if (e.key === "Enter" || e.key === ",") {
+        if (e.key === "Enter" || (!lines && e.key === ",")) {
           e.preventDefault()
           add()
         } else if (e.key === "Backspace" && this.el.value === "") {
           const count = Number(this.el.dataset.count || 0)
           if (count > 0) {
             e.preventDefault()
-            this.pushEvent("select_term_remove", {field: this.el.dataset.field, index: String(count - 1)})
+            this.pushEvent("list_item_remove", {field: this.el.dataset.field, index: String(count - 1)})
           }
+        }
+      })
+      // A pasted block of several lines is several items, wherever the caret
+      // was; a single line pastes into the box as usual.
+      this.el.addEventListener("paste", e => {
+        const text = e.clipboardData && e.clipboardData.getData("text")
+        if (text && /\r?\n/.test(text.trim())) {
+          e.preventDefault()
+          push(this.el.value + text)
+          this.el.value = ""
         }
       })
       // A datalist pick arrives as an input event with no inputType (Safari,
       // Firefox) or "insertReplacementText" (Chromium).
-      this.el.addEventListener("input", e => {
-        if (!e.inputType || e.inputType === "insertReplacementText") add()
-      })
+      if (!lines) {
+        this.el.addEventListener("input", e => {
+          if (!e.inputType || e.inputType === "insertReplacementText") add()
+        })
+      }
     },
   },
   // Type-to-filter over the sectioned tag picker. The server renders every tag

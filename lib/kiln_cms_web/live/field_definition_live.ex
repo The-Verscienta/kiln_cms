@@ -1232,7 +1232,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :target_types, :list, default: []
 
   # Single image or a gallery, for a `:media` field — or one row or repeating
-  # rows, for a `:group`, or one term or several, for a `:select` (which then
+  # rows, for a `:group`, or one line or a list, for a `:string`, or one term
+  # or several, for a `:select` (which then
   # also asks whether editors may add terms of their own, `allow_custom`) —
   # with the list's optional item bounds. A `:reference` field asks the same question from
   # both sides in `relationship_counts/1`; this keeps only the warning, shown
@@ -1257,8 +1258,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     # The warning outlives the toggle: retyping a list field to another type
     # narrows it just the same (`SyncFieldValues`), so it shows then too.
     ~H"""
-    <div :if={@type in [:media, :group, :select] || @narrowing} class="sm:col-span-2">
-      <fieldset :if={@type in [:media, :group, :select]}>
+    <div :if={@type in [:media, :group, :select, :string] || @narrowing} class="sm:col-span-2">
+      <fieldset :if={@type in [:media, :group, :select, :string]}>
         <legend class="mb-1 block text-sm font-medium">{gettext("Holds")}</legend>
         <div class="grid gap-2 sm:grid-cols-2">
           <label
@@ -2111,12 +2112,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       "reference" -> :reference
       "group" -> :group
       "select" -> :select
+      "string" -> :string
       _other -> nil
     end
   end
 
   defp list_type(%{field_type: type, multiple: true})
-       when type in [:media, :reference, :group, :select],
+       when type in [:media, :reference, :group, :select, :string],
        do: type
 
   defp list_type(_stored), do: nil
@@ -2151,6 +2153,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp bounds_legend(:media, _target), do: gettext("How many images")
   defp bounds_legend(:group, _target), do: gettext("How many rows")
   defp bounds_legend(:select, _target), do: gettext("How many terms")
+  defp bounds_legend(:string, _target), do: gettext("How many items")
   defp bounds_legend(_type, _target), do: gettext("How many items")
 
   defp multiple_choices(:media, _target) do
@@ -2171,6 +2174,17 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        gettext(
          "As many rows as the editor adds, in the order they arrange them — dosages, steps."
        ), "hero-table-cells"}
+    ]
+  end
+
+  defp multiple_choices(:string, _target) do
+    [
+      {"false", gettext("One line"), gettext("A single short text — a name, a code."),
+       "hero-minus"},
+      {"true", gettext("A list"),
+       gettext(
+         "As many phrases as the editor adds, each free text, in their order — symptoms, synonyms."
+       ), "hero-list-bullet"}
     ]
   end
 
@@ -2216,6 +2230,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     do:
       gettext(
         "Saving keeps only the first row of each list already filled in. The other rows are removed from the content."
+      )
+
+  defp narrowing_warning(:string),
+    do:
+      gettext(
+        "Saving keeps only the first item of each list already filled in. The other items are removed from the content."
       )
 
   defp narrowing_warning(:select),
@@ -2745,6 +2765,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                         class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
                       >
                         {gettext("repeating")}
+                      </span>
+                      <span
+                        :if={definition.field_type == :string and definition.multiple}
+                        class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
+                      >
+                        {gettext("list")}
                       </span>
                       <span
                         :if={definition.field_type == :select and definition.multiple}

@@ -649,6 +649,113 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
+  # A list of phrases (`multiple` `:string` — symptoms, indications,
+  # synonyms): one text input per item, each editable in place, removable and
+  # dragged by its handle, plus an "add" box (`TermPicker` in lines mode) that
+  # adds an item on Enter and splits a pasted block into one item per line.
+  # No vocabulary and no suggestions: these lists run to hundreds of distinct
+  # phrases. The inputs post `name[]` in screen order behind the same blank
+  # sentinel as the tag picker. An item emptied in place keeps its row while
+  # the form holds it (`list_items/1`) — dropping it on the next patch would
+  # take the input out from under the author retyping it — and is dropped on
+  # save.
+  def custom_field_input(%{definition: %{field_type: :string, multiple: true}} = assigns) do
+    items = list_items(assigns.value)
+
+    assigns =
+      assigns
+      |> assign(:items, items)
+      |> assign(:full?, full?(assigns.definition, length(items)))
+
+    ~H"""
+    <div
+      id={cf_id(@definition)}
+      role="group"
+      aria-labelledby={"#{cf_id(@definition)}-label"}
+      aria-describedby={@errors != [] && cf_errors_id(@definition)}
+    >
+      <div class="mb-1 flex items-baseline justify-between gap-2">
+        <span id={"#{cf_id(@definition)}-label"} class="text-sm font-medium">
+          {@definition.label}
+        </span>
+        <span :if={@items != []} class="text-xs tabular-nums text-base-content/60">
+          {ngettext("%{count} item", "%{count} items", length(@items))}
+        </span>
+      </div>
+      <input type="hidden" name={"#{@name}[]"} value="" />
+      <ol
+        :if={@items != []}
+        id={"#{cf_id(@definition)}-items"}
+        phx-hook="Sortable"
+        data-sort-event="list_item_reorder"
+        data-sort-field={@definition.name}
+        class="mb-1.5 space-y-1"
+      >
+        <li
+          :for={{item, index} <- Enum.with_index(@items)}
+          id={"cf-item-#{@definition.name}-#{index}"}
+          data-sort-id={index}
+          class="group flex items-center gap-1"
+        >
+          <span
+            data-drag-handle
+            title={gettext("Drag to reorder")}
+            class="cursor-grab rounded p-1 text-base-content/30 transition-colors group-hover:text-base-content/60 active:cursor-grabbing"
+          >
+            <.icon name="hero-bars-2" class="size-3.5" />
+          </span>
+          <input
+            type="text"
+            id={"#{cf_id(@definition)}-#{index}"}
+            name={"#{@name}[]"}
+            value={item}
+            aria-label={
+              gettext("%{field}, item %{position}", field: @definition.label, position: index + 1)
+            }
+            class="field-input min-w-0 flex-1 py-1 text-sm"
+          />
+          <button
+            type="button"
+            phx-click="list_item_remove"
+            phx-value-field={@definition.name}
+            phx-value-index={index}
+            aria-label={gettext("Remove item %{position}", position: index + 1)}
+            class="rounded p-1 text-base-content/40 opacity-60 transition hover:bg-error/10 hover:text-error group-hover:opacity-100 focus-visible:opacity-100"
+          >
+            <.icon name="hero-x-mark" class="size-4" />
+          </button>
+        </li>
+      </ol>
+      <div :if={!@full?} class="flex items-center gap-1">
+        <span class="p-1 text-base-content/30"><.icon name="hero-plus" class="size-3.5" /></span>
+        <input
+          type="text"
+          id={"#{cf_id(@definition)}-entry"}
+          phx-hook="TermPicker"
+          data-field={@definition.name}
+          data-count={length(@items)}
+          data-split="lines"
+          autocomplete="off"
+          enterkeyhint="enter"
+          placeholder={gettext("Add an item…")}
+          aria-label={gettext("Add an item to %{field}", field: @definition.label)}
+          class="field-input min-w-0 flex-1 border-dashed py-1 text-sm"
+        />
+      </div>
+      <p class="mt-1 text-xs text-base-content/60">
+        <span :if={@definition.help_text}>{@definition.help_text}</span>
+        <span :if={!@full?}>
+          {gettext("Press Enter to add. Paste several lines to add one item per line.")}
+        </span>
+        <span :if={@full?}>
+          {gettext("At the limit of %{max} items.", max: @definition.max_items)}
+        </span>
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
   # A multiple select (several terms): the chosen terms as removable chips,
   # each carried by a hidden `name[]` input so the order on screen is the
   # order submitted, and a text box that adds one. The box suggests the
@@ -697,7 +804,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
           :if={@terms != []}
           id={"#{cf_id(@definition)}-terms"}
           phx-hook="Sortable"
-          data-sort-event="select_term_reorder"
+          data-sort-event="list_item_reorder"
           data-sort-field={@definition.name}
           aria-label={gettext("Chosen terms")}
           class="contents"
@@ -719,7 +826,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
             <span class="truncate px-0.5">{term}</span>
             <button
               type="button"
-              phx-click="select_term_remove"
+              phx-click="list_item_remove"
               phx-value-field={@definition.name}
               phx-value-index={index}
               aria-label={gettext("Remove %{term}", term: term)}
@@ -1447,14 +1554,22 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
-  # The chosen terms of a multiple select, from the stored list or the posted
-  # one (blank sentinel included); a single string stored while the field was
-  # single is its one term.
+  # The items of a list field (a multiple select's terms, a multiple string's
+  # phrases), from the stored list or the posted one (blank sentinel
+  # included); a single string stored while the field was single is its one
+  # item.
   defp select_terms(value) when is_list(value),
     do: value |> Enum.map(&to_string/1) |> Enum.reject(&(String.trim(&1) == ""))
 
   defp select_terms(value) when is_binary(value) and value != "", do: [value]
   defp select_terms(_value), do: []
+
+  # A list of phrases as the form holds it: the posted list less its leading
+  # blank sentinel, blank items kept (see the input above); a stored list
+  # never holds a blank, and a stored single string is its one item.
+  defp list_items(["" | items]), do: Enum.map(items, &to_string/1)
+  defp list_items(items) when is_list(items), do: Enum.map(items, &to_string/1)
+  defp list_items(value), do: select_terms(value)
 
   defp full?(%{max_items: max}, count) when is_integer(max), do: count >= max
   defp full?(_definition, _count), do: false

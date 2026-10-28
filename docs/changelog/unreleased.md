@@ -21,6 +21,24 @@ carries the reasoning.
 
 ## Added
 
+<a id="string-lists"></a>
+
+- **A `:string` field can hold a list of phrases.** With `multiple: true` its
+  value is a JSON list of strings — symptoms, indications, synonyms,
+  services — for lists too large or too free for a select's vocabulary. The
+  editor shows one input per item, edited in place, removed with × and
+  dragged to reorder, and an add box: Enter adds an item, and pasting
+  several lines adds one item per line (an item written with line breaks is
+  split the same way on write). Items are trimmed, blanks and repeats
+  dropped, bounded by `min_items` / `max_items`, and a JSON-encoded list sent
+  as a string is refused. `custom_filter` asks whether the list contains an
+  item; the schema export carries an array of strings. A `names_record` list
+  names the record by each item — the alias leg now matches each element of
+  a list, not its JSON text. `mix kiln.fields.convert` targets it, and
+  `--lines` reads a plain-text source as one item per line. The editor's list
+  events are now `list_item_add` / `list_item_remove` / `list_item_reorder`
+  for this and the multiple select alike.
+
 <a id="multiple-select"></a>
 
 - **A `:select` field can hold several terms.** With `multiple: true` its

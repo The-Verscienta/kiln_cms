@@ -285,6 +285,85 @@ defmodule KilnCMS.CMS.SelectAndTextFieldsTest do
     end
   end
 
+  describe "a list of phrases (multiple :string)" do
+    defp list_field!(admin, attrs \\ %{}) do
+      define!(Map.merge(%{label: "Symptoms", field_type: :string, multiple: true}, attrs), admin)
+    end
+
+    test "keeps multiple on a record-level string, not on a group sub-field" do
+      admin = admin()
+      assert list_field!(admin, %{max_items: 5}).multiple
+
+      group = define!(%{label: "Doses", field_type: :group, multiple: true}, admin)
+
+      sub =
+        CMS.create_field_definition!(
+          %{
+            group_of_id: group.id,
+            name: "note",
+            label: "Note",
+            field_type: :string,
+            multiple: true
+          },
+          actor: admin
+        )
+
+      refute sub.multiple
+    end
+
+    test "stores the items as a list; a multi-line item is one item per line" do
+      admin = admin()
+      field = list_field!(admin)
+
+      page =
+        page!(
+          %{field.name => ["", " fatigue ", "night sweats\nfatigue\r\ndry, hacking cough"]},
+          admin
+        )
+
+      assert page.custom_fields[field.name] == ["fatigue", "night sweats", "dry, hacking cough"]
+      assert page!(%{field.name => "fatigue"}, admin).custom_fields[field.name] == ["fatigue"]
+    end
+
+    test "refuses a JSON-encoded list and an item that is not text; holds the bounds" do
+      admin = admin()
+      field = list_field!(admin, %{max_items: 1})
+
+      assert {:error, error} = page(%{field.name => ~s(["a","b"])}, admin)
+      assert Exception.message(error) =~ "JSON-encoded list"
+
+      assert {:error, error} = page(%{field.name => [%{"value" => "a"}]}, admin)
+      assert Exception.message(error) =~ "must be a list of terms"
+
+      assert {:error, error} = page(%{field.name => ["a", "b"]}, admin)
+      assert Exception.message(error) =~ "at most 1 items"
+    end
+
+    test "filters by containment, and flipping reshapes like a select" do
+      admin = admin()
+      field = list_field!(admin)
+      a = page!(%{field.name => ["fatigue", "cough"]}, admin)
+      _b = page!(%{field.name => ["fever"]}, admin)
+
+      assert %{custom_filter: %{field.name => "cough"}}
+             |> CMS.list_pages!(actor: admin)
+             |> Enum.map(& &1.id) == [a.id]
+
+      CMS.update_field_definition!(field, %{multiple: false}, actor: admin)
+      assert CMS.get_page!(a.id, actor: admin).custom_fields[field.name] == "fatigue"
+    end
+
+    test "retyping a text field into a list leaves its JSON strings for the converter" do
+      admin = admin()
+      field = define!(%{label: "Old", field_type: :text, format: :plain}, admin)
+      page = page!(%{field.name => ~s(["a"])}, admin)
+
+      CMS.update_field_definition!(field, %{field_type: :string, multiple: true}, actor: admin)
+
+      assert CMS.get_page!(page.id, actor: admin).custom_fields[field.name] == ~s(["a"])
+    end
+  end
+
   describe "a rich :text field" do
     test "is the default format" do
       assert define!(%{label: "Uses", field_type: :text}, admin()).format == :rich

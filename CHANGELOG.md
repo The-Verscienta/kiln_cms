@@ -63,6 +63,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A `:string` field can hold a list of phrases: one input per item, pasted
+  lines split into items, and a `names_record` list names the record by each.**
+  ([long form](docs/changelog/unreleased.md#string-lists))
+
 - **A `:select` field can hold several terms, in a tag picker; `allow_custom`
   opens its vocabulary. `mix kiln.fields.convert` moves JSON-string lists in.**
   ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099) · [long form](docs/changelog/unreleased.md#multiple-select))
