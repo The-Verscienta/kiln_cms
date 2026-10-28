@@ -998,7 +998,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       >
         <option value="">{gettext("— None —")}</option>
         <option :for={option <- @definition.options} value={option} selected={@value == option}>
-          {option}
+          {FieldDefinition.option_label(@definition, option)}
         </option>
       </select>
     </div>
@@ -1118,7 +1118,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           value={option}
           selected={to_string(@value || @field.default) == option}
         >
-          {option}
+          {FieldDefinition.option_label(@field, option)}
         </option>
       </select>
     </div>

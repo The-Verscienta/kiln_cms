@@ -17,7 +17,7 @@ UI" workflow, scoped to fields.
 
 - **Define**: `KilnCMS.CMS.FieldDefinition` rows describe each field
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
-  `allow_custom`, `format`,
+  `allow_custom`, `format`, `option_labels`,
   `target_type`, `target_types`, `multiple`, `min_items`, `max_items`,
   `max_sources`, `on_target_delete`, `inverse_label`, `inverse_name`,
   `schema_org_property`,
@@ -53,6 +53,15 @@ UI" workflow, scoped to fields.
   from the library drawer's multi-select and reordered tile by tile. Flipping
   the setting reshapes stored values: a single image becomes a one-image
   gallery, and a gallery keeps only its first image.
+- **Option labels**: a `:select` field's `options` are the stored values —
+  often codes such as `transforming_phlegm` — and `option_labels` maps any of
+  them to what an editor reads (`%{"transforming_phlegm" => "Transforming
+  phlegm"}`). The editor's select, tag picker and link and group inputs show
+  the label; filters, the delivered value and API clients keep the value. A
+  write that names a label (ignoring case) stores its value. An option with
+  no label is its own label, a label whose option is removed is dropped, and
+  a field that stops being a select keeps none. In the fields admin, write
+  `value | Label` on an option's line (a label may hold commas).
 - **One choice or several terms**: a `:select` field holds one of its
   `options` by default. With `multiple: true` it holds **several terms**: a
   JSON list of strings, in the order the editor arranges them, picked in a
