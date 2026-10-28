@@ -61,6 +61,7 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
              Ash.Changeset.changing_attribute?(changeset, :multiple) or
              reindex_search?(changeset, record) or
              replain?(changeset, record) or
+             reconvert?(changeset, record) or
              rebyline?(changeset, record) or
              Ash.Changeset.changing_attribute?(changeset, :private) do
           # Determine which type this field belongs to and sweep it
@@ -148,6 +149,14 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   defp replain?(changeset, record) do
     Ash.Changeset.changing_attribute?(changeset, :deliver_plain) or
       (changeset.action_type == :destroy and Map.get(record, :deliver_plain) == true)
+  end
+
+  # The same for `deliver_portable` and `custom_fields_portable.<name>`
+  # (`KilnCMS.CMS.PortableFields`) — a switch to `format: :plain` included,
+  # which clears the flag (`Changes.ClearDeliverPortable`).
+  defp reconvert?(changeset, record) do
+    Ash.Changeset.changing_attribute?(changeset, :deliver_portable) or
+      (changeset.action_type == :destroy and Map.get(record, :deliver_portable) == true)
   end
 
   # A `schema_org_property` change adds or drops `author` / `contributor` on

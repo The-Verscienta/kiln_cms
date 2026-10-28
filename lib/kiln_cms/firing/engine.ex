@@ -507,6 +507,17 @@ defmodule KilnCMS.Firing.Engine do
     end
   end
 
+  # The Portable Text rendition of the `deliver_portable` rich `:text` fields
+  # (`KilnCMS.CMS.PortableFields`), computed here so every read of the
+  # artifact is a lookup. Absent on a type that flags none, like
+  # `custom_fields_plain`.
+  defp put_portable_fields(body, %{values: values, definitions: definitions}) do
+    case KilnCMS.CMS.PortableFields.project(values, definitions) do
+      nil -> body
+      portable -> Map.put(body, "custom_fields_portable", portable)
+    end
+  end
+
   # The `:json` body names the fields it filled along the locale fallback
   # chain, and from which locale (#1327) — additive, and absent unless
   # something was inherited, so an artifact of a type that opted nothing in
@@ -547,6 +558,7 @@ defmodule KilnCMS.Firing.Engine do
         |> KilnCMS.Firing.BlockMedia.put(typed, Map.get(document, :org_id))
     }
     |> put_plain_fields(custom)
+    |> put_portable_fields(custom)
   end
 
   # Clean chunked Markdown for LLM/answer-engine extraction (#357, GEO).

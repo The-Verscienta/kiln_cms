@@ -577,6 +577,8 @@ type Entry implements ContentRecord {
 
   customFieldsPlain: JsonString
 
+  customFieldsPortable: JsonString
+
   blockIds: [JsonString!]
 
   highlight(locale: String!, query: String!): String
@@ -1744,6 +1746,8 @@ type Page implements ContentRecord {
 
   customFieldsPlain: JsonString
 
+  customFieldsPortable: JsonString
+
   blockIds: [JsonString!]
 
   highlight(locale: String!, query: String!): String
@@ -2494,6 +2498,8 @@ type Post implements ContentRecord {
   inheritedFields: JsonString
 
   customFieldsPlain: JsonString
+
+  customFieldsPortable: JsonString
 
   blockIds: [JsonString!]
 

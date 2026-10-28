@@ -236,6 +236,7 @@ defmodule KilnCMS.SchemaExport do
     |> base_content_schema()
     |> put_inherited_fields(ct)
     |> put_plain_fields(ct)
+    |> put_portable_fields(ct)
     |> put_reverse_fields(Map.get(ct, :reverse_fields, []))
   end
 
@@ -301,6 +302,30 @@ defmodule KilnCMS.SchemaExport do
               "the stored value with its HTML tags removed, entities decoded and " <>
               "whitespace collapsed. `null` where the record holds no value.",
           "properties" => Map.new(names, &{&1, %{"type" => ["string", "null"]}}),
+          "additionalProperties" => false
+        })
+    end
+  end
+
+  # `deliver_portable` rich `:text` fields fire a `custom_fields_portable`
+  # sibling (`KilnCMS.CMS.PortableFields`), closed and optional for the
+  # reasons above. Each value is the type a `:rich_text` block field has —
+  # an array of the shared `#/$defs/portable_text_block`, by `$ref` — so the
+  # `.d.ts` (and every other emitter) types a field's prose and a block's
+  # body as one thing.
+  defp put_portable_fields(schema, ct) do
+    case KilnCMS.CMS.PortableFields.names(ct.field_definitions) do
+      [] ->
+        schema
+
+      names ->
+        put_in(schema, ["properties", "custom_fields_portable"], %{
+          "type" => "object",
+          "description" =>
+            "Portable Text renditions of the rich `:text` custom fields marked " <>
+              "`deliver_portable`: the stored HTML as the same block tree a `rich_text` " <>
+              "block's `body` holds. `null` where the record holds no value.",
+          "properties" => Map.new(names, &{&1, JsonSchema.type_schema(:rich_text)}),
           "additionalProperties" => false
         })
     end

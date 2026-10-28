@@ -174,8 +174,8 @@ curl -s 'https://cms.example.com/api/content/recipe/pancakes?fields=title,slug,c
 ```
 
 - Comma-separated **top-level keys** (`title`, `slug`, `locale`, `blocks`,
-  `custom_fields`, `custom_fields_plain`, and any other key the artifact
-  carries) plus
+  `custom_fields`, `custom_fields_plain`, `custom_fields_portable`, and any
+  other key the artifact carries) plus
   **`custom_fields.<name>`** for one custom field. `custom_fields` on its own
   keeps all of them.
 - `id` and `type` are **always** kept. So is `expanded` when you also pass
@@ -206,6 +206,54 @@ A fieldset response is deliberately **not** valid against the full document
 schema from `GET /api/schema`, which lists `blocks`, `custom_fields`, `slug`
 and the rest as required. Decode a fieldset response into a separate, smaller
 type, or into a type whose properties beyond `id` and `type` are optional.
+
+## Rich text without a web view
+
+Prose in **blocks** is already structured: a `rich_text` block's `body` is
+Portable Text, an array of blocks whose spans carry their formatting as data.
+A rich `:text` **custom field** stores HTML instead (its `format` is `:rich`
+by default; [extending-content.md](extending-content.md)), and
+`custom_fields` delivers that HTML as it is.
+
+So that an app does not need a browser engine to show it, an admin can tick
+two per-field options in the fields admin. Both are off by default, and each
+adds a sibling map beside `custom_fields`, which never changes:
+
+| Option | Key | Value |
+|---|---|---|
+| Also deliver as plain text (`deliver_plain`) | `custom_fields_plain` | the text with tags removed and whitespace collapsed (paragraphs run together), for a list row or a search index |
+| Also deliver as Portable Text (`deliver_portable`, rich fields only) | `custom_fields_portable` | the same Portable Text tree a `rich_text` block's `body` holds: paragraphs, `h1`–`h6`, quotes, nested lists (`listItem` + `level`), `strong`/`em`/`code`/`strike`/`underline` marks, links in `markDefs` |
+
+```json
+"custom_fields": {"actions": "<p>Clears <em>heat</em>.</p>"},
+"custom_fields_portable": {
+  "actions": [
+    {"_type": "block", "_key": "b0", "style": "normal", "markDefs": [],
+     "children": [{"_type": "span", "marks": [], "text": "Clears "},
+                  {"_type": "span", "marks": ["em"], "text": "heat"},
+                  {"_type": "span", "marks": [], "text": "."}]}
+  ]
+}
+```
+
+- Every flagged field has a key. It is `null` when the record holds no value
+  for it, and `[]` when the value is blank. A value stored as JSON data is
+  `null`: it is not prose. A value with no markup at all becomes one
+  paragraph per blank-line-separated run, with single newlines kept as `\n`
+  inside the span.
+- It is computed when the document fires, so the artifact read and
+  `/api/sync` carry it at no extra cost. JSON:API
+  (`fields[<type>]=…,custom_fields_portable`) and GraphQL
+  (`customFieldsPortable`) serve it only when asked for. Ticking or clearing
+  the option re-fires the type's published documents.
+- Render it with the same code that renders a `rich_text` block's `body`. In
+  `GET /api/schema` each value is the type `body` has, an array of
+  `#/$defs/portable_text_block`, so generated models share one type.
+- A link with an unsafe scheme keeps its text, but its `href` is `""`. An
+  `<img>` inside the prose is dropped, as in a block's body (images are their
+  own block in Kiln). The HTML in `custom_fields` is always the full value.
+- Values inside a `:group` field's rows are not converted: the rows arrive
+  whole in `custom_fields.<group>`.
 
 ## Push: webhooks, through your backend
 

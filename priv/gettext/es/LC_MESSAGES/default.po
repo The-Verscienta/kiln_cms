@@ -1612,6 +1612,11 @@ msgstr "Clave secreta de API"
 msgid "APIs add a copy with HTML tags removed under custom_fields_plain, for apps that cannot render HTML."
 msgstr "Las API añaden una copia sin etiquetas HTML en custom_fields_plain, para las aplicaciones que no pueden mostrar HTML."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "APIs add the formatting as structured data under custom_fields_portable, for apps that render rich text natively."
+msgstr "Las API añaden el formato como datos estructurados en custom_fields_portable, para las aplicaciones que muestran texto enriquecido de forma nativa."
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "About %{percentage}% of sentences look passive (guideline: %{max}%). This is an estimate — passive voice is often the right choice."
@@ -2374,8 +2379,18 @@ msgstr "También adjuntadas"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "Also deliver as Portable Text"
+msgstr "Entregar también como Portable Text"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "Also deliver as plain text"
 msgstr "Entregar también como texto plano"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Also delivered as Portable Text (custom_fields_portable)"
+msgstr "También se entrega como Portable Text (custom_fields_portable)"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -21087,6 +21102,11 @@ msgstr "huérfano"
 #, elixir-autogen, elixir-format
 msgid "plain"
 msgstr "texto plano"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "portable"
+msgstr "portable"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format

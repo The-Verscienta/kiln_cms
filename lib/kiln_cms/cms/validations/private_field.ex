@@ -12,9 +12,10 @@ defmodule KilnCMS.CMS.Validations.PrivateField do
       computed value is copied into edges, usage tracking, structured data or
       other fields, and a link field or sub-field lives inside a value that is
       delivered whole;
-    * **not searchable, not a name of the record, not delivered as plain text**
-      — each of those copies the value into something public (`search_text`,
-      the alias leg, `custom_fields_plain`);
+    * **not searchable, not a name of the record, not delivered as plain text
+      or Portable Text** — each of those copies the value into something
+      public (`search_text`, the alias leg, `custom_fields_plain`,
+      `custom_fields_portable`);
     * **not `:fallback`-localized** — a variant that inherits the value serves
       it through the `inherited_fields` calculation, which is no read of the
       field. `:shared` is fine: the copy stays under the same private
@@ -33,7 +34,8 @@ defmodule KilnCMS.CMS.Validations.PrivateField do
   @copies [
     searchable: "can't be searchable: search results would show it",
     names_record: "can't be a name of the record: search would match it",
-    deliver_plain: "can't be delivered as plain text"
+    deliver_plain: "can't be delivered as plain text",
+    deliver_portable: "can't be delivered as Portable Text"
   ]
 
   @impl true

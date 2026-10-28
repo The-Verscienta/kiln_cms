@@ -585,6 +585,7 @@ default. `GET /api/json/open_api` describes each of them on the resource's
 | `related_links` | array | No — curated related links, projected to `[{id, title, slug}]`, in the order the editor set |
 | `inherited_fields` | object | No — what this locale variant inherits along the site's fallback chain for its `:fallback` fields, with the source locale: `{"excerpt": {"value", "locale"}, "custom_fields": {…}}` (#1327). Served only when asked for with `fields[<type>]=…` |
 | `custom_fields_plain` | object | No — the plain-text rendition of the `:text` custom fields marked "Also deliver as plain text" (`deliver_plain`): `{"<name>": "text without tags" \| null}`, `null` when the type marks none. `custom_fields` keeps the stored HTML. Served only when asked for with `fields[<type>]=…`; the fired artifact (`/api/content`, `/api/sync`) carries it whenever the type marks a field |
+| `custom_fields_portable` | object | No — the Portable Text rendition of the rich `:text` custom fields marked "Also deliver as Portable Text" (`deliver_portable`): `{"<name>": [<Portable Text block>, …] \| null}`, the shape a `rich_text` block's `body` holds; `null` when the type marks none. `custom_fields` keeps the stored HTML. Served only when asked for with `fields[<type>]=…`; the fired artifact (`/api/content`, `/api/sync`) carries it whenever the type marks a field |
 
 "No" means exactly that — not merely undocumented as a filter or sort:
 `?filter[path]=…` is a clean `400 invalid_filter`, and `?sort=path` is

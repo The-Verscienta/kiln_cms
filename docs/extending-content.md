@@ -40,7 +40,7 @@ UI" workflow, scoped to fields.
   cannot be probed, and the schema export does not describe it. Only the
   plain top-level types can be private (`KilnCMS.CMS.PrivateFields.types/0`),
   and a private field cannot also be `searchable`, `names_record`,
-  `deliver_plain` or `:fallback`-localized: each of those copies the value
+  `deliver_plain`, `deliver_portable` or `:fallback`-localized: each of those copies the value
   somewhere public, so the combination is refused. Flipping it re-fires the
   type's published documents.
 - **A person on the site (`:user`)**: a console account — an admin, or a
@@ -94,7 +94,16 @@ UI" workflow, scoped to fields.
   paragraph. Opening a record never rewrites a value: only an edit does.
   `format: :plain` keeps the textarea and stores the text as typed, for a
   note or a code. The value is a string either way; the schema export marks a
-  rich one `contentMediaType: text/html`.
+  rich one `contentMediaType: text/html`. For a client that cannot render
+  HTML, two per-field options add a sibling map beside `custom_fields`:
+  `deliver_plain` adds `custom_fields_plain.<name>` (tags removed), and, on
+  a rich field, `deliver_portable` adds `custom_fields_portable.<name>`, the
+  value as the Portable Text tree a `rich_text` block's `body` holds
+  (`KilnCMS.CMS.PortableFields`). Both are off by default and computed when a
+  document fires. The schema export types the Portable Text one by `$ref` to
+  `portable_text_block`. `deliver_portable` is cleared on a `:plain` field,
+  on any other type, and on a link or group sub-field. See
+  [native-apps.md](native-apps.md#rich-text-without-a-web-view).
 - **One reference or a list**: a `:reference` field holds one record by
   default (an `%{"id", "type", "slug", "title"}` snapshot). With
   `multiple: true` it holds a **list of references**: an ordered list of

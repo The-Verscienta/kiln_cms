@@ -352,6 +352,42 @@ carries the reasoning.
   single-record refresh, `?fields=`, webhooks as the push path for apps with
   a backend, and typed models from `GET /api/schema`.
 
+<a id="rich-text-fields-as-portable-text"></a>
+
+- **A rich `:text` custom field can also be delivered as Portable Text.** A
+  new per-field toggle in the fields admin, "Also deliver as Portable Text"
+  (`deliver_portable` on `FieldDefinition`, off by default, beside
+  "Also deliver as plain text"), adds a `custom_fields_portable` map beside
+  `custom_fields`: each flagged field's HTML as the Portable Text tree a
+  `rich_text` block's `body` holds — paragraphs, headings, quotes, nested
+  lists, marks and links — so a native app renders a field's prose with the
+  code that renders a block's body, and needs no web view for it. This is
+  the structured rendition the mobile-delivery plan asked a `:rich_text`
+  field type for; with `:text` rich by default since #2099, no new type is
+  needed. `custom_fields` itself is never rewritten.
+
+  Opt-in rather than always on for `format: :rich`: Portable Text spells out
+  every span, so it is several times the size of the HTML it comes from, and
+  every web client and every rich field that already renders HTML would
+  carry it for nothing on every artifact and sync item. The conversion is
+  `KilnCMS.Blocks.PortableText.from_html/1` after the rich-text sanitizer,
+  then `sanitize_body/1` — not `from_html_faithful/1`, which refuses
+  whatever it would lose: a delivered rendition must always be there, and
+  the HTML beside it stays the full value. Markup-free text becomes one
+  paragraph per blank-line-separated run; JSON data stored as text is
+  `null`.
+
+  Where it appears: the fired `:json` artifact (so `GET
+  /api/content/:type/:slug`, its `?fields=`, and every `/api/sync` item)
+  whenever the type flags a field; the `custom_fields_portable` calculation
+  on JSON:API and GraphQL (`customFieldsPortable`), on request; and the
+  delivery schema, where each value is `$ref`'d to the shared
+  `portable_text_block`, so the `.d.ts` types it as `Array<PortableTextBlock> | null`.
+  Computed at fire time; flipping the toggle, or switching the field to
+  `format: :plain`, re-fires the type. Cleared on plain and non-`:text`
+  fields and on link and group sub-fields (a group's rows are delivered
+  whole); refused on a private field.
+
 <a id="a-text-custom-field-can-also-be-delivered-as-plain-text"></a>
 
 - **A `:text` custom field can also be delivered as plain text.** A new

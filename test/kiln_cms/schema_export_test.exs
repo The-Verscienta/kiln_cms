@@ -266,6 +266,47 @@ defmodule KilnCMS.SchemaExportTest do
     end
   end
 
+  describe "deliver_portable" do
+    test "declares custom_fields_portable by $ref to the shared Portable Text block, and the .d.ts types it",
+         %{actor: actor, org: org} do
+      for {name, attrs} <- [
+            {"body", %{deliver_portable: true}},
+            {"notes", %{}},
+            {"code", %{format: :plain, deliver_portable: true}}
+          ] do
+        CMS.create_field_definition!(
+          Map.merge(%{content_type: :page, name: name, label: name, field_type: :text}, attrs),
+          actor: actor,
+          tenant: org
+        )
+      end
+
+      schema = SchemaExport.json_schema(org_id: org.id)
+      page = schema["$defs"]["content_page"]
+      portable = page["properties"]["custom_fields_portable"]
+
+      # Only the rich field that flags it — the plain one was cleared.
+      assert Map.keys(portable["properties"]) == ["body"]
+      assert portable["additionalProperties"] == false
+
+      # The very schema a `:rich_text` block field declares, so one renderer
+      # (and one generated type) serves both.
+      assert portable["properties"]["body"] == Kiln.Block.JsonSchema.type_schema(:rich_text)
+
+      assert portable["properties"]["body"]["items"] == %{
+               "$ref" => "#/$defs/portable_text_block"
+             }
+
+      assert Map.has_key?(schema["$defs"], "portable_text_block")
+      refute "custom_fields_portable" in page["required"]
+      refute Map.has_key?(schema["$defs"]["content_post"]["properties"], "custom_fields_portable")
+
+      ts = SchemaExport.TypeScript.emit(schema)
+      assert ts =~ "custom_fields_portable?:"
+      assert ts =~ ~r/custom_fields_portable\?: \{[^}]*body\??: Array<PortableTextBlock>/
+    end
+  end
+
   describe "media" do
     test "a :media field, a gallery and an image block all declare the one media shape",
          %{actor: actor, org: org} do

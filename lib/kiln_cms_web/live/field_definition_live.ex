@@ -2342,6 +2342,44 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :form, :any, required: true
   attr :id, :string, required: true
 
+  # Whether delivery carries a Portable Text rendition beside a rich `:text`
+  # field's value (`deliver_portable`). Shown only for a rich one: on a plain
+  # field or any other type nothing is submitted and
+  # `Changes.ClearDeliverPortable` drops a stored `true`.
+  defp deliver_portable_field(assigns) do
+    ~H"""
+    <label
+      :if={
+        to_string(@form[:field_type].value) == "text" and
+          to_string(@form[:format].value || "rich") == "rich"
+      }
+      for={@id}
+      class="flex items-start gap-2 self-end text-sm"
+    >
+      <input type="hidden" name={@form[:deliver_portable].name} value="false" />
+      <input
+        type="checkbox"
+        id={@id}
+        name={@form[:deliver_portable].name}
+        value="true"
+        checked={@form[:deliver_portable].value in [true, "true"]}
+        class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
+      />
+      <span>
+        {gettext("Also deliver as Portable Text")}
+        <span class="block text-xs text-base-content/60">
+          {gettext(
+            "APIs add the formatting as structured data under custom_fields_portable, for apps that render rich text natively."
+          )}
+        </span>
+      </span>
+    </label>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+
   # Whether the value is for editors and admins only (#2044,
   # `KilnCMS.CMS.PrivateFields`). Offered for the types that can be private;
   # a `:user` field always is, so it says so instead of asking.
@@ -2646,6 +2684,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <.default_field form={@form} />
             <.text_format_field form={@form} id="new-field-format" />
             <.deliver_plain_field form={@form} id="new-field-deliver-plain" />
+            <.deliver_portable_field form={@form} id="new-field-deliver-portable" />
             <.private_field form={@form} id="new-field-private" />
             <label class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="field_definition[required]" value="false" />
@@ -2792,6 +2831,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                         class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
                       >
                         {gettext("plain")}
+                      </span>
+                      <span
+                        :if={definition.field_type == :text and definition.deliver_portable}
+                        title={gettext("Also delivered as Portable Text (custom_fields_portable)")}
+                        class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
+                      >
+                        {gettext("portable")}
                       </span>
                       <span
                         :if={definition.private}
@@ -2994,6 +3040,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   <.deliver_plain_field
                     form={@edit.form}
                     id={"edit-field-deliver-plain-#{@edit.id}"}
+                  />
+                  <.deliver_portable_field
+                    form={@edit.form}
+                    id={"edit-field-deliver-portable-#{@edit.id}"}
                   />
                   <.private_field form={@edit.form} id={"edit-field-private-#{@edit.id}"} />
                   <label class="flex items-center gap-2 self-end text-sm">
