@@ -1,0 +1,1998 @@
+{
+  "$defs": {
+    "block": {
+      "description": "Any block in a fired `:json` artifact, tagged by `_type`.",
+      "discriminator": {
+        "propertyName": "_type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/block_accordion"
+        },
+        {
+          "$ref": "#/$defs/block_audio"
+        },
+        {
+          "$ref": "#/$defs/block_callout"
+        },
+        {
+          "$ref": "#/$defs/block_checklist"
+        },
+        {
+          "$ref": "#/$defs/block_claim"
+        },
+        {
+          "$ref": "#/$defs/block_columns"
+        },
+        {
+          "$ref": "#/$defs/block_custom"
+        },
+        {
+          "$ref": "#/$defs/block_dep_badge"
+        },
+        {
+          "$ref": "#/$defs/block_divider"
+        },
+        {
+          "$ref": "#/$defs/block_embed"
+        },
+        {
+          "$ref": "#/$defs/block_faq"
+        },
+        {
+          "$ref": "#/$defs/block_file"
+        },
+        {
+          "$ref": "#/$defs/block_form"
+        },
+        {
+          "$ref": "#/$defs/block_fragment"
+        },
+        {
+          "$ref": "#/$defs/block_gallery"
+        },
+        {
+          "$ref": "#/$defs/block_heading"
+        },
+        {
+          "$ref": "#/$defs/block_how_to"
+        },
+        {
+          "$ref": "#/$defs/block_image"
+        },
+        {
+          "$ref": "#/$defs/block_newsletter_signup"
+        },
+        {
+          "$ref": "#/$defs/block_product_card"
+        },
+        {
+          "$ref": "#/$defs/block_quote"
+        },
+        {
+          "$ref": "#/$defs/block_restricted_required"
+        },
+        {
+          "$ref": "#/$defs/block_restricted_required_default"
+        },
+        {
+          "$ref": "#/$defs/block_rich_text"
+        },
+        {
+          "$ref": "#/$defs/block_video"
+        }
+      ],
+      "title": "Block"
+    },
+    "block_accordion": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "accordion"
+        },
+        "first_open": {
+          "default": false,
+          "type": "boolean"
+        },
+        "panels": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "content",
+              "title"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "AccordionBlock",
+      "type": "object",
+      "x-kiln-block": "accordion",
+      "x-kiln-block-version": 1
+    },
+    "block_audio": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "audio"
+        },
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duration_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "loop": {
+          "default": false,
+          "type": "boolean"
+        },
+        "media_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "src": {
+          "description": "Playable source, resolved from `media_id` or the authored url.",
+          "format": "uri-reference",
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "AudioBlock",
+      "type": "object",
+      "x-kiln-block": "audio",
+      "x-kiln-block-version": 1
+    },
+    "block_callout": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "callout"
+        },
+        "text": {
+          "type": "string"
+        },
+        "tone": {
+          "default": "info",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type",
+        "text"
+      ],
+      "title": "CalloutBlock",
+      "type": "object",
+      "x-kiln-block": "callout",
+      "x-kiln-block-version": 1
+    },
+    "block_checklist": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "checklist"
+        },
+        "items": {
+          "default": [],
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "owner": {
+                "type": "string"
+              },
+              "task": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "title": {
+          "description": "Shown above the list.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "ChecklistBlock",
+      "type": "object",
+      "x-kiln-block": "checklist",
+      "x-kiln-block-version": 1
+    },
+    "block_claim": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "claim"
+        },
+        "rating": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_url": {
+          "format": "uri",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "_type",
+        "text"
+      ],
+      "title": "ClaimBlock",
+      "type": "object",
+      "x-kiln-block": "claim",
+      "x-kiln-block-version": 1
+    },
+    "block_columns": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "columns"
+        },
+        "columns": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "blocks": {
+                "items": {
+                  "$ref": "#/$defs/block"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "blocks"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "gap": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "layout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "ColumnsBlock",
+      "type": "object",
+      "x-kiln-block": "columns",
+      "x-kiln-block-version": 1
+    },
+    "block_custom": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "custom"
+        },
+        "content": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "data": {
+          "default": {},
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "legacy_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "CustomBlock",
+      "type": "object",
+      "x-kiln-block": "custom",
+      "x-kiln-block-version": 1
+    },
+    "block_dep_badge": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "dep_badge"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "_type",
+        "label"
+      ],
+      "title": "DepBadgeBlock",
+      "type": "object",
+      "x-kiln-block": "dep_badge",
+      "x-kiln-block-version": 1
+    },
+    "block_divider": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "divider"
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "DividerBlock",
+      "type": "object",
+      "x-kiln-block": "divider",
+      "x-kiln-block-version": 1
+    },
+    "block_embed": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "embed"
+        },
+        "author_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolved_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolved_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thumbnail_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "EmbedBlock",
+      "type": "object",
+      "x-kiln-block": "embed",
+      "x-kiln-block-version": 1
+    },
+    "block_faq": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "faq"
+        },
+        "items": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "answer": {
+                "type": "string"
+              },
+              "question": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "answer",
+              "question"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "FaqBlock",
+      "type": "object",
+      "x-kiln-block": "faq",
+      "x-kiln-block-version": 1
+    },
+    "block_file": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "file"
+        },
+        "byte_size": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "content_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "download_url": {
+          "description": "Delivery href for the attachment, resolved from `media_id`.",
+          "format": "uri-reference",
+          "type": "string"
+        },
+        "filename": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "media_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "FileBlock",
+      "type": "object",
+      "x-kiln-block": "file",
+      "x-kiln-block-version": 1
+    },
+    "block_form": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "form"
+        },
+        "form_slug": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "_type",
+        "form_slug"
+      ],
+      "title": "FormBlock",
+      "type": "object",
+      "x-kiln-block": "form",
+      "x-kiln-block-version": 1
+    },
+    "block_fragment": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "fragment"
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "FragmentBlock",
+      "type": "object",
+      "x-kiln-block": "fragment",
+      "x-kiln-block-version": 1
+    },
+    "block_gallery": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "gallery"
+        },
+        "images": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "alt": {
+                "type": "string"
+              },
+              "caption": {
+                "type": "string"
+              },
+              "media": {
+                "additionalProperties": true,
+                "description": "The library item behind the block, as fired; null when none.",
+                "properties": {
+                  "alt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "focal": {
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "height": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "mime_type": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "variants": {
+                    "items": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "bytes": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "cropped": {
+                          "type": "boolean"
+                        },
+                        "format": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "height": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "width": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "url",
+                        "cropped"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "width": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "url"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "media_id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "alt",
+              "caption",
+              "media_id",
+              "url"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "layout": {
+          "default": "grid",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "GalleryBlock",
+      "type": "object",
+      "x-kiln-block": "gallery",
+      "x-kiln-block-version": 1
+    },
+    "block_heading": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "heading"
+        },
+        "level": {
+          "default": 2,
+          "maximum": 6,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "_type",
+        "text"
+      ],
+      "title": "HeadingBlock",
+      "type": "object",
+      "x-kiln-block": "heading",
+      "x-kiln-block-version": 2
+    },
+    "block_how_to": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "how_to"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "steps": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "text"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "HowToBlock",
+      "type": "object",
+      "x-kiln-block": "how_to",
+      "x-kiln-block-version": 1
+    },
+    "block_image": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "image"
+        },
+        "alt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "media": {
+          "additionalProperties": true,
+          "description": "The library item behind the block, as fired; null when none.",
+          "properties": {
+            "alt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "focal": {
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "height": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "mime_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "variants": {
+              "items": {
+                "additionalProperties": true,
+                "properties": {
+                  "bytes": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "cropped": {
+                    "type": "boolean"
+                  },
+                  "format": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "height": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "width": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "label",
+                  "url",
+                  "cropped"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "width": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "url"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "ImageBlock",
+      "type": "object",
+      "x-kiln-block": "image",
+      "x-kiln-block-version": 1
+    },
+    "block_newsletter_signup": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "newsletter_signup"
+        },
+        "action": {
+          "description": "Where to POST `email` (and `name`), relative to the Kiln host.",
+          "format": "uri-reference",
+          "type": "string"
+        },
+        "button_label": {
+          "type": "string"
+        },
+        "collect_name": {
+          "default": false,
+          "type": "boolean"
+        },
+        "heading": {
+          "description": "Shown above the form, e.g. \"Get release notes\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "honeypot_field": {
+          "description": "An input to render hidden and leave empty; a filled one is dropped.",
+          "type": "string"
+        },
+        "intro": {
+          "description": "One line on what subscribers receive and how often.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "NewsletterSignupBlock",
+      "type": "object",
+      "x-kiln-block": "newsletter_signup",
+      "x-kiln-block-version": 1
+    },
+    "block_product_card": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "product_card"
+        },
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-kiln-localization": "fallback"
+        },
+        "image_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-kiln-localization": "shared"
+        },
+        "in_stock": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "x-kiln-localization": "shared"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "price": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "x-kiln-localization": "shared"
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "ProductCardBlock",
+      "type": "object",
+      "x-kiln-block": "product_card",
+      "x-kiln-block-version": 1
+    },
+    "block_quote": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "quote"
+        },
+        "citation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "_type",
+        "text"
+      ],
+      "title": "QuoteBlock",
+      "type": "object",
+      "x-kiln-block": "quote",
+      "x-kiln-block-version": 1
+    },
+    "block_restricted_required": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "restricted_required"
+        },
+        "locked_text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "_type",
+        "locked_text"
+      ],
+      "title": "RestrictedRequiredBlock",
+      "type": "object",
+      "x-kiln-block": "restricted_required",
+      "x-kiln-block-version": 1
+    },
+    "block_restricted_required_default": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "restricted_required_default"
+        },
+        "locked_text": {
+          "default": "redacted",
+          "type": "string"
+        }
+      },
+      "required": [
+        "_type",
+        "locked_text"
+      ],
+      "title": "RestrictedRequiredDefaultBlock",
+      "type": "object",
+      "x-kiln-block": "restricted_required_default",
+      "x-kiln-block-version": 1
+    },
+    "block_rich_text": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "rich_text"
+        },
+        "body": {
+          "description": "Portable Text — the canonical rich-text representation (D12).",
+          "items": {
+            "$ref": "#/$defs/portable_text_block"
+          },
+          "type": "array"
+        },
+        "legacy_html": {
+          "deprecated": true,
+          "description": "Sanitized HTML that Portable Text cannot hold faithfully, present only when `body` is empty. Read `body` first, and write `body` wherever it can hold the prose.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type",
+        "body"
+      ],
+      "title": "RichTextBlock",
+      "type": "object",
+      "x-kiln-block": "rich_text",
+      "x-kiln-block-version": 1
+    },
+    "block_video": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "video"
+        },
+        "autoplay": {
+          "default": false,
+          "type": "boolean"
+        },
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "captions_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "captions_lang": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "captions_url": {
+          "format": "uri-reference",
+          "type": "string"
+        },
+        "duration_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "loop": {
+          "default": false,
+          "type": "boolean"
+        },
+        "media_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "poster": {
+          "format": "uri-reference",
+          "type": "string"
+        },
+        "src": {
+          "description": "Playable source, resolved from `media_id` or the authored url.",
+          "format": "uri-reference",
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "VideoBlock",
+      "type": "object",
+      "x-kiln-block": "video",
+      "x-kiln-block-version": 1
+    },
+    "content_page": {
+      "additionalProperties": false,
+      "description": "A published `Page` as fired to the `:json` surface.",
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/block"
+          },
+          "type": "array"
+        },
+        "custom_fields": {
+          "additionalProperties": true,
+          "description": "Admin-defined custom fields (`KilnCMS.CMS.FieldDefinition`). Open: a point-in-time read (`?as_of=`) serves the values stored at that instant, which may include fields since removed from the registry.",
+          "properties": {},
+          "type": "object"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "inherited_fields": {
+          "additionalProperties": true,
+          "description": "Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited.",
+          "type": "object"
+        },
+        "locale": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slug": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "const": "page"
+        }
+      },
+      "required": [
+        "blocks",
+        "custom_fields",
+        "id",
+        "locale",
+        "slug",
+        "title",
+        "type"
+      ],
+      "title": "PageDocument",
+      "type": "object",
+      "x-kiln-content-type": "page",
+      "x-kiln-content-type-source": "compiled"
+    },
+    "content_post": {
+      "additionalProperties": false,
+      "description": "A published `Post` as fired to the `:json` surface.",
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/block"
+          },
+          "type": "array"
+        },
+        "custom_fields": {
+          "additionalProperties": true,
+          "description": "Admin-defined custom fields (`KilnCMS.CMS.FieldDefinition`). Open: a point-in-time read (`?as_of=`) serves the values stored at that instant, which may include fields since removed from the registry.",
+          "properties": {
+            "code_sample": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dosages": {
+              "description": "Rows of this group, in the order the editor arranged them.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "amount": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "form": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "unit": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              "type": [
+                "array",
+                "null"
+              ],
+              "x-kiln-sub-fields": [
+                "amount",
+                "form",
+                "unit"
+              ]
+            },
+            "featured": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "gallery": {
+              "description": "Snapshots of the picked media items, in gallery order.",
+              "items": {
+                "additionalProperties": true,
+                "properties": {
+                  "alt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "focal": {
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "height": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "mime_type": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "variants": {
+                    "items": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "bytes": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "cropped": {
+                          "type": "boolean"
+                        },
+                        "format": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "height": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "width": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "url",
+                        "cropped"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "width": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "url"
+                ],
+                "type": "object"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "hero": {
+              "additionalProperties": true,
+              "description": "Snapshot of the picked media item.",
+              "properties": {
+                "alt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "focal": {
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "height": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "mime_type": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "variants": {
+                  "items": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "bytes": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "cropped": {
+                        "type": "boolean"
+                      },
+                      "format": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "height": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "url",
+                      "cropped"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "width": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "url"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "homepage": {
+              "format": "uri",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "launch_date": {
+              "format": "date",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "parent": {
+              "description": "Write-time snapshot of a referenced record.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "x-kiln-target-types": [
+                "post"
+              ]
+            },
+            "properties": {
+              "description": "The chosen terms, in the order the editor arranged them.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ],
+              "uniqueItems": true,
+              "x-kiln-max-items": 5
+            },
+            "published_at": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rating": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "read_time": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "related": {
+              "description": "Write-time snapshots of the referenced records, in the order the editor arranged them.",
+              "items": {
+                "additionalProperties": true,
+                "properties": {
+                  "id": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "title": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "type"
+                ],
+                "type": "object"
+              },
+              "type": [
+                "array",
+                "null"
+              ],
+              "x-kiln-target-types": [
+                "post"
+              ]
+            },
+            "seo": {
+              "additionalProperties": false,
+              "properties": {
+                "no_index": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": [
+                "object",
+                "null"
+              ],
+              "x-kiln-sub-fields": [
+                "no_index",
+                "title"
+              ]
+            },
+            "subtitle": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "summary": {
+              "contentMediaType": "text/html",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "synonyms": {
+              "description": "The items, in the order the editor arranged them.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ],
+              "uniqueItems": true
+            },
+            "tier": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "where": {
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "lat": {
+                  "type": "number"
+                },
+                "lng": {
+                  "type": "number"
+                },
+                "zoom": {
+                  "type": "number"
+                }
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "custom_fields_plain": {
+          "additionalProperties": false,
+          "description": "Plain-text renditions of the `:text` custom fields marked `deliver_plain`: the stored value with its HTML tags removed, entities decoded and whitespace collapsed. `null` where the record holds no value.",
+          "properties": {
+            "summary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "inherited_fields": {
+          "additionalProperties": true,
+          "description": "Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited.",
+          "type": "object"
+        },
+        "locale": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slug": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "const": "post"
+        }
+      },
+      "required": [
+        "blocks",
+        "custom_fields",
+        "id",
+        "locale",
+        "slug",
+        "title",
+        "type"
+      ],
+      "title": "PostDocument",
+      "type": "object",
+      "x-kiln-content-type": "post",
+      "x-kiln-content-type-source": "compiled"
+    },
+    "portable_text_block": {
+      "additionalProperties": true,
+      "description": "One Portable Text node (D12). Open by design: Portable Text is an extensible convention rather than a fixed schema, and a consumer that does not recognize a node's `_type` is expected to skip it.",
+      "properties": {
+        "_key": {
+          "type": "string"
+        },
+        "_type": {
+          "type": "string"
+        }
+      },
+      "title": "PortableTextBlock",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The `:json` fired-artifact shape served by `GET /api/content/:type/:slug`. Generated by `mix kiln.export.schema` / `GET /api/schema`.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/content_post"
+    },
+    {
+      "$ref": "#/$defs/content_page"
+    }
+  ],
+  "title": "KilnCMS delivery schema",
+  "x-kiln": {
+    "artifact_format_version": 3,
+    "blocks": [
+      "accordion",
+      "audio",
+      "callout",
+      "checklist",
+      "claim",
+      "columns",
+      "custom",
+      "dep_badge",
+      "divider",
+      "embed",
+      "faq",
+      "file",
+      "form",
+      "fragment",
+      "gallery",
+      "heading",
+      "how_to",
+      "image",
+      "newsletter_signup",
+      "product_card",
+      "quote",
+      "restricted_required",
+      "restricted_required_default",
+      "rich_text",
+      "video"
+    ],
+    "content_types": [
+      "post",
+      "page"
+    ],
+    "surface": "json"
+  }
+}

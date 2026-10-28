@@ -111,6 +111,24 @@ calibration_exclusion = [:calibration]
 #     mix test --only table_lock
 table_lock_exclusion = [:table_lock]
 
+# The Swift emitter's compile-and-decode smoke test really runs `swiftc`, on
+# the same reasoning as pg_dump and qpdf above: only the compiler can say the
+# generated file is Swift, and only a real decode can say it reads a fired
+# artifact. Excluded, not skipped, where there is no toolchain — Xcode or the
+# Swift toolchain on macOS, `swift` on the GitHub ubuntu images, or
+# https://www.swift.org/install/ anywhere else.
+swiftc_exclusion =
+  if System.find_executable("swiftc") do
+    []
+  else
+    IO.puts(:stderr, "note: excluding :swiftc tests — no swiftc on PATH")
+    [:swiftc]
+  end
+
+# Not a test: rewrites the schema-export fixture and goldens. Run it with
+# `--only regenerate_schema_goldens` (see its moduledoc).
+regenerate_exclusion = [:regenerate_schema_goldens]
+
 if KilnCMS.Config.StrictTestFlag.strict?(System.get_env("KILN_STRICT_TEST")) do
   ExUnit.start(include: [strict_tenancy: true], exclude: [:test])
 else
@@ -120,7 +138,9 @@ else
         pg_tools_exclusion ++
         qpdf_exclusion ++
         ffmpeg_exclusion ++
-        no_ffmpeg_exclusion ++ calibration_exclusion ++ table_lock_exclusion
+        no_ffmpeg_exclusion ++
+        calibration_exclusion ++
+        table_lock_exclusion ++ swiftc_exclusion ++ regenerate_exclusion
   )
 end
 

@@ -1,13 +1,13 @@
 defmodule Mix.Tasks.Kiln.Export.Schema do
-  @shortdoc "Export the delivery JSON Schema (or a .d.ts) for blocks and content types"
+  @shortdoc "Export the delivery JSON Schema (or .d.ts / Swift types) for blocks and content types"
   @moduledoc """
-  JSON Schema / TypeScript export of the block union and content types (#430).
+  JSON Schema / TypeScript / Swift export of the block union and content types (#430).
 
   Describes the `:json` fired-artifact shape — what
   `GET /api/content/:type/:slug?surface=json` returns — so a typed client has
   something to generate against. See `KilnCMS.SchemaExport`.
 
-      mix kiln.export.schema [--format json|ts] [--out PATH] [--type NAME,NAME]
+      mix kiln.export.schema [--format json|ts|swift] [--out PATH] [--type NAME,NAME]
                              [--org-id UUID | --all-orgs] [--blocks-only]
                              [--base-url URL] [--pretty]
 
@@ -16,6 +16,7 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
       mix kiln.export.schema --pretty
       mix kiln.export.schema --out priv/static/schema.json --pretty
       mix kiln.export.schema --format ts --out assets/js/kiln.d.ts
+      mix kiln.export.schema --format swift --out Sources/Kiln/Kiln.swift
       mix kiln.export.schema --type post,page --org-id 018f…
       mix kiln.export.schema --all-orgs --out ./schemas --pretty
 
@@ -26,10 +27,27 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
 
   `--blocks-only` skips content types entirely and touches no database, which
   is what a CI job that only wants block types should use.
+
+  ## Swift
+
+  `--format swift` writes one self-contained file of `Codable` models
+  (`KilnCMS.SchemaExport.Swift`): a struct per content type, block and
+  `:group` row, `Block` and `Document` enums that switch on `_type`/`type`
+  and keep an `unknown` case, and a bundled `JSONValue` for open maps. It
+  needs only the Swift standard library, so it drops into an app target or a
+  Swift package as-is.
+
+  The file describes **one site's** schema at the moment of export, so
+  regenerate it whenever a content type, a custom field or a block changes —
+  `--org-id` picks the site. An app built against an older file keeps
+  decoding: unknown keys are ignored, and a new block type or select-style
+  enum value lands in an `unknown` case rather than failing the decode. See
+  `docs/native-apps.md`.
   """
   use Mix.Task
 
   alias KilnCMS.SchemaExport
+  alias KilnCMS.SchemaExport.Swift
   alias KilnCMS.SchemaExport.TypeScript
 
   @requirements ["app.start"]
@@ -100,9 +118,13 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
     {encode(document, format, opts[:pretty]), summary}
   end
 
-  defp encode(document, :ts, _pretty), do: TypeScript.emit(document)
+  # Public for the golden regenerator, which writes its fixture through the
+  # same sorted encoder an export does.
+  @doc false
+  def encode(document, :ts, _pretty), do: TypeScript.emit(document)
+  def encode(document, :swift, _pretty), do: Swift.emit(document)
 
-  defp encode(document, :json, pretty) do
+  def encode(document, :json, pretty) do
     opts = if pretty, do: [pretty: true], else: []
     Jason.encode!(sorted(document), opts) <> "\n"
   end
@@ -146,11 +168,13 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
   defp parse_format(nil), do: :json
   defp parse_format(format) when format in ~w(json), do: :json
   defp parse_format(format) when format in ~w(ts d.ts typescript), do: :ts
+  defp parse_format(format) when format in ~w(swift), do: :swift
 
   defp parse_format(other),
-    do: Mix.raise("Unknown format #{inspect(other)} (expected json|ts).")
+    do: Mix.raise("Unknown format #{inspect(other)} (expected json|ts|swift).")
 
   defp extension(:ts), do: "d.ts"
+  defp extension(:swift), do: "swift"
   defp extension(:json), do: "json"
 
   defp emit(body, nil), do: IO.write(body)
