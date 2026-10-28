@@ -28,11 +28,10 @@ defmodule KilnCMS.CMS.Changes.DeriveAlias do
              Slugs.changeset_context(changeset, pattern),
              Slugs.changeset_token_definitions(changeset, pattern, :alias)
            ) do
-      Ash.Changeset.force_change_attribute(
-        changeset,
-        :path_alias,
-        unique_alias(alias_path, changeset)
-      )
+      changeset
+      |> Ash.Changeset.force_change_attribute(:path_alias, unique_alias(alias_path, changeset))
+      # Recorded, not inferred later (#1890): see `Changes.TrackAliasDerivation`.
+      |> Ash.Changeset.force_change_attribute(:path_alias_derived, true)
     else
       # Alias present, no alias pattern, or an all-empty expansion — leave the
       # record at its flat URL.

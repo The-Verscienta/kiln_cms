@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Overlays: run `mix ash.codegen` for your content types. Every content table
+  gains a nullable `path_alias_derived` column; reads fail until it exists.**
+  ([#1890](https://github.com/The-Verscienta/kiln_cms/issues/1890) · [long form](docs/changelog/unreleased.md#alias-derivation-overlays))
+
 - **Optional: run `mix kiln.media.resnapshot --apply` once after deploying**
   so stored `:media` field values gain dimensions, focal point and variants;
   fired artifacts converge by themselves.
@@ -147,6 +151,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2068](https://github.com/The-Verscienta/kiln_cms/pull/2068) · [long form](docs/changelog/unreleased.md#overlay-refire))
 
 ### Changed
+
+- **Whether a path alias was derived is recorded when it is written, so a move
+  rewrites a stale derived path beneath it instead of mistaking it for a pinned one.**
+  ([#1890](https://github.com/The-Verscienta/kiln_cms/issues/1890) · [long form](docs/changelog/unreleased.md#alias-derivation-recorded))
 
 - **The schema export states the media snapshot once, as `$defs.media_snapshot`;
   nullable uses are `anyOf: [$ref, null]`, so generated clients get one type.**

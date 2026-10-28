@@ -19,6 +19,16 @@ carries the reasoning.
   need nothing: they re-fire on their next read (`format_version` 3), or at
   once with `mix kiln.refire_all`.
 
+<a id="alias-derivation-overlays"></a>
+
+- **Overlays: run `mix ash.codegen <name>` before deploying (#1890).** The
+  `KilnCMS.CMS.Content` macro adds a nullable `path_alias_derived` column to
+  every content type, so it lands on your overlay's tables too, and your tree
+  carries its own migrations ([overlay-contract.md](../overlay-contract.md)).
+  Until the migration runs, reads of those types fail with
+  `undefined_column`. The core's own tables get it from the release's
+  migrations. Adding a nullable column takes no table rewrite.
+
 ## Added
 
 <a id="plain-text-breaks"></a>
@@ -548,6 +558,32 @@ carries the reasoning.
   pending for an id is not queued twice.
 
 ## Changed
+
+<a id="alias-derivation-recorded"></a>
+
+- **Whether a path alias was derived is recorded, not inferred (#1890).**
+  A move re-derived the paths beneath it only where it could tell a derived
+  alias from a hand-written one, and it told them apart by re-deriving and
+  comparing (`KilnCMS.CMS.Slugs.underived?/2`). That breaks once a
+  derivation's inputs change for a reason the job does not know about: rename
+  a section's slug and every `[ancestors]` path beneath it differs from both
+  the old and the new derivation, exactly as a hand-written one does, so the
+  next move left those stale paths alone for good. Every content type now has
+  `path_alias_derived`: `true` when `Changes.DeriveAlias` filled the alias or
+  a regeneration rewrote it, `false` when anything else wrote it (the editor,
+  the working copy, an import, a restore, the API). `Changes.TrackAliasDerivation`
+  records it on every create and update. Re-saving an unchanged alias leaves it
+  as it was, and clearing one derives it again. `SlugRegeneration` reads the
+  fact and falls back to the inference only where it is `nil`.
+
+  Rows saved before 1.7 hold `nil` and keep the old inference, including the
+  pre-move chain a move job reconstructs, so nothing changes for them until
+  their alias is next written. That is why the move job's `old_parent_id`
+  stays for now. A blanket "assume pinned" backfill was considered and left
+  out: it would have stopped every existing tree-derived path from following
+  its next move. The column is internal: it is on no API surface and no action
+  accepts it. Re-deriving the subtree when an ancestor is renamed, which the
+  recorded fact now makes safe, is not part of this change.
 
 <a id="media-snapshot-def"></a>
 
