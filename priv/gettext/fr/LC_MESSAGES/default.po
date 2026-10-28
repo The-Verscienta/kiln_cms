@@ -1173,6 +1173,11 @@ msgstr "Une sauvegarde ne peut pas s'exécuter sur cette installation."
 msgid "A bearer token widens reads and search to include drafts. Delivery sites attaching a service key should use the published-only routes (the /published twins) so drafts can never leak."
 msgstr "Un jeton bearer étend les lectures et la recherche aux brouillons. Les sites de diffusion utilisant une clé de service doivent employer les routes réservées au contenu publié (les jumelles /published) afin qu'aucun brouillon ne puisse fuiter."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A blank line between paragraphs and a new line for each line break, instead of one line."
+msgstr "Une ligne vide entre les paragraphes et un retour à la ligne pour chaque saut de ligne, au lieu d'une seule ligne."
+
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "A block"
@@ -8829,6 +8834,11 @@ msgstr "KILN_CONSOLE_HOST n'est pas défini : la console d'édition répond donc
 #, elixir-autogen, elixir-format
 msgid "Keep all live versions"
 msgstr "Garder toutes les versions en ligne"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keep paragraph breaks"
+msgstr "Conserver les sauts de paragraphe"
 
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
 #, elixir-autogen, elixir-format

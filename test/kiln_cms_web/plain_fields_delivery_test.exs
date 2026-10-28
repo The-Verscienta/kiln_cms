@@ -66,10 +66,12 @@ defmodule KilnCMSWeb.PlainFieldsDeliveryTest do
   # Flips the flag the way the fields admin does, and runs the re-fire the
   # flip enqueues. Reads the definition fresh: a struct that already holds
   # `value` would make the update a no-op Ash drops.
-  defp deliver_plain(%{actor: actor, definition: definition}, value) do
+  defp deliver_plain(ctx, value), do: update_definition(ctx, %{deliver_plain: value})
+
+  defp update_definition(%{actor: actor, definition: definition}, attrs) do
     definition
     |> then(&CMS.get_field_definition!(&1.id, actor: actor))
-    |> CMS.update_field_definition!(%{deliver_plain: value}, actor: actor)
+    |> CMS.update_field_definition!(attrs, actor: actor)
 
     KilnCMS.DataCase.drain_oban()
     KilnCMS.Cache.bust_published()
@@ -100,6 +102,24 @@ defmodule KilnCMSWeb.PlainFieldsDeliveryTest do
 
       assert body["custom_fields"][name] == @html
       assert body["custom_fields_plain"] == %{name => @plain}
+    end
+
+    test "keeping the breaks re-fires with them, on every surface", %{conn: conn, page: page} = ctx do
+      update_definition(ctx, %{plain_breaks: true})
+      broken = "Bitter & cold.\n\nClears heat."
+
+      assert artifact(conn, page)["custom_fields_plain"] == %{ctx.name => broken}
+
+      conn =
+        json_api(
+          "/api/json/pages/by-slug/#{page.slug}?locale=en&fields[page]=title,custom_fields_plain"
+        )
+
+      assert Jason.decode!(conn.resp_body)["data"]["attributes"]["custom_fields_plain"] ==
+               %{ctx.name => broken}
+
+      update_definition(ctx, %{plain_breaks: false})
+      assert artifact(build_conn(), page)["custom_fields_plain"] == %{ctx.name => @plain}
     end
 
     test "/api/sync carries it inside the artifact", %{conn: conn, page: page, name: name} do

@@ -272,6 +272,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :names_record,
       :searchable,
       :deliver_plain,
+      :plain_breaks,
       :deliver_portable,
       :localization,
       :inverse_label,
@@ -406,6 +407,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     # `deliver_plain` speaks about a `:text` field's HTML, so it drops on any
     # other type — and on a link field, whose value delivery never projects.
+    # `plain_breaks` shapes that rendition, so it drops with it.
     change KilnCMS.CMS.Changes.ClearDeliverPlain
 
     # `deliver_portable` converts a rich `:text` field's HTML, so it drops on
@@ -696,6 +698,16 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # never rewritten. `:text` only (`Changes.ClearDeliverPlain`). Flipping it
     # re-fires the type's published documents (`Changes.BustTypeRegistry`).
     attribute :deliver_plain, :boolean, allow_nil?: false, default: false, public?: true
+
+    # Whether that plain rendition keeps the value's paragraph and line breaks
+    # (`KilnCMS.PlainText.from_html_paragraphs/1`: a blank line between
+    # paragraphs, a newline per `<br>` and list item) rather than reading as
+    # one line. Same key, same string type — only the whitespace differs — so
+    # off by default, and every field flagged before it existed keeps its
+    # one-line value. Meaningful only with `deliver_plain`, and cleared
+    # without it (`Changes.ClearDeliverPlain`). Flipping it re-fires the
+    # type's published documents (`Changes.BustTypeRegistry`).
+    attribute :plain_breaks, :boolean, allow_nil?: false, default: false, public?: true
 
     # Whether delivery carries a Portable Text rendition beside a rich `:text`
     # field's value: `custom_fields_portable.<name>`, the stored HTML as the

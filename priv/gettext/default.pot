@@ -1173,6 +1173,11 @@ msgstr ""
 msgid "A bearer token widens reads and search to include drafts. Delivery sites attaching a service key should use the published-only routes (the /published twins) so drafts can never leak."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A blank line between paragraphs and a new line for each line break, instead of one line."
+msgstr ""
+
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "A block"
@@ -8828,6 +8833,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Keep all live versions"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keep paragraph breaks"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/recipes.ex

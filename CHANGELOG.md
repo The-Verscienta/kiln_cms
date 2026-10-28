@@ -63,6 +63,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A plain-text field can keep its paragraph breaks: "Keep paragraph breaks"
+  delivers `custom_fields_plain.<name>` with `\n\n` between paragraphs.**
+  ([long form](docs/changelog/unreleased.md#plain-text-breaks))
+
 - **`mix kiln.export.schema --format swift` writes `Codable` models: a struct per
   type, block and group row, and `Block`/`Document` enums that tolerate unknowns.**
   ([#2105](https://github.com/The-Verscienta/kiln_cms/pull/2105) · [long form](docs/changelog/unreleased.md#swift-schema-export))

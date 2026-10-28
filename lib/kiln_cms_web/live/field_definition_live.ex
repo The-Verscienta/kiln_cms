@@ -2311,31 +2311,52 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # Whether delivery carries a plain-text rendition beside a `:text` field's
   # value (`deliver_plain`). Shown only for that type: on any other, nothing
   # is submitted and `Changes.ClearDeliverPlain` drops a stored `true`.
+  # `plain_breaks` sits under it, shown once it is ticked — and cleared with
+  # it, by the same change.
   defp deliver_plain_field(assigns) do
+    assigns = assign(assigns, :plain?, assigns.form[:deliver_plain].value in [true, "true"])
+
     ~H"""
-    <label
-      :if={to_string(@form[:field_type].value) == "text"}
-      for={@id}
-      class="flex items-start gap-2 self-end text-sm"
-    >
-      <input type="hidden" name={@form[:deliver_plain].name} value="false" />
-      <input
-        type="checkbox"
-        id={@id}
-        name={@form[:deliver_plain].name}
-        value="true"
-        checked={@form[:deliver_plain].value in [true, "true"]}
-        class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
-      />
-      <span>
-        {gettext("Also deliver as plain text")}
-        <span class="block text-xs text-base-content/60">
-          {gettext(
-            "APIs add a copy with HTML tags removed under custom_fields_plain, for apps that cannot render HTML."
-          )}
+    <div :if={to_string(@form[:field_type].value) == "text"} class="space-y-2 self-end text-sm">
+      <label for={@id} class="flex items-start gap-2">
+        <input type="hidden" name={@form[:deliver_plain].name} value="false" />
+        <input
+          type="checkbox"
+          id={@id}
+          name={@form[:deliver_plain].name}
+          value="true"
+          checked={@plain?}
+          class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
+        />
+        <span>
+          {gettext("Also deliver as plain text")}
+          <span class="block text-xs text-base-content/60">
+            {gettext(
+              "APIs add a copy with HTML tags removed under custom_fields_plain, for apps that cannot render HTML."
+            )}
+          </span>
         </span>
-      </span>
-    </label>
+      </label>
+      <label :if={@plain?} for={"#{@id}-breaks"} class="ml-6 flex items-start gap-2">
+        <input type="hidden" name={@form[:plain_breaks].name} value="false" />
+        <input
+          type="checkbox"
+          id={"#{@id}-breaks"}
+          name={@form[:plain_breaks].name}
+          value="true"
+          checked={@form[:plain_breaks].value in [true, "true"]}
+          class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
+        />
+        <span>
+          {gettext("Keep paragraph breaks")}
+          <span class="block text-xs text-base-content/60">
+            {gettext(
+              "A blank line between paragraphs and a new line for each line break, instead of one line."
+            )}
+          </span>
+        </span>
+      </label>
+    </div>
     """
   end
 

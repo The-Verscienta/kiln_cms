@@ -18,19 +18,26 @@ defmodule KilnCMS.CMS.PlainFields do
 
   Every flagged field has a key, `nil` when the record holds no string for
   it, so a client reads one shape per type.
+
+  A field that also sets `plain_breaks` keeps its paragraph and line breaks
+  (`KilnCMS.PlainText.from_html_paragraphs/1`) instead of reading as one
+  line — the same key and type, so a client that ignores the breaks still
+  reads text.
   """
 
   alias KilnCMS.PlainText
 
   @doc "The names of the fields among `definitions` that deliver a plain rendition."
   @spec names([KilnCMS.CMS.FieldDefinition.t()]) :: [String.t()]
-  def names(definitions) do
+  def names(definitions), do: Enum.map(flagged(definitions), & &1.name)
+
+  defp flagged(definitions) do
     for %{deliver_plain: true, field_type: :text} = definition <- definitions,
         is_nil(Map.get(definition, :link_of_id)),
-        do: definition.name
+        do: definition
   end
 
-  @doc """
+  @doc ~S"""
   The `custom_fields_plain` map for `values` under `definitions`, or `nil`
   when no definition opts in — the caller leaves the key out then.
 
@@ -41,15 +48,26 @@ defmodule KilnCMS.CMS.PlainFields do
       %{"body" => nil}
       iex> KilnCMS.CMS.PlainFields.project(%{"body" => "x"}, [])
       nil
+      iex> defs = [%{name: "body", field_type: :text, deliver_plain: true, plain_breaks: true}]
+      iex> KilnCMS.CMS.PlainFields.project(%{"body" => "<p>A</p><p>B<br>C</p>"}, defs)
+      %{"body" => "A\n\nB\nC"}
   """
   @spec project(map() | nil, [KilnCMS.CMS.FieldDefinition.t()]) :: map() | nil
   def project(values, definitions) do
-    case names(definitions) do
-      [] -> nil
-      names -> Map.new(names, &{&1, plain(Map.get(values || %{}, &1))})
+    case flagged(definitions) do
+      [] ->
+        nil
+
+      flagged ->
+        Map.new(flagged, &{&1.name, plain(Map.get(values || %{}, &1.name), &1)})
     end
   end
 
-  defp plain(value) when is_binary(value), do: PlainText.from_html(value)
-  defp plain(_value), do: nil
+  defp plain(value, definition) when is_binary(value) do
+    if Map.get(definition, :plain_breaks) == true,
+      do: PlainText.from_html_paragraphs(value),
+      else: PlainText.from_html(value)
+  end
+
+  defp plain(_value, _definition), do: nil
 end

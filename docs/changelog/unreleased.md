@@ -21,6 +21,23 @@ carries the reasoning.
 
 ## Added
 
+<a id="plain-text-breaks"></a>
+
+- **A plain-text rendition can keep its paragraph breaks.** A `:text` field
+  delivered as plain text (`deliver_plain`, #2037) read as one line:
+  `KilnCMS.PlainText.from_html/1` collapses every run of whitespace, so a
+  three-paragraph description came out as one. A new option under it in the
+  fields admin, "Keep paragraph breaks" (`plain_breaks` on `FieldDefinition`,
+  off by default), delivers that field through
+  `KilnCMS.PlainText.from_html_paragraphs/1` instead: a blank line (`"\n\n"`)
+  between block elements — paragraphs, headings, quotes, lists, table rows —
+  and a newline for each `<br>` and list item, whitespace inside a line
+  collapsed as a browser shows it. Text with no markup keeps the newlines it
+  was typed with. List items carry no marker. The key, the string type and
+  every other field's value are unchanged; the schema export marks such a
+  field `x-kiln-plain-breaks: true`. Cleared with `deliver_plain`, and
+  flipping it re-fires the type's published documents.
+
 <a id="swift-schema-export"></a>
 
 - **Swift models from the schema export.** `mix kiln.export.schema --format
