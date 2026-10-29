@@ -62,8 +62,15 @@ defmodule KilnCMS.CMS.Tagging do
     end
 
     # Link/unlink is an editing action — editors only (admins via the bypass).
+    # Field-level localization's copy of a shared tag set (#1859) links and
+    # unlinks as the `:localization` system actor, through the `tags`
+    # `manage_relationship` of `:sync_shared_fields`
+    # (`I18n.Changes.ApplySharedFields`); it never updates a row.
     policy action_type([:create, :update, :destroy]) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: :localization, action: [:create, :destroy]}
     end
   end
 

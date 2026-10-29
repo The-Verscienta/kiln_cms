@@ -89,6 +89,20 @@ does not see no change. Where each kind of field opts in:
   `seo_keywords`, `seo_image`, `category_id` and `featured_image_id`;
   `fallback:` the text fields and `seo_image`. The title, slug, locale and
   canonical URL are always per locale.
+- **Tags and curated related content** (#1859) — the same `shared:` list
+  (and the operator config below) may name `:tags` and `:related`:
+
+  ```elixir
+  localization: [shared: [:tags, :related, :category_id]]
+  ```
+
+  Tags have no locale, so a translation gets the source's tag set as it is,
+  by reference; no tag is changed. Related content is resolved per locale:
+  each of the source's targets becomes its document's variant (same slug) in
+  the translation's locale, or, when the target has none, the first variant
+  along the site's fallback chain, as `?fallback=site` would pick it. A
+  target with no variant on the chain is left out. The source's order is
+  kept. Neither can be `fallback:`.
 - **Record attributes of the core types** — a site cannot edit `page` or
   `post`'s `use` line, so the operator config takes the same list per type:
 
@@ -96,6 +110,9 @@ does not see no change. Where each kind of field opts in:
   config :kiln_cms, :i18n,
     field_localization: [page: [shared: [:seo_image], fallback: [:seo_description]]]
   ```
+
+  `page: [shared: [:tags, :related]]` shares the core page type's tags and
+  related content the same way.
 
 ### What happens, and when
 
@@ -132,7 +149,15 @@ does not see no change. Where each kind of field opts in:
 
 - Blocks nested inside a `columns` block are not walked; only top-level block
   fields are shared or inherited.
-- Tags and curated related content are not shareable.
+- A shared related link is resolved when the copy runs. A translation
+  linked to the English variant of a target (because the target had no
+  French one) keeps that link after the target's French variant is created,
+  until the source or the translation next publishes.
+- On a translation, the tag picker and the related picker are read-only, and
+  a write that changes the tag set or the related list is refused like any
+  other shared field — whether it sends the complete set (`tag_ids`,
+  `related_<type>_ids`) or the `add_*` / `remove_*` verbs. Tags compare as a
+  set, the related list in order. Re-sending the current links passes.
 - On a translation, a write that changes a shared field — a JSON:API
   `PATCH` or `POST`, a GraphQL mutation, `:autosave`, the working copy — is
   refused with a validation error naming the field and the source locale

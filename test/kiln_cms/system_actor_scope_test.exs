@@ -41,7 +41,8 @@ defmodule KilnCMS.SystemActorScopeTest do
   # Reads whose policy is `access_type :runtime`: decided against a row below.
   @data_probed %{
     Firing.PublishedArtifact => [:read, :for_document, :get_surface],
-    KilnCMS.CMS.ContentLink => [:read, :backlinks, :references_from, :references_to]
+    KilnCMS.CMS.ContentLink => [:read, :backlinks, :references_from, :references_to],
+    KilnCMS.CMS.RelatedLink => [:read]
   }
 
   defp expected(resource, action),
@@ -244,6 +245,54 @@ defmodule KilnCMS.SystemActorScopeTest do
 
         assert admitted? == MapSet.member?(expected(KilnCMS.CMS.ContentLink, action), subsystem),
                "ContentLink #{inspect(action)} as #{inspect(subsystem)}: " <>
+                 "admitted? #{admitted?}, but the matrix row says the opposite"
+      end
+    end
+  end
+
+  describe "CMS.RelatedLink reads, against a row" do
+    setup do
+      org_id = KilnCMS.Accounts.default_org_id()
+
+      # A curated link between two drafts: no branch for people admits it (an
+      # anonymous reader may read neither end), so only the system clause can.
+      draft = fn ->
+        Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+          title: "Related probe",
+          slug: "related-probe-#{System.unique_integer([:positive])}",
+          locale: "en",
+          state: :draft
+        })
+      end
+
+      link =
+        Ash.Seed.seed!(KilnCMS.CMS.RelatedLink, %{
+          org_id: org_id,
+          source_id: draft.().id,
+          target_id: draft.().id
+        })
+
+      %{org_id: org_id, link: link}
+    end
+
+    test "the read admits the subsystems its row names, and refuses every other", ctx do
+      assert @data_probed[KilnCMS.CMS.RelatedLink] == [:read]
+
+      for subsystem <- Grants.all_subsystems() do
+        admitted? =
+          case KilnCMS.CMS.list_related_links(
+                 actor: SystemActor.new(subsystem),
+                 tenant: ctx.org_id,
+                 authorize_with: :error,
+                 query: [filter: [id: ctx.link.id]]
+               ) do
+            {:ok, [%{id: id}]} -> id == ctx.link.id
+            {:ok, []} -> false
+            {:error, %Ash.Error.Forbidden{}} -> false
+          end
+
+        assert admitted? == MapSet.member?(expected(KilnCMS.CMS.RelatedLink, :read), subsystem),
+               "RelatedLink :read as #{inspect(subsystem)}: " <>
                  "admitted? #{admitted?}, but the matrix row says the opposite"
       end
     end

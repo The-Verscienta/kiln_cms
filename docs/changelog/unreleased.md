@@ -265,6 +265,32 @@ carries the reasoning.
   fields and on link and group sub-fields (a group's rows are delivered
   whole); refused on a private field.
 
+<a id="shared-tags-and-related"></a>
+
+- **Field localization can share tags and curated related content (#1859).**
+  A content type's `localization:` option — and, for the core types,
+  `config :kiln_cms, :i18n, field_localization:` — now accepts `:tags` and
+  `:related` in `shared:`. When the default-locale variant publishes, every
+  translation takes:
+  - **its tag set, by reference.** Tags have no locale, so the tag ids are
+    copied and no tag is touched.
+  - **its related list, resolved per locale, in order.** Each target becomes
+    its document's variant in the translation's locale; a target with none
+    follows the site's fallback chain (#1579), the same rule `?fallback=site`
+    uses, and one with no variant on the chain is left out.
+
+  The copy is still `:sync_shared_fields`: versioned, optimistic-locked, and
+  ignored by coverage, so a copied tag set does not make an outdated
+  translation look fresh. A translation's pending working copy that holds its
+  own tags or related list gets the shared value too. The #1860 write
+  refusal covers both — the complete-set arguments and the `add_*` /
+  `remove_*` verbs — and the editor shows both pickers read-only on a
+  translation, with a link to the source. The `:localization` system actor
+  gains `Tagging` `create`/`destroy` and `RelatedLink` `read`/`create`/`destroy`
+  for the copy (`docs/policy-matrix.md`). No migration; a type that names
+  neither behaves as before. The design is in
+  [field-level localization](../field-level-localization.md#tags-and-related-content).
+
 ## Changed
 
 <a id="portable-text-node-keys"></a>
