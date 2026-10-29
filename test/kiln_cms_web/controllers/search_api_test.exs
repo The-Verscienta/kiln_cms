@@ -177,6 +177,23 @@ defmodule KilnCMSWeb.SearchApiTest do
     assert body["suggestion"] == "Fermentation Handbook"
   end
 
+  # /developers documented `?query=` while the controller read only `q`, so a
+  # client following the docs got an empty 200 (outside audit, 2026-10-29).
+  test "?query= is read as an alias for ?q=", %{conn: conn} do
+    actor = admin()
+    word = token()
+
+    page =
+      CMS.create_page!(%{title: "Alias #{word}", slug: slug()}, actor: actor)
+      |> then(&CMS.publish_page!(&1, %{}, actor: actor))
+
+    body = conn |> get("/api/search?query=#{word}") |> json_response(200)
+
+    assert body["query"] == word
+    assert [%{"id" => id}] = body["results"]["pages"]
+    assert id == page.id
+  end
+
   test "a blank query returns the empty shape", %{conn: conn} do
     body = conn |> get("/api/search?q=") |> json_response(200)
 

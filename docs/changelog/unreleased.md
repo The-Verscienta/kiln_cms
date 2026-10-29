@@ -417,3 +417,25 @@ carries the reasoning.
   found it by moving an image between a heading and a text block, four times
   out of four. `BlockParams.sort_blocks/2` now sorts and marks `blocks`
   touched, and every reorder in the editor goes through it.
+
+<a id="page-value-500"></a>
+
+- **A `page[...]` value `ash_json_api` could not cast answered 500.**
+  `page[limit]=abc`, an empty `page[limit]=`, `page[limit]=1.5`,
+  `page[offset]=abc` and `page[count]=maybe` reached `ash_json_api` 1.7.1's own
+  rejection, which builds `InvalidPagination` with a field the struct does
+  not have: a `KeyError`, so a 500. `page[limit]=0` got past the cast and
+  came back as an opaque `something_went_wrong`, and a negative limit or
+  offset as a schema-pattern `invalid_query`. `KilnCMSWeb.Plugs.AshJsonApiParams`,
+  which already refused the wrong *shapes* (#763), now checks the values too,
+  and every rejection is a 400 `invalid_pagination` (or `invalid_sort`/
+  `invalid_includes`) whose `source.parameter` names the parameter, as
+  `ash_json_api`'s own sort errors do. `KilnCMSWeb.ApiError.send/5` takes the
+  optional `source_parameter:`. Found by an outside audit of kilncms.dev.
+
+<a id="search-query-alias"></a>
+
+- **`GET /api/search?query=` answered an empty 200.** The /developers page
+  documented `?query=`, and the controller read only `q`, so a client
+  following the page could not tell a wrong parameter name from no matches.
+  The page now says `?q=`, and the endpoint reads `query` when `q` is absent.
