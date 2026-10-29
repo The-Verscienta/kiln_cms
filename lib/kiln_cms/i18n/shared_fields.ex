@@ -21,12 +21,15 @@ defmodule KilnCMS.I18n.SharedFields do
 
     * record attributes the type's `localization:` option lists as `shared:`;
     * custom fields whose definition's `localization` is `:shared`;
-    * top-level block fields declared `localized: :shared`, addressed by the
-      block `_id` the variants share (`ContentCopy` keeps ids on the
+    * block fields declared `localized: :shared`, on top-level blocks and on
+      blocks nested inside `columns` at any depth, addressed by the block
+      `_id` the variants share (`ContentCopy` keeps ids at every depth on the
       translation path). A block the sibling no longer holds, or whose `_type`
-      differs, is skipped. Both trees are read through the block union's
-      `cast_stored`, which upcasts every block to its current version, so the
-      two sides are compared at the same schema version;
+      differs, is skipped. Top-level blocks are read through the block union's
+      `cast_stored` and nested children through `TypedBlocks.to_typed/1`; both
+      upcast every block to its current version, so the two sides are
+      compared at the same schema version. A nested child is rewritten only
+      when one of its shared values changes;
     * the **tags**, when the type shares `:tags` (#1859): the source's tag set,
       as tag ids — a tag has no locale, so the references are copied and no
       tag is touched;
@@ -39,7 +42,8 @@ defmodule KilnCMS.I18n.SharedFields do
   ## The sibling's working copy (#1815)
 
   A published sibling with a pending working copy gets the value in the copy
-  too — `working_blocks`, and any held field in `working_fields` — so its next
+  too — `working_blocks` (nested children included), and any held field in
+  `working_fields` — so its next
   *Publish changes* does not put the old value back. The copy's recorded base
   (`working_base`) is moved to the new live value for each key whose base was
   the old live value, so the lost-update guard does not report the copy as a
@@ -341,35 +345,33 @@ defmodule KilnCMS.I18n.SharedFields do
   end
 
   @doc false
-  # The target tree with each shared field of each block replaced by the
-  # source's value for the block with the same id and type.
+  # The target tree with each shared field of each block, top-level or nested
+  # inside `columns`, replaced by the source's value for the block with the
+  # same id and type, wherever in the source's tree that block sits.
   def copy_block_fields(source_blocks, target_blocks) do
-    by_id =
-      for block <- source_blocks,
-          %{id: id} = value <- [value(block)],
-          into: %{},
-          do: {id, value}
+    by_id = FieldLocalization.blocks_by_id(source_blocks)
 
-    Enum.map(target_blocks, fn block ->
-      with %module{id: id} = value <- value(block),
-           shared when shared != [] <- shared_block_fields(module),
-           %^module{} = from <- Map.get(by_id, id) do
-        put_value(block, Enum.reduce(shared, value, &Map.put(&2, &1, Map.get(from, &1))))
-      else
-        _untouched -> block
-      end
-    end)
+    {blocks, nil} =
+      FieldLocalization.map_reduce_block_fields(target_blocks, nil, fn %module{} = value, nil ->
+        {shared_changes(value, module, Map.get(by_id, Map.get(value, :id))), nil}
+      end)
+
+    blocks
   end
+
+  # Only the fields that differ, so a nested child whose shared values already
+  # match is left exactly as stored.
+  defp shared_changes(value, module, %module{} = from) do
+    for name <- shared_block_fields(module),
+        Map.get(from, name) != Map.get(value, name),
+        into: %{},
+        do: {name, Map.get(from, name)}
+  end
+
+  defp shared_changes(_value, _module, _from), do: %{}
 
   defp shared_block_fields(module),
     do: for({name, :shared} <- FieldLocalization.block_fields(module), do: name)
-
-  defp value(%Ash.Union{value: value}), do: value
-  defp value(%_{} = value), do: value
-  defp value(_other), do: nil
-
-  defp put_value(%Ash.Union{} = union, value), do: %{union | value: value}
-  defp put_value(_block, value), do: value
 
   # The working-copy half of a sync onto a sibling with a pending copy.
   defp working_copy(sibling, changes, source, shared_custom) do

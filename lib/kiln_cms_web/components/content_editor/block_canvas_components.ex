@@ -847,6 +847,10 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
   attr :bf, :any, required: true
   attr :columns, :list, required: true
   attr :child_types, :list, required: true
+  # Field-level localization reaches nested children too (#1858): see
+  # `nested_child_fields/1`.
+  attr :localization, :map, default: nil
+  attr :kind, :any, default: nil
 
   def columns_editor(assigns) do
     assigns = assign(assigns, :block_id, col_block_id(assigns.bf))
@@ -946,7 +950,12 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
                   </button>
                 </div>
               </div>
-              <.nested_child_fields block_id={@block_id} child={child} />
+              <.nested_child_fields
+                block_id={@block_id}
+                child={child}
+                localization={@localization}
+                kind={@kind}
+              />
             </div>
           </div>
 
@@ -972,8 +981,14 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
   # Simple per-type field editors for a nested child block. Inputs are nameless
   # (they never enter the form's params) and commit to socket state via
   # `col_update_child` on blur/change — see the columns handlers.
+  #
+  # A field the child's block declares `localized: :shared` is read-only on a
+  # translation, and an empty `localized: :fallback` one shows what it
+  # inherits, as on a top-level block (#1858). Inactive by default.
   attr :block_id, :any, required: true
   attr :child, :map, required: true
+  attr :localization, :map, default: nil
+  attr :kind, :any, default: nil
 
   def nested_child_fields(%{child: %{"_type" => "divider"}} = assigns) do
     ~H"""
@@ -982,23 +997,43 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
   end
 
   def nested_child_fields(assigns) do
+    assigns =
+      assigns
+      |> assign(:localization, assigns.localization || Localization.inactive())
+      |> assign(:module, KilnCMS.Blocks.module_for_tagged_map(assigns.child))
+
     ~H"""
     <div class="space-y-2">
       <%!-- Wrapped in its visible label, which names the input and focuses it
             on click — no id needed, so none to keep unique per child. --%>
-      <label :for={{field, label} <- nested_fields_for(@child["_type"])} class="block space-y-1">
-        <span class="text-xs font-medium text-base-content/70">{label}</span>
-        <input
-          type="text"
-          value={nested_field_value(@child, field)}
-          placeholder={label}
-          phx-blur="col_update_child"
-          phx-value-id={@block_id}
-          phx-value-child={@child["id"]}
-          phx-value-field={field}
-          class="field-input w-full text-sm"
+      <div :for={{field, label} <- nested_fields_for(@child["_type"])}>
+        <label class="block space-y-1">
+          <span class="text-xs font-medium text-base-content/70">{label}</span>
+          <input
+            type="text"
+            value={nested_field_value(@child, field)}
+            placeholder={nested_placeholder(@localization, @module, field, @child, label)}
+            readonly={nested_locked?(@localization, @module, field)}
+            phx-blur="col_update_child"
+            phx-value-id={@block_id}
+            phx-value-child={@child["id"]}
+            phx-value-field={field}
+            class="field-input w-full text-sm"
+          />
+        </label>
+        <Localization.localization_note
+          :if={nested_mode_field(@module, field)}
+          localization={@localization}
+          field={{:block, @module, nested_mode_field(@module, field)}}
+          kind={@kind}
+          inherited={
+            Localization.inherited(
+              @localization,
+              {:block, @module, nested_mode_field(@module, field), @child["id"]}
+            )
+          }
         />
-      </label>
+      </div>
       <%!-- Named, unlike its nameless siblings above, and the name carries the
       identifiers (#893). A `<select>` inside a form routes its own `phx-change`
       through LiveView's `pushInput`, which serializes the form filtered to the
@@ -1029,6 +1064,31 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
       </label>
     </div>
     """
+  end
+
+  # The declared block field behind a nested input, or `nil` for one that is
+  # not a field of its own (rich text's `"html"` edits `body`).
+  defp nested_mode_field(nil, _field), do: nil
+
+  defp nested_mode_field(module, field) do
+    Enum.find_value(Kiln.Block.Info.fields(module), &(to_string(&1.name) == field && &1.name))
+  end
+
+  defp nested_locked?(localization, module, field) do
+    case nested_mode_field(module, field) do
+      nil -> false
+      name -> Localization.locked?(localization, {:block, module, name})
+    end
+  end
+
+  defp nested_placeholder(localization, module, field, child, label) do
+    with name when not is_nil(name) <- nested_mode_field(module, field),
+         text when is_binary(text) <-
+           Localization.placeholder(localization, {:block, module, name, child["id"]}) do
+      text
+    else
+      _none -> label
+    end
   end
 
   # The level the select must show: what `KilnCMS.Blocks.Heading` will render,

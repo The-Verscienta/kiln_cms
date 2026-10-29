@@ -276,6 +276,37 @@ defmodule KilnCMSWeb.SharedFieldWritesTest do
       assert [_, %Ash.Union{value: %{image_url: "extra.png"}}] = fr.blocks
     end
 
+    test "a shared field on a block nested inside columns is refused the same way", ctx do
+      # #1858: the sync reaches nested blocks, so the refusal does too.
+      id = Ash.UUID.generate()
+
+      nested = fn attrs, extra ->
+        Map.merge(
+          %{"_type" => "columns", "columns" => [%{"blocks" => [card(Map.put(attrs, "id", id))]}]},
+          extra
+        )
+      end
+
+      {_en, fr} = document(ctx.actor, %{blocks: [nested.(%{}, %{})]})
+      [%Ash.Union{value: cols}] = fr.blocks
+
+      write = fn attrs ->
+        CMS.update_page(reload(fr), %{blocks: [nested.(attrs, %{"_id" => cols.id})]},
+          actor: ctx.actor
+        )
+      end
+
+      assert {:error, %Ash.Error.Invalid{errors: [error]}} = write.(%{"image_url" => "fr.png"})
+      assert %Ash.Error.Changes.InvalidAttribute{field: :blocks} = error
+      assert Exception.message(error) =~ "product_card.image_url"
+      assert Exception.message(error) =~ id
+
+      assert {:ok, fr} = write.(%{"name" => "Chaussure"})
+      [%Ash.Union{value: %{columns: [%{"blocks" => [child]}]}}] = fr.blocks
+      assert child["name"] == "Chaussure"
+      assert child["image_url"] == "a.png"
+    end
+
     test "a write that leaves shared fields alone, or re-sends them, passes", ctx do
       fr = reload(ctx.fr)
       fr_card = card_of(fr)

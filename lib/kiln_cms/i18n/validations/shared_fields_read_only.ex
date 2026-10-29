@@ -42,10 +42,11 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
       after coercion, present-or-absent like the sync's own copy. A default
       `ApplyCustomFields` fills into a key the payload never named, and a
       `:computed` field's value, are the engine's, not the caller's.
-    * **Block fields** declared `localized: :shared`: matched by block `_id`
-      and module, the way the sync matches them. A field on a block the
-      source does not hold (or holds as another type) is never overwritten, so
-      it is never refused.
+    * **Block fields** declared `localized: :shared`, on top-level blocks and
+      on blocks nested inside `columns`: matched by block `_id` and module at
+      any depth, the way the sync matches them. A field on a block the source
+      does not hold (or holds as another type) is never overwritten, so it is
+      never refused.
     * **Tags and related content** the type shares (#1859,
       `FieldLocalization.relationships/1`): the set, or list, the write leaves
       the variant with — the complete-set argument (`tag_ids`,
@@ -284,10 +285,10 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
 
   defp block_candidates(changeset, attr) do
     if Ash.Changeset.changing_attribute?(changeset, attr) do
-      current = changeset |> current_blocks(attr) |> by_id()
+      current = changeset |> current_blocks(attr) |> FieldLocalization.blocks_by_id()
 
-      for block <- Ash.Changeset.get_attribute(changeset, attr) || [],
-          %module{id: id} = value <- [value(block)],
+      for %module{id: id} = value <-
+            FieldLocalization.typed_blocks(Ash.Changeset.get_attribute(changeset, attr)),
           is_binary(id),
           name <- shared_block_fields(module),
           new <- [Map.get(value, name)],
@@ -327,7 +328,7 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
         :ok
 
       {:ok, source} ->
-        source_blocks = by_id(source.blocks || [])
+        source_blocks = FieldLocalization.blocks_by_id(source.blocks)
 
         case Enum.reject(candidates, &matches_source?(&1, source, source_blocks)) do
           [] -> :ok
@@ -454,14 +455,6 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
 
   # ── Blocks ─────────────────────────────────────────────────────────────────
 
-  defp by_id(blocks) do
-    for block <- blocks, %{id: id} = value <- [value(block)], into: %{}, do: {id, value}
-  end
-
   defp shared_block_fields(module),
     do: for({name, :shared} <- FieldLocalization.block_fields(module), do: name)
-
-  defp value(%Ash.Union{value: value}), do: value
-  defp value(%_{} = value), do: value
-  defp value(_other), do: nil
 end

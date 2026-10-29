@@ -117,6 +117,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Shared and fallback block fields work inside `columns`: a nested block is copied,
+  filled, refused and shown in the editor by its id, as a top-level block is.**
+  ([#2129](https://github.com/The-Verscienta/kiln_cms/pull/2129) · [long form](docs/changelog/unreleased.md#field-localization-nested-blocks))
+
 - **Generated Swift and Kotlin models keep Portable Text's text:
   `#/$defs/portable_text_block` now declares `style`, `listItem`, `level`,
   `children` and `markDefs`, all optional, the node still open.**
@@ -145,6 +149,12 @@ Every summary line below that was shortened links to its own entry there.
 - **ash_graphql 1.13.0 defaults an omitted `offset` to `0`, replacing Kiln's
   #1883 workaround and fixing offset-paged relationship lists too.**
   ([ash_graphql#480](https://github.com/ash-project/ash_graphql/issues/480))
+
+### Fixed
+
+- **The content editor no longer crashes on a fallback custom field that holds a
+  value, and an empty one shows the value it inherits as its placeholder.**
+  ([#2130](https://github.com/The-Verscienta/kiln_cms/pull/2130) · [long form](docs/changelog/unreleased.md#fallback-custom-field-crash))
 
 ## [1.6.0] - 2026-10-28
 

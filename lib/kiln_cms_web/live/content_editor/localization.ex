@@ -108,7 +108,8 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
   @doc """
   The value an empty `:fallback` field inherits, as text for a placeholder,
   with its source locale — `{text, locale}` — or `nil`. Block fields are
-  addressed `{:block, module, name, block_id}`.
+  addressed `{:block, module, name, block_id}`, top-level or nested inside
+  `columns`.
   """
   @spec inherited(t(), tuple()) :: {String.t(), String.t()} | nil
   def inherited(%{active?: false}, _field), do: nil
@@ -119,9 +120,17 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
     end
   end
 
+  # The catch-all matters: a field that inherited nothing must answer `nil`.
+  # As a bare `with` it answered the unmatched map (`%{}`), and the note's
+  # `elem/2` crashed the editor on every render of a fallback custom field
+  # holding a value of its own.
   def inherited(loc, {:custom, name}) do
-    with %{^name => locale} <- Map.get(loc.inherited, "custom_fields", %{}) do
-      {text(Map.get(loc.values.record.custom_fields || %{}, name)), locale}
+    case Map.get(loc.inherited, "custom_fields", %{}) do
+      %{^name => locale} when is_binary(locale) ->
+        {text(Map.get(loc.values.record.custom_fields || %{}, name)), locale}
+
+      _none ->
+        nil
     end
   end
 
@@ -145,11 +154,13 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
     end
   end
 
+  # The block with `id` at any depth: a block nested inside `columns` is
+  # filled, and so has a placeholder, the same as a top-level one.
   defp block_value(record, id, name) do
-    Enum.find_value(FieldLocalization.block_list(record), fn
-      %Ash.Union{value: %{id: ^id} = value} -> Map.get(value, name)
-      _other -> nil
-    end)
+    case Map.get(FieldLocalization.blocks_by_id(FieldLocalization.block_list(record)), id) do
+      %{} = value -> Map.get(value, name)
+      nil -> nil
+    end
   end
 
   defp text(value) when is_binary(value), do: value

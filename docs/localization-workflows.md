@@ -126,8 +126,11 @@ does not see no change. Where each kind of field opts in:
 - The copy is an ordinary versioned write on each translation
   (`:sync_shared_fields`), so its history shows it, `/api/sync` reports it,
   a published translation is re-fired and sends its `updated` webhook. Block
-  fields are matched by the block id a translation shares with its source;
-  a block the translation deleted is skipped.
+  fields are matched by the block id a translation shares with its source,
+  at any depth: a block nested inside a `columns` block is shared and
+  inherited the same as a top-level one, and the editor shows it read-only
+  or with its inherited placeholder the same way. A block the translation
+  deleted is skipped.
 - A translation with a **pending working copy** gets the value in the copy
   too, so its next *Publish changes* does not put the old value back, and the
   lost-update guard does not count the copy as a conflict.
@@ -147,8 +150,6 @@ does not see no change. Where each kind of field opts in:
 
 ### Limits
 
-- Blocks nested inside a `columns` block are not walked; only top-level block
-  fields are shared or inherited.
 - A shared related link is resolved when the copy runs. A translation
   linked to the English variant of a target (because the target had no
   French one) keeps that link after the target's French variant is created,

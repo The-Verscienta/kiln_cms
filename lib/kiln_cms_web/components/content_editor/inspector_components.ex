@@ -450,6 +450,9 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   attr :value, :any, required: true
   attr :errors, :list, default: []
   attr :options, :list, default: []
+  # What an empty `:fallback` field inherits (#1327), on the inputs that can
+  # show it: the scalar `<input>` and the plain textarea.
+  attr :placeholder, :string, default: nil
 
   # A gallery media field (`multiple: true`): the picked images as an ordered
   # strip of thumbnails, each carried by a hidden `name[]` input so the order on
@@ -1087,6 +1090,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       <textarea
         id={cf_id(@definition)}
         name={@name}
+        placeholder={@placeholder}
         required={@definition.required}
         aria-invalid={@errors != [] && "true"}
         aria-describedby={@errors != [] && cf_errors_id(@definition)}
@@ -1553,6 +1557,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
         type={@input_type}
         name={@name}
         value={@value}
+        placeholder={@placeholder}
         required={@definition.required}
         aria-invalid={@errors != [] && "true"}
         aria-describedby={@errors != [] && cf_errors_id(@definition)}
