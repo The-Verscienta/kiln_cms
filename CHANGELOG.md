@@ -113,6 +113,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Shared and fallback block fields work inside `columns`: a nested block is copied,
+  filled, refused and shown in the editor by its id, as a top-level block is.**
+  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR) · [long form](docs/changelog/unreleased.md#field-localization-nested-blocks))
+
 - **Generated Swift and Kotlin models keep Portable Text's text:
   `#/$defs/portable_text_block` now declares `style`, `listItem`, `level`,
   `children` and `markDefs`, all optional, the node still open.**

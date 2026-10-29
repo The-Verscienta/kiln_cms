@@ -159,6 +159,72 @@ defmodule KilnCMSWeb.FieldLocalizationDeliveryTest do
     end
   end
 
+  # #1858: a fallback field inherits the same way when its block sits inside a
+  # `columns` block.
+  describe "a block nested inside columns" do
+    setup %{actor: actor} do
+      child_id = Ash.UUID.generate()
+
+      nested = fn attrs, extra ->
+        Map.merge(
+          %{
+            "_type" => "columns",
+            "columns" => [%{"blocks" => [card(Map.put(attrs, "id", child_id))]}]
+          },
+          extra
+        )
+      end
+
+      {en, fr} =
+        document(actor, %{blocks: [nested.(%{"caption" => "Waterproof"}, %{})]}, fn fr ->
+          [%Ash.Union{value: cols}] = fr.blocks
+
+          %{
+            blocks: [
+              nested.(%{"name" => "Chaussure", "caption" => ""}, %{"_id" => cols.id})
+            ]
+          }
+        end)
+
+      %{en: en, fr: fr, child_id: child_id}
+    end
+
+    test "the fired artifact fills the nested field and names it", %{
+      conn: conn,
+      fr: fr,
+      child_id: child_id
+    } do
+      body = conn |> get(~p"/api/content/page/#{fr.slug}?locale=fr") |> json_response(200)
+
+      assert [%{"_type" => "columns", "columns" => [%{"blocks" => [child]}]}] = body["blocks"]
+      assert %{"_id" => ^child_id, "name" => "Chaussure", "caption" => "Waterproof"} = child
+      assert body["inherited_fields"] == %{"blocks" => %{child_id => %{"caption" => "en"}}}
+    end
+
+    test "the public page renders the inherited value", %{conn: conn, fr: fr} do
+      html = conn |> get("/fr/#{fr.slug}") |> html_response(200)
+      assert html =~ "Chaussure — Waterproof"
+    end
+
+    test "the editor locks the nested shared field and shows the inherited placeholder", %{
+      en: en,
+      fr: fr,
+      child_id: child_id
+    } do
+      alias KilnCMS.FixturePlugin.ProductCardBlock
+      alias KilnCMSWeb.ContentEditor.Localization
+
+      coverage = [%{locale: "en", record: en}, %{locale: "fr", record: fr}]
+      loc = Localization.build(fr, [], coverage)
+
+      assert loc.active?
+      assert Localization.locked?(loc, {:block, ProductCardBlock, :image_url})
+
+      assert Localization.inherited(loc, {:block, ProductCardBlock, :caption, child_id}) ==
+               {"Waterproof", "en"}
+    end
+  end
+
   # A core type opts its record attributes in through the operator config,
   # since a site cannot edit `KilnCMS.CMS.Page`'s `use` line.
   describe "record attributes opted in through config" do

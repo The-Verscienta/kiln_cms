@@ -7188,6 +7188,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         bf={bf}
                         columns={col_state(@block_children, bf)}
                         child_types={@nested_child_types}
+                        localization={@localization}
+                        kind={@kind}
                       />
                       <div :if={
                         block_type_string(bf) not in [

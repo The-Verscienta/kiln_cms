@@ -267,6 +267,37 @@ carries the reasoning.
 
 ## Changed
 
+<a id="field-localization-nested-blocks"></a>
+
+- **Field-level localization reaches blocks nested inside `columns` (#1858).**
+  `localized: :shared` and `localized: :fallback` block fields worked on
+  top-level blocks only; a block inside a `columns` column was skipped by
+  both. Every path now walks the whole tree, matching a nested block to its
+  counterpart by the `_id` the variants share (and its `_type`), at any depth
+  and even when the counterpart sits at another depth:
+  - **The shared-value copy** (`KilnCMS.I18n.SharedFields`) writes the
+    source's value into the translation's nested block, in `blocks` and, for
+    a translation with a pending working copy, in `working_blocks` too, so
+    *Publish changes* does not revert it. The `working_base` fingerprints
+    are moved with it, so the copy is not reported as a conflict.
+  - **The fallback fill** (`KilnCMS.I18n.FieldFallback`) fills an empty
+    nested field from a donor, and names it under `inherited_fields.blocks`
+    by the nested block's id.
+  - **The #1860 refusal** of a translation's write to a shared field covers
+    nested blocks.
+  - **The editor** shows a nested shared field read-only on a translation and
+    an empty nested fallback field with its inherited placeholder.
+  A nested child is stored as the raw map it was written as and never meets
+  the block union's `cast_stored`, so it is typed through
+  `TypedBlocks.to_typed/1`, which upcasts it to its block's current version
+  first; both sides of a comparison are read at the same schema version, as
+  top-level blocks are. A nested child is rewritten only when one of its
+  shared values changes, and then in its upcast shape, with each value dumped
+  to its stored form. The traversal lives in `KilnCMS.I18n.FieldLocalization`
+  (`typed_blocks/1`, `blocks_by_id/1`, `map_reduce_block_fields/3`).
+  A nested child is matched only when it carries an id; the editor always
+  gives it one.
+
 <a id="portable-text-node-keys"></a>
 
 - **The Portable Text node declares its standard keys (#2126).** The
