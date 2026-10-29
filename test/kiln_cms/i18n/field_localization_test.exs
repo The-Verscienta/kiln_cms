@@ -87,6 +87,22 @@ defmodule KilnCMS.I18n.FieldLocalizationTest do
     )
   end
 
+  # A `columns` block holding `children` in its one column.
+  defp columns(children, attrs \\ %{}),
+    do: Map.merge(%{"_type" => "columns", "columns" => [%{"blocks" => children}]}, attrs)
+
+  # A card to nest: a nested child carries an id only when its writer gives it
+  # one, as the editor always does.
+  defp nested_card(attrs), do: card(Map.put_new(attrs, "id", Ash.UUID.generate()))
+
+  # The `columns` block and its one raw child: nested children stay the maps
+  # they were stored as.
+  defp nested_of(page) do
+    [%Ash.Union{type: :columns, value: cols}] = reload(page).blocks
+    [%{"blocks" => [child]}] = cols.columns
+    {cols, child}
+  end
+
   # An English source and a French translation of it (same slug, same block
   # ids), both published.
   defp document(actor, attrs) do
@@ -480,6 +496,158 @@ defmodule KilnCMS.I18n.FieldLocalizationTest do
       {:ok, body} = Engine.read(fr.org_id, :page, fr.id, :json)
       assert body["custom_fields"][tagline.name] == "Two"
       assert body["inherited_fields"] == %{"custom_fields" => %{"tagline" => "en"}}
+    end
+  end
+
+  describe "blocks nested inside columns (#1858)" do
+    test "a shared field is copied into the nested block with the same id" do
+      actor = admin()
+      {en, fr} = document(actor, %{blocks: [columns([nested_card(%{})])]})
+
+      {fr_cols, fr_child} = nested_of(fr)
+      {en_cols, en_child} = nested_of(en)
+      assert is_binary(fr_child["id"])
+      assert fr_child["id"] == en_child["id"]
+
+      # The translation's own name, and an old value of its own for the
+      # shared field, seeded past the #1860 refusal for the copy to overwrite.
+      held = fr_child |> Map.put("name", "Chaussure") |> Map.put("image_url", "fr.png")
+      [union] = reload(fr).blocks
+
+      Ash.Seed.update!(reload(fr), %{
+        blocks: [%{union | value: %{fr_cols | columns: [%{"blocks" => [held]}]}}]
+      })
+
+      en =
+        CMS.update_page!(
+          reload(en),
+          %{
+            blocks: [
+              columns(
+                [card(%{"id" => en_child["id"], "image_url" => "new.png", "price" => 12})],
+                %{"_id" => en_cols.id}
+              )
+            ]
+          },
+          actor: actor
+        )
+
+      assert :ok = run_worker(en)
+
+      {_cols, synced} = nested_of(fr)
+      assert synced["id"] == fr_child["id"]
+      assert synced["name"] == "Chaussure"
+      assert synced["image_url"] == "new.png"
+      assert synced["price"] == 12
+
+      # Nothing left to copy: a second run writes nothing.
+      assert SharedFields.plan(reload(en), reload(fr), []) == %{}
+    end
+
+    test "a sibling's pending working copy gets the nested value, and publishes it" do
+      actor = admin()
+      {en, fr} = document(actor, %{blocks: [columns([nested_card(%{})])]})
+      {fr_cols, fr_child} = nested_of(fr)
+
+      {:ok, _fr} =
+        CMS.save_page_working_copy(
+          reload(fr),
+          %{
+            working_title: fr.title,
+            working_blocks: [
+              columns([Map.put(fr_child, "name", "Chaussure")], %{"_id" => fr_cols.id})
+            ]
+          },
+          actor: actor,
+          tenant: fr.org_id
+        )
+
+      {en_cols, en_child} = nested_of(en)
+
+      en =
+        CMS.update_page!(
+          reload(en),
+          %{
+            blocks: [
+              columns([card(%{"id" => en_child["id"], "image_url" => "new.png"})], %{
+                "_id" => en_cols.id
+              })
+            ]
+          },
+          actor: actor
+        )
+
+      assert :ok = run_worker(en)
+
+      fr = reload(fr)
+      assert KilnCMS.CMS.WorkingCopy.pending?(fr)
+      [%Ash.Union{value: %{columns: [%{"blocks" => [held]}]}}] = fr.working_blocks
+      assert held["image_url"] == "new.png"
+      assert held["name"] == "Chaussure"
+      assert KilnCMS.CMS.WorkingCopy.reconcile(fr).conflicts == []
+
+      published = CMS.publish_page_changes!(fr, %{}, actor: actor, tenant: fr.org_id)
+      [%Ash.Union{value: %{columns: [%{"blocks" => [out]}]}}] = published.blocks
+      assert out["name"] == "Chaussure"
+      assert out["image_url"] == "new.png"
+    end
+
+    test "an empty fallback field on a nested block inherits from the same block" do
+      actor = admin()
+
+      {_en, fr} =
+        document(actor, %{blocks: [columns([nested_card(%{"caption" => "Waterproof"})])]})
+
+      {fr_cols, fr_child} = nested_of(fr)
+
+      CMS.update_page!(
+        reload(fr),
+        %{
+          blocks: [
+            columns([Map.merge(fr_child, %{"name" => "Chaussure", "caption" => ""})], %{
+              "_id" => fr_cols.id
+            })
+          ]
+        },
+        actor: actor
+      )
+
+      {filled, inherited} = FieldFallback.fill(reload(fr))
+      assert inherited == %{"blocks" => %{fr_child["id"] => %{"caption" => "en"}}}
+      [%Ash.Union{value: %{columns: [%{"blocks" => [child]}]}}] = filled.blocks
+      assert child["caption"] == "Waterproof"
+      assert child["name"] == "Chaussure"
+
+      {:ok, %{json: json, web: web}} = Engine.fire(reload(fr), mode: :preview)
+
+      assert [
+               %{
+                 "columns" => [
+                   %{"blocks" => [%{"name" => "Chaussure", "caption" => "Waterproof"}]}
+                 ]
+               }
+             ] =
+               json["blocks"]
+
+      assert json["inherited_fields"] == %{
+               "blocks" => %{fr_child["id"] => %{"caption" => "en"}}
+             }
+
+      assert web["html"] =~ "Waterproof"
+      # Nothing is written back to the row.
+      assert elem(nested_of(fr), 1)["caption"] in [nil, ""]
+    end
+
+    test "a nested block is matched across depths by id" do
+      actor = admin()
+      {en, fr} = document(actor, %{blocks: [columns([columns([nested_card(%{})])])]})
+
+      [%Ash.Union{value: %{columns: [%{"blocks" => [inner]}]}}] = reload(en).blocks
+      [%{"blocks" => [deep]}] = inner["columns"]
+
+      by_id = FieldLocalization.blocks_by_id(reload(fr).blocks)
+      assert %ProductCardBlock{image_url: "a.png"} = by_id[deep["id"]]
+      assert FieldLocalization.any?(reload(fr), [])
     end
   end
 

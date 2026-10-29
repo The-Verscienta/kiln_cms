@@ -33,9 +33,10 @@ defmodule KilnCMS.I18n.FieldFallback do
 
     * record attributes the type's `localization:` option lists as `fallback:`;
     * custom fields whose definition's `localization` is `:fallback`;
-    * top-level block fields declared `localized: :fallback`, matched to the
-      donor's block by the shared block `_id` (and `_type`). Blocks nested
-      inside a `columns` block are not walked.
+    * block fields declared `localized: :fallback`, on top-level blocks and
+      on blocks nested inside `columns` at any depth, matched to the donor's
+      block by the shared block `_id` (and `_type`), wherever in the donor's
+      tree that block sits.
 
   A field is empty when `KilnCMS.I18n.FieldLocalization.empty?/1` says so.
   """
@@ -133,9 +134,9 @@ defmodule KilnCMS.I18n.FieldFallback do
           do: name
 
     blocks =
-      for block <- FieldLocalization.block_list(record),
-          %{id: id} = value <- [block_value(block)],
-          module <- [FieldLocalization.block_module(block)],
+      for %module{id: id} = value <-
+            FieldLocalization.typed_blocks(FieldLocalization.block_list(record)),
+          not is_nil(id),
           fields <- [empty_fallback_fields(module, value)],
           fields != [],
           into: %{},
@@ -188,37 +189,47 @@ defmodule KilnCMS.I18n.FieldFallback do
   defp fill_blocks(record, plan, _donors, inherited) when plan == %{}, do: {record, inherited}
 
   defp fill_blocks(record, plan, donors, inherited) do
-    donor_blocks = Enum.map(donors, &{&1.locale, blocks_by_id(&1)})
+    donor_blocks =
+      Enum.map(
+        donors,
+        &{&1.locale, FieldLocalization.blocks_by_id(FieldLocalization.block_list(&1))}
+      )
 
     {blocks, filled} =
-      record
-      |> FieldLocalization.block_list()
-      |> Enum.map_reduce(%{}, &fill_planned_block(&1, &2, plan, donor_blocks))
+      FieldLocalization.map_reduce_block_fields(
+        FieldLocalization.block_list(record),
+        %{},
+        &fill_planned_block(&1, &2, plan, donor_blocks)
+      )
 
     if filled == %{},
       do: {record, inherited},
       else: {Map.put(record, :blocks, blocks), Map.put(inherited, "blocks", filled)}
   end
 
-  defp fill_planned_block(block, filled, plan, donor_blocks) do
-    with %{id: id} = value <- block_value(block),
-         {:ok, {module, fields}} <- Map.fetch(plan, id) do
-      {value, block_filled} = fill_block(value, module, fields, donor_blocks)
-      filled = if block_filled == %{}, do: filled, else: Map.put(filled, id, block_filled)
-      {put_block_value(block, value), filled}
-    else
-      _not_planned -> {block, filled}
+  # The fields to fill on one block, at whatever depth, and where each came from.
+  defp fill_planned_block(%{id: id} = value, filled, plan, donor_blocks) do
+    case Map.fetch(plan, id) do
+      {:ok, {module, fields}} ->
+        {changes, block_filled} = fill_block(value, module, fields, donor_blocks)
+        filled = if block_filled == %{}, do: filled, else: Map.put(filled, id, block_filled)
+        {changes, filled}
+
+      :error ->
+        {%{}, filled}
     end
   end
 
+  defp fill_planned_block(_value, filled, _plan, _donor_blocks), do: {%{}, filled}
+
   defp fill_block(value, module, fields, donor_blocks) do
-    Enum.reduce(fields, {value, %{}}, fn field, {acc, filled} ->
+    Enum.reduce(fields, {%{}, %{}}, fn field, {changes, filled} ->
       case Enum.find_value(donor_blocks, &donor_value(&1, module, value.id, field)) do
         {candidate, locale} ->
-          {Map.put(acc, field, candidate), Map.put(filled, to_string(field), locale)}
+          {Map.put(changes, field, candidate), Map.put(filled, to_string(field), locale)}
 
         nil ->
-          {acc, filled}
+          {changes, filled}
       end
     end)
   end
@@ -234,20 +245,6 @@ defmodule KilnCMS.I18n.FieldFallback do
       _none -> nil
     end
   end
-
-  defp blocks_by_id(donor) do
-    for block <- FieldLocalization.block_list(donor),
-        %{id: id} = value <- [block_value(block)],
-        into: %{},
-        do: {id, value}
-  end
-
-  defp block_value(%Ash.Union{value: value}), do: value
-  defp block_value(%_{} = value), do: value
-  defp block_value(_other), do: nil
-
-  defp put_block_value(%Ash.Union{} = union, value), do: %{union | value: value}
-  defp put_block_value(_block, value), do: value
 
   defp first_value(donors, getter) do
     Enum.find_value(donors, fn donor ->
