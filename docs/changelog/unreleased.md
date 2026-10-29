@@ -269,7 +269,7 @@ carries the reasoning.
 
 <a id="field-localization-nested-blocks"></a>
 
-- **Field-level localization reaches blocks nested inside `columns` (#1858).**
+- **Field-level localization reaches blocks nested inside `columns` (#1858, #2129).**
   `localized: :shared` and `localized: :fallback` block fields worked on
   top-level blocks only; a block inside a `columns` column was skipped by
   both. Every path now walks the whole tree, matching a nested block to its
