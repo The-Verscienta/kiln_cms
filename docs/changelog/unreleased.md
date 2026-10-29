@@ -404,3 +404,16 @@ carries the reasoning.
   `e2e/tests/field_localization.spec.js` found both bugs. It adds `fr` for
   itself through the e2e-only `/dev/e2e-locales` route, so the rest of the
   suite stays single-locale.
+
+<a id="reorder-snap-back"></a>
+
+- **A moved block snapped back on the next autosave (#2132).** Move up/down
+  and drag reordered the editor's block sub-forms with
+  `AshPhoenix.Form.sort_forms/3`, which leaves the form's touched set alone.
+  Autosave submits `AshPhoenix.Form.params/1`, and that carries only touched
+  keys, so a move on an otherwise untouched form sent no `blocks` at all. The
+  row kept its old order, and the form rebuilt from the row put the blocks
+  back on screen, so a later Save wrote the old order too. A usability round
+  found it by moving an image between a heading and a text block, four times
+  out of four. `BlockParams.sort_blocks/2` now sorts and marks `blocks`
+  touched, and every reorder in the editor goes through it.
