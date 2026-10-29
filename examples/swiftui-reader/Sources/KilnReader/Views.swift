@@ -118,8 +118,8 @@ public struct RecipeDetailView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-                ForEach(Array(document.blocks.enumerated()), id: \.offset) { index, block in
-                    BlockView(block: block, nodes: index < recipe.bodies.count ? recipe.bodies[index] : nil)
+                ForEach(Array(document.blocks.enumerated()), id: \.offset) { _, block in
+                    BlockView(block: block)
                 }
 
                 if let rows = fields.ingredients, !rows.isEmpty {
@@ -151,7 +151,7 @@ public struct RecipeDetailView: View {
     /// Portable Text when the field delivers it, the plain rendition (with
     /// its paragraph breaks) when not. Never the HTML in `custom_fields`.
     var methodText: AttributedString? {
-        if let nodes = recipe.portable["method"] ?? nil, !nodes.isEmpty {
+        if let nodes = recipe.document.customFieldsPortable?.method, !nodes.isEmpty {
             return PortableTextRenderer.attributedString(nodes)
         }
         return recipe.document.customFieldsPlain?.method.map { AttributedString($0) }
@@ -168,15 +168,13 @@ public struct RecipeDetailView: View {
 /// type newer than this build) are skipped rather than failing the screen.
 struct BlockView: View {
     let block: Block
-    /// The block's `body` as renderer nodes, when it has one.
-    let nodes: [PortableTextNode]?
 
     var body: some View {
         switch block {
-        case .richText:
+        case .richText(let richText):
             // The same renderer as the `method` field: a rich_text block's
             // body and a delivered Portable Text field are one shape.
-            Text(PortableTextRenderer.attributedString(nodes ?? []))
+            Text(PortableTextRenderer.attributedString(richText.body))
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .heading(let heading):
             Text(heading.text).font(.title3.bold())

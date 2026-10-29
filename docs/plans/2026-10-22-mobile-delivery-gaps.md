@@ -228,9 +228,9 @@ shows rows and generated types rather than workarounds.
 It shows `:group` rows, Portable Text rendered to `AttributedString`, the
 media snapshot's variants and focal point, `?fields=`, `ETag` revalidation,
 and the sync cursor and restart rules from [native-apps.md](../native-apps.md).
-One workaround remains. The generated `PortableTextBlock` declares only
-`_type` and `_key`, because `portable_text_block` is an open node in the
-schema. So the example decodes Portable Text into its own node type.
+Its one workaround, a hand-written Portable Text node type, went in #2126:
+`portable_text_block` now declares the standard keys (still open), so the
+example renders the generated `PortableTextBlock`.
 
 ## Order
 

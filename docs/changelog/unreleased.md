@@ -282,7 +282,9 @@ carries the reasoning.
   served. The definition is built in the SDK
   (`Kiln.Block.JsonSchema`), so kiln_plugin gets a patch entry; no plugin
   callback changed, and the core builds it from its path dependency, so no
-  SDK release is needed for KilnCMS itself.
+  SDK release is needed for KilnCMS itself. `examples/swiftui-reader`
+  regenerates its models and drops its hand-written `PortableTextNode`: the
+  renderer takes the generated `PortableTextBlock`.
 
 <a id="alias-derivation-recorded"></a>
 

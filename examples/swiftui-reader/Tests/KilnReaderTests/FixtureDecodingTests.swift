@@ -38,23 +38,22 @@ final class FixtureDecodingTests: XCTestCase {
         XCTAssertEqual(intro.body.count, 1)
     }
 
-    /// The generated `PortableTextBlock` is the schema's open node, `_type`
-    /// and `_key` only, which is why the renderer reads the same JSON into
-    /// `PortableTextNode`.
-    func testPortableTextDecodesThroughTheRendererNode() throws {
-        let data = try fixture("recipe-artifact")
-        let generated = try JSONDecoder().decode(RecipeDocument.self, from: data)
-        XCTAssertEqual(generated.customFieldsPortable?.method?.first?.type, "block")
+    /// The generated `PortableTextBlock` declares the standard keys, so the
+    /// decoded document carries the text the renderer reads: the delivered
+    /// field and a rich_text block's body alike.
+    func testPortableTextDecodesThroughTheGeneratedNode() throws {
+        let generated = try JSONDecoder().decode(RecipeDocument.self, from: fixture("recipe-artifact"))
 
-        let recipe = try Recipe(data: data)
-        let method = try XCTUnwrap(recipe.portable["method"] ?? nil)
+        let method = try XCTUnwrap(generated.customFieldsPortable?.method)
+        XCTAssertEqual(method.first?.type, "block")
         XCTAssertEqual(method.first?.style, "h2")
-        XCTAssertEqual(method.first?.children.first?.text, "Batter")
+        XCTAssertEqual(method.first?.children?.first?.text, "Batter")
         XCTAssertEqual(method[1].listItem, "number")
-        XCTAssertEqual(method.last?.markDefs.first?.href, "https://kilncms.dev")
+        XCTAssertEqual(method[1].level, 1)
+        XCTAssertEqual(method.last?.markDefs?.first?.href, "https://kilncms.dev")
 
-        XCTAssertEqual(recipe.bodies.count, generated.blocks.count)
-        XCTAssertEqual(recipe.bodies.first??.first?.children.first?.text, "Thick, soft pancakes for a slow weekend morning.")
+        guard case .richText(let intro) = try XCTUnwrap(generated.blocks.first) else { return XCTFail("first block") }
+        XCTAssertEqual(intro.body.first?.children?.first?.text, "Thick, soft pancakes for a slow weekend morning.")
     }
 
     /// A `?fields=` response is not a full document: it decodes into its own

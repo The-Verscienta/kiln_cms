@@ -75,15 +75,75 @@ public struct MediaSnapshot: Codable, Hashable, Sendable {
 public struct PortableTextBlock: Codable, Hashable, Sendable {
     public let key: String?
     public let type: String?
+    /// The block's inline nodes — `span`s, in order.
+    public let children: [ChildrenItem]?
+    /// The list item's nesting depth, from 1.
+    public let level: Int?
+    /// `bullet` or `number` when the block is a list item.
+    public let listItem: String?
+    /// Annotations a span's `marks` reference by `_key` (a link's `href`).
+    public let markDefs: [MarkDefsItem]?
+    /// `normal`, `h1`–`h6` or `blockquote` on a `block` node.
+    public let style: String?
 
-    public init(key: String? = nil, type: String? = nil) {
+    public init(key: String? = nil, type: String? = nil, children: [ChildrenItem]? = nil, level: Int? = nil, listItem: String? = nil, markDefs: [MarkDefsItem]? = nil, style: String? = nil) {
         self.key = key
         self.type = type
+        self.children = children
+        self.level = level
+        self.listItem = listItem
+        self.markDefs = markDefs
+        self.style = style
     }
 
     enum CodingKeys: String, CodingKey {
         case key = "_key"
         case type = "_type"
+        case children
+        case level
+        case listItem
+        case markDefs
+        case style
+    }
+
+    public struct ChildrenItem: Codable, Hashable, Sendable {
+        public let key: String?
+        public let type: String?
+        /// Decorators (`strong`, `em`, …) and `markDefs` `_key`s.
+        public let marks: [String]?
+        public let text: String?
+
+        public init(key: String? = nil, type: String? = nil, marks: [String]? = nil, text: String? = nil) {
+            self.key = key
+            self.type = type
+            self.marks = marks
+            self.text = text
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case key = "_key"
+            case type = "_type"
+            case marks
+            case text
+        }
+    }
+
+    public struct MarkDefsItem: Codable, Hashable, Sendable {
+        public let key: String?
+        public let type: String?
+        public let href: String?
+
+        public init(key: String? = nil, type: String? = nil, href: String? = nil) {
+            self.key = key
+            self.type = type
+            self.href = href
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case key = "_key"
+            case type = "_type"
+            case href
+        }
     }
 }
 
