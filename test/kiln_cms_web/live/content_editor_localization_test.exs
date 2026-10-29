@@ -134,6 +134,33 @@ defmodule KilnCMSWeb.ContentEditorLocalizationTest do
     refute has_element?(lv, "input[name$='[name]'][readonly]")
   end
 
+  test "a fallback custom field with its own value renders and inherits nothing", %{conn: conn} do
+    actor = admin()
+    field(actor, "caption", :fallback)
+    {en, fr} = document(actor, %{custom_fields: %{"caption" => "Waterproof"}})
+
+    # A value of its own on either side: nothing is inherited, which once
+    # answered `%{}` instead of `nil` and crashed the note's render.
+    for record <- [en, fr] do
+      {lv, _html} = open_editor(conn, actor, record)
+
+      assert has_element?(lv, "input[name$='[custom_fields][caption]'][value='Waterproof']")
+      assert has_element?(lv, "[data-localization=fallback]", "Leave empty to inherit")
+    end
+  end
+
+  test "an empty fallback custom field shows the value it inherits", %{conn: conn} do
+    actor = admin()
+    field(actor, "caption", :fallback)
+    {_en, fr} = document(actor, %{custom_fields: %{"caption" => "Waterproof"}})
+    fr = CMS.update_page!(fr, %{custom_fields: %{"caption" => ""}}, actor: actor)
+
+    {lv, _html} = open_editor(conn, actor, fr)
+
+    assert has_element?(lv, "input[name$='[custom_fields][caption]'][placeholder='Waterproof']")
+    assert has_element?(lv, "[data-localization=fallback]", "readers get the EN value")
+  end
+
   test "a type that opts nothing in shows no localization notes", %{conn: conn} do
     actor = admin()
     field(actor, "plain", :localized)

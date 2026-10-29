@@ -1238,6 +1238,11 @@ defmodule KilnCMSWeb.Router do
       # it (e2e/tests/collab.spec.js); the rest of the suite stays on the
       # solo editor production runs. Same gating and :prod refusal.
       forward "/e2e-collab", KilnCMSWeb.Plugs.E2ECollab
+
+      # Adds a second content locale for the one spec that translates
+      # (e2e/tests/field_localization.spec.js); the rest of the suite stays
+      # single-locale. Same gating and :prod refusal.
+      forward "/e2e-locales", KilnCMSWeb.Plugs.E2ELocales
     end
   end
 

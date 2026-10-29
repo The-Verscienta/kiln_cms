@@ -194,6 +194,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
         value={input_value(@form, @definition)}
         errors={custom_field_errors(@form, @definition.name)}
         options={field_options(@definition, assigns)}
+        placeholder={Localization.placeholder(@localization, {:custom, @definition.name})}
       />
       <Localization.localization_note
         localization={@localization}
