@@ -113,9 +113,17 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
     end
   end
 
+  # The catch-all matters: a field that inherited nothing must answer `nil`.
+  # As a bare `with` it answered the unmatched map (`%{}`), and the note's
+  # `elem/2` crashed the editor on every render of a fallback custom field
+  # holding a value of its own.
   def inherited(loc, {:custom, name}) do
-    with %{^name => locale} <- Map.get(loc.inherited, "custom_fields", %{}) do
-      {text(Map.get(loc.values.record.custom_fields || %{}, name)), locale}
+    case Map.get(loc.inherited, "custom_fields", %{}) do
+      %{^name => locale} when is_binary(locale) ->
+        {text(Map.get(loc.values.record.custom_fields || %{}, name)), locale}
+
+      _none ->
+        nil
     end
   end
 
