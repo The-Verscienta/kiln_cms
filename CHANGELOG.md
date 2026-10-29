@@ -159,6 +159,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **`mix kiln.update` reads a pin's release tag even when an SDK tag shares its
+  commit; v1.6.0 also carries `kiln_plugin-v1.3.0`, and read as untagged.**
+  ([#2125](https://github.com/The-Verscienta/kiln_cms/pull/2125))
+
 - **The content editor no longer crashes on a fallback custom field that holds a
   value, and an empty one shows the value it inherits as its placeholder.**
   ([#2130](https://github.com/The-Verscienta/kiln_cms/pull/2130) · [long form](docs/changelog/v1.7.0.md#fallback-custom-field-crash))
