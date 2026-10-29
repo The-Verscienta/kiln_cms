@@ -329,3 +329,21 @@ carries the reasoning.
   CHANGELOG). The hoist happens over the assembled document rather than in
   `Kiln.Block.JsonSchema`, whose per-block schemas are still validated on
   their own by the block suite and `mix kiln.plugins.doctor`.
+
+## Fixed
+
+<a id="fallback-custom-field-crash"></a>
+
+- **Fallback custom fields in the editor (#1861).** For a custom field set to
+  *Inherited when a translation leaves it empty*, `Localization.inherited/2`
+  returned the unmatched map (`%{}`) instead of `nil` whenever the field
+  inherited nothing. That covers the source variant, and any translation that
+  kept its copied value. The field's note then called `elem/2` on that map and
+  the editor's LiveView crashed, so the first Save of a new EN draft with such
+  a field failed. Separately, an empty fallback custom field showed only the
+  note and never the inherited value as a placeholder, which block fields
+  already did. `custom_field_input` now takes a `placeholder`, used by the
+  scalar input and the plain textarea. The new
+  `e2e/tests/field_localization.spec.js` found both bugs. It adds `fr` for
+  itself through the e2e-only `/dev/e2e-locales` route, so the rest of the
+  suite stays single-locale.

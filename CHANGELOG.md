@@ -142,6 +142,12 @@ Every summary line below that was shortened links to its own entry there.
   #1883 workaround and fixing offset-paged relationship lists too.**
   ([ash_graphql#480](https://github.com/ash-project/ash_graphql/issues/480))
 
+### Fixed
+
+- **The content editor no longer crashes on a fallback custom field that holds a
+  value, and an empty one shows the value it inherits as its placeholder.**
+  ([#2130](https://github.com/The-Verscienta/kiln_cms/pull/2130) · [long form](docs/changelog/unreleased.md#fallback-custom-field-crash))
+
 ## [1.6.0] - 2026-10-28
 
 Long form: [docs/changelog/v1.6.0.md](docs/changelog/v1.6.0.md) —
