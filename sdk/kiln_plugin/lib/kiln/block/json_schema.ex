@@ -433,15 +433,70 @@ defmodule Kiln.Block.JsonSchema do
         "One Portable Text node (D12). Open by design: Portable Text is an " <>
           "extensible convention rather than a fixed schema, and a consumer that " <>
           "does not recognize a node's `_type` is expected to skip it.",
+      # The standard `block` keys are declared so a generated model (Swift,
+      # Kotlin) keeps the text: those emitters decode declared properties
+      # only, and a def of just `_type`/`_key` dropped every span. All of them
+      # optional — a custom node (`_type: "image"`, …) carries none of them.
       "properties" => %{
         "_type" => %{"type" => "string"},
-        "_key" => %{"type" => "string"}
+        "_key" => %{"type" => "string"},
+        "style" => %{
+          "type" => "string",
+          "description" => "`normal`, `h1`–`h6` or `blockquote` on a `block` node."
+        },
+        "listItem" => %{
+          "type" => "string",
+          "description" => "`bullet` or `number` when the block is a list item."
+        },
+        "level" => %{
+          "type" => "integer",
+          "description" => "The list item's nesting depth, from 1."
+        },
+        "children" => %{
+          "type" => "array",
+          "description" => "The block's inline nodes — `span`s, in order.",
+          "items" => portable_text_span_schema()
+        },
+        "markDefs" => %{
+          "type" => "array",
+          "description" => "Annotations a span's `marks` reference by `_key` (a link's `href`).",
+          "items" => portable_text_mark_def_schema()
+        }
       },
       # Not `required`, though every well-formed node has one: nothing on the
       # write path enforces it. `TypedBlocks.normalize_body/1` passes any list
       # through untouched and `PortableText.sanitize_block/1`'s catch-all only
       # scrubs `markDefs`, so a headless write of `body: [%{"text" => "hi"}]` is
       # stored and fired verbatim. The schema describes what is served.
+      "additionalProperties" => true
+    }
+  end
+
+  defp portable_text_span_schema do
+    %{
+      "type" => "object",
+      "properties" => %{
+        "_type" => %{"type" => "string"},
+        "_key" => %{"type" => "string"},
+        "text" => %{"type" => "string"},
+        "marks" => %{
+          "type" => "array",
+          "description" => "Decorators (`strong`, `em`, …) and `markDefs` `_key`s.",
+          "items" => %{"type" => "string"}
+        }
+      },
+      "additionalProperties" => true
+    }
+  end
+
+  defp portable_text_mark_def_schema do
+    %{
+      "type" => "object",
+      "properties" => %{
+        "_type" => %{"type" => "string"},
+        "_key" => %{"type" => "string"},
+        "href" => %{"type" => "string"}
+      },
       "additionalProperties" => true
     }
   end

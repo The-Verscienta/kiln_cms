@@ -250,6 +250,12 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           tags_capped?={length(@tags) >= @max_tags}
           tag_limit={@max_tags}
           can_create?={@can_create_tag?}
+          locked={Localization.locked?(@localization, {:relationship, :tags})}
+        />
+        <Localization.localization_note
+          localization={@localization}
+          field={{:relationship, :tags}}
+          kind={@kind}
         />
 
         <.featured_image_field
@@ -281,10 +287,15 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
               |> Enum.map(&to_string/1)
             }
             errors={Enum.map(@form[@related_field].errors, &translate_error/1)}
-            locked={!@may_write?}
+            locked={!@may_write? or Localization.locked?(@localization, {:relationship, :related})}
             exclude={[@record.id]}
             actor={@actor}
             tenant={@tenant}
+          />
+          <Localization.localization_note
+            localization={@localization}
+            field={{:relationship, :related}}
+            kind={@kind}
           />
           <%!-- Related content is one type only. A link to another type
                 is a reference field's job (R2), so say where that is set

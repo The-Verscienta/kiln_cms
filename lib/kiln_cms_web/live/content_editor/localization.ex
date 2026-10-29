@@ -9,6 +9,8 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
     * a `:shared` field on a **translation** is read-only, labelled *Shared:
       edited in the EN version*, with a link to the source variant;
     * a `:shared` field on the **source** is labelled *Shared with N locales*;
+    * the same two notes for a shared relationship — the tags and the curated
+      related content (#1859) — whose pickers are read-only on a translation;
     * an empty `:fallback` field shows the value it will inherit as its
       placeholder, labelled with the locale it comes from.
 
@@ -29,6 +31,7 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
           source_id: term(),
           shared_with: non_neg_integer(),
           attributes: %{atom() => :shared | :fallback},
+          relationships: %{atom() => :shared},
           custom: %{String.t() => :shared | :fallback},
           inherited: map(),
           values: map()
@@ -44,6 +47,7 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
       source_id: nil,
       shared_with: 0,
       attributes: %{},
+      relationships: %{},
       custom: %{},
       inherited: %{},
       values: %{}
@@ -73,6 +77,7 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
             Map.new(modes.shared, &{&1, :shared}),
             Map.new(modes.fallback, &{&1, :fallback})
           ),
+        relationships: Map.new(FieldLocalization.relationships(record), &{&1, :shared}),
         custom: FieldLocalization.custom_fields(definitions),
         inherited: inherited,
         values: %{record: filled}
@@ -83,12 +88,14 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
   end
 
   @doc """
-  The mode of a field: `{:attribute, :seo_title}`, `{:custom, "price"}` or
-  `{:block, module, :caption}`. `:localized` when nothing says otherwise.
+  The mode of a field: `{:attribute, :seo_title}`, `{:relationship, :tags}`
+  (or `:related`), `{:custom, "price"}` or `{:block, module, :caption}`.
+  `:localized` when nothing says otherwise.
   """
   @spec mode(t(), tuple()) :: :localized | :shared | :fallback
   def mode(%{active?: false}, _field), do: :localized
   def mode(loc, {:attribute, name}), do: Map.get(loc.attributes, name, :localized)
+  def mode(loc, {:relationship, name}), do: Map.get(loc.relationships, name, :localized)
   def mode(loc, {:custom, name}), do: Map.get(loc.custom, name, :localized)
 
   def mode(_loc, {:block, module, name}),
@@ -101,7 +108,8 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
   @doc """
   The value an empty `:fallback` field inherits, as text for a placeholder,
   with its source locale — `{text, locale}` — or `nil`. Block fields are
-  addressed `{:block, module, name, block_id}`.
+  addressed `{:block, module, name, block_id}`, top-level or nested inside
+  `columns`.
   """
   @spec inherited(t(), tuple()) :: {String.t(), String.t()} | nil
   def inherited(%{active?: false}, _field), do: nil
@@ -112,9 +120,17 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
     end
   end
 
+  # The catch-all matters: a field that inherited nothing must answer `nil`.
+  # As a bare `with` it answered the unmatched map (`%{}`), and the note's
+  # `elem/2` crashed the editor on every render of a fallback custom field
+  # holding a value of its own.
   def inherited(loc, {:custom, name}) do
-    with %{^name => locale} <- Map.get(loc.inherited, "custom_fields", %{}) do
-      {text(Map.get(loc.values.record.custom_fields || %{}, name)), locale}
+    case Map.get(loc.inherited, "custom_fields", %{}) do
+      %{^name => locale} when is_binary(locale) ->
+        {text(Map.get(loc.values.record.custom_fields || %{}, name)), locale}
+
+      _none ->
+        nil
     end
   end
 
@@ -138,11 +154,13 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
     end
   end
 
+  # The block with `id` at any depth: a block nested inside `columns` is
+  # filled, and so has a placeholder, the same as a top-level one.
   defp block_value(record, id, name) do
-    Enum.find_value(FieldLocalization.block_list(record), fn
-      %Ash.Union{value: %{id: ^id} = value} -> Map.get(value, name)
-      _other -> nil
-    end)
+    case Map.get(FieldLocalization.blocks_by_id(FieldLocalization.block_list(record)), id) do
+      %{} = value -> Map.get(value, name)
+      nil -> nil
+    end
   end
 
   defp text(value) when is_binary(value), do: value

@@ -23,7 +23,10 @@ defmodule KilnCMS.I18n.FieldLocalization do
       `KilnCMS.CMS.FieldDefinition`, set on the Fields screen;
     * **record attributes** — the `localization:` option of
       `use KilnCMS.CMS.Content`, e.g.
-      `localization: [shared: [:seo_image, :category_id], fallback: [:excerpt]]`.
+      `localization: [shared: [:seo_image, :category_id], fallback: [:excerpt]]`;
+    * **relationships** — the same option's `shared:` list may also name
+      `:tags` and `:related` (the curated related content, #1859). Their
+      copy is `KilnCMS.I18n.SharedFields`'; neither can fall back.
 
   Nothing is shared or inherited until one of those opts in, so a site that
   declares none of them behaves exactly as before.
@@ -33,6 +36,9 @@ defmodule KilnCMS.I18n.FieldLocalization do
 
   require Logger
 
+  alias KilnCMS.Blocks.Columns
+  alias KilnCMS.Blocks.Upcaster
+  alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.I18n
 
   @typedoc "A field's localization mode."
@@ -53,6 +59,11 @@ defmodule KilnCMS.I18n.FieldLocalization do
     :featured_image_id
   ]
 
+  # Relationships a type may share (#1859): the tag set, copied as tag ids
+  # (tags have no locale), and the curated related list, each target resolved
+  # to its variant in the sibling's locale (`KilnCMS.I18n.SharedFields`).
+  @shareable_relationships [:tags, :related]
+
   # Record attributes that may fall back. Text (and the social image) only:
   # what a reader sees about the page, where "use the next locale's" is a
   # better answer than nothing.
@@ -65,6 +76,10 @@ defmodule KilnCMS.I18n.FieldLocalization do
   @doc "The record attributes the `localization:` option may name as `shared:`."
   @spec shareable_attributes() :: [atom()]
   def shareable_attributes, do: @shareable
+
+  @doc "The relationships the `localization:` option may name as `shared:` (#1859)."
+  @spec shareable_relationships() :: [atom()]
+  def shareable_relationships, do: @shareable_relationships
 
   @doc "The record attributes the `localization:` option may name as `fallback:`."
   @spec fallbackable_attributes() :: [atom()]
@@ -87,7 +102,10 @@ defmodule KilnCMS.I18n.FieldLocalization do
       invalid!("expected a keyword list of `shared:` and `fallback:`, got: #{inspect(option)}")
     end
 
-    shared = option |> Keyword.get(:shared, []) |> check_list!(:shared, @shareable, excerpt?)
+    shared =
+      option
+      |> Keyword.get(:shared, [])
+      |> check_list!(:shared, @shareable ++ @shareable_relationships, excerpt?)
 
     fallback =
       option |> Keyword.get(:fallback, []) |> check_list!(:fallback, @fallbackable, excerpt?)
@@ -142,11 +160,30 @@ defmodule KilnCMS.I18n.FieldLocalization do
   ignored with a logged warning rather than raised on: it is read at run time,
   on delivery paths. Empty for a resource that declares nothing, and for
   anything built outside the Content macro.
+
+  Record attributes only: a shared relationship (`:tags`, `:related`) the
+  same option names is `relationships/1`'s.
   """
   @spec attributes(module() | struct()) :: %{shared: [atom()], fallback: [atom()]}
-  def attributes(%module{}), do: attributes(module)
+  def attributes(record_or_module) do
+    modes = modes(record_or_module)
+    %{modes | shared: modes.shared -- @shareable_relationships}
+  end
 
-  def attributes(module) when is_atom(module) do
+  @doc """
+  The relationships a content resource shares across its locale variants
+  (#1859): the subset of `:tags` and `:related` its `localization:` option, or
+  the operator's `field_localization:` entry for its type, names as `shared:`.
+  `[]` for a resource that shares neither.
+  """
+  @spec relationships(module() | struct()) :: [atom()]
+  def relationships(record_or_module),
+    do: Enum.filter(modes(record_or_module).shared, &(&1 in @shareable_relationships))
+
+  # Everything declared and configured, attributes and relationships together.
+  defp modes(%module{}), do: modes(module)
+
+  defp modes(module) when is_atom(module) do
     if Code.ensure_loaded?(module) and function_exported?(module, :__kiln_localization__, 0) do
       module.__kiln_localization__() |> merge(configured(module))
     else
@@ -154,7 +191,7 @@ defmodule KilnCMS.I18n.FieldLocalization do
     end
   end
 
-  def attributes(_other), do: %{shared: [], fallback: []}
+  defp modes(_other), do: %{shared: [], fallback: []}
 
   defp merge(declared, nil), do: declared
 
@@ -262,16 +299,17 @@ defmodule KilnCMS.I18n.FieldLocalization do
 
   @doc """
   Whether anything on `record`'s type opts out of `:localized`: a declared
-  record attribute, one of `definitions`, or a block in the record's tree
-  whose module declares a mode. The cheap gate every caller checks first, so a
+  record attribute or relationship, one of `definitions`, or a block in the
+  record's tree (top level or nested inside `columns`) whose module declares a
+  mode. The cheap gate every caller checks first, so a
   site that opted nothing in pays one definitions read and nothing more.
   """
   @spec any?(struct(), [struct()]) :: boolean()
   def any?(record, definitions) do
-    %{shared: shared, fallback: fallback} = attributes(record)
+    %{shared: shared, fallback: fallback} = modes(record)
 
     shared != [] or fallback != [] or custom_fields(definitions) != %{} or
-      Enum.any?(block_list(record), &(block_fields(block_module(&1)) != %{}))
+      Enum.any?(typed_blocks(block_list(record)), &(block_fields(block_module(&1)) != %{}))
   end
 
   @doc """
@@ -300,4 +338,154 @@ defmodule KilnCMS.I18n.FieldLocalization do
   def block_module(%Ash.Union{value: %module{}}), do: module
   def block_module(%module{}), do: module
   def block_module(_block), do: nil
+
+  # ── The block tree (#1858) ─────────────────────────────────────────────────
+  # A shared or fallback field behaves the same at every depth. Top-level
+  # blocks come out of the union's `cast_stored` as typed structs, upcast to
+  # their current version. A `columns` child does not: it is stored as the raw
+  # map it was written as (the recursive-type cycle `KilnCMS.Blocks.Columns`
+  # avoids), so it is typed here through `TypedBlocks.to_typed/1`, which
+  # upcasts it first. Both sides of every comparison are then read at the same
+  # schema version, whichever depth they sit at.
+
+  @doc false
+  # Every block in `blocks` at every depth, typed, in document order: each
+  # block followed by the children of its columns, recursively.
+  @spec typed_blocks([term()] | nil) :: [struct()]
+  def typed_blocks(blocks) do
+    Enum.flat_map(List.wrap(blocks), fn block ->
+      case typed(block) do
+        %Columns{} = value -> [value | typed_blocks(Columns.child_blocks_flat(value))]
+        %_{} = value -> [value]
+        nil -> []
+      end
+    end)
+  end
+
+  @doc false
+  # `typed_blocks/1` by block id. The variants share ids at every depth
+  # (`ContentCopy` keeps them on the translation path), so a block is matched
+  # to its counterpart by id whether it is top-level or nested.
+  @spec blocks_by_id([term()] | nil) :: %{term() => struct()}
+  def blocks_by_id(blocks) do
+    for %{id: id} = value <- typed_blocks(blocks), not is_nil(id), into: %{}, do: {id, value}
+  end
+
+  @doc false
+  # `blocks` with `fun` applied to every block at every depth, threading `acc`.
+  # `fun` gets a block's typed struct and returns `{changes, acc}`, where
+  # `changes` maps field names to the values to write (`%{}` for none).
+  #
+  # A top-level block takes the changes into its struct. A nested child keeps
+  # its raw map: it is left exactly as stored when nothing changes, and is
+  # otherwise upcast (so the fields written are the current version's) and
+  # takes each value dumped to its stored form.
+  @spec map_reduce_block_fields([term()] | nil, acc, (struct(), acc -> {map(), acc})) ::
+          {[term()] | nil, acc}
+        when acc: term()
+  def map_reduce_block_fields(blocks, acc, fun) when is_list(blocks),
+    do: Enum.map_reduce(blocks, acc, &update_block(&1, &2, fun))
+
+  def map_reduce_block_fields(blocks, acc, _fun), do: {blocks, acc}
+
+  # A top-level block is an `%Ash.Union{}` (or its bare struct) by the time
+  # anything reads it; anything else is left alone.
+  defp update_block(block, acc, fun) when is_struct(block) do
+    case typed(block) do
+      %_{} = value ->
+        {changes, acc} = fun.(value, acc)
+        value = Map.merge(value, changes)
+        {columns, acc} = update_columns(value, Map.get(value, :columns), acc, fun)
+        value = if columns == :none, do: value, else: %{value | columns: columns}
+        {put_typed(block, value), acc}
+
+      nil ->
+        {block, acc}
+    end
+  end
+
+  defp update_block(block, acc, _fun), do: {block, acc}
+
+  defp put_typed(%Ash.Union{} = union, value), do: %{union | value: value}
+  defp put_typed(_block, value), do: value
+
+  defp update_columns(%Columns{}, columns, acc, fun) when is_list(columns),
+    do: Enum.map_reduce(columns, acc, &update_column(&1, &2, fun))
+
+  defp update_columns(_value, _columns, acc, _fun), do: {:none, acc}
+
+  defp update_column(%{} = column, acc, fun) do
+    key = if Map.has_key?(column, :blocks), do: :blocks, else: "blocks"
+
+    case Map.get(column, key) do
+      children when is_list(children) ->
+        {children, acc} = Enum.map_reduce(children, acc, &update_child(&1, &2, fun))
+        {Map.put(column, key, children), acc}
+
+      _none ->
+        {column, acc}
+    end
+  end
+
+  defp update_column(column, acc, _fun), do: {column, acc}
+
+  defp update_child(%{} = child, acc, fun) when not is_struct(child) do
+    case typed(child) do
+      %module{id: id} = value when not is_nil(id) ->
+        {changes, acc} = fun.(value, acc)
+        child = if changes == %{}, do: child, else: put_raw_fields(child, module, changes)
+        update_nested_columns(child, value, acc, fun)
+
+      %_{} = value ->
+        update_nested_columns(child, value, acc, fun)
+
+      nil ->
+        {child, acc}
+    end
+  end
+
+  defp update_child(child, acc, _fun), do: {child, acc}
+
+  # A child that is itself a `columns` block keeps its columns under its own
+  # (string, as stored) key.
+  defp update_nested_columns(child, %Columns{}, acc, fun) do
+    key = if Map.has_key?(child, :columns), do: :columns, else: "columns"
+
+    case Map.get(child, key) do
+      columns when is_list(columns) ->
+        {columns, acc} = Enum.map_reduce(columns, acc, &update_column(&1, &2, fun))
+        {Map.put(child, key, columns), acc}
+
+      _none ->
+        {child, acc}
+    end
+  end
+
+  defp update_nested_columns(child, _value, acc, _fun), do: {child, acc}
+
+  defp put_raw_fields(child, module, changes) do
+    child = child |> Map.new(fn {key, value} -> {to_string(key), value} end)
+    child = Upcaster.upcast_block_map(child)
+
+    Enum.reduce(changes, child, fn {name, value}, acc ->
+      Map.put(acc, to_string(name), dump(module, name, value))
+    end)
+  end
+
+  # A value written into a raw child is stored as JSON, so it takes the form
+  # its block attribute dumps to, whichever depth it was read from.
+  defp dump(module, name, value) do
+    with %{type: type, constraints: constraints} <- Ash.Resource.Info.attribute(module, name),
+         {:ok, dumped} <- Ash.Type.dump_to_embedded(type, value, constraints) do
+      dumped
+    else
+      _not_dumpable -> value
+    end
+  end
+
+  defp typed(%Ash.Union{value: %_{} = value}), do: value
+  defp typed(%Ash.Union{}), do: nil
+  defp typed(%_{} = value), do: value
+  defp typed(%{} = raw), do: raw |> List.wrap() |> TypedBlocks.to_typed() |> hd()
+  defp typed(_other), do: nil
 end

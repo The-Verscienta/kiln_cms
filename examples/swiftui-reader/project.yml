@@ -1,0 +1,35 @@
+# XcodeGen spec for the iOS app: `xcodegen` writes SwiftUIReader.xcodeproj
+# (gitignored) and App/Info.plist. The app target compiles the same entry
+# point as `swift run` (Sources/SwiftUIReader); the screens, client and sync
+# engine come from this package's KilnReader library.
+name: SwiftUIReader
+options:
+  bundleIdPrefix: dev.kilncms.examples
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  SwiftUIReader:
+    path: .
+targets:
+  SwiftUIReaderApp:
+    type: application
+    platform: iOS
+    sources:
+      - Sources/SwiftUIReader
+    dependencies:
+      - package: SwiftUIReader
+        product: KilnReader
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Recipes
+        UILaunchScreen: {}
+        # The demo reads http://localhost:4000. A real app talks HTTPS and
+        # needs no exception.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_NAME: SwiftUIReader
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO

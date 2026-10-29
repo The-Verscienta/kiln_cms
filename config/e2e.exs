@@ -125,3 +125,8 @@ config :kiln_cms, Kiln.Updates, enabled: false
 # for its own two peers through `/dev/e2e-collab` (KilnCMSWeb.Plugs.E2ECollab)
 # and restores it after; the flag is VM-global, which `workers: 1` makes safe.
 config :kiln_cms, :collab_prototype, false
+
+# Content locales stay at config.exs's single `en`, which specs such as
+# `e2e/tests/status_marks.spec.js` assume. `e2e/tests/field_localization.spec.js`
+# adds `fr` for itself through `/dev/e2e-locales` (KilnCMSWeb.Plugs.E2ELocales)
+# and restores the list after, on the same `workers: 1` footing as the above.

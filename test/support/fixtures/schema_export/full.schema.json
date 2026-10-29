@@ -1478,7 +1478,7 @@
         },
         "custom_fields_plain": {
           "additionalProperties": false,
-          "description": "Plain-text renditions of the `:text` custom fields marked `deliver_plain`: the stored value with its HTML tags removed, entities decoded and whitespace collapsed. `null` where the record holds no value.",
+          "description": "Plain-text renditions of the `:text` custom fields marked `deliver_plain`: the stored value with its HTML tags removed, entities decoded and whitespace collapsed (to one line, unless the field keeps its breaks). `null` where the record holds no value.",
           "properties": {
             "summary": {
               "type": [
@@ -1651,6 +1651,63 @@
           "type": "string"
         },
         "_type": {
+          "type": "string"
+        },
+        "children": {
+          "description": "The block's inline nodes — `span`s, in order.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "_key": {
+                "type": "string"
+              },
+              "_type": {
+                "type": "string"
+              },
+              "marks": {
+                "description": "Decorators (`strong`, `em`, …) and `markDefs` `_key`s.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "level": {
+          "description": "The list item's nesting depth, from 1.",
+          "type": "integer"
+        },
+        "listItem": {
+          "description": "`bullet` or `number` when the block is a list item.",
+          "type": "string"
+        },
+        "markDefs": {
+          "description": "Annotations a span's `marks` reference by `_key` (a link's `href`).",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "_key": {
+                "type": "string"
+              },
+              "_type": {
+                "type": "string"
+              },
+              "href": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "style": {
+          "description": "`normal`, `h1`–`h6` or `blockquote` on a `block` node.",
           "type": "string"
         }
       },

@@ -109,6 +109,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # `CMS.can_create_tag?/3` answer, so a role the Taxonomy policies refuse is
   # never offered a button that would only fail.
   attr :can_create?, :boolean, default: false
+  # A tag set the type shares across locales, on a translation (#1859): shown,
+  # not editable. The checkboxes are disabled, and a hidden input per ticked
+  # tag re-sends the set unchanged, as `category_field/1` does for its select.
+  attr :locked, :boolean, default: false
 
   def tag_picker(assigns) do
     # A **MapSet**, not a list (#528). Membership is tested three times per tag
@@ -132,10 +136,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       # picker is showing. A name that does exist elsewhere (a group scoped to
       # another type) is still safe to submit: the server ticks that tag
       # rather than making a second one.
-      |> assign(
-        :offer_create?,
-        assigns.can_create? and filtering? and not exact_tag?(sections, assigns.tag_query)
-      )
+      |> assign(:offer_create?, offer_create?(assigns, sections, filtering?))
       # The checkboxes still post under `tag_ids[]`; `merge_tag_params/2`
       # rewrites that into `add_tag_ids`/`remove_tag_ids` at submit time, so the
       # wire name the browser posts and the argument the changeset takes are
@@ -161,6 +162,12 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     ~H"""
     <fieldset id="tag-picker" phx-hook="TagFilter" data-tag-filter>
       <legend class="mb-1 block text-sm font-medium text-base-content">{gettext("Tags")}</legend>
+      <input
+        :for={id <- if(@locked, do: Enum.sort(@selected), else: [])}
+        type="hidden"
+        name={@name}
+        value={id}
+      />
       <p :if={@empty_reason == :no_tags} class="text-xs text-base-content/70">
         {if @can_create?,
           do: gettext("No tags yet. Type a name below to add one."),
@@ -245,7 +252,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
                 name={@name}
                 value={tag.id}
                 checked={MapSet.member?(@selected, tag.id)}
-                class="size-4 rounded border border-base-content/30 accent-primary"
+                disabled={@locked}
+                class="size-4 rounded border border-base-content/30 accent-primary disabled:opacity-60"
               />
               {tag.name}
             </label>
@@ -277,6 +285,12 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     </fieldset>
     """
   end
+
+  defp offer_create?(%{can_create?: false}, _sections, _filtering?), do: false
+  defp offer_create?(%{locked: true}, _sections, _filtering?), do: false
+
+  defp offer_create?(assigns, sections, filtering?),
+    do: filtering? and not exact_tag?(sections, assigns.tag_query)
 
   defp exact_tag?(sections, query) do
     wanted = query |> String.trim() |> String.downcase()
@@ -436,6 +450,9 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   attr :value, :any, required: true
   attr :errors, :list, default: []
   attr :options, :list, default: []
+  # What an empty `:fallback` field inherits (#1327), on the inputs that can
+  # show it: the scalar `<input>` and the plain textarea.
+  attr :placeholder, :string, default: nil
 
   # A gallery media field (`multiple: true`): the picked images as an ordered
   # strip of thumbnails, each carried by a hidden `name[]` input so the order on
@@ -1073,6 +1090,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       <textarea
         id={cf_id(@definition)}
         name={@name}
+        placeholder={@placeholder}
         required={@definition.required}
         aria-invalid={@errors != [] && "true"}
         aria-describedby={@errors != [] && cf_errors_id(@definition)}
@@ -1539,6 +1557,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
         type={@input_type}
         name={@name}
         value={@value}
+        placeholder={@placeholder}
         required={@definition.required}
         aria-invalid={@errors != [] && "true"}
         aria-describedby={@errors != [] && cf_errors_id(@definition)}

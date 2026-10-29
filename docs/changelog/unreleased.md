@@ -124,6 +124,30 @@ carries the reasoning.
   test suite compiles the output with `-Werror` and decodes a real fired
   artifact with it ([native-apps.md → Kotlin models](../native-apps.md#kotlin-models)).
 
+<a id="swiftui-reader"></a>
+
+- **A SwiftUI example (#2124).** `examples/swiftui-reader` is a Swift package
+  (iOS 17, macOS 14) that reads a Kiln site the way
+  [native-apps.md](../native-apps.md) describes, so a mobile team evaluating
+  Kiln can see the intended path in code. It checks in the `Kiln.swift` that
+  `mix kiln.export.schema --format swift` generates for a demo `recipe` type
+  (`kiln/seed.exs` creates it, `bin/regenerate` regenerates it). A small
+  `KilnClient` reads `/api/sync` and the `json` artifact, with
+  `If-None-Match` and `?fields=`. A file mirror saves each sync page and its
+  cursor in one atomic write. It restarts with `initial=true` only on
+  `invalid_cursor`, keeps local data until the new snapshot ends, and retries
+  everything else with `Retry-After` or jittered backoff. The two screens show
+  a `:group` field's rows as a native grid, render Portable Text to an
+  `AttributedString` with no web view (the plain rendition is the fallback),
+  and crop images around the media snapshot's focal point, choosing a
+  variant by pixel width. `swift test` decodes JSON captured from a real
+  local Kiln and runs the sync loop against a stubbed `URLProtocol`. A macOS
+  CI job runs it when the example or the Swift emitter changes. The docs gain
+  one fix: the generated Swift and Kotlin `PortableTextBlock` is the schema's
+  open node and drops `children`, `style` and `markDefs`, which
+  native-apps.md now says. The api.md sync section now gives the delta
+  window's real lag, 10 seconds.
+
 <a id="field-sections"></a>
 
 - **Sections in the Custom fields panel.** A field definition's new
@@ -241,7 +265,83 @@ carries the reasoning.
   fields and on link and group sub-fields (a group's rows are delivered
   whole); refused on a private field.
 
+<a id="shared-tags-and-related"></a>
+
+- **Field localization can share tags and curated related content (#1859).**
+  A content type's `localization:` option — and, for the core types,
+  `config :kiln_cms, :i18n, field_localization:` — now accepts `:tags` and
+  `:related` in `shared:`. When the default-locale variant publishes, every
+  translation takes:
+  - **its tag set, by reference.** Tags have no locale, so the tag ids are
+    copied and no tag is touched.
+  - **its related list, resolved per locale, in order.** Each target becomes
+    its document's variant in the translation's locale; a target with none
+    follows the site's fallback chain (#1579), the same rule `?fallback=site`
+    uses, and one with no variant on the chain is left out.
+
+  The copy is still `:sync_shared_fields`: versioned, optimistic-locked, and
+  ignored by coverage, so a copied tag set does not make an outdated
+  translation look fresh. A translation's pending working copy that holds its
+  own tags or related list gets the shared value too. The #1860 write
+  refusal covers both — the complete-set arguments and the `add_*` /
+  `remove_*` verbs — and the editor shows both pickers read-only on a
+  translation, with a link to the source. The `:localization` system actor
+  gains `Tagging` `create`/`destroy` and `RelatedLink` `read`/`create`/`destroy`
+  for the copy (`docs/policy-matrix.md`). No migration; a type that names
+  neither behaves as before. The design is in
+  [field-level localization](../field-level-localization.md#tags-and-related-content).
+
 ## Changed
+
+<a id="field-localization-nested-blocks"></a>
+
+- **Field-level localization reaches blocks nested inside `columns` (#1858, #2129).**
+  `localized: :shared` and `localized: :fallback` block fields worked on
+  top-level blocks only; a block inside a `columns` column was skipped by
+  both. Every path now walks the whole tree, matching a nested block to its
+  counterpart by the `_id` the variants share (and its `_type`), at any depth
+  and even when the counterpart sits at another depth:
+  - **The shared-value copy** (`KilnCMS.I18n.SharedFields`) writes the
+    source's value into the translation's nested block, in `blocks` and, for
+    a translation with a pending working copy, in `working_blocks` too, so
+    *Publish changes* does not revert it. The `working_base` fingerprints
+    are moved with it, so the copy is not reported as a conflict.
+  - **The fallback fill** (`KilnCMS.I18n.FieldFallback`) fills an empty
+    nested field from a donor, and names it under `inherited_fields.blocks`
+    by the nested block's id.
+  - **The #1860 refusal** of a translation's write to a shared field covers
+    nested blocks.
+  - **The editor** shows a nested shared field read-only on a translation and
+    an empty nested fallback field with its inherited placeholder.
+  A nested child is stored as the raw map it was written as and never meets
+  the block union's `cast_stored`, so it is typed through
+  `TypedBlocks.to_typed/1`, which upcasts it to its block's current version
+  first; both sides of a comparison are read at the same schema version, as
+  top-level blocks are. A nested child is rewritten only when one of its
+  shared values changes, and then in its upcast shape, with each value dumped
+  to its stored form. The traversal lives in `KilnCMS.I18n.FieldLocalization`
+  (`typed_blocks/1`, `blocks_by_id/1`, `map_reduce_block_fields/3`).
+  A nested child is matched only when it carries an id; the editor always
+  gives it one.
+
+<a id="portable-text-node-keys"></a>
+
+- **The Portable Text node declares its standard keys (#2126).** The
+  `portable_text_block` definition that a `rich_text` block's `body` and every
+  `custom_fields_portable` value point at declared only `_type` and `_key`.
+  That is lenient enough for TypeScript, whose index signature keeps the rest,
+  but the Swift and Kotlin emitters decode declared properties only, so a
+  generated `PortableTextBlock` kept two strings and dropped every span. It
+  now declares `style`, `listItem`, `level`, `children` (spans: `_type`,
+  `_key`, `text`, `marks`) and `markDefs` (`_type`, `_key`, `href`). Every
+  one is optional and every object stays `additionalProperties: true`, since
+  a headless write can still store any node and the schema describes what is
+  served. The definition is built in the SDK
+  (`Kiln.Block.JsonSchema`), so kiln_plugin gets a patch entry; no plugin
+  callback changed, and the core builds it from its path dependency, so no
+  SDK release is needed for KilnCMS itself. `examples/swiftui-reader`
+  regenerates its models and drops its hand-written `PortableTextNode`: the
+  renderer takes the generated `PortableTextBlock`.
 
 <a id="alias-derivation-recorded"></a>
 
@@ -286,3 +386,56 @@ carries the reasoning.
   CHANGELOG). The hoist happens over the assembled document rather than in
   `Kiln.Block.JsonSchema`, whose per-block schemas are still validated on
   their own by the block suite and `mix kiln.plugins.doctor`.
+
+## Fixed
+
+<a id="fallback-custom-field-crash"></a>
+
+- **Fallback custom fields in the editor (#1861).** For a custom field set to
+  *Inherited when a translation leaves it empty*, `Localization.inherited/2`
+  returned the unmatched map (`%{}`) instead of `nil` whenever the field
+  inherited nothing. That covers the source variant, and any translation that
+  kept its copied value. The field's note then called `elem/2` on that map and
+  the editor's LiveView crashed, so the first Save of a new EN draft with such
+  a field failed. Separately, an empty fallback custom field showed only the
+  note and never the inherited value as a placeholder, which block fields
+  already did. `custom_field_input` now takes a `placeholder`, used by the
+  scalar input and the plain textarea. The new
+  `e2e/tests/field_localization.spec.js` found both bugs. It adds `fr` for
+  itself through the e2e-only `/dev/e2e-locales` route, so the rest of the
+  suite stays single-locale.
+
+<a id="reorder-snap-back"></a>
+
+- **A moved block snapped back on the next autosave (#2132).** Move up/down
+  and drag reordered the editor's block sub-forms with
+  `AshPhoenix.Form.sort_forms/3`, which leaves the form's touched set alone.
+  Autosave submits `AshPhoenix.Form.params/1`, and that carries only touched
+  keys, so a move on an otherwise untouched form sent no `blocks` at all. The
+  row kept its old order, and the form rebuilt from the row put the blocks
+  back on screen, so a later Save wrote the old order too. A usability round
+  found it by moving an image between a heading and a text block, four times
+  out of four. `BlockParams.sort_blocks/2` now sorts and marks `blocks`
+  touched, and every reorder in the editor goes through it.
+
+<a id="page-value-500"></a>
+
+- **A `page[...]` value `ash_json_api` could not cast answered 500.**
+  `page[limit]=abc`, an empty `page[limit]=`, `page[limit]=1.5`,
+  `page[offset]=abc` and `page[count]=maybe` reached `ash_json_api` 1.7.1's own
+  rejection, which builds `InvalidPagination` with a field the struct does
+  not have: a `KeyError`, so a 500. `page[limit]=0` got past the cast and
+  came back as an opaque `something_went_wrong`, and a negative limit or
+  offset as a schema-pattern `invalid_query`. `KilnCMSWeb.Plugs.AshJsonApiParams`,
+  which already refused the wrong *shapes* (#763), now checks the values too,
+  and every rejection is a 400 `invalid_pagination` (or `invalid_sort`/
+  `invalid_includes`) whose `source.parameter` names the parameter, as
+  `ash_json_api`'s own sort errors do. `KilnCMSWeb.ApiError.send/5` takes the
+  optional `source_parameter:`. Found by an outside audit of kilncms.dev.
+
+<a id="search-query-alias"></a>
+
+- **`GET /api/search?query=` answered an empty 200.** The /developers page
+  documented `?query=`, and the controller read only `q`, so a client
+  following the page could not tell a wrong parameter name from no matches.
+  The page now says `?q=`, and the endpoint reads `query` when `q` is absent.

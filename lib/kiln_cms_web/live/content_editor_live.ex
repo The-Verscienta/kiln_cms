@@ -1546,7 +1546,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # (or holds it in a published record's working copy) exactly as the old
   # multi-select's did, and the order rides along.
   defp edit_related(socket, op, arg) do
-    if socket.assigns.may_write? do
+    if socket.assigns.may_write? and not shared_link_locked?(socket, :related) do
       ids = edit_reference_list(related_ids(socket), op, arg)
 
       params =
@@ -2237,7 +2237,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # it lands in the same save as everything else the author is editing and is
   # undoable by unticking the checkbox the picker already renders for it.
   def handle_event("intel_add_tag", %{"id" => id}, socket) when is_binary(id) do
-    if socket.assigns.may_write?,
+    if socket.assigns.may_write? and not shared_link_locked?(socket, :tags),
       do: {:noreply, add_suggested_tag(socket, id)},
       else: {:noreply, socket}
   end
@@ -3071,7 +3071,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     %{actor: actor, current_org: org} = socket.assigns
 
     cond do
-      not socket.assigns.can_create_tag? ->
+      not socket.assigns.can_create_tag? or shared_link_locked?(socket, :tags) ->
         {:noreply, socket}
 
       socket.assigns.conflict ->
@@ -5915,6 +5915,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # The tags or related content, when this type shares them across locales
+  # and the record is a translation (#1859): read-only here, and a write that
+  # changes them is refused (#1860).
+  defp shared_link_locked?(socket, link) do
+    case socket.assigns[:localization] do
+      nil -> false
+      loc -> KilnCMSWeb.ContentEditor.Localization.locked?(loc, {:relationship, link})
+    end
+  end
+
   # The featured image's URL, resolved through the picker window first and only
   # then the database — the window holds the most recent items, so the common
   # case costs no query, while an older featured image still resolves.
@@ -7188,6 +7198,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         bf={bf}
                         columns={col_state(@block_children, bf)}
                         child_types={@nested_child_types}
+                        localization={@localization}
+                        kind={@kind}
                       />
                       <div :if={
                         block_type_string(bf) not in [

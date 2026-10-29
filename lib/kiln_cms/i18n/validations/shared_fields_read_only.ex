@@ -42,10 +42,20 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
       after coercion, present-or-absent like the sync's own copy. A default
       `ApplyCustomFields` fills into a key the payload never named, and a
       `:computed` field's value, are the engine's, not the caller's.
-    * **Block fields** declared `localized: :shared`: matched by block `_id`
-      and module, the way the sync matches them. A field on a block the
-      source does not hold (or holds as another type) is never overwritten, so
-      it is never refused.
+    * **Block fields** declared `localized: :shared`, on top-level blocks and
+      on blocks nested inside `columns`: matched by block `_id` and module at
+      any depth, the way the sync matches them. A field on a block the source
+      does not hold (or holds as another type) is never overwritten, so it is
+      never refused.
+    * **Tags and related content** the type shares (#1859,
+      `FieldLocalization.relationships/1`): the set, or list, the write leaves
+      the variant with — the complete-set argument (`tag_ids`,
+      `related_<type>_ids`) when supplied, else the current links with the
+      `add_*` / `remove_*` verbs applied. The tags compare as a set, the
+      related list in order, against what the next sync would write: the
+      source's tag ids, and the source's related targets resolved to this
+      locale (`SharedFields.resolve_related/6`). On `:create`, an empty
+      set is a value the payload left out.
 
   ## Where it runs
 
@@ -90,7 +100,9 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
   alias Ash.Error.Changes.InvalidAttribute
   alias KilnCMS.CMS.Changes.ApplyCustomFields
   alias KilnCMS.CMS.WorkingCopy
+  alias KilnCMS.I18n.Fallback
   alias KilnCMS.I18n.FieldLocalization
+  alias KilnCMS.I18n.SharedFields
 
   @impl true
   def init(opts) do
@@ -130,7 +142,89 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
 
   defp candidates(changeset, blocks_attr) do
     attribute_candidates(changeset) ++
-      custom_field_candidates(changeset) ++ block_candidates(changeset, blocks_attr)
+      custom_field_candidates(changeset) ++
+      block_candidates(changeset, blocks_attr) ++ link_candidates(changeset)
+  end
+
+  # Only a link argument the caller supplied is read against the current
+  # links, so a write that sends none (every write on a type sharing none)
+  # reads nothing.
+  defp link_candidates(changeset) do
+    for link <- FieldLocalization.relationships(changeset.resource),
+        argument <- [link_argument(changeset.resource, link)],
+        argument != nil,
+        supplied_link?(changeset, argument),
+        current <- [current_links(changeset, link)],
+        ids <- [resulting_links(changeset, link, argument, current)],
+        if(current == :none, do: ids != [], else: ids != current),
+        do: {:link, link, argument, ids, link_scope(changeset)}
+  end
+
+  # `tag_ids`, or `related_<type>_ids` — the complete-set argument the macro
+  # derives, as a string.
+  defp link_argument(resource, link) do
+    Enum.find_value(WorkingCopy.held_relationships(resource), fn {argument, relationship} ->
+      name = to_string(relationship)
+
+      if (link == :tags and name == "tags") or
+           (link == :related and String.starts_with?(name, "related_")),
+         do: to_string(argument)
+    end)
+  end
+
+  defp supplied_link?(changeset, argument) do
+    {add, remove} = verbs(argument)
+
+    Enum.any?([argument, add, remove], fn name ->
+      match?({:ok, _value}, fetch_argument(changeset, name))
+    end)
+  end
+
+  defp verbs(argument), do: {"add_" <> argument, "remove_" <> argument}
+
+  # Looked up by name among the arguments the changeset holds rather than by
+  # building the verbs' atoms (as `Changes.StageWorkingFields` does). A key
+  # set to `nil` counts as supplied: a complete set of `nil` clears it.
+  defp fetch_argument(changeset, name) do
+    Enum.find_value(changeset.arguments, :error, fn {key, ids} ->
+      if to_string(key) == name, do: {:ok, ids}
+    end)
+  end
+
+  defp current_links(%{action_type: :create}, _link), do: :none
+  defp current_links(changeset, :tags), do: SharedFields.tag_ids(changeset.data)
+  defp current_links(changeset, :related), do: SharedFields.related_ids(changeset.data)
+
+  defp resulting_links(changeset, link, argument, current) do
+    case fetch_argument(changeset, argument) do
+      {:ok, ids} ->
+        normalize_links(link, List.wrap(ids))
+
+      :error ->
+        {add, remove} = verbs(argument)
+        base = if current == :none, do: [], else: current
+        added = changeset |> fetch_argument(add) |> verb_ids()
+        removed = changeset |> fetch_argument(remove) |> verb_ids() |> MapSet.new()
+
+        normalize_links(link, Enum.reject(base ++ added, &MapSet.member?(removed, &1)))
+    end
+  end
+
+  defp verb_ids({:ok, ids}), do: ids |> List.wrap() |> Enum.map(&to_string/1)
+  defp verb_ids(:error), do: []
+
+  # The tags are a set, held sorted; the related list keeps its order.
+  defp normalize_links(:tags, ids),
+    do: ids |> Enum.map(&to_string/1) |> Enum.uniq() |> Enum.sort()
+
+  defp normalize_links(:related, ids), do: ids |> Enum.map(&to_string/1) |> Enum.uniq()
+
+  # What a related list is resolved for: this variant's locale, less itself.
+  defp link_scope(changeset) do
+    %{
+      locale: Ash.Changeset.get_attribute(changeset, :locale),
+      except: if(changeset.action_type == :update, do: changeset.data.id)
+    }
   end
 
   defp attribute_candidates(changeset) do
@@ -191,10 +285,10 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
 
   defp block_candidates(changeset, attr) do
     if Ash.Changeset.changing_attribute?(changeset, attr) do
-      current = changeset |> current_blocks(attr) |> by_id()
+      current = changeset |> current_blocks(attr) |> FieldLocalization.blocks_by_id()
 
-      for block <- Ash.Changeset.get_attribute(changeset, attr) || [],
-          %module{id: id} = value <- [value(block)],
+      for %module{id: id} = value <-
+            FieldLocalization.typed_blocks(Ash.Changeset.get_attribute(changeset, attr)),
           is_binary(id),
           name <- shared_block_fields(module),
           new <- [Map.get(value, name)],
@@ -234,7 +328,7 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
         :ok
 
       {:ok, source} ->
-        source_blocks = by_id(source.blocks || [])
+        source_blocks = FieldLocalization.blocks_by_id(source.blocks)
 
         case Enum.reject(candidates, &matches_source?(&1, source, source_blocks)) do
           [] -> :ok
@@ -295,6 +389,21 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
   defp matches_source?({:custom_field, key, type, value}, source, _blocks),
     do: value == comparable(type, Map.fetch(source.custom_fields || %{}, key))
 
+  defp matches_source?({:link, :tags, _argument, ids, _scope}, source, _blocks),
+    do: ids == SharedFields.tag_ids(source)
+
+  defp matches_source?({:link, :related, _argument, ids, scope}, %module{} = source, _blocks) do
+    ids ==
+      SharedFields.resolve_related(
+        module,
+        SharedFields.related_targets(source),
+        scope.locale,
+        Fallback.chains(source.org_id),
+        source.org_id,
+        except: scope.except
+      )
+  end
+
   # The sync copies a block field only from the source block with the same id
   # and type; with no such block, nothing will overwrite this value.
   defp matches_source?({:block, _attr, id, module, name, value}, _source, blocks) do
@@ -326,6 +435,17 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
     )
   end
 
+  defp error({:link, link, argument, _ids, _scope}, locale) do
+    InvalidAttribute.exception(
+      field: String.to_existing_atom(argument),
+      message: "#{link_label(link)} #{owned_by(locale)}",
+      value: nil
+    )
+  end
+
+  defp link_label(:tags), do: "tags"
+  defp link_label(:related), do: "related content"
+
   defp owned_by(locale) do
     "is shared across this document's locales and can only be changed on the " <>
       "#{locale} version; set it there and it is copied here when that version publishes"
@@ -335,14 +455,6 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
 
   # ── Blocks ─────────────────────────────────────────────────────────────────
 
-  defp by_id(blocks) do
-    for block <- blocks, %{id: id} = value <- [value(block)], into: %{}, do: {id, value}
-  end
-
   defp shared_block_fields(module),
     do: for({name, :shared} <- FieldLocalization.block_fields(module), do: name)
-
-  defp value(%Ash.Union{value: value}), do: value
-  defp value(%_{} = value), do: value
-  defp value(_other), do: nil
 end

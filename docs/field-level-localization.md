@@ -271,3 +271,120 @@ Beyond the note: JSON:API and GraphQL get the inherited values through a
 public `inherited_fields` calculation that neither serves unless asked for,
 and XLIFF leaves shared fields out.
 
+
+## Tags and related content
+
+Built in 1.7 ([#1859](https://github.com/The-Verscienta/kiln_cms/issues/1859)).
+1.1 left two things a type could not share: its **tags** and its **curated
+related content**. Both are relationships, not attributes, so the
+`localization:` option had nothing to name. 1.7 adds them, as two more names
+the option's `shared:` list accepts — `:tags` and `:related` — and the same two
+names under `config :kiln_cms, :i18n, field_localization:` for the core types.
+Neither can be `fallback:`: a relationship has no "empty, so inherit" reading
+that a reader could tell from "this page has no tags".
+
+```elixir
+use KilnCMS.CMS.Content,
+  type: :recipe,
+  localization: [shared: [:tags, :related, :category_id]]
+```
+
+### Decisions
+
+**Tags are locale-agnostic.** A `Tag` has no `locale`: it is one row per org,
+and its `name` is the only label it has. Sharing tags therefore copies the
+tag **references** — the source's set of tag ids becomes every translation's
+set — and never touches a tag. A site that wants a tag's name translated
+translates it outside this feature (a tag group per locale, say); the shared
+set still points at the same rows. The set has no order, so it is compared and
+copied as a set.
+
+**A related link resolves to the target's variant in the translation's
+locale.** Related targets are content records, one per locale, so copying the
+source's target ids verbatim would point a French page at English articles.
+The copy instead takes each target's **document** — its `slug`, and on the
+entry tier its type definition, the same identity `[slug, locale]` names — and
+links the translation to that document's variant in the translation's
+locale.
+
+**A target with no variant in that locale follows the site's fallback chain
+(#1579).** The copy walks `KilnCMS.I18n.Fallback.chain(org, locale, :site)` —
+the chain delivery already walks to pick a document's row — and links the
+first variant it finds. With no chain configured that ends at the default
+locale, so a French page links the English target when there is no French
+one, which is the same answer `?fallback=site` gives a reader asking for the
+target itself. A target with no variant anywhere along the chain is left
+out. Any non-trashed variant counts, in any workflow state, as it does for a
+link an editor picks by hand: delivery already filters a related list by what
+the reader may read.
+
+The decision is the operator's, made once in the chain. A site that wants
+"same locale or nothing" configures no implicit fallback for that locale.
+
+**Order is kept.** The related list is ordered by its links' `position`
+(#2025, `KilnCMS.CMS.RelatedLink`). The copy keeps the source's order: the
+resolved targets are numbered in the order the source lists them
+(`ContentLinks.order_related/2`). Two source targets that resolve to the same
+variant are linked once, at the first one's place. A target that resolves to
+the translation itself is dropped.
+
+**When a target's translation appears later, nothing changes until the next
+copy.** A link is resolved when the copy runs — the source publishing, or the
+translation publishing — like every other shared value. A French page linked
+to the English variant of a target keeps that link until one of those happens
+after the French variant of the target is created. Re-resolving on every
+target write would make one document's publish a write to every document
+linking to it.
+
+### The write
+
+The copy is still the internal `:sync_shared_fields` action, with no input,
+its values riding in the changeset context. Two keys join the map:
+`tags: [tag_id]` and `related: [content_id]`. `Changes.ApplySharedFields`
+turns them into the join-table writes inside the same transaction as the row
+write, so the copy still **writes a version** (the sync delta API reports the
+sibling as an upsert, and `Translations.edited_at/2` recognises it by its
+action name and keeps ignoring it) and still **takes the optimistic lock**.
+
+- Tags go through `manage_relationship(:tags, ids, type: :append_and_remove)`,
+  the write `tag_ids` makes.
+- Related links are replaced row by row through `RelatedLink`'s `create` and
+  `destroy`, then numbered by `ContentLinks.order_related/2`.
+  `manage_relationship` is not used for them: it would look the targets up as
+  the actor, and the `:localization` system actor reads content only as an
+  anonymous visitor does, so a draft target would fail the copy.
+
+Both writes run as the `:localization` system actor, so its grant widens by
+exactly those writes: `Tagging` `create` and `destroy`, and `RelatedLink`
+`read`, `create` and `destroy` (`docs/policy-matrix.md`). The read is the
+copy's own: it lists the translation's current related rows to know which to
+remove.
+
+A sibling with a pending working copy that holds its own tags or related
+list gets the shared value there too, and the copy's recorded base moves with
+the live value, exactly as for a shared attribute (#1815).
+
+### The write refusal and the editor
+
+The #1860 refusal covers both. On a translation, a write whose resulting tag
+set, or related list, differs both from the translation's current one and
+from what the next copy would write is refused, whether it came as the
+complete set (`tag_ids`, `related_<type>_ids`) or as the merge verbs
+(`add_*`, `remove_*`). Tags compare as sets, the related list in order.
+Re-sending the current links passes, as re-sending a shared attribute's
+current value does.
+
+In the editor, a translation shows both read-only — the tag picker's
+checkboxes disabled, the related picker without search, reorder or remove —
+under the same *Shared: edited in the EN version* note with a link to the
+source.
+
+### The contract
+
+Additive under the 1.x overlay contract. The `localization:` option is
+covered; it gains two names it accepts, and a type that names neither behaves
+as before. `__kiln_localization__/0` returns them in `shared:` like any other
+name. `FieldLocalization.attributes/1` keeps answering record attributes
+only, and the new `FieldLocalization.relationships/1` answers the shared
+relationships. No HTTP surface changes: `tags` and `related_<type>s` keep their
+types, and a translation's links are the ones it reads back. No migration.

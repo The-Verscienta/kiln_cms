@@ -87,18 +87,31 @@ defmodule KilnCMSWeb.ApiError do
   `100..999`; both normalize to the same body. Anything else raises, in a
   module whose whole job is rendering error responses — so pass a literal, and
   never a value derived from request data.
+
+  `source_parameter: "page[limit]"` adds JSON:API's `source.parameter`, naming
+  the query parameter a 400 is about — the same member `ash_json_api` sets on
+  its own query errors (`invalid_sort`), so a client reads both the same way.
   """
-  @spec send(Plug.Conn.t(), atom() | 100..999, String.t(), String.t()) :: Plug.Conn.t()
-  def send(conn, status, code, detail) do
+  @spec send(Plug.Conn.t(), atom() | 100..999, String.t(), String.t(), keyword()) ::
+          Plug.Conn.t()
+  def send(conn, status, code, detail, opts \\ []) do
     conn
     |> put_status(status)
-    |> json(body(status, code, detail))
+    |> json(body(status, code, detail, opts))
   end
 
   @doc "The envelope body alone — see \"`body/3` and `body_from_template/1`\" above."
-  @spec body(atom() | 100..999, String.t(), String.t()) :: map()
-  def body(status, code, detail) do
-    %{errors: [%{status: to_string(Plug.Conn.Status.code(status)), code: code, detail: detail}]}
+  @spec body(atom() | 100..999, String.t(), String.t(), keyword()) :: map()
+  def body(status, code, detail, opts \\ []) do
+    error = %{status: to_string(Plug.Conn.Status.code(status)), code: code, detail: detail}
+
+    error =
+      case Keyword.fetch(opts, :source_parameter) do
+        {:ok, parameter} -> Map.put(error, :source, %{parameter: parameter})
+        :error -> error
+      end
+
+    %{errors: [error]}
   end
 
   @doc """

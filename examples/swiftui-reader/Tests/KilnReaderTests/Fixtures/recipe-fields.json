@@ -1,0 +1,86 @@
+{
+  "custom_fields": {
+    "hero": {
+      "alt": "A plate of buttermilk pancakes",
+      "focal": {
+        "x": 0.72,
+        "y": 0.36
+      },
+      "height": 1067,
+      "id": "0573b09e-e823-4c58-be48-71ba2f3bd05e",
+      "mime_type": "image/jpeg",
+      "url": "/uploads/85b0e85f-dd90-436b-aa85-f16a1aaf1eb5.jpg",
+      "variants": [
+        {
+          "bytes": 5687,
+          "cropped": false,
+          "format": "image/jpeg",
+          "height": 267,
+          "label": "thumb",
+          "url": "/uploads/1dfc8764-f9d4-4bf0-a205-a0a300e9eb8e.jpg",
+          "width": 400
+        },
+        {
+          "bytes": 2538,
+          "cropped": false,
+          "format": "image/webp",
+          "height": 267,
+          "label": "thumb.webp",
+          "url": "/uploads/bbd6a6d6-e0e1-4b89-8b76-44c9c77e9e2a.webp",
+          "width": 400
+        },
+        {
+          "bytes": 20229,
+          "cropped": false,
+          "format": "image/jpeg",
+          "height": 683,
+          "label": "medium",
+          "url": "/uploads/63202748-8aff-4288-9cb3-5878852167ad.jpg",
+          "width": 1024
+        },
+        {
+          "bytes": 7042,
+          "cropped": false,
+          "format": "image/webp",
+          "height": 683,
+          "label": "medium.webp",
+          "url": "/uploads/5b182aa3-f257-41c2-83bc-9deea116e97d.webp",
+          "width": 1024
+        },
+        {
+          "bytes": 13154,
+          "cropped": false,
+          "format": "image/webp",
+          "height": 1067,
+          "label": "full.webp",
+          "url": "/uploads/b4ce1095-7251-40e3-9279-3a2745369719.webp",
+          "width": 1600
+        },
+        {
+          "bytes": 11992,
+          "cropped": true,
+          "format": "image/jpeg",
+          "height": 450,
+          "label": "card",
+          "url": "/uploads/1051011a-23c5-4d9e-8a6b-26dcb78687a5.jpg",
+          "width": 800
+        },
+        {
+          "bytes": 5098,
+          "cropped": true,
+          "format": "image/webp",
+          "height": 450,
+          "label": "card.webp",
+          "url": "/uploads/48dab785-79d9-486b-ba21-65d2f71b72e7.webp",
+          "width": 800
+        }
+      ],
+      "width": 1600
+    },
+    "minutes": 25
+  },
+  "id": "bfdc6f9d-1d13-4e8a-a7d4-cebc3f54b94e",
+  "slug": "buttermilk-pancakes",
+  "title": "Buttermilk pancakes",
+  "type": "recipe"
+}

@@ -84,6 +84,10 @@ Every summary line below that was shortened links to its own entry there.
   class per type, block and group row, and `Block`/`Document` interfaces with `Unknown`.**
   ([#2109](https://github.com/The-Verscienta/kiln_cms/pull/2109) · [long form](docs/changelog/unreleased.md#kotlin-schema-export))
 
+- **`examples/swiftui-reader`: a SwiftUI app on generated Swift models and a
+  `/api/sync` mirror, with `:group` rows, Portable Text and focal-point crops.**
+  ([#2124](https://github.com/The-Verscienta/kiln_cms/pull/2124) · [long form](docs/changelog/unreleased.md#swiftui-reader))
+
 - **Sections in the Custom fields panel: a field's `section` files it under a
   collapsible heading; only sections already holding values start open.**
   ([#2116](https://github.com/The-Verscienta/kiln_cms/pull/2116) · [long form](docs/changelog/unreleased.md#field-sections))
@@ -107,7 +111,20 @@ Every summary line below that was shortened links to its own entry there.
 - **A rich `:text` custom field can also be delivered as Portable Text (`custom_fields_portable`).**
   ([#2103](https://github.com/The-Verscienta/kiln_cms/pull/2103) · [long form](docs/changelog/unreleased.md#rich-text-fields-as-portable-text))
 
+- **Field localization can share tags and related content: `localization: [shared: [:tags, :related]]`
+  copies the tag set, and links each related target's same-locale variant along the fallback chain.**
+  ([#2131](https://github.com/The-Verscienta/kiln_cms/pull/2131) · [long form](docs/changelog/unreleased.md#shared-tags-and-related))
+
 ### Changed
+
+- **Shared and fallback block fields work inside `columns`: a nested block is copied,
+  filled, refused and shown in the editor by its id, as a top-level block is.**
+  ([#2129](https://github.com/The-Verscienta/kiln_cms/pull/2129) · [long form](docs/changelog/unreleased.md#field-localization-nested-blocks))
+
+- **Generated Swift and Kotlin models keep Portable Text's text:
+  `#/$defs/portable_text_block` now declares `style`, `listItem`, `level`,
+  `children` and `markDefs`, all optional, the node still open.**
+  ([#2126](https://github.com/The-Verscienta/kiln_cms/pull/2126) · [long form](docs/changelog/unreleased.md#portable-text-node-keys))
 
 - **Whether a path alias was derived is recorded when it is written, so a move
   rewrites a stale derived path beneath it instead of mistaking it for a pinned one.**
@@ -132,6 +149,18 @@ Every summary line below that was shortened links to its own entry there.
 - **ash_graphql 1.13.0 defaults an omitted `offset` to `0`, replacing Kiln's
   #1883 workaround and fixing offset-paged relationship lists too.**
   ([ash_graphql#480](https://github.com/ash-project/ash_graphql/issues/480))
+
+### Fixed
+
+- **The content editor no longer crashes on a fallback custom field that holds a
+  value, and an empty one shows the value it inherits as its placeholder.**
+  ([#2130](https://github.com/The-Verscienta/kiln_cms/pull/2130) · [long form](docs/changelog/unreleased.md#fallback-custom-field-crash))
+- **A block moved in the content editor stays moved: autosave no longer puts it
+  back.** ([#2132](https://github.com/The-Verscienta/kiln_cms/issues/2132) · [long form](docs/changelog/unreleased.md#reorder-snap-back))
+- **A bad `page[limit]` on `/api/json` is a 400 naming the parameter, not a
+  500.** ([long form](docs/changelog/unreleased.md#page-value-500))
+- **`/api/search` reads `?query=` as well as `?q=`; /developers now documents
+  `?q=`.** ([long form](docs/changelog/unreleased.md#search-query-alias))
 
 ## [1.6.0] - 2026-10-28
 
