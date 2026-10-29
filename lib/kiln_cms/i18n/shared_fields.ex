@@ -29,7 +29,15 @@ defmodule KilnCMS.I18n.SharedFields do
       `cast_stored` and nested children through `TypedBlocks.to_typed/1`; both
       upcast every block to its current version, so the two sides are
       compared at the same schema version. A nested child is rewritten only
-      when one of its shared values changes.
+      when one of its shared values changes;
+    * the **tags**, when the type shares `:tags` (#1859): the source's tag set,
+      as tag ids — a tag has no locale, so the references are copied and no
+      tag is touched;
+    * the curated **related content**, when the type shares `:related`
+      (#1859): each of the source's targets resolved to its document's variant
+      in the sibling's locale, or the first variant along the site's fallback
+      chain (#1579), in the source's order (`resolve_related/6`). A target
+      with no variant on the chain is left out.
 
   ## The sibling's working copy (#1815)
 
@@ -49,7 +57,9 @@ defmodule KilnCMS.I18n.SharedFields do
 
   require Ash.Query
 
+  alias KilnCMS.CMS.ContentLinks
   alias KilnCMS.CMS.WorkingCopy
+  alias KilnCMS.I18n.Fallback
   alias KilnCMS.I18n.FieldLocalization
 
   @doc """
@@ -86,9 +96,10 @@ defmodule KilnCMS.I18n.SharedFields do
 
   @doc """
   Copy the published `source`'s shared values into each sibling that differs.
-  `only:` limits the copy to the sibling with that id, and `attributes:`
+  `only:` limits the copy to the sibling with that id, `attributes:`
   overrides the record-attribute modes the source's type declares (see
-  `plan/4`). Returns the number of siblings written.
+  `plan/5`), and `relationships:` the relationships it shares. Returns the
+  number of siblings written.
   """
   @spec sync(struct(), [struct()], keyword()) :: {:ok, non_neg_integer()} | {:error, term()}
   def sync(source, definitions, opts \\ [])
@@ -99,11 +110,14 @@ defmodule KilnCMS.I18n.SharedFields do
     attributes =
       Keyword.get_lazy(opts, :attributes, fn -> FieldLocalization.attributes(source) end)
 
-    source
-    |> siblings()
-    |> Enum.filter(&(is_nil(only) or &1.id == only))
-    |> Enum.reduce_while({:ok, 0}, fn sibling, {:ok, written} ->
-      case sync_one(sibling, plan(source, sibling, definitions, attributes)) do
+    relationships =
+      Keyword.get_lazy(opts, :relationships, fn -> FieldLocalization.relationships(source) end)
+
+    siblings = source |> siblings() |> Enum.filter(&(is_nil(only) or &1.id == only))
+    links = if siblings == [], do: %{}, else: links(source, relationships)
+
+    Enum.reduce_while(siblings, {:ok, 0}, fn sibling, {:ok, written} ->
+      case sync_one(sibling, plan(source, sibling, definitions, attributes, links)) do
         :unchanged -> {:cont, {:ok, written}}
         {:ok, _updated} -> {:cont, {:ok, written + 1}}
         {:error, error} -> {:halt, {:error, error}}
@@ -129,13 +143,15 @@ defmodule KilnCMS.I18n.SharedFields do
   @doc """
   The attribute values a sync would write onto `sibling`, keyed by attribute
   — `%{}` when it already carries the source's shared values. Includes the
-  working-copy columns when the sibling has a pending copy.
+  working-copy columns when the sibling has a pending copy, and `:tags` /
+  `:related` (lists of ids) when a shared relationship differs.
 
   `modes` are the record-attribute modes, `%{shared: [...], fallback: [...]}`
-  — by default what the source's type declares.
+  — by default what the source's type declares. `links` is the source's
+  shared relationships as `links/2` reads them; `%{}` shares none.
   """
-  @spec plan(struct(), struct(), [struct()], map() | nil) :: %{atom() => term()}
-  def plan(source, sibling, definitions, modes \\ nil) do
+  @spec plan(struct(), struct(), [struct()], map() | nil, map()) :: %{atom() => term()}
+  def plan(source, sibling, definitions, modes \\ nil, links \\ %{}) do
     modes = modes || FieldLocalization.attributes(source)
 
     attributes =
@@ -150,10 +166,159 @@ defmodule KilnCMS.I18n.SharedFields do
       attributes
       |> put_custom_fields(source, sibling, shared_custom)
       |> put_blocks(:blocks, source.blocks, sibling.blocks)
+      |> put_links(links, sibling)
 
     if changes != %{} and WorkingCopy.pending?(sibling),
       do: Map.merge(changes, working_copy(sibling, changes, source, shared_custom)),
       else: changes
+  end
+
+  # ── Shared relationships (#1859) ───────────────────────────────────────────
+
+  @doc """
+  What `source` shares of its relationships, read once per sync:
+  `%{tags: [tag_id]}` (sorted, a set) and `%{related: {targets, chains}}`
+  (the targets in the source's order, with the site's fallback chains), each
+  only when `relationships` names it.
+  """
+  @spec links(struct(), [atom()]) :: map()
+  def links(source, relationships) do
+    Enum.reduce(relationships, %{}, fn
+      :tags, acc ->
+        Map.put(acc, :tags, tag_ids(source))
+
+      :related, acc ->
+        Map.put(acc, :related, {related_targets(source), Fallback.chains(source.org_id)})
+
+      _other, acc ->
+        acc
+    end)
+  end
+
+  defp put_links(changes, links, sibling) do
+    changes
+    |> put_tags(Map.fetch(links, :tags), sibling)
+    |> put_related(Map.fetch(links, :related), sibling)
+  end
+
+  defp put_tags(changes, {:ok, wanted}, sibling) do
+    if tag_ids(sibling) == wanted, do: changes, else: Map.put(changes, :tags, wanted)
+  end
+
+  defp put_tags(changes, :error, _sibling), do: changes
+
+  defp put_related(changes, {:ok, {targets, chains}}, sibling) do
+    wanted =
+      resolve_related(sibling.__struct__, targets, sibling.locale, chains, sibling.org_id,
+        except: sibling.id
+      )
+
+    if related_ids(sibling) == wanted, do: changes, else: Map.put(changes, :related, wanted)
+  end
+
+  defp put_related(changes, :error, _sibling), do: changes
+
+  @doc "`record`'s tag ids, sorted — the tags are a set."
+  @spec tag_ids(struct()) :: [String.t()]
+  def tag_ids(record) do
+    record
+    # authorize?: false — ids only, of a document this sync (or a write
+    # already authorized on it) is about; nothing read leaves the copy.
+    |> Ash.load!([tags: Ash.Query.select(KilnCMS.CMS.Tag, [:id])],
+      authorize?: false,
+      tenant: record.org_id,
+      lazy?: false
+    )
+    |> Map.fetch!(:tags)
+    |> Enum.map(&to_string(&1.id))
+    |> Enum.sort()
+  end
+
+  @doc "`record`'s curated related targets' ids, in the related list's order."
+  @spec related_ids(struct()) :: [String.t()]
+  def related_ids(record),
+    do: record |> ContentLinks.related_order() |> Enum.map(&to_string/1)
+
+  @doc """
+  `record`'s curated related targets, in order, as the rows `resolve_related/6`
+  matches documents by. A link to a target that has since been trashed is
+  left out.
+  """
+  @spec related_targets(struct()) :: [struct()]
+  def related_targets(%module{} = record) do
+    case related_ids(record) do
+      [] ->
+        []
+
+      ids ->
+        rows =
+          module
+          |> Ash.Query.filter(id in ^ids)
+          |> Ash.Query.select(document_fields(module))
+          # authorize?: false — the targets' document identity only (slug,
+          # type, locale), to match them across locales; see `siblings/1`.
+          |> Ash.read!(tenant: record.org_id, authorize?: false)
+          |> Map.new(&{to_string(&1.id), &1})
+
+        for id <- ids, row = Map.get(rows, id), do: row
+    end
+  end
+
+  @doc """
+  The ids a shared related list holds on a variant of `resource` in `locale`:
+  each of `targets` (rows of `resource`, in order) resolved to its document's
+  variant in `locale`, or else the first variant along
+  `Fallback.chain(chains, locale, :site)` (#1579). A target whose document has
+  no variant on the chain is left out; two targets that resolve to the same
+  variant are linked once, at the first one's place.
+
+  `except:` drops one id — the variant being written, which cannot be its
+  own related content.
+  """
+  @spec resolve_related(module(), [struct()], String.t(), term(), term(), keyword()) :: [
+          String.t()
+        ]
+  def resolve_related(resource, targets, locale, chains, org_id, opts \\ [])
+
+  def resolve_related(_resource, [], _locale, _chains, _org_id, _opts), do: []
+
+  def resolve_related(resource, targets, locale, chains, org_id, opts) do
+    chain = Fallback.chain(chains, locale, :site)
+    slugs = targets |> Enum.map(& &1.slug) |> Enum.uniq()
+    except = opts |> Keyword.get(:except) |> then(&(&1 && to_string(&1)))
+
+    variants =
+      resource
+      |> Ash.Query.filter(slug in ^slugs and locale in ^chain)
+      |> Ash.Query.select(document_fields(resource))
+      # authorize?: false — as `related_targets/1`: which variants exist, by
+      # document identity, and nothing read leaves the copy but their ids.
+      |> Ash.read!(tenant: org_id, authorize?: false)
+      |> Enum.group_by(&document/1)
+
+    targets
+    |> Enum.flat_map(&variant_along(Map.get(variants, document(&1), []), chain))
+    |> Enum.reject(&(&1 == except))
+    |> Enum.uniq()
+  end
+
+  # The id of the first of a document's `rows` along `chain`, as a list of
+  # zero or one.
+  defp variant_along(rows, chain) do
+    case Enum.find_value(chain, fn locale -> Enum.find(rows, &(&1.locale == locale)) end) do
+      nil -> []
+      variant -> [to_string(variant.id)]
+    end
+  end
+
+  # What names a document across its variants: the slug, and on the entry
+  # tier the type definition (the identity `[type_definition_id, slug, locale]`).
+  defp document(row), do: {row.slug, Map.get(row, :type_definition_id)}
+
+  defp document_fields(resource) do
+    if Ash.Resource.Info.attribute(resource, :type_definition_id),
+      do: [:id, :slug, :locale, :type_definition_id],
+      else: [:id, :slug, :locale]
   end
 
   defp put_custom_fields(changes, source, sibling, shared) do
@@ -223,6 +388,9 @@ defmodule KilnCMS.I18n.SharedFields do
         {:blocks, _value}, acc ->
           acc
 
+        {link, ids}, acc when link in [:tags, :related] ->
+          hold_link(acc, link_key(resource, link), ids)
+
         {:custom_fields, _value}, acc ->
           case Map.fetch(acc, "custom_fields") do
             {:ok, held_map} when is_map(held_map) ->
@@ -251,16 +419,45 @@ defmodule KilnCMS.I18n.SharedFields do
     }
   end
 
+  # A held tag set or related list is replaced by the shared one, as a held
+  # shared attribute is; one the copy does not hold stays unheld.
+  defp hold_link(held, key, ids) do
+    if key && Map.has_key?(held, key),
+      do: Map.put(held, key, ids),
+      else: held
+  end
+
   # Each recorded base that was the old live value moves to the new one.
   defp rebase(sibling, changes) do
     resource = sibling.__struct__
 
     Enum.reduce(changes, WorkingCopy.base_fingerprints(sibling), fn {name, value}, base ->
-      key = to_string(name)
-
-      if Map.get(base, key) == WorkingCopy.live_fingerprint(sibling, key),
-        do: Map.put(base, key, WorkingCopy.fingerprint(resource, key, value)),
-        else: base
+      rebase_key(base, sibling, base_key(resource, name), value)
     end)
+  end
+
+  defp rebase_key(base, _sibling, nil, _value), do: base
+
+  defp rebase_key(base, sibling, key, value) do
+    if Map.get(base, key) == WorkingCopy.live_fingerprint(sibling, key),
+      do: Map.put(base, key, WorkingCopy.fingerprint(sibling.__struct__, key, value)),
+      else: base
+  end
+
+  defp base_key(resource, link) when link in [:tags, :related], do: link_key(resource, link)
+  defp base_key(_resource, name), do: to_string(name)
+
+  # The working copy's key for a shared relationship: its complete-set
+  # argument, `"tag_ids"` or `"related_<type>_ids"`.
+  defp link_key(resource, link) do
+    Enum.find_value(WorkingCopy.held_relationships(resource), fn {argument, relationship} ->
+      if relationship_link(relationship) == link, do: to_string(argument)
+    end)
+  end
+
+  defp relationship_link(:tags), do: :tags
+
+  defp relationship_link(relationship) do
+    if String.starts_with?(to_string(relationship), "related_"), do: :related
   end
 end

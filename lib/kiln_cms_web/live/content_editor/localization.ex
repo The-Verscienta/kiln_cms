@@ -9,6 +9,8 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
     * a `:shared` field on a **translation** is read-only, labelled *Shared:
       edited in the EN version*, with a link to the source variant;
     * a `:shared` field on the **source** is labelled *Shared with N locales*;
+    * the same two notes for a shared relationship — the tags and the curated
+      related content (#1859) — whose pickers are read-only on a translation;
     * an empty `:fallback` field shows the value it will inherit as its
       placeholder, labelled with the locale it comes from.
 
@@ -29,6 +31,7 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
           source_id: term(),
           shared_with: non_neg_integer(),
           attributes: %{atom() => :shared | :fallback},
+          relationships: %{atom() => :shared},
           custom: %{String.t() => :shared | :fallback},
           inherited: map(),
           values: map()
@@ -44,6 +47,7 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
       source_id: nil,
       shared_with: 0,
       attributes: %{},
+      relationships: %{},
       custom: %{},
       inherited: %{},
       values: %{}
@@ -73,6 +77,7 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
             Map.new(modes.shared, &{&1, :shared}),
             Map.new(modes.fallback, &{&1, :fallback})
           ),
+        relationships: Map.new(FieldLocalization.relationships(record), &{&1, :shared}),
         custom: FieldLocalization.custom_fields(definitions),
         inherited: inherited,
         values: %{record: filled}
@@ -83,12 +88,14 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
   end
 
   @doc """
-  The mode of a field: `{:attribute, :seo_title}`, `{:custom, "price"}` or
-  `{:block, module, :caption}`. `:localized` when nothing says otherwise.
+  The mode of a field: `{:attribute, :seo_title}`, `{:relationship, :tags}`
+  (or `:related`), `{:custom, "price"}` or `{:block, module, :caption}`.
+  `:localized` when nothing says otherwise.
   """
   @spec mode(t(), tuple()) :: :localized | :shared | :fallback
   def mode(%{active?: false}, _field), do: :localized
   def mode(loc, {:attribute, name}), do: Map.get(loc.attributes, name, :localized)
+  def mode(loc, {:relationship, name}), do: Map.get(loc.relationships, name, :localized)
   def mode(loc, {:custom, name}), do: Map.get(loc.custom, name, :localized)
 
   def mode(_loc, {:block, module, name}),

@@ -23,7 +23,10 @@ defmodule KilnCMS.I18n.FieldLocalization do
       `KilnCMS.CMS.FieldDefinition`, set on the Fields screen;
     * **record attributes** — the `localization:` option of
       `use KilnCMS.CMS.Content`, e.g.
-      `localization: [shared: [:seo_image, :category_id], fallback: [:excerpt]]`.
+      `localization: [shared: [:seo_image, :category_id], fallback: [:excerpt]]`;
+    * **relationships** — the same option's `shared:` list may also name
+      `:tags` and `:related` (the curated related content, #1859). Their
+      copy is `KilnCMS.I18n.SharedFields`'; neither can fall back.
 
   Nothing is shared or inherited until one of those opts in, so a site that
   declares none of them behaves exactly as before.
@@ -56,6 +59,11 @@ defmodule KilnCMS.I18n.FieldLocalization do
     :featured_image_id
   ]
 
+  # Relationships a type may share (#1859): the tag set, copied as tag ids
+  # (tags have no locale), and the curated related list, each target resolved
+  # to its variant in the sibling's locale (`KilnCMS.I18n.SharedFields`).
+  @shareable_relationships [:tags, :related]
+
   # Record attributes that may fall back. Text (and the social image) only:
   # what a reader sees about the page, where "use the next locale's" is a
   # better answer than nothing.
@@ -68,6 +76,10 @@ defmodule KilnCMS.I18n.FieldLocalization do
   @doc "The record attributes the `localization:` option may name as `shared:`."
   @spec shareable_attributes() :: [atom()]
   def shareable_attributes, do: @shareable
+
+  @doc "The relationships the `localization:` option may name as `shared:` (#1859)."
+  @spec shareable_relationships() :: [atom()]
+  def shareable_relationships, do: @shareable_relationships
 
   @doc "The record attributes the `localization:` option may name as `fallback:`."
   @spec fallbackable_attributes() :: [atom()]
@@ -90,7 +102,10 @@ defmodule KilnCMS.I18n.FieldLocalization do
       invalid!("expected a keyword list of `shared:` and `fallback:`, got: #{inspect(option)}")
     end
 
-    shared = option |> Keyword.get(:shared, []) |> check_list!(:shared, @shareable, excerpt?)
+    shared =
+      option
+      |> Keyword.get(:shared, [])
+      |> check_list!(:shared, @shareable ++ @shareable_relationships, excerpt?)
 
     fallback =
       option |> Keyword.get(:fallback, []) |> check_list!(:fallback, @fallbackable, excerpt?)
@@ -145,11 +160,30 @@ defmodule KilnCMS.I18n.FieldLocalization do
   ignored with a logged warning rather than raised on: it is read at run time,
   on delivery paths. Empty for a resource that declares nothing, and for
   anything built outside the Content macro.
+
+  Record attributes only: a shared relationship (`:tags`, `:related`) the
+  same option names is `relationships/1`'s.
   """
   @spec attributes(module() | struct()) :: %{shared: [atom()], fallback: [atom()]}
-  def attributes(%module{}), do: attributes(module)
+  def attributes(record_or_module) do
+    modes = modes(record_or_module)
+    %{modes | shared: modes.shared -- @shareable_relationships}
+  end
 
-  def attributes(module) when is_atom(module) do
+  @doc """
+  The relationships a content resource shares across its locale variants
+  (#1859): the subset of `:tags` and `:related` its `localization:` option, or
+  the operator's `field_localization:` entry for its type, names as `shared:`.
+  `[]` for a resource that shares neither.
+  """
+  @spec relationships(module() | struct()) :: [atom()]
+  def relationships(record_or_module),
+    do: Enum.filter(modes(record_or_module).shared, &(&1 in @shareable_relationships))
+
+  # Everything declared and configured, attributes and relationships together.
+  defp modes(%module{}), do: modes(module)
+
+  defp modes(module) when is_atom(module) do
     if Code.ensure_loaded?(module) and function_exported?(module, :__kiln_localization__, 0) do
       module.__kiln_localization__() |> merge(configured(module))
     else
@@ -157,7 +191,7 @@ defmodule KilnCMS.I18n.FieldLocalization do
     end
   end
 
-  def attributes(_other), do: %{shared: [], fallback: []}
+  defp modes(_other), do: %{shared: [], fallback: []}
 
   defp merge(declared, nil), do: declared
 
@@ -265,13 +299,14 @@ defmodule KilnCMS.I18n.FieldLocalization do
 
   @doc """
   Whether anything on `record`'s type opts out of `:localized`: a declared
-  record attribute, one of `definitions`, or a block in the record's tree
-  (top level or nested inside `columns`) whose module declares a mode. The cheap gate every caller checks first, so a
+  record attribute or relationship, one of `definitions`, or a block in the
+  record's tree (top level or nested inside `columns`) whose module declares a
+  mode. The cheap gate every caller checks first, so a
   site that opted nothing in pays one definitions read and nothing more.
   """
   @spec any?(struct(), [struct()]) :: boolean()
   def any?(record, definitions) do
-    %{shared: shared, fallback: fallback} = attributes(record)
+    %{shared: shared, fallback: fallback} = modes(record)
 
     shared != [] or fallback != [] or custom_fields(definitions) != %{} or
       Enum.any?(typed_blocks(block_list(record)), &(block_fields(block_module(&1)) != %{}))

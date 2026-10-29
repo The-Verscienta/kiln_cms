@@ -81,6 +81,10 @@ defmodule KilnCMS.CMS.RelatedLink do
 
     policy action_type(:read) do
       access_type :runtime
+      # Field-level localization's copy of a shared related list (#1859,
+      # `I18n.Changes.ApplySharedFields`) lists the variant's own rows to know
+      # which to remove, then creates and destroys the difference below.
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :localization}
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       authorize_if KilnCMS.CMS.Checks.ThroughRelatedJoin
       authorize_if KilnCMS.CMS.Checks.LinkEndsReadable
@@ -88,6 +92,7 @@ defmodule KilnCMS.CMS.RelatedLink do
 
     policy action_type([:create, :destroy]) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :localization}
     end
   end
 

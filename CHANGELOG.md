@@ -111,6 +111,10 @@ Every summary line below that was shortened links to its own entry there.
 - **A rich `:text` custom field can also be delivered as Portable Text (`custom_fields_portable`).**
   ([#2103](https://github.com/The-Verscienta/kiln_cms/pull/2103) · [long form](docs/changelog/unreleased.md#rich-text-fields-as-portable-text))
 
+- **Field localization can share tags and related content: `localization: [shared: [:tags, :related]]`
+  copies the tag set, and links each related target's same-locale variant along the fallback chain.**
+  ([#2131](https://github.com/The-Verscienta/kiln_cms/pull/2131) · [long form](docs/changelog/unreleased.md#shared-tags-and-related))
+
 ### Changed
 
 - **Shared and fallback block fields work inside `columns`: a nested block is copied,
