@@ -840,8 +840,9 @@ public never appears in a delta at all, not even as an id.
 
 **Semantics a client must allow for.**
 
-* **At-least-once.** A delta window trails the clock by a few seconds (so a
-  write whose transaction is still committing is not skipped), and windows
+* **At-least-once.** A delta window trails the clock by 10 seconds (so a
+  write whose transaction is still committing is not skipped; an edit shows up
+  in a delta about that long after it commits), and windows
   overlap slightly after the snapshot. The same item can arrive twice; applying
   it twice is harmless.
 * **A delete for something you don't hold** can happen (a document that became

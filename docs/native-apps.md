@@ -6,6 +6,11 @@ headless API used from a client that sleeps, loses its network and pays for
 every byte. The endpoint reference is [api.md](api.md). The general consumer
 guide is [headless-consumer-guide.md](headless-consumer-guide.md).
 
+[`examples/swiftui-reader`](https://github.com/The-Verscienta/kiln_cms/tree/main/examples/swiftui-reader) is a small
+SwiftUI app that does everything on this page: generated models, a sync
+mirror, `ETag` revalidation, `?fields=`, Portable Text rendered natively and
+focal-point cropping.
+
 Three reads cover almost every app:
 
 | Need | Endpoint | Section |
@@ -368,6 +373,9 @@ ignored rather than kept. The Portable Text node (`PortableTextBlock`) keeps
 `text`, `marks`) and `markDefs` (`PortableTextBlock.MarkDefsItem`: `href`),
 which is all a native renderer needs. See
 [Rich text without a web view](#rich-text-without-a-web-view).
+
+[`examples/swiftui-reader`](https://github.com/The-Verscienta/kiln_cms/tree/main/examples/swiftui-reader) checks in
+a generated file and the script that regenerates it.
 
 Decode a delivery with `JSONDecoder`:
 
