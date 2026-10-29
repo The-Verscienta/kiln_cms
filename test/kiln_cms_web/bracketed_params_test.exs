@@ -196,6 +196,7 @@ defmodule KilnCMSWeb.BracketedParamsTest do
       {"page[limit][a]", "page[limit][a]=1"},
       {"page[offset][]", "page[offset][]=1"},
       {"page[offset][a]", "page[offset][a]=1"},
+      {"page[after][a]", "page[after][a]=x"},
       {"a scalar page", "page=1"},
       {"a listed page", "page[]=1"},
       {"sort[]", "sort[]=title"},
@@ -225,11 +226,49 @@ defmodule KilnCMSWeb.BracketedParamsTest do
       end
     end
 
+    # A value ash_json_api 1.7.1 can't cast raised a KeyError in its own
+    # InvalidPagination (500), and a limit of 0 cast and then failed inside
+    # Ash as an opaque `something_went_wrong` (outside audit, 2026-10-29).
+    @bad_values [
+      {"page[limit]", "page[limit]=abc"},
+      {"page[limit]", "page[limit]="},
+      {"page[limit]", "page[limit]=1.5"},
+      {"page[limit]", "page[limit]=0"},
+      {"page[limit]", "page[limit]=-1"},
+      {"page[offset]", "page[offset]=abc"},
+      {"page[offset]", "page[offset]=-1"},
+      {"page[count]", "page[count]=maybe"}
+    ]
+
+    for {parameter, query} <- @bad_values do
+      @parameter parameter
+      @query query
+
+      test "#{query} is a 400 naming #{parameter}" do
+        conn =
+          build_conn()
+          |> put_req_header("accept", "application/vnd.api+json")
+          |> get("/api/json/posts?#{@query}")
+
+        assert %{
+                 "errors" => [
+                   %{
+                     "status" => "400",
+                     "code" => "invalid_pagination",
+                     "source" => %{"parameter" => @parameter}
+                   }
+                 ]
+               } = json_response(conn, 400)
+      end
+    end
+
     test "legitimate page/sort/include values are unaffected" do
       conn =
         build_conn()
         |> put_req_header("accept", "application/vnd.api+json")
-        |> get("/api/json/posts?page[limit]=10&page[offset]=0&sort=-inserted_at&include=tags")
+        |> get(
+          "/api/json/posts?page[limit]=10&page[offset]=0&page[count]=true&sort=-inserted_at&include=tags"
+        )
 
       assert conn.status == 200
     end

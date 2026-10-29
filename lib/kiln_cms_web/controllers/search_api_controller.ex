@@ -1,6 +1,7 @@
 defmodule KilnCMSWeb.SearchApiController do
   @moduledoc """
-  Headless **hybrid search** (`GET /api/search?q=…`) — the query surface the
+  Headless **hybrid search** (`GET /api/search?q=…`, `?query=` accepted as an
+  alias) — the query surface the
   search roadmap (#4) left open: keyword + semantic + title legs fused by RRF
   (and reranked when enabled), which no single Ash action can express, so it
   ships as a thin controller over `KilnCMS.Search.global/2`.
@@ -71,7 +72,7 @@ defmodule KilnCMSWeb.SearchApiController do
   @hit_fields [:id, :title, :slug, :excerpt, :locale, :org_id]
 
   def index(conn, params) do
-    query = params |> Params.string("q", "") |> String.trim()
+    query = params |> query_param() |> String.trim()
     locale = validated_locale(Params.string(params, "locale"))
     limit = Params.integer(params, "limit", @default_limit, 1..@max_limit)
 
@@ -81,6 +82,12 @@ defmodule KilnCMSWeb.SearchApiController do
       search(conn, query, locale, limit, params)
     end
   end
+
+  # `q` is the parameter. `query` is read when `q` is absent: /developers
+  # documented `?query=` until the 2026-10-29 audit, and that spelling answered
+  # an empty 200 — a client could not tell a wrong name from no matches.
+  defp query_param(params),
+    do: Params.string(params, "q") || Params.string(params, "query", "")
 
   # A saturated pool drops a query's checkout rather than queue it forever,
   # and that used to escape from whichever leg hit it as a `500`. It is

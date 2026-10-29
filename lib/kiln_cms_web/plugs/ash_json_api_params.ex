@@ -18,6 +18,14 @@ defmodule KilnCMSWeb.Plugs.AshJsonApiParams do
       comma-separated list in one query value) — `sort[a]=1`/`include[a]=1`
       reach a `String.Chars`/`String.split/2` call with no map clause.
 
+  The `page[...]` *values* are checked too, not only their shape (audit,
+  2026-10-29). A value `ash_json_api` 1.7.1 cannot cast (`page[limit]=abc`,
+  `page[limit]=`, `page[offset]=1.5`, `page[count]=maybe`) reaches its own
+  rejection, which builds `InvalidPagination` with a `source_parameter` field
+  the struct does not have: a `KeyError`, so a 500 in place of the 400 it was
+  writing. `page[limit]=0` casts, then fails inside Ash and reaches the client
+  as an opaque `something_went_wrong`.
+
   `filter[...]` and `fields[...]` are **not** guarded here: both are correctly
   a nested shape in `ash_json_api` already (verified against the real router;
   they answer 400, not 500) — this plug only patches the specific gaps.
@@ -54,9 +62,9 @@ defmodule KilnCMSWeb.Plugs.AshJsonApiParams do
       nil ->
         conn
 
-      {code, detail} ->
+      {code, detail, parameter} ->
         conn
-        |> KilnCMSWeb.ApiError.send(400, code, detail)
+        |> KilnCMSWeb.ApiError.send(400, code, detail, source_parameter: parameter)
         |> halt()
     end
   end
@@ -67,20 +75,44 @@ defmodule KilnCMSWeb.Plugs.AshJsonApiParams do
 
   defp invalid_page(nil), do: nil
 
-  defp invalid_page(page) when is_map(page) do
-    Enum.find_value(~w(limit offset), fn key ->
-      case Map.get(page, key) do
-        value when is_binary(value) or is_nil(value) ->
-          nil
+  # Every key `ash_json_api` reads from `page`, with what its value must be
+  # and an example. `after`/`before` are opaque cursors: any string will do.
+  @page_keys [
+    {"limit", "a positive integer", "10"},
+    {"offset", "a non-negative integer", "0"},
+    {"count", "true or false", "true"},
+    {"after", "a cursor string", "<cursor>"},
+    {"before", "a cursor string", "<cursor>"}
+  ]
 
-        _list_or_map ->
-          {"invalid_pagination", "page[#{key}] must be a plain value, e.g. page[#{key}]=10."}
-      end
+  defp invalid_page(page) when is_map(page) do
+    Enum.find_value(@page_keys, fn {key, must_be, example} ->
+      invalid_page_key("page[#{key}]", key, Map.get(page, key), must_be, example)
     end)
   end
 
   defp invalid_page(_not_a_map),
-    do: {"invalid_pagination", "page must be an object, e.g. page[limit]=10."}
+    do: {"invalid_pagination", "page must be an object, e.g. page[limit]=10.", "page"}
+
+  defp invalid_page_key(_parameter, _key, nil, _must_be, _example), do: nil
+
+  defp invalid_page_key(parameter, key, value, must_be, example) when is_binary(value) do
+    if valid_page_value?(key, value),
+      do: nil,
+      else:
+        {"invalid_pagination", "#{parameter} must be #{must_be}, e.g. #{parameter}=#{example}.",
+         parameter}
+  end
+
+  defp invalid_page_key(parameter, _key, _list_or_map, _must_be, example),
+    do:
+      {"invalid_pagination", "#{parameter} must be a plain value, e.g. #{parameter}=#{example}.",
+       parameter}
+
+  defp valid_page_value?("limit", value), do: match?({n, ""} when n > 0, Integer.parse(value))
+  defp valid_page_value?("offset", value), do: match?({n, ""} when n >= 0, Integer.parse(value))
+  defp valid_page_value?("count", value), do: value in ~w(true false)
+  defp valid_page_value?(_cursor, _value), do: true
 
   # `sort`/`include` are each a single comma-separated scalar in JSON:API —
   # `[{name, code}]` rather than a case per param, so a third one is a row.
@@ -93,7 +125,7 @@ defmodule KilnCMSWeb.Plugs.AshJsonApiParams do
           nil
 
         _list_or_map ->
-          {code, "#{name} must be a plain value, not a list or object."}
+          {code, "#{name} must be a plain value, not a list or object.", name}
       end
     end)
   end

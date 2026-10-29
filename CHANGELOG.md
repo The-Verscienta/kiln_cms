@@ -157,6 +157,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2130](https://github.com/The-Verscienta/kiln_cms/pull/2130) · [long form](docs/changelog/unreleased.md#fallback-custom-field-crash))
 - **A block moved in the content editor stays moved: autosave no longer puts it
   back.** ([#2132](https://github.com/The-Verscienta/kiln_cms/issues/2132) · [long form](docs/changelog/unreleased.md#reorder-snap-back))
+- **A bad `page[limit]` on `/api/json` is a 400 naming the parameter, not a
+  500.** ([long form](docs/changelog/unreleased.md#page-value-500))
+- **`/api/search` reads `?query=` as well as `?q=`; /developers now documents
+  `?q=`.** ([long form](docs/changelog/unreleased.md#search-query-alias))
 
 ## [1.6.0] - 2026-10-28
 
