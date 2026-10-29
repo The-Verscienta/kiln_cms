@@ -217,7 +217,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
   defp on_event("remove_block", _params, socket), do: {:halt, socket}
 
   defp on_event("reorder", %{"order" => order}, socket) when is_list(order) do
-    form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
+    form = sort_blocks(socket.assigns.form, order)
     {:halt, socket |> assign(:form, form) |> mark_dirty()}
   end
 
@@ -235,7 +235,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
          true <- i < count,
          j when j >= 0 and j < count <- if(dir == "up", do: i - 1, else: i + 1) do
       order = 0..(count - 1) |> Enum.map(&to_string/1) |> swap_at(i, j)
-      form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
+      form = sort_blocks(socket.assigns.form, order)
 
       {:halt,
        socket

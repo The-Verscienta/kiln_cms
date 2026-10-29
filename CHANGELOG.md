@@ -151,6 +151,8 @@ Every summary line below that was shortened links to its own entry there.
 - **The content editor no longer crashes on a fallback custom field that holds a
   value, and an empty one shows the value it inherits as its placeholder.**
   ([#2130](https://github.com/The-Verscienta/kiln_cms/pull/2130) · [long form](docs/changelog/unreleased.md#fallback-custom-field-crash))
+- **A block moved in the content editor stays moved: autosave no longer puts it
+  back.** ([#2132](https://github.com/The-Verscienta/kiln_cms/issues/2132) · [long form](docs/changelog/unreleased.md#reorder-snap-back))
 
 ## [1.6.0] - 2026-10-28
 

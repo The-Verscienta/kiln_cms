@@ -147,7 +147,21 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
     target = target |> max(0) |> min(last)
     existing = if last > 0, do: Enum.map(0..(last - 1), &to_string/1), else: []
     order = List.insert_at(existing, target, to_string(last))
-    AshPhoenix.Form.sort_forms(form, [:blocks], order)
+    sort_blocks(form, order)
+  end
+
+  # Reorder the block sub-forms AND mark `blocks` touched. `sort_forms/3` alone
+  # leaves the touched set as it was, and `AshPhoenix.Form.params/1` — which
+  # autosave submits — only carries touched keys: a move made on an untouched
+  # form submitted no `blocks` at all, the row kept its old order, and the
+  # form rebuilt from that row snapped the blocks back (#2132).
+  def sort_blocks(%Phoenix.HTML.Form{} = form, order) do
+    sorted = AshPhoenix.Form.sort_forms(form, [:blocks], order)
+    %{sorted | source: AshPhoenix.Form.touch(sorted.source, :blocks)}
+  end
+
+  def sort_blocks(%AshPhoenix.Form{} = form, order) do
+    form |> AshPhoenix.Form.sort_forms([:blocks], order) |> AshPhoenix.Form.touch(:blocks)
   end
 
   # A copy of a columns block's socket-managed child tree with every nested child
