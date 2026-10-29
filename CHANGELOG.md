@@ -113,7 +113,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Field localization can share tags and related content: `localization: [shared: [:tags, :related]]`
   copies the tag set, and links each related target's same-locale variant along the fallback chain.**
-  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#shared-tags-and-related))
+  ([#2131](https://github.com/The-Verscienta/kiln_cms/pull/2131) · [long form](docs/changelog/unreleased.md#shared-tags-and-related))
 
 ### Changed
 
