@@ -230,8 +230,14 @@ defmodule KilnCMS.LLM.BudgetTest do
       after_ms = System.system_time(:millisecond)
 
       assert reset in 1..window
-      # Hammer's window boundary is a multiple of the window length.
-      assert rem(before + reset, window) in 0..(after_ms - before)
+      # Hammer's window boundary is a multiple of the window length, and it is
+      # `now + reset` for the instant `now` the function read the clock, which
+      # lies somewhere in `before..after_ms`. So the boundary sits 0 to
+      # `after_ms - before` ms past `before + reset`. Asserting on
+      # `rem(before + reset, window)` directly failed whenever the clock
+      # ticked between the two reads: the remainder is then `window - 1`, not 1.
+      past = rem(window - rem(before + reset, window), window)
+      assert past in 0..(after_ms - before)
     end
   end
 end
