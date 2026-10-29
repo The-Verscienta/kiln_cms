@@ -54,113 +54,123 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [1.7.0] - 2026-10-29
+
+Long form: [docs/changelog/v1.7.0.md](docs/changelog/v1.7.0.md) —
+the 1.7.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
 ### Upgrade notes
 
 - **Overlays: run `mix ash.codegen` for your content types. Every content table
   gains a nullable `path_alias_derived` column; reads fail until it exists.**
-  ([#2118](https://github.com/The-Verscienta/kiln_cms/pull/2118) · [long form](docs/changelog/unreleased.md#alias-derivation-overlays))
+  ([#2118](https://github.com/The-Verscienta/kiln_cms/pull/2118) · [long form](docs/changelog/v1.7.0.md#alias-derivation-overlays))
 
 ### Breaking
 
 - **`KILN_PROVENANCE_ENABLED` now defaults to `true`: every fire signs, and `/api/provenance/*`
   answers. Set it to `false` to keep 1.6's behaviour; with no key, nothing is refused.**
-  ([#2119](https://github.com/The-Verscienta/kiln_cms/pull/2119) · [long form](docs/changelog/unreleased.md#provenance-default-upgrade))
+  ([#2119](https://github.com/The-Verscienta/kiln_cms/pull/2119) · [long form](docs/changelog/v1.7.0.md#provenance-default-upgrade))
 
 ### Added
 
 - **`GET /api/provenance/verify/:type/:slug` says whether a published artifact
   is `verified`, `tampered` or `unsigned`, checked against the manifest stored when it fired.**
-  ([#2119](https://github.com/The-Verscienta/kiln_cms/pull/2119) · [long form](docs/changelog/unreleased.md#provenance-on-by-default))
+  ([#2119](https://github.com/The-Verscienta/kiln_cms/pull/2119) · [long form](docs/changelog/v1.7.0.md#provenance-on-by-default))
 
 - **A plain-text field can keep its paragraph breaks: "Keep paragraph breaks"
   delivers `custom_fields_plain.<name>` with `\n\n` between paragraphs.**
-  ([#2110](https://github.com/The-Verscienta/kiln_cms/pull/2110) · [long form](docs/changelog/unreleased.md#plain-text-breaks))
+  ([#2110](https://github.com/The-Verscienta/kiln_cms/pull/2110) · [long form](docs/changelog/v1.7.0.md#plain-text-breaks))
 
 - **`mix kiln.export.schema --format swift` writes `Codable` models: a struct per
   type, block and group row, and `Block`/`Document` enums that tolerate unknowns.**
-  ([#2105](https://github.com/The-Verscienta/kiln_cms/pull/2105) · [long form](docs/changelog/unreleased.md#swift-schema-export))
+  ([#2105](https://github.com/The-Verscienta/kiln_cms/pull/2105) · [long form](docs/changelog/v1.7.0.md#swift-schema-export))
 
 - **`mix kiln.export.schema --format kotlin` writes kotlinx.serialization models: a data
   class per type, block and group row, and `Block`/`Document` interfaces with `Unknown`.**
-  ([#2109](https://github.com/The-Verscienta/kiln_cms/pull/2109) · [long form](docs/changelog/unreleased.md#kotlin-schema-export))
+  ([#2109](https://github.com/The-Verscienta/kiln_cms/pull/2109) · [long form](docs/changelog/v1.7.0.md#kotlin-schema-export))
 
 - **`examples/swiftui-reader`: a SwiftUI app on generated Swift models and a
   `/api/sync` mirror, with `:group` rows, Portable Text and focal-point crops.**
-  ([#2124](https://github.com/The-Verscienta/kiln_cms/pull/2124) · [long form](docs/changelog/unreleased.md#swiftui-reader))
+  ([#2124](https://github.com/The-Verscienta/kiln_cms/pull/2124) · [long form](docs/changelog/v1.7.0.md#swiftui-reader))
 
 - **Sections in the Custom fields panel: a field's `section` files it under a
   collapsible heading; only sections already holding values start open.**
-  ([#2116](https://github.com/The-Verscienta/kiln_cms/pull/2116) · [long form](docs/changelog/unreleased.md#field-sections))
+  ([#2116](https://github.com/The-Verscienta/kiln_cms/pull/2116) · [long form](docs/changelog/v1.7.0.md#field-sections))
 
 - **`:select` options can carry labels (`option_labels`): editors see
   "Transforming phlegm" while `transforming_phlegm` stays the stored value.**
-  ([#2107](https://github.com/The-Verscienta/kiln_cms/pull/2107) · [long form](docs/changelog/unreleased.md#option-labels))
+  ([#2107](https://github.com/The-Verscienta/kiln_cms/pull/2107) · [long form](docs/changelog/v1.7.0.md#option-labels))
 
 - **A `:string` field can hold a list of phrases: one input per item, pasted
   lines split into items, and a `names_record` list names the record by each.**
-  ([#2101](https://github.com/The-Verscienta/kiln_cms/pull/2101) · [long form](docs/changelog/unreleased.md#string-lists))
+  ([#2101](https://github.com/The-Verscienta/kiln_cms/pull/2101) · [long form](docs/changelog/v1.7.0.md#string-lists))
 
 - **A `:select` field can hold several terms, in a tag picker; `allow_custom`
   opens its vocabulary. `mix kiln.fields.convert` moves JSON-string lists in.**
-  ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099) · [long form](docs/changelog/unreleased.md#multiple-select))
+  ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099) · [long form](docs/changelog/v1.7.0.md#multiple-select))
 
 - **`:text` custom fields get the TipTap editor (bold, italic, links, lists),
   sanitized on write; `format: :plain` keeps the textarea.**
-  ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099) · [long form](docs/changelog/unreleased.md#rich-text-fields))
+  ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099) · [long form](docs/changelog/v1.7.0.md#rich-text-fields))
 
 - **A rich `:text` custom field can also be delivered as Portable Text (`custom_fields_portable`).**
-  ([#2103](https://github.com/The-Verscienta/kiln_cms/pull/2103) · [long form](docs/changelog/unreleased.md#rich-text-fields-as-portable-text))
+  ([#2103](https://github.com/The-Verscienta/kiln_cms/pull/2103) · [long form](docs/changelog/v1.7.0.md#rich-text-fields-as-portable-text))
 
 - **Field localization can share tags and related content: `localization: [shared: [:tags, :related]]`
   copies the tag set, and links each related target's same-locale variant along the fallback chain.**
-  ([#2131](https://github.com/The-Verscienta/kiln_cms/pull/2131) · [long form](docs/changelog/unreleased.md#shared-tags-and-related))
+  ([#2131](https://github.com/The-Verscienta/kiln_cms/pull/2131) · [long form](docs/changelog/v1.7.0.md#shared-tags-and-related))
 
 ### Changed
 
 - **Shared and fallback block fields work inside `columns`: a nested block is copied,
   filled, refused and shown in the editor by its id, as a top-level block is.**
-  ([#2129](https://github.com/The-Verscienta/kiln_cms/pull/2129) · [long form](docs/changelog/unreleased.md#field-localization-nested-blocks))
+  ([#2129](https://github.com/The-Verscienta/kiln_cms/pull/2129) · [long form](docs/changelog/v1.7.0.md#field-localization-nested-blocks))
 
 - **Generated Swift and Kotlin models keep Portable Text's text:
   `#/$defs/portable_text_block` now declares `style`, `listItem`, `level`,
   `children` and `markDefs`, all optional, the node still open.**
-  ([#2126](https://github.com/The-Verscienta/kiln_cms/pull/2126) · [long form](docs/changelog/unreleased.md#portable-text-node-keys))
+  ([#2126](https://github.com/The-Verscienta/kiln_cms/pull/2126) · [long form](docs/changelog/v1.7.0.md#portable-text-node-keys))
 
 - **Whether a path alias was derived is recorded when it is written, so a move
   rewrites a stale derived path beneath it instead of mistaking it for a pinned one.**
-  ([#2118](https://github.com/The-Verscienta/kiln_cms/pull/2118) · [long form](docs/changelog/unreleased.md#alias-derivation-recorded))
+  ([#2118](https://github.com/The-Verscienta/kiln_cms/pull/2118) · [long form](docs/changelog/v1.7.0.md#alias-derivation-recorded))
 
 - **JSON:API `/by-slug/:slug` and GraphQL `*BySlug` no longer require `locale`:
-  left out, the walk starts at the site's default locale, as the delivery API did.**
-  ([#2115](https://github.com/The-Verscienta/kiln_cms/pull/2115))
+  left out, the walk starts at the site's default locale, as the delivery API
+  did.**
+  ([#2115](https://github.com/The-Verscienta/kiln_cms/issues/2115))
 
 - **Moving a section in the content tree reads only its subtree (recursive CTE),
   not the whole type: a 10,000-document move peaks at 27 MB, not 180 MB.**
-  ([#2117](https://github.com/The-Verscienta/kiln_cms/pull/2117) · [benchmark](docs/benchmarks.md#content-tree-moving-a-large-subtree))
+  ([#2117](https://github.com/The-Verscienta/kiln_cms/issues/2117) · [long form](docs/changelog/v1.7.0.md#moving-a-section-in-the-content-tree-reads-only-its-subtree-recursive-cte-not))
 
-- **A bare `GET /api` redirects (302) to `/developers`, the API summary,
-  instead of answering 404; every `/api/*` route is unchanged.**
-  ([#2114](https://github.com/The-Verscienta/kiln_cms/pull/2114))
+- **A bare `GET /api` redirects (302) to `/developers`, the API summary, instead
+  of answering 404; every `/api/*` route is unchanged.**
+  ([#2114](https://github.com/The-Verscienta/kiln_cms/issues/2114))
 
 - **The schema export states the media snapshot once, as `$defs.media_snapshot`;
   nullable uses are `anyOf: [$ref, null]`, so generated clients get one type.**
-  ([#2106](https://github.com/The-Verscienta/kiln_cms/pull/2106) · [long form](docs/changelog/unreleased.md#media-snapshot-def))
+  ([#2106](https://github.com/The-Verscienta/kiln_cms/pull/2106) · [long form](docs/changelog/v1.7.0.md#media-snapshot-def))
 
 - **ash_graphql 1.13.0 defaults an omitted `offset` to `0`, replacing Kiln's
   #1883 workaround and fixing offset-paged relationship lists too.**
-  ([ash_graphql#480](https://github.com/ash-project/ash_graphql/issues/480))
+  ([#1883](https://github.com/The-Verscienta/kiln_cms/issues/1883) · [long form](docs/changelog/v1.7.0.md#ashgraphql-1130-defaults-an-omitted-offset-to-0-replacing-kilns-1883-workaround))
 
 ### Fixed
 
 - **The content editor no longer crashes on a fallback custom field that holds a
   value, and an empty one shows the value it inherits as its placeholder.**
-  ([#2130](https://github.com/The-Verscienta/kiln_cms/pull/2130) · [long form](docs/changelog/unreleased.md#fallback-custom-field-crash))
+  ([#2130](https://github.com/The-Verscienta/kiln_cms/pull/2130) · [long form](docs/changelog/v1.7.0.md#fallback-custom-field-crash))
+
 - **A block moved in the content editor stays moved: autosave no longer puts it
-  back.** ([#2132](https://github.com/The-Verscienta/kiln_cms/issues/2132) · [long form](docs/changelog/unreleased.md#reorder-snap-back))
+  back.** ([#2132](https://github.com/The-Verscienta/kiln_cms/issues/2132) · [long form](docs/changelog/v1.7.0.md#reorder-snap-back))
+
 - **A bad `page[limit]` on `/api/json` is a 400 naming the parameter, not a
-  500.** ([long form](docs/changelog/unreleased.md#page-value-500))
+  500.** ([#2171](https://github.com/The-Verscienta/kiln_cms/pull/2171) · [long form](docs/changelog/v1.7.0.md#page-value-500))
+
 - **`/api/search` reads `?query=` as well as `?q=`; /developers now documents
-  `?q=`.** ([long form](docs/changelog/unreleased.md#search-query-alias))
+  `?q=`.** ([#2171](https://github.com/The-Verscienta/kiln_cms/pull/2171) · [long form](docs/changelog/v1.7.0.md#search-query-alias))
 
 ## [1.6.0] - 2026-10-28
 
@@ -3054,7 +3064,8 @@ that `mix kiln.update` compares against.
   one that can't be described by a changelog diff.
   ([long form](docs/changelog/v0.1.0.md#if-your-project-pins-a-sha-from-before-this-tag-your-first-update-is-the-only))
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/The-Verscienta/kiln_cms/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.4.0...v1.5.0
