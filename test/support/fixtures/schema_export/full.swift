@@ -75,15 +75,75 @@ public struct MediaSnapshot: Codable, Hashable, Sendable {
 public struct PortableTextBlock: Codable, Hashable, Sendable {
     public let key: String?
     public let type: String?
+    /// The block's inline nodes — `span`s, in order.
+    public let children: [ChildrenItem]?
+    /// The list item's nesting depth, from 1.
+    public let level: Int?
+    /// `bullet` or `number` when the block is a list item.
+    public let listItem: String?
+    /// Annotations a span's `marks` reference by `_key` (a link's `href`).
+    public let markDefs: [MarkDefsItem]?
+    /// `normal`, `h1`–`h6` or `blockquote` on a `block` node.
+    public let style: String?
 
-    public init(key: String? = nil, type: String? = nil) {
+    public init(key: String? = nil, type: String? = nil, children: [ChildrenItem]? = nil, level: Int? = nil, listItem: String? = nil, markDefs: [MarkDefsItem]? = nil, style: String? = nil) {
         self.key = key
         self.type = type
+        self.children = children
+        self.level = level
+        self.listItem = listItem
+        self.markDefs = markDefs
+        self.style = style
     }
 
     enum CodingKeys: String, CodingKey {
         case key = "_key"
         case type = "_type"
+        case children
+        case level
+        case listItem
+        case markDefs
+        case style
+    }
+
+    public struct ChildrenItem: Codable, Hashable, Sendable {
+        public let key: String?
+        public let type: String?
+        /// Decorators (`strong`, `em`, …) and `markDefs` `_key`s.
+        public let marks: [String]?
+        public let text: String?
+
+        public init(key: String? = nil, type: String? = nil, marks: [String]? = nil, text: String? = nil) {
+            self.key = key
+            self.type = type
+            self.marks = marks
+            self.text = text
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case key = "_key"
+            case type = "_type"
+            case marks
+            case text
+        }
+    }
+
+    public struct MarkDefsItem: Codable, Hashable, Sendable {
+        public let key: String?
+        public let type: String?
+        public let href: String?
+
+        public init(key: String? = nil, type: String? = nil, href: String? = nil) {
+            self.key = key
+            self.type = type
+            self.href = href
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case key = "_key"
+            case type = "_type"
+            case href
+        }
     }
 }
 
@@ -999,7 +1059,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
     public let blocks: [Block]
     /// Admin-defined custom fields (`KilnCMS.CMS.FieldDefinition`). Open: a point-in-time read (`?as_of=`) serves the values stored at that instant, which may include fields since removed from the registry.
     public let customFields: CustomFields
-    /// Plain-text renditions of the `:text` custom fields marked `deliver_plain`: the stored value with its HTML tags removed, entities decoded and whitespace collapsed. `null` where the record holds no value.
+    /// Plain-text renditions of the `:text` custom fields marked `deliver_plain`: the stored value with its HTML tags removed, entities decoded and whitespace collapsed (to one line, unless the field keeps its breaks). `null` where the record holds no value.
     public let customFieldsPlain: CustomFieldsPlain?
     public let id: String
     /// Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited.

@@ -1,20 +1,22 @@
+import KilnModels
 @testable import KilnReader
 import SwiftUI
 import XCTest
 
 final class PortableTextRendererTests: XCTestCase {
-    typealias Node = PortableTextNode
-    typealias Span = PortableTextNode.Span
+    typealias Node = PortableTextBlock
+    typealias Span = PortableTextBlock.ChildrenItem
+    typealias MarkDef = PortableTextBlock.MarkDefsItem
 
     func testMarksBecomeInlineAttributes() {
         let text = render([
-            Node(children: [
-                Span(text: "bold", marks: ["strong"]), Span(text: " "),
-                Span(text: "it", marks: ["em"]), Span(text: " "),
-                Span(text: "x()", marks: ["code"]), Span(text: " "),
-                Span(text: "gone", marks: ["strike"]), Span(text: " "),
-                Span(text: "under", marks: ["underline"]), Span(text: " "),
-                Span(text: "both", marks: ["strong", "em"]),
+            block(children: [
+                span("bold", ["strong"]), span(" "),
+                span("it", ["em"]), span(" "),
+                span("x()", ["code"]), span(" "),
+                span("gone", ["strike"]), span(" "),
+                span("under", ["underline"]), span(" "),
+                span("both", ["strong", "em"]),
             ]),
         ])
 
@@ -30,9 +32,9 @@ final class PortableTextRendererTests: XCTestCase {
 
     func testLinksComeFromMarkDefsAndABlankedHrefIsJustText() {
         let text = render([
-            Node(
-                children: [Span(text: "safe", marks: ["a"]), Span(text: " "), Span(text: "unsafe", marks: ["b"])],
-                markDefs: [.init(key: "a", href: "https://kilncms.dev"), .init(key: "b", href: "")]
+            block(
+                children: [span("safe", ["a"]), span(" "), span("unsafe", ["b"])],
+                markDefs: [link("a", "https://kilncms.dev"), link("b", "")]
             ),
         ])
 
@@ -42,9 +44,9 @@ final class PortableTextRendererTests: XCTestCase {
 
     func testHeadingsQuotesAndParagraphSpacing() {
         let text = render([
-            Node(style: "h2", children: [Span(text: "Batter")]),
-            Node(children: [Span(text: "Mix.")]),
-            Node(style: "blockquote", children: [Span(text: "Lumps are fine.")]),
+            block(style: "h2", children: [span("Batter")]),
+            block(children: [span("Mix.")]),
+            block(style: "blockquote", children: [span("Lumps are fine.")]),
         ])
 
         XCTAssertEqual(String(text.characters), "Batter\n\nMix.\n\n▍ Lumps are fine.")
@@ -57,29 +59,28 @@ final class PortableTextRendererTests: XCTestCase {
 
     func testListsAreNumberedAndIndentedByLevel() {
         let text = render([
-            Node(listItem: "number", level: 1, children: [Span(text: "One")]),
-            Node(listItem: "number", level: 1, children: [Span(text: "Two")]),
-            Node(listItem: "bullet", level: 2, children: [Span(text: "Detail")]),
-            Node(listItem: "number", level: 1, children: [Span(text: "Three")]),
-            Node(children: [Span(text: "After.")]),
-            Node(listItem: "number", level: 1, children: [Span(text: "Again")]),
+            block(listItem: "number", level: 1, children: [span("One")]),
+            block(listItem: "number", level: 1, children: [span("Two")]),
+            block(listItem: "bullet", level: 2, children: [span("Detail")]),
+            block(listItem: "number", level: 1, children: [span("Three")]),
+            block(children: [span("After.")]),
+            block(listItem: "number", level: 1, children: [span("Again")]),
         ])
 
         XCTAssertEqual(String(text.characters), "1. One\n2. Two\n    • Detail\n3. Three\n\nAfter.\n\n1. Again")
     }
 
     func testUnknownNodesAreSkipped() {
-        var image = Node(children: [Span(text: "alt")])
-        image.type = "image"
+        let image = block(type: "image", children: [span("alt")])
 
-        XCTAssertEqual(String(render([image, Node(children: [Span(text: "Kept")])]).characters), "Kept")
+        XCTAssertEqual(String(render([image, block(children: [span("Kept")])]).characters), "Kept")
         XCTAssertEqual(String(render([]).characters), "")
     }
 
     /// The real `method` field from the captured artifact.
     func testTheCapturedMethodField() throws {
         let recipe = try Recipe(data: fixture("recipe-artifact"))
-        let text = render(try XCTUnwrap(recipe.portable["method"] ?? nil))
+        let text = render(try XCTUnwrap(recipe.document.customFieldsPortable?.method))
 
         XCTAssertTrue(String(text.characters).hasPrefix("Batter\n\n1. Whisk the flour and baking powder.\n2. Beat in"))
         XCTAssertEqual(run(text, "flour")?.inlinePresentationIntent, .stronglyEmphasized)
@@ -90,6 +91,15 @@ final class PortableTextRendererTests: XCTestCase {
     // MARK: -
 
     func render(_ nodes: [Node]) -> AttributedString { PortableTextRenderer.attributedString(nodes) }
+
+    /// A `block` node as the serializer writes one.
+    func block(type: String = "block", style: String? = "normal", listItem: String? = nil, level: Int? = nil, children: [Span], markDefs: [MarkDef] = []) -> Node {
+        Node(type: type, children: children, level: level, listItem: listItem, markDefs: markDefs, style: style)
+    }
+
+    func span(_ text: String, _ marks: [String] = []) -> Span { Span(type: "span", marks: marks, text: text) }
+
+    func link(_ key: String, _ href: String) -> MarkDef { MarkDef(key: key, type: "link", href: href) }
 
     /// The attributes at the first occurrence of `string`, which must be
     /// styled as one run.

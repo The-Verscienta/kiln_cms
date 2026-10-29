@@ -129,12 +129,13 @@ publishes it again.
   restart can resume), and anything not sent is deleted when it ends. Every
   other error retries the same request: `Retry-After` when given, otherwise
   2, 4, 8 … seconds with jitter, five attempts per wake.
-- **Portable Text through its own node type.** The generated
-  `PortableTextBlock` is the schema's open node. It declares only `_type`
-  and `_key`, because Portable Text is an extensible convention, so decoding
-  through it drops the spans. The renderer decodes the same JSON into
-  `PortableTextNode`. It renders both a `rich_text` block's `body` and a
-  field's `custom_fields_portable` value, which have the same shape.
+- **Portable Text through the generated node.** `PortableTextBlock` is the
+  schema's open node, and it declares the keys a renderer reads: `style`,
+  `listItem`, `level`, `children` (spans with `text` and `marks`) and
+  `markDefs` (with `href`). The renderer takes `[PortableTextBlock]`
+  straight from the decoded document, for a `rich_text` block's `body` and
+  a field's `custom_fields_portable` value alike, which have the same shape.
+  A node of another `_type` decodes with those keys `nil` and is skipped.
 - **`?fields=` for the featured card, sync for the list.** The list is the
   mirror, and pull-to-refresh is one sync delta, not one request per row. The
   featured card at the top is the widget case `?fields=` exists for. It reads

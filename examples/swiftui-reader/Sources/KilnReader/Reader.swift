@@ -5,18 +5,11 @@ import Observation
 /// A mirrored recipe, decoded with the generated model.
 public struct Recipe: Identifiable, Hashable, Sendable {
     public let document: RecipeDocument
-    /// `custom_fields_portable`, read with the renderer's node type.
-    public let portable: [String: [PortableTextNode]?]
-    /// Each block's `body`, by position in `document.blocks` (`nil` for a
-    /// block without one), read the same way.
-    public let bodies: [[PortableTextNode]?]
 
     public var id: String { document.id }
 
-    public init(document: RecipeDocument, portable: [String: [PortableTextNode]?] = [:], bodies: [[PortableTextNode]?] = []) {
+    public init(document: RecipeDocument) {
         self.document = document
-        self.portable = portable
-        self.bodies = bodies
     }
 
     public init(artifact: JSONValue) throws {
@@ -26,13 +19,6 @@ public struct Recipe: Identifiable, Hashable, Sendable {
 
     public init(data: Data) throws {
         document = try JSONDecoder().decode(RecipeDocument.self, from: data)
-        portable = try JSONDecoder().decode(PortableFields.self, from: data).fields
-        bodies = try JSONDecoder().decode(BlockBodies.self, from: data).blocks.map(\.body)
-    }
-
-    private struct BlockBodies: Decodable {
-        struct Body: Decodable { let body: [PortableTextNode]? }
-        let blocks: [Body]
     }
 }
 

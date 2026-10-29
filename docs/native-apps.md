@@ -255,11 +255,11 @@ adds a sibling map beside `custom_fields`, which never changes:
 - Render it with the same code that renders a `rich_text` block's `body`. In
   `GET /api/schema` each value is the type `body` has, an array of
   `#/$defs/portable_text_block`, so generated models share one type. That
-  definition is an open node that declares only `_type` and `_key`, so the
-  Swift and Kotlin models drop `children`, `style` and `markDefs` on decode.
-  Decode the Portable Text keys with a small node type of your own
-  ([the SwiftUI example](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/swiftui-reader/Sources/KilnReader/PortableText.swift)
-  has one, with an `AttributedString` renderer).
+  definition declares the standard keys (`style`, `listItem`, `level`,
+  `children` spans with `text` and `marks`, `markDefs` with `href`), all
+  optional and the node still open, so a Swift or Kotlin model decodes the
+  text itself. A node of a `_type` you don't render (an extension, a
+  hand-written node) decodes with those keys `nil`: skip it.
 - A link with an unsafe scheme keeps its text, but its `href` is `""`. An
   `<img>` inside the prose is dropped, as in a block's body (images are their
   own block in Kiln). The HTML in `custom_fields` is always the full value.
@@ -368,8 +368,10 @@ package. What it contains:
 What Swift can't state is dropped, as in the TypeScript emitter. A `uuid` or
 `date-time` is a `String`: pick a date strategy where you decode. Numeric
 bounds and `const` pins are dropped. Unknown keys on an open object are
-ignored rather than kept. That includes the Portable Text node
-(`PortableTextBlock`), which keeps only `type` and `key`. See
+ignored rather than kept. The Portable Text node (`PortableTextBlock`) keeps
+`style`, `listItem`, `level`, `children` (`PortableTextBlock.ChildrenItem`:
+`text`, `marks`) and `markDefs` (`PortableTextBlock.MarkDefsItem`: `href`),
+which is all a native renderer needs. See
 [Rich text without a web view](#rich-text-without-a-web-view).
 
 [`examples/swiftui-reader`](https://github.com/The-Verscienta/kiln_cms/tree/main/examples/swiftui-reader) checks in

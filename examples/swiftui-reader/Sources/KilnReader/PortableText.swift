@@ -1,96 +1,6 @@
 import Foundation
+import KilnModels
 import SwiftUI
-
-/// One Portable Text node, with the keys a renderer reads.
-///
-/// The generated `PortableTextBlock` is the schema's open node: it declares
-/// only `_type` and `_key`, because Portable Text is an extensible
-/// convention, so it decodes without `children`, `style` or `markDefs`.
-/// The renderer needs those, so it decodes the same JSON into this type.
-public struct PortableTextNode: Decodable, Hashable, Sendable {
-    public var type: String
-    public var key: String?
-    public var style: String?
-    public var listItem: String?
-    public var level: Int?
-    public var children: [Span]
-    public var markDefs: [MarkDef]
-
-    public struct Span: Decodable, Hashable, Sendable {
-        public var type: String
-        public var text: String
-        public var marks: [String]
-
-        enum CodingKeys: String, CodingKey { case type = "_type", text, marks }
-
-        public init(text: String, marks: [String] = []) {
-            self.type = "span"
-            self.text = text
-            self.marks = marks
-        }
-
-        public init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            type = try c.decodeIfPresent(String.self, forKey: .type) ?? "span"
-            text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
-            marks = try c.decodeIfPresent([String].self, forKey: .marks) ?? []
-        }
-    }
-
-    public struct MarkDef: Decodable, Hashable, Sendable {
-        public var key: String
-        public var type: String
-        public var href: String?
-
-        enum CodingKeys: String, CodingKey { case key = "_key", type = "_type", href }
-
-        public init(key: String, type: String = "link", href: String?) {
-            self.key = key
-            self.type = type
-            self.href = href
-        }
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case type = "_type", key = "_key", style, listItem, level, children, markDefs
-    }
-
-    public init(style: String? = "normal", listItem: String? = nil, level: Int? = nil, children: [Span], markDefs: [MarkDef] = []) {
-        self.type = "block"
-        self.style = style
-        self.listItem = listItem
-        self.level = level
-        self.children = children
-        self.markDefs = markDefs
-    }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        type = try c.decodeIfPresent(String.self, forKey: .type) ?? ""
-        key = try c.decodeIfPresent(String.self, forKey: .key)
-        style = try c.decodeIfPresent(String.self, forKey: .style)
-        listItem = try c.decodeIfPresent(String.self, forKey: .listItem)
-        level = try c.decodeIfPresent(Int.self, forKey: .level)
-        // An unknown node type has neither; it is skipped when rendered.
-        children = (try? c.decodeIfPresent([Span].self, forKey: .children)) ?? []
-        markDefs = (try? c.decodeIfPresent([MarkDef].self, forKey: .markDefs)) ?? []
-    }
-}
-
-/// The `custom_fields_portable` map of an artifact, read with the renderer's
-/// node type. `nil` for a field means the record holds no value.
-public struct PortableFields: Decodable, Sendable {
-    public let fields: [String: [PortableTextNode]?]
-
-    enum CodingKeys: String, CodingKey { case fields = "custom_fields_portable" }
-
-    public init(from decoder: Decoder) throws {
-        fields = try decoder.container(keyedBy: CodingKeys.self)
-            .decodeIfPresent([String: [PortableTextNode]?].self, forKey: .fields) ?? [:]
-    }
-
-    public subscript(name: String) -> [PortableTextNode]? { fields[name] ?? nil }
-}
 
 /// Portable Text to an `AttributedString` that `Text` renders natively: no
 /// web view, no HTML parser.
@@ -102,8 +12,12 @@ public struct PortableFields: Decodable, Sendable {
 /// - List items are prefixed with a bullet or their number, indented by
 ///   `level`; numbering restarts after any non-list block.
 /// - A node whose `_type` isn't `block` is skipped, as the convention asks.
+///
+/// It reads the generated `PortableTextBlock`, which declares every key used
+/// here, so a `rich_text` block's `body` and a `custom_fields_portable` value
+/// render straight from the decoded document.
 public enum PortableTextRenderer {
-    public static func attributedString(_ nodes: [PortableTextNode]) -> AttributedString {
+    public static func attributedString(_ nodes: [PortableTextBlock]) -> AttributedString {
         var output = AttributedString()
         var counters: [Int: Int] = [:]
         var previousWasListItem = false
@@ -135,8 +49,8 @@ public enum PortableTextRenderer {
             previousWasListItem = node.listItem != nil
 
             var paragraph = AttributedString(prefix)
-            for span in node.children where span.type == "span" {
-                paragraph += styled(span, markDefs: node.markDefs)
+            for span in node.children ?? [] where (span.type ?? "span") == "span" {
+                paragraph += styled(span, markDefs: node.markDefs ?? [])
             }
 
             identity += 1
@@ -159,11 +73,11 @@ public enum PortableTextRenderer {
         return output
     }
 
-    static func styled(_ span: PortableTextNode.Span, markDefs: [PortableTextNode.MarkDef]) -> AttributedString {
-        var text = AttributedString(span.text)
+    static func styled(_ span: PortableTextBlock.ChildrenItem, markDefs: [PortableTextBlock.MarkDefsItem]) -> AttributedString {
+        var text = AttributedString(span.text ?? "")
         var intent: InlinePresentationIntent = []
 
-        for mark in span.marks {
+        for mark in span.marks ?? [] {
             switch mark {
             case "strong": intent.insert(.stronglyEmphasized)
             case "em": intent.insert(.emphasized)

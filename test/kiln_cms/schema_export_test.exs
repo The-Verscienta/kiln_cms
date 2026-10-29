@@ -321,7 +321,24 @@ defmodule KilnCMS.SchemaExportTest do
                "$ref" => "#/$defs/portable_text_block"
              }
 
-      assert Map.has_key?(schema["$defs"], "portable_text_block")
+      # Open, nothing required (a headless write may store any node), but the
+      # standard keys are declared: a Swift/Kotlin model decodes declared
+      # properties only, and `_type`/`_key` alone dropped every span.
+      node = schema["$defs"]["portable_text_block"]
+      assert node["additionalProperties"] == true
+      refute Map.has_key?(node, "required")
+
+      assert Enum.sort(Map.keys(node["properties"])) ==
+               ~w(_key _type children level listItem markDefs style)
+
+      assert node["properties"]["children"]["items"]["properties"]["text"] == %{
+               "type" => "string"
+             }
+
+      assert node["properties"]["markDefs"]["items"]["properties"]["href"] == %{
+               "type" => "string"
+             }
+
       refute "custom_fields_portable" in page["required"]
       refute Map.has_key?(schema["$defs"]["content_post"]["properties"], "custom_fields_portable")
 

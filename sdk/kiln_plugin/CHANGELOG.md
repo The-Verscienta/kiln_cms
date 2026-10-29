@@ -13,6 +13,17 @@ read for a plugin contract:
 Releases are tagged `kiln_plugin-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+### Changed
+
+- **`Kiln.Block.JsonSchema`'s `portable_text_block` definition declares the
+  standard Portable Text keys (kiln_cms#2126).** `style`, `listItem`, `level`,
+  `children` (spans with `text` and `marks`) and `markDefs` (with `href`),
+  all optional, the definition still open, so a model generated from the
+  schema keeps a block's text. Additive: a value that validated before still
+  validates, and no callback or DSL option changed.
+
 ## 1.3.0
 
 ### Added
