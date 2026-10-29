@@ -155,9 +155,10 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
   # autosave submits — only carries touched keys: a move made on an untouched
   # form submitted no `blocks` at all, the row kept its old order, and the
   # form rebuilt from that row snapped the blocks back (#2132).
-  def sort_blocks(%Phoenix.HTML.Form{} = form, order) do
-    sorted = AshPhoenix.Form.sort_forms(form, [:blocks], order)
-    %{sorted | source: AshPhoenix.Form.touch(sorted.source, :blocks)}
+  # Unwrapped by hand, as `sort_forms/3` does internally: its spec admits only
+  # an `AshPhoenix.Form`, and Dialyzer holds a `Phoenix.HTML.Form` to that.
+  def sort_blocks(%Phoenix.HTML.Form{source: %AshPhoenix.Form{} = source} = form, order) do
+    source |> sort_blocks(order) |> Phoenix.HTML.FormData.to_form(form.options)
   end
 
   def sort_blocks(%AshPhoenix.Form{} = form, order) do
