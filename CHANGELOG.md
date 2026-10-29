@@ -161,6 +161,8 @@ Every summary line below that was shortened links to its own entry there.
   500.** ([long form](docs/changelog/unreleased.md#page-value-500))
 - **`/api/search` reads `?query=` as well as `?q=`; /developers now documents
   `?q=`.** ([long form](docs/changelog/unreleased.md#search-query-alias))
+- **Typing in an inline "Insert block here" filter no longer loses the rest of
+  the word when an autosave lands.** ([#2133](https://github.com/The-Verscienta/kiln_cms/issues/2133) · [long form](docs/changelog/unreleased.md#inserter-filter-autosave))
 
 ## [1.6.0] - 2026-10-28
 

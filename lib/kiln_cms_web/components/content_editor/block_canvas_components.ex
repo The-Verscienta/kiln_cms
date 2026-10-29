@@ -46,7 +46,22 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
   # every option so the same menu can append or insert at a gap; only the main
   # instance owns the global "/" shortcut (`global_key`) so inline copies don't
   # all fire at once.
+  #
+  # The hook owns every attribute it toggles: the menu's and each filtered
+  # option's `hidden`, `aria-expanded`, `aria-selected` and
+  # `aria-activedescendant`. The `phx-mounted` `JS.ignore_attributes/1` on
+  # each one tells LiveView to leave them be. Without it, a patch put back the
+  # server's closed menu (#2133): the inline copies sit inside each block card,
+  # which the autosave's form rebuild re-renders, so an autosave landing while
+  # the author typed in the filter hid the menu under them. The hidden input
+  # lost focus, the patch then reset its value, and the rest of the word went
+  # to <body>.
   def block_inserter(assigns) do
+    assigns =
+      assigns
+      |> assign(:keep_hidden, JS.ignore_attributes(["hidden"]))
+      |> assign(:keep_expanded, JS.ignore_attributes(["aria-expanded"]))
+
     ~H"""
     <div
       id={@id}
@@ -60,6 +75,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
         data-inserter-trigger
         aria-haspopup="listbox"
         aria-expanded="false"
+        phx-mounted={@keep_expanded}
         aria-controls={"#{@id}-list"}
         class="btn btn-sm btn-default"
       >
@@ -73,6 +89,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
         data-inserter-trigger
         aria-haspopup="listbox"
         aria-expanded="false"
+        phx-mounted={@keep_expanded}
         aria-controls={"#{@id}-list"}
         aria-label={gettext("Insert block here")}
         class="group/ins flex w-full items-center gap-2 py-1 text-base-content/30 hover:text-base-content/70"
@@ -87,6 +104,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
       <div
         data-inserter-menu
         hidden
+        phx-mounted={@keep_hidden}
         class="absolute left-0 z-20 mt-1 w-72 rounded-lg border border-base-content/15 bg-base-100 p-1 shadow-lg"
       >
         <div class="p-1">
@@ -97,6 +115,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
             aria-autocomplete="list"
             aria-expanded="true"
             aria-controls={"#{@id}-list"}
+            phx-mounted={JS.ignore_attributes(["aria-activedescendant"])}
             placeholder={gettext("Filter blocks…")}
             class="field-input px-2 py-1 text-sm"
           />
@@ -109,12 +128,19 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           aria-label={gettext("Insert block")}
           class="max-h-72 overflow-y-auto"
         >
-          <li :for={bt <- @block_types} role="presentation" data-inserter-option data-label={bt.label}>
+          <li
+            :for={bt <- @block_types}
+            role="presentation"
+            data-inserter-option
+            data-label={bt.label}
+            phx-mounted={@keep_hidden}
+          >
             <button
               type="button"
               id={"#{@id}-item-#{bt.type}"}
               role="option"
               aria-selected="false"
+              phx-mounted={JS.ignore_attributes(["aria-selected"])}
               tabindex="-1"
               phx-click="add_block"
               phx-value-type={bt.type}
@@ -131,7 +157,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           </li>
         </ul>
 
-        <p data-inserter-empty hidden class="px-3 py-2 text-sm opacity-60">
+        <p data-inserter-empty hidden phx-mounted={@keep_hidden} class="px-3 py-2 text-sm opacity-60">
           {gettext("No blocks match.")}
         </p>
       </div>
