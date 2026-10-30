@@ -148,8 +148,14 @@ defmodule KilnCMS.I18n.SharedRelationshipsTest do
       # Versioned and locked, like any other shared value.
       assert length(versions(fr)) == before + 1
 
-      assert List.last(Enum.sort_by(versions(fr), & &1.version_inserted_at)).version_action_name ==
-               :sync_shared_fields
+      # Chronological, not term order: `sort_by/2` on a timestamp struct compares
+      # its fields in map order and can put an earlier version last.
+      latest =
+        Enum.max_by(versions(fr), & &1.version_inserted_at, fn a, b ->
+          a.__struct__.compare(a, b) != :lt
+        end)
+
+      assert latest.version_action_name == :sync_shared_fields
 
       assert reload(fr).lock_version == lock + 1
 
