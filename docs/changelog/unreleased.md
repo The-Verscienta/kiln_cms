@@ -439,3 +439,16 @@ carries the reasoning.
   documented `?query=`, and the controller read only `q`, so a client
   following the page could not tell a wrong parameter name from no matches.
   The page now says `?q=`, and the endpoint reads `query` when `q` is absent.
+
+<a id="inserter-filter-autosave"></a>
+
+- **An autosave closed the inline block inserter under the author (#2133).**
+  The "Insert block here" menus between blocks render inside each block card,
+  and the autosave's form rebuild re-renders the cards. Its patch put back the
+  server-rendered `hidden` on a menu the `BlockInserter` hook had opened: the
+  filter box lost focus, LiveView reset its value, and the rest of the word
+  went nowhere. A usability round reported it as dropped keystrokes. Every
+  attribute the hook toggles now carries `phx-mounted={JS.ignore_attributes(…)}`,
+  so patches leave the menu's open state and the filter's results alone.
+  `e2e/tests/typing_survives_patches.spec.js` types across a real autosave
+  patch, and across a patch of the media drawer around the alt-text field.
