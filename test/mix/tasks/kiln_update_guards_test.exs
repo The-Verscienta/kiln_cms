@@ -149,6 +149,22 @@ defmodule Mix.Tasks.Kiln.UpdateGuardsTest do
       assert head(clone) == before
     end
 
+    # v1.6.0's commit also carries kiln_plugin-v1.3.0, and `git describe
+    # --exact-match` named only the SDK tag: a pin on a release read as untagged,
+    # and every 1.6.0 site was refused the update to 1.7.0 without --allow-major.
+    test "a pin that also carries an SDK tag is still read as its release",
+         %{clone: clone} do
+      checkout!(clone, "v0.2.0")
+
+      for tag <- ["kiln_plugin-v1.3.0", "client-js-v0.9.0"] do
+        git!(clone, ["tag", "-a", tag, "-m", tag])
+      end
+
+      run(clone, ["--check", "--to", "v1.0.0"])
+
+      assert output() =~ "v0.2.0 ("
+    end
+
     test "--exit-code exits 1 when an update is available", %{clone: clone} do
       checkout!(clone, "v0.1.0")
 

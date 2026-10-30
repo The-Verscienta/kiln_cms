@@ -37,7 +37,11 @@ needs nothing from Hex. Two things tie the two together:
 
 - **A core release that changed `sdk/kiln_plugin` publishes the package too**:
   bump its `@version` and CHANGELOG in the same release PR, and tag
-  `kiln_plugin-vX.Y.Z` after the core tag. Third-party plugins resolve the
+  `kiln_plugin-vX.Y.Z` after the core tag — **on a later commit, never the
+  core release commit itself**. A pinned site's `mix kiln.update` reads the
+  pin's version from the tags on its commit, and before 1.7.0 it read only
+  the one `git describe --exact-match` names: `kiln_plugin-v1.3.0` on v1.6.0's
+  commit made every 1.6.0 pin read as untagged. Third-party plugins resolve the
   contract from Hex, and `mix kiln.plugins.doctor` checks their requirement
   against the bundled version, so a core that bundles an unpublished
   `kiln_plugin` version can't be targeted by anyone else.

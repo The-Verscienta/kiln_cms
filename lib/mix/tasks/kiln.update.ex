@@ -300,10 +300,22 @@ defmodule Mix.Tasks.Kiln.Update do
   defp current_pin(repo) do
     sha = git!(repo.root, ~w[rev-parse HEAD])
 
+    # Every tag on the pin, not `git describe --exact-match`, which names only
+    # one: v1.6.0's commit also carries `kiln_plugin-v1.3.0`, describe picked
+    # the SDK tag, and a pin on a release read as "not on a release tag"
+    # (refused without --allow-major). Only core release tags parse here; the
+    # SDK and client tags (`kiln_plugin-v…`, `client-js-v…`) do not.
     version =
-      case git(repo.root, ["describe", "--tags", "--exact-match", sha]) do
-        {:ok, tag} -> parse_version(tag)
-        {:error, _} -> nil
+      case git(repo.root, ["tag", "--points-at", sha]) do
+        {:ok, tags} ->
+          tags
+          |> String.split("\n", trim: true)
+          |> Enum.map(&parse_version/1)
+          |> Enum.reject(&is_nil/1)
+          |> Enum.max(Version, fn -> nil end)
+
+        {:error, _} ->
+          nil
       end
 
     %{sha: sha, tag: version && "v#{version}", version: version}
