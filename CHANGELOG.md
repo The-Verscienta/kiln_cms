@@ -159,6 +159,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Typing in an inline "Insert block here" filter no longer loses the rest of
+  the word when an autosave lands.** ([#2173](https://github.com/The-Verscienta/kiln_cms/pull/2173) · [long form](docs/changelog/v1.7.0.md#inserter-filter-autosave))
+
 - **`mix kiln.update` reads a pin's release tag even when an SDK tag shares its
   commit; v1.6.0 also carries `kiln_plugin-v1.3.0`, and read as untagged.**
   ([#2125](https://github.com/The-Verscienta/kiln_cms/pull/2125))
