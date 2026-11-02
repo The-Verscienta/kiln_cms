@@ -111,8 +111,19 @@ defmodule KilnClient.Error do
   @doc """
   Details grouped by attribute name (`/data/attributes/slug` → `"slug"`):
   `%{"slug" => ["has already been taken"]}`.
+
+  A refused form submission (`KilnClient.submit_form/3`) answers
+  `%{"ok" => false, "errors" => %{"email" => "is required"}}` rather than
+  the JSON:API error list, and reads the same way:
+  `%{"email" => ["is required"]}`.
   """
   @spec field_errors(t()) :: %{optional(String.t()) => [String.t()]}
+  def field_errors(%__MODULE__{body: %{"errors" => %{} = by_field}}) do
+    Map.new(by_field, fn {field, messages} ->
+      {to_string(field), messages |> List.wrap() |> Enum.map(&to_string/1)}
+    end)
+  end
+
   def field_errors(%__MODULE__{errors: errors}) do
     for %{"source" => %{"pointer" => pointer}} = error when is_binary(pointer) <- errors,
         reduce: %{} do
