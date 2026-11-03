@@ -58,13 +58,13 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The upgrade migration rewrites `search_vector` on every content row holding
   Chinese characters, adding their bigrams. Nothing to run, overlays included.**
-  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#han-bigrams-upgrade))
+  ([#2179](https://github.com/The-Verscienta/kiln_cms/pull/2179) · [long form](docs/changelog/unreleased.md#han-bigrams-upgrade))
 
 ### Added
 
 - **Chinese is searchable inside longer text: `吴茱萸` finds `本方以吴茱萸为君药`, and a query
   that is exactly a record's Chinese name ranks it first (`:han` leg).**
-  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#han-bigrams))
+  ([#2179](https://github.com/The-Verscienta/kiln_cms/pull/2179) · [long form](docs/changelog/unreleased.md#han-bigrams))
 
 ## [1.7.0] - 2026-10-29
 
