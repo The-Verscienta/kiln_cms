@@ -600,6 +600,12 @@ The metric is recorded as missed, not as met.
   reconnect elsewhere; Oban gives running jobs 15 s
   (`shutdown_grace_period`). None of it is configured by Kiln, so these are
   the libraries' defaults.
+- **A probe that waits for search** (#2166). `/live`, `/up` and `/ready`
+  answer 503 until `KilnCMS.Search.Warmup` has run one search through the
+  embedding and reranker servings, so a platform that swaps on "healthy"
+  does not move traffic onto a node whose first searches would stall. And
+  each search answers within `query_budget`, so one that arrives early anyway
+  is bounded. Measured below, under [Search across a restart](#search-across-a-restart).
 - **Multi-node correctness.** Cache purges reach every node (#1138),
   rate-limited auth buckets are counted cluster-wide, and Oban coordinates
   through Postgres. Two releases can run side by side.
@@ -646,6 +652,83 @@ is deployed.
 The smallest honest next step: run the demonstration above against two
 consecutive release images, on Coolify or with Docker Compose and Traefik,
 and record the error count here.
+
+### Search across a restart
+
+Measured on 2026-11-02 for #2166, after one production search took 27.6 s
+around a deploy. One node is started cold, with semantic search and
+reranking on the local Bumblebee servings (`KILN_ML=1`, `bge-small-en-v1.5`,
+`bge-reranker-base`). From the moment the process is spawned, four clients
+search `/api/search` in a loop and a fifth polls `/live` every 200 ms. The
+corpus is 100 pages and 300 posts from `scripts/benchmarks/seed.exs`. "Before"
+is the same build with the latch open from the start and `query_budget:
+:infinity`, which is how a node behaved before #2166. "After" is the default.
+Both ran back to back on a laptop with a load average of 9–17 from other
+work (18 cores), so read the numbers as orders of magnitude.
+
+| | Before | After |
+|---|---|---|
+| `/live` 503 window | none (200 as soon as HTTP was up) | 13.9 s, the warm-up (13.5 s in the log) |
+| Slowest search, from the client | 10.7 s | 3.2 s |
+| Steady state, p50 / p95, from the client | 8.3 s / 8.7 s | 1.9 s / 2.4 s |
+| Searches answered in the run | 15 | 94 |
+| Answered with `503` or `500` | 0 | 0 |
+| Flagged `partial` | 0 | all 94 |
+
+Every "after" search was partial. On this host one query embedding costs
+about 315 ms idle, because the input is padded to the compiled batch shape
+(`KilnCMS.Search.Serving`), and four clients plus a cross-encoder do not fit
+in 1.5 s. So the semantic legs or the reranker were cut, and the response
+said so. Kiln's own timing (`Server-Timing` `total`, and Phoenix's `Sent 200
+in`) was 1.50–1.76 s on every request. The gap up to the client's 2–3 s is
+the host: an empty `GET /live` took 0.2–0.9 s from the client under the
+same load, against 0.09 s idle.
+
+A first "after" run, before budgeted calls were capped by serving slots,
+read 1.5 s inside Kiln but up to 10.8 s at the client. A rerank the budget
+abandons still runs in the serving, and the backlog took the CPU. That is
+why budgeted embeddings are capped at one batch and reranks at
+`rerank_slots`.
+
+What this does not show: a swap between two containers behind a proxy, which
+is the demonstration [above](#what-is-missing) still asks for. It shows the
+half of it that belongs to one node. The node holds its health check at 503
+until it can search at speed, and while it holds, searches that reach it
+anyway are answered within the budget rather than queued. The roughly
+fifteen minutes of origin `503` that Verscienta measured around the same
+deploy are not reproduced here. Nothing in this run answered `503`, and that
+window is still unexplained.
+
+**The default path costs nothing.** With semantic search off, as a default
+install runs, the budget is a deadline that never fires.
+`scripts/benchmarks/api_latency.sh` with `BENCH_ENDPOINTS=search,search_common`
+and `BENCH_CONCURRENCY=1,10`, run back to back on the #2166 branch and on
+its base, had server p95s within 2 ms of each other in every row (load
+average 5–9). Branch first, then base, in milliseconds:
+
+| Endpoint | Cache | C | Branch p95 | Base p95 |
+|---|---|---|---|---|
+| search | cold | 1 | 17.1 | 17.3 |
+| search | warm | 1 | 16.8 | 16.3 |
+| search | cold | 10 | 19.2 | 18.9 |
+| search | warm | 10 | 50.3 | 48.6 |
+| search_common | cold | 1 | 23.7 | 23.8 |
+| search_common | warm | 1 | 20.0 | 20.2 |
+| search_common | cold | 10 | 64.5 | 64.4 |
+| search_common | warm | 10 | 73.7 | 72.6 |
+
+So the target row stands as it was: a rare word meets 50 ms from 10 clients
+(just), and a common word does not, on either side.
+
+Rerunning: `scripts/benchmarks/search_restart_boot.exs` boots the node and
+says how to seed its database, and `scripts/benchmarks/search_restart.py`
+drives it:
+
+```bash
+KILN_ML=1 MIX_ENV=dev mix compile
+python3 -I scripts/benchmarks/search_restart.py before 30 4 "$PWD"
+python3 -I scripts/benchmarks/search_restart.py after 30 4 "$PWD"
+```
 
 ## Editor page-building and beta feedback
 

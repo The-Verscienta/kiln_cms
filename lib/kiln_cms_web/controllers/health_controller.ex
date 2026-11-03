@@ -16,6 +16,12 @@ defmodule KilnCMSWeb.HealthController do
       200 when the database is reachable, else 503, with the queue-depth payload
       either way.
 
+  Both also answer 503 until search has warmed up after boot
+  (`KilnCMS.Search.Warmup`, #2166) — `/ready` says so as `"search":
+  "warming"` — so a proxy routing on either holds traffic off a node whose
+  first searches would stall. The latch only opens, so after boot it is
+  never the reason for a 503.
+
   See `docs/observability.md` for the alert rules that consume `/ready`.
   """
   use KilnCMSWeb, :controller
@@ -23,23 +29,27 @@ defmodule KilnCMSWeb.HealthController do
   import Ecto.Query, only: [from: 2]
 
   def show(conn, _params) do
-    case check_db() do
-      :ok -> send_resp(conn, 200, "OK")
-      :error -> send_resp(conn, 503, "database unavailable")
+    cond do
+      not KilnCMS.Search.Warmup.ready?() -> send_resp(conn, 503, "warming up")
+      check_db() == :error -> send_resp(conn, 503, "database unavailable")
+      true -> send_resp(conn, 200, "OK")
     end
   end
 
   def ready(conn, _params) do
     db = check_db()
+    search = if KilnCMS.Search.Warmup.ready?(), do: :ok, else: :warming
+    ok? = db == :ok and search == :ok
 
     payload = %{
-      status: if(db == :ok, do: "ok", else: "degraded"),
+      status: if(ok?, do: "ok", else: "degraded"),
       db: to_string(db),
+      search: to_string(search),
       oban: oban_depth()
     }
 
     conn
-    |> put_status(if(db == :ok, do: :ok, else: :service_unavailable))
+    |> put_status(if(ok?, do: :ok, else: :service_unavailable))
     |> json(payload)
   end
 

@@ -222,3 +222,20 @@ would.
 | `BENCH_SUBTREES` | `100,1000,10000` | one leg per subtree size |
 | `BENCH_WORK` | a `mktemp -d` | where logs, `results.json` and `results.md` go |
 | `POOL_SIZE` | 10 | the Repo pool |
+
+# Search across a restart
+
+`search_restart.py` + `search_restart_boot.exs` (#2166): what search clients
+see while one node boots cold with semantic search and reranking on. Four
+(or N) clients search `/api/search` in a loop from the moment the process is
+spawned, and a poller reads `/live` every 200 ms. The summary gives the
+`/live` 503 window, the latency and status of the searches before and after
+the probe said ready, how many came back `partial`, and the slowest few with
+their `Server-Timing`.
+
+`before` is the old behaviour (the warm-up latch open from the start, no
+query budget). `after` is the default. It needs a `KILN_ML=1` dev build and
+the cached Hugging Face models (`BUMBLEBEE_OFFLINE=true` is set). The boot
+file says how to seed `kiln_cms_bench_restart`. Node logs go to
+`$BENCH_WORK` (default `/tmp`). A run is in
+[`docs/benchmarks.md`](../../docs/benchmarks.md#search-across-a-restart).

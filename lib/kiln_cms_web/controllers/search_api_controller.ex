@@ -87,13 +87,19 @@ defmodule KilnCMSWeb.SearchApiController do
     limit = Params.integer(params, "limit", @default_limit, 1..@max_limit)
 
     if query == "" do
-      json(conn, %{
-        query: query,
-        locale: locale,
-        results: empty_sections(),
-        suggestion: nil,
-        also_searched: []
-      })
+      json(
+        conn,
+        Map.merge(
+          %{
+            query: query,
+            locale: locale,
+            results: empty_sections(),
+            suggestion: nil,
+            also_searched: []
+          },
+          partial(%{})
+        )
+      )
     else
       search(conn, query, locale, limit, params)
     end
@@ -113,10 +119,17 @@ defmodule KilnCMSWeb.SearchApiController do
   defp search(conn, query, locale, limit, params) do
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
 
+    started = System.monotonic_time(:microsecond)
+
     case Search.unless_unavailable(fn -> {:ok, run(query, locale, limit, params, org_id)} end) do
-      {:ok, {payload, total}} ->
+      {:ok, {payload, total, timings}} ->
         Search.record_query_async(query, total, locale: locale, tenant: org_id)
-        json(conn, payload)
+        timings = timings ++ [total: System.monotonic_time(:microsecond) - started]
+
+        conn
+        |> put_resp_header("server-timing", server_timing(timings))
+        |> no_store_if_partial(payload)
+        |> json(payload)
 
       {:error, :unavailable} ->
         conn
@@ -147,8 +160,8 @@ defmodule KilnCMSWeb.SearchApiController do
     # section searched.
     also_searched = Synonyms.alternates(query, org_id)
 
-    sections =
-      Search.global(
+    report =
+      Search.global_report(
         query,
         read_opts ++
           [
@@ -163,6 +176,8 @@ defmodule KilnCMSWeb.SearchApiController do
             sections: sections(org_id)
           ]
       )
+
+    sections = report.sections
 
     # One result section per compiled content type, straight from the same
     # registry `Search.global/2` swept — a project type registered on
@@ -200,24 +215,73 @@ defmodule KilnCMSWeb.SearchApiController do
       |> Enum.map(&length/1)
       |> Enum.sum()
 
-    suggestion = if total < @suggest_below, do: Search.suggest(query, read_opts), else: nil
+    {suggest_micros, suggestion} =
+      :timer.tc(fn ->
+        if total < @suggest_below, do: Search.suggest(query, read_opts), else: nil
+      end)
 
-    payload = %{
-      query: query,
-      locale: locale,
-      results: results,
-      suggestion: suggestion,
-      also_searched: also_searched
-    }
+    payload =
+      Map.merge(
+        %{
+          query: query,
+          locale: locale,
+          results: results,
+          suggestion: suggestion,
+          also_searched: also_searched
+        },
+        partial(report.partial)
+      )
 
     # `facets=true` adds category/tag counts over the (unfiltered) match set —
     # opt-in, since it's an extra scan the common lookup doesn't need.
-    payload =
-      if params["facets"] == "true",
-        do: Map.put(payload, :facets, Search.facets(query, read_opts)),
-        else: payload
+    {facets_micros, payload} =
+      :timer.tc(fn ->
+        if params["facets"] == "true",
+          do: Map.put(payload, :facets, Search.facets(query, read_opts)),
+          else: payload
+      end)
 
-    {payload, total}
+    {payload, total, timings(report.timings, suggest_micros, facets_micros, params)}
+  end
+
+  # Whether the query budget (`KilnCMS.Search.query_budget/0`) cut the sweep
+  # short, and what it cut, per section: a leg name (as in `legs`), `rerank`
+  # for a section left in fused order, `section` for a taxonomy section that
+  # had not answered. Always present, so a client can branch on `partial`
+  # without checking for the key.
+  defp partial(cut) do
+    %{
+      partial: cut != %{},
+      incomplete: Map.new(cut, fn {section, legs} -> {section, Enum.map(legs, &to_string/1)} end)
+    }
+  end
+
+  # A cut answer is still the right answer to send, but not one to keep: a
+  # shared cache would hand it out for a minute after the slow moment passed.
+  # `KilnCMSWeb.Plugs.PublicCache` leaves a handler's own `cache-control`
+  # alone.
+  defp no_store_if_partial(conn, %{partial: true}),
+    do: put_resp_header(conn, "cache-control", "no-store")
+
+  defp no_store_if_partial(conn, _payload), do: conn
+
+  # The sweep's own timings, with its wall time as `sweep`, then what this
+  # endpoint adds. `total` (the whole handler) is appended by `search/5`.
+  defp timings(sweep, suggest_micros, facets_micros, params) do
+    {[total: sweep_total], parts} = Enum.split_with(sweep, &match?({:total, _}, &1))
+
+    parts ++
+      [sweep: sweep_total, suggest: suggest_micros] ++
+      if(params["facets"] == "true", do: [facets: facets_micros], else: [])
+  end
+
+  # `Server-Timing` (W3C): one metric per part, durations in milliseconds.
+  # Leg durations are summed over the sections, which run concurrently, so
+  # they can add up to more than `sweep`.
+  defp server_timing(timings) do
+    Enum.map_join(timings, ", ", fn {name, micros} ->
+      "#{name};dur=#{:erlang.float_to_binary(micros / 1000, decimals: 1)}"
+    end)
   end
 
   # The sections this endpoint renders. `:entries` only on a site with a live
