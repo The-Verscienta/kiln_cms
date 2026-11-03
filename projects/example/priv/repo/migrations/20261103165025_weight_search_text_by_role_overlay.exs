@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.WeightSearchTextByRole do
+defmodule KilnCMS.Repo.Migrations.WeightSearchTextByRoleOverlay do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 
