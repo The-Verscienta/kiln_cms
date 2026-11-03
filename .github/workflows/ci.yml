@@ -1308,9 +1308,13 @@ jobs:
           # it downloads AND the built `libexla.so` (keyed on toolchain + xla +
           # exla versions). Without it in the key, every run re-downloads the
           # archive and rebuilds the NIF; with it, both are free.
-          key: ml-v1-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          # v2 (2026-11-03): the ash_authentication 5.0 RC lock restored a
+          # v1 `_build_ml` from the previous lock, and the ML leg then compiled
+          # the LEAN shape (`KilnCMS.Search.ML.available?/0` false) while a
+          # cold build compiles the real one. Bump the prefix again if it recurs.
+          key: ml-v2-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
           restore-keys: |
-            ml-v1-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+            ml-v2-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
 
       - name: Install dependencies
         # local.rebar explicitly, as the strict leg does: this job has no warm
