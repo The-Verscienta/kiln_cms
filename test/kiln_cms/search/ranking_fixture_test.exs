@@ -83,6 +83,18 @@ defmodule KilnCMS.Search.RankingFixtureTest do
       semantic_max_distance: 0.8
     )
 
+    # Exact vector scans, `KilnCMS.Search.VectorScan`'s measurement mode: a
+    # gate is a measurement, and the HNSW index is approximate. Its walk
+    # also visits the dead entries every earlier test's rolled-back
+    # embeddings leave behind, so what it misses depends on which tests ran
+    # first. "yellow emperor inner classic" leads by 0.0001 only while both
+    # vector legs rank huangdi-neijing first; an HNSW miss in either put it
+    # second, on some orders of the ML job's search suite and not others.
+    # `SET LOCAL` ends with the test's sandbox transaction, and the sandbox
+    # is shared (`async: false`), so every section of the sweep reads
+    # through it.
+    KilnCMS.Repo.query!("SET LOCAL enable_indexscan = off", [])
+
     :ok
   end
 
