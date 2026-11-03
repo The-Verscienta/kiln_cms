@@ -108,7 +108,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2185](https://github.com/The-Verscienta/kiln_cms/pull/2185) · [long form](docs/changelog/unreleased.md#ash-authentication-5-assent))
 - **ash_authentication 5.0.0-rc.16 fixes EEF-CVE-2026-119215 (TOTP setup) and
   EEF-CVE-2026-118505 (`brute_force_strategy`); Kiln uses neither, so not exposed.**
-  ([long form](docs/changelog/unreleased.md#ash-authentication-rc16))
+  ([#2193](https://github.com/The-Verscienta/kiln_cms/pull/2193) · [long form](docs/changelog/unreleased.md#ash-authentication-rc16))
 
 ## [1.7.0] - 2026-10-29
 

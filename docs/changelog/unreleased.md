@@ -355,6 +355,7 @@ carries the reasoning.
   resource-wide sweep ran after the reset minted its new session and revoked
   it, so Kiln now leaves the flag off. A change or reset revokes exactly what
   it did before.
+  ([#2193](https://github.com/The-Verscienta/kiln_cms/pull/2193))
 
 <a id="compound-names"></a>
 
