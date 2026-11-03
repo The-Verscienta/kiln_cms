@@ -90,7 +90,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Fired artifacts** | `GET /api/content/:type/:slug` | Pre-rendered output per surface: `json` (default), `json_ld`, `web`, and `llm` (raw `text/markdown`). `?as_of=` reads a document as it stood on a date; `GET /api/content/:type?as_of=` lists what was published then; `?fields=` trims the `json` body ([§ Sparse fieldsets](#sparse-fieldsets-on-artifacts)). | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md), [point-in-time.md](point-in-time.md) |
 | **Sync (delta)** | `GET /api/sync` | Mirror public content: a snapshot, then upserts **and deletions** since an opaque cursor — the only surface that reports a document *leaving*. | [§ Sync](#sync-delta-api), [native-apps.md](native-apps.md) |
 | **Version history** | `GET /api/content/:type/:id/revisions` | A document's revisions, one revision's snapshot, and restore. Editor-tier credential required. | [§ Version history](#version-history-revisions) |
-| **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked; answers as an anonymous visitor whatever the credential. `503` with `Retry-After` (`temporarily_unavailable`) when the database pool cannot take the search. | [search-roadmap.md](search-roadmap.md) |
+| **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked, with the site's search synonyms applied (`also_searched` lists the alternate wordings searched); answers as an anonymous visitor whatever the credential. `503` with `Retry-After` (`temporarily_unavailable`) when the database pool cannot take the search. | [search-roadmap.md](search-roadmap.md) |
 | **Path resolution** | `GET /api/resolve?path=` | "What lives at this URL?" — content, a redirect to follow, or nothing — for a front end's catch-all route. | [json-api.md](json-api.md) (URLs, pathauto & redirects) |
 | **Menus** | `GET /api/menus`, `GET /api/menus/:key` | Resolved navigation trees with live URLs. | [navigation-menus.md](navigation-menus.md) |
 | **Related content** | `GET /api/content/:type/:slug/related` | Published documents semantically closest to this one (empty when semantic search is off). | [rag.md](rag.md) |
@@ -1512,7 +1512,9 @@ Without a purge, a publish reaches readers when the cached copy expires —
 within `KILN_API_CACHE_MAX_AGE` (60 s by default) for JSON:API, GraphQL and
 search, 300 s for fired artifacts. Set **`KILN_CDN_PURGE_URL`** and every
 `<type>.published`, `<type>.unpublished`, `<type>.updated` and
-`release.published` in a site sends one purge of that site's key. Those are the
+`release.published` in a site sends one purge of that site's key, as does every
+write to a search synonym (`/editor/search-synonyms`), which changes what a
+cached `/api/search` URL answers. The others are the
 content webhook events; a change that emits none — renaming a category or tag,
 editing a type definition or custom field — is not purged and ages out on the
 `max-age`:

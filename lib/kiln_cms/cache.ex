@@ -273,6 +273,20 @@ defmodule KilnCMS.Cache do
   @spec name_fields_key(Ash.UUID.t()) :: String.t()
   def name_fields_key(org_id), do: "content_types:name_fields:#{org_id}"
 
+  @doc "Cache key for a site's search synonym rules (`KilnCMS.Search.Synonyms`)."
+  @spec search_synonyms_key(Ash.UUID.t()) :: String.t()
+  def search_synonyms_key(org_id), do: "search_synonyms:#{org_id}"
+
+  @doc """
+  Drop a site's cached search synonym rules on every node, so a rule saved in
+  the console applies to the next search wherever it lands.
+  """
+  @spec bust_search_synonyms(Ash.UUID.t()) :: :ok
+  def bust_search_synonyms(org_id) do
+    if enabled?(), do: ClusterBust.broadcast([search_synonyms_key(org_id)])
+    :ok
+  end
+
   @doc """
   Drop a site's cached dynamic-type registry so a `TypeDefinition` write is
   visible on the next request instead of waiting out the TTL. Like the sitemap
