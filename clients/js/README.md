@@ -188,6 +188,13 @@ cold-cache 503 once before throwing; everything else that fails throws — see
 | `mintPreview(type, id)`              | `POST /api/content/:type/:id/preview-token`         | server side; `{token, url, expires_at, …}`                   |
 | `preview(token)`                     | `GET /preview/:token`                               | one draft, signed 15-minute token                            |
 | `schema(opts)`                       | `GET /api/schema`                                   | the live delivery schema; feed it to `emitTypes`             |
+| `resolvePath(path, opts)`            | `GET /api/resolve?path=`                            | `ok` / `moved` / `not_found` verdict; never throws a 404     |
+| `menus()`                            | `GET /api/menus`                                    | every menu's key, name and locale                            |
+| `menu(key, opts)`                    | `GET /api/menus/:key`                               | one resolved tree with live URLs                             |
+| `locales()`                          | `GET /api/locales`                                  | default, locales, each locale's fallback chain               |
+| `related(type, slug, opts)`          | `GET /api/content/:type/:slug/related`              | semantically closest; empty when semantic search is off      |
+| `form(slug)`                         | `GET /api/forms/:slug`                              | fields, labels, types, honeypot name                         |
+| `submitForm(slug, values, opts)`     | `POST /api/forms/:slug`                             | anonymous: never sends the key; 422 → `fieldErrors()`        |
 | `imageUrl(media, opts)`              | `GET /media/:id/t/:ops`                             | builds the URL, no request; unsigned, sizes snapped          |
 | `imageSrcset(media, opts)`           | 〃                                                  | `null` without dimensions; `signedImage*` twins take the key |
 | `create(plural, attrs, opts)`        | `POST /api/json/:plural`                            | a draft; `:read_write` key, editor+                          |
@@ -199,6 +206,32 @@ cold-cache 503 once before throwing; everything else that fails throws — see
 | `unpublish(plural, id)`              | `PATCH …/:id/unpublish`                             | purges artifacts; admin                                      |
 | `delete(plural, id)`                 | `DELETE /api/json/:plural/:id`                      | reversible soft-delete; admin                                |
 | `graphql(query, variables, opts)`    | `POST /gql`                                         | resolves to `data`; `errors` throw `KilnGraphQLError`        |
+
+### Routing, navigation and forms
+
+A headless front end's catch-all route asks what lives at the URL, then
+renders it or redirects:
+
+```ts
+const at = await kiln.resolvePath(url.pathname, { locale });
+if (at.status === "moved") return Response.redirect(new URL(at.to, url), 301);
+if (at.status === "not_found") return notFound();
+
+const [page, nav] = await Promise.all([
+  kiln.artifact(at.type, at.slug, { locale: at.locale }),
+  kiln.menu("main", { locale: at.locale }),
+]);
+```
+
+`menu`, `related` and `resolvePath` take `locale`, plus `fallback: false` to
+turn the site's fallback chain off and `fallbackLocale` to name one fallback.
+The result's `locale` says which translation answered.
+
+`submitForm` is anonymous by design and never sends the client's key. When it
+relays a visitor's browser submission, pass the form's honeypot field
+(`honeypot_field` in the schema) and `_kiln_rendered_at` through untouched, so
+the server's spam checks see them. A filled honeypot is discarded and still
+answers success, so never set it yourself.
 
 ### Media uploads
 

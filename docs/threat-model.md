@@ -428,7 +428,7 @@ build if a resource is ever registered without that authorizer.
   token instead of `201` with a JWT, and finishes at
   `POST /api/auth/sign_in/verify`.
   - **What is withheld is access to the token, not its existence.**
-    `Strategy.action/3` mints the JWT and — because `User` sets
+    `Strategy.action/4` mints the JWT and — because `User` sets
     `store_all_tokens?` — stores it, before anything looks at `totp_enabled?`.
     The second factor gates whether the caller ever receives it. Say it that way
     round: "no token is issued" would tell an incident responder that a

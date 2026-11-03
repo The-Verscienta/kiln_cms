@@ -11,17 +11,15 @@ defmodule KilnCMS.Search.RankingStabilityTest do
   the code before that change. A diff here is a ranking change: it needs a
   reason of its own, not a re-pin to make the test pass.
 
+  Re-pinned once for such a reason, #2175: `global/2` now ranks the keyword,
+  any-term, semantic, block and tag legs over every section's candidates
+  together, so the scores moved and tied `ts_rank`s share a rank. The
+  keyword-only order within each section did not move. In the stub-embedder
+  run, semantic-only neighbours swap places inside a section, because their
+  global ranks are spaced differently than their section ranks were.
+
   Runs twice: keyword-only (the default build) and with the deterministic
   stub embedder, so the semantic, block and tag legs take part too.
-
-  ## Re-pinned
-
-    * #2175 (A3, fields weighted by role, ranked by `ts_rank_cd`): "pad thai
-      tom yum" only. Its any-term leg ranked Thai Street Food first, for
-      naming all four words in a body that was weighted `B`; the body is `D`
-      now, so Pad Thai and Tom Yum, whose `A` titles each carry two of the
-      words, lead that leg. Each score moves by the difference of one or two
-      reciprocal ranks in that leg; no result moved position or legs.
   """
   # async: false — toggles the global `KilnCMS.Search` app env.
   use KilnCMS.DataCase, async: false
@@ -178,34 +176,34 @@ defmodule KilnCMS.Search.RankingStabilityTest do
         entries: [],
         pages: [
           {"Green Curry", 0.07377049, [:keyword, :keyword_any, :title], true},
-          {"About the kitchen", 0.00806452, [:keyword_any], true}
+          {"About the kitchen", 0.00793651, [:keyword_any], true}
         ],
         posts: [
-          {"How to cook rice", 0.00819672, [:keyword_any], true},
-          {"Kitchen notes", 0.00806452, [:keyword_any], true}
+          {"How to cook rice", 0.00806452, [:keyword_any], true},
+          {"Kitchen notes", 0.0078125, [:keyword_any], true}
         ]
       ],
       "kitchen" => [
         entries: [],
         pages: [
-          {"About the kitchen", 0.06557377, [:keyword, :title], true},
-          {"Saffron Rice", 0.01612903, [:keyword], true},
+          {"About the kitchen", 0.06530936, [:keyword, :title], true},
+          {"Saffron Rice", 0.01587302, [:keyword], true},
           {"Tom Yum", 0.01587302, [:keyword], true},
-          {"Pad Thai", 0.015625, [:keyword], true}
+          {"Pad Thai", 0.01587302, [:keyword], true}
         ],
         posts: [
           {"Kitchen notes", 0.02459016, [:keyword, :fuzzy], true},
-          {"Weeknight dinners", 0.01612903, [:keyword], true}
+          {"Weeknight dinners", 0.01587302, [:keyword], true}
         ]
       ],
       "pad thai tom yum" => [
         entries: [],
         pages: [
           {"Pad Thai", 0.05724484, [:keyword_any, :title], true},
-          {"Tom Yum", 0.05658382, [:keyword_any, :title], true},
-          {"Thai Street Food", 0.02432995, [:keyword, :keyword_any], true}
+          {"Tom Yum", 0.05645161, [:keyword_any, :title], true},
+          {"Thai Street Food", 0.02459016, [:keyword, :keyword_any], true}
         ],
-        posts: [{"Yum", 0.05737705, [:keyword_any, :title], true}]
+        posts: [{"Yum", 0.05699283, [:keyword_any, :title], true}]
       ],
       "saffon" => [entries: [], pages: [], posts: []],
       "saffron" => [
@@ -217,12 +215,12 @@ defmodule KilnCMS.Search.RankingStabilityTest do
         entries: [],
         pages: [
           {"Saffron Rice", 0.08196721, [:keyword, :keyword_any, :title, :fuzzy], true},
-          {"Pad Thai", 0.00806452, [:keyword_any], true}
+          {"Pad Thai", 0.0078125, [:keyword_any], true}
         ],
         posts: [
-          {"Saffron, the costly spice", 0.01639344, [:keyword_any, :fuzzy], true},
-          {"How to cook rice", 0.00806452, [:keyword_any], true},
-          {"Kitchen notes", 0.00793651, [:keyword_any], true}
+          {"Saffron, the costly spice", 0.01626124, [:keyword_any, :fuzzy], true},
+          {"How to cook rice", 0.00793651, [:keyword_any], true},
+          {"Kitchen notes", 0.0078125, [:keyword_any], true}
         ]
       ],
       "weeknight" => [
@@ -238,91 +236,91 @@ defmodule KilnCMS.Search.RankingStabilityTest do
       "how do I cook a green curry at home" => [
         entries: [],
         pages: [
-          {"Green Curry", 0.10454701, [:keyword, :keyword_any, :semantic, :block, :title], true},
-          {"About the kitchen", 0.04033097, [:keyword_any, :semantic, :block], true},
-          {"Tom Yum", 0.03252247, [:semantic, :block], true},
-          {"Saffron Rice", 0.03200205, [:semantic, :block], true},
-          {"Pad Thai", 0.03077652, [:semantic, :block], true},
-          {"Thai Street Food", 0.03076923, [:semantic, :block], true}
+          {"Green Curry", 0.10276209, [:keyword, :keyword_any, :semantic, :block, :title], true},
+          {"About the kitchen", 0.03921706, [:keyword_any, :semantic, :block], true},
+          {"Tom Yum", 0.03201844, [:semantic, :block], true},
+          {"Saffron Rice", 0.03128055, [:semantic, :block], true},
+          {"Pad Thai", 0.02900988, [:semantic, :block], true},
+          {"Thai Street Food", 0.02877847, [:semantic, :block], true}
         ],
         posts: [
-          {"Kitchen notes", 0.04008296, [:keyword_any, :semantic, :block], true},
-          {"How to cook rice", 0.03971037, [:keyword_any, :semantic, :block], true},
-          {"Yum", 0.03201844, [:semantic, :block], true},
-          {"Weeknight dinners", 0.03174603, [:semantic, :block], true},
-          {"Saffron, the costly spice", 0.03151365, [:semantic, :block], true}
+          {"Kitchen notes", 0.03861089, [:keyword_any, :semantic, :block], true},
+          {"How to cook rice", 0.03818227, [:keyword_any, :semantic, :block], true},
+          {"Yum", 0.03109932, [:semantic, :block], true},
+          {"Weeknight dinners", 0.03076923, [:semantic, :block], true},
+          {"Saffron, the costly spice", 0.02995752, [:semantic, :block], true}
         ]
       ],
       "kitchen" => [
         entries: [],
         pages: [
-          {"About the kitchen", 0.09759221, [:keyword, :semantic, :block, :title], true},
-          {"Saffron Rice", 0.04713865, [:keyword, :semantic, :block], true},
-          {"Pad Thai", 0.04713865, [:keyword, :semantic, :block], true},
-          {"Tom Yum", 0.04617605, [:keyword, :semantic, :block], true},
-          {"Green Curry", 0.03252247, [:semantic, :block], true},
-          {"Thai Street Food", 0.03174603, [:semantic, :block], true}
+          {"About the kitchen", 0.09636377, [:keyword, :semantic, :block, :title], true},
+          {"Pad Thai", 0.04628776, [:keyword, :semantic, :block], true},
+          {"Saffron Rice", 0.04465148, [:keyword, :semantic, :block], true},
+          {"Tom Yum", 0.04404203, [:keyword, :semantic, :block], true},
+          {"Green Curry", 0.03177806, [:semantic, :block], true},
+          {"Thai Street Food", 0.03077652, [:semantic, :block], true}
         ],
         posts: [
-          {"Kitchen notes", 0.05559978, [:keyword, :semantic, :block, :fuzzy], true},
-          {"Weeknight dinners", 0.04865151, [:keyword, :semantic, :block], true},
-          {"Saffron, the costly spice", 0.03200205, [:semantic, :block], true},
-          {"Yum", 0.03177806, [:semantic, :block], true},
-          {"How to cook rice", 0.03149802, [:semantic, :block], true}
+          {"Kitchen notes", 0.05400193, [:keyword, :semantic, :block, :fuzzy], true},
+          {"Weeknight dinners", 0.04761905, [:keyword, :semantic, :block], true},
+          {"Saffron, the costly spice", 0.03100962, [:semantic, :block], true},
+          {"Yum", 0.0308862, [:semantic, :block], true},
+          {"How to cook rice", 0.03007689, [:semantic, :block], true}
         ]
       ],
       "pad thai tom yum" => [
         entries: [],
         pages: [
-          {"Tom Yum", 0.08832985, [:keyword_any, :semantic, :block, :title], true},
-          {"Pad Thai", 0.08802136, [:keyword_any, :semantic, :block, :title], true},
-          {"Thai Street Food", 0.05509918, [:keyword, :keyword_any, :semantic, :block], true},
-          {"About the kitchen", 0.03252247, [:semantic, :block], true},
-          {"Green Curry", 0.03201844, [:semantic, :block], true},
-          {"Saffron Rice", 0.03128055, [:semantic, :block], true}
+          {"Tom Yum", 0.0865285, [:keyword_any, :semantic, :block, :title], true},
+          {"Pad Thai", 0.08625472, [:keyword_any, :semantic, :block, :title], true},
+          {"Thai Street Food", 0.05358176, [:keyword, :keyword_any, :semantic, :block], true},
+          {"About the kitchen", 0.03175403, [:semantic, :block], true},
+          {"Green Curry", 0.03062179, [:semantic, :block], true},
+          {"Saffron Rice", 0.02964427, [:semantic, :block], true}
         ],
         posts: [
-          {"Yum", 0.0893791, [:keyword_any, :semantic, :block, :title], true},
+          {"Yum", 0.08825046, [:keyword_any, :semantic, :block, :title], true},
           {"Weeknight dinners", 0.03278689, [:semantic, :block], true},
-          {"Saffron, the costly spice", 0.03151365, [:semantic, :block], true},
-          {"How to cook rice", 0.03149802, [:semantic, :block], true},
-          {"Kitchen notes", 0.03100962, [:semantic, :block], true}
+          {"Saffron, the costly spice", 0.0305789, [:semantic, :block], true},
+          {"How to cook rice", 0.02991071, [:semantic, :block], true},
+          {"Kitchen notes", 0.02946912, [:semantic, :block], true}
         ]
       ],
       "saffon" => [
         entries: [],
         pages: [
-          {"Green Curry", 0.03226646, [:semantic, :block], true},
-          {"Pad Thai", 0.03226646, [:semantic, :block], true},
-          {"Thai Street Food", 0.03225806, [:semantic, :block], true},
-          {"Saffron Rice", 0.03100962, [:semantic, :block], true},
-          {"About the kitchen", 0.03077652, [:semantic, :block], true},
-          {"Tom Yum", 0.03053613, [:semantic, :block], true}
+          {"Green Curry", 0.03200205, [:semantic, :block], true},
+          {"Thai Street Food", 0.03200205, [:semantic, :block], true},
+          {"Pad Thai", 0.03177806, [:semantic, :block], true},
+          {"About the kitchen", 0.02943723, [:semantic, :block], true},
+          {"Saffron Rice", 0.02943723, [:semantic, :block], true},
+          {"Tom Yum", 0.02857726, [:semantic, :block], true}
         ],
         posts: [
-          {"Saffron, the costly spice", 0.03201844, [:semantic, :block], true},
-          {"How to cook rice", 0.03201844, [:semantic, :block], true},
-          {"Weeknight dinners", 0.03174603, [:semantic, :block], true},
-          {"Yum", 0.03151365, [:semantic, :block], true},
-          {"Kitchen notes", 0.03151365, [:semantic, :block], true}
+          {"Saffron, the costly spice", 0.03109932, [:semantic, :block], true},
+          {"How to cook rice", 0.03033088, [:semantic, :block], true},
+          {"Kitchen notes", 0.02987737, [:semantic, :block], true},
+          {"Weeknight dinners", 0.02985075, [:semantic, :block], true},
+          {"Yum", 0.02970951, [:semantic, :block], true}
         ]
       ],
       "saffron" => [
         entries: [],
         pages: [
-          {"Saffron Rice", 0.05559978, [:keyword, :semantic, :block, :fuzzy], true},
-          {"Green Curry", 0.03252247, [:semantic, :block], true},
-          {"About the kitchen", 0.03177806, [:semantic, :block], true},
-          {"Pad Thai", 0.03175403, [:semantic, :block], true},
-          {"Thai Street Food", 0.03174603, [:semantic, :block], true},
-          {"Tom Yum", 0.03030303, [:semantic, :block], true}
+          {"Saffron Rice", 0.05358176, [:keyword, :semantic, :block, :fuzzy], true},
+          {"Green Curry", 0.03177806, [:semantic, :block], true},
+          {"Pad Thai", 0.03105441, [:semantic, :block], true},
+          {"Thai Street Food", 0.03102453, [:semantic, :block], true},
+          {"About the kitchen", 0.03036577, [:semantic, :block], true},
+          {"Tom Yum", 0.02816901, [:semantic, :block], true}
         ],
         posts: [
-          {"Saffron, the costly spice", 0.0563442, [:keyword, :semantic, :block, :fuzzy], true},
-          {"How to cook rice", 0.03201844, [:semantic, :block], true},
-          {"Weeknight dinners", 0.03200205, [:semantic, :block], true},
-          {"Yum", 0.03177806, [:semantic, :block], true},
-          {"Kitchen notes", 0.03125763, [:semantic, :block], true}
+          {"Saffron, the costly spice", 0.05564457, [:keyword, :semantic, :block, :fuzzy], true},
+          {"Weeknight dinners", 0.03100962, [:semantic, :block], true},
+          {"Yum", 0.03067916, [:semantic, :block], true},
+          {"How to cook rice", 0.03033088, [:semantic, :block], true},
+          {"Kitchen notes", 0.02964427, [:semantic, :block], true}
         ]
       ],
       "saffron rice" => [
@@ -330,37 +328,37 @@ defmodule KilnCMS.Search.RankingStabilityTest do
         pages: [
           {"Saffron Rice", 0.11374527,
            [:keyword, :keyword_any, :semantic, :block, :title, :fuzzy], true},
-          {"Pad Thai", 0.04008296, [:keyword_any, :semantic, :block], true},
-          {"Tom Yum", 0.03981855, [:semantic, :block, :tag], true},
-          {"Green Curry", 0.03922125, [:semantic, :block, :tag], true},
-          {"Thai Street Food", 0.03200205, [:semantic, :block], true},
-          {"About the kitchen", 0.03053613, [:semantic, :block], true}
+          {"Tom Yum", 0.03969474, [:semantic, :block, :tag], true},
+          {"Pad Thai", 0.03913132, [:keyword_any, :semantic, :block], true},
+          {"Green Curry", 0.03815424, [:semantic, :block, :tag], true},
+          {"Thai Street Food", 0.03151365, [:semantic, :block], true},
+          {"About the kitchen", 0.0289916, [:semantic, :block], true}
         ],
         posts: [
-          {"Kitchen notes", 0.04878791, [:keyword_any, :semantic, :block, :tag], true},
-          {"Saffron, the costly spice", 0.04814747, [:keyword_any, :semantic, :block, :fuzzy],
+          {"Kitchen notes", 0.04728977, [:keyword_any, :semantic, :block, :tag], true},
+          {"Saffron, the costly spice", 0.04567936, [:keyword_any, :semantic, :block, :fuzzy],
            true},
-          {"How to cook rice", 0.04006656, [:keyword_any, :semantic, :block], true},
-          {"Weeknight dinners", 0.03920634, [:semantic, :block, :tag], true},
-          {"Yum", 0.03125763, [:semantic, :block], true}
+          {"How to cook rice", 0.03826739, [:keyword_any, :semantic, :block], true},
+          {"Weeknight dinners", 0.03697519, [:semantic, :block, :tag], true},
+          {"Yum", 0.02923602, [:semantic, :block], true}
         ]
       ],
       "weeknight" => [
         entries: [],
         pages: [
-          {"Tom Yum", 0.03981855, [:semantic, :block, :tag], true},
-          {"Green Curry", 0.03922125, [:semantic, :block, :tag], true},
-          {"Pad Thai", 0.03201844, [:semantic, :block], true},
-          {"Thai Street Food", 0.03200205, [:semantic, :block], true},
+          {"Tom Yum", 0.03969474, [:semantic, :block, :tag], true},
+          {"Green Curry", 0.03815424, [:semantic, :block, :tag], true},
           {"Saffron Rice", 0.03177806, [:semantic, :block], true},
-          {"About the kitchen", 0.03053613, [:semantic, :block], true}
+          {"Thai Street Food", 0.03151365, [:semantic, :block], true},
+          {"Pad Thai", 0.03131882, [:semantic, :block], true},
+          {"About the kitchen", 0.0289916, [:semantic, :block], true}
         ],
         posts: [
-          {"Weeknight dinners", 0.0637965, [:keyword, :semantic, :block, :fuzzy, :tag], true},
-          {"Kitchen notes", 0.0408514, [:semantic, :block, :tag], true},
-          {"How to cook rice", 0.03200205, [:semantic, :block], true},
-          {"Saffron, the costly spice", 0.03175403, [:semantic, :block], true},
-          {"Yum", 0.03125763, [:semantic, :block], true}
+          {"Weeknight dinners", 0.06156535, [:keyword, :semantic, :block, :fuzzy, :tag], true},
+          {"Kitchen notes", 0.03947727, [:semantic, :block, :tag], true},
+          {"How to cook rice", 0.03033088, [:semantic, :block], true},
+          {"Saffron, the costly spice", 0.02941813, [:semantic, :block], true},
+          {"Yum", 0.02923602, [:semantic, :block], true}
         ]
       ]
     }

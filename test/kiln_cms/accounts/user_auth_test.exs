@@ -24,10 +24,15 @@ defmodule KilnCMS.Accounts.UserAuthTest do
   defp sign_in(email, password) do
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
-    AshAuthentication.Strategy.action(strategy, :sign_in, %{
-      "email" => email,
-      "password" => password
-    })
+    AshAuthentication.Strategy.action(
+      strategy,
+      :sign_in,
+      %{
+        "email" => email,
+        "password" => password
+      },
+      []
+    )
   end
 
   test "sign-in succeeds with policies + field policies in place (auth bypass works)" do

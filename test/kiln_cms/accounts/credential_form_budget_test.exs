@@ -131,11 +131,16 @@ defmodule KilnCMS.Accounts.CredentialFormBudgetTest do
 
       for _ <- 1..5 do
         assert {:ok, _} =
-                 AshAuthentication.Strategy.action(strategy, :register, %{
-                   "email" => email(),
-                   "password" => @password,
-                   "password_confirmation" => @password
-                 })
+                 AshAuthentication.Strategy.action(
+                   strategy,
+                   :register,
+                   %{
+                     "email" => email(),
+                     "password" => @password,
+                     "password_confirmation" => @password
+                   },
+                   []
+                 )
       end
     end
   end
