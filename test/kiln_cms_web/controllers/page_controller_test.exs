@@ -18,10 +18,15 @@ defmodule KilnCMSWeb.PageControllerTest do
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
     {:ok, user} =
-      AshAuthentication.Strategy.action(strategy, :sign_in, %{
-        "email" => email,
-        "password" => "password123456"
-      })
+      AshAuthentication.Strategy.action(
+        strategy,
+        :sign_in,
+        %{
+          "email" => email,
+          "password" => "password123456"
+        },
+        []
+      )
 
     user
   end

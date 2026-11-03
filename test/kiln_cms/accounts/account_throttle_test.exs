@@ -59,10 +59,15 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
   defp sign_in(address, password) do
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
-    AshAuthentication.Strategy.action(strategy, :sign_in, %{
-      "email" => address,
-      "password" => password
-    })
+    AshAuthentication.Strategy.action(
+      strategy,
+      :sign_in,
+      %{
+        "email" => address,
+        "password" => password
+      },
+      []
+    )
   end
 
   defp exhaust(address) do
@@ -377,12 +382,12 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
 
   defp request_reset(address) do
     strategy = AshAuthentication.Info.strategy!(User, :password)
-    AshAuthentication.Strategy.action(strategy, :reset_request, %{"email" => address})
+    AshAuthentication.Strategy.action(strategy, :reset_request, %{"email" => address}, [])
   end
 
   defp request_magic_link(address) do
     strategy = AshAuthentication.Info.strategy!(User, :magic_link)
-    AshAuthentication.Strategy.action(strategy, :request, %{"email" => address})
+    AshAuthentication.Strategy.action(strategy, :request, %{"email" => address}, [])
   end
 
   defp reset_token(user) do
