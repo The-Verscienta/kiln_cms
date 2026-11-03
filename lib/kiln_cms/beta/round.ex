@@ -160,7 +160,7 @@ defmodule KilnCMS.Beta.Round do
   # changing their role or password through `Ash.Seed.update!` would skip the
   # two things that make those changes safe: `:manage_access`'s
   # `EvictSessions` (a socket authorizes once, at connect — #675) and the
-  # `log_out_everywhere` add-on that `apply_on_password_change?` hangs off.
+  # token sweep the password actions run (`RevokeAllTokens`, #734).
   # Both are re-run explicitly below.
   defp seat(email, role, facilitator?, reset?) do
     # authorize?: false — a `User` read by email is self-only (see the

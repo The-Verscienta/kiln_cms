@@ -5,7 +5,7 @@ defmodule KilnCMSWeb.PasswordRotationTest do
 
   The #1536 review's probe, as a regression: sign in with a session and a
   remember-me cookie, rotate the password, and both kept authenticating —
-  because `log_out_everywhere apply_on_password_change?` never fires on either
+  because `log_out_everywhere apply_on_password_change?` never fired on either
   password action (see `KilnCMS.Accounts.Changes.RevokeAllTokens`). Every
   "before" below is asserted too, so a test cannot pass by the credential never
   having worked.

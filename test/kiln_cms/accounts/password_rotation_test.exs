@@ -4,11 +4,10 @@ defmodule KilnCMS.Accounts.PasswordRotationTest do
   (#734) and drops its live sockets (#1637) — at the action, where it has to
   hold for every caller.
 
-  `log_out_everywhere apply_on_password_change? true` was declared the whole
-  time and revoked nothing: its change is gated on `hashed_password` being
-  *touched*, evaluated when the changeset is built, and both actions write the
-  hash in a `before_action`. So these assert on the token rows themselves, not
-  on the presence of a flag. The end-to-end half — the old session and the
+  `log_out_everywhere apply_on_password_change? true` was declared for a long
+  time and, before AshAuthentication 5.0.0-rc.16, revoked nothing (see
+  `KilnCMS.Accounts.Changes.RevokeAllTokens`). So these assert on the token
+  rows themselves, not on the presence of a flag. The end-to-end half — the old session and the
   remember-me cookie actually stop signing anyone in — is
   `KilnCMSWeb.PasswordRotationTest`.
   """

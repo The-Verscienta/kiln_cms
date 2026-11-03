@@ -168,8 +168,8 @@ defmodule KilnCMS.Beta.RoundTest do
     test "--reset-passwords actually revokes the old credential's sessions" do
       # The reason to reset is that the old password leaked, so the tokens
       # minted under it have to die too. `Ash.Seed.update!` writes the hash
-      # without running an action, which skips the `log_out_everywhere` add-on
-      # that `apply_on_password_change?` hangs off — leaving a 30-day
+      # without running an action, which skips the token sweep the password
+      # actions run (`RevokeAllTokens`, #734) — leaving a 30-day
       # remember-me token authorizing under a password nobody thinks works.
       round = label()
       [tester] = Round.run(round: round, testers: 1, seed?: false).testers

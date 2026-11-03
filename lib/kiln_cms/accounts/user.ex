@@ -27,18 +27,15 @@ defmodule KilnCMS.Accounts.User do
 
   authentication do
     add_ons do
-      # NOT what revokes tokens on a password change (#734). The flag hangs its
-      # change off `Changing(:hashed_password, touching?: true)`, evaluated when
-      # the changeset is built, and both password actions below write the hash
-      # in a `before_action` (`HashPasswordChange`) — so the condition never
-      # holds on them. They declare `KilnCMS.Accounts.Changes.RevokeAllTokens`
-      # explicitly instead; that is the control, and this flag stays only to
-      # cover any future plain update that takes `hashed_password` as input.
-      # The add-on itself is still load-bearing: it defines the
-      # `:log_out_everywhere` action that change (and the admin "Sign out
-      # everywhere") runs.
+      # NOT what revokes tokens on a password change (#734): both password
+      # actions below declare `KilnCMS.Accounts.Changes.RevokeAllTokens`
+      # explicitly, and that is the control. Leave `apply_on_password_change?`
+      # off. Since AshAuthentication 5.0.0-rc.16 it fires, as a resource-wide
+      # change whose `after_action` runs after `GenerateTokenChange`, so it
+      # would revoke the session a password reset just signed its user into.
+      # The add-on itself is load-bearing: it defines the `:log_out_everywhere`
+      # action that change (and the admin "Sign out everywhere") runs.
       log_out_everywhere do
-        apply_on_password_change? true
       end
 
       confirmation :confirm_new_user do
@@ -420,7 +417,7 @@ defmodule KilnCMS.Accounts.User do
       # Revokes every stored token the account holds — every session, the
       # remember-me cookie, a sign-in held at the code prompt — in this
       # transaction, failing the change if it cannot (#734). Not the
-      # `log_out_everywhere` flag above, which never fires here; see its comment.
+      # `log_out_everywhere` flag above, which is off; see its comment.
       #
       # That includes the session on the device making the change: a LiveView
       # cannot write a cookie to re-issue one, and the rotation is exactly the

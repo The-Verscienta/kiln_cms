@@ -3,26 +3,24 @@ defmodule KilnCMS.Accounts.Changes.RevokeAllTokens do
   Revokes every stored token the user owns, inside the action's own
   transaction, so a password rotation ends every other sign-in (#734).
 
-  ## Why the `log_out_everywhere` flag is not enough
+  ## Why not the `log_out_everywhere` flag
 
-  `KilnCMS.Accounts.User` declares `log_out_everywhere apply_on_password_change?
-  true`, and for a long time that line was read as the control. It is not. The
-  add-on's transformer registers its change resource-wide as
-
-      change OnPasswordChange,
-        on: [:update],
-        where: [Changing(:hashed_password, touching?: true)]
-
-  and a `where` is evaluated when the changeset is *built*. Both of our password
+  `KilnCMS.Accounts.User` used to declare `log_out_everywhere
+  apply_on_password_change? true`, and for a long time that line was read as the
+  control. Before AshAuthentication 5.0.0-rc.16 it revoked nothing: the add-on
+  gated its resource-wide change on `Changing(:hashed_password, touching?:
+  true)`, evaluated when the changeset is *built*, and both of our password
   actions (`:change_password`, `:reset_password_with_token`) `accept []` and
-  write the hash through `HashPasswordChange`, which does it in a
-  `before_action` hook — i.e. after the `where` has already looked and seen
-  `hashed_password` untouched. So the condition is false on exactly the actions
-  it exists for, nothing is revoked, and the session tokens *and* the thirty-day
-  remember-me cookie of whoever held the old password keep authenticating.
+  write the hash through `HashPasswordChange` in a `before_action` hook. So the
+  session tokens *and* the thirty-day remember-me cookie of whoever held the old
+  password kept authenticating.
 
-  This change is the control; the DSL flag is left declared only so any future
-  plain `:update` that does take `hashed_password` as input is covered too.
+  rc.16 fixed the flag (it now checks for a changed hash after the action), and
+  Kiln dropped it rather than run two sweeps. The add-on's change is
+  resource-wide, so its `after_action` runs after every hook the action
+  declares, `GenerateTokenChange` included, and it revoked the session
+  `:reset_password_with_token` had just signed its user into. This change sits
+  where the action puts it, above the token it must not revoke.
 
   ## What it revokes
 
