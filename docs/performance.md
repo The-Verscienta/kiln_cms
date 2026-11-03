@@ -131,6 +131,16 @@ content section fuses up to eight legs. Since #1712 it is built to share the poo
   title's lexemes. A rare-word title lookup on 1,700 posts went from a 7.4 ms sequential
   scan to 0.04 ms.
 - **Analytics off the request.** The `search_queries` upsert runs on the task supervisor.
+- **A budget per search** (#2166). `query_budget` (`config :kiln_cms, KilnCMS.Search`,
+  milliseconds, default **1500**, `:infinity` for none) caps how long one sweep may take.
+  The query embedding gets half of it. A leg still running at the deadline is dropped,
+  the legs that finished are fused, and a reranker that misses it leaves fused order.
+  `GET /api/search` then answers `partial: true` with the cut legs under `incomplete`,
+  and sends `cache-control: no-store` so no shared cache keeps the cut answer. A normal
+  search takes tens of milliseconds, so the budget only bounds the tail: a cold serving,
+  a slow nearest-neighbour scan, a pool queue during a deploy. Every response carries a
+  `Server-Timing` header with the time per leg, so the slow part shows in the browser's
+  network panel or a `curl -D -`.
 
 Measured with `scripts/benchmarks/api_latency.sh` (#1546): `MIX_ENV=prod`, `POOL_SIZE=10`,
 500 pages, 1,500 posts and 200 drafts, closed-loop clients, Apple M5 Pro with PostgreSQL

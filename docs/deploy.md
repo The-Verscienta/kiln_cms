@@ -219,9 +219,9 @@ one deploy mistake that makes a bad day worse:
 
 | Endpoint | Answers | Checks the database? | Point this at |
 |----------|---------|----------------------|---------------|
-| `GET /live` | `200 OK` iff the endpoint is serving HTTP; connection refused otherwise | **No** | Anything that may **restart** the container on failure: Kubernetes/Swarm liveness, systemd watchdogs, an autoheal sidecar. The image's `HEALTHCHECK` (already wired) probes it — see the note below on what does and does not act on that. |
-| `GET /up` | `200 OK` when the database is also reachable, else `503 database unavailable` | Yes | Anything that decides whether to **route traffic here**: a load balancer's backend check, an uptime monitor, Kubernetes readiness. |
-| `GET /ready` | JSON with `db` and Oban queue depth; 200/503 like `/up` | Yes | Monitoring and alerting sinks — [`observability.md`](observability.md) has the alert rules that read it. |
+| `GET /live` | `200 OK` iff the endpoint is serving HTTP and search has warmed up after boot; `503 warming up` before that; connection refused otherwise | **No** | Anything that may **restart** the container on failure: Kubernetes/Swarm liveness, systemd watchdogs, an autoheal sidecar. The image's `HEALTHCHECK` (already wired) probes it — see the note below on what does and does not act on that. |
+| `GET /up` | `200 OK` when the database is also reachable, else `503 database unavailable` (and `503 warming up` like `/live`) | Yes | Anything that decides whether to **route traffic here**: a load balancer's backend check, an uptime monitor, Kubernetes readiness. |
+| `GET /ready` | JSON with `db`, `search` and Oban queue depth; 200/503 like `/up` | Yes | Monitoring and alerting sinks — [`observability.md`](observability.md) has the alert rules that read it. |
 
 Why two: `/up` returning 503 on a database outage is exactly right for a load
 balancer (stop sending users to a node that can't serve them) and exactly
@@ -230,6 +230,21 @@ cannot fix only restart-storms every replica at the moment the platform is
 already degraded (#816). `/live` is answered by an endpoint plug *ahead of*
 tenant resolution (which itself reads the database), so it stays a pure "is
 this process serving" signal even with Postgres down.
+
+**All three hold traffic until search is warm** (#2166). The embedding and
+reranker servings start after the endpoint, and a query that reached a fresh
+node before they had compiled waited for them: one production search took
+27.6 s around a deploy. Since then `KilnCMS.Search.Warmup` runs one search
+through the servings after boot, and the probes answer 503 until it has. On
+an install with semantic search and reranking off there is nothing to warm,
+and the probes answer as soon as the endpoint does. The latch only ever opens,
+so it cannot fail a running node, and `/live` can carry it without becoming a
+restart storm. The warm-up gives up after 90 s (`config :kiln_cms,
+KilnCMS.Search.Warmup, timeout:`), logs a warning and opens anyway. That is
+inside the image's healthcheck window (a 60 s start period, then three 30 s
+retries), so a model that never warms costs semantic results, not a restart
+loop. A platform that waits for "healthy" before it moves traffic, like
+Coolify, therefore swaps onto a node that answers search at speed.
 
 Two things the image already handles, and that you must preserve if you
 change either: the healthcheck probes `http://127.0.0.1:${PORT}/live`, and

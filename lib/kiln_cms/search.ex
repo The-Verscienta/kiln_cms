@@ -9,6 +9,7 @@ defmodule KilnCMS.Search do
   """
   require Logger
 
+  alias KilnCMS.Search.Budget
   alias KilnCMS.Search.RerankOrder
 
   @doc "Whether semantic search is enabled."
@@ -86,6 +87,47 @@ defmodule KilnCMS.Search do
   """
   @spec section_concurrency() :: pos_integer()
   def section_concurrency, do: cfg(:section_concurrency, 2)
+
+  @doc """
+  How long one `global/2` sweep may take before it answers with what it has,
+  in milliseconds. Default 1500; `:infinity` turns the budget off.
+
+  A sweep normally takes tens of milliseconds, so the budget is not a target.
+  It caps the tail: a query embedded while the serving is still compiling, a
+  nearest-neighbour scan on a cold index, a pool queue during a deploy. Those
+  used to hold a request for as long as they took (27.6 s was measured in
+  production around a deploy, #2166). The query embedding gets half of the
+  budget, and at most `batch_size/0` budgeted embeddings (and
+  `rerank_slots/0` reranks) are in a serving at once: a call the budget gave
+  up on still runs there, so past that a search skips the leg instead of
+  queueing behind abandoned work. A leg still running at the deadline is dropped, and the legs that
+  finished are fused as usual. The sweep says what was dropped
+  (`global_report/2`), and `GET /api/search` passes that on as `partial`.
+  A reranker that has not finished by the deadline leaves its section in
+  fused order.
+
+  The budget is checked between legs and enforced by killing the section's
+  task, so it holds at `section_concurrency/0` above 1. At 1 the sections run
+  in the caller's process, and a single leg already running is not
+  interrupted: a later leg simply does not start.
+  """
+  @spec query_budget() :: pos_integer() | :infinity
+  def query_budget, do: cfg(:query_budget, 1_500)
+
+  @doc """
+  How many budgeted rerank calls may be in the reranker at once, node-wide.
+  Default 4.
+
+  A rerank the budget stops waiting for is not cancelled: the call stays in
+  the serving's queue and the model runs it. So under load, a budget alone
+  turns slow reranks into abandoned ones, and the abandoned ones take the CPU
+  the next searches need. A section that finds this many reranks still in
+  the serving skips its rerank — fused order, reported as `:rerank` in
+  `global_report/2` — instead of queueing behind them. Unbudgeted calls
+  (`budget: :infinity`, `hybrid/3`) do not count against it.
+  """
+  @spec rerank_slots() :: pos_integer()
+  def rerank_slots, do: cfg(:rerank_slots, 4)
 
   @doc """
   Instruction prefixes some retrieval models expect, prepended before
@@ -962,10 +1004,11 @@ defmodule KilnCMS.Search do
   @hybrid_candidates 50
   @rrf_k 60
 
-  # Ceiling on a single `global/2` section. Generous — it exists to stop one
-  # wedged query hanging the request forever, not to bound normal latency, and
-  # a timeout takes the whole call down rather than silently dropping a
-  # section.
+  # Ceiling on a single `global/2` section where the budget does not reach:
+  # the fusion round, and a sweep run with `budget: :infinity`. Generous — it
+  # exists to stop one wedged query hanging the request forever, not to bound
+  # normal latency, and a timeout takes the whole call down rather than
+  # silently dropping a section. Normal latency is `query_budget/0`'s.
   @section_timeout :timer.seconds(30)
 
   # The typo-tolerance fallback: when the keyword leg finds fewer hits than
@@ -1094,7 +1137,8 @@ defmodule KilnCMS.Search do
   """
   @spec hybrid(atom() | String.t() | module(), String.t(), keyword()) :: [struct()]
   def hybrid(type, query, opts \\ []) when is_binary(query) do
-    type |> search_resource() |> collect_legs(query, opts) |> fuse_legs(%{})
+    {hits, _report} = type |> search_resource() |> collect_legs(query, opts) |> fuse_legs(%{})
+    hits
   end
 
   # The legs whose ranks `global/2` takes over the union of its sections
@@ -1109,35 +1153,54 @@ defmodule KilnCMS.Search do
   # section, and the fuzzy leg is a fallback that runs per section.
   @global_rank_legs [:keyword, :keyword_any, :semantic, :block, :tag]
 
+  # How a sweep hears from the legs it runs: the deadline each leg checks
+  # before it starts, and `emit`, called with each leg's result the moment it
+  # has one — so a section the sweep cuts off at the deadline keeps the legs it
+  # finished (`KilnCMS.Search.Budget.run/3`). A direct `hybrid/3` call has neither.
+  @unbudgeted %{deadline: :infinity, emit: nil}
+
+  # The order the legs RUN in, which is not the order fusion lists them in
+  # (`assemble_legs/2`; that order breaks exact ties). The legs that read the
+  # query vector go last, so a sweep that spent its embedding budget has every
+  # lexical leg in hand by then. `:fuzzy` reads `:keyword`'s result, so it
+  # follows it. `:keyword` is both keyword legs, `:keyword` and
+  # `:keyword_any` — one call reads them.
+  @leg_order [:keyword, :title, :alias, :fuzzy, :semantic, :block, :tag]
+
+  # What a leg that never ran contributes.
+  @leg_defaults %{keyword: {[], []}, fuzzy: {[], nil}, block: {[], %{}}, tag: {[], %{}}}
+
   # The first half of `hybrid/3`: every leg's candidates, and what fusion
   # and the floor need, without fusing them. `global/2` collects every
   # content section before it fuses any, so it can hand each one ranks
   # taken over all of them (`global_ranks/1`).
-  defp collect_legs(resource, query, opts) do
+  defp collect_legs(resource, query, opts, sweep \\ @unbudgeted) do
+    context = leg_context(resource, query, opts)
+
+    @leg_order
+    |> Enum.reduce(%{}, &run_timed_leg(&1, &2, context, sweep))
+    |> then(&assemble_legs(context, &1))
+  end
+
+  # One leg, unless the sweep's deadline has passed — then it never starts.
+  defp run_timed_leg(leg, ran, context, sweep) do
+    if Budget.past?(sweep.deadline) do
+      ran
+    else
+      {micros, value} = :timer.tc(fn -> run_named_leg(leg, context, ran) end)
+      if sweep.emit, do: sweep.emit.(leg, {value, micros})
+      Map.put(ran, leg, {value, micros})
+    end
+  end
+
+  # Everything a section's legs read, from its options alone — so the sweep
+  # can rebuild it for a section it cut off, and assemble the legs that section
+  # sent before it was stopped.
+  defp leg_context(resource, query, opts) do
     # `:tenant` scopes the multitenant content legs to the request's org (#336).
     read_opts = Keyword.take(opts, [:actor, :authorize?, :tenant])
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
-    limit = Keyword.get(opts, :limit, 20)
-    k = Keyword.get(opts, :k, @rrf_k)
-    load = Keyword.get(opts, :load, [])
     filters = opts |> Keyword.get(:filters, %{}) |> Map.take(@facet_filters)
-
-    args = Map.merge(%{query: query, locale: locale}, filters)
-
-    # The legs fetch ids alone (`@leg_select`). Fusion needs only ids and
-    # order, so reading whole rows — or loading calcs — here would pay for up
-    # to `@hybrid_candidates` rows *per leg* to keep `limit` of them.
-    # `highlight` is a `ts_headline` over the whole document, so that is most
-    # of the query's cost thrown away. The one calc a leg does load is the
-    # semantic leg's `semantic_distance`, which its ORDER BY computes anyway
-    # (see `semantic_context/1`). The kept hits are read whole, with `:load`,
-    # in one query (`hydrate/4`) — before the reranker, which reads their
-    # title and `search_text` (`rerank_text/1`).
-    #
-    # Both keyword legs read `search_vector`, so they share one containment:
-    # a type without the column loses both, and logs it once.
-    {keyword, relaxed} =
-      without_search_vector(resource, fn -> keyword_legs(resource, query, args, read_opts) end)
 
     # One embedding per call, shared by the two semantic legs: a sweep hands
     # its vector down in `opts`; a direct caller gets it embedded here once,
@@ -1145,32 +1208,88 @@ defmodule KilnCMS.Search do
     # leg. `:unavailable` (semantic off, or the embedder failed) skips both.
     opts = Keyword.put_new_lazy(opts, :query_vector, fn -> global_query_vector(query) end)
 
-    semantic = run_leg(resource, :search_semantic, args, read_opts, semantic_context(opts))
-    {blocks, block_distances} = block_leg(resource, query, locale, filters, read_opts, opts)
-    {tagged, tag_distances} = tag_leg(resource, locale, filters, read_opts, opts)
-    title = run_leg(resource, :search_title, args, read_opts)
-    aliases = run_leg(resource, :search_alias, args, read_opts)
-
-    # The term-evidence gate (`term_gate/0`) — consulted only when the
-    # keyword leg is empty, since a keyword hit means every term is in the
-    # vocabulary.
-    evidence = gate_evidence(resource, query, locale, keyword, read_opts)
-
-    fuzzy =
-      if filters == %{} and length(keyword) < @fuzzy_fallback_threshold do
-        fuzzy_leg(resource, query, locale, evidence, read_opts)
-      else
-        []
-      end
-
     %{
       resource: resource,
       query: query,
       opts: opts,
       read_opts: read_opts,
-      limit: limit,
-      k: k,
-      load: load,
+      locale: locale,
+      filters: filters,
+      args: Map.merge(%{query: query, locale: locale}, filters)
+    }
+  end
+
+  # The legs fetch ids alone (`@leg_select`). Fusion needs only ids and
+  # order, so reading whole rows — or loading calcs — here would pay for up
+  # to `@hybrid_candidates` rows *per leg* to keep `limit` of them.
+  # `highlight` is a `ts_headline` over the whole document, so that is most
+  # of the query's cost thrown away. The one calc a leg does load is the
+  # semantic leg's `semantic_distance`, which its ORDER BY computes anyway
+  # (see `semantic_context/1`). The kept hits are read whole, with `:load`,
+  # in one query (`hydrate/4`) — before the reranker, which reads their
+  # title and `search_text` (`rerank_text/1`).
+  #
+  # Both keyword legs read `search_vector`, so they share one containment:
+  # a type without the column loses both, and logs it once.
+  defp run_named_leg(:keyword, %{resource: resource} = c, _ran) do
+    without_search_vector(resource, fn -> keyword_legs(resource, c.query, c.args, c.read_opts) end)
+  end
+
+  defp run_named_leg(:title, c, _ran), do: run_leg(c.resource, :search_title, c.args, c.read_opts)
+  defp run_named_leg(:alias, c, _ran), do: run_leg(c.resource, :search_alias, c.args, c.read_opts)
+
+  # The fuzzy step also takes the term-evidence verdict (`term_gate/0`): both
+  # read the keyword leg's result, and the verdict is consulted only when that
+  # leg is empty — a keyword hit means every term is in the vocabulary. A
+  # step the deadline cut leaves no verdict, so a partial answer is ungated.
+  defp run_named_leg(:fuzzy, c, ran) do
+    {keyword, _relaxed} = leg_value(ran, :keyword)
+    evidence = gate_evidence(c.resource, c.query, c.locale, keyword, c.read_opts)
+
+    fuzzy =
+      if c.filters == %{} and length(keyword) < @fuzzy_fallback_threshold do
+        fuzzy_leg(c.resource, c.query, c.locale, evidence, c.read_opts)
+      else
+        []
+      end
+
+    {fuzzy, evidence}
+  end
+
+  defp run_named_leg(:semantic, c, _ran),
+    do: run_leg(c.resource, :search_semantic, c.args, c.read_opts, semantic_context(c.opts))
+
+  defp run_named_leg(:block, c, _ran),
+    do: block_leg(c.resource, c.query, c.locale, c.filters, c.read_opts, c.opts)
+
+  defp run_named_leg(:tag, c, _ran),
+    do: tag_leg(c.resource, c.locale, c.filters, c.read_opts, c.opts)
+
+  defp leg_value(ran, leg) do
+    case ran do
+      %{^leg => {value, _micros}} -> value
+      _never_ran -> Map.get(@leg_defaults, leg, [])
+    end
+  end
+
+  # `ran` is `%{leg => {result, microseconds}}` for the legs that finished —
+  # all of them, unless the sweep's deadline stopped some. The rest contribute
+  # nothing and are listed in `:missing`.
+  defp assemble_legs(c, ran) do
+    {keyword, relaxed} = leg_value(ran, :keyword)
+    semantic = leg_value(ran, :semantic)
+    {blocks, block_distances} = leg_value(ran, :block)
+    {tagged, tag_distances} = leg_value(ran, :tag)
+    {fuzzy, evidence} = leg_value(ran, :fuzzy)
+
+    %{
+      resource: c.resource,
+      query: c.query,
+      opts: c.opts,
+      read_opts: c.read_opts,
+      limit: Keyword.get(c.opts, :limit, 20),
+      k: Keyword.get(c.opts, :k, @rrf_k),
+      load: Keyword.get(c.opts, :load, []),
       # The term-evidence verdict, `nil` when the gate did not judge.
       evidence: evidence,
       # Order matters only for exact ties (`reciprocal_rank_fusion/3`): a
@@ -1180,8 +1299,8 @@ defmodule KilnCMS.Search do
         {:keyword_any, relaxed, @relaxed_weight},
         {:semantic, semantic, 1.0},
         {:block, blocks, @block_weight},
-        {:title, title, @title_weight},
-        {:alias, aliases, @title_weight},
+        {:title, leg_value(ran, :title), @title_weight},
+        {:alias, leg_value(ran, :alias), @title_weight},
         {:fuzzy, fuzzy, @fuzzy_weight},
         {:tag, tagged, @tag_weight}
       ],
@@ -1198,13 +1317,15 @@ defmodule KilnCMS.Search do
         legs: semantic_floor_legs(),
         distances: Map.merge(block_distances, tag_distances, fn _id, a, b -> min(a, b) end),
         semantic: semantic,
-        resource: resource,
-        query: query,
-        locale: locale,
-        filters: filters,
-        read_opts: read_opts,
-        opts: opts
-      }
+        resource: c.resource,
+        query: c.query,
+        locale: c.locale,
+        filters: c.filters,
+        read_opts: c.read_opts,
+        opts: c.opts
+      },
+      timings: Map.new(ran, fn {leg, {_value, micros}} -> {leg, micros} end),
+      missing: Enum.reject(@leg_order, &Map.has_key?(ran, &1))
     }
   end
 
@@ -1216,19 +1337,57 @@ defmodule KilnCMS.Search do
   # The second half of `hybrid/3`: fuse the collected legs — at the ranks
   # `ranks` gives (`%{leg => %{id => rank}}`, from `global_ranks/1`), a
   # leg or record it does not name at its rank within its own list — then
-  # floor, cut, read and rerank the hits.
-  defp fuse_legs(collected, ranks) do
+  # floor, cut, read and rerank the hits. Returns the hits and what the sweep
+  # reports about this half: its timings, and `:rerank` as missing when the
+  # deadline left the section in fused order.
+  defp fuse_legs(collected, ranks, deadline \\ :infinity) do
     %{resource: resource, query: query, opts: opts, read_opts: read_opts} = collected
     select = rerank_select(Keyword.get(opts, :select), opts)
 
-    collected.legs
-    |> reciprocal_rank_fusion(collected.k, ranks)
-    |> gate_hits(collected.evidence)
-    |> floor_hits(collected.floor)
-    |> Enum.take(collected.limit)
-    |> hydrate(resource, {select, collected.load}, read_opts)
-    |> maybe_rerank(query, opts)
-    |> Enum.map(&attach_hit/1)
+    {fuse_micros, fused} =
+      :timer.tc(fn ->
+        collected.legs
+        |> reciprocal_rank_fusion(collected.k, ranks)
+        |> gate_hits(collected.evidence)
+        |> floor_hits(collected.floor)
+        |> Enum.take(collected.limit)
+        |> hydrate(resource, {select, collected.load}, read_opts)
+      end)
+
+    {rerank_micros, {hits, reranked}} =
+      :timer.tc(fn -> budgeted_rerank(fused, query, opts, deadline) end)
+
+    timings =
+      if reranked == :off,
+        do: %{fuse: fuse_micros},
+        else: %{fuse: fuse_micros, rerank: rerank_micros}
+
+    {Enum.map(hits, &attach_hit/1),
+     %{timings: timings, missing: if(reranked == :cut, do: [:rerank], else: [])}}
+  end
+
+  # The reranker inside what is left of the budget. One that misses it — or
+  # starts with nothing left — leaves the fused order, which is what a
+  # reranker that fails leaves too.
+  defp budgeted_rerank(hits, query, opts, deadline) do
+    cond do
+      not Keyword.get(opts, :rerank, false) -> {hits, :off}
+      deadline == :infinity -> {maybe_rerank(hits, query, opts), :ok}
+      Budget.past?(deadline) -> {hits, :cut}
+      true -> rerank_within(hits, query, opts, deadline)
+    end
+  end
+
+  # On `rerank_slots/0` slots: a rerank the deadline gave up on still runs in
+  # the serving, so it keeps its slot, and a section that finds the slots
+  # taken skips the reranker rather than queueing behind them.
+  defp rerank_within(hits, query, opts, deadline) do
+    case Budget.within_slots(:rerank, rerank_slots(), deadline, fn ->
+           maybe_rerank(hits, query, opts)
+         end) do
+      {:ok, reranked} -> {reranked, :ok}
+      _timeout_or_busy -> {hits, :cut}
+    end
   end
 
   @doc false
@@ -2331,9 +2490,56 @@ defmodule KilnCMS.Search do
   asked for are absent from the result**, not empty — "you did not ask" and
   "there were no matches" are different answers, and a `KeyError` is the right
   way to learn you asked for the wrong thing. An unrecognised key raises.
+
+  ## `:budget`
+
+  Milliseconds the sweep may take, default `query_budget/0`; `:infinity`
+  waits for every leg. Legs the budget cut off are dropped from the fusion,
+  and `global/2` does not say which — `global_report/2` does.
   """
   @spec global(String.t(), keyword()) :: %{optional(atom()) => [struct()]}
-  def global(query, opts \\ []) when is_binary(query) do
+  def global(query, opts \\ []) when is_binary(query), do: global_report(query, opts).sections
+
+  @typedoc """
+  What `global_report/2` answers: the sections `global/2` returns, the legs
+  the budget cut off (`%{section => [leg]}`, empty when nothing was), and
+  how long each part took in microseconds, in the order the sweep ran them.
+  """
+  @type report() :: %{
+          sections: %{optional(atom()) => [struct()]},
+          partial: %{optional(atom()) => [atom()]},
+          timings: [{atom(), non_neg_integer()}]
+        }
+
+  @doc """
+  `global/2`, and what it would not say: whether the budget (`:budget`,
+  `query_budget/0`) cut the sweep short, and where the time went.
+
+  `:partial` names, per section, what did not contribute: a content leg
+  (`:keyword` — both keyword legs — `:title`, `:alias`, `:fuzzy`, `:semantic`,
+  `:block`, `:tag`), `:rerank` for a section left in fused order, or
+  `:section` for a media or taxonomy section that had not answered. A query
+  embedding that missed its share of the budget shows as `:semantic`,
+  `:block` and `:tag` in every content section. A leg that ran and found
+  nothing, or that does not apply (semantic search off, a facet filter), is
+  not partial. `:partial` is empty when the sweep finished.
+
+  `:timings` is `[{name, microseconds}]`: `:embed` (the query embedding),
+  each leg summed over the content sections, `:fuse` (fusion, the relevance
+  floor and the read of the kept hits) and `:rerank` summed the same way,
+  then `:total`, the sweep's wall time. The sections run concurrently, so a
+  summed leg can exceed `:total`. `GET /api/search` sends these as its
+  `Server-Timing` header.
+  """
+  @spec global_report(String.t(), keyword()) :: report()
+  def global_report(query, opts \\ []) when is_binary(query) do
+    started = System.monotonic_time(:microsecond)
+    budget = Keyword.get(opts, :budget, query_budget())
+    deadline = Budget.deadline(budget)
+
+    {embed_micros, {query_vector, embedded}} =
+      :timer.tc(fn -> budgeted_query_vector(query, Budget.deadline(Budget.half(budget))) end)
+
     # `:tenant` scopes the multitenant content legs to the request's org (#336).
     read_opts = Keyword.take(opts, [:actor, :authorize?, :tenant])
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
@@ -2362,8 +2568,9 @@ defmodule KilnCMS.Search do
           # Embed the query ONCE for the whole sweep. Every section below runs
           # a semantic leg, and each would otherwise embed this same string
           # itself — one identical embedding per registered content type, the
-          # dominant cost of a global search by a wide margin.
-          query_vector: global_query_vector(query)
+          # dominant cost of a global search by a wide margin. Within half
+          # the budget (`budgeted_query_vector/2`).
+          query_vector: query_vector
         ]
 
     # Section key per compiled type — `ct.section` is the plural atom minted
@@ -2399,32 +2606,125 @@ defmodule KilnCMS.Search do
 
     (compiled ++ fixed)
     |> select_sections(Keyword.get(opts, :sections))
-    |> run_global(query)
+    |> run_global(query, deadline, embedded)
+    |> then(fn report ->
+      total = System.monotonic_time(:microsecond) - started
+      %{report | timings: [{:embed, embed_micros}] ++ report.timings ++ [{:total, total}]}
+    end)
   end
 
+  # The query embedding, inside `deadline` — half the sweep's budget, so a
+  # serving that is slow to answer still leaves the other legs time to run.
+  # `:cut` is a missed deadline; an embedder that fails is not partial, the
+  # sweep just has no semantic legs (`global_query_vector/1`).
+  defp budgeted_query_vector(query, :infinity), do: {global_query_vector(query), :ok}
+
+  #
+  # A cut embedding still runs in the serving, so the embeddings searches have
+  # in flight are capped at one batch (`batch_size/0`) — past that, a search
+  # skips its semantic legs at once rather than queueing behind the ones the
+  # budget already gave up on (`KilnCMS.Search.Budget.within_slots/4`).
+  defp budgeted_query_vector(query, deadline) do
+    embed = fn -> global_query_vector(query) end
+
+    with true <- semantic?(),
+         {:ok, vector} <- Budget.within_slots(:embed, batch_size(), deadline, embed) do
+      {vector, :ok}
+    else
+      false -> {:unavailable, :ok}
+      _timeout_or_busy -> {:unavailable, :cut}
+    end
+  end
+
+  # The legs that read the query vector — what a cut embedding costs each
+  # content section.
+  @vector_legs [:semantic, :block, :tag]
+
   # Two rounds. The first collects every content section's legs
-  # (`collect_legs/3`) alongside the media and taxonomy sections, which are
+  # (`collect_legs/4`) alongside the media and taxonomy sections, which are
   # done after it; the second fuses each content section at ranks taken over
   # all of them (`global_ranks/1`), so `1 / (k + rank)` means the same in
   # every section and `hit_score/1` can be sorted across them (#2175).
-  defp run_global(sections, query) do
-    first =
-      Enum.map(sections, fn
-        {key, {:content, resource, opts}} -> {key, fn -> collect_legs(resource, query, opts) end}
-        {key, run} -> {key, run}
+  #
+  # The budget's deadline bounds the first round (`KilnCMS.Search.Budget.run/3`): a
+  # content section it cuts off is fused from the legs it had finished, and
+  # a media or taxonomy section is empty. The second round reads the kept
+  # hits whatever the clock says — a search with no records to show is not a
+  # partial result — but its reranker runs only inside what is left.
+  defp run_global(sections, query, deadline, embedded) do
+    outcomes =
+      sections
+      |> Enum.map(fn
+        {key, {:content, resource, opts}} ->
+          {key, fn sweep -> collect_legs(resource, query, opts, sweep) end}
+
+        {key, run} ->
+          {key, fn _sweep -> run.() end}
       end)
+      |> Budget.run(deadline, concurrency: section_concurrency(), stall_timeout: @section_timeout)
+
+    {content, plain} =
+      Enum.split_with(sections, &match?({_key, {:content, _resource, _opts}}, &1))
+
+    collected =
+      Map.new(content, fn {key, {:content, resource, opts}} ->
+        case outcomes[key] do
+          {:done, collected} -> {key, collected}
+          {:cut, ran} -> {key, assemble_legs(leg_context(resource, query, opts), ran)}
+        end
+      end)
+
+    ranks = global_ranks(collected)
+
+    fused =
+      collected
+      |> sweep_evidence()
+      |> Enum.map(fn {key, c} -> {key, fn -> fuse_legs(c, ranks[key], deadline) end} end)
       |> run_sections()
 
+    plain_results =
+      Map.new(plain, fn {key, _run} ->
+        case outcomes[key] do
+          {:done, records} -> {key, records}
+          {:cut, _ran} -> {key, []}
+        end
+      end)
+
+    %{
+      sections: Map.merge(plain_results, Map.new(fused, fn {key, {hits, _}} -> {key, hits} end)),
+      partial: partial(collected, fused, embedded, Enum.filter(plain, &cut?(outcomes, &1))),
+      timings: sweep_timings(collected, fused)
+    }
+  end
+
+  defp cut?(outcomes, {key, _run}), do: match?({:cut, _}, outcomes[key])
+
+  defp partial(collected, fused, embedded, cut_plain) do
+    vector_legs = if embedded == :cut, do: @vector_legs, else: []
+
     content =
-      for {key, {:content, _resource, _opts}} <- sections, into: %{}, do: {key, first[key]}
+      for {key, c} <- collected,
+          missing = Enum.uniq(c.missing ++ vector_legs ++ elem(fused[key], 1).missing),
+          missing != [],
+          into: %{},
+          do: {key, Enum.filter(@leg_order ++ [:rerank], &(&1 in missing))}
 
-    ranks = global_ranks(content)
+    Enum.into(cut_plain, content, fn {key, _run} -> {key, [:section]} end)
+  end
 
-    content
-    |> sweep_evidence()
-    |> Enum.map(fn {key, collected} -> {key, fn -> fuse_legs(collected, ranks[key]) end} end)
-    |> run_sections()
-    |> then(&Map.merge(first, &1))
+  # Each leg's time summed over the sections, in `@leg_order`, then fusion's.
+  defp sweep_timings(collected, fused) do
+    sum = fn timings, name ->
+      timings |> Enum.map(&Map.get(&1, name)) |> Enum.reject(&is_nil/1) |> Enum.sum()
+    end
+
+    legs = Enum.map(Map.values(collected), & &1.timings)
+    fuses = Enum.map(Map.values(fused), &elem(&1, 1).timings)
+
+    for(leg <- @leg_order, Enum.any?(legs, &Map.has_key?(&1, leg)), do: {leg, sum.(legs, leg)}) ++
+      for name <- [:fuse, :rerank],
+          Enum.any?(fuses, &Map.has_key?(&1, name)),
+          do: {name, sum.(fuses, name)}
   end
 
   @doc """
