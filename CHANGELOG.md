@@ -90,7 +90,7 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#term-evidence-gate))
 - **README, home page hero and kilncms.dev `/docs` lead with the wedge: content that has to be
   right, everywhere in seconds, provably. A new guide orders the six delivery and governance docs.**
-  ([long form](docs/changelog/unreleased.md#wedge-positioning))
+  ([#2197](https://github.com/The-Verscienta/kiln_cms/pull/2197) · [long form](docs/changelog/unreleased.md#wedge-positioning))
 
 ### Fixed
 
