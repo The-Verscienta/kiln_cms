@@ -299,9 +299,12 @@ build if a resource is ever registered without that authorizer.
   `KilnCMS.Accounts.Changes.RevokeAllTokens`, inside the write's transaction —
   the password is not changed if the revocation fails. Not through
   `log_out_everywhere`'s `apply_on_password_change? true`, which
-  `KilnCMS.Accounts.User` declares but which never fired: its change is gated
-  on `hashed_password` being *touched*, evaluated when the changeset is built,
-  and both actions write the hash in a `before_action`. Until 1.0 that made
+  `KilnCMS.Accounts.User` declared but which never fired before
+  AshAuthentication 5.0.0-rc.16: its change was gated on `hashed_password`
+  being *touched*, evaluated when the changeset is built, and both actions
+  write the hash in a `before_action`. (Once rc.16 made it fire, its
+  resource-wide sweep also revoked the session a reset signs its user into, so
+  Kiln turned it off.) Until 1.0 that made
   this control a claim rather than a fact, which is how an earlier revision of
   this page came to say it held "since #734" (fixed properly in #734's reopen,
   with the socket half in #1637). The session on the device that changed the

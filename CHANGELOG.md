@@ -106,6 +106,9 @@ Every summary line below that was shortened links to its own entry there.
 - **ash_authentication 5.0 and ash_authentication_phoenix 3.0 release candidates
   bring assent 0.3.2 (EEF-CVE-2026-117656, Sign in with Apple; Kiln not exposed).**
   ([#2185](https://github.com/The-Verscienta/kiln_cms/pull/2185) · [long form](docs/changelog/unreleased.md#ash-authentication-5-assent))
+- **ash_authentication 5.0.0-rc.16 fixes EEF-CVE-2026-119215 (TOTP setup) and
+  EEF-CVE-2026-118505 (`brute_force_strategy`); Kiln uses neither, so not exposed.**
+  ([long form](docs/changelog/unreleased.md#ash-authentication-rc16))
 
 ## [1.7.0] - 2026-10-29
 

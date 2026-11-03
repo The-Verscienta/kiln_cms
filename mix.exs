@@ -696,7 +696,7 @@ defmodule KilnCMS.MixProject do
       {:ash_oban, "~> 0.8"},
       {:bcrypt_elixir, "~> 3.0"},
       {:picosat_elixir, "~> 0.2"},
-      {:ash_authentication, "~> 5.0.0-rc.15"},
+      {:ash_authentication, "~> 5.0.0-rc.16"},
       {:ash_authentication_phoenix, "~> 3.0.0-rc.11"},
       {:absinthe_phoenix, "~> 2.0"},
       {:open_api_spex, "~> 3.0"},

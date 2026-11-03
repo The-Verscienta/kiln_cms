@@ -335,6 +335,27 @@ carries the reasoning.
   per-address throttles stay as they were.
   ([#2185](https://github.com/The-Verscienta/kiln_cms/pull/2185))
 
+<a id="ash-authentication-rc16"></a>
+
+- **ash_authentication 5.0.0-rc.16 fixes EEF-CVE-2026-119215 and
+  EEF-CVE-2026-118505.** The first (high) let a signed-in user install their own
+  authenticator secret on another account through the TOTP strategy's `setup`
+  and `confirm_setup` actions, where an application exposed them on a record the
+  caller picks. The second (medium) left `brute_force_strategy` applying no limit
+  to a sign-in or request action the resource defines itself. Kiln was exposed
+  to neither: its two-factor enrolment is its own (`:setup_totp`,
+  `:confirm_totp` on the signed-in user's record), not the library's TOTP
+  strategy, and it sets no `brute_force_strategy`; its per-account and
+  per-address throttles are its own. No migration, no configuration.
+
+  rc.16 also makes `log_out_everywhere`'s `apply_on_password_change?` fire on
+  password actions that hash in a `before_action`, which it never did before.
+  Kiln had declared it, but the control on a password change or reset has been
+  `KilnCMS.Accounts.Changes.RevokeAllTokens` since #734. Firing, the flag's
+  resource-wide sweep ran after the reset minted its new session and revoked
+  it, so Kiln now leaves the flag off. A change or reset revokes exactly what
+  it did before.
+
 <a id="compound-names"></a>
 
 - **Search matches names written spaced or joined (proposal A5).** A
