@@ -87,6 +87,7 @@ declarative, so the module *is* the specification.
 
 | You want to… | Read |
 |--------------|------|
+| Know what Kiln is for | [Right, everywhere, provably](right-everywhere-provably.md) — corrections that reach every consumer in seconds, with a signed record of what readers saw |
 | Use the editor | [Editor shortcuts](editor-shortcuts.md), [Editorial advisories](advisories.md), [Claim checking](compliance.md) |
 | Model new content | [Extending the content model](extending-content.md) |
 | Overlay the core with your own project | [The overlay contract](overlay-contract.md) — what you may rely on across releases; [Downstream projects](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md) for the mechanics |

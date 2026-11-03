@@ -225,6 +225,40 @@ carries the reasoning.
   `term_gate: [min_share: …]` retunes it. `KilnCMS.Search.term_evidence/3`
   shows the verdict for a query. The migration adds the extension only.
 
+
+<a id="wedge-positioning"></a>
+
+- **Kiln says what it is for, first (#1930).** The README's first sentence,
+  the stock home page served at `/` until a site publishes its own, and the
+  kilncms.dev `/docs` index now lead with the wedge from
+  [path-forward.md](../path-forward.md): content that has to be right,
+  everywhere in seconds, provably. This is release 1.8 of that plan, and it
+  changes no code path.
+
+  - **One entry point.** The new guide
+    [Right, everywhere, provably](../right-everywhere-provably.md) puts the six
+    delivery and governance guides in reading order (webhooks, resilient
+    delivery, static export, point in time, provenance, governance dashboard)
+    and adds what shipped between them in 1.3 to 1.7: `data.affected`, the
+    retraction guarantee, propagation records and the first p95, the change
+    feed's server side, the "what readers saw" trail, headless draft mode and
+    provenance on by default. It ends with what is not built yet. The six
+    guides stay where they are. It sits in the docs sidebar under Getting
+    started, and `scripts/publish_docs.exs` puts a "Start here" pointer to it
+    above the section list on kilncms.dev's `/docs`.
+  - **README.** The opening paragraph states the wedge; a short "Run it" block
+    (three commands and the dev sign-in) comes before the maturity notes; and
+    "Status & maturity" opens with what each 1.x minor has shipped toward the
+    wedge and what has not. The maturity content itself is unchanged.
+  - **Home page hero.** Editors in the 2026-10-29 usability walkthrough found
+    it heavy on jargon. It now says the same thing in plain words, with a
+    "How it works" link to the guide. The strings are new, so es and fr carry
+    new translations.
+  - **`docs/cms-comparison.md`** gains a wedge table for Sanity, Contentful,
+    Payload and Directus (live delivery, point in time, signed content,
+    governance), each claim linked to the vendor's own docs and checked on
+    2026-11-03. "Not documented" is written where nothing was found.
+
 ## Fixed
 
 <a id="global-search-ranks"></a>

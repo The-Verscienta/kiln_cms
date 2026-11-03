@@ -88,6 +88,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Search returns nothing for a query most of whose words are in no record's text or name;
   a word one edit from a name is a typo, and the fuzzy leg retries corrected. `SEARCH_TERM_GATE=false` reverts.**
   ([long form](docs/changelog/unreleased.md#term-evidence-gate))
+- **README, home page hero and kilncms.dev `/docs` lead with the wedge: content that has to be
+  right, everywhere in seconds, provably. A new guide orders the six delivery and governance docs.**
+  ([long form](docs/changelog/unreleased.md#wedge-positioning))
 
 ### Fixed
 

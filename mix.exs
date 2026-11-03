@@ -263,6 +263,9 @@ defmodule KilnCMS.MixProject do
       # Getting started
       "docs/getting-started.md": [],
       "README.md": [title: "Overview"],
+      # The wedge's entry point (#1930): orders the six delivery and
+      # governance guides below and the 1.3–1.7 features between them.
+      "docs/right-everywhere-provably.md": [],
       "CONTRIBUTING.md": [],
       # Compare & migrate — public "Kiln vs X" pages (#1876). Their facts are
       # dated and sourced; see docs/compare/how-kiln-compares.md for the rules.
@@ -426,7 +429,12 @@ defmodule KilnCMS.MixProject do
 
   defp groups_for_extras do
     [
-      "Getting started": ["docs/getting-started.md", "README.md", "CONTRIBUTING.md"],
+      "Getting started": [
+        "docs/getting-started.md",
+        "README.md",
+        "docs/right-everywhere-provably.md",
+        "CONTRIBUTING.md"
+      ],
       "Compare & migrate": [
         "docs/compare/how-kiln-compares.md",
         "docs/compare/kiln-vs-wordpress.md",
