@@ -43,6 +43,27 @@ carries the reasoning.
   (`cross_section`, `exact_phrase`, `prefix`, `joined_name`, `cjk_name`), so a
   deployment's own set can use them.
 
+<a id="search-explain"></a>
+
+- **Search explain mode: why a hit ranked where it did (#2177).** A site
+  comparing Kiln's `/api/search` against Meilisearch could see a hit's `score`
+  and `legs`, but nothing like `_rankingScoreDetails`. It had to guess "matched
+  some of the words" from the `keyword_any` leg's name. `GET
+  /api/search?explain=1`, and `explain: true` on `KilnCMS.Search.hybrid/3` and
+  `global/2`, now attach an `explain` object to every content hit
+  (`KilnCMS.Search.hit_explain/1`). For each leg it gives the rank fusion used,
+  which in a `global/2` sweep is the rank over every section. It also gives
+  that rank's contribution to `score` and the raw number the leg ranked by:
+  `ts_rank`, cosine distance or trigram similarity. Alongside these are the
+  query's terms, which ones the hit's `search_vector` contains, and `coverage`
+  (matched / terms). A consumer can sort by coverage and then score without
+  re-deriving coverage from snippets. The leg numbers come from the keys
+  fusion already collected. The term match adds one query per section, over
+  the kept hits only, and the fuzzy leg loads its similarity only under
+  explain. Explain is off by default, so the default payload is unchanged. An
+  explained response is `private, no-store` with no `ETag`, so it never
+  becomes the cached answer for a search URL.
+
 ## Changed
 
 <a id="field-role-weights"></a>
@@ -72,6 +93,8 @@ carries the reasoning.
   table ranks with the same expression over the same weights, so `global/2` can
   still compare keyword ranks across sections. A field definition reports the
   weight its text gets as the `search_weight` calculation (`"A"`, `"B"` or nil).
+  Explain mode (#2177) reports the keyword legs' raw score as `measure:
+  "ts_rank_cd"` accordingly.
 
   The trigger keeps the old vector for a row whose `search_weighted` is nil. It
   does the same when an update changes `title` or `search_text` and leaves
