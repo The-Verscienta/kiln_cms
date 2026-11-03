@@ -101,11 +101,16 @@ defmodule KilnCMS.Accounts.PasswordRotationTest do
     {:ok, reset_token} = AshAuthentication.Strategy.Password.reset_token_for(strategy, user)
 
     # The strategy's own entry point — what `/auth/user/password/reset` calls.
-    AshAuthentication.Strategy.action(strategy, :reset, %{
-      "reset_token" => reset_token,
-      "password" => @new_password,
-      "password_confirmation" => @new_password
-    })
+    AshAuthentication.Strategy.action(
+      strategy,
+      :reset,
+      %{
+        "reset_token" => reset_token,
+        "password" => @new_password,
+        "password_confirmation" => @new_password
+      },
+      []
+    )
   end
 
   defp watch(user) do
@@ -178,6 +183,43 @@ defmodule KilnCMS.Accounts.PasswordRotationTest do
       assert is_binary(jti)
       assert purpose(user, jti) == "user"
       assert purpose(user, before) == "revocation"
+    end
+
+    # The sweep spares the reset token (`spare: :reset_token`) so that the
+    # strategy can revoke it single-use. That is only safe if the strategy
+    # really does: the link must work once, end revoked, and refuse a second
+    # use rather than set the password again.
+    test "a reset link works once and is revoked by the reset" do
+      user = user!()
+      strategy = AshAuthentication.Info.strategy!(User, :password)
+      {:ok, reset_token} = AshAuthentication.Strategy.Password.reset_token_for(strategy, user)
+      {:ok, %{"jti" => reset_jti}} = AshAuthentication.Jwt.peek(reset_token)
+
+      params = %{
+        "reset_token" => reset_token,
+        "password" => @new_password,
+        "password_confirmation" => @new_password
+      }
+
+      assert {:ok, _} = AshAuthentication.Strategy.action(strategy, :reset, params, [])
+      assert purpose(user, reset_jti) == "revocation"
+
+      replay =
+        Map.merge(params, %{
+          "password" => "a-third-password-000",
+          "password_confirmation" => "a-third-password-000"
+        })
+
+      assert {:error, _} = AshAuthentication.Strategy.action(strategy, :reset, replay, [])
+
+      # The replay changed nothing: the password is still the first reset's.
+      assert {:ok, _} =
+               AshAuthentication.Strategy.action(
+                 strategy,
+                 :sign_in,
+                 %{"email" => to_string(user.email), "password" => @new_password},
+                 []
+               )
     end
   end
 

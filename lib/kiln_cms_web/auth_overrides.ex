@@ -111,18 +111,12 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :label_class, @title <> " mt-2 mb-4"
     set :form_class, nil
     set :spacer_class, "py-1"
-    set :disable_button_text, "Changing password ..."
-  end
-
-  # Not `Components.Reset.Form`: that component declares no `button_text` — its
-  # submit button is labelled by humanizing the reset action's name, which is
-  # how it came to read "Reset password with token". A `set` naming a key its
-  # component does not declare is silently ignored, so this one only does
-  # anything under the module that both declares and reads it, Kiln's own form
-  # component. `KilnCMSWeb.AuthResetForm` is why that component exists;
-  # `KilnCMSWeb.AuthOverridesTest` is what now catches the silence.
-  override KilnCMSWeb.AuthResetForm do
+    # Declared by the component since ash_authentication_phoenix 3.0. Before
+    # it, the button was labelled by humanizing the reset action's name, which
+    # is how it came to read "Reset password with token", and this setting had
+    # to live under `KilnCMSWeb.AuthResetForm` instead.
     set :button_text, "Change password"
+    set :disable_button_text, "Changing password ..."
   end
 
   # Blanked deliberately (#48). These overrides are a compile-time Spark DSL, so
