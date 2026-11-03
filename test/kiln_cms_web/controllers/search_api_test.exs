@@ -28,10 +28,15 @@ defmodule KilnCMSWeb.SearchApiTest do
     strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
 
     {:ok, signed_in} =
-      AshAuthentication.Strategy.action(strategy, :sign_in, %{
-        "email" => user.email,
-        "password" => "password123456"
-      })
+      AshAuthentication.Strategy.action(
+        strategy,
+        :sign_in,
+        %{
+          "email" => user.email,
+          "password" => "password123456"
+        },
+        []
+      )
 
     signed_in.__metadata__.token
   end

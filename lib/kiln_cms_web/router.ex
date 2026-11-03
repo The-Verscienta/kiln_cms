@@ -1,9 +1,10 @@
 defmodule KilnCMSWeb.Router do
   use KilnCMSWeb, :router
 
+  # Also imports `AshAuthentication.Phoenix.Plug`, which provides `set_actor/2`
+  # (since ash_authentication_phoenix 3.0 it delegates to
+  # `AshAuthentication.Plug.Helpers`, so importing that too is ambiguous).
   use AshAuthentication.Phoenix.Router
-
-  import AshAuthentication.Plug.Helpers
 
   # Content-Security-Policy. Directives shared by every browser response; the
   # `script-src` directive is finalized per-pipeline (see `put_*_browser_csp`).

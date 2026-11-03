@@ -15,7 +15,7 @@ defmodule KilnCMS.Accounts.ThrottledPasswordResetRequest do
   arise, and nothing needs deferring.
 
   Charges `:auth`, alongside the magic-link request, for the reason
-  `KilnCMS.Accounts.Preparations.ThrottleMagicLink` gives. The per-address mail
+  `KilnCMS.Accounts.ThrottledMagicLinkRequest` gives. The per-address mail
   budget (`AccountThrottle.allow_mail?/2`, five per hour) still bounds what
   actually leaves the building; this bounds the requests that reach it.
   """

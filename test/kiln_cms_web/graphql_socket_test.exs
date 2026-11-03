@@ -24,10 +24,15 @@ defmodule KilnCMSWeb.GraphqlSocketTest do
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
     {:ok, signed_in} =
-      AshAuthentication.Strategy.action(strategy, :sign_in, %{
-        "email" => email,
-        "password" => @password
-      })
+      AshAuthentication.Strategy.action(
+        strategy,
+        :sign_in,
+        %{
+          "email" => email,
+          "password" => @password
+        },
+        []
+      )
 
     token = signed_in.__metadata__.token
 
