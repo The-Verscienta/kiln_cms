@@ -230,10 +230,15 @@ defmodule KilnCMSWeb.GovernanceWitnessPanelTest do
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
     {:ok, user} =
-      AshAuthentication.Strategy.action(strategy, :sign_in, %{
-        "email" => email,
-        "password" => @password
-      })
+      AshAuthentication.Strategy.action(
+        strategy,
+        :sign_in,
+        %{
+          "email" => email,
+          "password" => @password
+        },
+        []
+      )
 
     user
   end
