@@ -56,12 +56,18 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **The upgrade migration rewrites `search_vector` on every content row holding
+  Chinese characters, adding their bigrams. Nothing to run, overlays included.**
+  ([#2179](https://github.com/The-Verscienta/kiln_cms/pull/2179) · [long form](docs/changelog/unreleased.md#han-bigrams-upgrade))
 - **Run the re-fire sweep after deploying (`mix kiln.refire_all`); overlays first run
   `mix ash.codegen`. Content tables gain `search_weighted`; old rows keep the old weights.**
   ([#2183](https://github.com/The-Verscienta/kiln_cms/pull/2183) · [long form](docs/changelog/unreleased.md#field-role-weights-upgrade))
 
 ### Added
 
+- **Chinese is searchable inside longer text: `吴茱萸` finds `本方以吴茱萸为君药`, and a query
+  that is exactly a record's Chinese name ranks it first (`:han` leg).**
+  ([#2179](https://github.com/The-Verscienta/kiln_cms/pull/2179) · [long form](docs/changelog/unreleased.md#han-bigrams))
 - **Per-site search synonyms and aliases (`/editor/search-synonyms`): equivalent groups and
   one-way rules, applied by `/api/search` (`also_searched`), `/api/ask`, the new `/mcp`
   `search_content` tool and site search alike.** ([long form](docs/changelog/unreleased.md#search-synonyms))

@@ -56,7 +56,8 @@ defmodule KilnCMS.Migrations do
   fields and the searchable fields' leading words `B`, the rest of those `C`
   and the body `D`. Otherwise — no such column, or a row not yet re-saved —
   the title weighs `A` and `search_text` `B`, which is also what this
-  function's backfill writes; a re-fire sweep (`mix kiln.refire_all`) moves
+  function's backfill writes (with the Han bigrams of each,
+  `KilnCMS.Search.HanGrams`, once that extension is installed); a re-fire sweep (`mix kiln.refire_all`) moves
   published rows onto the weighted vector.
 
   Everything is guarded (`IF NOT EXISTS`, backfill only where the vector is
@@ -89,11 +90,23 @@ defmodule KilnCMS.Migrations do
       "CREATE INDEX IF NOT EXISTS #{table}_search_vector_gin ON #{table} USING gin (search_vector)"
     )
 
+    # `kiln_search_vector()` (`KilnCMS.Search.HanGrams`) is what the trigger
+    # computes once that extension is installed; a migration that runs before
+    # it (an overlay's, timestamped earlier) writes the vector the trigger
+    # wrote then, and the extension's own backfill brings those rows forward.
     execute("""
-    UPDATE #{table} SET search_vector =
-      setweight(to_tsvector(kiln_regconfig(locale), coalesce(title, '')), 'A') ||
-      setweight(to_tsvector(kiln_regconfig(locale), coalesce(search_text, '')), 'B')
-    WHERE search_vector IS NULL
+    DO $$
+    BEGIN
+      IF to_regprocedure('kiln_search_vector(text, text, text, text[])') IS NOT NULL THEN
+        UPDATE #{table} SET search_vector = kiln_search_vector(locale, title, search_text, NULL)
+        WHERE search_vector IS NULL;
+      ELSE
+        UPDATE #{table} SET search_vector =
+          setweight(to_tsvector(kiln_regconfig(locale), coalesce(title, '')), 'A') ||
+          setweight(to_tsvector(kiln_regconfig(locale), coalesce(search_text, '')), 'B')
+        WHERE search_vector IS NULL;
+      END IF;
+    END $$
     """)
   end
 

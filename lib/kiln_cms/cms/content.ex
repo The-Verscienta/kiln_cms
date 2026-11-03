@@ -111,6 +111,11 @@ defmodule KilnCMS.CMS.Content do
   # by each item, so the match runs per element: a scalar is read as a
   # one-item list. Without that, `->>` hands the phrase match the list's JSON
   # text, which no query ever matches.
+  #
+  # A Han query also names the record whose field's Han text is exactly the
+  # query's (`han_named/1`): `黄连` names a field holding `黄连` or
+  # `黄连 (huáng lián)`, and not one holding `黄连解毒汤`, which the phrase
+  # match would not name either but the keyword leg ranks alongside it.
   def alias_filter(query) do
     case KilnCMS.CMS.NameFields.for_resource(query.resource, query.tenant) do
       [] ->
@@ -121,27 +126,104 @@ defmodule KilnCMS.CMS.Content do
         text = Ash.Query.get_argument(query, :query)
 
         names
-        |> Enum.map(fn name ->
-          Ash.Expr.expr(
-            fragment(
-              "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(coalesce(? ->> ?::text, '')) END) AS name_alias(value) WHERE (SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value))",
-              custom_fields,
-              ^name,
-              custom_fields,
-              ^name,
-              custom_fields,
-              ^name,
-              ^locale,
-              ^text,
-              ^locale
-            )
-          )
-        end)
+        |> Enum.map(&name_match(&1, locale, text, KilnCMS.Search.HanGrams.han?(text)))
         |> Enum.reduce(&Ash.Expr.expr(^&2 or ^&1))
         |> then(&Ash.Query.do_filter(query, &1))
         |> Ash.Query.sort([{:inserted_at, :desc}])
         |> cap_unbounded()
     end
+  end
+
+  # One flagged field's match, with the Han exactness for a Han query.
+  defp name_match(name, locale, text, true = _han?) do
+    Ash.Expr.expr(
+      fragment(
+        "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(coalesce(? ->> ?::text, '')) END) AS name_alias(value) WHERE (SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value) OR kiln_han_runs(name_alias.value) = (SELECT kiln_han_runs(?)))",
+        custom_fields,
+        ^name,
+        custom_fields,
+        ^name,
+        custom_fields,
+        ^name,
+        ^locale,
+        ^text,
+        ^locale,
+        ^text
+      )
+    )
+  end
+
+  defp name_match(name, locale, text, false = _han?) do
+    Ash.Expr.expr(
+      fragment(
+        "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(coalesce(? ->> ?::text, '')) END) AS name_alias(value) WHERE (SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value))",
+        custom_fields,
+        ^name,
+        custom_fields,
+        ^name,
+        custom_fields,
+        ^name,
+        ^locale,
+        ^text,
+        ^locale
+      )
+    )
+  end
+
+  @doc false
+  # The `:search_title` prepare's match: the title, as a phrase, occurs in
+  # the query (see the action), guarded by the title-lexeme overlap the
+  # `<table>_title_lexemes_index` answers. Built here rather than declared on
+  # the action because a Han query has a second way to name a record
+  # (`han_named/1`), and a query without Han keeps exactly the filter it had.
+  def title_filter(query) do
+    # Values, pinned; the bare `locale` and `title` below are the row's
+    # columns — the index expression's left side is the row's own `locale`.
+    query_locale = Ash.Query.get_argument(query, :locale)
+    text = Ash.Query.get_argument(query, :query)
+
+    overlap =
+      Ash.Expr.expr(
+        fragment(
+          "tsvector_to_array(to_tsvector(kiln_regconfig(?), ?)) && (SELECT tsvector_to_array(to_tsvector(kiln_regconfig(?), ?)))",
+          locale,
+          title,
+          ^query_locale,
+          ^text
+        )
+      )
+
+    phrase =
+      Ash.Expr.expr(
+        fragment(
+          "(SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), ?)",
+          ^query_locale,
+          ^text,
+          ^query_locale,
+          title
+        )
+      )
+
+    if KilnCMS.Search.HanGrams.han?(text) do
+      Ash.Query.do_filter(query, Ash.Expr.expr(^overlap and (^phrase or ^han_named(text))))
+    else
+      Ash.Query.do_filter(query, Ash.Expr.expr(^overlap and ^phrase))
+    end
+  end
+
+  # A Han query names a record whose title's Han text is exactly the query's:
+  # the same runs of ideographs, in the same order (`kiln_han_runs/1`,
+  # `KilnCMS.Search.HanGrams`). `黄连` names "Huang Lian 黄连" as well as
+  # "黄连", and not "黄连解毒汤", whose run merely contains it — the
+  # exactness `ts_rank` does not give, since all three hold the query's
+  # lexeme. The phrase match already names "黄连"; what this adds is a title
+  # with other words around its Han name, which the query does not contain.
+  #
+  # It sits under the same index-served overlap as the phrase match: the
+  # parser reads a run of ideographs as one word, so a title whose runs are
+  # the query's shares those lexemes with the query.
+  defp han_named(text) do
+    Ash.Expr.expr(fragment("kiln_han_runs(?) = (SELECT kiln_han_runs(?))", title, ^text))
   end
 
   @doc false
@@ -1670,31 +1752,12 @@ defmodule KilnCMS.CMS.Content do
     # Postgres answer it from the index: the row's own `locale` column, not
     # the argument (equal, by the clause before it, but the planner matches
     # index expressions by text).
+    #
+    # The match itself is built in the prepare
+    # (`KilnCMS.CMS.Content.title_filter/1`), because a Han query adds a
+    # second way to be named to it — see there.
     title_read = fn name ->
-      filter_ast =
-        join_and.(
-          [
-            quote(do: ^ref(:locale) == ^arg(:locale)),
-            quote do
-              fragment(
-                "tsvector_to_array(to_tsvector(kiln_regconfig(?), ?)) && (SELECT tsvector_to_array(to_tsvector(kiln_regconfig(?), ?)))",
-                ^ref(:locale),
-                ^ref(:title),
-                ^arg(:locale),
-                ^arg(:query)
-              )
-            end,
-            quote do
-              fragment(
-                "(SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), ?)",
-                ^arg(:locale),
-                ^arg(:query),
-                ^arg(:locale),
-                ^ref(:title)
-              )
-            end
-          ] ++ facet_clauses.(false)
-        )
+      filter_ast = join_and.([quote(do: ^ref(:locale) == ^arg(:locale))] ++ facet_clauses.(false))
 
       quote do
         read unquote(name) do
@@ -1710,6 +1773,7 @@ defmodule KilnCMS.CMS.Content do
 
             query
             |> Ash.Query.set_argument(:locale, locale)
+            |> KilnCMS.CMS.Content.title_filter()
             |> Ash.Query.sort([{:title_length, :desc}, {:inserted_at, :desc}])
             |> KilnCMS.CMS.Content.cap_unbounded()
           end
@@ -1745,6 +1809,49 @@ defmodule KilnCMS.CMS.Content do
             query
             |> Ash.Query.set_argument(:locale, locale)
             |> KilnCMS.CMS.Content.alias_filter()
+          end
+        end
+      end
+    end
+
+    # The Han leg of `KilnCMS.Search.hybrid/3` (A8): rows whose
+    # `search_vector` holds the query's Han text as character bigrams
+    # (`KilnCMS.Search.HanGrams`) — `吴茱萸` as `'吴茱' <-> '茱萸'` — so a
+    # Chinese word is found inside a longer unsegmented run, where the
+    # keyword leg sees one lexeme per run and matches only a run that is
+    # exactly the word or starts with it. Ranked by `han_rank`, newest to
+    # break ties. A query with no Han matches nothing here, and `hybrid/3`
+    # does not run the leg for one. Facets and locale narrow it like the
+    # keyword leg; internal to fusion, no published twin, same as
+    # `:search_title`.
+    han_read = fn name ->
+      filter_ast =
+        join_and.(
+          [
+            quote(do: ^ref(:locale) == ^arg(:locale)),
+            quote do
+              fragment("search_vector @@ (SELECT kiln_han_tsquery(?))", ^arg(:query))
+            end
+          ] ++ facet_clauses.(false)
+        )
+
+      quote do
+        read unquote(name) do
+          argument :query, :string, allow_nil?: false
+          argument :locale, :string
+
+          unquote_splicing(facet_args.(false))
+
+          filter expr(unquote(filter_ast))
+
+          prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
+            q = Ash.Query.get_argument(query, :query)
+
+            query
+            |> Ash.Query.set_argument(:locale, locale)
+            |> Ash.Query.sort([{:han_rank, {%{query: q}, :desc}}, {:inserted_at, :desc}])
+            |> KilnCMS.CMS.Content.cap_unbounded()
           end
         end
       end
@@ -1794,6 +1901,7 @@ defmodule KilnCMS.CMS.Content do
            autocomplete_read.(:autocomplete_published, true),
            title_read.(:search_title),
            alias_read.(:search_alias),
+           han_read.(:search_han),
            compound_read.(:search_compound)
          ]))
       end
@@ -2821,7 +2929,8 @@ defmodule KilnCMS.CMS.Content do
         # Keyword search (all terms, and the any-term relaxation the hybrid
         # falls back to), semantic search, and autocomplete — each paired with
         # its `*_published` delivery twin (state pinned server-side, #297) —
-        # plus the fusion-internal title leg (`:search_title`, no twin).
+        # plus the fusion-internal title, alias and Han legs (`:search_title`,
+        # `:search_alias`, `:search_han`, no twins).
         # Generated from one template each above (`search_read`/
         # `semantic_read`/`autocomplete_read`/`title_read`), where the behavior
         # is documented. All go through the read policy, so anonymous callers
@@ -4607,6 +4716,21 @@ defmodule KilnCMS.CMS.Content do
                     )
                   ) do
           argument :locale, :string, allow_nil?: false
+          argument :query, :string, allow_nil?: false
+        end
+
+        # `search_rank` for the Han leg (`:search_han`): `ts_rank` against the
+        # query's Han bigrams (`kiln_han_tsquery/1`, `KilnCMS.Search.HanGrams`),
+        # which the stored vector carries at the weight of the text they came
+        # from — a title's above a body's. Internal.
+        calculate :han_rank,
+                  :float,
+                  expr(
+                    fragment(
+                      "coalesce(ts_rank(search_vector, (SELECT kiln_han_tsquery(?))), 0)",
+                      ^arg(:query)
+                    )
+                  ) do
           argument :query, :string, allow_nil?: false
         end
 

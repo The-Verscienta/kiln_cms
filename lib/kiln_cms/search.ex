@@ -503,7 +503,7 @@ defmodule KilnCMS.Search do
   # error because they are the likeliest mistake.
   @floor_semantic_legs [:semantic, :block, :tag]
   @floor_optional_legs [:keyword_any, :fuzzy]
-  @floor_vouching_legs [:keyword, :title, :alias, :compound]
+  @floor_vouching_legs [:keyword, :han, :title, :alias, :compound]
 
   @doc """
   The legs whose hits the relevance floor judges (#1936). A fused hit is
@@ -530,11 +530,12 @@ defmodule KilnCMS.Search do
       trigrams with the junk. Listing it judges those guesses by distance
       too. A fuzzy hit on a record with no embedding yet is kept (below).
 
-  `:keyword`, `:title` and `:alias` cannot be listed, and listing one
-  **raises**, as does any leg `hybrid/3` does not have. Each is a lexical
-  claim strong enough to stand without a distance alibi — every query term
-  matched, or the query naming the record — and those are exactly the hits a
-  short query embeds far from: judging them would bring back the defect the
+  `:keyword`, `:han`, `:title`, `:alias` and `:compound` cannot be listed,
+  and listing one **raises**, as does any leg `hybrid/3` does not have. Each
+  is a lexical claim strong enough to stand without a distance alibi — every
+  query term matched (`:han` is that claim for Han text), or the query
+  naming the record — and those are exactly the hits a short query embeds
+  far from: judging them would bring back the defect the
   floor's post-fusion placement fixed (see `semantic_max_distance/0`).
 
   ## How a lexical hit is judged
@@ -1048,6 +1049,14 @@ defmodule KilnCMS.Search do
   @relaxed_fallback_threshold 3
   @relaxed_weight 0.5
 
+  # The Han leg (`:search_han`, A8): the query's Han text as character
+  # bigrams against the bigrams stored in `search_vector`
+  # (`KilnCMS.Search.HanGrams`). It is the keyword leg for text Postgres
+  # cannot segment — "every query term matched", read at the grain Chinese
+  # is written in — so it carries the keyword leg's weight. Runs only for a
+  # query that holds a Han ideograph; for any other it would match nothing.
+  @han_weight 1.0
+
   # The block leg is the semantic leg at block grain — same embedder, same
   # distance, one more view of the document — so it carries the semantic
   # leg's weight: a document reached both by its whole and by a section is
@@ -1087,7 +1096,9 @@ defmodule KilnCMS.Search do
   semantic (`:search_semantic`, cosine), block (the nearest per-block
   embedding per document — see `block_leg?/0`), title (`:search_title`,
   records the query names) and alias (`:search_alias`, records the query
-  names by a field flagged as a name — `KilnCMS.CMS.NameFields`), compound
+  names by a field flagged as a name — `KilnCMS.CMS.NameFields`), Han
+  (`:search_han`, a query's Chinese text matched as character bigrams —
+  `KilnCMS.Search.HanGrams`; only for a query that holds Han), compound
   (`:search_compound`, records the query names with the words of a name
   spaced or joined differently — `KilnCMS.Search.NameTerms`) and tag
   (documents carrying a tag the query names — see `tag_leg?/0`) result lists
@@ -1169,7 +1180,8 @@ defmodule KilnCMS.Search do
   # The legs whose ranks `global/2` takes over the union of its sections
   # (#2175). Each ranks by a number that means the same thing in every
   # table: a cosine distance (`:semantic`, `:block`, `:tag`) or a keyword
-  # rank over the same weighted `search_vector` (`:keyword`, `:keyword_any`).
+  # rank over the same weighted `search_vector` (`:keyword`, `:keyword_any`,
+  # `:han`).
   # Every content table fills that column from one shared trigger function,
   # `kiln_search_vector_refresh()` (`KilnCMS.Migrations.add_search_vector/1`),
   # from the same role buckets, so a keyword rank of 0.6 claims the same
@@ -1187,7 +1199,7 @@ defmodule KilnCMS.Search do
   # either. The title, alias and compound legs keep their section ranks: a
   # title, alias or compound hit is a record the query names outright, which
   # is the same claim in any section, and they carry no measure to rank by.
-  @global_rank_legs [:keyword, :keyword_any, :semantic, :block, :tag, :fuzzy]
+  @global_rank_legs [:keyword, :keyword_any, :han, :semantic, :block, :tag, :fuzzy]
 
   # How a sweep hears from the legs it runs: the deadline each leg checks
   # before it starts, and `emit`, called with each leg's result the moment it
@@ -1199,15 +1211,21 @@ defmodule KilnCMS.Search do
   # (`assemble_legs/2`; that order breaks exact ties). The legs that read the
   # query vector go last, so a sweep that spent its embedding budget has every
   # lexical leg in hand by then. `:fuzzy` reads `:keyword`'s result, so it
-  # follows it. `:keyword` is both keyword legs, `:keyword` and
-  # `:keyword_any` — one call reads them. `:compound` and `:synonym` (A7)
-  # are lexical too — the query's names rewritten, and each alternate
-  # wording through the keyword, title and alias legs — so they run before
-  # the vector legs, after the user's own wording.
+  # follows it. `:keyword` is the three legs over `search_vector`,
+  # `:keyword`, `:keyword_any` and `:han` — one call reads them.
+  # `:compound` and `:synonym` (A7) are lexical too — the query's names
+  # rewritten, and each alternate wording through the keyword, title and
+  # alias legs — so they run before the vector legs, after the user's own
+  # wording.
   @leg_order [:keyword, :title, :alias, :compound, :synonym, :fuzzy, :semantic, :block, :tag]
 
   # What a leg that never ran contributes.
-  @leg_defaults %{keyword: {[], []}, fuzzy: {[], nil}, block: {[], %{}}, tag: {[], %{}}}
+  @leg_defaults %{
+    keyword: {[], [], []},
+    fuzzy: {[], nil},
+    block: {[], %{}},
+    tag: {[], %{}}
+  }
 
   # The first half of `hybrid/3`: every leg's candidates, and what fusion
   # and the floor need, without fusing them. `global/2` collects every
@@ -1270,15 +1288,17 @@ defmodule KilnCMS.Search do
   # of the query's cost thrown away. The calcs a leg does load are the ones
   # its ORDER BY ranks by: the semantic leg's `semantic_distance` (see
   # `semantic_context/1`), and — when `rank_keys?` — the keyword legs'
-  # `search_rank` / `search_rank_any` and the fuzzy leg's `title_similarity`,
-  # which a `global/2` sweep ranks across sections. The kept hits are read whole, with `:load`,
+  # `search_rank` / `search_rank_any`, the Han leg's `han_rank` and the fuzzy
+  # leg's `title_similarity`, which a `global/2` sweep ranks across sections.
+  # The kept hits are read whole, with `:load`,
   # in one query (`hydrate/4`) — before the reranker, which reads their
   # title and `search_text` (`rerank_text/1`).
   #
-  # Both keyword legs read `search_vector`, so they share one containment:
-  # a type without the column loses both, and logs it once.
+  # The keyword, any-term and Han legs read `search_vector`, so they share
+  # one containment: a type without the column loses all three, and logs it
+  # once.
   defp run_named_leg(:keyword, %{resource: resource} = c, _ran) do
-    without_search_vector(resource, fn ->
+    without_search_vector(resource, @leg_defaults.keyword, fn ->
       keyword_legs(resource, c.query, c.args, c.read_opts, c.rank_keys?)
     end)
   end
@@ -1295,7 +1315,7 @@ defmodule KilnCMS.Search do
   # leg is empty — a keyword hit means every term is in the vocabulary. A
   # step the deadline cut leaves no verdict, so a partial answer is ungated.
   defp run_named_leg(:fuzzy, c, ran) do
-    {keyword, _relaxed} = leg_value(ran, :keyword)
+    {keyword, _relaxed, _han} = leg_value(ran, :keyword)
     evidence = gate_evidence(c.resource, c.query, c.locale, keyword, c.read_opts)
 
     fuzzy =
@@ -1328,7 +1348,7 @@ defmodule KilnCMS.Search do
   # all of them, unless the sweep's deadline stopped some. The rest contribute
   # nothing and are listed in `:missing`.
   defp assemble_legs(c, ran) do
-    {keyword, relaxed} = leg_value(ran, :keyword)
+    {keyword, relaxed, han} = leg_value(ran, :keyword)
     semantic = leg_value(ran, :semantic)
     {blocks, block_distances} = leg_value(ran, :block)
     {tagged, tag_distances} = leg_value(ran, :tag)
@@ -1350,6 +1370,7 @@ defmodule KilnCMS.Search do
       legs: [
         {:keyword, keyword, 1.0},
         {:keyword_any, relaxed, @relaxed_weight},
+        {:han, han, @han_weight},
         {:semantic, semantic, 1.0},
         {:block, blocks, @block_weight},
         {:title, leg_value(ran, :title), @title_weight},
@@ -1367,6 +1388,7 @@ defmodule KilnCMS.Search do
       keys: %{
         keyword: Map.new(keyword, &{&1.id, rank_key(&1.search_rank)}),
         keyword_any: Map.new(relaxed, &{&1.id, rank_key(&1.search_rank_any)}),
+        han: Map.new(han, &{&1.id, rank_key(&1.han_rank)}),
         semantic: Map.new(semantic, &{&1.id, &1.semantic_distance}),
         block: block_distances,
         tag: tag_distances,
@@ -1536,7 +1558,7 @@ defmodule KilnCMS.Search do
   # `collected.keys` sorts smaller-first; the better-higher measures were
   # negated into it (`rank_key/1`) and are negated back here.
   defp raw_score(_leg, nil), do: nil
-  defp raw_score(leg, key) when leg in [:keyword, :keyword_any, :fuzzy], do: -key
+  defp raw_score(leg, key) when leg in [:keyword, :keyword_any, :han, :fuzzy], do: -key
   defp raw_score(_leg, key), do: key
 
   # The query's terms and each hit's matches (`IdfCoverage.term_matches/5`).
@@ -1637,7 +1659,7 @@ defmodule KilnCMS.Search do
   score, so that the number always agrees with the order it came in. The
   fused scores of one `global/2` sweep are **comparable across content
   types**: the sections share `k` and the leg weights, and the keyword,
-  any-term, semantic, block and tag legs are ranked over every section's
+  any-term, Han, semantic, block and tag legs are ranked over every section's
   candidates together, so a page scored `0.031` and a post scored `0.016`
   can be sorted against each other, which is how `KilnCMS.Ask` picks its
   sources. Before #2175 the ranks were taken per section, and a section
@@ -1665,20 +1687,25 @@ defmodule KilnCMS.Search do
 
   @doc """
   Which legs of `hybrid/3` returned this record — a subset of
-  `[:keyword, :keyword_any, :semantic, :block, :title, :alias, :compound, :fuzzy, :tag, :synonym]`,
+  `[:keyword, :keyword_any, :han, :semantic, :block, :title, :alias, :compound, :fuzzy, :tag, :synonym]`,
   in that order — or `[]` for a record that did not come out of `hybrid/3`.
 
   `:keyword` is the full-text leg, every query term matched; `:keyword_any`
   is its any-term relaxation, which runs only when the full match came up
   short on a multi-word query, so its presence on a hit means "matched some
-  of the terms"; `:semantic` is the embedding leg over the whole document;
+  of the terms"; `:han` is the full-text leg for Han text, the query's
+  ideographs matched as character bigrams wherever they sit in a longer
+  run (`KilnCMS.Search.HanGrams`), which runs only for a query holding one;
+  `:semantic` is the embedding leg over the whole document;
   `:block` the same embedding at block grain, a document reached through
   its nearest section (`block_leg?/0`) — a block or, with
   `chunk_long_documents?/0` on, a window of its text past the first;
-  `:title` a record the query names outright (its whole title appears in the query); `:alias` a record the
-  query names by one of its other names — a custom field an admin flagged
-  `names_record` (`KilnCMS.CMS.NameFields`), matched the way the title is
-  and weighted the same; `:compound` a record the query names by its title
+  `:title` a record the query names outright (its whole title appears in
+  the query, or — for a Han query — the title's Han text is exactly the
+  query's: `黄连` names "Huang Lian 黄连" and not "黄连解毒汤"); `:alias` a
+  record the query names by one of its other names — a custom field an
+  admin flagged `names_record` (`KilnCMS.CMS.NameFields`), matched the way
+  the title is and weighted the same; `:compound` a record the query names by its title
   or one of those names written spaced or joined differently — `huangqi` for
   Huang Qi, `xiao yao san` for Xiaoyaosan (`KilnCMS.Search.NameTerms`),
   weighted the same again; `:fuzzy` the trigram title leg that runs only when
@@ -1745,6 +1772,7 @@ defmodule KilnCMS.Search do
   @type leg ::
           :keyword
           | :keyword_any
+          | :han
           | :semantic
           | :block
           | :title
@@ -2514,9 +2542,10 @@ defmodule KilnCMS.Search do
   # visitors. Every other error still raises: an empty result set must never be
   # how a caller learns their query was broken.
   #
-  # Both keyword legs run inside one call (`keyword_legs/4`), so the column's
-  # absence empties both and is logged once, not once per leg.
-  defp without_search_vector(resource, fun) do
+  # Every leg that reads the column — keyword, any-term, Han — runs inside
+  # one call (`keyword_legs/4`), so its absence empties them all and is
+  # logged once, not once per leg. `empty` is what the caller gets instead.
+  defp without_search_vector(resource, empty, fun) do
     fun.()
   rescue
     error ->
@@ -2536,15 +2565,15 @@ defmodule KilnCMS.Search do
         `mix kiln.search.check` reports every table in this state.\
         """)
 
-        {[], []}
+        empty
       else
         reraise error, __STACKTRACE__
       end
   end
 
   # The keyword leg, and its any-term relaxation when the full match is
-  # sparse: `{all_terms, any_term}`. AND is the primary semantics and stays
-  # untouched — a precise query with enough hits never runs the OR, and a
+  # sparse, and the Han leg for a query holding Han: `{all_terms, any_term,
+  # han}`. AND is the primary semantics and stays untouched — a precise query with enough hits never runs the OR, and a
   # one-word query has nothing to relax (its OR *is* its AND, so the leg
   # would re-count the same hits). `:search_any` takes the same arguments
   # as `:search`, filters included, so the relaxation narrows exactly as the
@@ -2564,7 +2593,20 @@ defmodule KilnCMS.Search do
         []
       end
 
-    {keyword, relaxed}
+    han =
+      if KilnCMS.Search.HanGrams.han?(query),
+        do:
+          run_leg(
+            resource,
+            :search_han,
+            args,
+            read_opts,
+            %{},
+            if(rank_keys?, do: [han_rank: %{query: query}], else: [])
+          ),
+        else: []
+
+    {keyword, relaxed, han}
   end
 
   defp multi_word?(query), do: query |> String.split() |> length() > 1
@@ -2578,10 +2620,8 @@ defmodule KilnCMS.Search do
     |> Enum.flat_map(fn alternate ->
       args = %{args | query: alternate}
 
-      {keyword, _relaxed} =
-        without_search_vector(resource, fn ->
-          {run_leg(resource, :search, args, read_opts), []}
-        end)
+      keyword =
+        without_search_vector(resource, [], fn -> run_leg(resource, :search, args, read_opts) end)
 
       [
         {:synonym, keyword, @synonym_factor},
@@ -3212,7 +3252,7 @@ defmodule KilnCMS.Search do
       |> Enum.flat_map(fn resource ->
         # Same containment as the keyword leg: one type missing its
         # `search_vector` migration must not empty every facet on the page.
-        without_search_vector(resource, fn ->
+        without_search_vector(resource, [], fn ->
           resource
           |> Ash.Query.new()
           |> Ash.Query.limit(@facet_scan_cap)

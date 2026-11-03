@@ -7,6 +7,7 @@
     "pg_trgm",
     "unaccent",
     "kiln_accent_folding_v1",
+    "kiln_han_grams_v1",
     "fuzzystrmatch"
   ]
 }
