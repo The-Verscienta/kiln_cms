@@ -142,10 +142,15 @@ defmodule KilnCMSWeb.ConsoleSharesOriginTest do
       strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
 
       {:ok, user} =
-        AshAuthentication.Strategy.action(strategy, :sign_in, %{
-          "email" => email,
-          "password" => @password
-        })
+        AshAuthentication.Strategy.action(
+          strategy,
+          :sign_in,
+          %{
+            "email" => email,
+            "password" => @password
+          },
+          []
+        )
 
       Kiln.Updates.clear_cache()
       on_exit(&Kiln.Updates.clear_cache/0)
