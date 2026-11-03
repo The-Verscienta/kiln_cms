@@ -79,6 +79,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Search: keyword ranking weights a record's text by role (title and names `A`, fields `B`/`C`,
   body `D`) and ranks with `ts_rank_cd` plus a phrase score, so an adjacent phrase wins.**
   ([#2183](https://github.com/The-Verscienta/kiln_cms/pull/2183) · [long form](docs/changelog/unreleased.md#field-role-weights))
+- **Search returns nothing for a query most of whose words are in no record's text or name;
+  a word one edit from a name is a typo, and the fuzzy leg retries corrected. `SEARCH_TERM_GATE=false` reverts.**
+  ([long form](docs/changelog/unreleased.md#term-evidence-gate))
 
 ### Fixed
 

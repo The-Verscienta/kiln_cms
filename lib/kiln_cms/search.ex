@@ -659,6 +659,153 @@ defmodule KilnCMS.Search do
   end
 
   @doc """
+  The **term-evidence gate** (A6): what separates a typo from junk when no
+  score can — `KilnCMS.Search.TermEvidence` judges the query's own words
+  against the section's vocabulary. On by default; `false` turns it off.
+
+  A typo and a junk query look alike to every number `hybrid/3` has. Both
+  come back with an empty keyword leg, both are answered by the legs that
+  always answer — the semantic legs' nearest neighbours, the any-term
+  relaxation's one shared word, the trigram guesses — and both score in the
+  same band. Measured on a production deployment's held-out set, a cutoff
+  that rejected junk rejected every typo with it, in Kiln and in Meilisearch
+  alike. Their words are what differ: every word of "gui zi tang" is in the
+  corpus or one edit from a record's name, and most words of "taylor swift
+  tour dates" are nowhere in it.
+
+  So the gate runs where the floor cannot tell them apart — a section whose
+  keyword leg came back **empty** (a keyword hit means every term is in the
+  vocabulary, and the gate is never consulted) — and reads, for each term,
+  whether the section's vocabulary holds it, whether a record's name holds
+  it, and whether a record's name holds a word within `d(len)` edits of it.
+  Then:
+
+    * **junk** — fewer than `:min_share` of the terms have any of that
+      evidence (fewer than `:min_share_named` when one term is a record's
+      name outright). Only the legs that vouch for a hit — `:keyword`,
+      `:title`, `:alias` — may answer it; a hit the semantic, block, tag,
+      any-term or fuzzy legs alone returned is dropped. With the keyword leg
+      empty, that is almost always every hit: the query returns nothing.
+    * **typo** — not junk, and some term is near a name without being one.
+      The fuzzy leg runs on the corrected query as well ("gui zi tang" →
+      "gui zhi tang"), its hits first, still at the fuzzy weight.
+    * otherwise nothing changes.
+
+  The settings, as a keyword list (each optional):
+
+    * `:min_share` — default `0.6`: a four-term query needs three terms with
+      evidence, a two-term one both.
+    * `:min_share_named` — default `0.5`, the bar when a term names a record:
+      "ban qwerty" has said which record it is about.
+    * `:one_typo_length` — default `2`: terms this long get one edit
+      ("xa" → "xia", "zi" → "zhi"). Romanised names are short; a longer
+      bound loses exactly the probes the gate exists for.
+    * `:two_typo_length` — default `8`: terms this long get two.
+
+  Unlike `semantic_max_distance/0` there is nothing model-specific here to
+  measure first — vocabulary membership is read off the corpus at query
+  time, which is why this ships on where the floor ships `nil`. What it costs
+  is the case the vocabulary cannot see: a query in none of the corpus's
+  words that a semantic leg would still have answered well (a synonym-only
+  paraphrase, "automobile" for a corpus that says "car"). That query now
+  returns nothing where it returned the semantic leg's guess. A site's
+  synonym rules (`KilnCMS.Search.Synonyms`) are the remedy that keeps the
+  gate: a hit the `:synonym` leg returns vouches for itself under a junk
+  verdict, so "automobile → car" answers it. Otherwise turn the gate off, or
+  lower `:min_share`, if your users search that way. Measure with
+  `mix kiln.search.eval`, whose `junk`, `typo` and `paraphrase` classes are
+  the three it moves.
+
+  The cost: nothing when the keyword leg found anything; otherwise one
+  `exists` aggregate per section, and one read of up to twenty names when
+  the verdict is a typo. Both run through the content resource's read under
+  the caller's read options, like `keyword_any_idf_coverage/0`'s.
+
+  Two environment variables override it at boot, each through a key of its
+  own so neither drops an overlay's settings
+  (`config/runtime/prod/search.exs`): `SEARCH_TERM_GATE` (`false` or `true`,
+  as `:term_gate_enabled`) turns it off or on, and
+  `SEARCH_TERM_GATE_MIN_SHARE` (as `:term_gate_min_share`) sets `:min_share`
+  over whatever else is configured. Anything but `false`, `true` or a
+  keyword list of the four settings above **raises** on first use, as does a
+  share outside `(0, 1]` or a length below `1`.
+  """
+  @spec term_gate() :: KilnCMS.Search.TermEvidence.gate() | nil
+  def term_gate do
+    settings = cfg(:term_gate, true)
+
+    unless is_boolean(settings) or is_list(settings),
+      do: raise_term_gate(settings, "must be true, false or a keyword list")
+
+    # `:term_gate_enabled` is `SEARCH_TERM_GATE`'s key: it wins either way.
+    case {cfg(:term_gate_enabled, nil), settings} do
+      {false, _settings} -> nil
+      {nil, false} -> nil
+      {_enabled, opts} when is_list(opts) -> term_gate_settings(opts)
+      {_enabled, _on} -> term_gate_settings([])
+    end
+  end
+
+  @term_gate_defaults [
+    min_share: 0.6,
+    min_share_named: 0.5,
+    one_typo_length: 2,
+    two_typo_length: 8
+  ]
+
+  defp term_gate_settings(opts) do
+    unless Keyword.keyword?(opts) and
+             Keyword.keys(opts) -- Keyword.keys(@term_gate_defaults) == [],
+           do: raise_term_gate(opts, "takes only #{inspect(Keyword.keys(@term_gate_defaults))}")
+
+    gate =
+      @term_gate_defaults
+      |> Keyword.merge(opts)
+      |> Keyword.merge(
+        List.wrap(if(share = cfg(:term_gate_min_share, nil), do: {:min_share, share}))
+      )
+      |> Map.new()
+
+    for key <- [:min_share, :min_share_named],
+        not (is_number(gate[key]) and gate[key] > 0 and gate[key] <= 1),
+        do: raise_term_gate(opts, "#{key} must be a number greater than 0 and at most 1")
+
+    for key <- [:one_typo_length, :two_typo_length],
+        not (is_integer(gate[key]) and gate[key] >= 1),
+        do: raise_term_gate(opts, "#{key} must be a positive integer")
+
+    gate
+  end
+
+  defp raise_term_gate(value, why) do
+    raise ArgumentError,
+          "config :kiln_cms, KilnCMS.Search, term_gate: #{why}, got #{inspect(value)}."
+  end
+
+  @doc """
+  The term-evidence verdict `hybrid/3` would act on for `query` over `type`,
+  read whatever the keyword leg finds — for measuring the gate
+  (`term_gate/0`) on a golden set, or asking why a query came back empty.
+  Takes `hybrid/3`'s `:locale` and read options. `nil` when the gate is off.
+  """
+  @spec term_evidence(atom() | String.t() | module(), String.t(), keyword()) ::
+          KilnCMS.Search.TermEvidence.t() | nil
+  def term_evidence(type, query, opts \\ []) when is_binary(query) do
+    with gate when is_map(gate) <- term_gate() do
+      resource = search_resource(type)
+      locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
+
+      assess_terms(
+        resource,
+        query,
+        locale,
+        Keyword.take(opts, [:actor, :authorize?, :tenant]),
+        gate
+      )
+    end
+  end
+
+  @doc """
   Cosine-distance ceiling on a tag suggestion — see
   `KilnCMS.Search.Related.suggest_tags/2`.
 
@@ -1060,7 +1207,7 @@ defmodule KilnCMS.Search do
   @leg_order [:keyword, :title, :alias, :compound, :synonym, :fuzzy, :semantic, :block, :tag]
 
   # What a leg that never ran contributes.
-  @leg_defaults %{keyword: {[], []}, block: {[], %{}}, tag: {[], %{}}}
+  @leg_defaults %{keyword: {[], []}, fuzzy: {[], nil}, block: {[], %{}}, tag: {[], %{}}}
 
   # The first half of `hybrid/3`: every leg's candidates, and what fusion
   # and the floor need, without fusing them. `global/2` collects every
@@ -1143,28 +1290,22 @@ defmodule KilnCMS.Search do
   defp run_named_leg(:compound, c, _ran),
     do: compound_leg(c.resource, c.query, c.args, c.read_opts, c.opts)
 
+  # The fuzzy step also takes the term-evidence verdict (`term_gate/0`): both
+  # read the keyword leg's result, and the verdict is consulted only when that
+  # leg is empty — a keyword hit means every term is in the vocabulary. A
+  # step the deadline cut leaves no verdict, so a partial answer is ungated.
   defp run_named_leg(:fuzzy, c, ran) do
     {keyword, _relaxed} = leg_value(ran, :keyword)
+    evidence = gate_evidence(c.resource, c.query, c.locale, keyword, c.read_opts)
 
-    # The trigram similarity the fuzzy leg orders by is read only when
-    # something consumes it (`rank_keys?`).
-    similarity =
-      if c.rank_keys?,
-        do: [title_similarity: %{prefix: c.query}],
-        else: []
+    fuzzy =
+      if c.filters == %{} and length(keyword) < @fuzzy_fallback_threshold do
+        fuzzy_leg(c, evidence)
+      else
+        []
+      end
 
-    if c.filters == %{} and length(keyword) < @fuzzy_fallback_threshold do
-      run_leg(
-        c.resource,
-        :autocomplete,
-        %{prefix: c.query, locale: c.locale},
-        c.read_opts,
-        %{},
-        similarity
-      )
-    else
-      []
-    end
+    {fuzzy, evidence}
   end
 
   defp run_named_leg(:semantic, c, _ran),
@@ -1192,7 +1333,7 @@ defmodule KilnCMS.Search do
     {blocks, block_distances} = leg_value(ran, :block)
     {tagged, tag_distances} = leg_value(ran, :tag)
     synonyms = leg_value(ran, :synonym)
-    fuzzy = leg_value(ran, :fuzzy)
+    {fuzzy, evidence} = leg_value(ran, :fuzzy)
 
     %{
       resource: c.resource,
@@ -1202,6 +1343,8 @@ defmodule KilnCMS.Search do
       limit: Keyword.get(c.opts, :limit, 20),
       k: Keyword.get(c.opts, :k, @rrf_k),
       load: Keyword.get(c.opts, :load, []),
+      # The term-evidence verdict, `nil` when the gate did not judge.
+      evidence: evidence,
       # Order matters only for exact ties (`reciprocal_rank_fusion/3`): a
       # partial keyword match at rank n outranks a trigram guess at rank n.
       legs: [
@@ -1270,6 +1413,7 @@ defmodule KilnCMS.Search do
       :timer.tc(fn ->
         collected.legs
         |> reciprocal_rank_fusion(collected.k, ranks)
+        |> gate_hits(collected.evidence)
         |> floor_hits(floor_inputs(collected))
         |> Enum.take(collected.limit)
         |> hydrate(resource, {select, collected.load}, read_opts)
@@ -1739,6 +1883,114 @@ defmodule KilnCMS.Search do
       :error -> %{semantic_floor: :caller}
     end
   end
+
+  # The gate's verdict for this section, or `nil` when there is nothing to
+  # judge: the gate off, or a keyword hit (every term matched). A type with
+  # no `search_vector` has an empty keyword leg and nothing for the gate to
+  # read either; it is answered ungated, as it was.
+  defp gate_evidence(resource, query, locale, [], read_opts) do
+    with gate when is_map(gate) <- term_gate() do
+      assess_terms(resource, query, locale, read_opts, gate)
+    end
+  end
+
+  defp gate_evidence(_resource, _query, _locale, _keyword, _read_opts), do: nil
+
+  defp assess_terms(resource, query, locale, read_opts, gate) do
+    KilnCMS.Search.TermEvidence.assess(resource, query, locale, read_opts, gate)
+  rescue
+    error ->
+      if missing_search_vector?(error), do: nil, else: reraise(error, __STACKTRACE__)
+  end
+
+  # The trigram title leg. A typo verdict runs it on the corrected query too,
+  # those hits first: "gui zi tang" is far from "Gui Zhi Tang" in trigrams
+  # ("zi" shares one with "zhi"), and the corrected words are not.
+  #
+  # The trigram similarity the leg orders by is read only when something
+  # consumes it (`rank_keys?`: a global sweep's ranks, or explain), and each
+  # run reads it against its own prefix, so a corrected hit is ranked and
+  # explained by the similarity it was found at.
+  defp fuzzy_leg(c, evidence) do
+    fuzzy = autocomplete_leg(c, c.query)
+
+    case evidence do
+      %{verdict: :typo, corrections: corrections} ->
+        c
+        |> autocomplete_leg(correct(c.query, corrections))
+        |> Enum.concat(fuzzy)
+        |> Enum.uniq_by(& &1.id)
+
+      _ ->
+        fuzzy
+    end
+  end
+
+  defp autocomplete_leg(c, prefix) do
+    similarity =
+      if c.rank_keys?,
+        do: [title_similarity: %{prefix: prefix}],
+        else: []
+
+    run_leg(
+      c.resource,
+      :autocomplete,
+      %{prefix: prefix, locale: c.locale},
+      c.read_opts,
+      %{},
+      similarity
+    )
+  end
+
+  # The query with each corrected word replaced, everything else as typed.
+  defp correct(query, corrections) do
+    Regex.replace(~r/[\p{L}\p{N}]+/u, query, fn word ->
+      Map.get(corrections, KilnCMS.Search.TermEvidence.fold(word), word)
+    end)
+  end
+
+  # A sweep judges the query against the whole site, not one section: a
+  # section's junk verdict stands only when `TermEvidence.across/2` finds the
+  # query junk over every content section's evidence together. Otherwise it
+  # is lifted, and that section answers as it would without the gate — a
+  # partial match ("heat" of "heat interior") is a match the site's other
+  # vocabulary vouches for. A typo verdict is per section (its corrections
+  # are that section's names) and stays.
+  defp sweep_evidence(content) do
+    with gate when is_map(gate) <- term_gate(),
+         false <-
+           content
+           |> Enum.map(fn {_key, c} -> c.evidence end)
+           |> KilnCMS.Search.TermEvidence.across(gate) do
+      Map.new(content, fn
+        {key, %{evidence: %{verdict: :junk} = evidence} = collected} ->
+          {key, %{collected | evidence: %{evidence | verdict: :ok}}}
+
+        other ->
+          other
+      end)
+    else
+      _junk_or_off -> content
+    end
+  end
+
+  # A junk verdict: only a leg that vouches for a hit may answer it — the
+  # floor's vouching legs, every term matched (`:keyword`, empty here by
+  # construction) or the query naming the record (`:title`, `:alias`,
+  # `:compound`) — and `:synonym`, which is those same matches on a wording
+  # the site's own rules gave the query. A synonym rule is how a site answers
+  # the query the gate cannot: "licorice" for a corpus that only says
+  # "glycyrrhiza". Before the floor, so the floor's lookups never run for a
+  # hit already gone.
+  @gate_vouching_legs @floor_vouching_legs ++ [:synonym]
+
+  defp gate_hits(hits, %{verdict: :junk}) do
+    Enum.filter(hits, fn {_record, _score, legs} ->
+      Enum.any?(legs, &(&1 in @gate_vouching_legs))
+    end)
+  end
+
+  defp gate_hits(hits, _evidence), do: hits
 
   # The relevance floor, applied after fusion to hits only the judged legs
   # returned — the why is on `semantic_max_distance/0`, which legs are judged
@@ -2779,6 +3031,7 @@ defmodule KilnCMS.Search do
 
     fused =
       collected
+      |> sweep_evidence()
       |> Enum.map(fn {key, c} -> {key, fn -> fuse_legs(c, ranks[key], deadline) end} end)
       |> run_sections()
 
