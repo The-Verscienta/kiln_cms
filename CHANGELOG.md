@@ -59,14 +59,26 @@ Every summary line below that was shortened links to its own entry there.
 - **The upgrade migration rewrites `search_vector` on every content row holding
   Chinese characters, adding their bigrams. Nothing to run, overlays included.**
   ([#2179](https://github.com/The-Verscienta/kiln_cms/pull/2179) · [long form](docs/changelog/unreleased.md#han-bigrams-upgrade))
+- **Run the re-fire sweep after deploying (`mix kiln.refire_all`); overlays first run
+  `mix ash.codegen`. Content tables gain `search_weighted`; old rows keep the old weights.**
+  ([#2183](https://github.com/The-Verscienta/kiln_cms/pull/2183) · [long form](docs/changelog/unreleased.md#field-role-weights-upgrade))
 
 ### Added
 
 - **Chinese is searchable inside longer text: `吴茱萸` finds `本方以吴茱萸为君药`, and a query
   that is exactly a record's Chinese name ranks it first (`:han` leg).**
   ([#2179](https://github.com/The-Verscienta/kiln_cms/pull/2179) · [long form](docs/changelog/unreleased.md#han-bigrams))
+- **Search: `explain=1` on `/api/search` (and `explain: true` on `hybrid/3`/`global/2`)
+  reports each hit's leg ranks, raw scores, matched terms and coverage.**
+  ([#2177](https://github.com/The-Verscienta/kiln_cms/pull/2177) · [long form](docs/changelog/unreleased.md#search-explain))
 - **Search: an adversarial ranking fixture gates CI, and golden sets gain the
   classes it uses.** ([long form](docs/changelog/unreleased.md#search-ranking-fixture))
+
+### Changed
+
+- **Search: keyword ranking weights a record's text by role (title and names `A`, fields `B`/`C`,
+  body `D`) and ranks with `ts_rank_cd` plus a phrase score, so an adjacent phrase wins.**
+  ([#2183](https://github.com/The-Verscienta/kiln_cms/pull/2183) · [long form](docs/changelog/unreleased.md#field-role-weights))
 
 ### Fixed
 

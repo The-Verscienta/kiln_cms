@@ -46,10 +46,19 @@ defmodule KilnCMS.Migrations do
 
   Mirrors what `20260623213400_add_locale_weighted_search` does for the core
   tables, reusing the shared `kiln_search_vector_refresh()` trigger function
-  and `kiln_regconfig(locale)` helper that migration created (title weighted
-  `A`, `search_text` weighted `B`, stemmed per the row's locale). The table
-  must carry `title`, `search_text`, and `locale` columns — every table built
-  by `KilnCMS.CMS.Content` does.
+  and `kiln_regconfig(locale)` helper that migration created, stemmed per the
+  row's locale. The table must carry `title`, `search_text`, and `locale`
+  columns — every table built by `KilnCMS.CMS.Content` does.
+
+  The function weights by role (#2175 A3): where the table also has the
+  `search_weighted` column (`mix ash.codegen` adds it to every content table)
+  and a row has it set, the title and name fields weigh `A`, the summary
+  fields and the searchable fields' leading words `B`, the rest of those `C`
+  and the body `D`. Otherwise — no such column, or a row not yet re-saved —
+  the title weighs `A` and `search_text` `B`, which is also what this
+  function's backfill writes (with the Han bigrams of each,
+  `KilnCMS.Search.HanGrams`, once that extension is installed); a re-fire sweep (`mix kiln.refire_all`) moves
+  published rows onto the weighted vector.
 
   Everything is guarded (`IF NOT EXISTS`, backfill only where the vector is
   `NULL`), so re-running — or a future core migration covering the same
@@ -88,8 +97,8 @@ defmodule KilnCMS.Migrations do
     execute("""
     DO $$
     BEGIN
-      IF to_regprocedure('kiln_search_vector(text, text, text)') IS NOT NULL THEN
-        UPDATE #{table} SET search_vector = kiln_search_vector(locale, title, search_text)
+      IF to_regprocedure('kiln_search_vector(text, text, text, text[])') IS NOT NULL THEN
+        UPDATE #{table} SET search_vector = kiln_search_vector(locale, title, search_text, NULL)
         WHERE search_vector IS NULL;
       ELSE
         UPDATE #{table} SET search_vector =

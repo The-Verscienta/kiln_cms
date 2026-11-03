@@ -150,20 +150,81 @@ defmodule KilnCMS.Search.HanGramsTest do
       assert none
     end
 
-    test "the stored vector of a text with no Han is what it always was" do
+    # A3's two vectors (`*_weighted_search_vector_trigger`, #2183), by hand:
+    # the role-weighted one from the four `search_weighted` buckets, and the
+    # title/`search_text` one for a row without them.
+    @role_vector """
+    setweight(to_tsvector(kiln_regconfig(locale), coalesce(search_weighted[1], '')), 'A') ||
+    setweight(to_tsvector(kiln_regconfig(locale), coalesce(search_weighted[2], '')), 'B') ||
+    setweight(to_tsvector(kiln_regconfig(locale), coalesce(search_weighted[3], '')), 'C') ||
+    setweight(to_tsvector(kiln_regconfig(locale), coalesce(search_weighted[4], '')), 'D')
+    """
+
+    @plain_vector """
+    setweight(to_tsvector(kiln_regconfig(locale), coalesce(title, '')), 'A') ||
+    setweight(to_tsvector(kiln_regconfig(locale), coalesce(search_text, '')), 'B')
+    """
+
+    defp stored(record, select) do
+      %{rows: [row]} =
+        Repo.query!("SELECT #{select} FROM pages WHERE id = $1", [Ecto.UUID.dump!(record.id)])
+
+      row
+    end
+
+    test "the stored vector of a text with no Han is A3's role-weighted vector, exactly" do
       admin = admin()
       plain = page(admin, "Saffron Rice", "Saffron threads bloom in warm stock.")
 
-      assert %{rows: [[true]]} =
-               Repo.query!(
-                 """
-                 SELECT search_vector =
-                   setweight(to_tsvector(kiln_regconfig(locale), coalesce(title, '')), 'A') ||
-                   setweight(to_tsvector(kiln_regconfig(locale), coalesce(search_text, '')), 'B')
-                 FROM pages WHERE id = $1
-                 """,
-                 [Ecto.UUID.dump!(plain.id)]
+      assert [4, true] =
+               stored(plain, "cardinality(search_weighted), search_vector = #{@role_vector}")
+    end
+
+    test "a Han row keeps A3's role weighting and gains its buckets' bigrams at their weights" do
+      admin = admin()
+      han = page(admin, "Huang Lian 黄连", "本方以吴茱萸为君药。")
+
+      grams = """
+      setweight(to_tsvector('pg_catalog.simple', kiln_han_grams(search_weighted[1])), 'A') ||
+      setweight(to_tsvector('pg_catalog.simple', kiln_han_grams(search_weighted[2])), 'B') ||
+      setweight(to_tsvector('pg_catalog.simple', kiln_han_grams(search_weighted[3])), 'C') ||
+      setweight(to_tsvector('pg_catalog.simple', kiln_han_grams(search_weighted[4])), 'D')
+      """
+
+      # Exactly A3's vector with the bigrams after it — nothing of A3's moved.
+      assert [4, true] =
+               stored(
+                 han,
+                 "cardinality(search_weighted), search_vector = #{@role_vector} || #{grams}"
                )
+
+      # The title's Han name is a bucket-A bigram, the body's a lower one.
+      assert [true, true] =
+               stored(
+                 han,
+                 "search_vector @@ to_tsquery('pg_catalog.simple', '黄连:A'), " <>
+                   "search_vector @@ to_tsquery('pg_catalog.simple', '茱萸') AND " <>
+                   "NOT search_vector @@ to_tsquery('pg_catalog.simple', '茱萸:A')"
+               )
+    end
+
+    test "a row without buckets keeps A3's title/search_text vector, plus bigrams" do
+      admin = admin()
+      han = page(admin, "Formula notes", "本方以吴茱萸为君药。")
+
+      # What the previous release writes mid-deploy: search_text moves and the
+      # buckets do not, so the trigger clears them (A3's rule).
+      Repo.query!("UPDATE pages SET search_text = search_text || ' 吴茱萸汤' WHERE id = $1", [
+        Ecto.UUID.dump!(han.id)
+      ])
+
+      grams = """
+      setweight(to_tsvector('pg_catalog.simple', kiln_han_grams(title)), 'A') ||
+      setweight(to_tsvector('pg_catalog.simple', kiln_han_grams(search_text)), 'B')
+      """
+
+      assert [nil, true] =
+               stored(han, "search_weighted, search_vector = #{@plain_vector} || #{grams}")
     end
 
     test "the upgrade backfill adds the bigrams to a Han row and leaves another alone" do
@@ -171,17 +232,11 @@ defmodule KilnCMS.Search.HanGramsTest do
       han = page(admin, "Formula notes", "本方以吴茱萸为君药。")
       plain = page(admin, "Saffron Rice", "Saffron threads.")
 
-      # Store both the way the trigger did before the upgrade.
+      # Store both the way A3's trigger did before the upgrade.
       for record <- [han, plain] do
-        Repo.query!(
-          """
-          UPDATE pages SET search_vector =
-            setweight(to_tsvector(kiln_regconfig(locale), coalesce(title, '')), 'A') ||
-            setweight(to_tsvector(kiln_regconfig(locale), coalesce(search_text, '')), 'B')
-          WHERE id = $1
-          """,
-          [Ecto.UUID.dump!(record.id)]
-        )
+        Repo.query!("UPDATE pages SET search_vector = #{@role_vector} WHERE id = $1", [
+          Ecto.UUID.dump!(record.id)
+        ])
       end
 
       ctid = fn record ->

@@ -26,21 +26,26 @@ defmodule KilnCMS.Search.HanGrams do
       one-character run a prefix (`'黄':*`, which matches the bigrams that
       begin with it), the runs ANDed — or `NULL` when the text holds no Han,
       so `search_vector @@ kiln_han_tsquery(q)` is never true for it;
-    * creates `kiln_search_vector(locale, title, search_text)`, the whole
-      stored vector: what `search_vector` always held (title `A`, body `B`,
-      stemmed under `kiln_regconfig/1`) followed by the bigrams of each, at
-      the same weights, under `pg_catalog.simple`. For a text with no Han the
-      bigram parts are empty and the vector is exactly the old one;
-    * points the shared trigger function, `kiln_search_vector_refresh()`, at
-      it — so every content table, core or overlay, picks it up with no
-      per-table change;
-    * rewrites the stored vector of every row whose title or `search_text`
-      holds a Han character, in every table with a `search_vector`. A row
-      without one already has the right vector and is not touched.
+    * creates `kiln_search_vector(locale, title, search_text, weighted)`, the
+      whole stored vector: what `search_vector` already held, followed by the
+      bigrams of the same texts at the same weights, under
+      `pg_catalog.simple`. With `weighted` — the row's four `search_weighted`
+      buckets (#2183, A3) — that is the role-weighted vector, buckets `A`–`D`;
+      without it (`NULL`: no such column, or a row not yet re-saved), title
+      `A` and `search_text` `B`. For a text with no Han the bigram parts are
+      empty and the vector is exactly the one A3's trigger built;
+    * replaces the shared trigger function, `kiln_search_vector_refresh()`,
+      with A3's own body — which branch a row takes and when its buckets are
+      cleared as stale are unchanged — computing each branch's vector with
+      `kiln_search_vector`, so every content table, core or overlay, picks it
+      up with no per-table change;
+    * rewrites the stored vector of every row whose title, `search_text` or
+      buckets hold a Han character, in every table with a `search_vector`.
+      A row without one already has the right vector and is not touched.
 
-  The bigrams are appended after the old lexemes, never interleaved, so the
-  positions of every other lexeme are unchanged and nothing a non-Han query
-  ranks by moves.
+  The bigrams are appended after the other lexemes, never interleaved, so
+  the positions of every other lexeme are unchanged and nothing a non-Han
+  query ranks by moves.
 
   Nothing indexes an expression over these functions, so unlike
   `KilnCMS.Search.AccentFolding` nothing needs rebuilding. Their bodies are
@@ -49,13 +54,13 @@ defmodule KilnCMS.Search.HanGrams do
 
   Expand-only: the previous release reads `search_vector` with queries that
   only ever name whole-run lexemes, which are still there, and the extra
-  lexemes are ones no non-Han query produces. `uninstall/1` puts the old
-  trigger body back and drops the functions; the bigrams already stored stay
-  until each row is next written, harmlessly.
+  lexemes are ones no non-Han query produces. `uninstall/1` puts A3's trigger
+  body back and drops the functions; the bigrams already stored stay until
+  each row is next written, harmlessly.
 
   ## Which characters
 
-  `@han` below: CJK Unified Ideographs and Extension A, the compatibility
+  `@ranges` below: CJK Unified Ideographs and Extension A, the compatibility
   ideographs, and the supplementary-plane extensions B onwards. Kana and
   Hangul are not Han: Japanese kana and Korean words are delimited by
   script changes and spaces, which the parser already splits on. A
@@ -102,7 +107,12 @@ defmodule KilnCMS.Search.HanGrams do
     Enum.join(
       [
         Enum.map_join(functions_sql(), "\n\n", &execute/1),
-        execute(refresh_sql("kiln_search_vector(NEW.locale, NEW.title, NEW.search_text)")),
+        execute(
+          refresh_sql(
+            "kiln_search_vector(NEW.locale, NEW.title, NEW.search_text, weighted)",
+            "kiln_search_vector(NEW.locale, NEW.title, NEW.search_text, NULL)"
+          )
+        ),
         execute(backfill_sql())
       ],
       "\n\n"
@@ -113,8 +123,8 @@ defmodule KilnCMS.Search.HanGrams do
   def uninstall(1) do
     Enum.join(
       [
-        execute(refresh_sql(old_vector_sql("NEW."))),
-        ~s|execute("DROP FUNCTION IF EXISTS kiln_search_vector(text, text, text)")|,
+        execute(refresh_sql(role_vector_sql("weighted", "NEW."), plain_vector_sql("NEW."))),
+        ~s|execute("DROP FUNCTION IF EXISTS kiln_search_vector(text, text, text, text[])")|,
         ~s|execute("DROP FUNCTION IF EXISTS kiln_han_tsquery(text)")|,
         ~s|execute("DROP FUNCTION IF EXISTS kiln_han_grams(text)")|,
         ~s|execute("DROP FUNCTION IF EXISTS kiln_han_runs(text)")|
@@ -127,18 +137,39 @@ defmodule KilnCMS.Search.HanGrams do
   @heredoc String.duplicate(~s("), 3)
   defp execute(sql), do: "execute(#{@heredoc}\n#{escape(sql)}\n#{@heredoc})"
 
-  # The SQL holds regex backslashes (`一`), which an Elixir heredoc would
+  # The SQL holds regex backslashes (`\u4E00`), which an Elixir heredoc would
   # read as escapes; the migration must carry them to Postgres as written.
   defp escape(sql), do: String.replace(sql, "\\", "\\\\")
 
-  # What `search_vector` held before this extension, over `prefix`ed columns
-  # (`NEW.` in the trigger).
-  defp old_vector_sql(prefix) do
+  # The two vectors A3's trigger (`*_weighted_search_vector_trigger`, #2183)
+  # builds, over `prefix`ed columns (`NEW.` in the trigger, none in a
+  # function body taking them as arguments): from the four `search_weighted`
+  # buckets in `weighted`, and from the title and `search_text`.
+  defp role_vector_sql(weighted, prefix) do
+    ~w(A B C D)
+    |> Enum.with_index(1)
+    |> Enum.map_join(" ||\n      ", fn {weight, i} ->
+      "setweight(to_tsvector(kiln_regconfig(#{prefix}locale), coalesce(#{weighted}[#{i}], '')), '#{weight}')"
+    end)
+  end
+
+  defp plain_vector_sql(prefix) do
     "setweight(to_tsvector(kiln_regconfig(#{prefix}locale), coalesce(#{prefix}title, '')), 'A') ||\n" <>
       "      setweight(to_tsvector(kiln_regconfig(#{prefix}locale), coalesce(#{prefix}search_text, '')), 'B')"
   end
 
+  # The bigrams of each text, at its weight, under `pg_catalog.simple`.
+  defp han_vector_sql(texts, weights) do
+    texts
+    |> Enum.zip(weights)
+    |> Enum.map_join(" ||\n      ", fn {text, weight} ->
+      "setweight(to_tsvector('pg_catalog.simple', kiln_han_grams(#{text})), '#{weight}')"
+    end)
+  end
+
   # One statement each: a migration's `execute/1` runs a single statement.
+  # `kiln_search_vector` names its arguments after the trigger's columns,
+  # so the two A3 vectors read the same in both places.
   defp functions_sql do
     [
       """
@@ -174,43 +205,86 @@ defmodule KilnCMS.Search.HanGrams do
       END\
       """,
       """
-      CREATE OR REPLACE FUNCTION kiln_search_vector(loc text, title text, body text) RETURNS tsvector
+      CREATE OR REPLACE FUNCTION kiln_search_vector(locale text, title text, search_text text, weighted text[])
+      RETURNS tsvector
       LANGUAGE sql IMMUTABLE PARALLEL SAFE
       BEGIN ATOMIC
-        SELECT setweight(to_tsvector(kiln_regconfig(loc), coalesce(title, '')), 'A') ||
-          setweight(to_tsvector(kiln_regconfig(loc), coalesce(body, '')), 'B') ||
-          setweight(to_tsvector('pg_catalog.simple', kiln_han_grams(title)), 'A') ||
-          setweight(to_tsvector('pg_catalog.simple', kiln_han_grams(body)), 'B');
+        SELECT CASE WHEN cardinality(weighted) = 4 THEN
+          #{role_vector_sql("weighted", "")} ||
+          #{han_vector_sql(Enum.map(1..4, &"weighted[#{&1}]"), ~w(A B C D))}
+        ELSE
+          #{plain_vector_sql("")} ||
+          #{han_vector_sql(~w(title search_text), ~w(A B))}
+        END;
       END\
       """
     ]
   end
 
-  defp refresh_sql(vector_sql) do
+  # `*_weighted_search_vector_trigger`'s function (#2183, A3) as it stands,
+  # with each of its two vectors passed in — the role-weighted one, for a
+  # row with its four buckets, and the title/`search_text` one otherwise.
+  # Which branch a row takes, and when its buckets are cleared as stale, is
+  # A3's and unchanged.
+  defp refresh_sql(weighted_vector_sql, plain_vector_sql) do
     """
     CREATE OR REPLACE FUNCTION kiln_search_vector_refresh() RETURNS trigger AS $$
+    DECLARE
+      weighted text[];
+      changed boolean;
     BEGIN
-      IF TG_OP = 'INSERT'
-         OR NEW.title       IS DISTINCT FROM OLD.title
-         OR NEW.search_text IS DISTINCT FROM OLD.search_text
-         OR NEW.locale      IS DISTINCT FROM OLD.locale THEN
-        NEW.search_vector :=
-          #{vector_sql};
+      IF TG_OP = 'INSERT' THEN
+        changed := true;
+      ELSE
+        changed := NEW.title IS DISTINCT FROM OLD.title
+          OR NEW.search_text IS DISTINCT FROM OLD.search_text
+          OR NEW.locale IS DISTINCT FROM OLD.locale;
       END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = TG_RELID AND attname = 'search_weighted' AND NOT attisdropped
+      ) THEN
+        weighted := NEW.search_weighted;
+
+        IF TG_OP = 'UPDATE' THEN
+          IF weighted IS DISTINCT FROM OLD.search_weighted THEN
+            changed := true;
+          ELSIF NEW.title IS DISTINCT FROM OLD.title
+                OR NEW.search_text IS DISTINCT FROM OLD.search_text THEN
+            weighted := NULL;
+            NEW.search_weighted := NULL;
+          END IF;
+        END IF;
+      END IF;
+
+      IF changed THEN
+        IF weighted IS NOT NULL AND cardinality(weighted) = 4 THEN
+          NEW.search_vector :=
+            #{weighted_vector_sql};
+        ELSE
+          NEW.search_vector :=
+            #{plain_vector_sql};
+        END IF;
+      END IF;
+
       RETURN NEW;
     END
     $$ LANGUAGE plpgsql\
     """
   end
 
-  # The trigger recomputes only when the title, `search_text` or locale
-  # changes, so the vector is set here directly. Public for the test that
-  # re-runs it over a row stored the old way.
+  # The trigger recomputes only when the title, `search_text`, locale or
+  # buckets change, so the vector is set here directly — from the buckets
+  # where the table has `search_weighted`, as the trigger would. Public for
+  # the test that re-runs it over a row stored the old way.
   @doc false
   def backfill_sql do
     """
     DO $kiln$
-    DECLARE tbl text;
+    DECLARE
+      tbl text;
+      buckets text;
     BEGIN
       FOR tbl IN
         SELECT c.table_name
@@ -221,10 +295,17 @@ defmodule KilnCMS.Search.HanGrams do
                       WHERE t.table_schema = c.table_schema AND t.table_name = c.table_name
                         AND t.column_name = 'search_text')
       LOOP
+        buckets := CASE WHEN EXISTS (
+          SELECT 1 FROM information_schema.columns w
+          WHERE w.table_schema = current_schema() AND w.table_name = tbl
+            AND w.column_name = 'search_weighted'
+        ) THEN 'search_weighted' ELSE 'NULL::text[]' END;
+
         EXECUTE format(
-          'UPDATE %I SET search_vector = kiln_search_vector(locale, title, search_text) '
-          'WHERE coalesce(title, '''') || coalesce(search_text, '''') ~ ''#{@sql_class}''',
-          tbl);
+          'UPDATE %I SET search_vector = kiln_search_vector(locale, title, search_text, %s) '
+          'WHERE coalesce(title, '''') || coalesce(search_text, '''') '
+          '|| coalesce(array_to_string(%s, '' ''), '''') ~ ''#{@sql_class}''',
+          tbl, buckets, buckets);
       END LOOP;
     END
     $kiln$\

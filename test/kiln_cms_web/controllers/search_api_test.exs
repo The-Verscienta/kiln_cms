@@ -363,6 +363,57 @@ defmodule KilnCMSWeb.SearchApiTest do
     assert hit["legs"] == ["keyword", "title", "fuzzy"]
   end
 
+  describe "explain=1" do
+    setup do
+      actor = admin()
+      {first, second} = {token(), token()}
+
+      for body <- ["#{first} and #{second}", "only #{first}"] do
+        %{title: "Explained", slug: slug(), body_markdown: body}
+        |> CMS.create_page!(actor: actor)
+        |> then(&CMS.publish_page!(&1, %{}, actor: actor))
+      end
+
+      KilnCMS.DataCase.drain_oban()
+      %{q: "#{first}%20#{second}", first: first}
+    end
+
+    test "adds each hit's leg ranks, raw scores, matched terms and coverage",
+         %{conn: conn, q: q, first: first} do
+      conn = get(conn, "/api/search?q=#{q}&explain=1")
+      hits = json_response(conn, 200)["results"]["pages"]
+
+      assert [%{"explain" => full}, %{"explain" => partial}] = hits
+      assert full["coverage"] == 1.0
+      assert partial["coverage"] == 0.5
+      assert partial["matched_terms"] == [first]
+
+      assert [%{"term" => ^first, "matched" => true, "lexeme" => _}, %{"matched" => false}] =
+               partial["terms"]
+
+      assert %{"rank" => 1, "measure" => "ts_rank_cd", "score" => score, "contribution" => c} =
+               full["legs"]["keyword"]
+
+      assert is_float(score) and is_float(c)
+      assert partial["legs"]["keyword_any"]["measure"] == "ts_rank_cd"
+
+      # A debugging view is never what a shared cache stores for the URL.
+      assert get_resp_header(conn, "cache-control") == ["private, no-store"]
+      assert get_resp_header(conn, "etag") == []
+    end
+
+    test "is off by default, and the default answer stays cacheable", %{conn: conn, q: q} do
+      conn = get(conn, "/api/search?q=#{q}")
+      hits = json_response(conn, 200)["results"]["pages"]
+
+      assert length(hits) == 2
+      refute Enum.any?(hits, &Map.has_key?(&1, "explain"))
+      assert [public] = get_resp_header(conn, "cache-control")
+      assert public =~ "public"
+      assert [_etag] = get_resp_header(conn, "etag")
+    end
+  end
+
   test "a query naming two records returns both above a page that merely mentions them",
        %{conn: conn} do
     # "pad thai tom yum" ANDs four lexemes under `plainto_tsquery`: neither

@@ -865,6 +865,27 @@ defmodule KilnCMS.CMS.FieldDefinition do
     end
   end
 
+  calculations do
+    # The weight this field's text carries in the record's `search_vector`
+    # (#2175 A3, `KilnCMS.CMS.Changes.SetSearchText`): `"A"`, the title's,
+    # for a field that names the record; `"B"` for a searchable one — its
+    # leading words, in extractor order, with whatever falls past the first
+    # 48 of a record's searchable text at `"C"`; nil for a field search does
+    # not index. The body is `"D"`. Derived from the two flags, so there is
+    # nothing to set.
+    calculate :search_weight,
+              :string,
+              expr(
+                cond do
+                  names_record -> "A"
+                  searchable -> "B"
+                  true -> nil
+                end
+              ) do
+      public? true
+    end
+  end
+
   identities do
     # One field name per owner **per org** (Ash prepends `org_id`). Two
     # identities, one per scope — Postgres treats NULLs as distinct, so each acts
