@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Fixed
+
+- **Search: a section with one or two records no longer ranks them first across a
+  `global/2` sweep; ranks are taken over every section's candidates together.**
+  ([#2175](https://github.com/The-Verscienta/kiln_cms/issues/2175) · [long form](docs/changelog/unreleased.md#global-search-ranks))
+
 ## [1.7.0] - 2026-10-29
 
 Long form: [docs/changelog/v1.7.0.md](docs/changelog/v1.7.0.md) —
