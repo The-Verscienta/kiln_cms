@@ -61,7 +61,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2174](https://github.com/The-Verscienta/kiln_cms/pull/2174) · [long form](docs/changelog/unreleased.md#html-tls-jsv-advisories))
 - **ash_authentication 5.0 and ash_authentication_phoenix 3.0 release candidates
   bring assent 0.3.2 (EEF-CVE-2026-117656, Sign in with Apple; Kiln not exposed).**
-  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR) · [long form](docs/changelog/unreleased.md#ash-authentication-5-assent))
+  ([#2185](https://github.com/The-Verscienta/kiln_cms/pull/2185) · [long form](docs/changelog/unreleased.md#ash-authentication-5-assent))
 
 ## [1.7.0] - 2026-10-29
 

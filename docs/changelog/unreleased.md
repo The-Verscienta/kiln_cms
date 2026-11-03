@@ -57,4 +57,4 @@ carries the reasoning.
   is unchanged. Kiln does not turn on 5.0's new identity-keyed brute-force
   protection, which would add an audit-log table; its own per-account and
   per-address throttles stay as they were.
-  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR))
+  ([#2185](https://github.com/The-Verscienta/kiln_cms/pull/2185))
