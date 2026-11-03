@@ -29,10 +29,15 @@ defmodule KilnCMSWeb.StructureLiveTest do
     strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
 
     {:ok, user} =
-      AshAuthentication.Strategy.action(strategy, :sign_in, %{
-        "email" => email,
-        "password" => @password
-      })
+      AshAuthentication.Strategy.action(
+        strategy,
+        :sign_in,
+        %{
+          "email" => email,
+          "password" => @password
+        },
+        []
+      )
 
     user
   end

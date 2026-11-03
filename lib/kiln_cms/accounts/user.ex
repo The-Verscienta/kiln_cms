@@ -638,17 +638,18 @@ defmodule KilnCMS.Accounts.User do
 
     # Written out rather than generated, so a per-address budget can go in front
     # of it (#724). `MagicLink.Transformer` builds this action only when the
-    # resource does not already define it, and what it builds is exactly the two
-    # entities below — one argument and its own preparation. Ours runs first.
-    read :request_magic_link do
+    # resource does not already define it, and since AshAuthentication 5.0 what
+    # it builds is a generic action with one argument, run by
+    # `MagicLink.Request`, which looks the address up through `:get_by_email`.
+    # Ours wraps that run.
+    action :request_magic_link do
       description "Send a magic sign-in link to a user if they exist."
 
       argument :email, :ci_string do
         allow_nil? false
       end
 
-      prepare KilnCMS.Accounts.Preparations.ThrottleMagicLink
-      prepare AshAuthentication.Strategy.MagicLink.RequestPreparation
+      run KilnCMS.Accounts.ThrottledMagicLinkRequest
     end
 
     action :request_password_reset_token do
@@ -751,8 +752,10 @@ defmodule KilnCMS.Accounts.User do
       # password" path, so it is the one that most needs it. MUST stay above
       # `GenerateTokenChange`: `after_action` hooks run in declaration order,
       # and the session this reset signs the user into is minted there — after
-      # the sweep, so it survives it.
-      change KilnCMS.Accounts.Changes.RevokeAllTokens
+      # the sweep, so it survives it. `spare: :reset_token` leaves the reset
+      # token itself to the strategy, which revokes it single-use after these
+      # hooks (AshAuthentication 5.0; see the change's moduledoc).
+      change {KilnCMS.Accounts.Changes.RevokeAllTokens, spare: :reset_token}
 
       # Generates an authentication token for the user
       change AshAuthentication.GenerateTokenChange

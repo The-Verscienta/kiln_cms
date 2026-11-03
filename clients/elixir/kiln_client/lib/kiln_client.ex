@@ -2,9 +2,11 @@ defmodule KilnClient do
   @moduledoc """
   Official Elixir client for the KilnCMS APIs — the JSON:API read surface at
   `/api/json/*`, per-type and hybrid search, fired artifacts at
-  `/api/content/:type/:slug`, the JSON:API write surface (create, update,
-  workflow transitions, soft-delete), the media upload API (`upload_media/2`
-  and friends) the `/api/sync` delta API and a minimal `/gql` helper (see Kiln's `docs/json-api.md` and
+  `/api/content/:type/:slug` (including `:as_of` point-in-time reads), path
+  resolution, menus, locales, related content, forms, preview tokens, the
+  delivery schema, the JSON:API write surface (create, update, workflow
+  transitions, soft-delete), the media upload API (`upload_media/2` and
+  friends), the `/api/sync` delta API and a minimal `/gql` helper (see Kiln's `docs/json-api.md` and
   `docs/headless-consumer-guide.md`). The writes and the uploads need a read +
   write key on an editor account; the reads need no key at all.
 
@@ -319,6 +321,13 @@ defmodule KilnClient do
   `GET /api/content/:plural/:slug`. `:surface` is `"json"` (default),
   `"json_ld"` or `"web"`; `:locale` selects a translation.
 
+  `:as_of` reads the document as it was at that moment, reconstructed from
+  its version history (`?as_of=`). It takes a `DateTime`, a `NaiveDateTime`
+  (read as UTC), a `Date` (the end of that day, UTC) or an ISO 8601 string.
+  Two 404 codes tell the cases apart: `"not_published"` (nothing was
+  published by then) and `"withdrawn"` (unpublished before then and not
+  republished).
+
   A cold cache answers 503; this retries once after `:retry_delay_ms`
   (default 2000) before giving up. Pass `retry: false` to fail fast.
   """
@@ -328,6 +337,7 @@ defmodule KilnClient do
       []
       |> put_param(:surface, opts[:surface])
       |> put_param(:locale, opts[:locale])
+      |> put_param(:as_of, as_of_param(opts[:as_of]))
 
     path = "/api/content/#{plural}/#{slug}"
 
@@ -344,6 +354,231 @@ defmodule KilnClient do
         other
     end
   end
+
+  @doc """
+  What a content type's collection looked like at a moment:
+  `GET /api/content/:type?as_of=`. `as_of` takes the same values as
+  `artifact/3`'s `:as_of`.
+
+  Returns the raw response, `%{"as_of", "type", "entries"}`. Each entry
+  carries `"slug"`, `"title"`, `"published_at"` and an `"href"` to the
+  per-document snapshot. The `"href"` is `nil` when the document has since
+  been unpublished or renamed. Unlike the single-document read, the index
+  respects unpublish.
+
+  Options: `:limit` (server default 100, max 500), `:req`.
+  """
+  @spec content_as_of(String.t(), as_of(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def content_as_of(type, as_of, opts \\ []) do
+    params =
+      [{"as_of", as_of_param(as_of)}]
+      |> put_param(:limit, opts[:limit])
+
+    json_get("/api/content/" <> segment(type), params, opts)
+  end
+
+  @doc """
+  Mint a draft preview link: `POST /api/content/:type/:id/preview-token`.
+
+  The server half of a front end's draft mode. Call it where the API key
+  lives, then hand the returned `"token"` (or `"url"`) to the browser, which
+  redeems it at `GET /preview/:token` and holds no credential of its own.
+  Tokens are signed, read-only, bound to this one document and expire after
+  `"expires_in"` seconds.
+
+  The key's owner must be able to see this document's drafts as an editor;
+  a `:read` key is enough, since the token only grants a read. Like the
+  writes, this takes the key per call (`:api_key`) or from config, and
+  returns `{:error, %KilnClient.Error{reason: :no_api_key}}` without sending
+  anything when there is none. A 403 means the key's owner cannot edit the
+  document, a 404 that it does not exist.
+
+  Returns `{:ok, %{"token", "url", "type", "id", "expires_at",
+  "expires_in"}}`. Options: `:api_key`, `:req`.
+  """
+  @spec mint_preview(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def mint_preview(type, id, opts \\ []) do
+    path = "/api/content/#{segment(type)}/#{segment(id)}/preview-token"
+
+    write_request(:post, path, nil, accept: @json, api_key: opts[:api_key], req: opts[:req])
+  end
+
+  @doc """
+  The site's live delivery schema: `GET /api/schema`, a JSON Schema of the
+  `:json` fired-artifact shape, dynamic content types and custom fields
+  included. Generate typed models from it rather than from a vendored copy.
+
+  Options: `:types` (a list of content type names, to restrict the
+  document), `:blocks_only` (`true` returns the block union alone and reads
+  no database), `:req`.
+  """
+  @spec schema(keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def schema(opts \\ []) do
+    params =
+      []
+      |> put_param(:type, join_list(opts[:types]))
+      |> put_param(:blocks, if(opts[:blocks_only], do: "only"))
+
+    json_get("/api/schema", params, opts)
+  end
+
+  # --- headless routing and site structure ---
+
+  @doc """
+  What lives at a URL path: `GET /api/resolve?path=`. The read a front end's
+  catch-all route makes, so it can render or redirect without mirroring
+  Kiln's URL scheme or redirect table.
+
+  The answer is a verdict, and all three are `{:ok, map}`:
+
+    * `%{"status" => "ok", "type", "slug", "id", "path", "locale"}`:
+      published content lives here, found in `"locale"`.
+    * `%{"status" => "moved", "to", "type", "slug", "id"}`: a pathauto
+      redirect. Send the visitor a 301 to `"to"`.
+    * `%{"status" => "not_found"}`: nothing is here. The server answers this
+      with a 404, but it is an answer about the path, not a failed call.
+
+  `path` needs its leading slash (`"/blog/hello"`). A missing one, or a
+  locale the site does not run, is `{:error, %KilnClient.Error{reason:
+  :validation}}`.
+
+  Options: `:locale`, `:fallback` (`false` turns the locale fallback chain
+  off), `:fallback_locale`, `:req`.
+  """
+  @spec resolve_path(String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def resolve_path(path, opts \\ []) do
+    params = locale_params([{"path", path}], opts)
+
+    case json_get("/api/resolve", params, opts) do
+      {:error, %Error{status: 404, body: %{"status" => "not_found"} = verdict}} -> {:ok, verdict}
+      other -> other
+    end
+  end
+
+  @doc """
+  Every navigation menu on the site: `GET /api/menus`. Returns
+  `{:ok, %{"menus" => [%{"key", "name", "locale"}]}}`; read one with
+  `menu/2`. Options: `:req`.
+  """
+  @spec menus(keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def menus(opts \\ []), do: json_get("/api/menus", [], opts)
+
+  @doc """
+  One resolved navigation menu: `GET /api/menus/:key`.
+
+  Returns `%{"key", "name", "locale", "items"}`. Each item carries `"id"`,
+  `"label"`, `"url"`, `"link_type"`, `"open_in_new_tab"` and its own
+  `"children"`. A content item's `"url"` is the target's current published
+  path, so renaming a slug moves the menu with it. Items whose target is not
+  published are left out with their children; a heading's `"url"` is `nil`.
+
+  A menu missing in the requested locale follows the site's fallback chain;
+  `"locale"` names the variant served. Options: `:locale` (default: the
+  site's default locale), `:fallback`, `:fallback_locale`, `:req`.
+  """
+  @spec menu(String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def menu(key, opts \\ []) do
+    json_get("/api/menus/" <> segment(key), locale_params([], opts), opts)
+  end
+
+  @doc """
+  The site's locales: `GET /api/locales`. Returns `%{"default", "locales",
+  "fallbacks"}`, where `"fallbacks"` maps each locale to the chain a missing
+  translation falls back along (`%{"fr-CA" => ["fr", "en"], "en" => []}`).
+  Enough to build a locale switcher or an hreflang set. Options: `:req`.
+  """
+  @spec locales(keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def locales(opts \\ []), do: json_get("/api/locales", [], opts)
+
+  @doc """
+  Published documents semantically closest to one:
+  `GET /api/content/:type/:slug/related`.
+
+  Returns `%{"type", "slug", "locale", "related"}`, each related document
+  carrying `"type"`, `"slug"`, `"title"`, a `"score"` (higher is closer) and
+  an `"href"` to its artifact. `"related"` is empty when semantic search is
+  off. The anchor document must be published.
+
+  Options: `:limit` (server default 5, max 20), `:locale`, `:fallback`,
+  `:fallback_locale`, `:req`.
+  """
+  @spec related(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def related(type, slug, opts \\ []) do
+    params = locale_params([], opts) |> put_param(:limit, opts[:limit])
+
+    json_get("/api/content/#{segment(type)}/#{segment(slug)}/related", params, opts)
+  end
+
+  # --- forms ---
+
+  @doc """
+  An admin-defined form's schema: `GET /api/forms/:slug`, so a front end can
+  render it itself. Returns `%{"slug", "name", "description",
+  "success_message", "submit_label", "honeypot_field", "submit_url",
+  "fields"}`, each field with `"name"`, `"label"`, `"type"`, `"required"`,
+  `"options"`, `"help_text"`, `"placeholder"`, `"default_value"` and
+  `"width"`. An unknown or inactive form is `reason: :not_found`.
+  Options: `:req`.
+  """
+  @spec form(String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def form(slug, opts \\ []), do: json_get("/api/forms/" <> segment(slug), [], opts)
+
+  @doc """
+  Submit a form: `POST /api/forms/:slug` with `values` (field name => value)
+  as JSON. Returns `{:ok, %{"ok" => true, "message" => success_message}}`.
+
+  A refusal is `{:error, %KilnClient.Error{reason: :validation, status:
+  422}}`; `KilnClient.Error.field_errors/1` reads the messages by field
+  name.
+
+  Submission is anonymous by design, so this never sends an API key. The
+  server's spam checks still run. If you are relaying a visitor's browser
+  submission, pass the honeypot field (`form/2`'s `"honeypot_field"`) and
+  `"_kiln_rendered_at"` through untouched. A filled honeypot is discarded
+  and still answers success, so never set it yourself.
+
+  Options: `:locale` (recorded on the submission), `:req`.
+  """
+  @spec submit_form(String.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def submit_form(slug, values, opts \\ []) when is_map(values) do
+    body = if opts[:locale], do: Map.put(values, "locale", opts[:locale]), else: values
+
+    request(:post, "/api/forms/" <> segment(slug),
+      json: body,
+      headers: [{"accept", @json}, {"content-type", @json}],
+      anonymous: true,
+      req: opts[:req]
+    )
+  end
+
+  # A plain-JSON delivery read (not JSON:API): the raw body.
+  defp json_get(path, params, opts) do
+    request(:get, path, params: params, headers: [{"accept", @json}], req: opts[:req])
+  end
+
+  # The `?locale=` / `?fallback=` / `?fallback_locale=` trio every
+  # locale-aware delivery surface reads (`KilnCMSWeb.DeliveryLocale`).
+  defp locale_params(params, opts) do
+    fallback =
+      case opts[:fallback] do
+        nil -> nil
+        value -> to_string(value)
+      end
+
+    params
+    |> put_param(:locale, opts[:locale])
+    |> put_param(:fallback, fallback)
+    |> put_param(:fallback_locale, opts[:fallback_locale])
+  end
+
+  @typedoc "A moment for a point-in-time read: an ISO 8601 string, or a date/time struct."
+  @type as_of :: DateTime.t() | NaiveDateTime.t() | Date.t() | String.t()
+
+  defp as_of_param(nil), do: nil
+  defp as_of_param(%DateTime{} = at), do: DateTime.to_iso8601(at)
+  defp as_of_param(%NaiveDateTime{} = at), do: NaiveDateTime.to_iso8601(at) <> "Z"
+  defp as_of_param(%Date{} = date), do: Date.to_iso8601(date)
+  defp as_of_param(value) when is_binary(value), do: value
 
   # --- sync (delta) API ---
 
@@ -378,8 +613,28 @@ defmodule KilnClient do
   @spec sync(keyword()) :: {:ok, %{items: [map()], cursor: String.t()}} | {:error, Error.t()}
   def sync(opts \\ []), do: sync_pages(opts[:cursor], opts, [])
 
+  @doc """
+  One page of `GET /api/sync`, for a caller that streams pages instead of
+  collecting them all as `sync/1` does. `nil` starts a new sync; otherwise
+  pass the previous page's `"cursor"`.
+
+  Returns the raw page, `%{"items" => items, "cursor" => cursor,
+  "has_more" => boolean}`. Apply its items, store its cursor, and ask again
+  while `"has_more"` is `true`:
+
+      {:ok, page} = KilnClient.sync_page(stored_cursor)
+
+  Options are `sync/1`'s: `:type`, `:surface` and `:limit` for a new sync,
+  and `:req`. A page answering 503 while a just-published artifact compiles
+  is returned as the error unless you pass `:retries` (default 0 here, 3 in
+  `sync/1`) with `:retry_delay_ms`.
+  """
+  @spec sync_page(String.t() | nil, keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def sync_page(cursor \\ nil, opts \\ []),
+    do: fetch_sync_page(cursor, opts, Keyword.get(opts, :retries, 0))
+
   defp sync_pages(cursor, opts, acc) do
-    case sync_page(cursor, opts, Keyword.get(opts, :retries, 3)) do
+    case fetch_sync_page(cursor, opts, Keyword.get(opts, :retries, 3)) do
       {:ok, %{"items" => items, "cursor" => next, "has_more" => true}} ->
         sync_pages(next, opts, [items | acc])
 
@@ -391,7 +646,7 @@ defmodule KilnClient do
     end
   end
 
-  defp sync_page(cursor, opts, retries) do
+  defp fetch_sync_page(cursor, opts, retries) do
     params =
       case cursor do
         nil ->
@@ -407,7 +662,7 @@ defmodule KilnClient do
     case request(:get, "/api/sync", params: params, req: opts[:req]) do
       {:error, %Error{status: 503}} when retries > 0 ->
         Process.sleep(Keyword.get(opts, :retry_delay_ms, 2_000))
-        sync_page(cursor, opts, retries - 1)
+        fetch_sync_page(cursor, opts, retries - 1)
 
       other ->
         other
@@ -1122,8 +1377,15 @@ defmodule KilnClient do
   # return (0.5.0; before that a read returned `{:http_status, status, body}`
   # or the bare exception). A 404 isn't logged: a missing slug is an expected
   # answer for a read, not a fault.
+  #
+  # `anonymous: true` sends no key even when one is configured: a public form
+  # submission is anonymous by design, and a key there would only leak the
+  # credential to a route that ignores it.
   defp request(method, path, opts) do
-    case do_request(method, path, opts, Application.get_env(:kiln_client, :api_key)) do
+    {anonymous?, opts} = Keyword.pop(opts, :anonymous, false)
+    key = if anonymous?, do: nil, else: Application.get_env(:kiln_client, :api_key)
+
+    case do_request(method, path, opts, key) do
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
         {:ok, body}
 

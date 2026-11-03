@@ -48,19 +48,29 @@ defmodule KilnCMS.Search.TermEvidence do
   require Ash.Sort
   import Ash.Expr, only: [expr: 1]
 
-  defstruct terms: [], share: 1.0, named?: false, corrections: %{}, verdict: :ok
+  defstruct terms: [],
+            share: 1.0,
+            named?: false,
+            corrections: %{},
+            verdict: :ok,
+            evidenced: MapSet.new(),
+            names: MapSet.new()
 
   @typedoc """
   One judged query: its terms, the share of them with evidence, whether one
   is a name outright, the corrections for the ones only near a name, and the
   verdict — `:ok` (nothing to gate), `:typo` (corrections apply) or `:junk`.
+  `evidenced` and `names` are the terms with any evidence and the terms that
+  are names outright, for `across/2`.
   """
   @type t :: %__MODULE__{
           terms: [String.t()],
           share: float(),
           named?: boolean(),
           corrections: %{String.t() => String.t()},
-          verdict: :ok | :typo | :junk
+          verdict: :ok | :typo | :junk,
+          evidenced: MapSet.t(String.t()),
+          names: MapSet.t(String.t())
         }
 
   @typedoc "The gate's settings, as `KilnCMS.Search.term_gate/0` returns them."
@@ -172,15 +182,20 @@ defmodule KilnCMS.Search.TermEvidence do
         })
       end)
 
-    evidenced = Enum.count(judged, &(&1.vocab? or &1.name? or &1.near?))
-    share = evidenced / length(judged)
-    named? = Enum.any?(judged, & &1.name?)
-    bar = if named?, do: gate.min_share_named, else: gate.min_share
-
     words = Enum.map(judged, & &1.word)
+    evidenced = for t <- judged, t.vocab? or t.name? or t.near?, into: MapSet.new(), do: t.word
+    name_terms = for t <- judged, t.name?, into: MapSet.new(), do: t.word
+    {share, named?, junk?} = weigh(words, evidenced, name_terms, gate)
 
-    if share < bar do
-      %__MODULE__{terms: words, share: share, named?: named?, verdict: :junk}
+    if junk? do
+      %__MODULE__{
+        terms: words,
+        share: share,
+        named?: named?,
+        verdict: :junk,
+        evidenced: evidenced,
+        names: name_terms
+      }
     else
       # Every term near a name is a candidate — a name word itself too: "zi"
       # names Wu Wei Zi and is still the typo in "gui zi tang". Corrections
@@ -195,8 +210,41 @@ defmodule KilnCMS.Search.TermEvidence do
         share: share,
         named?: named?,
         corrections: corrections,
-        verdict: if(corrections == %{}, do: :ok, else: :typo)
+        verdict: if(corrections == %{}, do: :ok, else: :typo),
+        evidenced: evidenced,
+        names: name_terms
       }
+    end
+  end
+
+  defp weigh(words, evidenced, names, gate) do
+    share = MapSet.size(evidenced) / length(words)
+    named? = MapSet.size(names) > 0
+    bar = if named?, do: gate.min_share_named, else: gate.min_share
+    {share, named?, share < bar}
+  end
+
+  @doc """
+  Whether a query is junk across several sections at once — a `global/2`
+  sweep's content sections, each judged on its own vocabulary. `verdicts`
+  holds each section's `t()`, or `nil` for a section the gate did not judge
+  because its keyword leg matched (every term is in its vocabulary).
+
+  The query is junk only if every section called it junk **and** the terms
+  any section has evidence for still fall short of the bar: "heat interior"
+  is junk to a section whose one record says "heat", and not to a site whose
+  other section says "interior".
+  """
+  @spec across([t() | nil], gate()) :: boolean()
+  def across(verdicts, gate) do
+    if verdicts != [] and Enum.all?(verdicts, &match?(%__MODULE__{verdict: :junk}, &1)) do
+      [first | _] = verdicts
+      evidenced = verdicts |> Enum.map(& &1.evidenced) |> Enum.reduce(&MapSet.union/2)
+      names = verdicts |> Enum.map(& &1.names) |> Enum.reduce(&MapSet.union/2)
+      {_share, _named?, junk?} = weigh(first.terms, evidenced, names, gate)
+      junk?
+    else
+      false
     end
   end
 

@@ -26,10 +26,15 @@ defmodule KilnCMSWeb.Plugs.PublicCacheTest do
     strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
 
     {:ok, signed_in} =
-      AshAuthentication.Strategy.action(strategy, :sign_in, %{
-        "email" => user.email,
-        "password" => @password
-      })
+      AshAuthentication.Strategy.action(
+        strategy,
+        :sign_in,
+        %{
+          "email" => user.email,
+          "password" => @password
+        },
+        []
+      )
 
     signed_in.__metadata__.token
   end

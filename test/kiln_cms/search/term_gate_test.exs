@@ -75,7 +75,14 @@ defmodule KilnCMS.Search.TermGateTest do
   setup do
     original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, original) end)
-    put_search_env(semantic: true, embedder: NearEmbedder)
+    # The default org's embedding budget is shared with every other suite in
+    # this window; spent, the corpus goes unembedded and the semantic legs
+    # answer nothing, which would make the gate-off assertions vacuous.
+    put_search_env(
+      semantic: true,
+      embedder: NearEmbedder,
+      embedding_per_org_limit: {1_000_000, :timer.hours(1)}
+    )
 
     admin =
       Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -179,7 +186,13 @@ defmodule KilnCMS.Search.TermGateTest do
       assert corrections == %{}
     end
 
+    # Lexical legs only: `NearEmbedder` puts every text a hair's breadth from
+    # every other, so the semantic ranks are arbitrary and a record sharing
+    # one word ("Dang Gui") can take semantic rank 1. The top-five test above
+    # holds with them on.
     test "rank the corrected record first", %{admin: admin} do
+      put_search_env(semantic: false)
+
       assert [%{title: "Gui Zhi Tang"} | _] = Search.hybrid(:page, "gui zi tang", actor: admin)
       assert [%{title: "Ban Xia"} | _] = Search.hybrid(:page, "ban xa", actor: admin)
     end
@@ -282,6 +295,35 @@ defmodule KilnCMS.Search.TermGateTest do
 
       put_search_env(term_gate: false, term_gate_enabled: true)
       assert %{min_share: 0.8} = Search.term_gate()
+    end
+  end
+
+  describe "across/2" do
+    @gate %{min_share: 0.6, min_share_named: 0.5, one_typo_length: 2, two_typo_length: 8}
+
+    defp junk(evidenced, names \\ []) do
+      %TermEvidence{
+        terms: ~w(heat interior),
+        verdict: :junk,
+        evidenced: MapSet.new(evidenced),
+        names: MapSet.new(names)
+      }
+    end
+
+    test "is junk only when every section is and their evidence together falls short" do
+      assert TermEvidence.across([junk([]), junk([])], @gate)
+      assert TermEvidence.across([junk(~w(heat)), junk(~w(heat))], @gate)
+    end
+
+    test "is not junk when the sections' evidence together clears the bar" do
+      # "heat" in one section, "interior" in the other.
+      refute TermEvidence.across([junk(~w(heat)), junk(~w(interior))], @gate)
+    end
+
+    test "is not junk when any section matched or passed" do
+      refute TermEvidence.across([junk([]), nil], @gate)
+      refute TermEvidence.across([junk([]), %TermEvidence{verdict: :ok}], @gate)
+      refute TermEvidence.across([], @gate)
     end
   end
 
