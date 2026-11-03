@@ -24,6 +24,33 @@ carries the reasoning.
 
 ## Added
 
+<a id="search-synonyms"></a>
+
+- **Search synonyms and aliases, per site (proposal A7).** A site whose
+  readers search for "reishi" when its content says "Ling Zhi" had to fix it
+  in the consumer: Verscienta's own synonym table was worth +0.058 MRR over
+  the backend, and Kiln's own surfaces — `/api/ask`, the editor palette, the
+  public `/search` page — got none of it. `KilnCMS.CMS.SearchSynonym` holds the
+  rules: a `group` of equivalent terms (`reishi ⇄ ling zhi ⇄ ganoderma`) or a
+  `one_way` rule (`tcm → traditional chinese medicine`), multi-word terms
+  matched as phrases at word boundaries. `Search.hybrid/3` reads them
+  (`KilnCMS.Search.Synonyms`, cached per site and busted on every write) and
+  runs each alternate wording of the query through the keyword, title and
+  alias legs at half the weight of the same leg on the user's own words — the
+  new `synonym` leg — so a record the reader named outranks one a rule named
+  for them. The semantic legs do not re-run: the query's one embedding already
+  carries its meaning. `global/2` reads the rules once per sweep, and
+  `/api/search` reports the alternates it searched as `also_searched`. Editors
+  manage rules at `/editor/search-synonyms` (with a "try a query" box); only an
+  admin deletes one. A rule write purges the site's CDN key, since it changes
+  what a publicly cached `/api/search` URL answers. `/mcp` gains a
+  `search_content` tool (`KilnCMS.CMS.ContentSearch`) — the ranked hybrid
+  search under the key's own read policies, which MCP clients had no way to
+  reach before. The index-time half of the proposal ("index this field's
+  values as names") already exists as `names_record` on a field definition
+  (`KilnCMS.CMS.NameFields`); a synonym's alternate runs the alias leg too, so
+  the two compose.
+
 <a id="search-ranking-fixture"></a>
 
 - **An adversarial ranking fixture gates search ranking in CI (A10).** The
@@ -129,7 +156,9 @@ carries the reasoning.
 
   What it costs is the synonym-only query — a word the corpus never uses that
   the semantic leg would have answered ("licorice" for a corpus that says
-  "glycyrrhiza"). That now returns nothing. `SEARCH_TERM_GATE=false` (or
+  "glycyrrhiza"). That now returns nothing, unless a site synonym rule
+  rewords it: a `:synonym` hit vouches for itself under a junk verdict, as a
+  keyword, title or alias hit does. `SEARCH_TERM_GATE=false` (or
   `term_gate: false`) turns the gate off; `SEARCH_TERM_GATE_MIN_SHARE` or
   `term_gate: [min_share: …]` retunes it. `KilnCMS.Search.term_evidence/3`
   shows the verdict for a query. The migration adds the extension only.

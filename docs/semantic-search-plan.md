@@ -234,7 +234,8 @@ answer it — in practice nothing comes back. A term one edit from a name is a
 typo, and the fuzzy leg also runs on the corrected query ("gui zi tang" →
 "gui zhi tang"). It runs before the floor and needs no calibration; its cost
 is the synonym-only query ("licorice" for a corpus that never says it), which
-now returns nothing. `SEARCH_TERM_GATE=false` turns it off,
+now returns nothing unless a site synonym rule rewords it (a `:synonym` hit
+vouches for itself). `SEARCH_TERM_GATE=false` turns it off,
 `SEARCH_TERM_GATE_MIN_SHARE` retunes it.
 
 **Runtime overrides.** `SEARCH_SEMANTIC_MAX_DISTANCE`,

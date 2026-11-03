@@ -226,6 +226,18 @@ defmodule KilnCMS.Search.TermGateTest do
       assert Search.hybrid(:page, "licorice", opts) != []
     end
 
+    test "a site's synonym rule answers the query the gate calls junk", %{opts: opts} do
+      # "licorice" is no word of the corpus, so the verdict is junk; a rule
+      # rewording it to a word the corpus does use is the site saying what
+      # it means, and the synonym leg's hit vouches for itself.
+      assert Search.term_evidence(:page, "licorice", opts).verdict == :junk
+
+      assert [%{title: "Huang Qi"} = hit | _] =
+               Search.hybrid(:page, "licorice", opts ++ [synonyms: ["astragalus"]])
+
+      assert :synonym in Search.hit_legs(hit)
+    end
+
     test "a record named on one word survives a stray word", %{opts: opts} do
       evidence = Search.term_evidence(:page, "ban qwerty", opts)
 
