@@ -9,5 +9,9 @@
   {"query": "wellcome", "expected": ["welcome"], "class": "typo"},
   {"query": "helo world", "expected": ["hello-world"], "class": "typo"},
   {"query": "asdfghjkl zzqqxx", "expected": [], "class": "junk"},
-  {"query": "xylophone quasar", "expected": [], "class": "junk"}
+  {"query": "xylophone quasar", "expected": [], "class": "junk"},
+  {"query": "taylor swift tour dates", "expected": [], "class": "junk"},
+  {"query": "cheap flights to paris", "expected": [], "class": "junk"},
+  {"query": "how to publish a podcast episode", "expected": [], "class": "junk"},
+  {"query": "weather tomorrow in london", "expected": [], "class": "junk"}
 ]

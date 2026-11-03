@@ -10,7 +10,7 @@ genuinely large — but almost none of it is something you have to decide.
    production release refuses to start. There are three.
 2. **[Common (10)](#common-10)** — not required, but what a real deployment
    usually sets. A short list, with a one-line reason for each.
-3. **[Everything else](#everything-else)** — the other 147, grouped by the
+3. **[Everything else](#everything-else)** — the other 149, grouped by the
    feature they configure. Every one is optional and has a default, so you can
    skip a whole section by not using the feature it configures.
 
@@ -436,6 +436,8 @@ for what the floor does and how to measure it.
 | `SEARCH_SEMANTIC_MAX_DISTANCE` | unset (compiled `semantic_max_distance`, `nil` = no floor) | The floor: the cosine distance in `[0, 2]` beyond which a hit only judged legs returned is dropped. `0.0` is legal and is the model-swap setting — it drops every judged hit with any distance, for the window in which stored vectors and query vectors come from different models (keep `keyword_any` out of `SEARCH_SEMANTIC_FLOOR_LEGS` meanwhile). `2.0` floors nothing, the runtime spelling of "off". See [`KilnCMS.Search.semantic_max_distance/0`](../lib/kiln_cms/search.ex). | [`config/runtime/prod/search.exs:52`](../config/runtime/prod/search.exs#L52) |
 | `SEARCH_SEMANTIC_FLOOR_LEGS` | unset (`semantic,block,tag`) | Which legs' hits the floor judges, comma-separated. Must include `semantic`, `block` and `tag`; may add `keyword_any` (the any-term relaxation, where junk on a long-prose corpus comes from) and `fuzzy`. `keyword`, `title` and `alias` vouch for a hit and are refused. Add `keyword_any` together with chunked document vectors (#1940), or accept that a match in a long document's late passage is judged by a vector that never saw it. See [`KilnCMS.Search.semantic_floor_legs/0`](../lib/kiln_cms/search.ex). | [`config/runtime/prod/search.exs:70`](../config/runtime/prod/search.exs#L70) |
 | `SEARCH_KEYWORD_ANY_IDF_COVERAGE` | unset (off) | The opt-in IDF-coverage variant, a share in `(0, 1]`: a `keyword_any` hit beyond the floor is kept when the query lexemes it matches carry at least this share of the query's IDF mass (per content type, over published documents). Acts only while `keyword_any` is in the floor legs. Shipped for measurement — the preregistered grid is `0.5`/`0.6`/`0.7`. See [`KilnCMS.Search.keyword_any_idf_coverage/0`](../lib/kiln_cms/search.ex). | [`config/runtime/prod/search.exs:82`](../config/runtime/prod/search.exs#L82) |
+| `SEARCH_TERM_GATE` | unset (compiled `term_gate`, on) | The term-evidence gate (A6): `false` turns it off, `true` on, over an overlay's settings. On, a query most of whose terms are in neither a content type's vocabulary nor within an edit or two of a record's name is junk, and only the keyword, title and alias legs may answer it; a term one edit from a name is a typo, and the fuzzy leg also runs on the corrected query. Off, a synonym-only query is answered by the semantic legs again — and so is junk. See [`KilnCMS.Search.term_gate/0`](../lib/kiln_cms/search.ex). | [`config/runtime/prod/search.exs:94`](../config/runtime/prod/search.exs#L94) |
+| `SEARCH_TERM_GATE_MIN_SHARE` | unset (`0.6`) | The share in `(0, 1]` of a query's terms that must have evidence for the gate to pass it — the bar when no term names a record outright (that bar, `min_share_named`, stays `0.5`). Higher calls more queries junk. See [`KilnCMS.Search.term_gate/0`](../lib/kiln_cms/search.ex). | [`config/runtime/prod/search.exs:102`](../config/runtime/prod/search.exs#L102) |
 
 ### vector search scan (measurement runs)
 
@@ -952,8 +954,8 @@ through all three sinks, and the warning names the shape wanted.
 
 * **`Env.float_in/4`** reads a number within stated bounds —
   `SEARCH_SEMANTIC_MAX_DISTANCE` in `[0, 2]`, `SEARCH_KEYWORD_ANY_IDF_COVERAGE`
-  in `(0, 1]`. Unlike a count, **zero is a value** where the bounds allow it:
-  a floor of `0.0` is the model-swap setting. Out-of-range values (`3.5` for
+  and `SEARCH_TERM_GATE_MIN_SHARE` in `(0, 1]`. Unlike a count, **zero is a
+  value** where the bounds allow it: a floor of `0.0` is the model-swap setting. Out-of-range values (`3.5` for
   `0.35`) and partly-numeric ones (`0.35 cosine`) are refused, not clamped or
   truncated.
 * **`Env.list_of/3`** reads a comma-separated list of known names —

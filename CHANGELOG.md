@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Changed
+
+- **Search returns nothing for a query most of whose words are in no record's text or name;
+  a word one edit from a name is a typo, and the fuzzy leg retries corrected. `SEARCH_TERM_GATE=false` reverts.**
+  ([long form](docs/changelog/unreleased.md#term-evidence-gate))
+
 ## [1.7.0] - 2026-10-29
 
 Long form: [docs/changelog/v1.7.0.md](docs/changelog/v1.7.0.md) —

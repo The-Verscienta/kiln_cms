@@ -41,7 +41,8 @@ defmodule KilnCMS.Search.RankingStabilityTest do
     # Two records named in one query: the AND fails closed, the title leg and
     # the any-term fallback carry it.
     "pad thai tom yum",
-    # A typo: the fuzzy leg.
+    # A typo: the fuzzy leg, on the term-evidence gate's correction
+    # ("saffon" → "saffron") — trigrams alone never reached it.
     "saffon",
     # A question: eight lexemes ANDed match nothing, the OR relaxation does.
     "how do I cook a green curry at home",
@@ -198,7 +199,11 @@ defmodule KilnCMS.Search.RankingStabilityTest do
         ],
         posts: [{"Yum", 0.05737705, [:keyword_any, :title], true}]
       ],
-      "saffon" => [entries: [], pages: [], posts: []],
+      "saffon" => [
+        entries: [],
+        pages: [{"Saffron Rice", 0.00819672, [:fuzzy], true}],
+        posts: [{"Saffron, the costly spice", 0.00819672, [:fuzzy], true}]
+      ],
       "saffron" => [
         entries: [],
         pages: [{"Saffron Rice", 0.02459016, [:keyword, :fuzzy], true}],
@@ -283,15 +288,15 @@ defmodule KilnCMS.Search.RankingStabilityTest do
       "saffon" => [
         entries: [],
         pages: [
+          {"Saffron Rice", 0.03920634, [:semantic, :block, :fuzzy], true},
           {"Green Curry", 0.03226646, [:semantic, :block], true},
           {"Pad Thai", 0.03226646, [:semantic, :block], true},
           {"Thai Street Food", 0.03225806, [:semantic, :block], true},
-          {"Saffron Rice", 0.03100962, [:semantic, :block], true},
           {"About the kitchen", 0.03077652, [:semantic, :block], true},
           {"Tom Yum", 0.03053613, [:semantic, :block], true}
         ],
         posts: [
-          {"Saffron, the costly spice", 0.03201844, [:semantic, :block], true},
+          {"Saffron, the costly spice", 0.04021516, [:semantic, :block, :fuzzy], true},
           {"How to cook rice", 0.03201844, [:semantic, :block], true},
           {"Weeknight dinners", 0.03174603, [:semantic, :block], true},
           {"Yum", 0.03151365, [:semantic, :block], true},
