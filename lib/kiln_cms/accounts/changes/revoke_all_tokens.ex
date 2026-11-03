@@ -57,8 +57,30 @@ defmodule KilnCMS.Accounts.Changes.RevokeAllTokens do
   `after_action` hooks run in declaration order, so the new session is issued
   after the sweep and survives it.
 
+  ## The reset token is spared, and revoked by AshAuthentication instead
+
+  On `:reset_password_with_token`, declare this as `{RevokeAllTokens, spare:
+  :reset_token}`. Since AshAuthentication 5.0 the strategy's reset revokes the
+  reset token itself, in an `after_action` hook added *after* every hook the
+  action declares, and that revocation row-locks the token and refuses one
+  already marked revoked: it is what makes a reset link single-use. Swept here
+  first, the token reached that check already revoked, and every reset failed
+  with "token has already been revoked". So the sweep leaves that one jti alone,
+  and the strategy revokes it moments later in the same transaction. A reset
+  still ends with every token the account held revoked, the reset token
+  included, or it rolls back.
+
+  The sparing sweep is the add-on's own bulk revocation with one more filter
+  (`AshAuthentication.AddOn.LogOutEverywhere.Action` takes no per-token
+  exclusion). It carries the same `private.ash_authentication?` context the
+  add-on sets, which is what the `Token` resource's AshAuthentication bypass
+  admits, and applies the strategy's `include_purposes`/`exclude_purposes`
+  exactly as the add-on does (`exclude_purposes` defaults to `["revocation"]`).
+
   ## Options
 
+    * `:spare` — `:reset_token` to leave the jti of the action's `:reset_token`
+      argument out of the sweep (above).
     * `:revoke` — a `(user, context) -> :ok | {:error, term}` function that
       stands in for the revocation. Test-only: it exists so a test can make the
       revocation fail and assert the rollback. It cannot be set from the DSL
@@ -66,9 +88,11 @@ defmodule KilnCMS.Accounts.Changes.RevokeAllTokens do
   """
   use Ash.Resource.Change
 
+  require Ash.Query
+
   @impl true
   def change(changeset, opts, context) do
-    revoke = Keyword.get(opts, :revoke, &revoke/2)
+    revoke = Keyword.get(opts, :revoke, default_revoke(changeset, opts[:spare]))
 
     Ash.Changeset.after_action(changeset, fn _changeset, user ->
       case revoke.(user, context) do
@@ -76,6 +100,28 @@ defmodule KilnCMS.Accounts.Changes.RevokeAllTokens do
         {:error, error} -> {:error, error}
       end
     end)
+  end
+
+  defp default_revoke(changeset, :reset_token) do
+    case reset_token_jti(changeset) do
+      {:ok, jti} -> &revoke_spared(&1, &2, jti)
+      # No readable jti: sweep everything. The strategy's own revocation then
+      # finds the token revoked and fails the reset, which is the safe way to
+      # be wrong. `ResetTokenValidation` has refused such a token by now anyway.
+      :error -> &revoke/2
+    end
+  end
+
+  defp default_revoke(_changeset, nil), do: &revoke/2
+
+  defp reset_token_jti(changeset) do
+    with token when is_binary(token) <- Ash.Changeset.get_argument(changeset, :reset_token),
+         {:ok, %{"jti" => jti}} when is_binary(jti) and jti != "" <-
+           AshAuthentication.Jwt.peek(token) do
+      {:ok, jti}
+    else
+      _ -> :error
+    end
   end
 
   @doc false
@@ -97,4 +143,45 @@ defmodule KilnCMS.Accounts.Changes.RevokeAllTokens do
       {:error, error} -> {:error, error}
     end
   end
+
+  @doc false
+  # The add-on's bulk revocation (`LogOutEverywhere.Action`), minus one jti.
+  @spec revoke_spared(struct(), map(), String.t()) :: :ok | {:error, term()}
+  def revoke_spared(%resource{} = user, context, jti) do
+    strategy = AshAuthentication.Info.strategy!(resource, :log_out_everywhere)
+
+    token_resource = AshAuthentication.Info.authentication_tokens_token_resource!(resource)
+
+    action =
+      AshAuthentication.TokenResource.Info.token_revocation_revoke_all_stored_for_subject_action_name!(
+        token_resource
+      )
+
+    token_resource
+    |> Ash.Query.filter(jti != ^jti)
+    |> include_purposes(strategy.include_purposes)
+    |> exclude_purposes(strategy.exclude_purposes)
+    |> Ash.bulk_update(
+      action,
+      %{subject: AshAuthentication.user_to_subject(user)},
+      Ash.Context.to_opts(context,
+        strategy: [:atomic, :atomic_batches, :stream],
+        context: %{private: %{ash_authentication?: true}},
+        notify?: true,
+        return_errors?: true,
+        stop_on_error?: true
+      )
+    )
+    |> case do
+      %{status: :success} -> :ok
+      %{errors: errors} -> {:error, errors}
+    end
+  end
+
+  # As `LogOutEverywhere.Action` filters: `nil` means no filter.
+  defp include_purposes(query, nil), do: query
+  defp include_purposes(query, purposes), do: Ash.Query.filter(query, purpose in ^purposes)
+
+  defp exclude_purposes(query, nil), do: query
+  defp exclude_purposes(query, purposes), do: Ash.Query.filter(query, purpose not in ^purposes)
 end

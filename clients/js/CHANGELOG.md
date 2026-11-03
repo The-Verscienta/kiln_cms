@@ -7,6 +7,17 @@ tagged `client-js-vX.Y.Z` in the
 
 ## Unreleased
 
+- **Headless routing, navigation and forms (kiln_cms#2128):**
+  `resolvePath(path)` (`GET /api/resolve`), `menus()` and `menu(key)`
+  (`GET /api/menus[/:key]`), `locales()` (`GET /api/locales`),
+  `related(type, slug)` (`GET /api/content/:type/:slug/related`), and
+  `form(slug)` / `submitForm(slug, values)` (`GET`/`POST /api/forms/:slug`).
+  `resolvePath` resolves to the server's `not_found` verdict instead of
+  throwing on its 404. `submitForm` never sends the client's API key.
+- `menu`, `related` and `resolvePath` take `fallback` and `fallbackLocale`
+  beside `locale` (`DeliveryLocaleOptions`).
+- `KilnValidationError.fieldErrors()` also reads a refused form submission's
+  `{ errors: { field: message } }` body.
 - `kiln-types` reads a nullable `$ref` (`anyOf: [$ref, {"type": "null"}]`) as
   `Target | null`. Kiln's schema export now states the shared media snapshot
   that way. Before this, such a field typed as `Record<string, unknown> | null`.

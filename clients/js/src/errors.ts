@@ -132,8 +132,16 @@ export class KilnValidationError extends KilnHttpError {
       .filter((pointer): pointer is string => typeof pointer === "string");
   }
 
-  /** Details grouped by attribute name (`/data/attributes/slug` → `slug`). */
+  /**
+   * Details grouped by attribute name (`/data/attributes/slug` → `slug`). A
+   * refused form submission (`submitForm`) answers
+   * `{ ok: false, errors: { email: "is required" } }` rather than the JSON:API
+   * error list, and reads the same way: `{ email: ["is required"] }`.
+   */
   fieldErrors(): Record<string, string[]> {
+    const formErrors = formFieldErrors(this.body);
+    if (formErrors !== undefined) return formErrors;
+
     const byField: Record<string, string[]> = {};
     for (const error of this.errors) {
       const pointer = error.source?.pointer;
@@ -262,6 +270,19 @@ function errorObjects(body: unknown): KilnErrorObject[] {
   return errors.filter(
     (error): error is KilnErrorObject => error !== null && typeof error === "object",
   );
+}
+
+// A form refusal's `errors` is a `{field: message}` object, not the JSON:API
+// array; `undefined` for any other body.
+function formFieldErrors(body: unknown): Record<string, string[]> | undefined {
+  if (body === null || typeof body !== "object" || !("errors" in body)) return undefined;
+  const errors = (body as { errors: unknown }).errors;
+  if (errors === null || typeof errors !== "object" || Array.isArray(errors)) return undefined;
+  const byField: Record<string, string[]> = {};
+  for (const [field, messages] of Object.entries(errors as Record<string, unknown>)) {
+    byField[field] = (Array.isArray(messages) ? messages : [messages]).map(String);
+  }
+  return byField;
 }
 
 function stringOrUndefined(value: unknown): string | undefined {

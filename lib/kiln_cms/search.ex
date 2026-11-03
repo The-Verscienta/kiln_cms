@@ -953,7 +953,27 @@ defmodule KilnCMS.Search do
   """
   @spec hybrid(atom() | String.t() | module(), String.t(), keyword()) :: [struct()]
   def hybrid(type, query, opts \\ []) when is_binary(query) do
-    resource = search_resource(type)
+    type |> search_resource() |> collect_legs(query, opts) |> fuse_legs(%{})
+  end
+
+  # The legs whose ranks `global/2` takes over the union of its sections
+  # (#2175). Each ranks by a number that means the same thing in every
+  # table: a cosine distance (`:semantic`, `:block`, `:tag`) or a `ts_rank`
+  # over the same weighted `search_vector` (`:keyword`, `:keyword_any`).
+  # Ranked per section instead, a section holding one record put it at rank
+  # 1 in every leg that returned it, whatever its relevance — the lone post
+  # that outscored every two-term match of "heat interior". The title,
+  # alias, compound and fuzzy legs keep their section ranks: a title, alias
+  # or compound hit is a record the query names outright, which is the same
+  # claim in any section, and the fuzzy leg is a fallback that runs per
+  # section.
+  @global_rank_legs [:keyword, :keyword_any, :semantic, :block, :tag]
+
+  # The first half of `hybrid/3`: every leg's candidates, and what fusion
+  # and the floor need, without fusing them. `global/2` collects every
+  # content section before it fuses any, so it can hand each one ranks
+  # taken over all of them (`global_ranks/1`).
+  defp collect_legs(resource, query, opts) do
     # `:tenant` scopes the multitenant content legs to the request's org (#336).
     read_opts = Keyword.take(opts, [:actor, :authorize?, :tenant])
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
@@ -999,36 +1019,126 @@ defmodule KilnCMS.Search do
         []
       end
 
-    # Order matters only for exact ties (`reciprocal_rank_fusion/2`): a
-    # partial keyword match at rank n outranks a trigram guess at rank n.
-    [
-      {:keyword, keyword, 1.0},
-      {:keyword_any, relaxed, @relaxed_weight},
-      {:semantic, semantic, 1.0},
-      {:block, blocks, @block_weight},
-      {:title, title, @title_weight},
-      {:alias, aliases, @title_weight},
-      {:compound, compound, @title_weight},
-      {:fuzzy, fuzzy, @fuzzy_weight},
-      {:tag, tagged, @tag_weight}
-    ]
-    |> reciprocal_rank_fusion(k)
-    |> floor_hits(%{
-      max_distance: semantic_max_distance(),
-      legs: semantic_floor_legs(),
-      distances: Map.merge(block_distances, tag_distances, fn _id, a, b -> min(a, b) end),
-      semantic: semantic,
+    %{
       resource: resource,
       query: query,
-      locale: locale,
-      filters: filters,
+      opts: opts,
       read_opts: read_opts,
-      opts: opts
-    })
-    |> Enum.take(limit)
-    |> hydrate(resource, {rerank_select(Keyword.get(opts, :select), opts), load}, read_opts)
+      limit: limit,
+      k: k,
+      load: load,
+      # Order matters only for exact ties (`reciprocal_rank_fusion/3`): a
+      # partial keyword match at rank n outranks a trigram guess at rank n.
+      legs: [
+        {:keyword, keyword, 1.0},
+        {:keyword_any, relaxed, @relaxed_weight},
+        {:semantic, semantic, 1.0},
+        {:block, blocks, @block_weight},
+        {:title, title, @title_weight},
+        {:alias, aliases, @title_weight},
+        {:compound, compound, @title_weight},
+        {:fuzzy, fuzzy, @fuzzy_weight},
+        {:tag, tagged, @tag_weight}
+      ],
+      # What each globally ranked leg ranked its candidates by, smaller first.
+      keys: %{
+        keyword: Map.new(keyword, &{&1.id, rank_key(&1.search_rank)}),
+        keyword_any: Map.new(relaxed, &{&1.id, rank_key(&1.search_rank_any)}),
+        semantic: Map.new(semantic, &{&1.id, &1.semantic_distance}),
+        block: block_distances,
+        tag: tag_distances
+      },
+      floor: %{
+        max_distance: semantic_max_distance(),
+        legs: semantic_floor_legs(),
+        distances: Map.merge(block_distances, tag_distances, fn _id, a, b -> min(a, b) end),
+        semantic: semantic,
+        resource: resource,
+        query: query,
+        locale: locale,
+        filters: filters,
+        read_opts: read_opts,
+        opts: opts
+      }
+    }
+  end
+
+  # `ts_rank` is better higher; every other key is a distance, better lower.
+  # Negated, it sorts with them.
+  defp rank_key(rank) when is_number(rank), do: -rank
+  defp rank_key(_not_loaded), do: nil
+
+  # The second half of `hybrid/3`: fuse the collected legs — at the ranks
+  # `ranks` gives (`%{leg => %{id => rank}}`, from `global_ranks/1`), a
+  # leg or record it does not name at its rank within its own list — then
+  # floor, cut, read and rerank the hits.
+  defp fuse_legs(collected, ranks) do
+    %{resource: resource, query: query, opts: opts, read_opts: read_opts} = collected
+    select = rerank_select(Keyword.get(opts, :select), opts)
+
+    collected.legs
+    |> reciprocal_rank_fusion(collected.k, ranks)
+    |> floor_hits(collected.floor)
+    |> Enum.take(collected.limit)
+    |> hydrate(resource, {select, collected.load}, read_opts)
     |> maybe_rerank(query, opts)
     |> Enum.map(&attach_hit/1)
+  end
+
+  @doc false
+  # Ranks for `@global_rank_legs`, taken over every collected section at
+  # once: `%{section => %{leg => %{id => rank}}}` from `%{section =>
+  # collected}`. Ranks are competition ranks (1, 2, 2, 4) over the leg's
+  # keys, so two sections' records at the same distance share a rank
+  # rather than one winning on the order the sections finished in. A
+  # candidate with no usable key (`Ash.NotLoaded`, which never happens on
+  # the paths above, but would otherwise rank first) ranks after every
+  # keyed one, in its section's own order. Public for its unit test only.
+  @spec global_ranks(%{term() => %{keys: map(), legs: list()}}) :: %{term() => map()}
+  def global_ranks(collected) do
+    per_leg =
+      Map.new(@global_rank_legs, fn leg ->
+        collected
+        |> Enum.flat_map(&leg_candidates(&1, leg))
+        |> competition_ranks()
+        |> then(&{leg, &1})
+      end)
+
+    Map.new(collected, fn {section, _collected} ->
+      {section, Map.new(per_leg, fn {leg, ranked} -> {leg, Map.get(ranked, section, %{})} end)}
+    end)
+  end
+
+  # One section's candidates in one leg: `[{section, id, sort key}]`.
+  defp leg_candidates({section, %{legs: legs, keys: keys}}, leg) do
+    keys = Map.get(keys, leg, %{})
+
+    legs
+    |> List.keyfind(leg, 0, {leg, [], 0})
+    |> elem(1)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {record, local} -> {section, record.id, sort_key(keys, record.id, local)} end)
+  end
+
+  defp sort_key(keys, id, local) do
+    case Map.get(keys, id) do
+      key when is_number(key) -> {0, key}
+      _missing -> {1, local}
+    end
+  end
+
+  # `[{section, id, key}]` → `%{section => %{id => rank}}`, rank 1 at the
+  # smallest key, ties sharing the better rank.
+  defp competition_ranks(candidates) do
+    candidates
+    |> Enum.sort_by(&elem(&1, 2))
+    |> Enum.with_index(1)
+    |> Enum.reduce({%{}, nil, 0}, fn {{section, id, key}, position}, {acc, last_key, last_rank} ->
+      rank = if key == last_key, do: last_rank, else: position
+
+      {Map.update(acc, section, %{id => rank}, &Map.put(&1, id, rank)), key, rank}
+    end)
+    |> elem(0)
   end
 
   @doc """
@@ -1038,13 +1148,22 @@ defmodule KilnCMS.Search do
   It is the record's fused RRF score — `weight / (k + rank)` summed over every
   leg that returned it — or, when the fused list was reranked, the reranker's
   score, so that the number always agrees with the order it came in. The
-  fused scores are **comparable across content types**: every `hybrid/3` call
-  in a `global/2` sweep shares `k` and the leg weights, so a page scored
-  `0.031` and a post scored `0.016` can be sorted against each other, which is
-  how `KilnCMS.Ask` picks its sources. They used to be computed and thrown
-  away inside fusion, which left the sections' callers nothing to interleave
-  on but the order of the registry — so `/api/ask` cited every "Guide"
-  before any "Recipe", however weak the guide match.
+  fused scores of one `global/2` sweep are **comparable across content
+  types**: the sections share `k` and the leg weights, and the keyword,
+  any-term, semantic, block and tag legs are ranked over every section's
+  candidates together, so a page scored `0.031` and a post scored `0.016`
+  can be sorted against each other, which is how `KilnCMS.Ask` picks its
+  sources. Before #2175 the ranks were taken per section, and a section
+  holding one record put it at rank 1 in every leg that returned it — the
+  lone post that outscored every full match of a two-word query. The title,
+  alias and fuzzy legs still rank per section (see `@global_rank_legs`).
+  Scores from two *separate* `hybrid/3` calls are not comparable: each
+  ranks over its own type alone.
+
+  They used to be computed and thrown away inside fusion, which left the
+  sections' callers nothing to interleave on but the order of the registry —
+  so `/api/ask` cited every "Guide" before any "Recipe", however weak the
+  guide match.
   """
   @spec hit_score(struct()) :: float() | nil
   def hit_score(%{__metadata__: %{search: %{score: score}}}), do: score
@@ -1772,12 +1891,16 @@ defmodule KilnCMS.Search do
   # would re-count the same hits). `:search_any` takes the same arguments
   # as `:search`, filters included, so the relaxation narrows exactly as the
   # full match does.
+  #
+  # Each loads the `ts_rank` it is ordered by, which `global/2` ranks every
+  # section's hits by together (`@global_rank_legs`).
   defp keyword_legs(resource, query, args, read_opts) do
-    keyword = run_leg(resource, :search, args, read_opts)
+    rank_args = %{locale: args.locale, query: query}
+    keyword = run_leg(resource, :search, args, read_opts, %{}, search_rank: rank_args)
 
     relaxed =
       if multi_word?(query) and length(keyword) < @relaxed_fallback_threshold do
-        run_leg(resource, :search_any, args, read_opts)
+        run_leg(resource, :search_any, args, read_opts, %{}, search_rank_any: rank_args)
       else
         []
       end
@@ -1987,9 +2110,12 @@ defmodule KilnCMS.Search do
   read with.
 
   Every content hit carries its fused score and legs (`hit_score/1`,
-  `hit_legs/1`), and the scores are comparable across sections — one `k` and
-  one set of leg weights for the whole sweep — so a caller that wants the
-  strongest hits *overall* can sort the sections' records together.
+  `hit_legs/1`), and the scores are comparable across sections — one `k`,
+  one set of leg weights, and the distance and `ts_rank` legs ranked over
+  every requested content section at once (#2175) — so a caller that wants
+  the strongest hits *overall* can sort the sections' records together. A
+  sweep therefore runs in two rounds: every section's legs, then every
+  section's fusion.
 
   The taxonomy sections come from `KilnCMS.CMS.Taxonomy.searchable/0` — one per
   taxonomy resource, so adding one joins global search with no edit here. They
@@ -2056,7 +2182,7 @@ defmodule KilnCMS.Search do
     # of collisions `ContentTypes.path_segment/2` guards public URLs against.
     compiled =
       Enum.map(KilnCMS.CMS.ContentTypes.all(), fn ct ->
-        {ct.section, fn -> hybrid(ct.resource, query, [load: content_load] ++ hybrid_opts) end}
+        {ct.section, {:content, ct.resource, [load: content_load] ++ hybrid_opts}}
       end)
 
     fixed =
@@ -2065,9 +2191,7 @@ defmodule KilnCMS.Search do
         # calc, so it doesn't run TypeDefinition's editor-only read policy for
         # anonymous callers) labels each hit with its dynamic type.
         {:entries,
-         fn ->
-           hybrid(KilnCMS.CMS.Entry, query, [load: [:type_name | content_load]] ++ hybrid_opts)
-         end},
+         {:content, KilnCMS.CMS.Entry, [load: [:type_name | content_load]] ++ hybrid_opts}},
         # Media and taxonomy are org-scoped like content (epic #336), so the
         # `:tenant` in `read_opts` narrows these sections too.
         {:media,
@@ -2085,7 +2209,31 @@ defmodule KilnCMS.Search do
 
     (compiled ++ fixed)
     |> select_sections(Keyword.get(opts, :sections))
+    |> run_global(query)
+  end
+
+  # Two rounds. The first collects every content section's legs
+  # (`collect_legs/3`) alongside the media and taxonomy sections, which are
+  # done after it; the second fuses each content section at ranks taken over
+  # all of them (`global_ranks/1`), so `1 / (k + rank)` means the same in
+  # every section and `hit_score/1` can be sorted across them (#2175).
+  defp run_global(sections, query) do
+    first =
+      Enum.map(sections, fn
+        {key, {:content, resource, opts}} -> {key, fn -> collect_legs(resource, query, opts) end}
+        {key, run} -> {key, run}
+      end)
+      |> run_sections()
+
+    content =
+      for {key, {:content, _resource, _opts}} <- sections, into: %{}, do: {key, first[key]}
+
+    ranks = global_ranks(content)
+
+    content
+    |> Enum.map(fn {key, collected} -> {key, fn -> fuse_legs(collected, ranks[key]) end} end)
     |> run_sections()
+    |> then(&Map.merge(first, &1))
   end
 
   @doc """
@@ -2406,10 +2554,11 @@ defmodule KilnCMS.Search do
   # the truncation the old post-read `Enum.take/2` did after loading every row.
   # `context` is set before `for_read` so the action's prepares can see it —
   # that is how a precomputed query vector reaches `Content.semantic_sort/1`.
-  defp run_leg(resource, action, args, read_opts, context \\ %{}) do
+  defp run_leg(resource, action, args, read_opts, context \\ %{}, load \\ []) do
     resource
     |> Ash.Query.new()
     |> Ash.Query.select(@leg_select)
+    |> Ash.Query.load(load)
     |> Ash.Query.limit(@hybrid_candidates)
     |> Ash.Query.set_context(context)
     |> Ash.Query.for_read(action, args)
@@ -2423,13 +2572,20 @@ defmodule KilnCMS.Search do
   # rank-1, for instance) keep the order the legs were given in and then the
   # order within the leg, so the fused list is deterministic rather than
   # whatever `Map.values/1` felt like.
-  @spec reciprocal_rank_fusion([{leg(), [struct()], float()}], pos_integer()) :: [hit()]
-  defp reciprocal_rank_fusion(weighted_lists, k) do
+  #
+  # `ranks` overrides a leg's ranks (`%{leg => %{id => rank}}`, from
+  # `global_ranks/1`); a leg it does not name ranks by position in its list.
+  @spec reciprocal_rank_fusion([{leg(), [struct()], float()}], pos_integer(), map()) :: [hit()]
+  defp reciprocal_rank_fusion(weighted_lists, k, ranks) do
     weighted_lists
     |> Enum.flat_map(fn {leg, list, weight} ->
+      leg_ranks = Map.get(ranks, leg, %{})
+
       list
       |> Enum.with_index(1)
-      |> Enum.map(fn {record, rank} -> {leg, record, weight / (k + rank)} end)
+      |> Enum.map(fn {record, position} ->
+        {leg, record, weight / (k + Map.get(leg_ranks, record.id, position))}
+      end)
     end)
     |> Enum.with_index()
     |> Enum.reduce(%{}, fn {{leg, record, score}, seen}, acc ->

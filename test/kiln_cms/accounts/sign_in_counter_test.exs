@@ -87,10 +87,15 @@ defmodule KilnCMS.Accounts.SignInCounterTest do
   defp password_sign_in(address) do
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
-    AshAuthentication.Strategy.action(strategy, :sign_in, %{
-      "email" => address,
-      "password" => @password
-    })
+    AshAuthentication.Strategy.action(
+      strategy,
+      :sign_in,
+      %{
+        "email" => address,
+        "password" => @password
+      },
+      []
+    )
   end
 
   describe "an account with no second factor" do
