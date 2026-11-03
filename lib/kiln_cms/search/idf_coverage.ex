@@ -114,6 +114,60 @@ defmodule KilnCMS.Search.IdfCoverage do
 
   defp base(item), do: String.replace_suffix(item, ":*", "")
 
+  # Each whitespace-separated query word with the operands its own
+  # `plainto_tsquery` parse yields, in query order — how `term_matches/5`
+  # names a lexeme by the word a caller typed. A word may yield several
+  # (a hyphenated compound) or none (a stop word).
+  @words_sql """
+  SELECT w.word, op
+  FROM unnest(regexp_split_to_array(trim($2), '\\s+')) WITH ORDINALITY AS w(word, n),
+       regexp_split_to_table(plainto_tsquery(kiln_regconfig($1), w.word)::text, ' & ') AS op
+  WHERE op <> ''
+  ORDER BY w.n
+  """
+
+  @doc """
+  The query's terms and which of them each of `ids` matches — the coverage
+  `KilnCMS.Search.hit_explain/1` reports, as opposed to `coverages/5`'s
+  IDF-weighted share.
+
+  Returns `{terms, %{id => [matched?]}}`. `terms` is one
+  `%{term: word, lexeme: lexeme}` per operand of `lexemes/2`, in query
+  order, where `word` is the query word whose parse yields that lexeme (the
+  lexeme itself when no single word does — a Han run the config splits
+  differently in context); the booleans are aligned with `terms`. A row
+  matches a term exactly as the keyword legs match it, the trailing one as
+  a prefix. Read through the resource under `read_opts`, like `coverages/5`;
+  `{[], %{}}` when the query has no lexemes or `ids` is empty.
+  """
+  @spec term_matches(module(), String.t(), String.t(), [Ash.UUID.t()], keyword()) ::
+          {[%{term: String.t(), lexeme: String.t()}], %{Ash.UUID.t() => [boolean()]}}
+  def term_matches(_resource, _query, _locale, [], _read_opts), do: {[], %{}}
+
+  def term_matches(resource, query, locale, ids, read_opts) do
+    case lexemes(query, locale) do
+      [] ->
+        {[], %{}}
+
+      lexemes ->
+        %{rows: rows} = KilnCMS.Repo.query!(@words_sql, [locale, query])
+
+        words =
+          Enum.reduce(Enum.reverse(rows), %{}, fn [w, op], acc -> Map.put(acc, plain(op), w) end)
+
+        terms =
+          Enum.map(lexemes, fn item ->
+            lexeme = plain(item)
+            %{term: Map.get(words, lexeme, lexeme), lexeme: lexeme}
+          end)
+
+        {terms, Map.new(matches(resource, ids, lexemes, read_opts))}
+    end
+  end
+
+  # `'noodl':*` → `noodl`.
+  defp plain(item), do: item |> base() |> String.trim("'")
+
   # `[idf]`, aligned with `lexemes`. Each operand is matched the way the
   # keyword legs match their whole query — `search_vector @@
   # to_tsquery('simple', …)` — one operand at a time.
