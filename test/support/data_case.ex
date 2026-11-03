@@ -146,6 +146,29 @@ defmodule KilnCMS.DataCase do
   end
 
   @doc """
+  Put this test's connection into exact vector scans
+  (`KilnCMS.Search.VectorScan.statements(:exact)`), as `SET LOCAL`.
+
+  For a test that asserts which embedded rows a semantic read returns. Through
+  the approximate HNSW index, a filtered read on a small corpus can come back
+  short or empty: the index walk also visits the entries every earlier test's
+  rolled-back inserts left behind, and the rows the filter wants fall outside
+  it. Which rows go missing changes from run to run, so the test flakes.
+
+  The sandbox's transaction scopes `SET LOCAL` to the calling test. In shared
+  mode, every process the test starts uses the same connection, so they get
+  exact scans too. Call it from `setup` in a test case with `async: false`.
+  """
+  @spec exact_vector_scans!() :: :ok
+  def exact_vector_scans! do
+    for statement <- KilnCMS.Search.VectorScan.statements(:exact) do
+      KilnCMS.Repo.query!(String.replace_prefix(statement, "SET ", "SET LOCAL "))
+    end
+
+    :ok
+  end
+
+  @doc """
   Drain **every** configured Oban queue until no job runs, aggregating the
   per-queue results. Jobs are split across workload queues (firing/search/mail/
   …), and a job in one queue can enqueue into another, so draining a single
