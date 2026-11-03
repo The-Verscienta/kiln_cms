@@ -22,7 +22,7 @@ defmodule KilnCMS.Accounts.PendingSignIn do
 
     * `:encrypted` — the headless gate. The client holds the blob, and the
       payload carries the first-factor JWT — already minted and stored by the
-      time `AshAuthentication.Strategy.action/3` returned. `Phoenix.Token.sign/4`
+      time `AshAuthentication.Strategy.action/4` returned. `Phoenix.Token.sign/4`
       *publishes* its payload; the signature only stops it being changed. So
       signing here would hand the caller the very credential the second factor
       exists to withhold, reopening #726 in a shape that looks fixed.
@@ -102,7 +102,7 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   ## The token it carries is withheld from the store too (#742)
 
   `User` sets `store_all_tokens?`, so the first-factor JWT is minted **and
-  inserted into `tokens`** by `AshAuthentication.Strategy.action/3` — before
+  inserted into `tokens`** by `AshAuthentication.Strategy.action/4` — before
   either controller has looked at `totp_enabled?`. What the second factor used to
   withhold was the caller's *access* to that token, not its existence: a sign-in
   abandoned at the code prompt left a live, usable row that nobody held, for the
