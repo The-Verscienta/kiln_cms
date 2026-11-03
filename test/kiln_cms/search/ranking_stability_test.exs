@@ -18,6 +18,14 @@ defmodule KilnCMS.Search.RankingStabilityTest do
   run, semantic-only neighbours swap places inside a section, because their
   global ranks are spaced differently than their section ranks were.
 
+  Re-pinned again for #2175 A3 (fields weighted by role, ranked by
+  `ts_rank_cd` plus a phrase score): "pad thai tom yum" only. Its any-term
+  leg ranked Thai Street Food first, for naming all four words in a body
+  that was weighted `B`; the body is `D` now, so Pad Thai and Tom Yum, whose
+  `A` titles each carry two of the words, lead that leg. Each score moves by
+  the difference of a reciprocal rank or two in that leg; no result moved
+  position or legs.
+
   Runs twice: keyword-only (the default build) and with the deterministic
   stub embedder, so the semantic, block and tag legs take part too.
   """
@@ -200,9 +208,9 @@ defmodule KilnCMS.Search.RankingStabilityTest do
       "pad thai tom yum" => [
         entries: [],
         pages: [
-          {"Pad Thai", 0.05724484, [:keyword_any, :title], true},
-          {"Tom Yum", 0.05645161, [:keyword_any, :title], true},
-          {"Thai Street Food", 0.02459016, [:keyword, :keyword_any], true}
+          {"Pad Thai", 0.05737705, [:keyword_any, :title], true},
+          {"Tom Yum", 0.05658382, [:keyword_any, :title], true},
+          {"Thai Street Food", 0.02432995, [:keyword, :keyword_any], true}
         ],
         posts: [{"Yum", 0.05699283, [:keyword_any, :title], true}]
       ],
@@ -277,9 +285,9 @@ defmodule KilnCMS.Search.RankingStabilityTest do
       "pad thai tom yum" => [
         entries: [],
         pages: [
-          {"Tom Yum", 0.0865285, [:keyword_any, :semantic, :block, :title], true},
-          {"Pad Thai", 0.08625472, [:keyword_any, :semantic, :block, :title], true},
-          {"Thai Street Food", 0.05358176, [:keyword, :keyword_any, :semantic, :block], true},
+          {"Tom Yum", 0.08666071, [:keyword_any, :semantic, :block, :title], true},
+          {"Pad Thai", 0.08638693, [:keyword_any, :semantic, :block, :title], true},
+          {"Thai Street Food", 0.05332155, [:keyword, :keyword_any, :semantic, :block], true},
           {"About the kitchen", 0.03175403, [:semantic, :block], true},
           {"Green Curry", 0.03062179, [:semantic, :block], true},
           {"Saffron Rice", 0.02964427, [:semantic, :block], true}

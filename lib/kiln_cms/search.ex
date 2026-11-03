@@ -1433,12 +1433,13 @@ defmodule KilnCMS.Search do
     end)
   end
 
-  # What each leg's raw `score` is. `ts_rank` and trigram similarity are
+  # What each leg's raw `score` is. `ts_rank_cd` (the keyword legs'
+  # `search_rank`, with its phrase score) and trigram similarity are
   # better higher; a cosine distance is better lower. The title and alias
   # legs match or don't, and report `nil`.
   @leg_measures %{
-    keyword: :ts_rank,
-    keyword_any: :ts_rank,
+    keyword: :ts_rank_cd,
+    keyword_any: :ts_rank_cd,
     semantic: :cosine_distance,
     block: :cosine_distance,
     tag: :cosine_distance,
@@ -1607,7 +1608,7 @@ defmodule KilnCMS.Search do
 
       %{
         legs: %{
-          keyword: %{rank: 2, score: 0.0608, measure: :ts_rank, contribution: 0.0161},
+          keyword: %{rank: 2, score: 0.0608, measure: :ts_rank_cd, contribution: 0.0161},
           semantic: %{rank: 1, score: 0.21, measure: :cosine_distance, contribution: 0.0164}
         },
         terms: [
@@ -1624,7 +1625,7 @@ defmodule KilnCMS.Search do
   and `contribution` is what that rank added to the fused score,
   `weight / (k + rank)`, so the contributions sum to the fused score (not
   to a reranked one). `score` is the raw number the leg ranked by, named by
-  `measure`: `:ts_rank` (`:keyword`, `:keyword_any`; higher is better),
+  `measure`: `:ts_rank_cd` (`:keyword`, `:keyword_any`; higher is better),
   `:cosine_distance` (`:semantic`, `:block`, `:tag`; lower is better), or
   `:trigram_similarity` (`:fuzzy`; higher is better). `:title` and `:alias`
   match or don't, and report `nil` for both.
