@@ -46,6 +46,9 @@ defmodule KilnCMS.Search.MLTest do
         # leg uniquely proves is that the Bumblebee/Nx call sites still
         # COMPILE, which the lean legs cannot notice going stale.
         assert Code.ensure_loaded?(Nx.Serving)
+        # Loaded explicitly, as above: nothing in a test boot loads them.
+        Code.ensure_loaded!(KilnCMS.Search.Serving)
+        Code.ensure_loaded!(KilnCMS.Search.RerankerServing)
         assert function_exported?(KilnCMS.Search.Serving, :build, 0)
         assert function_exported?(KilnCMS.Search.RerankerServing, :build, 0)
       end
