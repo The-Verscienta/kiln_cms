@@ -45,7 +45,10 @@ defmodule KilnCMS.Search.SemanticSearchTest do
     original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, original) end)
     put_search_env(semantic: true, embedder: StubEmbedder)
-    :ok
+    # Exact scans: these tests assert which embedded rows the semantic legs
+    # return, which an approximate HNSW walk drops at random (see
+    # `KilnCMS.DataCase.exact_vector_scans!/0`).
+    KilnCMS.DataCase.exact_vector_scans!()
   end
 
   defp admin do

@@ -67,7 +67,10 @@ defmodule KilnCMS.Search.RerankTest do
     end)
 
     put_search_env(semantic: true, embedder: StubEmbedder, rerank: true, reranker: BoostReranker)
-    :ok
+    # Exact scans: the fused order these tests compare against the reranked
+    # one includes the semantic leg, which an approximate HNSW walk can leave
+    # a seeded record out of (see `KilnCMS.DataCase.exact_vector_scans!/0`).
+    KilnCMS.DataCase.exact_vector_scans!()
   end
 
   defp admin do

@@ -24,7 +24,11 @@ defmodule KilnCMS.Search.MeasureFloorTaskTest do
     original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, original) end)
     put_search_env(Keyword.merge(KilnCMS.StubEmbedder.search_env(), semantic: true))
-    :ok
+    # Exact scans: the reports name which embedded rows sit where, which an
+    # approximate HNSW walk drops at random (see
+    # `KilnCMS.DataCase.exact_vector_scans!/0`). The approximate default
+    # report has a test of its own below.
+    KilnCMS.DataCase.exact_vector_scans!()
   end
 
   defp admin do
@@ -91,9 +95,6 @@ defmodule KilnCMS.Search.MeasureFloorTaskTest do
     assert output =~ ~s|"nothing like this exists"  [junk]  → expects nothing|
     assert output =~ ~r/nearest\s+page\s+(#{alpha.slug}|#{beta.slug})\s+\d\.\d{4}/
     assert output =~ "configured floor: 0.0 (ignored here)"
-    # The scan mode the neighbours were measured under, from the connection.
-    assert output =~ "vector scan: approximate HNSW, hnsw.ef_search = 40 (pgvector default)"
-    assert output =~ "WARNING: approximate vector recall (ef_search 40)"
     # The bands come out per class as well as overall.
     assert output =~ ~r/single_entity\s+0\.0000 – 0\.0000\s+\(n=1\)/
 
@@ -376,6 +377,25 @@ defmodule KilnCMS.Search.MeasureFloorTaskTest do
       repo_config = Application.get_env(:kiln_cms, KilnCMS.Repo)
       on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Repo, repo_config) end)
       :ok
+    end
+
+    @tag :tmp_dir
+    test "reports the approximate default, and warns about its recall", %{tmp_dir: dir} do
+      admin = admin()
+      alpha = published_page(admin, %{title: "Alpha", slug: slug()})
+      KilnCMS.DataCase.drain_oban()
+      set = golden(dir, [expects("Alpha", alpha.slug, "single_entity")])
+
+      # Undoes the exact scans `setup` asked for. Only the header is asserted:
+      # which neighbours an approximate walk returns is the very thing it
+      # warns about.
+      KilnCMS.Repo.query!("SET LOCAL enable_indexscan = on", [])
+
+      output = capture_io(fn -> MeasureFloor.run([set, "--type", "page"]) end)
+
+      # The scan mode the neighbours were measured under, from the connection.
+      assert output =~ "vector scan: approximate HNSW, hnsw.ef_search = 40 (pgvector default)"
+      assert output =~ "WARNING: approximate vector recall (ef_search 40)"
     end
 
     @tag :tmp_dir
