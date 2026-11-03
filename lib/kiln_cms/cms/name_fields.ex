@@ -6,10 +6,12 @@ defmodule KilnCMS.CMS.NameFields do
   A content type's title is not always the only name its records answer
   to: an herb has a Latin binomial and a pinyin spelling, a product a trade
   name, a person a former name. Those live in `custom_fields`, which the
-  keyword leg does not index unless the field is flagged `searchable`
+  keyword leg did not index unless the field was flagged `searchable`
   (`KilnCMS.CMS.SearchableFields`), and which nothing treated as a *name* — so
   "astragalus membranaceus" found nothing that "Huang Qi" found, although
-  both name one record. The alias leg of `KilnCMS.Search.hybrid/3` runs the
+  both name one record. A flagged field's value is now weighted `A` in
+  `search_vector`, like the title, whether or not it is also `searchable`
+  (#2175 A3, `KilnCMS.CMS.Changes.SetSearchText`). The alias leg of `KilnCMS.Search.hybrid/3` runs the
   title leg's phrase match over every field flagged here, and the per-type
   semantic routes exempt a record so named from the relevance floor, as
   they do for its title (the "Why Shen Beat Huang Qi" report's entity case,

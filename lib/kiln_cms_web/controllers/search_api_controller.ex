@@ -53,7 +53,7 @@ defmodule KilnCMSWeb.SearchApiController do
   key (`KilnCMS.CDN.purge_site/1`).
 
   `explain=1` (or `true`) adds an `explain` object to every content hit —
-  each leg's `rank`, raw `score` and its `measure` (`ts_rank`,
+  each leg's `rank`, raw `score` and its `measure` (`ts_rank_cd`,
   `cosine_distance`, `trigram_similarity`), the `contribution` that rank
   made to `score`, the query `terms` with whether the hit matched each,
   `matched_terms`, and `coverage` (matched / terms) — see
