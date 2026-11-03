@@ -287,6 +287,10 @@ defmodule KilnCMS.Cache do
     :ok
   end
 
+  @doc "Key for the per-org name-term dictionary (`KilnCMS.Search.NameTerms`)."
+  @spec name_terms_key(Ash.UUID.t()) :: String.t()
+  def name_terms_key(org_id), do: "search:name_terms:#{org_id}"
+
   @doc """
   Drop a site's cached dynamic-type registry so a `TypeDefinition` write is
   visible on the next request instead of waiting out the TTL. Like the sitemap

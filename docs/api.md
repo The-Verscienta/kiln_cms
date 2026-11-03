@@ -1456,7 +1456,7 @@ saying how it got there:
 - **`legs`** has one entry per leg in the hit's `legs`. `rank` is the rank
   fusion used. For the keyword, any-term, semantic, block and tag legs, that
   rank is taken over every content section of the search at once. For the
-  title, alias and fuzzy legs, it is the rank within the hit's own type.
+  title, alias, compound and fuzzy legs, it is the rank within the hit's own type.
   `contribution` is what that rank added to `score`
   (`weight / (k + rank)`), so the contributions sum to `score`. They do not
   sum to it when a reranker reordered the section, because `score` is then
@@ -1464,8 +1464,9 @@ saying how it got there:
 - **`score`** is the raw number the leg ranked by. **`measure`** says which
   number it is: `ts_rank_cd` for `keyword` and `keyword_any` (higher is
   better), `cosine_distance` for `semantic`, `block` and `tag` (lower is
-  better), or `trigram_similarity` for `fuzzy` (higher is better). `title`
-  and `alias` either match or don't, so both fields are `null` for them.
+  better), or `trigram_similarity` for `fuzzy` (higher is better). `title`,
+  `alias` and `compound` either match or don't, so both fields are `null`
+  for them.
 - **`terms`** are the query's terms as the keyword legs parse them: stemmed
   to a `lexeme`, stop words dropped, the last term matched as a prefix. Each
   one names the query word it came from and whether this hit's indexed text
@@ -1639,11 +1640,13 @@ Every non-empty search also sends a
 durations in milliseconds:
 
 ```
-server-timing: embed;dur=11.8, keyword;dur=6.2, title;dur=1.9, alias;dur=1.4, synonym;dur=0.0, fuzzy;dur=0.0, semantic;dur=4.1, block;dur=3.0, tag;dur=0.0, fuse;dur=3.3, sweep;dur=24.7, suggest;dur=0.0, total;dur=26.0
+server-timing: embed;dur=11.8, keyword;dur=6.2, title;dur=1.9, alias;dur=1.4, compound;dur=0.0, synonym;dur=0.0, fuzzy;dur=0.0, semantic;dur=4.1, block;dur=3.0, tag;dur=0.0, fuse;dur=3.3, sweep;dur=24.7, suggest;dur=0.0, total;dur=26.0
 ```
 
 `embed` is the query embedding. Each leg (`keyword`, `title`, `alias`,
-`synonym` — the site's search synonyms, near zero when none applies —
+`compound` — names written spaced or joined, near zero when the query has
+nothing to rewrite — `synonym` — the site's search synonyms, near zero when
+none applies —
 `fuzzy`, `semantic`, `block`, `tag`), `fuse` (fusion, the relevance floor and
 reading the kept hits) and `rerank` (only when reranking is on) are summed
 over the content sections. The sections run concurrently, so these can add up
