@@ -59,6 +59,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Search: a section with one or two records no longer ranks them first across a
   `global/2` sweep; ranks are taken over every section's candidates together.**
   ([#2176](https://github.com/The-Verscienta/kiln_cms/pull/2176) · [long form](docs/changelog/unreleased.md#global-search-ranks))
+- **Search: a deploy no longer stalls searches; probes hold traffic until search is warm, and
+  each sweep answers within a budget, flagged `partial`, with per-leg `Server-Timing`.**
+  ([#2166](https://github.com/The-Verscienta/kiln_cms/issues/2166) · [long form](docs/changelog/unreleased.md#search-warmup-and-budget))
 
 ## [1.7.0] - 2026-10-29
 
