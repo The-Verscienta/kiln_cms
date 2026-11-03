@@ -42,6 +42,16 @@ defmodule KilnCMSWeb.SearchApiController do
   sparse content result set carries a `suggestion` ("did you mean") when the
   query is trigram-close to a published title without matching a word exactly
   — including alongside hits the fuzzy hybrid leg rescued from the typo.
+
+  `explain=1` (or `true`) adds an `explain` object to every content hit —
+  each leg's `rank`, raw `score` and its `measure` (`ts_rank`,
+  `cosine_distance`, `trigram_similarity`), the `contribution` that rank
+  made to `score`, the query `terms` with whether the hit matched each,
+  `matched_terms`, and `coverage` (matched / terms) — see
+  `KilnCMS.Search.hit_explain/1`. It is a debugging and evaluation view,
+  off by default, and its responses are `private, no-store`: never stored
+  by a CDN, never given an `ETag`, so the cached answer for a URL is
+  always the plain one.
   """
   use KilnCMSWeb, :controller
 
@@ -100,7 +110,10 @@ defmodule KilnCMSWeb.SearchApiController do
     case Search.unless_unavailable(fn -> {:ok, run(query, locale, limit, params, org_id)} end) do
       {:ok, {payload, total}} ->
         Search.record_query_async(query, total, locale: locale, tenant: org_id)
-        json(conn, payload)
+
+        conn
+        |> no_store_if_explained(params)
+        |> json(payload)
 
       {:error, :unavailable} ->
         conn
@@ -111,6 +124,17 @@ defmodule KilnCMSWeb.SearchApiController do
           "Search is temporarily unavailable; retry shortly."
         )
     end
+  end
+
+  defp explain?(params), do: Params.string(params, "explain") in ["1", "true"]
+
+  # An explained answer is never cached (see the moduledoc): a handler-set
+  # `cache-control` is one `KilnCMSWeb.Plugs.PublicCache` leaves alone, so it
+  # also gets no `ETag` and never answers `304`.
+  defp no_store_if_explained(conn, params) do
+    if explain?(params),
+      do: put_resp_header(conn, "cache-control", "private, no-store"),
+      else: conn
   end
 
   defp run(query, locale, limit, params, org_id) do
@@ -133,6 +157,7 @@ defmodule KilnCMSWeb.SearchApiController do
         read_opts ++
           [
             highlight: true,
+            explain: explain?(params),
             filters: filters(params, org_id),
             # What `item/4` renders, and what the reranker reads when it is
             # on — not the block tree, which is most of a row (#1712).
@@ -239,7 +264,12 @@ defmodule KilnCMSWeb.SearchApiController do
       score: Search.hit_score(record),
       legs: Search.hit_legs(record)
     }
+    |> put_explain(Search.hit_explain(record))
   end
+
+  # Present only under `explain=1`, so the default payload is unchanged.
+  defp put_explain(item, nil), do: item
+  defp put_explain(item, explain), do: Map.put(item, :explain, explain)
 
   # A dynamic hit resolves its type through the per-org registry (#336) for
   # URL + label; hits whose type no longer resolves (archived mid-flight) are

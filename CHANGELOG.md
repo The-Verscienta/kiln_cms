@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **Search: `explain=1` on `/api/search` (and `explain: true` on `hybrid/3`/`global/2`)
+  reports each hit's leg ranks, raw scores, matched terms and coverage.**
+  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#search-explain))
+
 ### Fixed
 
 - **Search: a section with one or two records no longer ranks them first across a
