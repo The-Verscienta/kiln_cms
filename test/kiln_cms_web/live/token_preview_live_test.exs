@@ -25,10 +25,15 @@ defmodule KilnCMSWeb.TokenPreviewLiveTest do
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
     {:ok, user} =
-      AshAuthentication.Strategy.action(strategy, :sign_in, %{
-        "email" => email,
-        "password" => @password
-      })
+      AshAuthentication.Strategy.action(
+        strategy,
+        :sign_in,
+        %{
+          "email" => email,
+          "password" => @password
+        },
+        []
+      )
 
     Phoenix.ConnTest.build_conn()
     |> Phoenix.ConnTest.init_test_session(%{})

@@ -53,10 +53,15 @@ defmodule KilnCMSWeb.ApiSpecsTest do
     viewer = user(:viewer)
 
     {:ok, signed_in} =
-      AshAuthentication.Strategy.action(strategy, :sign_in, %{
-        "email" => viewer.email,
-        "password" => @password
-      })
+      AshAuthentication.Strategy.action(
+        strategy,
+        :sign_in,
+        %{
+          "email" => viewer.email,
+          "password" => @password
+        },
+        []
+      )
 
     signed_in.__metadata__.token
   end

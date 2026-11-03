@@ -5,6 +5,31 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `kiln_client-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+### Added
+
+- **Parity with the JS client (kiln_cms#2127):** `artifact/3` takes `:as_of`
+  for a point-in-time read (a `DateTime`, `NaiveDateTime`, `Date` or ISO 8601
+  string). `content_as_of/3` reads a collection as it was then.
+  `mint_preview/3` mints a draft preview token, needing a key like the writes.
+  `schema/1` reads the live delivery schema. `sync_page/2` reads one page of
+  `/api/sync` for callers that stream.
+- **Headless routing, navigation and forms (kiln_cms#2128):**
+  `resolve_path/2` (`GET /api/resolve`), `menus/1` and `menu/2`
+  (`GET /api/menus[/:key]`), `locales/1`, `related/3`
+  (`GET /api/content/:type/:slug/related`), and `form/2` / `submit_form/3`
+  (`GET`/`POST /api/forms/:slug`). `resolve_path/2` returns the server's
+  `"not_found"` verdict as `{:ok, %{"status" => "not_found"}}`, not an error.
+  `submit_form/3` never sends the configured API key.
+- `menu/2`, `related/3` and `resolve_path/2` take `:fallback` and
+  `:fallback_locale` beside `:locale`.
+- `KilnClient.Error.field_errors/1` also reads a refused form submission's
+  `%{"errors" => %{field => message}}` body.
+
+`resolve_path/2` is not named `resolve`, because `resolve/3` already joins a
+relationship through an included lookup.
+
 ## 0.5.0
 
 ### Changed (breaking)
