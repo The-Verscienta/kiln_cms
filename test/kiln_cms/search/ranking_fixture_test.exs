@@ -35,13 +35,25 @@ defmodule KilnCMS.Search.RankingFixtureTest do
   to one of 384 dimensions, so the semantic, block and tag legs take part,
   deterministically, and "near" means "shares words". With a semantic floor
   configured (0.8), as a deployment that serves junk queries has.
+
+  The run is hermetic, because a number that moves for a reason outside the
+  change under test is noise. The corpus lives in an organization of its own,
+  so no other test's rows or per-org embedding budget can reach it. The
+  settings that change a ranking are pinned rather than inherited from
+  whatever the app env holds. Vector reads are exact (`KilnCMS.Search.
+  VectorScan`'s measurement mode, scoped to the test's transaction), so no
+  HNSW recall loss can drop a record from a semantic leg. Every seeded
+  record must have its embedding before a query runs, so a vector that never
+  got written fails as that rather than as a ranking regression.
   """
   # async: false — toggles the global `KilnCMS.Search` app env.
   use KilnCMS.DataCase, async: false
 
   alias KilnCMS.CMS
+  alias KilnCMS.Repo
   alias KilnCMS.Search.Eval
   alias KilnCMS.Search.Eval.Retriever
+  alias KilnCMS.Search.VectorScan
 
   @moduletag :capture_log
 
@@ -80,8 +92,21 @@ defmodule KilnCMS.Search.RankingFixtureTest do
     put_search_env(
       semantic: true,
       embedder: BagOfWordsEmbedder,
-      semantic_max_distance: 0.8
+      semantic_max_distance: 0.8,
+      block_leg: true,
+      tag_leg: true,
+      rerank: false,
+      chunk_long_documents: false,
+      keyword_any_idf_coverage: nil,
+      query_prefix: "",
+      document_prefix: ""
     )
+
+    # `SET LOCAL`: the sandbox's transaction scopes it to this test, and the
+    # shared sandbox hands this connection to every process the sweep spawns.
+    for statement <- VectorScan.statements(:exact) do
+      Repo.query!(String.replace_prefix(statement, "SET ", "SET LOCAL "))
+    end
 
     :ok
   end
@@ -108,10 +133,18 @@ defmodule KilnCMS.Search.RankingFixtureTest do
     })
   end
 
-  defp page(actor, slug, title, body) do
+  defp org do
+    Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+      name: "ranking fixture",
+      slug: "ranking-fixture-#{System.unique_integer([:positive])}",
+      status: :active
+    })
+  end
+
+  defp page({org, actor}, slug, title, body) do
     %{title: title, slug: slug, body_markdown: body}
-    |> CMS.create_page!(actor: actor)
-    |> then(&CMS.publish_page!(&1, %{}, actor: actor))
+    |> CMS.create_page!(actor: actor, tenant: org)
+    |> then(&CMS.publish_page!(&1, %{}, actor: actor, tenant: org))
   end
 
   # 10,000 words of filler with the four words of "yellow emperor inner
@@ -139,8 +172,8 @@ defmodule KilnCMS.Search.RankingFixtureTest do
 
   # Created in this order every run, so `inserted_at` — the keyword legs'
   # tiebreaker — orders it the same way each time.
-  defp seed_corpus do
-    actor = admin()
+  defp seed_corpus(org) do
+    actor = {org, admin()}
 
     for n <- 1..25 do
       nn = String.pad_leading("#{n}", 2, "0")
@@ -201,10 +234,26 @@ defmodule KilnCMS.Search.RankingFixtureTest do
       slug: "ginseng-root",
       body_markdown: "A measured look at the root and its heat."
     }
-    |> CMS.create_post!(actor: actor)
-    |> then(&CMS.publish_post!(&1, %{}, actor: actor))
+    |> CMS.create_post!(actor: elem(actor, 1), tenant: org)
+    |> then(&CMS.publish_post!(&1, %{}, actor: elem(actor, 1), tenant: org))
 
     KilnCMS.DataCase.drain_oban()
+  end
+
+  # Slugs of the org's published records with no embedding — empty when the
+  # embedding jobs all ran.
+  defp unembedded(org) do
+    %{rows: rows} =
+      Repo.query!(
+        """
+        SELECT slug FROM pages WHERE org_id = $1 AND embedding IS NULL
+        UNION ALL
+        SELECT slug FROM posts WHERE org_id = $1 AND embedding IS NULL
+        """,
+        [Ecto.UUID.dump!(org.id)]
+      )
+
+    rows |> List.flatten() |> Enum.sort()
   end
 
   test "every class in the fixture is gated or has a baseline" do
@@ -225,9 +274,14 @@ defmodule KilnCMS.Search.RankingFixtureTest do
 
   test "the ranking holds its gates on the adversarial corpus" do
     %{rows: rows, gates: gates, baselines: baselines} = golden()
-    seed_corpus()
+    org = org()
+    drained = seed_corpus(org)
 
-    report = Eval.report(rows, &Retriever.global(&1, limit: 30), @ks)
+    assert unembedded(org) == [],
+           "seeded records without an embedding, so the semantic leg cannot " <>
+             "see them (Oban drain: #{inspect(drained)})"
+
+    report = Eval.report(rows, &Retriever.global(&1, tenant: org, limit: 30), @ks)
 
     with path when is_binary(path) <- System.get_env("GITHUB_STEP_SUMMARY") do
       File.write!(path, Eval.format_markdown(report, source: "adversarial fixture"), [:append])
