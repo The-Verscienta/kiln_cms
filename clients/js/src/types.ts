@@ -273,6 +273,148 @@ export interface AsOfIndexOptions extends RequestOptions {
   limit?: number;
 }
 
+// ── headless routing and site structure ─────────────────────────────────────
+
+/**
+ * The locale parameters every locale-aware delivery surface reads
+ * (`?locale=`, `?fallback=`, `?fallback_locale=`). A locale the site does not
+ * run is a `KilnValidationError` (`unsupported_locale`).
+ */
+export interface DeliveryLocaleOptions extends RequestOptions {
+  locale?: string;
+  /** `false` turns the site's fallback chain off: only `locale` itself answers. */
+  fallback?: boolean;
+  /** Fall back to this locale rather than along the site's configured chain. */
+  fallbackLocale?: string;
+}
+
+/** Published content lives at the path, found in `locale`. */
+export interface ResolveFound {
+  status: "ok";
+  type: string;
+  slug: string;
+  id: string;
+  path: string;
+  locale: string;
+}
+
+/** A pathauto redirect: answer the visitor with a 301 to `to`. */
+export interface ResolveMoved {
+  status: "moved";
+  to: string;
+  type: string;
+  slug: string;
+  id: string;
+}
+
+/** Nothing lives at the path. The server says so with a 404. */
+export interface ResolveNotFound {
+  status: "not_found";
+}
+
+/** `GET /api/resolve`'s verdict on a path. Branch on `status`. */
+export type ResolveResult = ResolveFound | ResolveMoved | ResolveNotFound;
+
+export interface MenuSummary {
+  key: string;
+  name: string;
+  locale: string;
+}
+
+export interface MenuList {
+  menus: MenuSummary[];
+}
+
+export interface MenuNode {
+  id: string;
+  label: string;
+  /**
+   * A content item's current published path, an external link's URL, or
+   * `null` for a heading (`link_type: "none"`).
+   */
+  url: string | null;
+  link_type: "content" | "url" | "none";
+  open_in_new_tab: boolean;
+  children: MenuNode[];
+}
+
+/** One resolved menu. `locale` names the variant served. */
+export interface Menu {
+  key: string;
+  name: string;
+  locale: string;
+  items: MenuNode[];
+}
+
+export interface Locales {
+  default: string;
+  locales: string[];
+  /** Each locale's fallback chain, itself excluded; `[]` never falls back. */
+  fallbacks: Record<string, string[]>;
+}
+
+export interface RelatedOptions extends DeliveryLocaleOptions {
+  /** Default 5, max 20. */
+  limit?: number;
+}
+
+export interface RelatedDocument {
+  type: string;
+  slug: string;
+  title: string | null;
+  /** Higher is closer. */
+  score: number;
+  /** The related document's artifact, `/api/content/:type/:slug`. */
+  href: string;
+}
+
+export interface RelatedResult {
+  type: string;
+  slug: string;
+  locale: string;
+  /** Empty when semantic search is off. */
+  related: RelatedDocument[];
+}
+
+// ── forms ───────────────────────────────────────────────────────────────────
+
+export interface FormField {
+  name: string;
+  label: string;
+  type: "string" | "text" | "email" | "integer" | "boolean" | "date" | "select";
+  required: boolean;
+  /** A `select` field's choices; `[]` for every other type. */
+  options: string[];
+  help_text: string | null;
+  placeholder: string | null;
+  default_value: string | null;
+  width: "full" | "half" | "third";
+}
+
+/** An admin-defined form, as `GET /api/forms/:slug` describes it. */
+export interface FormSchema {
+  slug: string;
+  name: string;
+  description: string | null;
+  success_message: string | null;
+  submit_label: string | null;
+  /** Render this as a hidden, empty input, and relay it untouched. */
+  honeypot_field: string;
+  /** The form-encoded browser route; `submitForm` posts JSON to `/api/forms/:slug`. */
+  submit_url: string;
+  fields: FormField[];
+}
+
+export interface SubmitFormOptions extends RequestOptions {
+  /** Recorded on the submission. */
+  locale?: string;
+}
+
+export interface FormSubmitResult {
+  ok: true;
+  message: string | null;
+}
+
 // ── sync (delta) API ────────────────────────────────────────────────────────
 
 /**

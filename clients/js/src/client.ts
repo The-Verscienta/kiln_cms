@@ -77,7 +77,10 @@ import type {
   DirectUpload,
   ContentRelease,
   ContentReleaseItem,
+  DeliveryLocaleOptions,
   Filter,
+  FormSchema,
+  FormSubmitResult,
   GraphQLOptions,
   GraphQLResponse,
   HybridSearchOptions,
@@ -87,13 +90,19 @@ import type {
   Item,
   ListOptions,
   ListResult,
+  Locales,
   MintedPreview,
   MediaItem,
   MediaMetadata,
   MediaMetadataUpdate,
+  Menu,
+  MenuList,
+  RelatedOptions,
+  RelatedResult,
   ReleaseListOptions,
   ReleaseOptions,
   RequestOptions,
+  ResolveResult,
   RestoreResult,
   RevisionDetail,
   RevisionList,
@@ -103,6 +112,7 @@ import type {
   SyncOptions,
   SyncPage,
   SyncResult,
+  SubmitFormOptions,
   SyncStartOptions,
   UploadMediaOptions,
   WorkflowVerb,
@@ -555,6 +565,153 @@ export class KilnClient {
       options.signal,
       "application/json",
     )) as SchemaDocument;
+  }
+
+  // ── headless routing and site structure ───────────────────────────────────
+
+  /**
+   * What lives at a URL path: `GET /api/resolve?path=`. The read a front
+   * end's catch-all route makes, so it can render or redirect without
+   * mirroring Kiln's URL scheme or redirect table. Branch on `status`:
+   *
+   *     const at = await kiln.resolvePath("/blog/old-slug");
+   *     if (at.status === "moved") return redirect(301, at.to);
+   *     if (at.status === "not_found") return notFound();
+   *     const page = await kiln.artifact(at.type, at.slug, { locale: at.locale });
+   *
+   * `not_found` is a verdict, not a failure: the server answers it with a
+   * 404, and this resolves to it rather than throwing. `path` needs its
+   * leading slash; a missing one, or a locale the site does not run, throws
+   * `KilnValidationError`.
+   */
+  async resolvePath(path: string, options: DeliveryLocaleOptions = {}): Promise<ResolveResult> {
+    const params = new URLSearchParams({ path });
+    appendLocale(params, options);
+    try {
+      return (await this.request(
+        "/api/resolve",
+        params,
+        options.signal,
+        "application/json",
+      )) as ResolveResult;
+    } catch (error) {
+      if (
+        error instanceof KilnHttpError &&
+        error.status === 404 &&
+        isNotFoundVerdict(error.body)
+      ) {
+        return { status: "not_found" };
+      }
+      throw error;
+    }
+  }
+
+  /** Every navigation menu on the site: `GET /api/menus`. Read one with `menu`. */
+  async menus(options: RequestOptions = {}): Promise<MenuList> {
+    return (await this.request(
+      "/api/menus",
+      new URLSearchParams(),
+      options.signal,
+      "application/json",
+    )) as MenuList;
+  }
+
+  /**
+   * One resolved navigation menu: `GET /api/menus/:key`. A content item's
+   * `url` is the target's current published path, so renaming a slug moves
+   * the menu with it; items whose target is not published are left out with
+   * their children. A menu missing in `locale` (default: the site's default
+   * locale) follows the site's fallback chain, and `locale` on the result
+   * names the variant served.
+   */
+  async menu(key: string, options: DeliveryLocaleOptions = {}): Promise<Menu> {
+    const params = new URLSearchParams();
+    appendLocale(params, options);
+    return (await this.request(
+      `/api/menus/${encodeURIComponent(key)}`,
+      params,
+      options.signal,
+      "application/json",
+    )) as Menu;
+  }
+
+  /**
+   * The site's locales: `GET /api/locales` — the default, every configured
+   * locale, and the chain each one falls back along. Enough to build a locale
+   * switcher or an hreflang set.
+   */
+  async locales(options: RequestOptions = {}): Promise<Locales> {
+    return (await this.request(
+      "/api/locales",
+      new URLSearchParams(),
+      options.signal,
+      "application/json",
+    )) as Locales;
+  }
+
+  /**
+   * Published documents semantically closest to one:
+   * `GET /api/content/:type/:slug/related`. `related` is empty when semantic
+   * search is off. The anchor document must be published, or this throws
+   * `KilnNotFoundError`.
+   */
+  async related(
+    type: string,
+    slug: string,
+    options: RelatedOptions = {},
+  ): Promise<RelatedResult> {
+    const params = new URLSearchParams();
+    appendLocale(params, options);
+    appendIfPresent(params, "limit", options.limit);
+    const path = `/api/content/${encodeURIComponent(type)}/${encodeURIComponent(slug)}/related`;
+    return (await this.request(
+      path,
+      params,
+      options.signal,
+      "application/json",
+    )) as RelatedResult;
+  }
+
+  // ── forms ─────────────────────────────────────────────────────────────────
+
+  /**
+   * An admin-defined form's schema: `GET /api/forms/:slug`, so a front end can
+   * render it itself. An unknown or inactive form throws `KilnNotFoundError`.
+   */
+  async form(slug: string, options: RequestOptions = {}): Promise<FormSchema> {
+    return (await this.request(
+      `/api/forms/${encodeURIComponent(slug)}`,
+      new URLSearchParams(),
+      options.signal,
+      "application/json",
+    )) as FormSchema;
+  }
+
+  /**
+   * Submit a form: `POST /api/forms/:slug` with `values` (field name → value)
+   * as JSON. A refusal throws `KilnValidationError` (422), whose
+   * `fieldErrors()` reads the messages by field name.
+   *
+   * Submission is anonymous by design, so this never sends the client's API
+   * key. The server's spam checks still run: when relaying a visitor's
+   * browser submission, pass the honeypot field (the schema's
+   * `honeypot_field`) and `_kiln_rendered_at` through untouched. A filled
+   * honeypot is discarded and still answers success, so never set it
+   * yourself.
+   */
+  async submitForm(
+    slug: string,
+    values: Record<string, unknown>,
+    options: SubmitFormOptions = {},
+  ): Promise<FormSubmitResult> {
+    const body = options.locale === undefined ? values : { ...values, locale: options.locale };
+    return (await this.send("POST", `/api/forms/${encodeURIComponent(slug)}`, {
+      signal: options.signal,
+      accept: "application/json",
+      contentType: "application/json",
+      body,
+      anonymous: true,
+    })) as FormSubmitResult;
   }
 
   // ── image transforms ──────────────────────────────────────────────────────
@@ -1130,6 +1287,12 @@ export class KilnClient {
       body?: unknown;
       /** Use the longer upload timeout rather than the request timeout. */
       upload?: boolean;
+      /**
+       * Send no `authorization` header even when the client has a key: a
+       * public form submission is anonymous by design, and a key there would
+       * only hand the credential to a route that ignores it.
+       */
+      anonymous?: boolean;
     },
   ): Promise<unknown> {
     // A `FormData` goes to `fetch` untouched: it must not be stringified, and
@@ -1141,7 +1304,9 @@ export class KilnClient {
     const headers: Record<string, string> = { accept: request.accept, ...this.headers };
     if (request.contentType !== undefined && !form)
       headers["content-type"] = request.contentType;
-    if (this.hasApiKey()) headers.authorization = `Bearer ${this.apiKey}`;
+    if (this.hasApiKey() && request.anonymous !== true) {
+      headers.authorization = `Bearer ${this.apiKey}`;
+    }
 
     const init: RequestInit = {
       method,
@@ -1257,6 +1422,24 @@ function revisionsPath(type: string, id: string): string {
 
 function asOfParam(asOf: string | Date): string {
   return asOf instanceof Date ? asOf.toISOString() : asOf;
+}
+
+// The `?locale=` / `?fallback=` / `?fallback_locale=` trio every
+// locale-aware delivery surface reads (`KilnCMSWeb.DeliveryLocale`).
+function appendLocale(params: URLSearchParams, options: DeliveryLocaleOptions): void {
+  appendIfPresent(params, "locale", options.locale);
+  if (options.fallback !== undefined) params.append("fallback", String(options.fallback));
+  appendIfPresent(params, "fallback_locale", options.fallbackLocale);
+}
+
+// `/api/resolve`'s 404 carries its verdict; any other 404 body (a proxy's
+// page, a route that moved) is a real failure and stays one.
+function isNotFoundVerdict(body: unknown): boolean {
+  return (
+    body !== null &&
+    typeof body === "object" &&
+    (body as { status?: unknown }).status === "not_found"
+  );
 }
 
 async function errorBody(response: Response): Promise<unknown> {
