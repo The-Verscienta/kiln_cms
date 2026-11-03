@@ -146,6 +146,10 @@ defmodule KilnCMS.Search.NameTermsTest do
 
       [hit] = Search.hybrid(:page, "huangqi", actor: nil) |> Enum.take(1)
       assert :compound in Search.hit_legs(hit)
+
+      # Explain reports it like the title leg: a rank, and no raw score.
+      [explained] = Search.hybrid(:page, "huangqi", actor: nil, explain: true) |> Enum.take(1)
+      assert %{rank: 1, score: nil, measure: nil} = Search.hit_explain(explained).legs[:compound]
     end
 
     test "the global sweep makes the rewrites once and every section uses them" do

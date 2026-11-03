@@ -992,7 +992,10 @@ defmodule KilnCMS.Search do
 
   Every record comes back carrying the score it was ranked by and the legs
   that returned it — read them with `hit_score/1` and `hit_legs/1`. The list
-  itself is plain records, so nothing that reads one changes.
+  itself is plain records, so nothing that reads one changes. `explain:
+  true` adds why: each leg's rank, contribution and raw score, and which
+  query terms the record matches (`hit_explain/1`). Off by default — it
+  costs a query.
   """
   @spec hybrid(atom() | String.t() | module(), String.t(), keyword()) :: [struct()]
   def hybrid(type, query, opts \\ []) when is_binary(query) do
@@ -1104,8 +1107,22 @@ defmodule KilnCMS.Search do
   defp run_named_leg(:fuzzy, c, ran) do
     {keyword, _relaxed} = leg_value(ran, :keyword)
 
+    # The trigram similarity the fuzzy leg orders by is read only for
+    # `explain: true` — nothing else consumes it.
+    similarity =
+      if Keyword.get(c.opts, :explain, false),
+        do: [title_similarity: %{prefix: c.query}],
+        else: []
+
     if c.filters == %{} and length(keyword) < @fuzzy_fallback_threshold do
-      run_leg(c.resource, :autocomplete, %{prefix: c.query, locale: c.locale}, c.read_opts)
+      run_leg(
+        c.resource,
+        :autocomplete,
+        %{prefix: c.query, locale: c.locale},
+        c.read_opts,
+        %{},
+        similarity
+      )
     else
       []
     end
@@ -1135,6 +1152,7 @@ defmodule KilnCMS.Search do
     semantic = leg_value(ran, :semantic)
     {blocks, block_distances} = leg_value(ran, :block)
     {tagged, tag_distances} = leg_value(ran, :tag)
+    fuzzy = leg_value(ran, :fuzzy)
 
     %{
       resource: c.resource,
@@ -1154,17 +1172,23 @@ defmodule KilnCMS.Search do
         {:title, leg_value(ran, :title), @title_weight},
         {:alias, leg_value(ran, :alias), @title_weight},
         {:compound, leg_value(ran, :compound), @title_weight},
-        {:fuzzy, leg_value(ran, :fuzzy), @fuzzy_weight},
+        {:fuzzy, fuzzy, @fuzzy_weight},
         {:tag, tagged, @tag_weight}
       ],
-      # What each globally ranked leg ranked its candidates by, smaller first.
+      # What each leg ranked its candidates by, smaller first: the globally
+      # ranked legs' keys (`global_ranks/1`), plus the fuzzy leg's similarity
+      # under `explain: true`, which `explain_legs/3` reports and nothing
+      # ranks by. The title, alias and compound legs have none — a title the
+      # query contains is a yes or no.
       keys: %{
         keyword: Map.new(keyword, &{&1.id, rank_key(&1.search_rank)}),
         keyword_any: Map.new(relaxed, &{&1.id, rank_key(&1.search_rank_any)}),
         semantic: Map.new(semantic, &{&1.id, &1.semantic_distance}),
         block: block_distances,
-        tag: tag_distances
+        tag: tag_distances,
+        fuzzy: Map.new(fuzzy, &{&1.id, rank_key(Map.get(&1, :title_similarity))})
       },
+      locale: c.locale,
       floor: %{
         max_distance: semantic_max_distance(),
         legs: semantic_floor_legs(),
@@ -1214,8 +1238,15 @@ defmodule KilnCMS.Search do
         do: %{fuse: fuse_micros},
         else: %{fuse: fuse_micros, rerank: rerank_micros}
 
-    {Enum.map(hits, &attach_hit/1),
-     %{timings: timings, missing: if(reranked == :cut, do: [:rerank], else: [])}}
+    attached =
+      if Keyword.get(opts, :explain, false) do
+        explain = explain(hits, collected, ranks)
+        Enum.map(hits, &attach_hit(&1, explain))
+      else
+        Enum.map(hits, &attach_hit/1)
+      end
+
+    {attached, %{timings: timings, missing: if(reranked == :cut, do: [:rerank], else: [])}}
   end
 
   # The reranker inside what is left of the budget. One that misses it — or
@@ -1241,6 +1272,87 @@ defmodule KilnCMS.Search do
       _timeout_or_busy -> {hits, :cut}
     end
   end
+
+  # `explain: true` — why each kept hit ranked where it did, by id: every
+  # leg that returned it at the rank fusion used (`ranked/2`, the same
+  # ranks `reciprocal_rank_fusion/3` summed), with the raw number that leg
+  # ranked by, and the query terms the hit's `search_vector` matches. Built
+  # from what fusion already had (`collected.keys`); the term match is the
+  # one extra query, over the kept hits only.
+  defp explain([], _collected, _ranks), do: %{}
+
+  defp explain(hits, collected, ranks) do
+    ids = Enum.map(hits, fn {record, _score, _legs} -> record.id end)
+    legs = explain_legs(collected, ranks, MapSet.new(ids))
+    {terms, matches} = explain_terms(collected, ids)
+
+    Map.new(ids, fn id ->
+      matched = Map.get(matches, id, Enum.map(terms, fn _term -> false end))
+      hit_terms = Enum.zip_with(terms, matched, &Map.put(&1, :matched, &2))
+
+      {id,
+       %{
+         legs: Map.get(legs, id, %{}),
+         terms: hit_terms,
+         matched_terms: for(%{matched: true, term: t} <- hit_terms, uniq: true, do: t),
+         coverage: coverage(matched)
+       }}
+    end)
+  end
+
+  # What each leg's raw `score` is. `ts_rank` and trigram similarity are
+  # better higher; a cosine distance is better lower. The title, alias and
+  # compound legs match or don't, and report `nil`.
+  @leg_measures %{
+    keyword: :ts_rank,
+    keyword_any: :ts_rank,
+    semantic: :cosine_distance,
+    block: :cosine_distance,
+    tag: :cosine_distance,
+    fuzzy: :trigram_similarity
+  }
+
+  # `%{id => %{leg => %{rank, score, measure, contribution}}}` for `ids`.
+  defp explain_legs(collected, ranks, ids) do
+    for {leg, list, weight} <- collected.legs,
+        {record, rank} <- ranked(list, Map.get(ranks, leg, %{})),
+        MapSet.member?(ids, record.id),
+        reduce: %{} do
+      acc ->
+        entry = %{
+          rank: rank,
+          score: raw_score(leg, get_in(collected.keys, [leg, record.id])),
+          measure: Map.get(@leg_measures, leg),
+          contribution: weight / (collected.k + rank)
+        }
+
+        Map.update(acc, record.id, %{leg => entry}, &Map.put_new(&1, leg, entry))
+    end
+  end
+
+  # `collected.keys` sorts smaller-first; the better-higher measures were
+  # negated into it (`rank_key/1`) and are negated back here.
+  defp raw_score(_leg, nil), do: nil
+  defp raw_score(leg, key) when leg in [:keyword, :keyword_any, :fuzzy], do: -key
+  defp raw_score(_leg, key), do: key
+
+  # The query's terms and each hit's matches (`IdfCoverage.term_matches/5`).
+  # A type without a `search_vector` has no terms to match — its keyword
+  # legs already logged that (`without_search_vector/2`).
+  defp explain_terms(collected, ids) do
+    KilnCMS.Search.IdfCoverage.term_matches(
+      collected.resource,
+      collected.query,
+      collected.locale,
+      ids,
+      collected.read_opts
+    )
+  rescue
+    error -> if missing_search_vector?(error), do: {[], %{}}, else: reraise(error, __STACKTRACE__)
+  end
+
+  defp coverage([]), do: nil
+  defp coverage(matched), do: Enum.count(matched, & &1) / length(matched)
 
   @doc false
   # Ranks for `@global_rank_legs`, taken over every collected section at
@@ -1358,6 +1470,48 @@ defmodule KilnCMS.Search do
   def hit_legs(%{__metadata__: %{search: %{legs: legs}}}), do: legs
   def hit_legs(_record), do: []
 
+  @doc """
+  Why this record ranked where it did, when it came out of `hybrid/3` or
+  `global/2` called with `explain: true` — otherwise `nil`. Off by default:
+  it costs one extra query per section, over the kept hits.
+
+      %{
+        legs: %{
+          keyword: %{rank: 2, score: 0.0608, measure: :ts_rank, contribution: 0.0161},
+          semantic: %{rank: 1, score: 0.21, measure: :cosine_distance, contribution: 0.0164}
+        },
+        terms: [
+          %{term: "heat", lexeme: "heat", matched: true},
+          %{term: "interior", lexeme: "interior", matched: false}
+        ],
+        matched_terms: ["heat"],
+        coverage: 0.5
+      }
+
+  `legs` has one entry per leg in `hit_legs/1`. `rank` is the rank fusion
+  used — in a `global/2` sweep the rank over every section for the legs
+  ranked that way (`hit_score/1`), else the rank within this type's leg —
+  and `contribution` is what that rank added to the fused score,
+  `weight / (k + rank)`, so the contributions sum to the fused score (not
+  to a reranked one). `score` is the raw number the leg ranked by, named by
+  `measure`: `:ts_rank` (`:keyword`, `:keyword_any`; higher is better),
+  `:cosine_distance` (`:semantic`, `:block`, `:tag`; lower is better), or
+  `:trigram_similarity` (`:fuzzy`; higher is better). `:title` and `:alias`
+  match or don't, and report `nil` for both.
+
+  `terms` are the query's terms as the keyword legs parse them (stemmed to
+  a `lexeme`, stop words dropped, the last term matched as a prefix), each
+  with the query word it came from and whether this record's
+  `search_vector` contains it. `coverage` is the matched share,
+  `matched / terms` in `[0, 1]` — `nil` for a query with no terms — so a
+  caller can rank full matches above partial ones without reading
+  snippets. It is read for every hit, whichever legs returned it: a
+  semantic-only hit reports the terms its text happens to contain.
+  """
+  @spec hit_explain(struct()) :: map() | nil
+  def hit_explain(%{__metadata__: %{search: %{explain: explain}}}), do: explain
+  def hit_explain(_record), do: nil
+
   @typedoc "A leg of `hybrid/3` — see `hit_legs/1`."
   @type leg ::
           :keyword
@@ -1381,6 +1535,15 @@ defmodule KilnCMS.Search do
   @spec attach_hit(hit()) :: struct()
   defp attach_hit({record, score, legs}) do
     Ash.Resource.put_metadata(record, :search, %{score: score, legs: legs})
+  end
+
+  # The same, with the hit's `explain/3` entry beside them (`hit_explain/1`).
+  defp attach_hit({record, score, legs}, explain) do
+    Ash.Resource.put_metadata(record, :search, %{
+      score: score,
+      legs: legs,
+      explain: Map.get(explain, record.id)
+    })
   end
 
   # The option alone decides. This used to also require `rerank?()`, which was
@@ -2264,7 +2427,8 @@ defmodule KilnCMS.Search do
   rather than clicks on, which is what `KilnCMS.Ask` cites. `:filters` (see
   `hybrid/3`) narrows the content sections — media and taxonomy don't carry
   facets — and `:select` (see `hybrid/3`) the attributes their records are
-  read with.
+  read with. `explain: true` (see `hybrid/3`) attaches `hit_explain/1` to
+  every content hit, its leg ranks the ones taken over every section.
 
   Every content hit carries its fused score and legs (`hit_score/1`,
   `hit_legs/1`), and the scores are comparable across sections — one `k`,
@@ -2370,6 +2534,7 @@ defmodule KilnCMS.Search do
           rerank_mode: Keyword.get(opts, :rerank_mode, rerank_mode()),
           filters: Keyword.get(opts, :filters, %{}),
           select: Keyword.get(opts, :select),
+          explain: Keyword.get(opts, :explain, false),
           # Embed the query ONCE for the whole sweep. Every section below runs
           # a semantic leg, and each would otherwise embed this same string
           # itself — one identical embedding per registered content type, the
@@ -2877,13 +3042,9 @@ defmodule KilnCMS.Search do
   defp reciprocal_rank_fusion(weighted_lists, k, ranks) do
     weighted_lists
     |> Enum.flat_map(fn {leg, list, weight} ->
-      leg_ranks = Map.get(ranks, leg, %{})
-
       list
-      |> Enum.with_index(1)
-      |> Enum.map(fn {record, position} ->
-        {leg, record, weight / (k + Map.get(leg_ranks, record.id, position))}
-      end)
+      |> ranked(Map.get(ranks, leg, %{}))
+      |> Enum.map(fn {record, rank} -> {leg, record, weight / (k + rank)} end)
     end)
     |> Enum.with_index()
     |> Enum.reduce(%{}, fn {{leg, record, score}, seen}, acc ->
@@ -2894,6 +3055,14 @@ defmodule KilnCMS.Search do
     |> Map.values()
     |> Enum.sort_by(fn {_record, score, _legs, first} -> {-score, first} end)
     |> Enum.map(fn {record, score, legs, _first} -> {record, score, legs} end)
+  end
+
+  # A leg's records at the ranks fusion uses: `leg_ranks`' rank where it
+  # names the record, its position in the list where it does not.
+  defp ranked(list, leg_ranks) do
+    list
+    |> Enum.with_index(1)
+    |> Enum.map(fn {record, position} -> {record, Map.get(leg_ranks, record.id, position)} end)
   end
 
   defp cfg(key, default) do
