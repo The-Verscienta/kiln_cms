@@ -239,9 +239,9 @@ Three HTTP probes back the container healthcheck and external monitoring:
 
 | Probe | Purpose | Body | Status |
 |-------|---------|------|--------|
-| `GET /live` | **Liveness** — the Docker `HEALTHCHECK` (restart trigger) probes this | `OK` | 200 iff the endpoint is serving; **no** DB check |
-| `GET /up` | **Readiness** — for a load balancer / uptime monitor routing traffic | `OK` | 200 if the DB answers `SELECT 1`, else 503 |
-| `GET /ready` | Readiness+ — for monitoring/alert sinks | JSON | 200 when the DB is reachable, else 503 |
+| `GET /live` | **Liveness** — the Docker `HEALTHCHECK` (restart trigger) probes this | `OK` | 200 iff the endpoint is serving; **no** DB check. 503 until search has warmed up after boot |
+| `GET /up` | **Readiness** — for a load balancer / uptime monitor routing traffic | `OK` | 200 if the DB answers `SELECT 1`, else 503. 503 until warm, like `/live` |
+| `GET /ready` | Readiness+ — for monitoring/alert sinks | JSON | 200 when the DB is reachable and search is warm, else 503 |
 
 **Use `/live`, not `/up`, for anything that RESTARTS the app.** `/up` returns
 503 on a database outage, and restarting the app cannot fix an unreachable
@@ -257,11 +257,16 @@ that is the signal a load balancer wants when deciding whether to *route* here.
 {
   "status": "ok",
   "db": "ok",
+  "search": "ok",
   "oban": { "available": 0, "retryable": 0, "backlog": 0 }
 }
 ```
 
 - `db` — `"ok"` when `SELECT 1` succeeds, `"error"` otherwise (drives the 503).
+- `search` — `"warming"` from boot until `KilnCMS.Search.Warmup` has run its
+  first search through the embedding and reranker servings, then `"ok"` for
+  the life of the node (also drives the 503; see *Health endpoints* in
+  [`deploy.md`](deploy.md)).
 - `oban.available` / `oban.retryable` — jobs queued to run now or awaiting a
   retry; `backlog` is their sum. Counted straight from `oban_jobs`, so the probe
   works without any Oban Pro/Met dependency.

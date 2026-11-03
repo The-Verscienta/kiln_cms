@@ -209,7 +209,11 @@ jobs:
       # Here rather than in a test shard because it wants the database this
       # job has just checked and nothing else: the example set is written
       # against the demo seeds, so the (idempotent) seed script runs first to
-      # give it its corpus, and no test runs in this job after it.
+      # give it its corpus, and no test runs in this job after it. The gate
+      # is elsewhere: the adversarial ranking fixture
+      # (test/kiln_cms/search/ranking_fixture_test.exs) seeds its own corpus
+      # and runs in the test shards, failing on its golden set's gates and
+      # adding its table to that shard's job summary.
       - name: Search ranking eval (report only)
         if: ${{ !cancelled() }}
         continue-on-error: true
