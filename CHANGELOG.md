@@ -60,6 +60,11 @@ Every summary line below that was shortened links to its own entry there.
   `mix ash.codegen`. Content tables gain `search_weighted`; old rows keep the old weights.**
   ([#2183](https://github.com/The-Verscienta/kiln_cms/pull/2183) · [long form](docs/changelog/unreleased.md#field-role-weights-upgrade))
 
+### Added
+
+- **Search: an adversarial ranking fixture gates CI, and golden sets gain the
+  classes it uses.** ([long form](docs/changelog/unreleased.md#search-ranking-fixture))
+
 ### Changed
 
 - **Search: keyword ranking weights a record's text by role (title and names `A`, fields `B`/`C`,
@@ -71,6 +76,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Search: a section with one or two records no longer ranks them first across a
   `global/2` sweep; ranks are taken over every section's candidates together.**
   ([#2176](https://github.com/The-Verscienta/kiln_cms/pull/2176) · [long form](docs/changelog/unreleased.md#global-search-ranks))
+- **Search: a deploy no longer stalls searches; probes hold traffic until search is warm, and
+  each sweep answers within a budget, flagged `partial`, with per-leg `Server-Timing`.**
+  ([#2186](https://github.com/The-Verscienta/kiln_cms/pull/2186) · [long form](docs/changelog/unreleased.md#search-warmup-and-budget))
 
 ### Security
 
