@@ -20,7 +20,7 @@ defmodule KilnCMS.Accounts.MagicLinkTest do
 
   defp request_magic_link(email) do
     strategy = AshAuthentication.Info.strategy!(User, :magic_link)
-    AshAuthentication.Strategy.action(strategy, :request, %{"email" => email})
+    AshAuthentication.Strategy.action(strategy, :request, %{"email" => email}, [])
   end
 
   test "requesting a magic link for an existing user emails a sign-in link" do

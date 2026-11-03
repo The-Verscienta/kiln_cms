@@ -59,6 +59,9 @@ Every summary line below that was shortened links to its own entry there.
 - **phoenix_html 4.4.0, ssl_verify_fun 1.1.9 and jsv 0.26.2 fix three of
   the advisories published 2026-10-30 and 2026-10-31.**
   ([#2174](https://github.com/The-Verscienta/kiln_cms/pull/2174) · [long form](docs/changelog/unreleased.md#html-tls-jsv-advisories))
+- **ash_authentication 5.0 and ash_authentication_phoenix 3.0 release candidates
+  bring assent 0.3.2 (EEF-CVE-2026-117656, Sign in with Apple; Kiln not exposed).**
+  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR) · [long form](docs/changelog/unreleased.md#ash-authentication-5-assent))
 
 ## [1.7.0] - 2026-10-29
 

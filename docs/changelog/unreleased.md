@@ -26,3 +26,35 @@ carries the reasoning.
   moves its `texture` dependency from 1.2.1 to 2.0.0.
   `examples/phoenix_showcase` gets phoenix_html 4.4.0 in its own lock.
   ([#2174](https://github.com/The-Verscienta/kiln_cms/pull/2174))
+
+<a id="ash-authentication-5-assent"></a>
+
+- **ash_authentication 5.0.0-rc.15 and ash_authentication_phoenix 3.0.0-rc.11
+  bring assent 0.3.2, fixing EEF-CVE-2026-117656.** In assent 0.2.13 an
+  unverified `user` parameter on a Sign in with Apple callback could override
+  the claims of the verified ID token (critical). The only fix is assent 0.3.2,
+  and every ash_authentication 4.x release requires assent below 0.3.0, so this
+  moves both auth libraries to their 5.0 and 3.0 release candidates. Kiln was
+  not exposed: the fix is confined to `Assent.Strategy.Apple`, and Kiln's two
+  sign-on paths use the generic OIDC strategy (the `:sso` strategy and a site's
+  own identity provider). It needs no migration and no configuration.
+
+  Two things a deployment can notice. Signing in on the sign-in page now hands
+  the short-lived sign-in token to the server in a POST body, never in a
+  redirect URL, so
+  it no longer appears in proxy, CDN or browser-history logs (3.0 made the
+  POST hand-off the only one). And a reset link is now single-use by the
+  library's own check, which locks the token's row and refuses one already
+  revoked; Kiln's sweep of the account's tokens on a reset spares that one
+  token so the library can make it (`RevokeAllTokens`, `spare: :reset_token`).
+
+  Inside Kiln, the magic-link request is now a generic action, as 5.0
+  requires, and its per-address budget wraps the run the way the password-reset
+  request's
+  already did (`KilnCMS.Accounts.ThrottledMagicLinkRequest`). 5.0 also makes a
+  failing auth-mail sender fail its action; Kiln's senders enqueue through
+  `KilnCMS.Mail.enqueue!/2`, which answers `:ok` or raises, so their behaviour
+  is unchanged. Kiln does not turn on 5.0's new identity-keyed brute-force
+  protection, which would add an audit-log table; its own per-account and
+  per-address throttles stay as they were.
+  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR))

@@ -24,9 +24,9 @@ defmodule KilnCMSWeb.AuthOverridesTest do
   alias AshAuthentication.Phoenix.Components
   alias KilnCMSWeb.{AuthOverrides, AuthRegisterForm, AuthResetForm, AuthSignInForm}
 
-  # What `Components.Reset.Form` labels its submit button when nobody passes it
-  # one: `Phoenix.Naming.humanize/1` of the reset action's name. The whole point
-  # of Kiln's form component is not shipping this.
+  # What `Components.Reset.Form` labelled its submit button before it declared
+  # `button_text` (ash_authentication_phoenix 3.0): `Phoenix.Naming.humanize/1`
+  # of the reset action's name. Kiln's setting keeps it off the page.
   @upstream_label "Reset password with token"
   @kiln_label "Change password"
 
@@ -57,9 +57,10 @@ defmodule KilnCMSWeb.AuthOverridesTest do
       # A key the component does declare.
       assert undeclared(%{{Components.Reset.Form, :root_class} => "x"}) == []
 
-      # The original bug: a key it does not.
-      assert undeclared(%{{Components.Reset.Form, :button_text} => "x"}) ==
-               [{Components.Reset.Form, :button_text}]
+      # A key it does not. (The original bug was `:button_text` here, which
+      # the component has declared since ash_authentication_phoenix 3.0.)
+      assert undeclared(%{{Components.Reset.Form, :no_such_setting} => "x"}) ==
+               [{Components.Reset.Form, :no_such_setting}]
 
       # A module that is not an overridable component at all — a plausible way
       # to mistype a component name into something that still resolves.
@@ -75,25 +76,20 @@ defmodule KilnCMSWeb.AuthOverridesTest do
       refute html =~ @upstream_label
     end
 
-    test "is the only thing Kiln's copy of the library's form changes" do
-      # `KilnCMSWeb.AuthResetForm.render/1` is upstream's render with one prop
-      # added, so it can go stale in a way delegation cannot. Rendering both
-      # against the same assigns turns that into a failing test: anything
-      # upstream changes in this form — a field, a class, the hidden token —
-      # shows up here as a difference that is not the button's wording.
-      # With the eye buttons (#1806) off: they are the other thing it changes,
-      # and `KilnCMSWeb.PasswordRevealTest` covers them.
+    test "is what Kiln's copy of the library's form renders, eye buttons aside" do
+      # `KilnCMSWeb.AuthResetForm.render/1` is upstream's with the password
+      # boxes swapped for `KilnCMSWeb.AuthPasswordInput`'s, so it can go stale in
+      # a way delegation cannot. Rendering both against the same assigns turns
+      # that into a failing test: anything upstream changes in this form — a
+      # field, a class, the hidden token — shows up here as a difference. With
+      # the eye buttons (#1806) off; `KilnCMSWeb.PasswordRevealTest` covers them.
       assigns = Map.put(form_assigns(), :password_reveal, false)
 
       kiln = render_component(AuthResetForm, assigns)
       upstream = render_component(Components.Reset.Form, assigns)
 
-      assert upstream =~ ">#{@upstream_label}</button>"
       assert kiln =~ ">#{@kiln_label}</button>"
-
-      assert kiln
-             |> String.replace(">#{@kiln_label}</button>", ">#{@upstream_label}</button>")
-             |> squash() == squash(upstream)
+      assert squash(kiln) == squash(upstream)
     end
   end
 

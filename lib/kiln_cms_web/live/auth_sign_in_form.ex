@@ -102,7 +102,7 @@ defmodule KilnCMSWeb.AuthSignInForm do
       </.form>
 
       <.form
-        :if={sign_in_token_via_post?(@strategy)}
+        :if={Map.get(@strategy, :sign_in_tokens_enabled?)}
         for={%{}}
         id={@form.id <> "-sign-in-with-token"}
         action={
@@ -126,7 +126,4 @@ defmodule KilnCMSWeb.AuthSignInForm do
 
   @impl true
   def handle_event(event, params, socket), do: Upstream.handle_event(event, params, socket)
-
-  # Upstream's is private; the same one-line read of the strategy.
-  defp sign_in_token_via_post?(strategy), do: Map.get(strategy, :sign_in_token_via_post?, false)
 end

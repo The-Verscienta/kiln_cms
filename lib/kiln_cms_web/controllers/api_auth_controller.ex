@@ -108,10 +108,15 @@ defmodule KilnCMSWeb.ApiAuthController do
          true <- is_binary(email) and is_binary(password),
          strategy = AshAuthentication.Info.strategy!(User, :password),
          {:ok, user} <-
-           AshAuthentication.Strategy.action(strategy, :sign_in, %{
-             "email" => email,
-             "password" => password
-           }) do
+           AshAuthentication.Strategy.action(
+             strategy,
+             :sign_in,
+             %{
+               "email" => email,
+               "password" => password
+             },
+             []
+           ) do
       if Accounts.totp_enabled?(user) do
         two_factor_required(conn, user)
       else
