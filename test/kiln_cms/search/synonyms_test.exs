@@ -167,6 +167,22 @@ defmodule KilnCMS.Search.SynonymsTest do
       assert :synonym in Search.hit_legs(hit)
     end
 
+    test "explain reports the synonym leg once, with every alternate list's contribution" do
+      admin = user(:admin)
+      n = uniq()
+      # The title names the alternate outright, so both its keyword and title
+      # lists return the page: two `:synonym` lists, one leg.
+      published_page("Zorb#{n}", admin)
+      CMS.create_search_synonym!(%{terms: ["qwyx#{n}", "zorb#{n}"]}, actor: admin)
+
+      assert [hit] = Search.hybrid(:page, "qwyx#{n}", explain: true)
+      assert Search.hit_legs(hit) == [:synonym]
+
+      %{legs: legs} = Search.hit_explain(hit)
+      assert Map.keys(legs) == [:synonym]
+      assert_in_delta legs.synonym.contribution, Search.hit_score(hit), 1.0e-9
+    end
+
     test "a match on the user's words outranks the same match on an alternate" do
       admin = user(:admin)
       n = uniq()
