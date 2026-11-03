@@ -126,45 +126,48 @@ defmodule KilnCMS.CMS.Content do
         text = Ash.Query.get_argument(query, :query)
 
         names
-        |> Enum.map(fn name ->
-          if KilnCMS.Search.HanGrams.han?(text) do
-            Ash.Expr.expr(
-              fragment(
-                "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(coalesce(? ->> ?::text, '')) END) AS name_alias(value) WHERE (SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value) OR kiln_han_runs(name_alias.value) = (SELECT kiln_han_runs(?)))",
-                custom_fields,
-                ^name,
-                custom_fields,
-                ^name,
-                custom_fields,
-                ^name,
-                ^locale,
-                ^text,
-                ^locale,
-                ^text
-              )
-            )
-          else
-            Ash.Expr.expr(
-              fragment(
-                "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(coalesce(? ->> ?::text, '')) END) AS name_alias(value) WHERE (SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value))",
-                custom_fields,
-                ^name,
-                custom_fields,
-                ^name,
-                custom_fields,
-                ^name,
-                ^locale,
-                ^text,
-                ^locale
-              )
-            )
-          end
-        end)
+        |> Enum.map(&name_match(&1, locale, text, KilnCMS.Search.HanGrams.han?(text)))
         |> Enum.reduce(&Ash.Expr.expr(^&2 or ^&1))
         |> then(&Ash.Query.do_filter(query, &1))
         |> Ash.Query.sort([{:inserted_at, :desc}])
         |> cap_unbounded()
     end
+  end
+
+  # One flagged field's match, with the Han exactness for a Han query.
+  defp name_match(name, locale, text, true = _han?) do
+    Ash.Expr.expr(
+      fragment(
+        "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(coalesce(? ->> ?::text, '')) END) AS name_alias(value) WHERE (SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value) OR kiln_han_runs(name_alias.value) = (SELECT kiln_han_runs(?)))",
+        custom_fields,
+        ^name,
+        custom_fields,
+        ^name,
+        custom_fields,
+        ^name,
+        ^locale,
+        ^text,
+        ^locale,
+        ^text
+      )
+    )
+  end
+
+  defp name_match(name, locale, text, false = _han?) do
+    Ash.Expr.expr(
+      fragment(
+        "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(coalesce(? ->> ?::text, '')) END) AS name_alias(value) WHERE (SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value))",
+        custom_fields,
+        ^name,
+        custom_fields,
+        ^name,
+        custom_fields,
+        ^name,
+        ^locale,
+        ^text,
+        ^locale
+      )
+    )
   end
 
   @doc false
