@@ -101,6 +101,7 @@ defmodule KilnCMS.Search.QueryBudgetTest do
                  :title,
                  :alias,
                  :compound,
+                 :synonym,
                  :fuzzy,
                  :semantic,
                  :block,

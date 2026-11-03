@@ -68,6 +68,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Chinese is searchable inside longer text: `吴茱萸` finds `本方以吴茱萸为君药`, and a query
   that is exactly a record's Chinese name ranks it first (`:han` leg).**
   ([#2179](https://github.com/The-Verscienta/kiln_cms/pull/2179) · [long form](docs/changelog/unreleased.md#han-bigrams))
+- **Per-site search synonyms and aliases (`/editor/search-synonyms`): equivalent groups and
+  one-way rules, applied by `/api/search` (`also_searched`), `/api/ask`, the new `/mcp`
+  `search_content` tool and site search alike.** ([long form](docs/changelog/unreleased.md#search-synonyms))
 - **Search finds a name written spaced or joined differently from the site:
   `huangqi` finds Huang Qi, `xiao yao san` Xiaoyaosan, `SP 9` SP9.**
   ([long form](docs/changelog/unreleased.md#compound-names))

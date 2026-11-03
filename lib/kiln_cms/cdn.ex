@@ -100,8 +100,18 @@ defmodule KilnCMS.CDN do
   """
   @spec handle_event(String.t(), map(), Ash.ToTenant.t() | nil) :: :ok
   def handle_event(event, _payload, org) do
+    if purges?(event), do: purge_site(org, "CDN.handle_event/3 for #{event}"), else: :ok
+  end
+
+  @doc """
+  Enqueue a purge of `org`'s surrogate key when purging is configured, for a
+  write that changes delivery without being a delivery event — a search
+  synonym (`KilnCMS.CMS.SearchSynonym`) changes what a cached `/api/search`
+  URL answers. Never raises.
+  """
+  @spec purge_site(Ash.ToTenant.t() | nil, String.t()) :: :ok
+  def purge_site(org, caller \\ "CDN.purge_site/1") do
     with true <- enabled?(),
-         true <- purges?(event),
          org_id when is_binary(org_id) <- org_id(org) do
       %{org_id: org_id, txn: transaction_id()}
       |> PurgeWorker.new(schedule_in: 2)
@@ -111,7 +121,7 @@ defmodule KilnCMS.CDN do
     :ok
   rescue
     error ->
-      Logger.warning("CDN.handle_event/3 failed for #{event}: #{Exception.message(error)}")
+      Logger.warning("#{caller} failed: #{Exception.message(error)}")
       :ok
   end
 

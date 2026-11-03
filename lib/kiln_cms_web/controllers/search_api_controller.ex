@@ -29,8 +29,8 @@ defmodule KilnCMSWeb.SearchApiController do
   public `path`, an escape-safe `highlight` snippet (only `<mark>`
   survives), the fused `score` they were ranked by (comparable across
   sections) and the `legs` that matched (`keyword`/`keyword_any`/`han`/
-  `semantic`/`block`/`title`/`alias`/`compound`/`fuzzy`/`tag` — `han` is the keyword
-  match for Chinese text, by character bigrams; `block` is the embedding leg at
+  `semantic`/`block`/`title`/`alias`/`compound`/`fuzzy`/`tag`/`synonym` — `han` is
+  the keyword match for Chinese text, by character bigrams; `block` is the embedding leg at
   block grain, a record reached through its nearest section; `title` is a
   record the query names outright, `alias` one it names by a custom field
   flagged as a name, `compound` one it names with a name's words
@@ -44,6 +44,15 @@ defmodule KilnCMSWeb.SearchApiController do
   sparse content result set carries a `suggestion` ("did you mean") when the
   query is trigram-close to a published title without matching a word exactly
   — including alongside hits the fuzzy hybrid leg rescued from the typo.
+
+  `also_searched` lists the alternate wordings the site's search synonyms
+  (`KilnCMS.CMS.SearchSynonym`, `/editor/search-synonyms`) gave the query —
+  "reishi tea" is also searched as "ling zhi tea" — and is `[]` when no rule
+  applies. A hit an alternate found carries the `synonym` leg, and ranks below
+  the same match on the query's own words. The response is cached per URL
+  like any anonymous read (`KilnCMSWeb.Plugs.PublicCache`): its ETag digests
+  the body, `also_searched` included, and a rule write purges the site's CDN
+  key (`KilnCMS.CDN.purge_site/1`).
 
   `explain=1` (or `true`) adds an `explain` object to every content hit —
   each leg's `rank`, raw `score` and its `measure` (`ts_rank_cd`,
@@ -61,6 +70,7 @@ defmodule KilnCMSWeb.SearchApiController do
   alias KilnCMS.I18n
   alias KilnCMS.Search
   alias KilnCMS.Search.Highlight
+  alias KilnCMS.Search.Synonyms
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Params
 
@@ -92,7 +102,13 @@ defmodule KilnCMSWeb.SearchApiController do
       json(
         conn,
         Map.merge(
-          %{query: query, locale: locale, results: empty_sections(), suggestion: nil},
+          %{
+            query: query,
+            locale: locale,
+            results: empty_sections(),
+            suggestion: nil,
+            also_searched: []
+          },
           partial(%{})
         )
       )
@@ -164,11 +180,16 @@ defmodule KilnCMSWeb.SearchApiController do
       limit: limit
     ]
 
+    # Read once and handed down, so what the response reports is what every
+    # section searched.
+    also_searched = Synonyms.alternates(query, org_id)
+
     report =
       Search.global_report(
         query,
         read_opts ++
           [
+            synonyms: also_searched,
             highlight: true,
             explain: explain?(params),
             filters: filters(params, org_id),
@@ -226,7 +247,13 @@ defmodule KilnCMSWeb.SearchApiController do
 
     payload =
       Map.merge(
-        %{query: query, locale: locale, results: results, suggestion: suggestion},
+        %{
+          query: query,
+          locale: locale,
+          results: results,
+          suggestion: suggestion,
+          also_searched: also_searched
+        },
         partial(report.partial)
       )
 

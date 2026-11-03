@@ -1766,6 +1766,7 @@ msgstr "Acción"
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
+#: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "Actions"
 msgstr "Acciones"
@@ -1892,6 +1893,7 @@ msgid "Add a passkey"
 msgstr "Añadir una clave de acceso"
 
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add a rule"
 msgstr "Añadir una regla"
@@ -2014,6 +2016,11 @@ msgstr "Añadir miembro"
 msgid "Add new %{type}"
 msgstr "Añadir %{type}"
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add one when readers search for a name your content doesn't use — the zero-result searches in Analytics are a good place to look."
+msgstr "Añade uno cuando los lectores busquen un nombre que tu contenido no usa: las búsquedas sin resultados de Analítica son un buen punto de partida."
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Add panel"
@@ -2046,6 +2053,7 @@ msgid "Add row"
 msgstr "Añadir fila"
 
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add rule"
 msgstr "Añadir regla"
@@ -2412,6 +2420,16 @@ msgstr "También se entrega como texto plano (custom_fields_plain)"
 msgid "Also included"
 msgstr "También incluye"
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Also search for"
+msgstr "Buscar también"
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Also searched as:"
+msgstr "También se busca como:"
+
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #, elixir-autogen, elixir-format
 msgid "Also set, from the file"
@@ -2720,6 +2738,11 @@ msgstr "Aplicar %{count} cambios de nombre"
 #, elixir-autogen, elixir-format
 msgid "Apply it from your project's Kiln checkout, then rebuild and redeploy:"
 msgstr "Aplícala desde la copia de trabajo de Kiln de tu proyecto, luego reconstruye y vuelve a desplegar:"
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Apply this rule"
+msgstr "Aplicar esta regla"
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -3456,6 +3479,7 @@ msgstr "No se puede reprogramar al pasado."
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
+#: lib/kiln_cms_web/live/search_synonym_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
@@ -4664,6 +4688,11 @@ msgstr "No se pudo guardar automáticamente — compruebe si hay errores"
 msgid "Couldn't change that item."
 msgstr "No se pudo cambiar ese elemento."
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't change that rule."
+msgstr "No se pudo cambiar esa regla."
+
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't change that setting."
@@ -4748,6 +4777,7 @@ msgid "Couldn't delete that role."
 msgstr "No se pudo eliminar ese rol."
 
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't delete that rule."
 msgstr "No se pudo eliminar esa regla."
@@ -4921,6 +4951,11 @@ msgstr "No se pudo revocar esa clave."
 #, elixir-autogen, elixir-format
 msgid "Couldn't save that item."
 msgstr "No se pudo guardar ese elemento."
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save that rule."
+msgstr "No se pudo guardar esa regla."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -5619,6 +5654,7 @@ msgid "Delete role %{name}"
 msgstr "Eliminar rol %{name}"
 
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete rule"
 msgstr "Eliminar regla"
@@ -5708,6 +5744,11 @@ msgstr "¿Eliminar este rol? Los miembros conservan su nivel y su alcance direct
 #, elixir-autogen, elixir-format
 msgid "Delete this rule?"
 msgstr "¿Eliminar esta regla?"
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete this rule? Search stops using it at once."
+msgstr "¿Eliminar esta regla? La búsqueda deja de usarla de inmediato."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
@@ -6369,6 +6410,7 @@ msgstr "Cada nivel concede una audiencia. Configure el precio en el panel de su 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
+#: lib/kiln_cms_web/live/search_synonym_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/structure_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
@@ -6438,6 +6480,11 @@ msgstr "Editar el texto enriquecido"
 #, elixir-autogen, elixir-format
 msgid "Edit role %{name}"
 msgstr "Editar rol %{name}"
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Edit rule"
+msgstr "Editar regla"
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
@@ -6889,6 +6936,11 @@ msgstr "Entorno: %{label}"
 #, elixir-autogen, elixir-format
 msgid "Equal width"
 msgstr "Ancho igual"
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Equivalent — every term finds the others"
+msgstr "Equivalentes: cada término encuentra los demás"
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -8974,6 +9026,7 @@ msgstr "Correo de prueba de KilnCMS"
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
+#: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "Kind"
 msgstr "Tipo"
@@ -10848,6 +10901,11 @@ msgstr "No hay resultados para «%{query}»."
 msgid "No rows yet."
 msgstr "Aún no hay filas."
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "No rule applies — searched as typed."
+msgstr "Ninguna regla se aplica: se busca tal como se escribió."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "No rules apply, so every document reports as unchecked rather than as clean. Add some phrases, or put the deployment's rules back."
@@ -10899,6 +10957,11 @@ msgstr "No hay direcciones bloqueadas."
 #, elixir-autogen, elixir-format
 msgid "No sweep has finished yet — the first one runs tonight."
 msgstr "Aún no ha terminado ningún rastreo: el primero se ejecuta esta noche."
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "No synonyms yet"
+msgstr "Aún no hay sinónimos"
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
@@ -11557,6 +11620,11 @@ msgstr "Un solo conjunto de valores"
 #, elixir-autogen, elixir-format
 msgid "One-to-many: a chapter belongs to a single book."
 msgstr "Uno a muchos: un capítulo pertenece a un solo libro."
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "One-way — the terms find the targets, not back"
+msgstr "En un sentido: los términos encuentran los destinos, no al revés"
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
@@ -12891,6 +12959,11 @@ msgstr "Lista de preguntas y respuestas, publicada con datos estructurados de pr
 msgid "Quantity"
 msgstr "Cantidad"
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Query"
+msgstr "Consulta"
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Question"
@@ -14128,6 +14201,11 @@ msgstr "¿Rotar la clave push de este sitio? Ningún dispositivo usa la actual, 
 msgid "Row %{position}"
 msgstr "Fila %{position}"
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rule"
+msgstr "Regla"
+
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Rule added."
@@ -14369,6 +14447,11 @@ msgstr "Guardar preferencias"
 msgid "Save profile"
 msgstr "Guardar perfil"
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Save rule"
+msgstr "Guardar regla"
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save secret"
@@ -14498,6 +14581,7 @@ msgstr "Al guardar esto, el contenido de este sitio se envía a la URL de abajo.
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/locale_settings_live.ex
+#: lib/kiln_cms_web/live/search_synonym_live.ex
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
@@ -14680,6 +14764,12 @@ msgstr "Buscar contenido publicado"
 #, elixir-autogen, elixir-format
 msgid "Search published content…"
 msgstr "Buscar contenido publicado…"
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search synonyms"
+msgstr "Sinónimos de búsqueda"
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
@@ -14997,6 +15087,11 @@ msgstr[1] "Enviado a %{count} endpoints cuyo detalle de entrega se depuró (se c
 #, elixir-autogen, elixir-format
 msgid "Sent to %{email}. Check that inbox."
 msgstr "Enviado a %{email}. Revisa esa bandeja de entrada."
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Separate terms with commas. A term can be several words."
+msgstr "Separa los términos con comas. Un término puede tener varias palabras."
 
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
@@ -15826,6 +15921,7 @@ msgstr "Estado:"
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
+#: lib/kiln_cms_web/live/search_synonym_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -16120,6 +16216,16 @@ msgstr "Sincronizado en vivo — guardados de coeditores"
 msgid "Syndicate the full body of every %{type}"
 msgstr "Sindicar el cuerpo completo de cada %{type}"
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Synonym rule deleted."
+msgstr "Regla de sinónimos eliminada."
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Synonym rule saved. Search uses it from the next query."
+msgstr "Regla de sinónimos guardada. La búsqueda la usa desde la próxima consulta."
+
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/image_backend_live.ex
@@ -16339,6 +16445,11 @@ msgstr "Nivel temporal"
 #, elixir-autogen, elixir-format
 msgid "Temporary tier ended."
 msgstr "Nivel temporal finalizado."
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Terms"
+msgstr "Términos"
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -16672,6 +16783,11 @@ msgstr "Ese lanzamiento no se puede eliminar."
 #, elixir-autogen, elixir-format
 msgid "That release no longer exists."
 msgstr "Ese lanzamiento ya no existe."
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "That rule is no longer listed."
+msgstr "Esa regla ya no aparece en la lista."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
@@ -18334,6 +18450,11 @@ msgstr "Trigramas"
 msgid "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
 msgstr "Trigramas: tres líneas por elemento — publicado abajo, traducido en medio, programado arriba; una línea continua significa sí. Pasa el cursor sobre uno para ver su lectura."
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Try a query"
+msgstr "Prueba una consulta"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Try a wider filter, or clear it to see everything."
@@ -18377,6 +18498,7 @@ msgid "Tue"
 msgstr "mar"
 
 #: lib/kiln_cms_web/live/link_report_live.ex
+#: lib/kiln_cms_web/live/search_synonym_live.ex
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "Turn off"
@@ -18387,6 +18509,7 @@ msgstr "Desactivar"
 msgid "Turn off on this device"
 msgstr "Desactivar en este dispositivo"
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "Turn on"
@@ -19409,6 +19532,11 @@ msgstr "Cuando un %{type} enlazado se elimina definitivamente…"
 msgid "When a linked record is deleted for good…"
 msgstr "Cuando un registro enlazado se elimina definitivamente…"
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "When a search says"
+msgstr "Cuando una búsqueda dice"
+
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "When a translation is missing"
@@ -19629,6 +19757,11 @@ msgstr "Recuento de palabras"
 msgid "Words"
 msgstr "Palabras"
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "Words your readers search for that your content doesn't use. A search naming one is also run with the others, ranked just below matches on the reader's own words — on the site, the search and ask APIs, and MCP."
+msgstr "Palabras que tus lectores buscan y que tu contenido no usa. Una búsqueda que nombra una también se ejecuta con las demás, justo por debajo de las coincidencias con las palabras del lector: en el sitio, en las API de búsqueda y de preguntas, y en MCP."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Words: the state badge, the date an item publishes or unpublishes, and “Missing translations” when a language is still to do."
@@ -19797,6 +19930,11 @@ msgstr "No tienes permiso para añadir etiquetas."
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change experiments on this site."
 msgstr "No tiene permiso para cambiar los experimentos de este sitio."
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change search synonyms."
+msgstr "No tienes permiso para cambiar los sinónimos de búsqueda."
 
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
@@ -20279,6 +20417,11 @@ msgstr "se añade justo antes de </head>"
 msgid "all confirmed subscribers"
 msgstr "todos los suscriptores confirmados"
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "also searches"
+msgstr "también busca"
+
 #: lib/kiln_cms_web/live/automation_live/preview.ex
 #, elixir-autogen, elixir-format
 msgid "an editor"
@@ -20693,6 +20836,11 @@ msgstr "en cola"
 #, elixir-autogen, elixir-format
 msgid "enqueued, not yet answered"
 msgstr "en cola, aún sin respuesta"
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "equivalent"
+msgstr "equivalentes"
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -21144,10 +21292,20 @@ msgstr "aún sin anclar"
 msgid "number"
 msgstr "número"
 
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "off"
+msgstr "desactivada"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "ok"
 msgstr "correcto"
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "on"
+msgstr "activada"
 
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format
@@ -21163,6 +21321,11 @@ msgstr "una palabra clave o frase por línea"
 #, elixir-autogen, elixir-format
 msgid "one segment"
 msgstr "un segmento"
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "one-way"
+msgstr "en un sentido"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -21265,6 +21428,16 @@ msgstr "registro"
 #, elixir-autogen, elixir-format
 msgid "recorded content views"
 msgstr "visualizaciones de contenido registradas"
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "reishi tea"
+msgstr "té de reishi"
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "reishi, ling zhi, ganoderma"
+msgstr "reishi, ling zhi, ganoderma"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -21588,6 +21761,11 @@ msgstr "demasiado grande (máx. %{mb} MB)"
 #, elixir-autogen, elixir-format
 msgid "too many files at once (max %{count})"
 msgstr "demasiados archivos a la vez (máx. %{count})"
+
+#: lib/kiln_cms_web/live/search_synonym_live.ex
+#, elixir-autogen, elixir-format
+msgid "traditional chinese medicine"
+msgstr "medicina tradicional china"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
