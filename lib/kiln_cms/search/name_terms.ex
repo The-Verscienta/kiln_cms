@@ -19,8 +19,8 @@ defmodule KilnCMS.Search.NameTerms do
       when every part is a name term (`xiaoyaosan` → `xiao yao san`).
 
   Each variant carries its **span**: the joined word, or the split parts as
-  a phrase. The compound leg (`:search_compound`,
-  `KilnCMS.CMS.Content.compound_filter/1`) matches a record when its name
+  a phrase. The compound leg (`:search_compound`, built by `KilnCMS.CMS.Content`)
+  matches a record when its name
   occurs in a variant the way the title leg matches a name in the query,
   *and* the span occurs in that name. The second half is what keeps a
   split honest: `carpet` → `car pet` names a record called "Car Pet", never
