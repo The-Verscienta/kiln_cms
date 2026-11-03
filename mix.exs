@@ -57,7 +57,19 @@ defmodule KilnCMS.MixProject do
       # Advisories `mix hex.audit` reports that have no fixed release yet, each
       # with what keeps it from mattering here. Remove an entry as soon as the
       # fix ships; an entry that no longer matches the lock warns.
-      hex: [ignore_advisories: []],
+      hex: [
+        ignore_advisories: [
+          # assent: the Sign in with Apple strategy merges the callback's
+          # unsigned `user` parameter over the verified ID token's claims.
+          # Fixed only in assent 0.3.2, and ash_authentication 4.15.0 (newest
+          # 4.x) pins assent below 0.3.0. The flaw is confined to
+          # `Assent.Strategy.Apple`, which Kiln never configures: SSO is the
+          # generic `oidc :sso` strategy (KilnCMS.Accounts.User) and
+          # `Assent.Strategy.OIDC` (KilnCMS.Accounts.SiteSSO), neither of which
+          # reads a `user` callback parameter.
+          "EEF-CVE-2026-117656"
+        ]
+      ],
       # `mix.lock` unless the overlay ships `config/project_deps.exs` (#1967):
       # then `config/project.lock`, so the core's committed lock never changes.
       lockfile: KilnCMS.Config.ProjectDeps.lockfile(__DIR__),
