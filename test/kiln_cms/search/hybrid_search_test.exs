@@ -685,6 +685,13 @@ defmodule KilnCMS.Search.HybridTest do
     @query "alpha beta delta epsilon"
     @with_any [:semantic, :block, :tag, :keyword_any]
 
+    # Three of the four words are in no document, so the term-evidence gate
+    # (`term_gate/0`) would call the query junk and drop the any-term hit
+    # before the floor saw it. These tests are about the floor alone.
+    setup do
+      put_search_env(term_gate: false)
+    end
+
     defp any_term_page(admin) do
       # Shares one word with the query: the relaxation's find, nobody else's.
       CMS.create_page!(%{title: "alpha gamma", slug: slug()}, actor: admin)

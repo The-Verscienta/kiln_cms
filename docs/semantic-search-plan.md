@@ -220,6 +220,24 @@ the variant — `KilnCMS.Search.keyword_any_idf_coverage/0` spells it out. Off
 (`nil`) by default; it acts only while `:keyword_any` is judged, and costs two
 queries per section only when a judged `keyword_any` hit is beyond the floor.
 
+**The term-evidence gate (A6).** A distance cannot separate a typo from
+junk: both arrive with an empty keyword leg and are answered by the legs that
+always answer, in the same score band — a production deployment's held-out set
+found no cutoff, in Kiln or in Meilisearch, that rejected junk and kept typos.
+Their words differ, so `term_gate` (`KilnCMS.Search.term_gate/0`, on by
+default) reads them: for a section whose keyword leg is empty, each query term
+is checked against the section's `search_vector` vocabulary, its records'
+names (title, `names_record` fields, tag names) and words within `d(len)`
+edits of those names (`fuzzystrmatch`). Under `min_share` (0.6; 0.5 when a
+term is a name outright) the query is junk and only the vouching legs may
+answer it — in practice nothing comes back. A term one edit from a name is a
+typo, and the fuzzy leg also runs on the corrected query ("gui zi tang" →
+"gui zhi tang"). It runs before the floor and needs no calibration; its cost
+is the synonym-only query ("licorice" for a corpus that never says it), which
+now returns nothing unless a site synonym rule rewords it (a `:synonym` hit
+vouches for itself). `SEARCH_TERM_GATE=false` turns it off,
+`SEARCH_TERM_GATE_MIN_SHARE` retunes it.
+
 **Runtime overrides.** `SEARCH_SEMANTIC_MAX_DISTANCE`,
 `SEARCH_SEMANTIC_FLOOR_LEGS` and `SEARCH_KEYWORD_ANY_IDF_COVERAGE` override the
 compiled values at boot ([environment-variables.md](environment-variables.md#search-relevance-floor-1936)),
