@@ -12,7 +12,9 @@ defmodule Mix.Tasks.Kiln.Search.Eval do
   format is documented on `KilnCMS.Search.Eval`, and `priv/search_eval/
   example.json` is one written against the demo seeds. Classes are
   `single_entity`, `multi_entity`, `paraphrase`, `question_form`, `typo` and
-  `junk`; a junk row expects nothing and passes only when nothing comes back.
+  `junk`, plus the adversarial `cross_section`, `exact_phrase`, `prefix`,
+  `joined_name` and `cjk_name`; a junk row expects nothing and passes only
+  when nothing comes back.
 
   ## What is measured
 

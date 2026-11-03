@@ -90,7 +90,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Fired artifacts** | `GET /api/content/:type/:slug` | Pre-rendered output per surface: `json` (default), `json_ld`, `web`, and `llm` (raw `text/markdown`). `?as_of=` reads a document as it stood on a date; `GET /api/content/:type?as_of=` lists what was published then; `?fields=` trims the `json` body ([§ Sparse fieldsets](#sparse-fieldsets-on-artifacts)). | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md), [point-in-time.md](point-in-time.md) |
 | **Sync (delta)** | `GET /api/sync` | Mirror public content: a snapshot, then upserts **and deletions** since an opaque cursor — the only surface that reports a document *leaving*. | [§ Sync](#sync-delta-api), [native-apps.md](native-apps.md) |
 | **Version history** | `GET /api/content/:type/:id/revisions` | A document's revisions, one revision's snapshot, and restore. Editor-tier credential required. | [§ Version history](#version-history-revisions) |
-| **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked; answers as an anonymous visitor whatever the credential. `503` with `Retry-After` (`temporarily_unavailable`) when the database pool cannot take the search. `?explain=1` reports why each hit ranked where it did. | [search-roadmap.md](search-roadmap.md), [§ Explaining a search ranking](#explaining-a-search-ranking) |
+| **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked; answers as an anonymous visitor whatever the credential. `503` with `Retry-After` (`temporarily_unavailable`) when the database pool cannot take the search. Answers within a time budget, flagged `partial` when it had to cut a leg; per-leg times in `Server-Timing` ([below](#search-budget-and-server-timing)). `?explain=1` reports why each hit ranked where it did ([§ Explaining a search ranking](#explaining-a-search-ranking)). | [search-roadmap.md](search-roadmap.md) |
 | **Path resolution** | `GET /api/resolve?path=` | "What lives at this URL?" — content, a redirect to follow, or nothing — for a front end's catch-all route. | [json-api.md](json-api.md) (URLs, pathauto & redirects) |
 | **Menus** | `GET /api/menus`, `GET /api/menus/:key` | Resolved navigation trees with live URLs. | [navigation-menus.md](navigation-menus.md) |
 | **Related content** | `GET /api/content/:type/:slug/related` | Published documents semantically closest to this one (empty when semantic search is off). | [rag.md](rag.md) |
@@ -1600,6 +1600,57 @@ with backoff on failure, and sent through `KilnCMS.SafeFetch`, so in production
 the URL must be `https://` and resolve to a public address. A purge that never
 lands leaves the cached copies to expire on their own. The `kiln` key on every
 response exists for a deployment-wide purge by hand.
+
+## Search budget and Server-Timing
+
+`GET /api/search` answers within a time budget (#2166): `query_budget` in
+`config :kiln_cms, KilnCMS.Search`, 1500 ms by default. The query embedding
+gets half of it. A leg still running at the deadline is left out, and the
+legs that finished are fused as usual. Every response says whether that
+happened:
+
+```json
+{
+  "query": "migrations",
+  "results": { "pages": [ … ], "posts": [ … ] },
+  "partial": true,
+  "incomplete": { "pages": ["semantic", "block", "tag"], "posts": ["semantic", "block", "tag"] }
+}
+```
+
+- `partial` — `true` when the budget cut anything, `false` otherwise. Always
+  present.
+- `incomplete` — per section, what did not contribute: a leg name as in a
+  hit's `legs` (`keyword` covers `keyword` and `keyword_any`), `rerank` when
+  the section is in fused order because the reranker ran out of time, or
+  `section` for a taxonomy section that had not answered. `{}` when nothing
+  was cut. A leg that ran and found nothing is not listed, and neither is
+  one that does not apply, such as the semantic legs on an install without
+  semantic search.
+
+A partial response is sent with `cache-control: no-store`, so a CDN does not
+keep the cut answer for its 60 seconds. A client can show it and retry later,
+or retry now if it would rather wait.
+
+Every non-empty search also sends a
+[`Server-Timing`](https://www.w3.org/TR/server-timing/) header, with
+durations in milliseconds:
+
+```
+server-timing: embed;dur=11.8, keyword;dur=6.2, title;dur=1.9, alias;dur=1.4, fuzzy;dur=0.0, semantic;dur=4.1, block;dur=3.0, tag;dur=0.0, fuse;dur=3.3, sweep;dur=24.7, suggest;dur=0.0, total;dur=26.0
+```
+
+`embed` is the query embedding. Each leg (`keyword`, `title`, `alias`,
+`fuzzy`, `semantic`, `block`, `tag`), `fuse` (fusion, the relevance floor and
+reading the kept hits) and `rerank` (only when reranking is on) are summed
+over the content sections. The sections run concurrently, so these can add up
+to more than `sweep`, the wall time of the whole search. `suggest` is the
+"did you mean" lookup, `facets` is there with `facets=true`, and `total` is
+the whole request inside Kiln. A browser shows the header in its network
+panel. A script on another origin can read it only if the response also
+carries `Timing-Allow-Origin`, which Kiln does not send. The header carries
+no content, but it does say how long each part of a search took. An install
+that does not want that public can strip `server-timing` at its proxy.
 
 ## Rate limits
 
