@@ -5,9 +5,51 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Upgrade notes
 
+<a id="field-role-weights-upgrade"></a>
+
+- **Run the re-fire sweep after deploying; overlays first run `mix ash.codegen`
+  (#2175, A3).** Every content table gains a nullable `search_weighted` column:
+  `pages`, `posts` and `entries` in core, and each overlay content table through
+  the overlay's own codegen. An overlay's reads fail until that column exists.
+  No overlay needs a trigger migration, because the one shared
+  `kiln_search_vector_refresh()` function looks for the column on each table it
+  runs for. The column's values are computed in Elixir, so the migration cannot
+  backfill them. Until a row is re-saved or re-fired it keeps the old vector, with
+  the title at `A` and all its other text at `B`, and a corpus that is half old
+  and half new ranks unevenly. `mix kiln.refire_all` fills every published
+  document (`/app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"` on a release).
+  A draft is filled on its next save.
 
 ## Added
+
+<a id="search-synonyms"></a>
+
+- **Search synonyms and aliases, per site (proposal A7).** A site whose
+  readers search for "reishi" when its content says "Ling Zhi" had to fix it
+  in the consumer: Verscienta's own synonym table was worth +0.058 MRR over
+  the backend, and Kiln's own surfaces — `/api/ask`, the editor palette, the
+  public `/search` page — got none of it. `KilnCMS.CMS.SearchSynonym` holds the
+  rules: a `group` of equivalent terms (`reishi ⇄ ling zhi ⇄ ganoderma`) or a
+  `one_way` rule (`tcm → traditional chinese medicine`), multi-word terms
+  matched as phrases at word boundaries. `Search.hybrid/3` reads them
+  (`KilnCMS.Search.Synonyms`, cached per site and busted on every write) and
+  runs each alternate wording of the query through the keyword, title and
+  alias legs at half the weight of the same leg on the user's own words — the
+  new `synonym` leg — so a record the reader named outranks one a rule named
+  for them. The semantic legs do not re-run: the query's one embedding already
+  carries its meaning. `global/2` reads the rules once per sweep, and
+  `/api/search` reports the alternates it searched as `also_searched`. Editors
+  manage rules at `/editor/search-synonyms` (with a "try a query" box); only an
+  admin deletes one. A rule write purges the site's CDN key, since it changes
+  what a publicly cached `/api/search` URL answers. `/mcp` gains a
+  `search_content` tool (`KilnCMS.CMS.ContentSearch`) — the ranked hybrid
+  search under the key's own read policies, which MCP clients had no way to
+  reach before. The index-time half of the proposal ("index this field's
+  values as names") already exists as `names_record` on a field definition
+  (`KilnCMS.CMS.NameFields`); a synonym's alternate runs the alias leg too, so
+  the two compose.
 
 <a id="search-ranking-fixture"></a>
 
@@ -28,6 +70,99 @@ carries the reasoning.
   (`cross_section`, `exact_phrase`, `prefix`, `joined_name`, `cjk_name`), so a
   deployment's own set can use them.
 
+<a id="search-explain"></a>
+
+- **Search explain mode: why a hit ranked where it did (#2177).** A site
+  comparing Kiln's `/api/search` against Meilisearch could see a hit's `score`
+  and `legs`, but nothing like `_rankingScoreDetails`. It had to guess "matched
+  some of the words" from the `keyword_any` leg's name. `GET
+  /api/search?explain=1`, and `explain: true` on `KilnCMS.Search.hybrid/3` and
+  `global/2`, now attach an `explain` object to every content hit
+  (`KilnCMS.Search.hit_explain/1`). For each leg it gives the rank fusion used,
+  which in a `global/2` sweep is the rank over every section. It also gives
+  that rank's contribution to `score` and the raw number the leg ranked by:
+  `ts_rank`, cosine distance or trigram similarity. Alongside these are the
+  query's terms, which ones the hit's `search_vector` contains, and `coverage`
+  (matched / terms). A consumer can sort by coverage and then score without
+  re-deriving coverage from snippets. The leg numbers come from the keys
+  fusion already collected. The term match adds one query per section, over
+  the kept hits only, and the fuzzy leg loads its similarity only under
+  explain. Explain is off by default, so the default payload is unchanged. An
+  explained response is `private, no-store` with no `ETag`, so it never
+  becomes the cached answer for a search URL.
+
+## Changed
+
+<a id="field-role-weights"></a>
+
+- **Keyword search weights a record's text by role and scores phrase proximity
+  (#2175, A3).** `search_vector` used to hold the title at `A` and everything
+  else at `B`, and `ts_rank` saturated near 1 on any long document that repeated
+  the query's words. A monograph that scattered "clears", "heat", "dries" and
+  "dampness" therefore outranked the record whose own field says "clears heat
+  and dries dampness" (0.97 against 0.95).
+
+  The vector is now built from `search_weighted`, which
+  `KilnCMS.CMS.Changes.SetSearchText` writes beside `search_text`:
+
+  - `A`: the title, and every `names_record` field, searchable or not;
+  - `B`: the summary fields (`seo_title`, `seo_description`, `seo_keywords`,
+    `excerpt`) and the first 48 words of the searchable custom fields, in
+    extractor order;
+  - `C`: the rest of those fields;
+  - `D`: the body.
+
+  `search_rank` and `search_rank_any` use `ts_rank_cd`. A query of two or more
+  words adds the score of its phrase (`phraseto_tsquery`, last word as a
+  prefix). Cover density alone still let repetition win inside one field
+  ("Intensely bitter and cold." scored 0.20 against 0.28 for a field that
+  repeats "bitter" and "cold" apart); the phrase score settles it. Every content
+  table ranks with the same expression over the same weights, so `global/2` can
+  still compare keyword ranks across sections. A field definition reports the
+  weight its text gets as the `search_weight` calculation (`"A"`, `"B"` or nil).
+  Explain mode (#2177) reports the keyword legs' raw score as `measure:
+  "ts_rank_cd"` accordingly.
+
+  The trigger keeps the old vector for a row whose `search_weighted` is nil. It
+  does the same when an update changes `title` or `search_text` and leaves
+  `search_weighted` alone, which is what the previous release writes during a
+  rolling deploy; the stale buckets are cleared. `RankingStabilityTest` moved on
+  one query. On "pad thai tom yum", Pad Thai and Tom Yum, whose titles carry the
+  words, now lead the any-term leg over Thai Street Food, which names all four
+  in its body. Fused scores moved by one or two reciprocal ranks in that leg, and
+  no result changed position.
+
+<a id="term-evidence-gate"></a>
+
+- **Hybrid search tells a typo from junk by the query's words, not by a score
+  (A6).** A downstream deployment benchmarked `/api/search` against
+  Meilisearch on a held-out set and found no score threshold, in either
+  engine, that separated the two: Meilisearch's floor rejected all the junk
+  and every typo with it, and Kiln passed 17–19 of 40 junk queries while
+  missing typos. Both kinds arrive with an empty keyword leg and are answered
+  by the legs that always answer — the semantic neighbours, the any-term
+  relaxation's one shared word, the trigram guesses.
+
+  `KilnCMS.Search.term_gate/0` (on by default) now reads, for a section whose
+  keyword leg is empty, each query term against the section's vocabulary:
+  its `search_vector`, its records' names (title, `names_record` fields, tag
+  names), and words within one edit (two from eight letters) of those names,
+  through the new `fuzzystrmatch` extension. When fewer than 60% of the terms
+  have any such evidence (50% when one term is a record's name outright), the
+  query is junk, and only the keyword, title and alias legs may answer it —
+  in practice nothing comes back. A term one edit from a name is a typo, and
+  the fuzzy leg also runs on the corrected query: "gui zi tang" finds Gui Zhi
+  Tang, "saffon" now finds Saffron Rice, which trigrams alone never reached.
+
+  What it costs is the synonym-only query — a word the corpus never uses that
+  the semantic leg would have answered ("licorice" for a corpus that says
+  "glycyrrhiza"). That now returns nothing, unless a site synonym rule
+  rewords it: a `:synonym` hit vouches for itself under a junk verdict, as a
+  keyword, title or alias hit does. `SEARCH_TERM_GATE=false` (or
+  `term_gate: false`) turns the gate off; `SEARCH_TERM_GATE_MIN_SHARE` or
+  `term_gate: [min_share: …]` retunes it. `KilnCMS.Search.term_evidence/3`
+  shows the verdict for a query. The migration adds the extension only.
+
 ## Fixed
 
 <a id="global-search-ranks"></a>
@@ -38,14 +173,22 @@ carries the reasoning.
   1 in every leg that returned it, and on `/api/search?q=heat interior` the only
   post (0.0410 = 2.5 / 61) outscored records that matched both terms. A sweep
   now collects every requested content section's legs first. It then ranks the
-  keyword, any-term, semantic, block and tag legs over all of them at once, by
-  `ts_rank` or cosine distance, with ties sharing a rank, and fuses each section
-  at those ranks. The title, alias and fuzzy legs still rank per section. A
-  title or alias hit is a record the query names outright, and the fuzzy leg is
-  a per-section fallback. A direct `hybrid/3` call is unchanged. Scores from
+  keyword, any-term, semantic, block, tag and fuzzy legs over all of them at
+  once, by `ts_rank`, cosine distance or trigram similarity, and fuses each
+  section at those ranks. Records that tie on that measure keep their leg's own
+  order within a section, and share a rank only with another section's record
+  at the same position. That matters most for the tag leg: every document
+  carrying the matched tag has the tag's distance, and ranked by distance alone
+  they would all have taken rank 1. A sweep of one section therefore ranks
+  exactly as `hybrid/3` does. The title and alias legs still rank per section:
+  a title or alias hit is a record the query names outright. Scores from
   `global/2` move, and so does the order within a section where semantic-only
   neighbours were spaced differently. `KilnCMS.Search.RankingStabilityTest` is
-  re-pinned for this reason.
+  re-pinned for this reason. A sweep that reranks each section under
+  `rerank_mode: {:rrf, k}` still scores per section, since the blend is built
+  from ranks within the section; `hit_score/1` says so. Only a sweep, or
+  `explain: true`, now loads the `ts_rank` and trigram similarity its legs rank
+  by; a plain `hybrid/3` call skips that per-row cost.
 
 <a id="search-warmup-and-budget"></a>
 
@@ -129,3 +272,23 @@ carries the reasoning.
   protection, which would add an audit-log table; its own per-account and
   per-address throttles stay as they were.
   ([#2185](https://github.com/The-Verscienta/kiln_cms/pull/2185))
+
+<a id="compound-names"></a>
+
+- **Search matches names written spaced or joined (proposal A5).** A
+  downstream TCM catalogue measured `huangqi` reaching Huang Qi at rank 30,
+  and `xiaoyaosan` and `He Gu` not reaching their records at all:
+  `to_tsvector` splits at spaces and never inside a word, so the title and
+  alias legs could not see either spelling as the other. `hybrid/3` gains a
+  `compound` leg (`:search_compound`) that rewrites the query one span at a
+  time — two or three adjacent words joined, or one word split into two or
+  three — and matches the rewrites against titles and `names_record` fields
+  at the title leg's weight. A rewrite is made only from the site's name
+  terms (`KilnCMS.Search.NameTerms`: the words of published titles and
+  flagged names, per organization, cached five minutes), so body text never
+  produces one; and a split names a record only when the record's name
+  holds the whole split, so `carpet` → `car pet` never finds "Car". A query
+  with nothing to rewrite does not run the leg: on a 2,000-record catalogue
+  the added work is ~0.07 ms of a 11–18 ms query, and a query that does
+  rewrite pays one more index-guarded leg query. `legs` on `/api/search` and
+  `/api/ask` hits may now include `compound`.

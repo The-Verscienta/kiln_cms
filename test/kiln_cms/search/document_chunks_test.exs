@@ -378,6 +378,14 @@ defmodule KilnCMS.Search.DocumentChunksTest do
   end
 
   describe "search" do
+    # "small marsupial" shares no word with the corpus — that is the point:
+    # only a vector can find the record. It is also exactly the query the
+    # term-evidence gate (`term_gate/0`) calls junk, so these tests of the
+    # chunk vectors run without it.
+    setup do
+      put_search_env(term_gate: false)
+    end
+
     test "a record whose only match is past the window is found through its chunk" do
       admin = user(:admin)
       page = long_page(admin)

@@ -453,6 +453,8 @@ defmodule KilnCMSWeb.Router do
       live "/editor/menus", MenuLive, :index
       live "/editor/menus/:id", MenuLive, :show
       live "/editor/analytics", AnalyticsLive, :index
+      # Search synonyms and aliases (A7) — applied by every search surface.
+      live "/editor/search-synonyms", SearchSynonymLive, :index
       # Site-wide broken outbound links (#474). Editorial, so it lives here
       # rather than under the admin session; the opt-in switch on the page is
       # admin-gated by the resource policy, not by the route.

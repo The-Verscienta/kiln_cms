@@ -54,10 +54,34 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Run the re-fire sweep after deploying (`mix kiln.refire_all`); overlays first run
+  `mix ash.codegen`. Content tables gain `search_weighted`; old rows keep the old weights.**
+  ([#2183](https://github.com/The-Verscienta/kiln_cms/pull/2183) · [long form](docs/changelog/unreleased.md#field-role-weights-upgrade))
+
 ### Added
 
+- **Per-site search synonyms and aliases (`/editor/search-synonyms`): equivalent groups and
+  one-way rules, applied by `/api/search` (`also_searched`), `/api/ask`, the new `/mcp`
+  `search_content` tool and site search alike.** ([long form](docs/changelog/unreleased.md#search-synonyms))
+- **Search finds a name written spaced or joined differently from the site:
+  `huangqi` finds Huang Qi, `xiao yao san` Xiaoyaosan, `SP 9` SP9.**
+  ([long form](docs/changelog/unreleased.md#compound-names))
+- **Search: `explain=1` on `/api/search` (and `explain: true` on `hybrid/3`/`global/2`)
+  reports each hit's leg ranks, raw scores, matched terms and coverage.**
+  ([#2177](https://github.com/The-Verscienta/kiln_cms/pull/2177) · [long form](docs/changelog/unreleased.md#search-explain))
 - **Search: an adversarial ranking fixture gates CI, and golden sets gain the
   classes it uses.** ([long form](docs/changelog/unreleased.md#search-ranking-fixture))
+
+### Changed
+
+- **Search: keyword ranking weights a record's text by role (title and names `A`, fields `B`/`C`,
+  body `D`) and ranks with `ts_rank_cd` plus a phrase score, so an adjacent phrase wins.**
+  ([#2183](https://github.com/The-Verscienta/kiln_cms/pull/2183) · [long form](docs/changelog/unreleased.md#field-role-weights))
+- **Search returns nothing for a query most of whose words are in no record's text or name;
+  a word one edit from a name is a typo, and the fuzzy leg retries corrected. `SEARCH_TERM_GATE=false` reverts.**
+  ([long form](docs/changelog/unreleased.md#term-evidence-gate))
 
 ### Fixed
 

@@ -52,6 +52,14 @@ Reads (all policy-scoped — drafts are visible only if the owner is an editor):
 `read_pages`, `read_posts`, `read_entries`, `read_type_definitions`,
 `read_field_definitions`, `read_tags`, `read_tag_groups`, `read_categories`.
 
+Search: `search_content` (`query`, optional `limit` 1–25 and `locale`) runs the
+same hybrid search as `/api/search` and `/api/ask` — keyword, title, alias and
+semantic legs fused and ranked, with the site's search synonyms applied
+(`/editor/search-synonyms`) — under the key's own read policies, so an
+editor's key finds drafts too. It answers one list across every content type,
+best first, each hit with its `type`, `id`, `slug`, `score` and `legs`, plus
+`also_searched`: the alternate wordings the site's synonyms added.
+
 Authoring (require a write key + editor role): `create_page` / `update_page` /
 `submit_page_for_review`, the same trio for posts and dynamic-type entries
 (`create_entry` needs a `type_definition_id` — discover them with

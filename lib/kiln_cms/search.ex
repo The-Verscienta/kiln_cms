@@ -10,7 +10,9 @@ defmodule KilnCMS.Search do
   require Logger
 
   alias KilnCMS.Search.Budget
+  alias KilnCMS.Search.NameTerms
   alias KilnCMS.Search.RerankOrder
+  alias KilnCMS.Search.Synonyms
 
   @doc "Whether semantic search is enabled."
   @spec semantic?() :: boolean()
@@ -501,7 +503,7 @@ defmodule KilnCMS.Search do
   # error because they are the likeliest mistake.
   @floor_semantic_legs [:semantic, :block, :tag]
   @floor_optional_legs [:keyword_any, :fuzzy]
-  @floor_vouching_legs [:keyword, :title, :alias]
+  @floor_vouching_legs [:keyword, :title, :alias, :compound]
 
   @doc """
   The legs whose hits the relevance floor judges (#1936). A fused hit is
@@ -653,6 +655,153 @@ defmodule KilnCMS.Search do
         raise ArgumentError,
               "config :kiln_cms, KilnCMS.Search, keyword_any_idf_coverage: must be nil or a " <>
                 "number greater than 0 and at most 1, got #{inspect(other)}."
+    end
+  end
+
+  @doc """
+  The **term-evidence gate** (A6): what separates a typo from junk when no
+  score can — `KilnCMS.Search.TermEvidence` judges the query's own words
+  against the section's vocabulary. On by default; `false` turns it off.
+
+  A typo and a junk query look alike to every number `hybrid/3` has. Both
+  come back with an empty keyword leg, both are answered by the legs that
+  always answer — the semantic legs' nearest neighbours, the any-term
+  relaxation's one shared word, the trigram guesses — and both score in the
+  same band. Measured on a production deployment's held-out set, a cutoff
+  that rejected junk rejected every typo with it, in Kiln and in Meilisearch
+  alike. Their words are what differ: every word of "gui zi tang" is in the
+  corpus or one edit from a record's name, and most words of "taylor swift
+  tour dates" are nowhere in it.
+
+  So the gate runs where the floor cannot tell them apart — a section whose
+  keyword leg came back **empty** (a keyword hit means every term is in the
+  vocabulary, and the gate is never consulted) — and reads, for each term,
+  whether the section's vocabulary holds it, whether a record's name holds
+  it, and whether a record's name holds a word within `d(len)` edits of it.
+  Then:
+
+    * **junk** — fewer than `:min_share` of the terms have any of that
+      evidence (fewer than `:min_share_named` when one term is a record's
+      name outright). Only the legs that vouch for a hit — `:keyword`,
+      `:title`, `:alias` — may answer it; a hit the semantic, block, tag,
+      any-term or fuzzy legs alone returned is dropped. With the keyword leg
+      empty, that is almost always every hit: the query returns nothing.
+    * **typo** — not junk, and some term is near a name without being one.
+      The fuzzy leg runs on the corrected query as well ("gui zi tang" →
+      "gui zhi tang"), its hits first, still at the fuzzy weight.
+    * otherwise nothing changes.
+
+  The settings, as a keyword list (each optional):
+
+    * `:min_share` — default `0.6`: a four-term query needs three terms with
+      evidence, a two-term one both.
+    * `:min_share_named` — default `0.5`, the bar when a term names a record:
+      "ban qwerty" has said which record it is about.
+    * `:one_typo_length` — default `2`: terms this long get one edit
+      ("xa" → "xia", "zi" → "zhi"). Romanised names are short; a longer
+      bound loses exactly the probes the gate exists for.
+    * `:two_typo_length` — default `8`: terms this long get two.
+
+  Unlike `semantic_max_distance/0` there is nothing model-specific here to
+  measure first — vocabulary membership is read off the corpus at query
+  time, which is why this ships on where the floor ships `nil`. What it costs
+  is the case the vocabulary cannot see: a query in none of the corpus's
+  words that a semantic leg would still have answered well (a synonym-only
+  paraphrase, "automobile" for a corpus that says "car"). That query now
+  returns nothing where it returned the semantic leg's guess. A site's
+  synonym rules (`KilnCMS.Search.Synonyms`) are the remedy that keeps the
+  gate: a hit the `:synonym` leg returns vouches for itself under a junk
+  verdict, so "automobile → car" answers it. Otherwise turn the gate off, or
+  lower `:min_share`, if your users search that way. Measure with
+  `mix kiln.search.eval`, whose `junk`, `typo` and `paraphrase` classes are
+  the three it moves.
+
+  The cost: nothing when the keyword leg found anything; otherwise one
+  `exists` aggregate per section, and one read of up to twenty names when
+  the verdict is a typo. Both run through the content resource's read under
+  the caller's read options, like `keyword_any_idf_coverage/0`'s.
+
+  Two environment variables override it at boot, each through a key of its
+  own so neither drops an overlay's settings
+  (`config/runtime/prod/search.exs`): `SEARCH_TERM_GATE` (`false` or `true`,
+  as `:term_gate_enabled`) turns it off or on, and
+  `SEARCH_TERM_GATE_MIN_SHARE` (as `:term_gate_min_share`) sets `:min_share`
+  over whatever else is configured. Anything but `false`, `true` or a
+  keyword list of the four settings above **raises** on first use, as does a
+  share outside `(0, 1]` or a length below `1`.
+  """
+  @spec term_gate() :: KilnCMS.Search.TermEvidence.gate() | nil
+  def term_gate do
+    settings = cfg(:term_gate, true)
+
+    unless is_boolean(settings) or is_list(settings),
+      do: raise_term_gate(settings, "must be true, false or a keyword list")
+
+    # `:term_gate_enabled` is `SEARCH_TERM_GATE`'s key: it wins either way.
+    case {cfg(:term_gate_enabled, nil), settings} do
+      {false, _settings} -> nil
+      {nil, false} -> nil
+      {_enabled, opts} when is_list(opts) -> term_gate_settings(opts)
+      {_enabled, _on} -> term_gate_settings([])
+    end
+  end
+
+  @term_gate_defaults [
+    min_share: 0.6,
+    min_share_named: 0.5,
+    one_typo_length: 2,
+    two_typo_length: 8
+  ]
+
+  defp term_gate_settings(opts) do
+    unless Keyword.keyword?(opts) and
+             Keyword.keys(opts) -- Keyword.keys(@term_gate_defaults) == [],
+           do: raise_term_gate(opts, "takes only #{inspect(Keyword.keys(@term_gate_defaults))}")
+
+    gate =
+      @term_gate_defaults
+      |> Keyword.merge(opts)
+      |> Keyword.merge(
+        List.wrap(if(share = cfg(:term_gate_min_share, nil), do: {:min_share, share}))
+      )
+      |> Map.new()
+
+    for key <- [:min_share, :min_share_named],
+        not (is_number(gate[key]) and gate[key] > 0 and gate[key] <= 1),
+        do: raise_term_gate(opts, "#{key} must be a number greater than 0 and at most 1")
+
+    for key <- [:one_typo_length, :two_typo_length],
+        not (is_integer(gate[key]) and gate[key] >= 1),
+        do: raise_term_gate(opts, "#{key} must be a positive integer")
+
+    gate
+  end
+
+  defp raise_term_gate(value, why) do
+    raise ArgumentError,
+          "config :kiln_cms, KilnCMS.Search, term_gate: #{why}, got #{inspect(value)}."
+  end
+
+  @doc """
+  The term-evidence verdict `hybrid/3` would act on for `query` over `type`,
+  read whatever the keyword leg finds — for measuring the gate
+  (`term_gate/0`) on a golden set, or asking why a query came back empty.
+  Takes `hybrid/3`'s `:locale` and read options. `nil` when the gate is off.
+  """
+  @spec term_evidence(atom() | String.t() | module(), String.t(), keyword()) ::
+          KilnCMS.Search.TermEvidence.t() | nil
+  def term_evidence(type, query, opts \\ []) when is_binary(query) do
+    with gate when is_map(gate) <- term_gate() do
+      resource = search_resource(type)
+      locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
+
+      assess_terms(
+        resource,
+        query,
+        locale,
+        Keyword.take(opts, [:actor, :authorize?, :tenant]),
+        gate
+      )
     end
   end
 
@@ -915,6 +1064,15 @@ defmodule KilnCMS.Search do
   # to outrank a lexical or semantic hit on its own.
   @tag_weight 0.5
 
+  # A site's synonyms (A7, `KilnCMS.Search.Synonyms`): each alternate wording
+  # of the query runs the legs that read *wording* — keyword, title, alias —
+  # at this fraction of the weight its own-wording counterpart carries, so a
+  # record found by what the user typed outranks one found only by what a rule
+  # said they might have meant, leg for leg. The semantic legs do not re-run:
+  # one embedding of the query already carries its meaning, and an embedding
+  # per alternate would multiply the dominant cost of a search.
+  @synonym_factor 0.5
+
   # The facet arguments shared by `:search`, `:search_any`, `:search_title`
   # and `:search_semantic`.
   @facet_filters [:category_id, :author_id, :state, :tag_ids]
@@ -929,7 +1087,9 @@ defmodule KilnCMS.Search do
   semantic (`:search_semantic`, cosine), block (the nearest per-block
   embedding per document — see `block_leg?/0`), title (`:search_title`,
   records the query names) and alias (`:search_alias`, records the query
-  names by a field flagged as a name — `KilnCMS.CMS.NameFields`) and tag
+  names by a field flagged as a name — `KilnCMS.CMS.NameFields`), compound
+  (`:search_compound`, records the query names with the words of a name
+  spaced or joined differently — `KilnCMS.Search.NameTerms`) and tag
   (documents carrying a tag the query names — see `tag_leg?/0`) result lists
   by Reciprocal Rank Fusion and return the merged records, best first.
 
@@ -974,6 +1134,12 @@ defmodule KilnCMS.Search do
   semantic and title legs; the fuzzy leg sits out under filters since
   `:autocomplete` can't apply them.
 
+  `:synonyms` is the query's alternate wordings (`KilnCMS.Search.Synonyms`),
+  each searched by the keyword, title and alias legs at `@synonym_factor` of
+  their weight and fused as the `:synonym` leg. Omitted, they are read from the
+  site's rules (`:tenant`); `global/2` reads them once and hands them down,
+  and `synonyms: []` searches the user's wording alone.
+
   `:query_vector` supplies an already-embedded query, skipping the embedding
   the semantic leg would otherwise do. Only worth passing when you are calling
   this repeatedly for one query — `global/2` does, across every content type —
@@ -989,7 +1155,10 @@ defmodule KilnCMS.Search do
 
   Every record comes back carrying the score it was ranked by and the legs
   that returned it — read them with `hit_score/1` and `hit_legs/1`. The list
-  itself is plain records, so nothing that reads one changes.
+  itself is plain records, so nothing that reads one changes. `explain:
+  true` adds why: each leg's rank, contribution and raw score, and which
+  query terms the record matches (`hit_explain/1`). Off by default — it
+  costs a query.
   """
   @spec hybrid(atom() | String.t() | module(), String.t(), keyword()) :: [struct()]
   def hybrid(type, query, opts \\ []) when is_binary(query) do
@@ -999,15 +1168,26 @@ defmodule KilnCMS.Search do
 
   # The legs whose ranks `global/2` takes over the union of its sections
   # (#2175). Each ranks by a number that means the same thing in every
-  # table: a cosine distance (`:semantic`, `:block`, `:tag`) or a `ts_rank`
-  # over the same weighted `search_vector` (`:keyword`, `:keyword_any`).
+  # table: a cosine distance (`:semantic`, `:block`, `:tag`) or a keyword
+  # rank over the same weighted `search_vector` (`:keyword`, `:keyword_any`).
+  # Every content table fills that column from one shared trigger function,
+  # `kiln_search_vector_refresh()` (`KilnCMS.Migrations.add_search_vector/1`),
+  # from the same role buckets, so a keyword rank of 0.6 claims the same
+  # match in any of them. The exception is a rollout: a row not saved or
+  # re-fired since the role weights landed keeps the older title-`A`,
+  # `search_text`-`B` vector, which ranks a body match higher, so until the
+  # re-fire sweep has run, a section of stale rows can outrank re-weighted
+  # ones on body matches.
+  #
   # Ranked per section instead, a section holding one record put it at rank
   # 1 in every leg that returned it, whatever its relevance — the lone post
-  # that outscored every two-term match of "heat interior". The title,
-  # alias and fuzzy legs keep their section ranks: a title or alias hit is
-  # a record the query names outright, which is the same claim in any
-  # section, and the fuzzy leg is a fallback that runs per section.
-  @global_rank_legs [:keyword, :keyword_any, :semantic, :block, :tag]
+  # that outscored every two-term match of "heat interior". The fuzzy leg
+  # ranks by trigram similarity to the title, which compares across tables
+  # the same way, so a section's lone trigram guess no longer takes rank 1
+  # either. The title, alias and compound legs keep their section ranks: a
+  # title, alias or compound hit is a record the query names outright, which
+  # is the same claim in any section, and they carry no measure to rank by.
+  @global_rank_legs [:keyword, :keyword_any, :semantic, :block, :tag, :fuzzy]
 
   # How a sweep hears from the legs it runs: the deadline each leg checks
   # before it starts, and `emit`, called with each leg's result the moment it
@@ -1020,11 +1200,14 @@ defmodule KilnCMS.Search do
   # query vector go last, so a sweep that spent its embedding budget has every
   # lexical leg in hand by then. `:fuzzy` reads `:keyword`'s result, so it
   # follows it. `:keyword` is both keyword legs, `:keyword` and
-  # `:keyword_any` — one call reads them.
-  @leg_order [:keyword, :title, :alias, :fuzzy, :semantic, :block, :tag]
+  # `:keyword_any` — one call reads them. `:compound` and `:synonym` (A7)
+  # are lexical too — the query's names rewritten, and each alternate
+  # wording through the keyword, title and alias legs — so they run before
+  # the vector legs, after the user's own wording.
+  @leg_order [:keyword, :title, :alias, :compound, :synonym, :fuzzy, :semantic, :block, :tag]
 
   # What a leg that never ran contributes.
-  @leg_defaults %{keyword: {[], []}, block: {[], %{}}, tag: {[], %{}}}
+  @leg_defaults %{keyword: {[], []}, fuzzy: {[], nil}, block: {[], %{}}, tag: {[], %{}}}
 
   # The first half of `hybrid/3`: every leg's candidates, and what fusion
   # and the floor need, without fusing them. `global/2` collects every
@@ -1071,7 +1254,12 @@ defmodule KilnCMS.Search do
       read_opts: read_opts,
       locale: locale,
       filters: filters,
-      args: Map.merge(%{query: query, locale: locale}, filters)
+      args: Map.merge(%{query: query, locale: locale}, filters),
+      # Whether the legs load the measure they rank by (`ts_rank`, trigram
+      # similarity): `global/2` ranks by it across sections, and `explain`
+      # reports it. A direct `hybrid/3` call does neither, and skips the
+      # per-row cost.
+      rank_keys?: Keyword.get(opts, :rank_keys, false) or Keyword.get(opts, :explain, false)
     }
   end
 
@@ -1079,29 +1267,45 @@ defmodule KilnCMS.Search do
   # order, so reading whole rows — or loading calcs — here would pay for up
   # to `@hybrid_candidates` rows *per leg* to keep `limit` of them.
   # `highlight` is a `ts_headline` over the whole document, so that is most
-  # of the query's cost thrown away. The one calc a leg does load is the
-  # semantic leg's `semantic_distance`, which its ORDER BY computes anyway
-  # (see `semantic_context/1`). The kept hits are read whole, with `:load`,
+  # of the query's cost thrown away. The calcs a leg does load are the ones
+  # its ORDER BY ranks by: the semantic leg's `semantic_distance` (see
+  # `semantic_context/1`), and — when `rank_keys?` — the keyword legs'
+  # `search_rank` / `search_rank_any` and the fuzzy leg's `title_similarity`,
+  # which a `global/2` sweep ranks across sections. The kept hits are read whole, with `:load`,
   # in one query (`hydrate/4`) — before the reranker, which reads their
   # title and `search_text` (`rerank_text/1`).
   #
   # Both keyword legs read `search_vector`, so they share one containment:
   # a type without the column loses both, and logs it once.
   defp run_named_leg(:keyword, %{resource: resource} = c, _ran) do
-    without_search_vector(resource, fn -> keyword_legs(resource, c.query, c.args, c.read_opts) end)
+    without_search_vector(resource, fn ->
+      keyword_legs(resource, c.query, c.args, c.read_opts, c.rank_keys?)
+    end)
   end
 
   defp run_named_leg(:title, c, _ran), do: run_leg(c.resource, :search_title, c.args, c.read_opts)
   defp run_named_leg(:alias, c, _ran), do: run_leg(c.resource, :search_alias, c.args, c.read_opts)
+  defp run_named_leg(:synonym, c, _ran), do: synonym_legs(c.resource, c.args, c.read_opts, c.opts)
 
+  defp run_named_leg(:compound, c, _ran),
+    do: compound_leg(c.resource, c.query, c.args, c.read_opts, c.opts)
+
+  # The fuzzy step also takes the term-evidence verdict (`term_gate/0`): both
+  # read the keyword leg's result, and the verdict is consulted only when that
+  # leg is empty — a keyword hit means every term is in the vocabulary. A
+  # step the deadline cut leaves no verdict, so a partial answer is ungated.
   defp run_named_leg(:fuzzy, c, ran) do
     {keyword, _relaxed} = leg_value(ran, :keyword)
+    evidence = gate_evidence(c.resource, c.query, c.locale, keyword, c.read_opts)
 
-    if c.filters == %{} and length(keyword) < @fuzzy_fallback_threshold do
-      run_leg(c.resource, :autocomplete, %{prefix: c.query, locale: c.locale}, c.read_opts)
-    else
-      []
-    end
+    fuzzy =
+      if c.filters == %{} and length(keyword) < @fuzzy_fallback_threshold do
+        fuzzy_leg(c, evidence)
+      else
+        []
+      end
+
+    {fuzzy, evidence}
   end
 
   defp run_named_leg(:semantic, c, _ran),
@@ -1128,6 +1332,8 @@ defmodule KilnCMS.Search do
     semantic = leg_value(ran, :semantic)
     {blocks, block_distances} = leg_value(ran, :block)
     {tagged, tag_distances} = leg_value(ran, :tag)
+    synonyms = leg_value(ran, :synonym)
+    {fuzzy, evidence} = leg_value(ran, :fuzzy)
 
     %{
       resource: c.resource,
@@ -1137,6 +1343,8 @@ defmodule KilnCMS.Search do
       limit: Keyword.get(c.opts, :limit, 20),
       k: Keyword.get(c.opts, :k, @rrf_k),
       load: Keyword.get(c.opts, :load, []),
+      # The term-evidence verdict, `nil` when the gate did not judge.
+      evidence: evidence,
       # Order matters only for exact ties (`reciprocal_rank_fusion/3`): a
       # partial keyword match at rank n outranks a trigram guess at rank n.
       legs: [
@@ -1146,32 +1354,44 @@ defmodule KilnCMS.Search do
         {:block, blocks, @block_weight},
         {:title, leg_value(ran, :title), @title_weight},
         {:alias, leg_value(ran, :alias), @title_weight},
-        {:fuzzy, leg_value(ran, :fuzzy), @fuzzy_weight},
+        {:compound, leg_value(ran, :compound), @title_weight},
+        {:fuzzy, fuzzy, @fuzzy_weight},
         {:tag, tagged, @tag_weight}
+        | synonyms
       ],
-      # What each globally ranked leg ranked its candidates by, smaller first.
+      # What each leg ranked its candidates by, smaller first: the globally
+      # ranked legs' keys (`global_ranks/1`), loaded only with `rank_keys?`
+      # (nil without), which `explain_legs/3` also reports. The title, alias
+      # and compound legs have none — a title the query contains is a yes or
+      # no.
       keys: %{
         keyword: Map.new(keyword, &{&1.id, rank_key(&1.search_rank)}),
         keyword_any: Map.new(relaxed, &{&1.id, rank_key(&1.search_rank_any)}),
         semantic: Map.new(semantic, &{&1.id, &1.semantic_distance}),
         block: block_distances,
-        tag: tag_distances
+        tag: tag_distances,
+        fuzzy: Map.new(fuzzy, &{&1.id, rank_key(Map.get(&1, :title_similarity))})
       },
+      locale: c.locale,
       floor: %{
         max_distance: semantic_max_distance(),
         legs: semantic_floor_legs(),
         distances: Map.merge(block_distances, tag_distances, fn _id, a, b -> min(a, b) end),
         semantic: semantic,
-        resource: c.resource,
-        query: c.query,
-        locale: c.locale,
-        filters: c.filters,
-        read_opts: c.read_opts,
-        opts: c.opts
+        filters: c.filters
       },
       timings: Map.new(ran, fn {leg, {_value, micros}} -> {leg, micros} end),
       missing: Enum.reject(@leg_order, &Map.has_key?(ran, &1))
     }
+  end
+
+  # The floor's inputs: its own, plus the section's fields it reads, taken
+  # from `collected` rather than copied into it, so the two cannot drift.
+  defp floor_inputs(collected) do
+    Map.merge(
+      collected.floor,
+      Map.take(collected, [:resource, :query, :locale, :read_opts, :opts])
+    )
   end
 
   # `ts_rank` is better higher; every other key is a distance, better lower.
@@ -1193,7 +1413,8 @@ defmodule KilnCMS.Search do
       :timer.tc(fn ->
         collected.legs
         |> reciprocal_rank_fusion(collected.k, ranks)
-        |> floor_hits(collected.floor)
+        |> gate_hits(collected.evidence)
+        |> floor_hits(floor_inputs(collected))
         |> Enum.take(collected.limit)
         |> hydrate(resource, {select, collected.load}, read_opts)
       end)
@@ -1206,8 +1427,15 @@ defmodule KilnCMS.Search do
         do: %{fuse: fuse_micros},
         else: %{fuse: fuse_micros, rerank: rerank_micros}
 
-    {Enum.map(hits, &attach_hit/1),
-     %{timings: timings, missing: if(reranked == :cut, do: [:rerank], else: [])}}
+    attached =
+      if Keyword.get(opts, :explain, false) do
+        explain = explain(hits, collected, ranks)
+        Enum.map(hits, &attach_hit(&1, explain))
+      else
+        Enum.map(hits, &attach_hit/1)
+      end
+
+    {attached, %{timings: timings, missing: if(reranked == :cut, do: [:rerank], else: [])}}
   end
 
   # The reranker inside what is left of the budget. One that misses it — or
@@ -1234,13 +1462,123 @@ defmodule KilnCMS.Search do
     end
   end
 
+  # `explain: true` — why each kept hit ranked where it did, by id: every
+  # leg that returned it at the rank fusion used (`ranked/2`, the same
+  # ranks `reciprocal_rank_fusion/3` summed), with the raw number that leg
+  # ranked by, and the query terms the hit's `search_vector` matches. Built
+  # from what fusion already had (`collected.keys`); the term match is the
+  # one extra query, over the kept hits only.
+  defp explain([], _collected, _ranks), do: %{}
+
+  defp explain(hits, collected, ranks) do
+    ids = Enum.map(hits, fn {record, _score, _legs} -> record.id end)
+    legs = explain_legs(collected, ranks, MapSet.new(ids))
+    {terms, matches} = explain_terms(collected, ids)
+
+    Map.new(ids, fn id ->
+      matched = Map.get(matches, id, Enum.map(terms, fn _term -> false end))
+      hit_terms = Enum.zip_with(terms, matched, &Map.put(&1, :matched, &2))
+
+      {id,
+       %{
+         legs: Map.get(legs, id, %{}),
+         terms: hit_terms,
+         matched_terms: for(%{matched: true, term: t} <- hit_terms, uniq: true, do: t),
+         coverage: coverage(matched)
+       }}
+    end)
+  end
+
+  # What each leg's raw `score` is. `ts_rank_cd` (the keyword legs'
+  # `search_rank`, with its phrase score) and trigram similarity are
+  # better higher; a cosine distance is better lower. The title, alias and
+  # compound legs match or don't, and report `nil`.
+  @leg_measures %{
+    keyword: :ts_rank_cd,
+    keyword_any: :ts_rank_cd,
+    semantic: :cosine_distance,
+    block: :cosine_distance,
+    tag: :cosine_distance,
+    fuzzy: :trigram_similarity
+  }
+
+  # `%{id => %{leg => %{rank, score, measure, contribution}}}` for `ids`.
+  defp explain_legs(collected, ranks, ids) do
+    for {leg, list, weight} <- collected.legs,
+        {record, rank} <- ranked(list, Map.get(ranks, leg, %{})),
+        MapSet.member?(ids, record.id),
+        reduce: %{} do
+      acc ->
+        entry = %{
+          rank: rank,
+          score: raw_score(leg, get_in(collected.keys, [leg, record.id])),
+          measure: Map.get(@leg_measures, leg),
+          contribution: weight / (collected.k + rank)
+        }
+
+        Map.update(acc, record.id, %{leg => entry}, fn legs ->
+          Map.update(legs, leg, entry, &merge_leg_entry(&1, entry))
+        end)
+    end
+  end
+
+  # A leg that ran several lists — `:synonym`, one per alternate wording and
+  # wording leg — is one entry, as it is one name in `hit_legs/1`: its best
+  # rank, and the contributions summed, as fusion summed them.
+  defp merge_leg_entry(first, next) do
+    %{
+      first
+      | rank: min(first.rank, next.rank),
+        contribution: first.contribution + next.contribution
+    }
+  end
+
+  # `collected.keys` sorts smaller-first; the better-higher measures were
+  # negated into it (`rank_key/1`) and are negated back here.
+  defp raw_score(_leg, nil), do: nil
+  defp raw_score(leg, key) when leg in [:keyword, :keyword_any, :fuzzy], do: -key
+  defp raw_score(_leg, key), do: key
+
+  # The query's terms and each hit's matches (`IdfCoverage.term_matches/5`).
+  # A type without a `search_vector` has no terms to match — its keyword
+  # legs already logged that (`without_search_vector/2`).
+  defp explain_terms(collected, ids) do
+    KilnCMS.Search.IdfCoverage.term_matches(
+      collected.resource,
+      collected.query,
+      collected.locale,
+      ids,
+      collected.read_opts
+    )
+  rescue
+    error -> if missing_search_vector?(error), do: {[], %{}}, else: reraise(error, __STACKTRACE__)
+  end
+
+  defp coverage([]), do: nil
+  defp coverage(matched), do: Enum.count(matched, & &1) / length(matched)
+
   @doc false
   # Ranks for `@global_rank_legs`, taken over every collected section at
   # once: `%{section => %{leg => %{id => rank}}}` from `%{section =>
   # collected}`. Ranks are competition ranks (1, 2, 2, 4) over the leg's
-  # keys, so two sections' records at the same distance share a rank
-  # rather than one winning on the order the sections finished in. A
-  # candidate with no usable key (`Ash.NotLoaded`, which never happens on
+  # keys, then each record's position in its own leg, so two sections'
+  # records at the same distance and position share a rank rather than one
+  # winning on the order the sections finished in, while records that tie
+  # within a section keep the leg's order. That matters for the tag leg,
+  # whose key is the matched tag's distance and so ties for every document
+  # carrying the tag: ranked by key alone, they would all take rank 1. And
+  # a sweep of one section ranks exactly as `hybrid/3` does, each leg's
+  # list being sorted by its key already.
+  #
+  # Each section offers at most `@hybrid_candidates` per leg, so a rank is
+  # taken over the union of each section's best, not over every record: a
+  # small section's record ranked behind a large section's fiftieth is
+  # ranked ahead of that section's fifty-first, which was never offered.
+  # The error still favours the small section, but by at most the
+  # candidate count, where per-section ranks favoured it by the whole of
+  # the large one.
+  #
+  # A candidate with no usable key (`Ash.NotLoaded`, which never happens on
   # the paths above, but would otherwise rank first) ranks after every
   # keyed one, in its section's own order. Public for its unit test only.
   @spec global_ranks(%{term() => %{keys: map(), legs: list()}}) :: %{term() => map()}
@@ -1271,8 +1609,8 @@ defmodule KilnCMS.Search do
 
   defp sort_key(keys, id, local) do
     case Map.get(keys, id) do
-      key when is_number(key) -> {0, key}
-      _missing -> {1, local}
+      key when is_number(key) -> {0, key, local}
+      _missing -> {1, 0, local}
     end
   end
 
@@ -1304,10 +1642,17 @@ defmodule KilnCMS.Search do
   can be sorted against each other, which is how `KilnCMS.Ask` picks its
   sources. Before #2175 the ranks were taken per section, and a section
   holding one record put it at rank 1 in every leg that returned it — the
-  lone post that outscored every full match of a two-word query. The title,
-  alias and fuzzy legs still rank per section (see `@global_rank_legs`).
-  Scores from two *separate* `hybrid/3` calls are not comparable: each
-  ranks over its own type alone.
+  lone post that outscored every full match of a two-word query. The title
+  and alias legs still rank per section (see `@global_rank_legs`). Scores
+  from two *separate* `hybrid/3` calls are not comparable: each ranks over
+  its own type alone.
+
+  A sweep that reranks each section under `rerank_mode: {:rrf, k}` loses
+  that: the blend is built from ranks within the section's own list
+  (`KilnCMS.Search.RerankOrder`), so a section's first hit carries nearly
+  the top blend however weak it is. Rerank the union instead (`KilnCMS.Ask`'s
+  `:union` scope) when the scores must compare; `:replace` carries the
+  reranker's own 0–1 score, which does.
 
   They used to be computed and thrown away inside fusion, which left the
   sections' callers nothing to interleave on but the order of the registry —
@@ -1320,7 +1665,7 @@ defmodule KilnCMS.Search do
 
   @doc """
   Which legs of `hybrid/3` returned this record — a subset of
-  `[:keyword, :keyword_any, :semantic, :block, :title, :alias, :fuzzy, :tag]`,
+  `[:keyword, :keyword_any, :semantic, :block, :title, :alias, :compound, :fuzzy, :tag, :synonym]`,
   in that order — or `[]` for a record that did not come out of `hybrid/3`.
 
   `:keyword` is the full-text leg, every query term matched; `:keyword_any`
@@ -1333,9 +1678,16 @@ defmodule KilnCMS.Search do
   `:title` a record the query names outright (its whole title appears in the query); `:alias` a record the
   query names by one of its other names — a custom field an admin flagged
   `names_record` (`KilnCMS.CMS.NameFields`), matched the way the title is
-  and weighted the same; `:fuzzy` the trigram title leg that runs only when
+  and weighted the same; `:compound` a record the query names by its title
+  or one of those names written spaced or joined differently — `huangqi` for
+  Huang Qi, `xiao yao san` for Xiaoyaosan (`KilnCMS.Search.NameTerms`),
+  weighted the same again; `:fuzzy` the trigram title leg that runs only when
   the full match came up short; `:tag` a record carrying a tag whose name
-  the query is near (`tag_leg?/0`) — a topic match, the weakest claim here.
+  the query is near (`tag_leg?/0`) — a topic match, the weakest claim here;
+  `:synonym` a record one of the query's alternate wordings found — a site
+  synonym rule (`KilnCMS.CMS.SearchSynonym`) rewrote a term of the query and
+  the rewrite matched by keyword, title or alias, weighted below the same
+  match on the user's own words.
 
   Provenance, for two readers: a client deciding how much to trust a hit (a
   keyword-and-semantic hit is a stronger claim than a fuzzy-only one, a
@@ -1347,8 +1699,60 @@ defmodule KilnCMS.Search do
   def hit_legs(%{__metadata__: %{search: %{legs: legs}}}), do: legs
   def hit_legs(_record), do: []
 
+  @doc """
+  Why this record ranked where it did, when it came out of `hybrid/3` or
+  `global/2` called with `explain: true` — otherwise `nil`. Off by default:
+  it costs one extra query per section, over the kept hits.
+
+      %{
+        legs: %{
+          keyword: %{rank: 2, score: 0.0608, measure: :ts_rank_cd, contribution: 0.0161},
+          semantic: %{rank: 1, score: 0.21, measure: :cosine_distance, contribution: 0.0164}
+        },
+        terms: [
+          %{term: "heat", lexeme: "heat", matched: true},
+          %{term: "interior", lexeme: "interior", matched: false}
+        ],
+        matched_terms: ["heat"],
+        coverage: 0.5
+      }
+
+  `legs` has one entry per leg in `hit_legs/1`. `rank` is the rank fusion
+  used — in a `global/2` sweep the rank over every section for the legs
+  ranked that way (`hit_score/1`), else the rank within this type's leg —
+  and `contribution` is what that rank added to the fused score,
+  `weight / (k + rank)`, so the contributions sum to the fused score (not
+  to a reranked one). `score` is the raw number the leg ranked by, named by
+  `measure`: `:ts_rank_cd` (`:keyword`, `:keyword_any`; higher is better),
+  `:cosine_distance` (`:semantic`, `:block`, `:tag`; lower is better), or
+  `:trigram_similarity` (`:fuzzy`; higher is better). `:title` and `:alias`
+  match or don't, and report `nil` for both.
+
+  `terms` are the query's terms as the keyword legs parse them (stemmed to
+  a `lexeme`, stop words dropped, the last term matched as a prefix), each
+  with the query word it came from and whether this record's
+  `search_vector` contains it. `coverage` is the matched share,
+  `matched / terms` in `[0, 1]` — `nil` for a query with no terms — so a
+  caller can rank full matches above partial ones without reading
+  snippets. It is read for every hit, whichever legs returned it: a
+  semantic-only hit reports the terms its text happens to contain.
+  """
+  @spec hit_explain(struct()) :: map() | nil
+  def hit_explain(%{__metadata__: %{search: %{explain: explain}}}), do: explain
+  def hit_explain(_record), do: nil
+
   @typedoc "A leg of `hybrid/3` — see `hit_legs/1`."
-  @type leg :: :keyword | :keyword_any | :semantic | :block | :title | :alias | :fuzzy | :tag
+  @type leg ::
+          :keyword
+          | :keyword_any
+          | :semantic
+          | :block
+          | :title
+          | :alias
+          | :compound
+          | :fuzzy
+          | :tag
+          | :synonym
 
   # A fused hit on its way out of `hybrid/3`: the record, the score it is
   # ordered by, and the legs that returned it.
@@ -1361,6 +1765,15 @@ defmodule KilnCMS.Search do
   @spec attach_hit(hit()) :: struct()
   defp attach_hit({record, score, legs}) do
     Ash.Resource.put_metadata(record, :search, %{score: score, legs: legs})
+  end
+
+  # The same, with the hit's `explain/3` entry beside them (`hit_explain/1`).
+  defp attach_hit({record, score, legs}, explain) do
+    Ash.Resource.put_metadata(record, :search, %{
+      score: score,
+      legs: legs,
+      explain: Map.get(explain, record.id)
+    })
   end
 
   # The option alone decides. This used to also require `rerank?()`, which was
@@ -1470,6 +1883,114 @@ defmodule KilnCMS.Search do
       :error -> %{semantic_floor: :caller}
     end
   end
+
+  # The gate's verdict for this section, or `nil` when there is nothing to
+  # judge: the gate off, or a keyword hit (every term matched). A type with
+  # no `search_vector` has an empty keyword leg and nothing for the gate to
+  # read either; it is answered ungated, as it was.
+  defp gate_evidence(resource, query, locale, [], read_opts) do
+    with gate when is_map(gate) <- term_gate() do
+      assess_terms(resource, query, locale, read_opts, gate)
+    end
+  end
+
+  defp gate_evidence(_resource, _query, _locale, _keyword, _read_opts), do: nil
+
+  defp assess_terms(resource, query, locale, read_opts, gate) do
+    KilnCMS.Search.TermEvidence.assess(resource, query, locale, read_opts, gate)
+  rescue
+    error ->
+      if missing_search_vector?(error), do: nil, else: reraise(error, __STACKTRACE__)
+  end
+
+  # The trigram title leg. A typo verdict runs it on the corrected query too,
+  # those hits first: "gui zi tang" is far from "Gui Zhi Tang" in trigrams
+  # ("zi" shares one with "zhi"), and the corrected words are not.
+  #
+  # The trigram similarity the leg orders by is read only when something
+  # consumes it (`rank_keys?`: a global sweep's ranks, or explain), and each
+  # run reads it against its own prefix, so a corrected hit is ranked and
+  # explained by the similarity it was found at.
+  defp fuzzy_leg(c, evidence) do
+    fuzzy = autocomplete_leg(c, c.query)
+
+    case evidence do
+      %{verdict: :typo, corrections: corrections} ->
+        c
+        |> autocomplete_leg(correct(c.query, corrections))
+        |> Enum.concat(fuzzy)
+        |> Enum.uniq_by(& &1.id)
+
+      _ ->
+        fuzzy
+    end
+  end
+
+  defp autocomplete_leg(c, prefix) do
+    similarity =
+      if c.rank_keys?,
+        do: [title_similarity: %{prefix: prefix}],
+        else: []
+
+    run_leg(
+      c.resource,
+      :autocomplete,
+      %{prefix: prefix, locale: c.locale},
+      c.read_opts,
+      %{},
+      similarity
+    )
+  end
+
+  # The query with each corrected word replaced, everything else as typed.
+  defp correct(query, corrections) do
+    Regex.replace(~r/[\p{L}\p{N}]+/u, query, fn word ->
+      Map.get(corrections, KilnCMS.Search.TermEvidence.fold(word), word)
+    end)
+  end
+
+  # A sweep judges the query against the whole site, not one section: a
+  # section's junk verdict stands only when `TermEvidence.across/2` finds the
+  # query junk over every content section's evidence together. Otherwise it
+  # is lifted, and that section answers as it would without the gate — a
+  # partial match ("heat" of "heat interior") is a match the site's other
+  # vocabulary vouches for. A typo verdict is per section (its corrections
+  # are that section's names) and stays.
+  defp sweep_evidence(content) do
+    with gate when is_map(gate) <- term_gate(),
+         false <-
+           content
+           |> Enum.map(fn {_key, c} -> c.evidence end)
+           |> KilnCMS.Search.TermEvidence.across(gate) do
+      Map.new(content, fn
+        {key, %{evidence: %{verdict: :junk} = evidence} = collected} ->
+          {key, %{collected | evidence: %{evidence | verdict: :ok}}}
+
+        other ->
+          other
+      end)
+    else
+      _junk_or_off -> content
+    end
+  end
+
+  # A junk verdict: only a leg that vouches for a hit may answer it — the
+  # floor's vouching legs, every term matched (`:keyword`, empty here by
+  # construction) or the query naming the record (`:title`, `:alias`,
+  # `:compound`) — and `:synonym`, which is those same matches on a wording
+  # the site's own rules gave the query. A synonym rule is how a site answers
+  # the query the gate cannot: "licorice" for a corpus that only says
+  # "glycyrrhiza". Before the floor, so the floor's lookups never run for a
+  # hit already gone.
+  @gate_vouching_legs @floor_vouching_legs ++ [:synonym]
+
+  defp gate_hits(hits, %{verdict: :junk}) do
+    Enum.filter(hits, fn {_record, _score, legs} ->
+      Enum.any?(legs, &(&1 in @gate_vouching_legs))
+    end)
+  end
+
+  defp gate_hits(hits, _evidence), do: hits
 
   # The relevance floor, applied after fusion to hits only the judged legs
   # returned — the why is on `semantic_max_distance/0`, which legs are judged
@@ -2029,15 +2550,16 @@ defmodule KilnCMS.Search do
   # as `:search`, filters included, so the relaxation narrows exactly as the
   # full match does.
   #
-  # Each loads the `ts_rank` it is ordered by, which `global/2` ranks every
-  # section's hits by together (`@global_rank_legs`).
-  defp keyword_legs(resource, query, args, read_opts) do
+  # With `rank_keys?`, each loads the `ts_rank` it is ordered by, which
+  # `global/2` ranks every section's hits by together (`@global_rank_legs`).
+  defp keyword_legs(resource, query, args, read_opts, rank_keys?) do
     rank_args = %{locale: args.locale, query: query}
-    keyword = run_leg(resource, :search, args, read_opts, %{}, search_rank: rank_args)
+    rank_load = fn calc -> if rank_keys?, do: [{calc, rank_args}], else: [] end
+    keyword = run_leg(resource, :search, args, read_opts, %{}, rank_load.(:search_rank))
 
     relaxed =
       if multi_word?(query) and length(keyword) < @relaxed_fallback_threshold do
-        run_leg(resource, :search_any, args, read_opts, %{}, search_rank_any: rank_args)
+        run_leg(resource, :search_any, args, read_opts, %{}, rank_load.(:search_rank_any))
       else
         []
       end
@@ -2046,6 +2568,56 @@ defmodule KilnCMS.Search do
   end
 
   defp multi_word?(query), do: query |> String.split() |> length() > 1
+
+  # The `:synonym` leg: every alternate wording of the query through the
+  # legs that read wording, each at `@synonym_factor` of its own weight. No
+  # alternates (a site without rules, or `synonyms: []`), no reads.
+  defp synonym_legs(resource, args, read_opts, opts) do
+    opts
+    |> Keyword.get_lazy(:synonyms, fn -> Synonyms.alternates(args.query, read_opts[:tenant]) end)
+    |> Enum.flat_map(fn alternate ->
+      args = %{args | query: alternate}
+
+      {keyword, _relaxed} =
+        without_search_vector(resource, fn ->
+          {run_leg(resource, :search, args, read_opts), []}
+        end)
+
+      [
+        {:synonym, keyword, @synonym_factor},
+        {:synonym, run_leg(resource, :search_title, args, read_opts),
+         @title_weight * @synonym_factor},
+        {:synonym, run_leg(resource, :search_alias, args, read_opts),
+         @title_weight * @synonym_factor}
+      ]
+    end)
+  end
+
+  # The compound leg (`:search_compound`): the query's rewrites — a name's
+  # words joined or split the way the site writes them, against its name
+  # terms (`KilnCMS.Search.NameTerms`) — matched against the title and the
+  # flagged name fields, at the title leg's weight: a record the query names
+  # as `huangqi` is named as surely as by `huang qi`. A query with nothing to
+  # join or split has no rewrites, and the leg does not run. A sweep hands
+  # its rewrites down in `:name_variants`, made once for every section.
+  defp compound_leg(resource, query, args, read_opts, opts) do
+    case Keyword.get_lazy(opts, :name_variants, fn -> name_variants(query, read_opts) end) do
+      [] ->
+        []
+
+      variants ->
+        {rewrites, spans} = Enum.unzip(variants)
+
+        compound_args =
+          args |> Map.delete(:query) |> Map.merge(%{variants: rewrites, spans: spans})
+
+        run_leg(resource, :search_compound, compound_args, read_opts)
+    end
+  end
+
+  defp name_variants(query, read_opts) do
+    NameTerms.variants(query, NameTerms.dictionary(Keyword.get(read_opts, :tenant)))
+  end
 
   defp table_name(resource) do
     AshPostgres.DataLayer.Info.table(resource) || "<table>"
@@ -2218,7 +2790,8 @@ defmodule KilnCMS.Search do
   rather than clicks on, which is what `KilnCMS.Ask` cites. `:filters` (see
   `hybrid/3`) narrows the content sections — media and taxonomy don't carry
   facets — and `:select` (see `hybrid/3`) the attributes their records are
-  read with.
+  read with. `explain: true` (see `hybrid/3`) attaches `hit_explain/1` to
+  every content hit, its leg ranks the ones taken over every section.
 
   Every content hit carries its fused score and legs (`hit_score/1`,
   `hit_legs/1`), and the scores are comparable across sections — one `k`,
@@ -2234,6 +2807,15 @@ defmodule KilnCMS.Search do
   from every search surface without anything failing (#530); `searchable/0` is
   the contract, and callers that enumerate sections should read it rather than
   restate the keys.
+
+  ## `:synonyms`
+
+  The site's synonym rules (`KilnCMS.CMS.SearchSynonym`) are read once per
+  sweep and every content section searches the same alternate wordings (see
+  `hybrid/3`). A caller that reports them — `/api/search`'s `also_searched` —
+  reads them first with `KilnCMS.Search.Synonyms.alternates/2` and passes them
+  in, so the report and the search cannot disagree; `synonyms: []` turns
+  expansion off.
 
   ## `:sections`
 
@@ -2324,12 +2906,24 @@ defmodule KilnCMS.Search do
           rerank_mode: Keyword.get(opts, :rerank_mode, rerank_mode()),
           filters: Keyword.get(opts, :filters, %{}),
           select: Keyword.get(opts, :select),
+          explain: Keyword.get(opts, :explain, false),
+          # Every section's legs load what they rank by (`global_ranks/1`).
+          rank_keys: true,
           # Embed the query ONCE for the whole sweep. Every section below runs
           # a semantic leg, and each would otherwise embed this same string
           # itself — one identical embedding per registered content type, the
           # dominant cost of a global search by a wide margin. Within half
           # the budget (`budgeted_query_vector/2`).
-          query_vector: query_vector
+          query_vector: query_vector,
+          # Likewise the compound leg's rewrites: one dictionary read for
+          # the sweep, not one per section.
+          name_variants: name_variants(query, read_opts),
+          # And read the site's synonyms ONCE (A7): every content section
+          # searches the same alternates.
+          synonyms:
+            Keyword.get_lazy(opts, :synonyms, fn ->
+              Synonyms.alternates(query, read_opts[:tenant])
+            end)
         ]
 
     # Section key per compiled type — `ct.section` is the plural atom minted
@@ -2437,6 +3031,7 @@ defmodule KilnCMS.Search do
 
     fused =
       collected
+      |> sweep_evidence()
       |> Enum.map(fn {key, c} -> {key, fn -> fuse_legs(c, ranks[key], deadline) end} end)
       |> run_sections()
 
@@ -2828,23 +3423,29 @@ defmodule KilnCMS.Search do
   defp reciprocal_rank_fusion(weighted_lists, k, ranks) do
     weighted_lists
     |> Enum.flat_map(fn {leg, list, weight} ->
-      leg_ranks = Map.get(ranks, leg, %{})
-
       list
-      |> Enum.with_index(1)
-      |> Enum.map(fn {record, position} ->
-        {leg, record, weight / (k + Map.get(leg_ranks, record.id, position))}
-      end)
+      |> ranked(Map.get(ranks, leg, %{}))
+      |> Enum.map(fn {record, rank} -> {leg, record, weight / (k + rank)} end)
     end)
     |> Enum.with_index()
     |> Enum.reduce(%{}, fn {{leg, record, score}, seen}, acc ->
       Map.update(acc, record.id, {record, score, [leg], seen}, fn {existing, total, legs, first} ->
-        {existing, total + score, legs ++ [leg], first}
+        # A leg that ran several lists (`:synonym`, one per alternate wording
+        # and leg) is named once.
+        {existing, total + score, Enum.uniq(legs ++ [leg]), first}
       end)
     end)
     |> Map.values()
     |> Enum.sort_by(fn {_record, score, _legs, first} -> {-score, first} end)
     |> Enum.map(fn {record, score, legs, _first} -> {record, score, legs} end)
+  end
+
+  # A leg's records at the ranks fusion uses: `leg_ranks`' rank where it
+  # names the record, its position in the list where it does not.
+  defp ranked(list, leg_ranks) do
+    list
+    |> Enum.with_index(1)
+    |> Enum.map(fn {record, position} -> {record, Map.get(leg_ranks, record.id, position)} end)
   end
 
   defp cfg(key, default) do

@@ -82,3 +82,23 @@ with {:ok, coverage} <-
        Env.float_in("SEARCH_KEYWORD_ANY_IDF_COVERAGE", 0.0, 1.0, exclusive_min: true) do
   config :kiln_cms, KilnCMS.Search, keyword_any_idf_coverage: coverage
 end
+
+# ## Hybrid search's term-evidence gate (A6)
+#
+# SEARCH_TERM_GATE: `false` turns the gate off — a query whose terms are
+# mostly nowhere in a section's vocabulary is then answered by the semantic,
+# any-term and fuzzy legs again — and `true` back on. `fetch/1`, not
+# `flag/2`: an unset variable must not override a project overlay. Its own
+# key, so `true` keeps an overlay's `term_gate:` settings rather than
+# replacing them.
+with {:ok, on?} <- Env.fetch("SEARCH_TERM_GATE") do
+  config :kiln_cms, KilnCMS.Search, term_gate_enabled: on?
+end
+
+# SEARCH_TERM_GATE_MIN_SHARE: the share of a query's terms that must have
+# evidence, in (0, 1]. A key of its own, applied over the gate's settings, so
+# setting it neither turns a disabled gate on nor drops an overlay's others.
+with {:ok, share} <-
+       Env.float_in("SEARCH_TERM_GATE_MIN_SHARE", 0.0, 1.0, exclusive_min: true) do
+  config :kiln_cms, KilnCMS.Search, term_gate_min_share: share
+end

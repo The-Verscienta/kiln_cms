@@ -145,6 +145,73 @@ defmodule KilnCMS.CMS.Content do
   end
 
   @doc false
+  # The `:search_compound` prepare: the title and alias legs' phrase match,
+  # run against each rewrite of the query `KilnCMS.Search.NameTerms` made
+  # (a name written spaced or joined — `huangqi`, `xiao yao san`) instead of
+  # the query itself, with one more condition: the rewritten span occurs in
+  # the name. A split is a guess about where a word breaks, and only a name
+  # that holds the whole guess confirms it — `carpet` → `car pet` must not
+  # name a record called "Car".
+  #
+  # The title half keeps the title leg's GIN prefilter: the title's lexemes
+  # overlap the spans' — implied, since a title that contains a span carries
+  # its lexemes — so with no name field flagged the leg is index-served.
+  # The alias half has no index shape, as in `alias_filter/1`.
+  def compound_filter(query) do
+    locale = Ash.Query.get_argument(query, :locale)
+    variants = Ash.Query.get_argument(query, :variants) || []
+    spans = Ash.Query.get_argument(query, :spans) || []
+
+    title =
+      Ash.Expr.expr(
+        fragment(
+          "tsvector_to_array(to_tsvector(kiln_regconfig(?), ?)) && (SELECT coalesce(array_agg(lexeme), '{}') FROM unnest(?::text[]) AS compound(span), unnest(tsvector_to_array(to_tsvector(kiln_regconfig(?), compound.span))) AS lexeme)",
+          locale,
+          title,
+          ^spans,
+          ^locale
+        ) and
+          fragment(
+            "EXISTS (SELECT 1 FROM unnest(?::text[], ?::text[]) AS compound(query, span) WHERE to_tsvector(kiln_regconfig(?), compound.query) @@ phraseto_tsquery(kiln_regconfig(?), ?) AND to_tsvector(kiln_regconfig(?), ?) @@ phraseto_tsquery(kiln_regconfig(?), compound.span))",
+            ^variants,
+            ^spans,
+            ^locale,
+            ^locale,
+            title,
+            ^locale,
+            title,
+            ^locale
+          )
+      )
+
+    query.resource
+    |> KilnCMS.CMS.NameFields.for_resource(query.tenant)
+    |> Enum.map(fn name ->
+      Ash.Expr.expr(
+        fragment(
+          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(coalesce(? ->> ?::text, '')) END) AS name_alias(value), unnest(?::text[], ?::text[]) AS compound(query, span) WHERE to_tsvector(kiln_regconfig(?), compound.query) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value) AND to_tsvector(kiln_regconfig(?), name_alias.value) @@ phraseto_tsquery(kiln_regconfig(?), compound.span))",
+          custom_fields,
+          ^name,
+          custom_fields,
+          ^name,
+          custom_fields,
+          ^name,
+          ^variants,
+          ^spans,
+          ^locale,
+          ^locale,
+          ^locale,
+          ^locale
+        )
+      )
+    end)
+    |> Enum.reduce(title, &Ash.Expr.expr(^&2 or ^&1))
+    |> then(&Ash.Query.do_filter(query, &1))
+    |> Ash.Query.sort([{:title_length, :desc}, {:inserted_at, :desc}])
+    |> cap_unbounded()
+  end
+
+  @doc false
   # Shared by the `:search_semantic` / `:search_semantic_published` prepares:
   # embed the query and order by cosine distance (nearest first). Returns
   # nothing when semantic search is disabled or the query can't be embedded.
@@ -1390,8 +1457,9 @@ defmodule KilnCMS.CMS.Content do
     # default) and stems with that locale's text-search config
     # (`kiln_regconfig/1`), so French content is matched with French rules,
     # etc. The prepare resolves the locale (setting it back so the filter sees
-    # it too), then orders by relevance (ts_rank over the weighted vector —
-    # title hits outrank body hits), newest to break ties. `Ash.Query.sort/2`
+    # it too), then orders by relevance (`ts_rank_cd` over the weighted
+    # vector — title and name hits outrank field hits, which outrank body
+    # hits; an adjacent phrase outranks scattered terms), newest to break ties. `Ash.Query.sort/2`
     # APPENDS: these keys rank after whatever the caller already sorted on, so
     # an explicit JSON:API/GraphQL `sort` overrides relevance and relevance
     # degrades to the tiebreaker. That contract is pinned by test ("explicit
@@ -1410,7 +1478,7 @@ defmodule KilnCMS.CMS.Content do
     # and rewriting the operator hands `to_tsquery` an expression it
     # produced itself — so user text never reaches `to_tsquery`, which
     # raises on syntax (`a & | b`) where `plainto_tsquery` only strips it.
-    # Ranked by `ts_rank` over the OR query, so a record matching more of
+    # Ranked by `ts_rank_cd` over the OR query, so a record matching more of
     # the terms rises above one matching a single term.
     #
     # In both, the query's LAST lexeme matches as a prefix (`'lia':*`): search
@@ -1682,6 +1750,37 @@ defmodule KilnCMS.CMS.Content do
       end
     end
 
+    # The compound leg: the title and alias legs over the query's rewrites —
+    # a name written spaced or joined differently from the record's
+    # (`KilnCMS.Search.NameTerms`). The rewrites are made per query, against
+    # the site's name terms, by `KilnCMS.Search.hybrid/3`, and passed here as
+    # two aligned lists; the match is built in the prepare
+    # (`KilnCMS.CMS.Content.compound_filter/1`) because the flagged name
+    # fields are a per-site fact. Internal to fusion, no published twin.
+    compound_read = fn name ->
+      filter_ast = join_and.([quote(do: ^ref(:locale) == ^arg(:locale))] ++ facet_clauses.(false))
+
+      quote do
+        read unquote(name) do
+          argument :variants, {:array, :string}, allow_nil?: false
+          argument :spans, {:array, :string}, allow_nil?: false
+          argument :locale, :string
+
+          unquote_splicing(facet_args.(false))
+
+          filter expr(unquote(filter_ast))
+
+          prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
+
+            query
+            |> Ash.Query.set_argument(:locale, locale)
+            |> KilnCMS.CMS.Content.compound_filter()
+          end
+        end
+      end
+    end
+
     search_actions =
       quote do
         (unquote_splicing([
@@ -1694,7 +1793,8 @@ defmodule KilnCMS.CMS.Content do
            autocomplete_read.(:autocomplete, false),
            autocomplete_read.(:autocomplete_published, true),
            title_read.(:search_title),
-           alias_read.(:search_alias)
+           alias_read.(:search_alias),
+           compound_read.(:search_compound)
          ]))
       end
 
@@ -1958,6 +2058,7 @@ defmodule KilnCMS.CMS.Content do
           :embedded_at,
           :next_occurrence_at,
           :lock_version,
+          :search_weighted,
           :access_password_hash,
           :password_fingerprint
         ])
@@ -3340,7 +3441,13 @@ defmodule KilnCMS.CMS.Content do
         update :reindex_search_text do
           require_atomic? false
           argument :search_text, :string, allow_nil?: false
+          # Optional so a caller that predates it still reindexes; the
+          # trigger then falls back to the unweighted vector.
+          argument :search_weighted, {:array, :string},
+            constraints: [nil_items?: true, items: [allow_empty?: true, trim?: false]]
+
           change set_attribute(:search_text, arg(:search_text))
+          change set_attribute(:search_weighted, arg(:search_weighted))
           # Re-indexing is not editing: a sweep that recomputes every published
           # document's text (a `searchable` flag flipped) must not restamp
           # them all as updated now (`Changes.KeepUpdatedAt`).
@@ -4084,6 +4191,16 @@ defmodule KilnCMS.CMS.Content do
         # queried by the `search` action. Internal.
         attribute :search_text, :string
 
+        # The same text bucketed by role for `search_vector`'s weights (#2175
+        # A3): `[a, b, c, d]` — title and the fields that name the record;
+        # the summary fields and the leading words of the searchable custom
+        # fields; the rest of those; the body. Maintained beside `search_text`
+        # by `Changes.SetSearchText` and read only by the database trigger
+        # (`kiln_search_vector_refresh()`), which falls back to the old
+        # title-`A`/`search_text`-`B` vector while it is `nil`. Internal.
+        attribute :search_weighted, {:array, :string},
+          constraints: [nil_items?: true, items: [allow_empty?: true, trim?: false]]
+
         # Semantic-search embedding of `search_text`, plus when it was last
         # computed. Maintained by `KilnCMS.Search.EmbeddingWorker`; internal
         # (never exposed via the APIs, ignored by PaperTrail). `nil` until first
@@ -4436,12 +4553,30 @@ defmodule KilnCMS.CMS.Content do
         # matches the last term as a prefix, so the rank is the whole-word
         # score plus the prefix score: a finished word ("huang qi") scores on
         # both for Huang Qi and on the prefix alone for Huang Qin, so the
-        # whole-word match is favoured. Internal.
+        # whole-word match is favoured.
+        #
+        # `ts_rank_cd` (cover density, #2175 A3), not `ts_rank`: a cover is a
+        # span holding every query term, scored by the weights of its words
+        # and divided by the words between them. `ts_rank` scored each term's
+        # occurrences apart and saturated near 1 on any long document that
+        # repeated them, so a monograph scattering "clears", "heat", "dries"
+        # and "dampness" outranked the record whose own field says "clears
+        # heat and dries dampness". A query of two or more words adds a third
+        # score, its phrase (`phraseto_tsquery`, last word a prefix): a record
+        # holding the words in order and adjacent scores it, and one that only
+        # repeats them apart — many covers, each thin — gets nothing from it.
+        # Every content table ranks with this one expression over the one
+        # trigger's weights, so a rank still compares across sections
+        # (`KilnCMS.Search.global/2`). Internal.
         calculate :search_rank,
                   :float,
                   expr(
                     fragment(
-                      "ts_rank(search_vector, (SELECT plainto_tsquery(kiln_regconfig(?), ?))) + ts_rank(search_vector, (SELECT to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'))))",
+                      "ts_rank_cd(search_vector, (SELECT plainto_tsquery(kiln_regconfig(?), ?))) + ts_rank_cd(search_vector, (SELECT to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')))) + CASE WHEN (SELECT numnode(phraseto_tsquery(kiln_regconfig(?), ?))) > 1 THEN ts_rank_cd(search_vector, (SELECT to_tsquery('simple', regexp_replace(phraseto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')))) ELSE 0 END",
+                      ^arg(:locale),
+                      ^arg(:query),
+                      ^arg(:locale),
+                      ^arg(:query),
                       ^arg(:locale),
                       ^arg(:query),
                       ^arg(:locale),
@@ -4453,7 +4588,7 @@ defmodule KilnCMS.CMS.Content do
         end
 
         # `search_rank` against the any-term (OR) form of the same query —
-        # orders the `:search_any` action. `ts_rank` over an OR query grows
+        # orders the `:search_any` action. `ts_rank_cd` over an OR query grows
         # with every term the row matches, so a record naming two of the
         # query's four words outranks one naming a single word. The query is
         # rewritten from `plainto_tsquery`'s own text form, exactly as the
@@ -4463,7 +4598,7 @@ defmodule KilnCMS.CMS.Content do
                   :float,
                   expr(
                     fragment(
-                      "ts_rank(search_vector, (SELECT to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | ')))) + ts_rank(search_vector, (SELECT to_tsquery('simple', replace(regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'), ' & ', ' | '))))",
+                      "ts_rank_cd(search_vector, (SELECT to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | ')))) + ts_rank_cd(search_vector, (SELECT to_tsquery('simple', replace(regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'), ' & ', ' | '))))",
                       ^arg(:locale),
                       ^arg(:locale),
                       ^arg(:query),

@@ -29,10 +29,11 @@ defmodule KilnCMSWeb.SearchApiController do
   public `path`, an escape-safe `highlight` snippet (only `<mark>`
   survives), the fused `score` they were ranked by (comparable across
   sections) and the `legs` that matched (`keyword`/`keyword_any`/`semantic`/
-  `block`/`title`/`alias`/`fuzzy`/`tag` — `block` is the embedding leg at
+  `block`/`title`/`alias`/`compound`/`fuzzy`/`tag`/`synonym` — `block` is the embedding leg at
   block grain, a record reached through its nearest section; `title` is a
   record the query names outright, `alias` one it names by a custom field
-  flagged as a name, `tag` one carrying a tag whose name the query is near,
+  flagged as a name, `compound` one it names with a name's words
+  spaced or joined differently (`huangqi` for Huang Qi), `tag` one carrying a tag whose name the query is near,
   and
   `keyword_any` the any-term relaxation that joins when the every-term match
   comes up short on a multi-word query, so a hit carrying only it matched
@@ -42,6 +43,25 @@ defmodule KilnCMSWeb.SearchApiController do
   sparse content result set carries a `suggestion` ("did you mean") when the
   query is trigram-close to a published title without matching a word exactly
   — including alongside hits the fuzzy hybrid leg rescued from the typo.
+
+  `also_searched` lists the alternate wordings the site's search synonyms
+  (`KilnCMS.CMS.SearchSynonym`, `/editor/search-synonyms`) gave the query —
+  "reishi tea" is also searched as "ling zhi tea" — and is `[]` when no rule
+  applies. A hit an alternate found carries the `synonym` leg, and ranks below
+  the same match on the query's own words. The response is cached per URL
+  like any anonymous read (`KilnCMSWeb.Plugs.PublicCache`): its ETag digests
+  the body, `also_searched` included, and a rule write purges the site's CDN
+  key (`KilnCMS.CDN.purge_site/1`).
+
+  `explain=1` (or `true`) adds an `explain` object to every content hit —
+  each leg's `rank`, raw `score` and its `measure` (`ts_rank_cd`,
+  `cosine_distance`, `trigram_similarity`), the `contribution` that rank
+  made to `score`, the query `terms` with whether the hit matched each,
+  `matched_terms`, and `coverage` (matched / terms) — see
+  `KilnCMS.Search.hit_explain/1`. It is a debugging and evaluation view,
+  off by default, and its responses are `private, no-store`: never stored
+  by a CDN, never given an `ETag`, so the cached answer for a URL is
+  always the plain one.
   """
   use KilnCMSWeb, :controller
 
@@ -49,6 +69,7 @@ defmodule KilnCMSWeb.SearchApiController do
   alias KilnCMS.I18n
   alias KilnCMS.Search
   alias KilnCMS.Search.Highlight
+  alias KilnCMS.Search.Synonyms
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Params
 
@@ -80,7 +101,13 @@ defmodule KilnCMSWeb.SearchApiController do
       json(
         conn,
         Map.merge(
-          %{query: query, locale: locale, results: empty_sections(), suggestion: nil},
+          %{
+            query: query,
+            locale: locale,
+            results: empty_sections(),
+            suggestion: nil,
+            also_searched: []
+          },
           partial(%{})
         )
       )
@@ -113,6 +140,7 @@ defmodule KilnCMSWeb.SearchApiController do
         conn
         |> put_resp_header("server-timing", server_timing(timings))
         |> no_store_if_partial(payload)
+        |> no_store_if_explained(params)
         |> json(payload)
 
       {:error, :unavailable} ->
@@ -124,6 +152,17 @@ defmodule KilnCMSWeb.SearchApiController do
           "Search is temporarily unavailable; retry shortly."
         )
     end
+  end
+
+  defp explain?(params), do: Params.string(params, "explain") in ["1", "true"]
+
+  # An explained answer is never cached (see the moduledoc): a handler-set
+  # `cache-control` is one `KilnCMSWeb.Plugs.PublicCache` leaves alone, so it
+  # also gets no `ETag` and never answers `304`.
+  defp no_store_if_explained(conn, params) do
+    if explain?(params),
+      do: put_resp_header(conn, "cache-control", "private, no-store"),
+      else: conn
   end
 
   defp run(query, locale, limit, params, org_id) do
@@ -140,12 +179,18 @@ defmodule KilnCMSWeb.SearchApiController do
       limit: limit
     ]
 
+    # Read once and handed down, so what the response reports is what every
+    # section searched.
+    also_searched = Synonyms.alternates(query, org_id)
+
     report =
       Search.global_report(
         query,
         read_opts ++
           [
+            synonyms: also_searched,
             highlight: true,
+            explain: explain?(params),
             filters: filters(params, org_id),
             # What `item/4` renders, and what the reranker reads when it is
             # on — not the block tree, which is most of a row (#1712).
@@ -201,7 +246,13 @@ defmodule KilnCMSWeb.SearchApiController do
 
     payload =
       Map.merge(
-        %{query: query, locale: locale, results: results, suggestion: suggestion},
+        %{
+          query: query,
+          locale: locale,
+          results: results,
+          suggestion: suggestion,
+          also_searched: also_searched
+        },
         partial(report.partial)
       )
 
@@ -303,7 +354,12 @@ defmodule KilnCMSWeb.SearchApiController do
       score: Search.hit_score(record),
       legs: Search.hit_legs(record)
     }
+    |> put_explain(Search.hit_explain(record))
   end
+
+  # Present only under `explain=1`, so the default payload is unchanged.
+  defp put_explain(item, nil), do: item
+  defp put_explain(item, explain), do: Map.put(item, :explain, explain)
 
   # A dynamic hit resolves its type through the per-org registry (#336) for
   # URL + label; hits whose type no longer resolves (archived mid-flight) are

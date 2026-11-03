@@ -324,6 +324,16 @@ defmodule KilnCMSWeb.ConsoleNav do
         path: ~p"/editor/analytics",
         icon: "hero-chart-bar"
       },
+      # Search synonyms (A7), beside the analytics whose zero-result searches
+      # are what they answer. Editorial: an editor writes and switches off
+      # rules; deleting one is an admin's (the resource policy).
+      %{
+        key: :search_synonyms,
+        label: gettext("Search synonyms"),
+        path: ~p"/editor/search-synonyms",
+        icon: "hero-arrows-right-left",
+        keywords: ["synonyms", "aliases", "search", "alternate names", "zero results"]
+      },
       # Outbound broken links (#474). In the author group, not the admin one:
       # fixing a dead citation is editorial work. The opt-in switch on the page
       # is what admins own.

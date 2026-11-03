@@ -12,9 +12,11 @@ defmodule KilnCMS.CMS.SearchableFields do
 
   Opt-in per field rather than the whole map: most keys are numbers, enums,
   dates and media or reference snapshots, which would only add noise to the
-  vector, and some values are long. The values are appended after the body,
-  as `B`-weight body words: a name that should rank like a title is what
-  `names_record` (the alias leg) is for.
+  vector, and some values are long. The values are appended after the body
+  in `search_text`. In `search_vector` their first 48 words, in extractor
+  order, weigh `B` and the rest `C`, above the body's `D` (#2175 A3,
+  `role_texts/2`): a name that should rank like a title is what
+  `names_record` is for, which weighs `A` and feeds the alias leg.
 
   What a value contributes, by default:
 
@@ -46,18 +48,44 @@ defmodule KilnCMS.CMS.SearchableFields do
   definitions' order — `[]` when no definition is flagged.
   """
   @spec texts(map() | nil, [KilnCMS.CMS.FieldDefinition.t()]) :: [String.t()]
-  def texts(custom_fields, definitions) when is_map(custom_fields) do
-    extractor = extractor()
+  def texts(custom_fields, definitions) do
+    for {role, text} <- role_texts(custom_fields, definitions), role != :name_only, do: text
+  end
 
-    definitions
-    |> Enum.filter(&Map.get(&1, :searchable, false))
-    |> order(extractor)
-    |> Enum.flat_map(fn definition ->
-      field_texts(extractor, definition, Map.get(custom_fields, definition.name))
+  @doc """
+  The text of every field search indexes, tagged by the role that sets its
+  weight in `search_vector` (#2175 A3, `KilnCMS.CMS.Changes.SetSearchText`):
+
+    * `:field` — a `searchable` field: body words, weighted by position;
+    * `:name` — a `searchable` field that also `names_record`: a name;
+    * `:name_only` — a `names_record` field that is not `searchable`: a name
+      in the vector, but not in `search_text` (so not in the snippet).
+
+  The searchable ones come first, in exactly the order `texts/2` returns
+  them; the name-only ones follow in editor order.
+  """
+  @spec role_texts(map() | nil, [KilnCMS.CMS.FieldDefinition.t()]) ::
+          [{:field | :name | :name_only, String.t()}]
+  def role_texts(custom_fields, definitions) when is_map(custom_fields) do
+    extractor = extractor()
+    {searchable, rest} = Enum.split_with(definitions, &Map.get(&1, :searchable, false))
+
+    name_only =
+      rest |> Enum.filter(&Map.get(&1, :names_record, false)) |> Enum.sort_by(& &1.position)
+
+    tagged =
+      Enum.map(order(searchable, extractor), fn definition ->
+        {if(Map.get(definition, :names_record, false), do: :name, else: :field), definition}
+      end) ++ Enum.map(name_only, &{:name_only, &1})
+
+    Enum.flat_map(tagged, fn {role, definition} ->
+      extractor
+      |> field_texts(definition, Map.get(custom_fields, definition.name))
+      |> Enum.map(&{role, &1})
     end)
   end
 
-  def texts(_custom_fields, _definitions), do: []
+  def role_texts(_custom_fields, _definitions), do: []
 
   @doc """
   The searchable text of a loaded content `record`, reading its type's
@@ -66,7 +94,13 @@ defmodule KilnCMS.CMS.SearchableFields do
   custom fields reads nothing.
   """
   @spec record_texts(struct()) :: [String.t()]
-  def record_texts(%resource{} = record) do
+  def record_texts(record) do
+    for {role, text} <- record_role_texts(record), role != :name_only, do: text
+  end
+
+  @doc "`role_texts/2` for a loaded content `record`, read the way `record_texts/1` reads it."
+  @spec record_role_texts(struct()) :: [{:field | :name | :name_only, String.t()}]
+  def record_role_texts(%resource{} = record) do
     case Map.get(record, :custom_fields) do
       fields when is_map(fields) and map_size(fields) > 0 ->
         definitions =
@@ -76,14 +110,14 @@ defmodule KilnCMS.CMS.SearchableFields do
             Map.get(record, :org_id)
           )
 
-        texts(fields, definitions)
+        role_texts(fields, definitions)
 
       _none ->
         []
     end
   end
 
-  def record_texts(_record), do: []
+  def record_role_texts(_record), do: []
 
   @doc """
   The generic rule for one value: its strings (HTML stripped) and numbers,

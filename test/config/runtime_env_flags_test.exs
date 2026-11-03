@@ -61,7 +61,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             BRAND_PRIMARY_COLOR ASK_RERANK SEARCH_CHUNK_LONG_DOCUMENTS
             SEARCH_RERANK_MODE ASK_RERANK_MODE ASK_RERANK_SCOPE ASK_RERANK_PIN
             SEARCH_SEMANTIC_MAX_DISTANCE SEARCH_SEMANTIC_FLOOR_LEGS
-            SEARCH_KEYWORD_ANY_IDF_COVERAGE
+            SEARCH_KEYWORD_ANY_IDF_COVERAGE SEARCH_TERM_GATE SEARCH_TERM_GATE_MIN_SHARE
             KILN_DEMO_RESET KILN_DEMO_RESET_CRON KILN_DEMO_GOLDEN_PATH
             KILN_FEDERATION_ENABLED
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
@@ -694,6 +694,34 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
         {search, stderr} = search_config(%{"SEARCH_KEYWORD_ANY_IDF_COVERAGE" => value})
         refute Keyword.has_key?(search, :keyword_any_idf_coverage), "#{inspect(value)}"
         assert stderr =~ "SEARCH_KEYWORD_ANY_IDF_COVERAGE is set to an unrecognized value"
+      end
+    end
+
+    test "SEARCH_TERM_GATE turns the term-evidence gate off, and unset leaves it alone" do
+      {search, _} = search_config(%{"SEARCH_TERM_GATE" => "false"})
+      assert search[:term_gate_enabled] == false
+
+      {search, _} = search_config(%{"SEARCH_TERM_GATE" => "true"})
+      assert search[:term_gate_enabled] == true
+      refute Keyword.has_key?(search, :term_gate)
+
+      {search, _} = search_config(%{})
+      refute Keyword.has_key?(search, :term_gate_enabled)
+
+      {search, stderr} = search_config(%{"SEARCH_TERM_GATE" => "sometimes"})
+      refute Keyword.has_key?(search, :term_gate_enabled)
+      assert stderr =~ "SEARCH_TERM_GATE is set to an unrecognized value"
+    end
+
+    test "SEARCH_TERM_GATE_MIN_SHARE is a share in (0, 1], under its own key" do
+      {search, _} = search_config(%{"SEARCH_TERM_GATE_MIN_SHARE" => "0.75"})
+      assert search[:term_gate_min_share] == 0.75
+      refute Keyword.has_key?(search, :term_gate_enabled)
+
+      for value <- ["0", "1.5", "most"] do
+        {search, stderr} = search_config(%{"SEARCH_TERM_GATE_MIN_SHARE" => value})
+        refute Keyword.has_key?(search, :term_gate_min_share), "#{inspect(value)}"
+        assert stderr =~ "SEARCH_TERM_GATE_MIN_SHARE is set to an unrecognized value"
       end
     end
 
