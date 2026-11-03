@@ -54,6 +54,11 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **Search: an adversarial ranking fixture gates CI, and golden sets gain the
+  classes it uses.** ([long form](docs/changelog/unreleased.md#search-ranking-fixture))
+
 ### Fixed
 
 - **Search: a section with one or two records no longer ranks them first across a

@@ -1,0 +1,30 @@
+{
+  "gates": [
+    "cross_section=1.0@25",
+    "exact_phrase=1.0@1",
+    "prefix=1.0@1",
+    "typo=1.0@3",
+    "junk=1.0"
+  ],
+  "baselines": {
+    "cjk_name": {"r@1": 0.5, "mrr": 0.75},
+    "joined_name": {"r@1": 0.0, "mrr": 0.083}
+  },
+  "rows": [
+    {"query": "heat interior", "class": "cross_section", "expected": [
+      "heat-pattern-01", "heat-pattern-02", "heat-pattern-03", "heat-pattern-04", "heat-pattern-05",
+      "heat-pattern-06", "heat-pattern-07", "heat-pattern-08", "heat-pattern-09", "heat-pattern-10",
+      "heat-pattern-11", "heat-pattern-12", "heat-pattern-13", "heat-pattern-14", "heat-pattern-15",
+      "heat-pattern-16", "heat-pattern-17", "heat-pattern-18", "heat-pattern-19", "heat-pattern-20",
+      "heat-pattern-21", "heat-pattern-22", "heat-pattern-23", "heat-pattern-24", "heat-pattern-25"
+    ]},
+    {"query": "yellow emperor inner classic", "class": "exact_phrase", "expected": ["huangdi-neijing"]},
+    {"query": "黄连", "class": "cjk_name", "expected": ["huang-lian"]},
+    {"query": "黄芪", "class": "cjk_name", "expected": ["huang-qi"]},
+    {"query": "huang lain", "class": "typo", "expected": ["huang-lian"]},
+    {"query": "xqzvw plorkt", "class": "junk", "expected": []},
+    {"query": "huang l", "class": "prefix", "expected": ["huang-lian"]},
+    {"query": "huangqi", "class": "joined_name", "expected": ["huang-qi"]},
+    {"query": "lianqiao", "class": "joined_name", "expected": ["lian-qiao"]}
+  ]
+}

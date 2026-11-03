@@ -22,9 +22,17 @@ defmodule KilnCMS.Search.Eval do
     * `query` — what a user typed.
     * `expected` — the slugs that should come back, in no particular order.
       Empty **only** for `junk`, which passes only when *nothing* is returned.
-    * `class` — one of #{inspect(~w(single_entity multi_entity paraphrase question_form typo junk))}.
-      Kept as strings end to end: a golden set is operator input, and a class
-      name never becomes an atom.
+    * `class` — one of #{inspect(~w(single_entity multi_entity paraphrase question_form typo junk))},
+      or one of the adversarial classes
+      #{inspect(~w(cross_section exact_phrase prefix joined_name cjk_name))} —
+      a weak match in a small section against strong ones in a large section,
+      an exact phrase against its words scattered through a long document, a
+      half-typed last word ("huang l"), a name typed without its space
+      ("huangqi"), a CJK name another record's name contains. The
+      adversarial fixture (`test/kiln_cms/search/ranking_fixture_test.exs`)
+      uses them, and a deployment's golden set may too. Kept as strings end
+      to end: a golden set is operator input, and a class name never becomes
+      an atom.
     * `type` (optional) — a content type name (`page`, `post`, a dynamic type's
       name) or a section plural (`pages`, `recipes`); ranks are then taken
       within that type only.
@@ -52,7 +60,8 @@ defmodule KilnCMS.Search.Eval do
 
   alias KilnCMS.Search.VectorScan
 
-  @classes ~w(single_entity multi_entity paraphrase question_form typo junk)
+  @classes ~w(single_entity multi_entity paraphrase question_form typo junk) ++
+             ~w(cross_section exact_phrase prefix joined_name cjk_name)
   @default_ks [1, 3, 5, 10]
 
   @typedoc "One golden-set row, validated."

@@ -351,8 +351,11 @@ defmodule KilnCMS.Search.EvalIntegrationTest do
       report =
         Eval.report(example_rows(), &Retriever.global(&1, tenant: org, limit: 10), [1, 3, 5, 10])
 
-      # Every class is present, and every figure is a real average.
-      assert report.summary.classes |> Map.keys() |> Enum.sort() == Enum.sort(Eval.classes())
+      # Every class but the adversarial fixture's is present, and every
+      # figure is a real average.
+      assert report.summary.classes |> Map.keys() |> Enum.sort() ==
+               Enum.sort(~w(single_entity multi_entity paraphrase question_form typo junk))
+
       assert report.summary.overall.queries == length(example_rows())
 
       # Naming a record finds it, first — and the typed row ranks within pages.
