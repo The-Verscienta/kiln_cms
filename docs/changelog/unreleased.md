@@ -11,7 +11,7 @@ carries the reasoning.
 
 <a id="search-explain"></a>
 
-- **Search explain mode: why a hit ranked where it did (#PRNUM).** A site
+- **Search explain mode: why a hit ranked where it did (#2177).** A site
   comparing Kiln's `/api/search` against Meilisearch could see a hit's `score`
   and `legs`, but nothing like `_rankingScoreDetails`. It had to guess "matched
   some of the words" from the `keyword_any` leg's name. `GET

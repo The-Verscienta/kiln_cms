@@ -58,7 +58,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Search: `explain=1` on `/api/search` (and `explain: true` on `hybrid/3`/`global/2`)
   reports each hit's leg ranks, raw scores, matched terms and coverage.**
-  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#search-explain))
+  ([#2177](https://github.com/The-Verscienta/kiln_cms/pull/2177) · [long form](docs/changelog/unreleased.md#search-explain))
 
 ### Fixed
 
