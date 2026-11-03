@@ -12,6 +12,7 @@ defmodule KilnCMS.Search do
   alias KilnCMS.Search.Budget
   alias KilnCMS.Search.NameTerms
   alias KilnCMS.Search.RerankOrder
+  alias KilnCMS.Search.Synonyms
 
   @doc "Whether semantic search is enabled."
   @spec semantic?() :: boolean()
@@ -916,6 +917,15 @@ defmodule KilnCMS.Search do
   # to outrank a lexical or semantic hit on its own.
   @tag_weight 0.5
 
+  # A site's synonyms (A7, `KilnCMS.Search.Synonyms`): each alternate wording
+  # of the query runs the legs that read *wording* — keyword, title, alias —
+  # at this fraction of the weight its own-wording counterpart carries, so a
+  # record found by what the user typed outranks one found only by what a rule
+  # said they might have meant, leg for leg. The semantic legs do not re-run:
+  # one embedding of the query already carries its meaning, and an embedding
+  # per alternate would multiply the dominant cost of a search.
+  @synonym_factor 0.5
+
   # The facet arguments shared by `:search`, `:search_any`, `:search_title`
   # and `:search_semantic`.
   @facet_filters [:category_id, :author_id, :state, :tag_ids]
@@ -977,6 +987,12 @@ defmodule KilnCMS.Search do
   semantic and title legs; the fuzzy leg sits out under filters since
   `:autocomplete` can't apply them.
 
+  `:synonyms` is the query's alternate wordings (`KilnCMS.Search.Synonyms`),
+  each searched by the keyword, title and alias legs at `@synonym_factor` of
+  their weight and fused as the `:synonym` leg. Omitted, they are read from the
+  site's rules (`:tenant`); `global/2` reads them once and hands them down,
+  and `synonyms: []` searches the user's wording alone.
+
   `:query_vector` supplies an already-embedded query, skipping the embedding
   the semantic leg would otherwise do. Only worth passing when you are calling
   this repeatedly for one query — `global/2` does, across every content type —
@@ -1027,8 +1043,11 @@ defmodule KilnCMS.Search do
   # query vector go last, so a sweep that spent its embedding budget has every
   # lexical leg in hand by then. `:fuzzy` reads `:keyword`'s result, so it
   # follows it. `:keyword` is both keyword legs, `:keyword` and
-  # `:keyword_any` — one call reads them.
-  @leg_order [:keyword, :title, :alias, :compound, :fuzzy, :semantic, :block, :tag]
+  # `:keyword_any` — one call reads them. `:compound` and `:synonym` (A7)
+  # are lexical too — the query's names rewritten, and each alternate
+  # wording through the keyword, title and alias legs — so they run before
+  # the vector legs, after the user's own wording.
+  @leg_order [:keyword, :title, :alias, :compound, :synonym, :fuzzy, :semantic, :block, :tag]
 
   # What a leg that never ran contributes.
   @leg_defaults %{keyword: {[], []}, block: {[], %{}}, tag: {[], %{}}}
@@ -1100,6 +1119,7 @@ defmodule KilnCMS.Search do
 
   defp run_named_leg(:title, c, _ran), do: run_leg(c.resource, :search_title, c.args, c.read_opts)
   defp run_named_leg(:alias, c, _ran), do: run_leg(c.resource, :search_alias, c.args, c.read_opts)
+  defp run_named_leg(:synonym, c, _ran), do: synonym_legs(c.resource, c.args, c.read_opts, c.opts)
 
   defp run_named_leg(:compound, c, _ran),
     do: compound_leg(c.resource, c.query, c.args, c.read_opts, c.opts)
@@ -1152,6 +1172,7 @@ defmodule KilnCMS.Search do
     semantic = leg_value(ran, :semantic)
     {blocks, block_distances} = leg_value(ran, :block)
     {tagged, tag_distances} = leg_value(ran, :tag)
+    synonyms = leg_value(ran, :synonym)
     fuzzy = leg_value(ran, :fuzzy)
 
     %{
@@ -1174,6 +1195,7 @@ defmodule KilnCMS.Search do
         {:compound, leg_value(ran, :compound), @title_weight},
         {:fuzzy, fuzzy, @fuzzy_weight},
         {:tag, tagged, @tag_weight}
+        | synonyms
       ],
       # What each leg ranked its candidates by, smaller first: the globally
       # ranked legs' keys (`global_ranks/1`), plus the fuzzy leg's similarity
@@ -1327,8 +1349,21 @@ defmodule KilnCMS.Search do
           contribution: weight / (collected.k + rank)
         }
 
-        Map.update(acc, record.id, %{leg => entry}, &Map.put_new(&1, leg, entry))
+        Map.update(acc, record.id, %{leg => entry}, fn legs ->
+          Map.update(legs, leg, entry, &merge_leg_entry(&1, entry))
+        end)
     end
+  end
+
+  # A leg that ran several lists — `:synonym`, one per alternate wording and
+  # wording leg — is one entry, as it is one name in `hit_legs/1`: its best
+  # rank, and the contributions summed, as fusion summed them.
+  defp merge_leg_entry(first, next) do
+    %{
+      first
+      | rank: min(first.rank, next.rank),
+        contribution: first.contribution + next.contribution
+    }
   end
 
   # `collected.keys` sorts smaller-first; the better-higher measures were
@@ -1441,7 +1476,7 @@ defmodule KilnCMS.Search do
 
   @doc """
   Which legs of `hybrid/3` returned this record — a subset of
-  `[:keyword, :keyword_any, :semantic, :block, :title, :alias, :compound, :fuzzy, :tag]`,
+  `[:keyword, :keyword_any, :semantic, :block, :title, :alias, :compound, :fuzzy, :tag, :synonym]`,
   in that order — or `[]` for a record that did not come out of `hybrid/3`.
 
   `:keyword` is the full-text leg, every query term matched; `:keyword_any`
@@ -1459,7 +1494,11 @@ defmodule KilnCMS.Search do
   Huang Qi, `xiao yao san` for Xiaoyaosan (`KilnCMS.Search.NameTerms`),
   weighted the same again; `:fuzzy` the trigram title leg that runs only when
   the full match came up short; `:tag` a record carrying a tag whose name
-  the query is near (`tag_leg?/0`) — a topic match, the weakest claim here.
+  the query is near (`tag_leg?/0`) — a topic match, the weakest claim here;
+  `:synonym` a record one of the query's alternate wordings found — a site
+  synonym rule (`KilnCMS.CMS.SearchSynonym`) rewrote a term of the query and
+  the rewrite matched by keyword, title or alias, weighted below the same
+  match on the user's own words.
 
   Provenance, for two readers: a client deciding how much to trust a hit (a
   keyword-and-semantic hit is a stronger claim than a fuzzy-only one, a
@@ -1524,6 +1563,7 @@ defmodule KilnCMS.Search do
           | :compound
           | :fuzzy
           | :tag
+          | :synonym
 
   # A fused hit on its way out of `hybrid/3`: the record, the score it is
   # ordered by, and the legs that returned it.
@@ -2231,6 +2271,30 @@ defmodule KilnCMS.Search do
 
   defp multi_word?(query), do: query |> String.split() |> length() > 1
 
+  # The `:synonym` leg: every alternate wording of the query through the
+  # legs that read wording, each at `@synonym_factor` of its own weight. No
+  # alternates (a site without rules, or `synonyms: []`), no reads.
+  defp synonym_legs(resource, args, read_opts, opts) do
+    opts
+    |> Keyword.get_lazy(:synonyms, fn -> Synonyms.alternates(args.query, read_opts[:tenant]) end)
+    |> Enum.flat_map(fn alternate ->
+      args = %{args | query: alternate}
+
+      {keyword, _relaxed} =
+        without_search_vector(resource, fn ->
+          {run_leg(resource, :search, args, read_opts), []}
+        end)
+
+      [
+        {:synonym, keyword, @synonym_factor},
+        {:synonym, run_leg(resource, :search_title, args, read_opts),
+         @title_weight * @synonym_factor},
+        {:synonym, run_leg(resource, :search_alias, args, read_opts),
+         @title_weight * @synonym_factor}
+      ]
+    end)
+  end
+
   # The compound leg (`:search_compound`): the query's rewrites — a name's
   # words joined or split the way the site writes them, against its name
   # terms (`KilnCMS.Search.NameTerms`) — matched against the title and the
@@ -2446,6 +2510,15 @@ defmodule KilnCMS.Search do
   the contract, and callers that enumerate sections should read it rather than
   restate the keys.
 
+  ## `:synonyms`
+
+  The site's synonym rules (`KilnCMS.CMS.SearchSynonym`) are read once per
+  sweep and every content section searches the same alternate wordings (see
+  `hybrid/3`). A caller that reports them — `/api/search`'s `also_searched` —
+  reads them first with `KilnCMS.Search.Synonyms.alternates/2` and passes them
+  in, so the report and the search cannot disagree; `synonyms: []` turns
+  expansion off.
+
   ## `:sections`
 
   By default every section runs. Pass `sections: [...]` to run only the ones
@@ -2544,7 +2617,13 @@ defmodule KilnCMS.Search do
           query_vector: query_vector,
           # Likewise the compound leg's rewrites: one dictionary read for
           # the sweep, not one per section.
-          name_variants: name_variants(query, read_opts)
+          name_variants: name_variants(query, read_opts),
+          # And read the site's synonyms ONCE (A7): every content section
+          # searches the same alternates.
+          synonyms:
+            Keyword.get_lazy(opts, :synonyms, fn ->
+              Synonyms.alternates(query, read_opts[:tenant])
+            end)
         ]
 
     # Section key per compiled type — `ct.section` is the plural atom minted
@@ -3050,7 +3129,9 @@ defmodule KilnCMS.Search do
     |> Enum.with_index()
     |> Enum.reduce(%{}, fn {{leg, record, score}, seen}, acc ->
       Map.update(acc, record.id, {record, score, [leg], seen}, fn {existing, total, legs, first} ->
-        {existing, total + score, legs ++ [leg], first}
+        # A leg that ran several lists (`:synonym`, one per alternate wording
+        # and leg) is named once.
+        {existing, total + score, Enum.uniq(legs ++ [leg]), first}
       end)
     end)
     |> Map.values()

@@ -242,6 +242,7 @@ everyone, the anonymous visitor included (published `:public` content, a
 | `History.DocumentEvent` | `for_document`, `by_actor`, `append`, `anonymize_actor` **only** | `append`, `for_document`, `by_actor`, `anonymize_actor`: `:history` | The block-level event log (#1659). The History API appends an event with the next per-document sequence number, folds one document's events for time-travel, and GDPR erasure redacts one user's events (a bulk update authorizes its query as a read, hence `by_actor`). The plain `read` is not admitted: nothing lists the whole log. No person, admin included, may append or rewrite an event. Every read fails closed (`authorize_with: :error`, `authorize_query_with: :error` on the erasure): a refused sequence read would hand out a number already taken, a refused fold would render an empty document, and a refused erasure would erase nothing and report success. |
 | `CMS.FeedSettings` | `read` **only** | `read`: `:feeds` | `KilnCMS.Feeds` resolves a site's syndication policy for anonymous feed readers (#1659). A refused read would be "no row", the operator config, cached for the TTL, which can turn full content on for a site that switched it off, so the read fails closed to `Feeds.unavailable/0`, uncached. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
 | `CMS.SiteCompliance` | `read` **only** | `read`: `:compliance` | `Compliance.Settings` resolves a site's claim-checking rules and publish gate for the editor panel and the publish path (#1659). Fails closed to `Settings.unavailable/0`, uncached, for the same reason as `FeedSettings`. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
+| `CMS.SearchSynonym` | `read` **only** | `read`: `:search` | `Search.Synonyms` reads a site's synonym rules for every search, usually an anonymous visitor's (A7). Fails closed (`authorize_with: :error`): a refused read raises rather than caching "no synonyms" for the TTL. Writing a rule stays an editor's; deleting one an admin's. |
 | `Analytics.SearchQuery` | `record` **only** | `record`: `:search` | `Search.record_query/3` counts a search, usually an anonymous visitor's (#1659). No person may record one (an admin still can, through the admin bypass above the policy), and the system may not read or purge the counters; the nightly purge is the AshOban trigger's own. |
 
 Legend: ✅ allowed · ❌ forbidden · 🔎 allowed but row-filtered (reads return only the rows the policy permits, never an error) · ⚙️ system-only (`authorize?: false`).
@@ -808,6 +809,24 @@ the URL must be HTTPS and is refused if it resolves to a private, loopback,
 link-local or metadata address, at save and on every request (through
 `KilnCMS.SafeFetch`). "Reindex now" re-asks the update policy before
 enqueueing (#1166).
+
+## Search synonyms — `SearchSynonym`, `ContentSearch` (A7)
+
+| Resource | read | writes |
+|---|---|---|
+| `SearchSynonym` (`read`) | editor/admin of the site; the `:search` system actor | `create`, `update`: editor/admin (no read-only API key) · `destroy`: admin only (no API key) |
+| `ContentSearch` (`search`, generic) | ✅ any caller | — |
+
+A site's search synonyms and aliases, at `/editor/search-synonyms`. Search
+config rather than content: nothing is rendered to a visitor, so reads are the
+site's editors' and the search legs', which read as the `:search` system actor
+(see "The system actor"). An editor writes rules and turns them off; a hard
+delete is an admin's, like everything else here.
+
+`ContentSearch.search` is the `/mcp` `search_content` tool. It has no data of
+its own: it runs `Search.global/2` as the caller, so the content read policies
+decide every hit it returns — the action's own policy admits the call and
+widens nothing.
 
 ## AI provider — `SiteAiProvider` (#1557)
 
