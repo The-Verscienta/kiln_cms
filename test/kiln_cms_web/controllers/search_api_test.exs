@@ -391,11 +391,11 @@ defmodule KilnCMSWeb.SearchApiTest do
       assert [%{"term" => ^first, "matched" => true, "lexeme" => _}, %{"matched" => false}] =
                partial["terms"]
 
-      assert %{"rank" => 1, "measure" => "ts_rank", "score" => score, "contribution" => c} =
+      assert %{"rank" => 1, "measure" => "ts_rank_cd", "score" => score, "contribution" => c} =
                full["legs"]["keyword"]
 
       assert is_float(score) and is_float(c)
-      assert partial["legs"]["keyword_any"]["measure"] == "ts_rank"
+      assert partial["legs"]["keyword_any"]["measure"] == "ts_rank_cd"
 
       # A debugging view is never what a shared cache stores for the URL.
       assert get_resp_header(conn, "cache-control") == ["private, no-store"]
