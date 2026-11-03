@@ -1440,7 +1440,7 @@ saying how it got there:
   "legs": ["keyword", "semantic"],
   "explain": {
     "legs": {
-      "keyword":  { "rank": 1, "score": 0.0991, "measure": "ts_rank",         "contribution": 0.0164 },
+      "keyword":  { "rank": 1, "score": 0.0991, "measure": "ts_rank_cd",      "contribution": 0.0164 },
       "semantic": { "rank": 2, "score": 0.2140, "measure": "cosine_distance", "contribution": 0.0161 }
     },
     "terms": [
@@ -1462,7 +1462,7 @@ saying how it got there:
   sum to it when a reranker reordered the section, because `score` is then
   the reranker's.
 - **`score`** is the raw number the leg ranked by. **`measure`** says which
-  number it is: `ts_rank` for `keyword` and `keyword_any` (higher is
+  number it is: `ts_rank_cd` for `keyword` and `keyword_any` (higher is
   better), `cosine_distance` for `semantic`, `block` and `tag` (lower is
   better), or `trigram_similarity` for `fuzzy` (higher is better). `title`,
   `alias` and `compound` either match or don't, so both fields are `null`

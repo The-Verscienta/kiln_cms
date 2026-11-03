@@ -60,10 +60,10 @@ defmodule KilnCMS.Search.ExplainTest do
 
     # The full match came through the every-term leg, the partial one only
     # through the any-term relaxation.
-    assert %{rank: 1, measure: :ts_rank, score: score} = full_explain.legs.keyword
+    assert %{rank: 1, measure: :ts_rank_cd, score: score} = full_explain.legs.keyword
     assert is_float(score) and score > 0
     refute Map.has_key?(partial_explain.legs, :keyword)
-    assert %{measure: :ts_rank, rank: rank} = partial_explain.legs.keyword_any
+    assert %{measure: :ts_rank_cd, rank: rank} = partial_explain.legs.keyword_any
     assert is_integer(rank)
 
     for hit <- hits do
