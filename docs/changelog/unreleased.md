@@ -34,4 +34,4 @@ carries the reasoning.
   the generic OIDC strategy, which reads no `user` parameter. The advisory
   is listed in `mix.exs`'s `hex: [ignore_advisories: ...]` with that reason,
   and comes out when ash_authentication allows assent 0.3.
-  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM))
+  ([#2178](https://github.com/The-Verscienta/kiln_cms/pull/2178))
