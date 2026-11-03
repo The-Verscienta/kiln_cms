@@ -6,7 +6,7 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
   one hook: the browser sign-in page, the LiveView (which submits over `/live`
   and so never passes the router's `:auth` pipeline at all), the headless
   `POST /api/auth/sign_in`, and anything reached through
-  `AshAuthentication.Strategy.action/3`. A plug per route is a list to forget to
+  `AshAuthentication.Strategy.action/4`. A plug per route is a list to forget to
   add to.
 
   ## An attempt is an execution, not a build

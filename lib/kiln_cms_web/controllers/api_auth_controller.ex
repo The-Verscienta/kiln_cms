@@ -31,7 +31,7 @@ defmodule KilnCMSWeb.ApiAuthController do
 
   An account *without* a second factor is unchanged — one call, 201, token.
 
-  "Returned", not "issued": `Strategy.action/3` mints and — because `User` sets
+  "Returned", not "issued": `Strategy.action/4` mints and — because `User` sets
   `store_all_tokens?` — *stores* the first-factor JWT before this controller
   gets to look at `totp_enabled?`. What the second factor withholds is the
   caller's access to it. Since #742 it also withholds its *use*:
