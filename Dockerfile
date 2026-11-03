@@ -354,6 +354,10 @@ USER nobody
 # unreachable — restarting the app on a database outage it can't fix only
 # restart-storms the replicas (#816). `/live` returns 200 iff the endpoint is
 # serving, no database check; with the endpoint down the connection is refused.
+# After boot it answers 503 until search has warmed up (KilnCMS.Search.Warmup,
+# #2166), so Coolify does not swap onto a node whose first searches would
+# stall. That latch only opens, and gives up within 90 s, inside the window
+# below (60 s start period + 3 × 30 s retries).
 # `curl -f` turns both a non-2xx and a refused connection into a non-zero exit —
 # the unhealthy signal. Shell form so ${PORT} (default 4000, matching
 # runtime.exs) is expanded. (`/up` / `/ready` remain the readiness signals a
