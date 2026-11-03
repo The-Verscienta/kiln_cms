@@ -88,6 +88,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Search returns nothing for a query most of whose words are in no record's text or name;
   a word one edit from a name is a typo, and the fuzzy leg retries corrected. `SEARCH_TERM_GATE=false` reverts.**
   ([long form](docs/changelog/unreleased.md#term-evidence-gate))
+- **`/developers` curl examples name the site's own URL instead of `<this-site>`, and the page
+  links the committed OpenAPI and GraphQL specs where a production build serves neither.**
+  ([#1872](https://github.com/The-Verscienta/kiln_cms/issues/1872) · [long form](docs/changelog/unreleased.md#developers-page-real-urls))
 
 ### Fixed
 
