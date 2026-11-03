@@ -54,6 +54,18 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Run the re-fire sweep after deploying (`mix kiln.refire_all`); overlays first run
+  `mix ash.codegen`. Content tables gain `search_weighted`; old rows keep the old weights.**
+  ([#2175](https://github.com/The-Verscienta/kiln_cms/issues/2175) · [long form](docs/changelog/unreleased.md#field-role-weights-upgrade))
+
+### Changed
+
+- **Search: keyword ranking weights a record's text by role (title and names `A`, fields `B`/`C`,
+  body `D`) and ranks with `ts_rank_cd` plus a phrase score, so an adjacent phrase wins.**
+  ([#2175](https://github.com/The-Verscienta/kiln_cms/issues/2175) · [long form](docs/changelog/unreleased.md#field-role-weights))
+
 ## [1.7.0] - 2026-10-29
 
 Long form: [docs/changelog/v1.7.0.md](docs/changelog/v1.7.0.md) —
