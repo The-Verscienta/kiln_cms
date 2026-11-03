@@ -90,7 +90,7 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#term-evidence-gate))
 - **`/developers` curl examples name the site's own URL instead of `<this-site>`, and the page
   links the committed OpenAPI and GraphQL specs where a production build serves neither.**
-  ([#1872](https://github.com/The-Verscienta/kiln_cms/issues/1872) · [long form](docs/changelog/unreleased.md#developers-page-real-urls))
+  ([#2196](https://github.com/The-Verscienta/kiln_cms/pull/2196) · [long form](docs/changelog/unreleased.md#developers-page-real-urls))
 
 ### Fixed
 

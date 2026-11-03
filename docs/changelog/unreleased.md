@@ -228,7 +228,7 @@ carries the reasoning.
 <a id="developers-page-real-urls"></a>
 
 - **`/developers` examples can be pasted as they stand, and the page always
-  links a spec (#1872).** The curl examples named `https://<this-site>`, so
+  links a spec (#1872, #2196).** The curl examples named `https://<this-site>`, so
   none ran as written. They now carry the site's own base URL
   (`KilnCMSWeb.Tenant.base_url/1`, so an org on a multi-org deployment sees
   its own host). Where a production build serves no OpenAPI document or
