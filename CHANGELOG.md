@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Fixed
+
+- **Search: a section with one or two records no longer ranks them first across a
+  `global/2` sweep; ranks are taken over every section's candidates together.**
+  ([#2176](https://github.com/The-Verscienta/kiln_cms/pull/2176) · [long form](docs/changelog/unreleased.md#global-search-ranks))
+
 ### Security
 
 - **phoenix_html 4.4.0, ssl_verify_fun 1.1.9 and jsv 0.26.2 fix three of
