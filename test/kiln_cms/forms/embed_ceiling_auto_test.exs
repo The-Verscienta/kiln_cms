@@ -381,10 +381,15 @@ defmodule KilnCMS.Forms.EmbedCeilingAutoTest do
       strategy = AshAuthentication.Info.strategy!(Accounts.User, :password)
 
       {:ok, user} =
-        AshAuthentication.Strategy.action(strategy, :sign_in, %{
-          "email" => email,
-          "password" => @password
-        })
+        AshAuthentication.Strategy.action(
+          strategy,
+          :sign_in,
+          %{
+            "email" => email,
+            "password" => @password
+          },
+          []
+        )
 
       conn =
         conn

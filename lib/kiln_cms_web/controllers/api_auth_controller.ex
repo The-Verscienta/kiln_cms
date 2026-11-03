@@ -31,7 +31,7 @@ defmodule KilnCMSWeb.ApiAuthController do
 
   An account *without* a second factor is unchanged — one call, 201, token.
 
-  "Returned", not "issued": `Strategy.action/3` mints and — because `User` sets
+  "Returned", not "issued": `Strategy.action/4` mints and — because `User` sets
   `store_all_tokens?` — *stores* the first-factor JWT before this controller
   gets to look at `totp_enabled?`. What the second factor withholds is the
   caller's access to it. Since #742 it also withholds its *use*:
@@ -108,10 +108,15 @@ defmodule KilnCMSWeb.ApiAuthController do
          true <- is_binary(email) and is_binary(password),
          strategy = AshAuthentication.Info.strategy!(User, :password),
          {:ok, user} <-
-           AshAuthentication.Strategy.action(strategy, :sign_in, %{
-             "email" => email,
-             "password" => password
-           }) do
+           AshAuthentication.Strategy.action(
+             strategy,
+             :sign_in,
+             %{
+               "email" => email,
+               "password" => password
+             },
+             []
+           ) do
       if Accounts.totp_enabled?(user) do
         two_factor_required(conn, user)
       else

@@ -25,32 +25,27 @@ defmodule KilnCMSWeb.AuthResetForm do
 
   ## Why the render is a copy
 
-  Upstream's `Input.submit` takes the button's wording as a `label` prop and
-  falls back to humanizing the action name when it is not given one. Upstream's
-  render never passes it, so the button on `/password-reset/:token` read
-  "Reset password with token" — an internal action name, on the same button that
-  then says "Changing password ..." while it works. `Components.Reset.Form`
-  declares no `button_text` override to fix that with, which leaves passing the
-  prop, which means owning the render.
-
-  So this module declares the `button_text` the component it stands in for
-  lacks, and `render/1` below is upstream's with that one prop added — and with
-  its password boxes rendered by `KilnCMSWeb.AuthPasswordInput`, which puts the
-  eye button beside each (#1806). Everything
-  else in it — including the four settings `override Components.Reset.Form` in
-  `KilnCMSWeb.AuthOverrides` writes — is read through
+  Upstream's template names `Password.Input.password_field` directly, and that
+  field has no slot or override that could put a button beside its `<input>`.
+  So `render/1` below is upstream's with its password boxes rendered by
+  `KilnCMSWeb.AuthPasswordInput`, which puts the eye button beside each
+  (#1806). Everything else in it, including the settings `override
+  Components.Reset.Form` in `KilnCMSWeb.AuthOverrides` writes, is read through
   `KilnCMSWeb.AuthOverrides.override_for/4` under upstream's name, so those
   settings keep working and the copy stays a copy.
 
+  Until ash_authentication_phoenix 3.0 the copy also existed to label the submit
+  button: upstream declared no `button_text` and never passed `Input.submit` a
+  label, so the button read "Reset password with token", the humanized action
+  name. 3.0 declares `button_text` and passes it, so Kiln's "Change password"
+  is now an ordinary setting on `Components.Reset.Form` and this render passes
+  it exactly as upstream's does.
+
   `KilnCMSWeb.AuthOverridesTest` pins it: it renders this component and upstream's
-  with the same assigns (the eye button off) and asserts the only difference is
-  the button's wording.
+  with the same assigns (the eye button off) and asserts they are identical.
   An upstream change to this form fails that test rather than going stale here.
   """
   use KilnCMSWeb, :live_component
-
-  use AshAuthentication.Phoenix.Overrides.Overridable,
-    button_text: "Text for the submit button."
 
   import AshAuthentication.Phoenix.Components.Helpers, only: [auth_path: 5]
   import PhoenixHTMLHelpers.Form, only: [hidden_input: 3]
@@ -67,21 +62,7 @@ defmodule KilnCMSWeb.AuthResetForm do
   def update(assigns, socket) do
     {:ok, socket} = Upstream.update(assigns, socket)
 
-    {:ok,
-     socket
-     |> assign(:submit_label, submit_label(socket.assigns.overrides))
-     |> assign_new(:password_reveal, fn -> true end)}
-  end
-
-  # Passed to `Input.submit` as attributes rather than as a `label={...}` that
-  # may be nil, because nil is not how that component spells "no label given":
-  # it fills the prop in with `assign_new/3`, so an unset `button_text` has to
-  # arrive as an absent attribute to get upstream's wording back.
-  defp submit_label(overrides) do
-    case override_for(overrides, :button_text) do
-      nil -> []
-      text -> [label: text]
-    end
+    {:ok, assign_new(socket, :password_reveal, fn -> true end)}
   end
 
   @impl true
@@ -146,6 +127,7 @@ defmodule KilnCMSWeb.AuthResetForm do
           strategy={@strategy}
           form={form}
           action={:reset}
+          label={AuthOverrides.override_for(@overrides, Upstream, :button_text)}
           disable_text={
             Web.gettext_switch(
               @gettext_fn,
@@ -155,7 +137,6 @@ defmodule KilnCMSWeb.AuthResetForm do
           }
           overrides={@overrides}
           gettext_fn={@gettext_fn}
-          {@submit_label}
         />
       </.form>
     </div>

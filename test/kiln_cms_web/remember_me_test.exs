@@ -50,10 +50,15 @@ defmodule KilnCMSWeb.RememberMeTest do
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
     {:ok, user} =
-      AshAuthentication.Strategy.action(strategy, :sign_in, %{
-        "email" => to_string(user.email),
-        "password" => @password
-      })
+      AshAuthentication.Strategy.action(
+        strategy,
+        :sign_in,
+        %{
+          "email" => to_string(user.email),
+          "password" => @password
+        },
+        []
+      )
 
     user
   end
@@ -123,20 +128,33 @@ defmodule KilnCMSWeb.RememberMeTest do
       # Not the same path as the POST above, and the one that matters:
       # `sign_in_tokens_enabled?` is on, so the form sets
       # `skip_remember_me_token_generation`, mints nothing on the password
-      # action, and forwards the ticked box as a query param to
-      # `:sign_in_with_token`. That action is where the token is issued — which
-      # is why the preparation has to be declared on both.
-      {:error, {:redirect, %{to: exchange}}} =
+      # action, and forwards the ticked box to `:sign_in_with_token`. That action
+      # is where the token is issued — which is why the preparation has to be
+      # declared on both. Since ash_authentication_phoenix 3.0 the hand-off is a
+      # hidden form POSTed by `phx-trigger-action`, never a redirect, so the
+      # sign-in token stays out of the URL (and every log that records one).
+      html =
         view
         |> form("#user-password-sign-in-with-password",
           user: %{email: to_string(user.email), password: @password, remember_me: "true"}
         )
         |> render_submit()
 
-      assert exchange =~ "remember_me=true"
+      hand_off = "#user-password-sign-in-with-password-sign-in-with-token"
+      assert html =~ ~s(id="#{String.trim_leading(hand_off, "#")}")
+      assert html =~ ~s(name="remember_me" value="true")
 
       exchanged =
-        build_conn() |> unique_ip() |> Phoenix.ConnTest.init_test_session(%{}) |> get(exchange)
+        view
+        |> form(hand_off)
+        |> follow_trigger_action(
+          build_conn()
+          |> unique_ip()
+          |> Phoenix.ConnTest.init_test_session(%{})
+        )
+
+      assert exchanged.method == "POST"
+      assert exchanged.query_string == ""
 
       assert %{value: token} = exchanged.resp_cookies[@cookie]
       assert is_binary(token) and token != ""
