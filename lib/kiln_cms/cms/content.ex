@@ -145,6 +145,73 @@ defmodule KilnCMS.CMS.Content do
   end
 
   @doc false
+  # The `:search_compound` prepare: the title and alias legs' phrase match,
+  # run against each rewrite of the query `KilnCMS.Search.NameTerms` made
+  # (a name written spaced or joined — `huangqi`, `xiao yao san`) instead of
+  # the query itself, with one more condition: the rewritten span occurs in
+  # the name. A split is a guess about where a word breaks, and only a name
+  # that holds the whole guess confirms it — `carpet` → `car pet` must not
+  # name a record called "Car".
+  #
+  # The title half keeps the title leg's GIN prefilter: the title's lexemes
+  # overlap the spans' — implied, since a title that contains a span carries
+  # its lexemes — so with no name field flagged the leg is index-served.
+  # The alias half has no index shape, as in `alias_filter/1`.
+  def compound_filter(query) do
+    locale = Ash.Query.get_argument(query, :locale)
+    variants = Ash.Query.get_argument(query, :variants) || []
+    spans = Ash.Query.get_argument(query, :spans) || []
+
+    title =
+      Ash.Expr.expr(
+        fragment(
+          "tsvector_to_array(to_tsvector(kiln_regconfig(?), ?)) && (SELECT coalesce(array_agg(lexeme), '{}') FROM unnest(?::text[]) AS compound(span), unnest(tsvector_to_array(to_tsvector(kiln_regconfig(?), compound.span))) AS lexeme)",
+          locale,
+          title,
+          ^spans,
+          ^locale
+        ) and
+          fragment(
+            "EXISTS (SELECT 1 FROM unnest(?::text[], ?::text[]) AS compound(query, span) WHERE to_tsvector(kiln_regconfig(?), compound.query) @@ phraseto_tsquery(kiln_regconfig(?), ?) AND to_tsvector(kiln_regconfig(?), ?) @@ phraseto_tsquery(kiln_regconfig(?), compound.span))",
+            ^variants,
+            ^spans,
+            ^locale,
+            ^locale,
+            title,
+            ^locale,
+            title,
+            ^locale
+          )
+      )
+
+    query.resource
+    |> KilnCMS.CMS.NameFields.for_resource(query.tenant)
+    |> Enum.map(fn name ->
+      Ash.Expr.expr(
+        fragment(
+          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(coalesce(? ->> ?::text, '')) END) AS name_alias(value), unnest(?::text[], ?::text[]) AS compound(query, span) WHERE to_tsvector(kiln_regconfig(?), compound.query) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value) AND to_tsvector(kiln_regconfig(?), name_alias.value) @@ phraseto_tsquery(kiln_regconfig(?), compound.span))",
+          custom_fields,
+          ^name,
+          custom_fields,
+          ^name,
+          custom_fields,
+          ^name,
+          ^variants,
+          ^spans,
+          ^locale,
+          ^locale,
+          ^locale,
+          ^locale
+        )
+      )
+    end)
+    |> Enum.reduce(title, &Ash.Expr.expr(^&2 or ^&1))
+    |> then(&Ash.Query.do_filter(query, &1))
+    |> Ash.Query.sort([{:title_length, :desc}, {:inserted_at, :desc}])
+    |> cap_unbounded()
+  end
+
+  @doc false
   # Shared by the `:search_semantic` / `:search_semantic_published` prepares:
   # embed the query and order by cosine distance (nearest first). Returns
   # nothing when semantic search is disabled or the query can't be embedded.
@@ -1683,6 +1750,37 @@ defmodule KilnCMS.CMS.Content do
       end
     end
 
+    # The compound leg: the title and alias legs over the query's rewrites —
+    # a name written spaced or joined differently from the record's
+    # (`KilnCMS.Search.NameTerms`). The rewrites are made per query, against
+    # the site's name terms, by `KilnCMS.Search.hybrid/3`, and passed here as
+    # two aligned lists; the match is built in the prepare
+    # (`KilnCMS.CMS.Content.compound_filter/1`) because the flagged name
+    # fields are a per-site fact. Internal to fusion, no published twin.
+    compound_read = fn name ->
+      filter_ast = join_and.([quote(do: ^ref(:locale) == ^arg(:locale))] ++ facet_clauses.(false))
+
+      quote do
+        read unquote(name) do
+          argument :variants, {:array, :string}, allow_nil?: false
+          argument :spans, {:array, :string}, allow_nil?: false
+          argument :locale, :string
+
+          unquote_splicing(facet_args.(false))
+
+          filter expr(unquote(filter_ast))
+
+          prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
+
+            query
+            |> Ash.Query.set_argument(:locale, locale)
+            |> KilnCMS.CMS.Content.compound_filter()
+          end
+        end
+      end
+    end
+
     search_actions =
       quote do
         (unquote_splicing([
@@ -1695,7 +1793,8 @@ defmodule KilnCMS.CMS.Content do
            autocomplete_read.(:autocomplete, false),
            autocomplete_read.(:autocomplete_published, true),
            title_read.(:search_title),
-           alias_read.(:search_alias)
+           alias_read.(:search_alias),
+           compound_read.(:search_compound)
          ]))
       end
 
