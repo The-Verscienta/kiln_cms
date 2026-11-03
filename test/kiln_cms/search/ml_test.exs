@@ -27,6 +27,13 @@ defmodule KilnCMS.Search.MLTest do
     # out of `KilnCMS.Search.embed/1`.
     assert KilnCMS.Search.embedder() == Embedder.Bumblebee
     assert KilnCMS.Search.reranker() == Reranker.Bumblebee
+
+    # `function_exported?/3` is false for a module that is not loaded yet, and
+    # nothing here loads them. This passed for a long time only because
+    # ash_authentication 4.x's token expunger ran `Spark.sparks/2` at boot,
+    # which loads every module in the app; 5.0 no longer does.
+    Code.ensure_loaded!(Embedder.Bumblebee)
+    Code.ensure_loaded!(Reranker.Bumblebee)
     assert function_exported?(Embedder.Bumblebee, :embed, 1)
     assert function_exported?(Reranker.Bumblebee, :scores, 2)
   end
@@ -39,6 +46,9 @@ defmodule KilnCMS.Search.MLTest do
         # leg uniquely proves is that the Bumblebee/Nx call sites still
         # COMPILE, which the lean legs cannot notice going stale.
         assert Code.ensure_loaded?(Nx.Serving)
+        # Loaded explicitly, as above: nothing in a test boot loads them.
+        Code.ensure_loaded!(KilnCMS.Search.Serving)
+        Code.ensure_loaded!(KilnCMS.Search.RerankerServing)
         assert function_exported?(KilnCMS.Search.Serving, :build, 0)
         assert function_exported?(KilnCMS.Search.RerankerServing, :build, 0)
       end

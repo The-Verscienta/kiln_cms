@@ -44,7 +44,11 @@ defmodule KilnCMSWeb.MailSettingsUnconfiguredLiveTest do
     {:ok, user} =
       User
       |> AshAuthentication.Info.strategy!(:password)
-      |> AshAuthentication.Strategy.action(:sign_in, %{"email" => email, "password" => @password})
+      |> AshAuthentication.Strategy.action(
+        :sign_in,
+        %{"email" => email, "password" => @password},
+        []
+      )
 
     {:ok, lv, html} =
       conn

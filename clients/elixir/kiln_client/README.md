@@ -117,9 +117,20 @@ its visibility follows the credential, which is why viewer-minted keys matter.
 # Rendered content (fired artifact; retries once on a cold cache)
 {:ok, artifact} = KilnClient.artifact("posts", "hello-world", surface: "json")
 
+# The same document as it was on a date, and the collection as it was then
+{:ok, then} = KilnClient.artifact("posts", "hello-world", as_of: ~D[2026-01-01])
+{:ok, %{"entries" => entries}} = KilnClient.content_as_of("post", ~D[2026-01-01])
+
 # Mirror the public site: a snapshot the first time, then upserts AND
 # deletes since the stored cursor (anonymous view, whatever key is set)
 {:ok, %{items: items, cursor: cursor}} = KilnClient.sync(cursor: stored_cursor)
+
+# ...or one page at a time, to stream it
+{:ok, %{"items" => page, "cursor" => next, "has_more" => more?}} =
+  KilnClient.sync_page(stored_cursor)
+
+# The live delivery schema, for generating typed models
+{:ok, json_schema} = KilnClient.schema(types: ["post"])
 
 # Join relationships through the included lookup
 {:ok, %{items: [post | _], included: included}} =
@@ -130,6 +141,61 @@ tags = KilnClient.resolve(post, "tags", included)
 
 Results are flattened JSON:API resources: the `attributes` map (string keys)
 plus `"id"`/`"type"`, with relationships reduced to `{type, id}` ref maps.
+
+## Routing, navigation and forms
+
+A headless front end's catch-all route asks what lives at the URL, then
+renders it or redirects. Every answer is `{:ok, verdict}`, including
+`"not_found"`, which the server sends as a 404:
+
+```elixir
+case KilnClient.resolve_path(conn.request_path, locale: locale) do
+  {:ok, %{"status" => "ok", "type" => type, "slug" => slug, "locale" => found_in}} ->
+    {:ok, page} = KilnClient.artifact(type, slug, locale: found_in)
+    {:ok, nav} = KilnClient.menu("main", locale: found_in)
+    render(conn, :page, page: page, nav: nav)
+
+  {:ok, %{"status" => "moved", "to" => to}} ->
+    conn |> put_status(301) |> redirect(to: to)
+
+  {:ok, %{"status" => "not_found"}} ->
+    send_resp(conn, 404, "Not found")
+end
+
+{:ok, %{"menus" => menus}} = KilnClient.menus()
+{:ok, %{"default" => default, "fallbacks" => chains}} = KilnClient.locales()
+{:ok, %{"related" => related}} = KilnClient.related("post", "hello-world", limit: 3)
+```
+
+`menu/2`, `related/3` and `resolve_path/2` take `:locale`, plus
+`fallback: false` to turn the site's fallback chain off and
+`:fallback_locale` to name one fallback. The result's `"locale"` says which
+translation answered.
+
+Forms render from their schema and submit as JSON:
+
+```elixir
+{:ok, %{"fields" => fields, "honeypot_field" => honeypot}} = KilnClient.form("contact")
+
+case KilnClient.submit_form("contact", params) do
+  {:ok, %{"message" => thanks}} -> thanks
+  {:error, %KilnClient.Error{reason: :validation} = e} -> KilnClient.Error.field_errors(e)
+end
+```
+
+`submit_form/3` is anonymous by design and never sends the configured key.
+When it relays a visitor's browser submission, pass the honeypot field and
+`"_kiln_rendered_at"` through untouched, so the server's spam checks see
+them. A filled honeypot is discarded and still answers success, so never set
+it yourself.
+
+A front end's draft mode mints a preview link where the key lives and hands
+only the token to the browser:
+
+```elixir
+{:ok, %{"token" => token, "url" => url}} =
+  KilnClient.mint_preview("post", draft_id, api_key: editor_key)
+```
 
 ## Image transforms
 
