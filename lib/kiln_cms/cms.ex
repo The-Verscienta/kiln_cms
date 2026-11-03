@@ -110,6 +110,16 @@ defmodule KilnCMS.CMS do
       load [:block_ids]
     end
 
+    # Ranked hybrid search across every content type, the site's synonyms
+    # applied (`KilnCMS.CMS.ContentSearch`) — the same ranking `/api/search`
+    # and `/api/ask` use, under the key's own read policies.
+    tool :search_content, KilnCMS.CMS.ContentSearch, :search do
+      description "Search all content (pages, posts, entries) by relevance — titles, aliases, " <>
+                    "body text and the site's search synonyms. Returns ranked hits with type, id, " <>
+                    "slug, score and the legs that matched, plus also_searched: the alternate " <>
+                    "wordings the site's synonyms added."
+    end
+
     tool :read_type_definitions, KilnCMS.CMS.TypeDefinition, :read do
       description "List the admin-defined dynamic content types (name, id) entries belong to."
     end
@@ -619,6 +629,20 @@ defmodule KilnCMS.CMS do
     # ownership half of editorial collaboration (Comment above is discussion).
     # Saved views on the content list (#1593): a named filter, private to its
     # owner unless an admin shares it with the site.
+    # A site's search synonyms and aliases (proposal A7) — applied at query
+    # time by `KilnCMS.Search.Synonyms`, managed at `/editor/search-synonyms`.
+    resource KilnCMS.CMS.ContentSearch do
+      define :search_content, action: :search, args: [:query]
+    end
+
+    resource KilnCMS.CMS.SearchSynonym do
+      define :list_search_synonyms, action: :read
+      define :get_search_synonym, action: :read, get_by: [:id]
+      define :create_search_synonym, action: :create
+      define :update_search_synonym, action: :update
+      define :destroy_search_synonym, action: :destroy
+    end
+
     resource KilnCMS.CMS.SavedView do
       define :list_saved_views, action: :visible
       define :get_saved_view, action: :read, get_by: [:id]

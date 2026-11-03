@@ -90,7 +90,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Fired artifacts** | `GET /api/content/:type/:slug` | Pre-rendered output per surface: `json` (default), `json_ld`, `web`, and `llm` (raw `text/markdown`). `?as_of=` reads a document as it stood on a date; `GET /api/content/:type?as_of=` lists what was published then; `?fields=` trims the `json` body ([§ Sparse fieldsets](#sparse-fieldsets-on-artifacts)). | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md), [point-in-time.md](point-in-time.md) |
 | **Sync (delta)** | `GET /api/sync` | Mirror public content: a snapshot, then upserts **and deletions** since an opaque cursor — the only surface that reports a document *leaving*. | [§ Sync](#sync-delta-api), [native-apps.md](native-apps.md) |
 | **Version history** | `GET /api/content/:type/:id/revisions` | A document's revisions, one revision's snapshot, and restore. Editor-tier credential required. | [§ Version history](#version-history-revisions) |
-| **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked; answers as an anonymous visitor whatever the credential. `503` with `Retry-After` (`temporarily_unavailable`) when the database pool cannot take the search. Answers within a time budget, flagged `partial` when it had to cut a leg; per-leg times in `Server-Timing` ([below](#search-budget-and-server-timing)). `?explain=1` reports why each hit ranked where it did ([§ Explaining a search ranking](#explaining-a-search-ranking)). | [search-roadmap.md](search-roadmap.md) |
+| **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked, with the site's search synonyms applied (`also_searched` lists the alternate wordings searched); answers as an anonymous visitor whatever the credential. `503` with `Retry-After` (`temporarily_unavailable`) when the database pool cannot take the search. Answers within a time budget, flagged `partial` when it had to cut a leg; per-leg times in `Server-Timing` ([below](#search-budget-and-server-timing)). `?explain=1` reports why each hit ranked where it did ([§ Explaining a search ranking](#explaining-a-search-ranking)). | [search-roadmap.md](search-roadmap.md) |
 | **Path resolution** | `GET /api/resolve?path=` | "What lives at this URL?" — content, a redirect to follow, or nothing — for a front end's catch-all route. | [json-api.md](json-api.md) (URLs, pathauto & redirects) |
 | **Menus** | `GET /api/menus`, `GET /api/menus/:key` | Resolved navigation trees with live URLs. | [navigation-menus.md](navigation-menus.md) |
 | **Related content** | `GET /api/content/:type/:slug/related` | Published documents semantically closest to this one (empty when semantic search is off). | [rag.md](rag.md) |
@@ -1456,7 +1456,7 @@ saying how it got there:
 - **`legs`** has one entry per leg in the hit's `legs`. `rank` is the rank
   fusion used. For the keyword, any-term, semantic, block and tag legs, that
   rank is taken over every content section of the search at once. For the
-  title, alias and fuzzy legs, it is the rank within the hit's own type.
+  title, alias, compound and fuzzy legs, it is the rank within the hit's own type.
   Candidates that tie share the average of the positions they hold, so a
   rank can be a half: two records tied for second both rank `2.5`.
   `contribution` is what that rank added to `score`
@@ -1466,8 +1466,9 @@ saying how it got there:
 - **`score`** is the raw number the leg ranked by. **`measure`** says which
   number it is: `ts_rank_cd` for `keyword` and `keyword_any` (higher is
   better), `cosine_distance` for `semantic`, `block` and `tag` (lower is
-  better), or `trigram_similarity` for `fuzzy` (higher is better). `title`
-  and `alias` either match or don't, so both fields are `null` for them.
+  better), or `trigram_similarity` for `fuzzy` (higher is better). `title`,
+  `alias` and `compound` either match or don't, so both fields are `null`
+  for them.
 - **`terms`** are the query's terms as the keyword legs parse them: stemmed
   to a `lexeme`, stop words dropped, the last term matched as a prefix. Each
   one names the query word it came from and whether this hit's indexed text
@@ -1570,7 +1571,9 @@ Without a purge, a publish reaches readers when the cached copy expires —
 within `KILN_API_CACHE_MAX_AGE` (60 s by default) for JSON:API, GraphQL and
 search, 300 s for fired artifacts. Set **`KILN_CDN_PURGE_URL`** and every
 `<type>.published`, `<type>.unpublished`, `<type>.updated` and
-`release.published` in a site sends one purge of that site's key. Those are the
+`release.published` in a site sends one purge of that site's key, as does every
+write to a search synonym (`/editor/search-synonyms`), which changes what a
+cached `/api/search` URL answers. The others are the
 content webhook events; a change that emits none — renaming a category or tag,
 editing a type definition or custom field — is not purged and ages out on the
 `max-age`:
@@ -1639,10 +1642,13 @@ Every non-empty search also sends a
 durations in milliseconds:
 
 ```
-server-timing: embed;dur=11.8, keyword;dur=6.2, title;dur=1.9, alias;dur=1.4, fuzzy;dur=0.0, semantic;dur=4.1, block;dur=3.0, tag;dur=0.0, fuse;dur=3.3, sweep;dur=24.7, suggest;dur=0.0, total;dur=26.0
+server-timing: embed;dur=11.8, keyword;dur=6.2, title;dur=1.9, alias;dur=1.4, compound;dur=0.0, synonym;dur=0.0, fuzzy;dur=0.0, semantic;dur=4.1, block;dur=3.0, tag;dur=0.0, fuse;dur=3.3, sweep;dur=24.7, suggest;dur=0.0, total;dur=26.0
 ```
 
 `embed` is the query embedding. Each leg (`keyword`, `title`, `alias`,
+`compound` — names written spaced or joined, near zero when the query has
+nothing to rewrite — `synonym` — the site's search synonyms, near zero when
+none applies —
 `fuzzy`, `semantic`, `block`, `tag`), `fuse` (fusion, the relevance floor and
 reading the kept hits) and `rerank` (only when reranking is on) are summed
 over the content sections. The sections run concurrently, so these can add up
