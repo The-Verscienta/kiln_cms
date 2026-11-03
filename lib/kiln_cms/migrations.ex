@@ -81,11 +81,23 @@ defmodule KilnCMS.Migrations do
       "CREATE INDEX IF NOT EXISTS #{table}_search_vector_gin ON #{table} USING gin (search_vector)"
     )
 
+    # `kiln_search_vector()` (`KilnCMS.Search.HanGrams`) is what the trigger
+    # computes once that extension is installed; a migration that runs before
+    # it (an overlay's, timestamped earlier) writes the vector the trigger
+    # wrote then, and the extension's own backfill brings those rows forward.
     execute("""
-    UPDATE #{table} SET search_vector =
-      setweight(to_tsvector(kiln_regconfig(locale), coalesce(title, '')), 'A') ||
-      setweight(to_tsvector(kiln_regconfig(locale), coalesce(search_text, '')), 'B')
-    WHERE search_vector IS NULL
+    DO $$
+    BEGIN
+      IF to_regprocedure('kiln_search_vector(text, text, text)') IS NOT NULL THEN
+        UPDATE #{table} SET search_vector = kiln_search_vector(locale, title, search_text)
+        WHERE search_vector IS NULL;
+      ELSE
+        UPDATE #{table} SET search_vector =
+          setweight(to_tsvector(kiln_regconfig(locale), coalesce(title, '')), 'A') ||
+          setweight(to_tsvector(kiln_regconfig(locale), coalesce(search_text, '')), 'B')
+        WHERE search_vector IS NULL;
+      END IF;
+    END $$
     """)
   end
 

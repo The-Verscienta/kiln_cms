@@ -34,8 +34,8 @@ clamped to 12).
 reranker's score instead when reranking is enabled, or the blend of the two
 ranks under `rrf` — see [Replace or blend](#replace-or-blend)), and the scores are
 comparable across types because every section of the sweep shares the same
-`k` and leg weights. `legs` names which of `keyword`, `keyword_any`, `semantic`,
-`block`, `title`, `alias`, `fuzzy` and `tag` returned the hit — a
+`k` and leg weights. `legs` names which of `keyword`, `keyword_any`, `han`,
+`semantic`, `block`, `title`, `alias`, `fuzzy` and `tag` returned the hit — a
 keyword-and-semantic hit is a stronger claim than a fuzzy-only one, and a
 `tag` hit (a record carrying a tag whose name the question is near) is a topic
 match, the weakest claim of all; `block` is the embedding leg at
@@ -44,7 +44,11 @@ opening (what a question about a section deep in a long monograph needs); an
 `alias` hit is a record the question names by one of its other names — a
 custom field an admin flagged "names the record", such as a Latin binomial or
 a pinyin spelling; a `title` hit is a record the question names
-outright (its title appears in the question, stemmed and at word boundaries);
+outright (its title appears in the question, stemmed and at word boundaries,
+or its Chinese text is exactly the question's — `黄连` names "Huang Lian 黄连");
+`han` is the keyword match for Chinese, the question's characters found as
+character bigrams wherever they sit in a longer run of Chinese text (a
+question with no Chinese never produces it);
 `keyword` (every query term matched) is a stronger claim than `keyword_any`
 (the relaxed leg that joins when the every-term match comes up short on a
 multi-word query: some of the terms matched). Both are additive; a client

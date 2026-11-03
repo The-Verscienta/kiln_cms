@@ -10,7 +10,17 @@ defmodule KilnCMS.Repo do
     # `pg_trgm` backs typo-tolerant autocomplete (trigram similarity on titles).
     # `unaccent` + `KilnCMS.Search.AccentFolding` fold diacritics out of every
     # full-text leg, so "Zusanli" finds "Zúsānlǐ" (#1628).
-    ["ash-functions", "citext", "vector", "pg_trgm", "unaccent", KilnCMS.Search.AccentFolding]
+    # `KilnCMS.Search.HanGrams` indexes Han text as character bigrams, so
+    # "吴茱萸" is found inside an unsegmented Chinese sentence (A8).
+    [
+      "ash-functions",
+      "citext",
+      "vector",
+      "pg_trgm",
+      "unaccent",
+      KilnCMS.Search.AccentFolding,
+      KilnCMS.Search.HanGrams
+    ]
   end
 
   # Don't open unnecessary transactions

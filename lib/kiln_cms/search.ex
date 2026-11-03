@@ -459,7 +459,7 @@ defmodule KilnCMS.Search do
   # error because they are the likeliest mistake.
   @floor_semantic_legs [:semantic, :block, :tag]
   @floor_optional_legs [:keyword_any, :fuzzy]
-  @floor_vouching_legs [:keyword, :title, :alias]
+  @floor_vouching_legs [:keyword, :han, :title, :alias]
 
   @doc """
   The legs whose hits the relevance floor judges (#1936). A fused hit is
@@ -486,10 +486,11 @@ defmodule KilnCMS.Search do
       trigrams with the junk. Listing it judges those guesses by distance
       too. A fuzzy hit on a record with no embedding yet is kept (below).
 
-  `:keyword`, `:title` and `:alias` cannot be listed, and listing one
-  **raises**, as does any leg `hybrid/3` does not have. Each is a lexical
+  `:keyword`, `:han`, `:title` and `:alias` cannot be listed, and listing
+  one **raises**, as does any leg `hybrid/3` does not have. Each is a lexical
   claim strong enough to stand without a distance alibi — every query term
-  matched, or the query naming the record — and those are exactly the hits a
+  matched (`:han` is that claim for Han text), or the query naming the
+  record — and those are exactly the hits a
   short query embeds far from: judging them would bring back the defect the
   floor's post-fusion placement fixed (see `semantic_max_distance/0`).
 
@@ -856,6 +857,14 @@ defmodule KilnCMS.Search do
   @relaxed_fallback_threshold 3
   @relaxed_weight 0.5
 
+  # The Han leg (`:search_han`, A8): the query's Han text as character
+  # bigrams against the bigrams stored in `search_vector`
+  # (`KilnCMS.Search.HanGrams`). It is the keyword leg for text Postgres
+  # cannot segment — "every query term matched", read at the grain Chinese
+  # is written in — so it carries the keyword leg's weight. Runs only for a
+  # query that holds a Han ideograph; for any other it would match nothing.
+  @han_weight 1.0
+
   # The block leg is the semantic leg at block grain — same embedder, same
   # distance, one more view of the document — so it carries the semantic
   # leg's weight: a document reached both by its whole and by a section is
@@ -886,7 +895,9 @@ defmodule KilnCMS.Search do
   semantic (`:search_semantic`, cosine), block (the nearest per-block
   embedding per document — see `block_leg?/0`), title (`:search_title`,
   records the query names) and alias (`:search_alias`, records the query
-  names by a field flagged as a name — `KilnCMS.CMS.NameFields`) and tag
+  names by a field flagged as a name — `KilnCMS.CMS.NameFields`), Han
+  (`:search_han`, a query's Chinese text matched as character bigrams —
+  `KilnCMS.Search.HanGrams`; only for a query that holds Han) and tag
   (documents carrying a tag the query names — see `tag_leg?/0`) result lists
   by Reciprocal Rank Fusion and return the merged records, best first.
 
@@ -971,10 +982,13 @@ defmodule KilnCMS.Search do
     # in one query (`hydrate/4`) — before the reranker, which reads their
     # title and `search_text` (`rerank_text/1`).
     #
-    # Both keyword legs read `search_vector`, so they share one containment:
-    # a type without the column loses both, and logs it once.
-    {keyword, relaxed} =
-      without_search_vector(resource, fn -> keyword_legs(resource, query, args, read_opts) end)
+    # The keyword, any-term and Han legs read `search_vector`, so they share
+    # one containment: a type without the column loses all three, and logs it
+    # once.
+    {keyword, relaxed, han} =
+      without_search_vector(resource, {[], [], []}, fn ->
+        keyword_legs(resource, query, args, read_opts)
+      end)
 
     # One embedding per call, shared by the two semantic legs: a sweep hands
     # its vector down in `opts`; a direct caller gets it embedded here once,
@@ -1000,6 +1014,7 @@ defmodule KilnCMS.Search do
     [
       {:keyword, keyword, 1.0},
       {:keyword_any, relaxed, @relaxed_weight},
+      {:han, han, @han_weight},
       {:semantic, semantic, 1.0},
       {:block, blocks, @block_weight},
       {:title, title, @title_weight},
@@ -1047,20 +1062,25 @@ defmodule KilnCMS.Search do
 
   @doc """
   Which legs of `hybrid/3` returned this record — a subset of
-  `[:keyword, :keyword_any, :semantic, :block, :title, :alias, :fuzzy, :tag]`,
+  `[:keyword, :keyword_any, :han, :semantic, :block, :title, :alias, :fuzzy, :tag]`,
   in that order — or `[]` for a record that did not come out of `hybrid/3`.
 
   `:keyword` is the full-text leg, every query term matched; `:keyword_any`
   is its any-term relaxation, which runs only when the full match came up
   short on a multi-word query, so its presence on a hit means "matched some
-  of the terms"; `:semantic` is the embedding leg over the whole document;
+  of the terms"; `:han` is the full-text leg for Han text, the query's
+  ideographs matched as character bigrams wherever they sit in a longer
+  run (`KilnCMS.Search.HanGrams`), which runs only for a query holding one;
+  `:semantic` is the embedding leg over the whole document;
   `:block` the same embedding at block grain, a document reached through
   its nearest section (`block_leg?/0`) — a block or, with
   `chunk_long_documents?/0` on, a window of its text past the first;
-  `:title` a record the query names outright (its whole title appears in the query); `:alias` a record the
-  query names by one of its other names — a custom field an admin flagged
-  `names_record` (`KilnCMS.CMS.NameFields`), matched the way the title is
-  and weighted the same; `:fuzzy` the trigram title leg that runs only when
+  `:title` a record the query names outright (its whole title appears in
+  the query, or — for a Han query — the title's Han text is exactly the
+  query's: `黄连` names "Huang Lian 黄连" and not "黄连解毒汤"); `:alias` a
+  record the query names by one of its other names — a custom field an
+  admin flagged `names_record` (`KilnCMS.CMS.NameFields`), matched the way
+  the title is and weighted the same; `:fuzzy` the trigram title leg that runs only when
   the full match came up short; `:tag` a record carrying a tag whose name
   the query is near (`tag_leg?/0`) — a topic match, the weakest claim here.
 
@@ -1075,7 +1095,8 @@ defmodule KilnCMS.Search do
   def hit_legs(_record), do: []
 
   @typedoc "A leg of `hybrid/3` — see `hit_legs/1`."
-  @type leg :: :keyword | :keyword_any | :semantic | :block | :title | :alias | :fuzzy | :tag
+  @type leg ::
+          :keyword | :keyword_any | :han | :semantic | :block | :title | :alias | :fuzzy | :tag
 
   # A fused hit on its way out of `hybrid/3`: the record, the score it is
   # ordered by, and the legs that returned it.
@@ -1720,9 +1741,10 @@ defmodule KilnCMS.Search do
   # visitors. Every other error still raises: an empty result set must never be
   # how a caller learns their query was broken.
   #
-  # Both keyword legs run inside one call (`keyword_legs/4`), so the column's
-  # absence empties both and is logged once, not once per leg.
-  defp without_search_vector(resource, fun) do
+  # Every leg that reads the column — keyword, any-term, Han — runs inside
+  # one call (`keyword_legs/4`), so its absence empties them all and is
+  # logged once, not once per leg. `empty` is what the caller gets instead.
+  defp without_search_vector(resource, empty, fun) do
     fun.()
   rescue
     error ->
@@ -1742,7 +1764,7 @@ defmodule KilnCMS.Search do
         `mix kiln.search.check` reports every table in this state.\
         """)
 
-        {[], []}
+        empty
       else
         reraise error, __STACKTRACE__
       end
@@ -1765,7 +1787,12 @@ defmodule KilnCMS.Search do
         []
       end
 
-    {keyword, relaxed}
+    han =
+      if KilnCMS.Search.HanGrams.han?(query),
+        do: run_leg(resource, :search_han, args, read_opts),
+        else: []
+
+    {keyword, relaxed, han}
   end
 
   defp multi_word?(query), do: query |> String.split() |> length() > 1
@@ -2174,7 +2201,7 @@ defmodule KilnCMS.Search do
       |> Enum.flat_map(fn resource ->
         # Same containment as the keyword leg: one type missing its
         # `search_vector` migration must not empty every facet on the page.
-        without_search_vector(resource, fn ->
+        without_search_vector(resource, [], fn ->
           resource
           |> Ash.Query.new()
           |> Ash.Query.limit(@facet_scan_cap)

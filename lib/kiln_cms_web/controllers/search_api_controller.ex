@@ -28,8 +28,9 @@ defmodule KilnCMSWeb.SearchApiController do
   (media is an authoring concern, not a content-search result). Content hits carry their
   public `path`, an escape-safe `highlight` snippet (only `<mark>`
   survives), the fused `score` they were ranked by (comparable across
-  sections) and the `legs` that matched (`keyword`/`keyword_any`/`semantic`/
-  `block`/`title`/`alias`/`fuzzy`/`tag` — `block` is the embedding leg at
+  sections) and the `legs` that matched (`keyword`/`keyword_any`/`han`/
+  `semantic`/`block`/`title`/`alias`/`fuzzy`/`tag` — `han` is the keyword
+  match for Chinese text, by character bigrams; `block` is the embedding leg at
   block grain, a record reached through its nearest section; `title` is a
   record the query names outright, `alias` one it names by a custom field
   flagged as a name, `tag` one carrying a tag whose name the query is near,
