@@ -14,6 +14,11 @@ defmodule KilnCMS.Search.Embedder.Bumblebee do
       {:ok, Nx.to_flat_list(tensor)}
     rescue
       error -> {:error, error}
+    catch
+      # A serving that is not running (yet), or that timed out, answers with an
+      # exit from `Nx.Serving.batched_run/2`, not an exception. Same answer as
+      # an exception: a search without its semantic legs, not a 500.
+      :exit, reason -> {:error, {:exit, reason}}
     end
   else
     # The lean build's answer. `{:error, _}` is what the behaviour already

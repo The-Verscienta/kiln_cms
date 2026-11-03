@@ -101,11 +101,16 @@ defmodule KilnCMS.Search.EvalTest do
       assert {:error, "row 0: expected an object"} = Eval.parse("[1]")
     end
 
-    test "the shipped example parses and covers every class" do
+    test "the shipped example and the adversarial fixture parse and cover every class" do
       json = File.read!(Path.join([:code.priv_dir(:kiln_cms), "search_eval", "example.json"]))
       assert {:ok, rows} = Eval.parse(json)
 
-      assert rows |> Enum.map(& &1.class) |> Enum.uniq() |> Enum.sort() ==
+      adversarial =
+        File.read!(Path.expand("../../support/fixtures/search_ranking/adversarial.json", __DIR__))
+
+      assert {:ok, fixture_rows} = Eval.parse(adversarial)
+
+      assert (rows ++ fixture_rows) |> Enum.map(& &1.class) |> Enum.uniq() |> Enum.sort() ==
                Enum.sort(Eval.classes())
     end
   end

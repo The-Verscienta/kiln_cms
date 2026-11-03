@@ -302,7 +302,9 @@ The golden set is a JSON array of rows:
 
 - `query` — what a user typed. `expected` — the slugs that should come back,
   in no particular order. `class` — one of `single_entity`, `multi_entity`,
-  `paraphrase`, `question_form`, `typo`, `junk`. Optional `type` (a content
+  `paraphrase`, `question_form`, `typo`, `junk`, or an adversarial class:
+  `cross_section`, `exact_phrase`, `prefix`, `joined_name`, `cjk_name` (see
+  the adversarial fixture below). Optional `type` (a content
   type name or its section plural — ranks are then taken within that type)
   and `locale`.
 - A **junk** row expects nothing and passes only when *nothing* is returned —
@@ -365,6 +367,24 @@ and uploads `search-eval.json` as an artifact. It never fails the build.
    what users actually get, not what the dev database ranks.
 5. Only when the numbers have been stable across a few changes, add
    `--fail-below` for the classes you would want a PR to fail on.
+
+**The adversarial fixture (A10).** Kiln's own gate is
+`test/kiln_cms/search/ranking_fixture_test.exs`: a synthetic corpus seeded in
+the test, and a golden set beside it
+(`test/support/fixtures/search_ranking/adversarial.json`) built to trip the
+ranking. It covers a section holding one weak match next to a large section
+of strong ones (the #2175 lone-record effect), an exact phrase against its
+words scattered through a ~10,000-word document, a query equal to one
+record's Chinese name when another record's name contains it, a typo and a
+junk query, a half-typed last word ("huang l" → "Huang Lian") and a name
+typed without its space ("huangqi" → "Huang Qi"). It runs in the ordinary
+test suite with a bag-of-words stub embedder, so the semantic, block and tag
+legs take part. The file's `"gates"` (in `--fail-below` syntax) fail the
+test. Its `"baselines"` record the classes the engine does not pass yet:
+`cjk_name` and `joined_name`. A run that moves one prints a notice on the
+pull request instead of failing, so the change carries its number. Raise
+the baseline in the same pull request, or promote the class to a gate once
+it passes. The table is appended to the job summary.
 
 **Touches.** `KilnCMS.Search.Eval` (the pure metrics, unit-tested),
 `KilnCMS.Search.Eval.Retriever` (the three sources), `Mix.Tasks.Kiln.Search.Eval`,

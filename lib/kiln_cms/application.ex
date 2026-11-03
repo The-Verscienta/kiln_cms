@@ -165,7 +165,14 @@ defmodule KilnCMS.Application do
            Supervisor.start_link(
              children ++
                subscription_batcher() ++
-               embedding_children() ++ reranker_children() ++ Kiln.Plugins.children(),
+               embedding_children() ++
+               reranker_children() ++
+               [
+                 # After the servings it warms: until it has run one search
+                 # through them, the probes keep this node out of rotation
+                 # (#2166). Opens at once where neither serving starts.
+                 KilnCMS.Search.Warmup
+               ] ++ Kiln.Plugins.children(),
              opts
            ) do
       # Needs the Repo, so it runs after the tree is up rather than alongside
