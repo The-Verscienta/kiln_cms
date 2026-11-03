@@ -9,6 +9,7 @@ defmodule KilnCMS.Search do
   """
   require Logger
 
+  alias KilnCMS.Search.NameTerms
   alias KilnCMS.Search.RerankOrder
 
   @doc "Whether semantic search is enabled."
@@ -459,7 +460,7 @@ defmodule KilnCMS.Search do
   # error because they are the likeliest mistake.
   @floor_semantic_legs [:semantic, :block, :tag]
   @floor_optional_legs [:keyword_any, :fuzzy]
-  @floor_vouching_legs [:keyword, :title, :alias]
+  @floor_vouching_legs [:keyword, :title, :alias, :compound]
 
   @doc """
   The legs whose hits the relevance floor judges (#1936). A fused hit is
@@ -886,7 +887,9 @@ defmodule KilnCMS.Search do
   semantic (`:search_semantic`, cosine), block (the nearest per-block
   embedding per document — see `block_leg?/0`), title (`:search_title`,
   records the query names) and alias (`:search_alias`, records the query
-  names by a field flagged as a name — `KilnCMS.CMS.NameFields`) and tag
+  names by a field flagged as a name — `KilnCMS.CMS.NameFields`), compound
+  (`:search_compound`, records the query names with the words of a name
+  spaced or joined differently — `KilnCMS.Search.NameTerms`) and tag
   (documents carrying a tag the query names — see `tag_leg?/0`) result lists
   by Reciprocal Rank Fusion and return the merged records, best first.
 
@@ -987,6 +990,7 @@ defmodule KilnCMS.Search do
     {tagged, tag_distances} = tag_leg(resource, locale, filters, read_opts, opts)
     title = run_leg(resource, :search_title, args, read_opts)
     aliases = run_leg(resource, :search_alias, args, read_opts)
+    compound = compound_leg(resource, query, args, read_opts, opts)
 
     fuzzy =
       if filters == %{} and length(keyword) < @fuzzy_fallback_threshold do
@@ -1004,6 +1008,7 @@ defmodule KilnCMS.Search do
       {:block, blocks, @block_weight},
       {:title, title, @title_weight},
       {:alias, aliases, @title_weight},
+      {:compound, compound, @title_weight},
       {:fuzzy, fuzzy, @fuzzy_weight},
       {:tag, tagged, @tag_weight}
     ]
@@ -1047,7 +1052,7 @@ defmodule KilnCMS.Search do
 
   @doc """
   Which legs of `hybrid/3` returned this record — a subset of
-  `[:keyword, :keyword_any, :semantic, :block, :title, :alias, :fuzzy, :tag]`,
+  `[:keyword, :keyword_any, :semantic, :block, :title, :alias, :compound, :fuzzy, :tag]`,
   in that order — or `[]` for a record that did not come out of `hybrid/3`.
 
   `:keyword` is the full-text leg, every query term matched; `:keyword_any`
@@ -1060,7 +1065,10 @@ defmodule KilnCMS.Search do
   `:title` a record the query names outright (its whole title appears in the query); `:alias` a record the
   query names by one of its other names — a custom field an admin flagged
   `names_record` (`KilnCMS.CMS.NameFields`), matched the way the title is
-  and weighted the same; `:fuzzy` the trigram title leg that runs only when
+  and weighted the same; `:compound` a record the query names by its title
+  or one of those names written spaced or joined differently — `huangqi` for
+  Huang Qi, `xiao yao san` for Xiaoyaosan (`KilnCMS.Search.NameTerms`),
+  weighted the same again; `:fuzzy` the trigram title leg that runs only when
   the full match came up short; `:tag` a record carrying a tag whose name
   the query is near (`tag_leg?/0`) — a topic match, the weakest claim here.
 
@@ -1075,7 +1083,16 @@ defmodule KilnCMS.Search do
   def hit_legs(_record), do: []
 
   @typedoc "A leg of `hybrid/3` — see `hit_legs/1`."
-  @type leg :: :keyword | :keyword_any | :semantic | :block | :title | :alias | :fuzzy | :tag
+  @type leg ::
+          :keyword
+          | :keyword_any
+          | :semantic
+          | :block
+          | :title
+          | :alias
+          | :compound
+          | :fuzzy
+          | :tag
 
   # A fused hit on its way out of `hybrid/3`: the record, the score it is
   # ordered by, and the legs that returned it.
@@ -1770,6 +1787,32 @@ defmodule KilnCMS.Search do
 
   defp multi_word?(query), do: query |> String.split() |> length() > 1
 
+  # The compound leg (`:search_compound`): the query's rewrites — a name's
+  # words joined or split the way the site writes them, against its name
+  # terms (`KilnCMS.Search.NameTerms`) — matched against the title and the
+  # flagged name fields, at the title leg's weight: a record the query names
+  # as `huangqi` is named as surely as by `huang qi`. A query with nothing to
+  # join or split has no rewrites, and the leg does not run. A sweep hands
+  # its rewrites down in `:name_variants`, made once for every section.
+  defp compound_leg(resource, query, args, read_opts, opts) do
+    case Keyword.get_lazy(opts, :name_variants, fn -> name_variants(query, read_opts) end) do
+      [] ->
+        []
+
+      variants ->
+        {rewrites, spans} = Enum.unzip(variants)
+
+        compound_args =
+          args |> Map.delete(:query) |> Map.merge(%{variants: rewrites, spans: spans})
+
+        run_leg(resource, :search_compound, compound_args, read_opts)
+    end
+  end
+
+  defp name_variants(query, read_opts) do
+    NameTerms.variants(query, NameTerms.dictionary(Keyword.get(read_opts, :tenant)))
+  end
+
   defp table_name(resource) do
     AshPostgres.DataLayer.Info.table(resource) || "<table>"
   rescue
@@ -2001,7 +2044,10 @@ defmodule KilnCMS.Search do
           # a semantic leg, and each would otherwise embed this same string
           # itself — one identical embedding per registered content type, the
           # dominant cost of a global search by a wide margin.
-          query_vector: global_query_vector(query)
+          query_vector: global_query_vector(query),
+          # Likewise the compound leg's rewrites: one dictionary read for
+          # the sweep, not one per section.
+          name_variants: name_variants(query, read_opts)
         ]
 
     # Section key per compiled type — `ct.section` is the plural atom minted

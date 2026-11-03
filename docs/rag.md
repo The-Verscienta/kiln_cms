@@ -35,7 +35,7 @@ reranker's score instead when reranking is enabled, or the blend of the two
 ranks under `rrf` — see [Replace or blend](#replace-or-blend)), and the scores are
 comparable across types because every section of the sweep shares the same
 `k` and leg weights. `legs` names which of `keyword`, `keyword_any`, `semantic`,
-`block`, `title`, `alias`, `fuzzy` and `tag` returned the hit — a
+`block`, `title`, `alias`, `compound`, `fuzzy` and `tag` returned the hit — a
 keyword-and-semantic hit is a stronger claim than a fuzzy-only one, and a
 `tag` hit (a record carrying a tag whose name the question is near) is a topic
 match, the weakest claim of all; `block` is the embedding leg at
@@ -43,7 +43,9 @@ block grain, a record reached through its nearest section rather than its
 opening (what a question about a section deep in a long monograph needs); an
 `alias` hit is a record the question names by one of its other names — a
 custom field an admin flagged "names the record", such as a Latin binomial or
-a pinyin spelling; a `title` hit is a record the question names
+a pinyin spelling; a `compound` hit is a record the question names by its
+title or one of those names with the words spaced or joined differently —
+`huangqi` for Huang Qi, `xiao yao san` for Xiaoyaosan; a `title` hit is a record the question names
 outright (its title appears in the question, stemmed and at word boundaries);
 `keyword` (every query term matched) is a stronger claim than `keyword_any`
 (the relaxed leg that joins when the every-term match comes up short on a

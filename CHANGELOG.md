@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **Search finds a name written spaced or joined differently from the site:
+  `huangqi` finds Huang Qi, `xiao yao san` Xiaoyaosan, `SP 9` SP9.**
+  ([long form](docs/changelog/unreleased.md#compound-names))
+
 ## [1.7.0] - 2026-10-29
 
 Long form: [docs/changelog/v1.7.0.md](docs/changelog/v1.7.0.md) —
