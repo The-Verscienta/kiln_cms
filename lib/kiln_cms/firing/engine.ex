@@ -210,13 +210,20 @@ defmodule KilnCMS.Firing.Engine do
   # content, only the denormalized text summarizing it. Skipped when nothing
   # changed, which is the common case (most documents carry no fragment, so
   # `expanded` equals `typed` and the recomputed text already matches).
+  #
+  # `search_weighted` (#2175 A3) rides along, and a difference there alone is
+  # a reason to write: that is how a re-fire sweep fills it in for documents
+  # saved before it existed.
   defp reindex_search_text(document, org_id, expanded) do
-    search_text =
-      KilnCMS.CMS.Changes.SetSearchText.compute(document, block_texts(expanded))
+    {search_text, weighted} =
+      KilnCMS.CMS.Changes.SetSearchText.compute_weighted(document, block_texts(expanded))
 
-    if search_text != Map.get(document, :search_text) do
+    if search_text != Map.get(document, :search_text) or
+         weighted != Map.get(document, :search_weighted) do
       document
-      |> Ash.Changeset.for_update(:reindex_search_text, %{search_text: search_text},
+      |> Ash.Changeset.for_update(
+        :reindex_search_text,
+        %{search_text: search_text, search_weighted: weighted},
         # A system-only action (#1402): the content macro's
         # `action_type([:create, :update])` policy — the one written for people
         # — narrows its own grant with `forbid_unless action(...)` and admits

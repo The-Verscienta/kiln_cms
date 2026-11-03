@@ -1390,8 +1390,9 @@ defmodule KilnCMS.CMS.Content do
     # default) and stems with that locale's text-search config
     # (`kiln_regconfig/1`), so French content is matched with French rules,
     # etc. The prepare resolves the locale (setting it back so the filter sees
-    # it too), then orders by relevance (ts_rank over the weighted vector —
-    # title hits outrank body hits), newest to break ties. `Ash.Query.sort/2`
+    # it too), then orders by relevance (`ts_rank_cd` over the weighted
+    # vector — title and name hits outrank field hits, which outrank body
+    # hits; an adjacent phrase outranks scattered terms), newest to break ties. `Ash.Query.sort/2`
     # APPENDS: these keys rank after whatever the caller already sorted on, so
     # an explicit JSON:API/GraphQL `sort` overrides relevance and relevance
     # degrades to the tiebreaker. That contract is pinned by test ("explicit
@@ -1410,7 +1411,7 @@ defmodule KilnCMS.CMS.Content do
     # and rewriting the operator hands `to_tsquery` an expression it
     # produced itself — so user text never reaches `to_tsquery`, which
     # raises on syntax (`a & | b`) where `plainto_tsquery` only strips it.
-    # Ranked by `ts_rank` over the OR query, so a record matching more of
+    # Ranked by `ts_rank_cd` over the OR query, so a record matching more of
     # the terms rises above one matching a single term.
     #
     # In both, the query's LAST lexeme matches as a prefix (`'lia':*`): search
@@ -1958,6 +1959,7 @@ defmodule KilnCMS.CMS.Content do
           :embedded_at,
           :next_occurrence_at,
           :lock_version,
+          :search_weighted,
           :access_password_hash,
           :password_fingerprint
         ])
@@ -3340,7 +3342,13 @@ defmodule KilnCMS.CMS.Content do
         update :reindex_search_text do
           require_atomic? false
           argument :search_text, :string, allow_nil?: false
+          # Optional so a caller that predates it still reindexes; the
+          # trigger then falls back to the unweighted vector.
+          argument :search_weighted, {:array, :string},
+            constraints: [nil_items?: true, items: [allow_empty?: true, trim?: false]]
+
           change set_attribute(:search_text, arg(:search_text))
+          change set_attribute(:search_weighted, arg(:search_weighted))
           # Re-indexing is not editing: a sweep that recomputes every published
           # document's text (a `searchable` flag flipped) must not restamp
           # them all as updated now (`Changes.KeepUpdatedAt`).
@@ -4084,6 +4092,16 @@ defmodule KilnCMS.CMS.Content do
         # queried by the `search` action. Internal.
         attribute :search_text, :string
 
+        # The same text bucketed by role for `search_vector`'s weights (#2175
+        # A3): `[a, b, c, d]` — title and the fields that name the record;
+        # the summary fields and the leading words of the searchable custom
+        # fields; the rest of those; the body. Maintained beside `search_text`
+        # by `Changes.SetSearchText` and read only by the database trigger
+        # (`kiln_search_vector_refresh()`), which falls back to the old
+        # title-`A`/`search_text`-`B` vector while it is `nil`. Internal.
+        attribute :search_weighted, {:array, :string},
+          constraints: [nil_items?: true, items: [allow_empty?: true, trim?: false]]
+
         # Semantic-search embedding of `search_text`, plus when it was last
         # computed. Maintained by `KilnCMS.Search.EmbeddingWorker`; internal
         # (never exposed via the APIs, ignored by PaperTrail). `nil` until first
@@ -4436,12 +4454,30 @@ defmodule KilnCMS.CMS.Content do
         # matches the last term as a prefix, so the rank is the whole-word
         # score plus the prefix score: a finished word ("huang qi") scores on
         # both for Huang Qi and on the prefix alone for Huang Qin, so the
-        # whole-word match is favoured. Internal.
+        # whole-word match is favoured.
+        #
+        # `ts_rank_cd` (cover density, #2175 A3), not `ts_rank`: a cover is a
+        # span holding every query term, scored by the weights of its words
+        # and divided by the words between them. `ts_rank` scored each term's
+        # occurrences apart and saturated near 1 on any long document that
+        # repeated them, so a monograph scattering "clears", "heat", "dries"
+        # and "dampness" outranked the record whose own field says "clears
+        # heat and dries dampness". A query of two or more words adds a third
+        # score, its phrase (`phraseto_tsquery`, last word a prefix): a record
+        # holding the words in order and adjacent scores it, and one that only
+        # repeats them apart — many covers, each thin — gets nothing from it.
+        # Every content table ranks with this one expression over the one
+        # trigger's weights, so a rank still compares across sections
+        # (`KilnCMS.Search.global/2`). Internal.
         calculate :search_rank,
                   :float,
                   expr(
                     fragment(
-                      "ts_rank(search_vector, (SELECT plainto_tsquery(kiln_regconfig(?), ?))) + ts_rank(search_vector, (SELECT to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'))))",
+                      "ts_rank_cd(search_vector, (SELECT plainto_tsquery(kiln_regconfig(?), ?))) + ts_rank_cd(search_vector, (SELECT to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')))) + CASE WHEN (SELECT numnode(phraseto_tsquery(kiln_regconfig(?), ?))) > 1 THEN ts_rank_cd(search_vector, (SELECT to_tsquery('simple', regexp_replace(phraseto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')))) ELSE 0 END",
+                      ^arg(:locale),
+                      ^arg(:query),
+                      ^arg(:locale),
+                      ^arg(:query),
                       ^arg(:locale),
                       ^arg(:query),
                       ^arg(:locale),
@@ -4453,7 +4489,7 @@ defmodule KilnCMS.CMS.Content do
         end
 
         # `search_rank` against the any-term (OR) form of the same query —
-        # orders the `:search_any` action. `ts_rank` over an OR query grows
+        # orders the `:search_any` action. `ts_rank_cd` over an OR query grows
         # with every term the row matches, so a record naming two of the
         # query's four words outranks one naming a single word. The query is
         # rewritten from `plainto_tsquery`'s own text form, exactly as the
@@ -4463,7 +4499,7 @@ defmodule KilnCMS.CMS.Content do
                   :float,
                   expr(
                     fragment(
-                      "ts_rank(search_vector, (SELECT to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | ')))) + ts_rank(search_vector, (SELECT to_tsquery('simple', replace(regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'), ' & ', ' | '))))",
+                      "ts_rank_cd(search_vector, (SELECT to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | ')))) + ts_rank_cd(search_vector, (SELECT to_tsquery('simple', replace(regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'), ' & ', ' | '))))",
                       ^arg(:locale),
                       ^arg(:locale),
                       ^arg(:query),
