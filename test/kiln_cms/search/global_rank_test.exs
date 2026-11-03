@@ -16,7 +16,8 @@ defmodule KilnCMS.Search.GlobalRankTest do
   alias KilnCMS.CMS
   alias KilnCMS.Search
 
-  # The query and anything marked `nearmark` embed near one axis, anything
+  # The query (matched as a substring, so a configured `query_prefix` does
+  # not move it) and anything marked `nearmark` embed near one axis, anything
   # marked `exactmark` exactly on it, and everything else near an orthogonal
   # one. A little hashed noise keeps the near distances distinct, so they
   # rank rather than tie.
@@ -29,7 +30,7 @@ defmodule KilnCMS.Search.GlobalRankTest do
     @impl true
     def embed(text) do
       cond do
-        text =~ "exactmark" or String.trim(text) == "heat interior" -> {:ok, axis(0, 0.0, text)}
+        text =~ "exactmark" or text =~ "heat interior" -> {:ok, axis(0, 0.0, text)}
         text =~ "nearmark" -> {:ok, axis(0, 0.05, text)}
         true -> {:ok, axis(1, 0.05, text)}
       end
@@ -114,6 +115,39 @@ defmodule KilnCMS.Search.GlobalRankTest do
     assert Search.hit_score(post) > weakest_page
   end
 
+  test "a sweep of one section ranks as hybrid/3 does" do
+    seed("farmark")
+    admin = admin()
+
+    swept = Search.global("heat interior", sections: [:pages], limit: 50, actor: admin).pages
+    direct = Search.hybrid(:page, "heat interior", limit: 50, actor: admin)
+
+    assert Enum.map(swept, & &1.id) == Enum.map(direct, & &1.id)
+    assert Enum.map(swept, &Search.hit_score/1) == Enum.map(direct, &Search.hit_score/1)
+  end
+
+  test "documents sharing a tag keep the tag leg's order instead of all taking rank 1" do
+    admin = admin()
+    tag = CMS.create_tag!(%{name: "immunity", slug: "gr-immunity"}, actor: admin)
+
+    for n <- 1..3 do
+      CMS.create_page!(%{title: "Remedy #{n}", slug: "gr-remedy-#{n}", tag_ids: [tag.id]},
+        actor: admin
+      )
+    end
+
+    CMS.create_post!(%{title: "Tonic", slug: "gr-tonic", tag_ids: [tag.id]}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    results =
+      Search.global("immunity", sections: [:pages, :posts], explain: true, actor: admin)
+
+    tag_rank = fn hit -> Search.hit_explain(hit).legs.tag.rank end
+
+    assert results.pages |> Enum.map(tag_rank) |> Enum.sort() == [1, 3, 4]
+    assert Enum.map(results.posts, tag_rank) == [1]
+  end
+
   describe "global_ranks/1" do
     defp collected(leg, keyed) do
       %{
@@ -122,30 +156,27 @@ defmodule KilnCMS.Search.GlobalRankTest do
       }
     end
 
-    test "ranks one leg over every section, ties sharing the average position" do
+    test "ranks one leg over every section, ties sharing the better rank" do
       ranks =
         Search.global_ranks(%{
           pages: collected(:semantic, [{"p1", 0.1}, {"p2", 0.3}, {"p3", 0.5}]),
-          posts: collected(:semantic, [{"q1", 0.3}])
+          posts: collected(:semantic, [{"q1", 0.1}, {"q2", 0.3}])
         })
 
-      assert ranks.pages.semantic === %{"p1" => 1, "p2" => 2.5, "p3" => 4}
-      assert ranks.posts.semantic === %{"q1" => 2.5}
+      assert ranks.pages.semantic == %{"p1" => 1, "p2" => 3, "p3" => 5}
+      assert ranks.posts.semantic == %{"q1" => 1, "q2" => 3}
       assert ranks.posts.keyword == %{}
     end
 
-    # The tag leg ties by design: every document carrying a tag sits at
-    # that tag's distance. Best-rank ties handed all of them rank 1, which
-    # multiplied the weakest leg's weight by the size of the group.
-    test "a tag's documents split its positions rather than all taking rank 1" do
+    test "records tied within a section keep their leg's order" do
       ranks =
         Search.global_ranks(%{
-          pages: collected(:tag, for(n <- 1..30, do: {"page-#{n}", 0.2})),
-          posts: collected(:tag, [{"post", 0.2}, {"far", 0.4}])
+          pages: collected(:tag, [{"p1", 0.2}, {"p2", 0.2}, {"p3", 0.2}]),
+          posts: collected(:tag, [{"q1", 0.2}])
         })
 
-      assert ranks.pages.tag["page-1"] === 16
-      assert ranks.posts.tag === %{"post" => 16, "far" => 32}
+      assert ranks.pages.tag == %{"p1" => 1, "p2" => 3, "p3" => 4}
+      assert ranks.posts.tag == %{"q1" => 1}
     end
 
     test "a candidate with no key ranks after every keyed one" do
@@ -158,8 +189,8 @@ defmodule KilnCMS.Search.GlobalRankTest do
           posts: collected(:semantic, [{"q1", 0.95}])
         })
 
-      assert ranks.pages.semantic === %{"keyed" => 1, "unkeyed" => 3}
-      assert ranks.posts.semantic === %{"q1" => 2}
+      assert ranks.pages.semantic == %{"keyed" => 1, "unkeyed" => 3}
+      assert ranks.posts.semantic == %{"q1" => 2}
     end
   end
 end

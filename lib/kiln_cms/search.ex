@@ -1034,12 +1034,13 @@ defmodule KilnCMS.Search do
   #
   # Ranked per section instead, a section holding one record put it at rank
   # 1 in every leg that returned it, whatever its relevance — the lone post
-  # that outscored every two-term match of "heat interior". The title,
-  # alias, compound and fuzzy legs keep their section ranks: a title, alias
-  # or compound hit is a record the query names outright, which is the same
-  # claim in any section, and the fuzzy leg is a fallback that runs per
-  # section.
-  @global_rank_legs [:keyword, :keyword_any, :semantic, :block, :tag]
+  # that outscored every two-term match of "heat interior". The fuzzy leg
+  # ranks by trigram similarity to the title, which compares across tables
+  # the same way, so a section's lone trigram guess no longer takes rank 1
+  # either. The title, alias and compound legs keep their section ranks: a
+  # title, alias or compound hit is a record the query names outright, which
+  # is the same claim in any section, and they carry no measure to rank by.
+  @global_rank_legs [:keyword, :keyword_any, :semantic, :block, :tag, :fuzzy]
 
   # How a sweep hears from the legs it runs: the deadline each leg checks
   # before it starts, and `emit`, called with each leg's result the moment it
@@ -1106,7 +1107,12 @@ defmodule KilnCMS.Search do
       read_opts: read_opts,
       locale: locale,
       filters: filters,
-      args: Map.merge(%{query: query, locale: locale}, filters)
+      args: Map.merge(%{query: query, locale: locale}, filters),
+      # Whether the legs load the measure they rank by (`ts_rank`, trigram
+      # similarity): `global/2` ranks by it across sections, and `explain`
+      # reports it. A direct `hybrid/3` call does neither, and skips the
+      # per-row cost.
+      rank_keys?: Keyword.get(opts, :rank_keys, false) or Keyword.get(opts, :explain, false)
     }
   end
 
@@ -1114,16 +1120,20 @@ defmodule KilnCMS.Search do
   # order, so reading whole rows — or loading calcs — here would pay for up
   # to `@hybrid_candidates` rows *per leg* to keep `limit` of them.
   # `highlight` is a `ts_headline` over the whole document, so that is most
-  # of the query's cost thrown away. The one calc a leg does load is the
-  # semantic leg's `semantic_distance`, which its ORDER BY computes anyway
-  # (see `semantic_context/1`). The kept hits are read whole, with `:load`,
+  # of the query's cost thrown away. The calcs a leg does load are the ones
+  # its ORDER BY ranks by: the semantic leg's `semantic_distance` (see
+  # `semantic_context/1`), and — when `rank_keys?` — the keyword legs'
+  # `search_rank` / `search_rank_any` and the fuzzy leg's `title_similarity`,
+  # which a `global/2` sweep ranks across sections. The kept hits are read whole, with `:load`,
   # in one query (`hydrate/4`) — before the reranker, which reads their
   # title and `search_text` (`rerank_text/1`).
   #
   # Both keyword legs read `search_vector`, so they share one containment:
   # a type without the column loses both, and logs it once.
   defp run_named_leg(:keyword, %{resource: resource} = c, _ran) do
-    without_search_vector(resource, fn -> keyword_legs(resource, c.query, c.args, c.read_opts) end)
+    without_search_vector(resource, fn ->
+      keyword_legs(resource, c.query, c.args, c.read_opts, c.rank_keys?)
+    end)
   end
 
   defp run_named_leg(:title, c, _ran), do: run_leg(c.resource, :search_title, c.args, c.read_opts)
@@ -1136,10 +1146,10 @@ defmodule KilnCMS.Search do
   defp run_named_leg(:fuzzy, c, ran) do
     {keyword, _relaxed} = leg_value(ran, :keyword)
 
-    # The trigram similarity the fuzzy leg orders by is read only for
-    # `explain: true` — nothing else consumes it.
+    # The trigram similarity the fuzzy leg orders by is read only when
+    # something consumes it (`rank_keys?`).
     similarity =
-      if Keyword.get(c.opts, :explain, false),
+      if c.rank_keys?,
         do: [title_similarity: %{prefix: c.query}],
         else: []
 
@@ -1207,10 +1217,10 @@ defmodule KilnCMS.Search do
         | synonyms
       ],
       # What each leg ranked its candidates by, smaller first: the globally
-      # ranked legs' keys (`global_ranks/1`), plus the fuzzy leg's similarity
-      # under `explain: true`, which `explain_legs/3` reports and nothing
-      # ranks by. The title, alias and compound legs have none — a title the
-      # query contains is a yes or no.
+      # ranked legs' keys (`global_ranks/1`), loaded only with `rank_keys?`
+      # (nil without), which `explain_legs/3` also reports. The title, alias
+      # and compound legs have none — a title the query contains is a yes or
+      # no.
       keys: %{
         keyword: Map.new(keyword, &{&1.id, rank_key(&1.search_rank)}),
         keyword_any: Map.new(relaxed, &{&1.id, rank_key(&1.search_rank_any)}),
@@ -1225,16 +1235,20 @@ defmodule KilnCMS.Search do
         legs: semantic_floor_legs(),
         distances: Map.merge(block_distances, tag_distances, fn _id, a, b -> min(a, b) end),
         semantic: semantic,
-        resource: c.resource,
-        query: c.query,
-        locale: c.locale,
-        filters: c.filters,
-        read_opts: c.read_opts,
-        opts: c.opts
+        filters: c.filters
       },
       timings: Map.new(ran, fn {leg, {_value, micros}} -> {leg, micros} end),
       missing: Enum.reject(@leg_order, &Map.has_key?(ran, &1))
     }
+  end
+
+  # The floor's inputs: its own, plus the section's fields it reads, taken
+  # from `collected` rather than copied into it, so the two cannot drift.
+  defp floor_inputs(collected) do
+    Map.merge(
+      collected.floor,
+      Map.take(collected, [:resource, :query, :locale, :read_opts, :opts])
+    )
   end
 
   # `ts_rank` is better higher; every other key is a distance, better lower.
@@ -1256,7 +1270,7 @@ defmodule KilnCMS.Search do
       :timer.tc(fn ->
         collected.legs
         |> reciprocal_rank_fusion(collected.k, ranks)
-        |> floor_hits(collected.floor)
+        |> floor_hits(floor_inputs(collected))
         |> Enum.take(collected.limit)
         |> hydrate(resource, {select, collected.load}, read_opts)
       end)
@@ -1402,17 +1416,15 @@ defmodule KilnCMS.Search do
   @doc false
   # Ranks for `@global_rank_legs`, taken over every collected section at
   # once: `%{section => %{leg => %{id => rank}}}` from `%{section =>
-  # collected}`. Tied keys share the average of the positions they hold
-  # (1, 2.5, 2.5, 4), so two sections' records at the same distance share a
-  # rank rather than one winning on the order the sections finished in.
-  #
-  # Average, not best: the tag leg ties by design — every document carrying
-  # one tag sits at that tag's distance — and a group of thirty sharing rank
-  # 1 would each collect the tag weight at `1 / (k + 1)`, where ranked in
-  # their sections they had spread from 1 to 30. The average keeps the
-  # group's total close to what it was and still lets no section's member
-  # beat another's. Distances and `ts_rank`s rarely tie exactly, so for the other
-  # legs the two rules agree.
+  # collected}`. Ranks are competition ranks (1, 2, 2, 4) over the leg's
+  # keys, then each record's position in its own leg, so two sections'
+  # records at the same distance and position share a rank rather than one
+  # winning on the order the sections finished in, while records that tie
+  # within a section keep the leg's order. That matters for the tag leg,
+  # whose key is the matched tag's distance and so ties for every document
+  # carrying the tag: ranked by key alone, they would all take rank 1. And
+  # a sweep of one section ranks exactly as `hybrid/3` does, each leg's
+  # list being sorted by its key already.
   #
   # Each section offers at most `@hybrid_candidates` per leg, so a rank is
   # taken over the union of each section's best, not over every record: a
@@ -1431,7 +1443,7 @@ defmodule KilnCMS.Search do
       Map.new(@global_rank_legs, fn leg ->
         collected
         |> Enum.flat_map(&leg_candidates(&1, leg))
-        |> average_ranks()
+        |> competition_ranks()
         |> then(&{leg, &1})
       end)
 
@@ -1453,49 +1465,23 @@ defmodule KilnCMS.Search do
 
   defp sort_key(keys, id, local) do
     case Map.get(keys, id) do
-      key when is_number(key) -> {0, key}
-      _missing -> {1, local}
+      key when is_number(key) -> {0, key, local}
+      _missing -> {1, 0, local}
     end
   end
 
   # `[{section, id, key}]` → `%{section => %{id => rank}}`, rank 1 at the
-  # smallest key, ties sharing the average of their positions.
-  defp average_ranks(candidates) do
+  # smallest key, ties sharing the better rank.
+  defp competition_ranks(candidates) do
     candidates
     |> Enum.sort_by(&elem(&1, 2))
-    |> tie_groups()
-    |> Enum.reduce({%{}, 0}, fn tied, {acc, before} ->
-      rank = tied_rank(before, length(tied))
+    |> Enum.with_index(1)
+    |> Enum.reduce({%{}, nil, 0}, fn {{section, id, key}, position}, {acc, last_key, last_rank} ->
+      rank = if key == last_key, do: last_rank, else: position
 
-      acc =
-        Enum.reduce(tied, acc, fn {section, id, _key}, acc ->
-          Map.update(acc, section, %{id => rank}, &Map.put(&1, id, rank))
-        end)
-
-      {acc, before + length(tied)}
+      {Map.update(acc, section, %{id => rank}, &Map.put(&1, id, rank)), key, rank}
     end)
     |> elem(0)
-  end
-
-  # The average of positions `before + 1 .. before + count`: an integer
-  # unless the run is of even length, so an untied rank — nearly every one
-  # outside the tag leg — reads as the integer `hit_explain/1` and
-  # `?explain=1` have always reported.
-  defp tied_rank(before, count) when rem(count, 2) == 1, do: before + div(count + 1, 2)
-  defp tied_rank(before, count), do: before + (count + 1) / 2
-
-  # Sorted candidates in runs of equal key, compared with `==` so that an
-  # integer and a float distance of the same value still tie.
-  defp tie_groups(sorted) do
-    sorted
-    |> Enum.reduce([], fn
-      {_, _, key} = candidate, [[{_, _, last} | _] = group | groups] when key == last ->
-        [[candidate | group] | groups]
-
-      candidate, groups ->
-        [[candidate] | groups]
-    end)
-    |> Enum.reverse()
   end
 
   @doc """
@@ -1512,10 +1498,17 @@ defmodule KilnCMS.Search do
   can be sorted against each other, which is how `KilnCMS.Ask` picks its
   sources. Before #2175 the ranks were taken per section, and a section
   holding one record put it at rank 1 in every leg that returned it — the
-  lone post that outscored every full match of a two-word query. The title,
-  alias and fuzzy legs still rank per section (see `@global_rank_legs`).
-  Scores from two *separate* `hybrid/3` calls are not comparable: each
-  ranks over its own type alone.
+  lone post that outscored every full match of a two-word query. The title
+  and alias legs still rank per section (see `@global_rank_legs`). Scores
+  from two *separate* `hybrid/3` calls are not comparable: each ranks over
+  its own type alone.
+
+  A sweep that reranks each section under `rerank_mode: {:rrf, k}` loses
+  that: the blend is built from ranks within the section's own list
+  (`KilnCMS.Search.RerankOrder`), so a section's first hit carries nearly
+  the top blend however weak it is. Rerank the union instead (`KilnCMS.Ask`'s
+  `:union` scope) when the scores must compare; `:replace` carries the
+  reranker's own 0–1 score, which does.
 
   They used to be computed and thrown away inside fusion, which left the
   sections' callers nothing to interleave on but the order of the registry —
@@ -2305,15 +2298,16 @@ defmodule KilnCMS.Search do
   # as `:search`, filters included, so the relaxation narrows exactly as the
   # full match does.
   #
-  # Each loads the `ts_rank` it is ordered by, which `global/2` ranks every
-  # section's hits by together (`@global_rank_legs`).
-  defp keyword_legs(resource, query, args, read_opts) do
+  # With `rank_keys?`, each loads the `ts_rank` it is ordered by, which
+  # `global/2` ranks every section's hits by together (`@global_rank_legs`).
+  defp keyword_legs(resource, query, args, read_opts, rank_keys?) do
     rank_args = %{locale: args.locale, query: query}
-    keyword = run_leg(resource, :search, args, read_opts, %{}, search_rank: rank_args)
+    rank_load = fn calc -> if rank_keys?, do: [{calc, rank_args}], else: [] end
+    keyword = run_leg(resource, :search, args, read_opts, %{}, rank_load.(:search_rank))
 
     relaxed =
       if multi_word?(query) and length(keyword) < @relaxed_fallback_threshold do
-        run_leg(resource, :search_any, args, read_opts, %{}, search_rank_any: rank_args)
+        run_leg(resource, :search_any, args, read_opts, %{}, rank_load.(:search_rank_any))
       else
         []
       end
@@ -2661,6 +2655,8 @@ defmodule KilnCMS.Search do
           filters: Keyword.get(opts, :filters, %{}),
           select: Keyword.get(opts, :select),
           explain: Keyword.get(opts, :explain, false),
+          # Every section's legs load what they rank by (`global_ranks/1`).
+          rank_keys: true,
           # Embed the query ONCE for the whole sweep. Every section below runs
           # a semantic leg, and each would otherwise embed this same string
           # itself — one identical embedding per registered content type, the

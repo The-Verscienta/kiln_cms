@@ -142,16 +142,22 @@ carries the reasoning.
   1 in every leg that returned it, and on `/api/search?q=heat interior` the only
   post (0.0410 = 2.5 / 61) outscored records that matched both terms. A sweep
   now collects every requested content section's legs first. It then ranks the
-  keyword, any-term, semantic, block and tag legs over all of them at once, by
-  `ts_rank` or cosine distance, and fuses each section at those ranks. Tied
-  candidates share the average of the positions they hold, so two sections'
-  equidistant records score the same and the documents carrying one tag do not
-  all take rank 1. The title, alias and fuzzy legs still rank per section. A
-  title or alias hit is a record the query names outright, and the fuzzy leg is
-  a per-section fallback. A direct `hybrid/3` call is unchanged. Scores from
+  keyword, any-term, semantic, block, tag and fuzzy legs over all of them at
+  once, by `ts_rank`, cosine distance or trigram similarity, and fuses each
+  section at those ranks. Records that tie on that measure keep their leg's own
+  order within a section, and share a rank only with another section's record
+  at the same position. That matters most for the tag leg: every document
+  carrying the matched tag has the tag's distance, and ranked by distance alone
+  they would all have taken rank 1. A sweep of one section therefore ranks
+  exactly as `hybrid/3` does. The title and alias legs still rank per section:
+  a title or alias hit is a record the query names outright. Scores from
   `global/2` move, and so does the order within a section where semantic-only
   neighbours were spaced differently. `KilnCMS.Search.RankingStabilityTest` is
-  re-pinned for this reason.
+  re-pinned for this reason. A sweep that reranks each section under
+  `rerank_mode: {:rrf, k}` still scores per section, since the blend is built
+  from ranks within the section; `hit_score/1` says so. Only a sweep, or
+  `explain: true`, now loads the `ts_rank` and trigram similarity its legs rank
+  by; a plain `hybrid/3` call skips that per-row cost.
 
 <a id="search-warmup-and-budget"></a>
 

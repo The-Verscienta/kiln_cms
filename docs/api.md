@@ -1457,8 +1457,6 @@ saying how it got there:
   fusion used. For the keyword, any-term, semantic, block and tag legs, that
   rank is taken over every content section of the search at once. For the
   title, alias, compound and fuzzy legs, it is the rank within the hit's own type.
-  Candidates that tie share the average of the positions they hold, so a
-  rank can be a half: two records tied for second both rank `2.5`.
   `contribution` is what that rank added to `score`
   (`weight / (k + rank)`), so the contributions sum to `score`. They do not
   sum to it when a reranker reordered the section, because `score` is then
