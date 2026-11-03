@@ -116,8 +116,10 @@ carries the reasoning.
   post (0.0410 = 2.5 / 61) outscored records that matched both terms. A sweep
   now collects every requested content section's legs first. It then ranks the
   keyword, any-term, semantic, block and tag legs over all of them at once, by
-  `ts_rank` or cosine distance, with ties sharing a rank, and fuses each section
-  at those ranks. The title, alias and fuzzy legs still rank per section. A
+  `ts_rank` or cosine distance, and fuses each section at those ranks. Tied
+  candidates share the average of the positions they hold, so two sections'
+  equidistant records score the same and the documents carrying one tag do not
+  all take rank 1. The title, alias and fuzzy legs still rank per section. A
   title or alias hit is a record the query names outright, and the fuzzy leg is
   a per-section fallback. A direct `hybrid/3` call is unchanged. Scores from
   `global/2` move, and so does the order within a section where semantic-only

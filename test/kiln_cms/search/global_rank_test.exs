@@ -122,16 +122,30 @@ defmodule KilnCMS.Search.GlobalRankTest do
       }
     end
 
-    test "ranks one leg over every section, ties sharing the better rank" do
+    test "ranks one leg over every section, ties sharing the average position" do
       ranks =
         Search.global_ranks(%{
           pages: collected(:semantic, [{"p1", 0.1}, {"p2", 0.3}, {"p3", 0.5}]),
           posts: collected(:semantic, [{"q1", 0.3}])
         })
 
-      assert ranks.pages.semantic == %{"p1" => 1, "p2" => 2, "p3" => 4}
-      assert ranks.posts.semantic == %{"q1" => 2}
+      assert ranks.pages.semantic === %{"p1" => 1, "p2" => 2.5, "p3" => 4}
+      assert ranks.posts.semantic === %{"q1" => 2.5}
       assert ranks.posts.keyword == %{}
+    end
+
+    # The tag leg ties by design: every document carrying a tag sits at
+    # that tag's distance. Best-rank ties handed all of them rank 1, which
+    # multiplied the weakest leg's weight by the size of the group.
+    test "a tag's documents split its positions rather than all taking rank 1" do
+      ranks =
+        Search.global_ranks(%{
+          pages: collected(:tag, for(n <- 1..30, do: {"page-#{n}", 0.2})),
+          posts: collected(:tag, [{"post", 0.2}, {"far", 0.4}])
+        })
+
+      assert ranks.pages.tag["page-1"] === 16
+      assert ranks.posts.tag === %{"post" => 16, "far" => 32}
     end
 
     test "a candidate with no key ranks after every keyed one" do
@@ -144,8 +158,8 @@ defmodule KilnCMS.Search.GlobalRankTest do
           posts: collected(:semantic, [{"q1", 0.95}])
         })
 
-      assert ranks.pages.semantic == %{"keyed" => 1, "unkeyed" => 3}
-      assert ranks.posts.semantic == %{"q1" => 2}
+      assert ranks.pages.semantic === %{"keyed" => 1, "unkeyed" => 3}
+      assert ranks.posts.semantic === %{"q1" => 2}
     end
   end
 end

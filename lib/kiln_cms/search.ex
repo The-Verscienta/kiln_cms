@@ -1002,8 +1002,17 @@ defmodule KilnCMS.Search do
 
   # The legs whose ranks `global/2` takes over the union of its sections
   # (#2175). Each ranks by a number that means the same thing in every
-  # table: a cosine distance (`:semantic`, `:block`, `:tag`) or a `ts_rank`
-  # over the same weighted `search_vector` (`:keyword`, `:keyword_any`).
+  # table: a cosine distance (`:semantic`, `:block`, `:tag`) or a keyword
+  # rank over the same weighted `search_vector` (`:keyword`, `:keyword_any`).
+  # Every content table fills that column from one shared trigger function,
+  # `kiln_search_vector_refresh()` (`KilnCMS.Migrations.add_search_vector/1`),
+  # from the same role buckets, so a keyword rank of 0.6 claims the same
+  # match in any of them. The exception is a rollout: a row not saved or
+  # re-fired since the role weights landed keeps the older title-`A`,
+  # `search_text`-`B` vector, which ranks a body match higher, so until the
+  # re-fire sweep has run, a section of stale rows can outrank re-weighted
+  # ones on body matches.
+  #
   # Ranked per section instead, a section holding one record put it at rank
   # 1 in every leg that returned it, whatever its relevance — the lone post
   # that outscored every two-term match of "heat interior". The title,
@@ -1350,10 +1359,27 @@ defmodule KilnCMS.Search do
   @doc false
   # Ranks for `@global_rank_legs`, taken over every collected section at
   # once: `%{section => %{leg => %{id => rank}}}` from `%{section =>
-  # collected}`. Ranks are competition ranks (1, 2, 2, 4) over the leg's
-  # keys, so two sections' records at the same distance share a rank
-  # rather than one winning on the order the sections finished in. A
-  # candidate with no usable key (`Ash.NotLoaded`, which never happens on
+  # collected}`. Tied keys share the average of the positions they hold
+  # (1, 2.5, 2.5, 4), so two sections' records at the same distance share a
+  # rank rather than one winning on the order the sections finished in.
+  #
+  # Average, not best: the tag leg ties by design — every document carrying
+  # one tag sits at that tag's distance — and a group of thirty sharing rank
+  # 1 would each collect the tag weight at `1 / (k + 1)`, where ranked in
+  # their sections they had spread from 1 to 30. The average keeps the
+  # group's total close to what it was and still lets no section's member
+  # beat another's. Distances and `ts_rank`s rarely tie exactly, so for the other
+  # legs the two rules agree.
+  #
+  # Each section offers at most `@hybrid_candidates` per leg, so a rank is
+  # taken over the union of each section's best, not over every record: a
+  # small section's record ranked behind a large section's fiftieth is
+  # ranked ahead of that section's fifty-first, which was never offered.
+  # The error still favours the small section, but by at most the
+  # candidate count, where per-section ranks favoured it by the whole of
+  # the large one.
+  #
+  # A candidate with no usable key (`Ash.NotLoaded`, which never happens on
   # the paths above, but would otherwise rank first) ranks after every
   # keyed one, in its section's own order. Public for its unit test only.
   @spec global_ranks(%{term() => %{keys: map(), legs: list()}}) :: %{term() => map()}
@@ -1362,7 +1388,7 @@ defmodule KilnCMS.Search do
       Map.new(@global_rank_legs, fn leg ->
         collected
         |> Enum.flat_map(&leg_candidates(&1, leg))
-        |> competition_ranks()
+        |> average_ranks()
         |> then(&{leg, &1})
       end)
 
@@ -1390,17 +1416,43 @@ defmodule KilnCMS.Search do
   end
 
   # `[{section, id, key}]` → `%{section => %{id => rank}}`, rank 1 at the
-  # smallest key, ties sharing the better rank.
-  defp competition_ranks(candidates) do
+  # smallest key, ties sharing the average of their positions.
+  defp average_ranks(candidates) do
     candidates
     |> Enum.sort_by(&elem(&1, 2))
-    |> Enum.with_index(1)
-    |> Enum.reduce({%{}, nil, 0}, fn {{section, id, key}, position}, {acc, last_key, last_rank} ->
-      rank = if key == last_key, do: last_rank, else: position
+    |> tie_groups()
+    |> Enum.reduce({%{}, 0}, fn tied, {acc, before} ->
+      rank = tied_rank(before, length(tied))
 
-      {Map.update(acc, section, %{id => rank}, &Map.put(&1, id, rank)), key, rank}
+      acc =
+        Enum.reduce(tied, acc, fn {section, id, _key}, acc ->
+          Map.update(acc, section, %{id => rank}, &Map.put(&1, id, rank))
+        end)
+
+      {acc, before + length(tied)}
     end)
     |> elem(0)
+  end
+
+  # The average of positions `before + 1 .. before + count`: an integer
+  # unless the run is of even length, so an untied rank — nearly every one
+  # outside the tag leg — reads as the integer `hit_explain/1` and
+  # `?explain=1` have always reported.
+  defp tied_rank(before, count) when rem(count, 2) == 1, do: before + div(count + 1, 2)
+  defp tied_rank(before, count), do: before + (count + 1) / 2
+
+  # Sorted candidates in runs of equal key, compared with `==` so that an
+  # integer and a float distance of the same value still tie.
+  defp tie_groups(sorted) do
+    sorted
+    |> Enum.reduce([], fn
+      {_, _, key} = candidate, [[{_, _, last} | _] = group | groups] when key == last ->
+        [[candidate | group] | groups]
+
+      candidate, groups ->
+        [[candidate] | groups]
+    end)
+    |> Enum.reverse()
   end
 
   @doc """
