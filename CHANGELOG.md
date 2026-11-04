@@ -103,6 +103,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Search: a deploy no longer stalls searches; probes hold traffic until search is warm, and
   each sweep answers within a budget, flagged `partial`, with per-leg `Server-Timing`.**
   ([#2186](https://github.com/The-Verscienta/kiln_cms/pull/2186) · [long form](docs/changelog/unreleased.md#search-warmup-and-budget))
+- **A plugin field type no longer breaks page renders in dev or `mix run` (`cannot load "money"`);
+  the field-type registry loads at boot. Releases were unaffected.**
+  ([long form](docs/changelog/unreleased.md#field-type-atoms-at-boot))
 
 ### Security
 
