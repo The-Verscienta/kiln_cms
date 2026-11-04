@@ -672,6 +672,9 @@ defmodule KilnCMS.MixProject do
   defp releases do
     [
       kiln_cms: [
+        # The image is Linux-only; without this `mix release` prints a
+        # "skipping elixir.bat/iex.bat for windows" line for each.
+        include_executables_for: [:unix],
         steps: [:assemble, &copy_runtime_config_fragments/1]
       ]
     ]

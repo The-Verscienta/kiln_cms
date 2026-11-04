@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Changed
+
+- **The release image builds without warnings or notices from Kiln's own steps,
+  and with ~60 fewer from third-party deps.**
+  ([long form](docs/changelog/unreleased.md#quiet-image-build))
+
 ### Security
 
 - **ecto 3.14.3 fixes EEF-CVE-2026-118391 (unbounded query cache growth), and

@@ -168,7 +168,16 @@ RUN if [ -d deps/bumblebee ]; then \
   complex nx nx_image nx_signal polaris axon safetensors unpickler \
   rustler_precompiled unzip tokenizers bumblebee; \
   fi
-RUN ERL_FLAGS="+S 2:2" mix deps.compile
+# OTP 29 deprecated `catch Expr` and variables exported out of a subexpression,
+# and warns on every use — several Erlang deps (yamerl, gproc, gen_smtp,
+# chatterbox) still have both, and gproc calls the deprecated `lists:zf/2`.
+# These are the compiler's own suppression options, which the warnings
+# themselves point to; ERL_COMPILER_OPTIONS applies them to every `.erl` this
+# step compiles, which is only third-party code — the app's own sources compile
+# in a later RUN without it, so they still warn.
+RUN ERL_FLAGS="+S 2:2" \
+  ERL_COMPILER_OPTIONS='[nowarn_deprecated_catch,nowarn_export_var_subexpr,{nowarn_deprecated_function,[{lists,zf,2}]}]' \
+  mix deps.compile
 
 COPY priv priv
 COPY lib lib
@@ -192,14 +201,18 @@ RUN if [ -n "$PROJECT" ]; then \
   if [ -d "projects/$PROJECT/priv" ]; then cp -R "projects/$PROJECT/priv/." priv/; fi; \
   fi
 
-# Install JS dependencies (TipTap, etc.) before bundling.
-RUN npm --prefix assets ci
+# Install JS dependencies (TipTap, etc.) before bundling. `--no-update-notifier`
+# and `--no-fund` drop npm's "new major version" and "looking for funding"
+# notices: the image pins its own Node/npm, so neither is actionable here.
+RUN npm --prefix assets ci --no-update-notifier --no-fund
 
 # Compile first so Phoenix generates the colocated JS/CSS manifest
 # (_build/$MIX_ENV/phoenix-colocated/...) that assets/css/app.css and
 # assets/js/app.js import; otherwise tailwind/esbuild can't resolve it.
 # Same 2-scheduler cap for the app compile (Ash resources are also memory-heavy).
-RUN ERL_FLAGS="+S 2:2" mix compile
+# Two schedulers make dozens of files cross the default 10s "it's taking more
+# than 10s" notice, which is a dev-time diagnostic, not news on a build host.
+RUN ERL_FLAGS="+S 2:2" mix compile --long-compilation-threshold 600
 RUN mix assets.deploy
 
 # `config/runtime/` holds the per-concern fragments runtime.exs imports (#1322).
