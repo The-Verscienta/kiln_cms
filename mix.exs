@@ -709,7 +709,10 @@ defmodule KilnCMS.MixProject do
       {:picosat_elixir, "~> 0.2"},
       {:ash_authentication, "~> 5.0.0-rc.16"},
       {:ash_authentication_phoenix, "~> 3.0.0-rc.11"},
-      {:absinthe_phoenix, "~> 2.0"},
+      # 2.0.6 is the first that delivers subscription pushes on Phoenix >= 1.8.16
+      # (absinthe_phoenix#113): older ones subscribe with fastlane metadata, which
+      # 1.8.16 no longer reads, so every push is dropped by the channel.
+      {:absinthe_phoenix, "~> 2.0 and >= 2.0.6"},
       {:open_api_spex, "~> 3.0"},
       {:ash_state_machine, "~> 0.2"},
       {:ash_archival, "~> 2.0"},
@@ -758,7 +761,7 @@ defmodule KilnCMS.MixProject do
       {:kiln_dep_fixture, path: "sdk/fixtures/dep_plugin", only: :test},
       # Yjs CRDTs on the BEAM (collab-editing prototype — see the spike doc).
       {:y_ex, "~> 0.10.5"},
-      {:phoenix, "~> 1.8.8"},
+      {:phoenix, "~> 1.8.16"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.13"},
       {:postgrex, ">= 0.0.0"},

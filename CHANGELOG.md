@@ -60,6 +60,12 @@ Every summary line below that was shortened links to its own entry there.
   and with ~60 fewer from third-party deps.**
   ([long form](docs/changelog/unreleased.md#quiet-image-build))
 
+### Fixed
+
+- **Phoenix 1.8.16 with absinthe_phoenix 2.0.6: GraphQL subscription pushes still reach
+  WebSocket clients after the bump, which silently dropped every push on absinthe_phoenix 2.0.5.**
+  ([#2202](https://github.com/The-Verscienta/kiln_cms/pull/2202) · [long form](docs/changelog/unreleased.md#phoenix-1-8-16-subscription-pushes))
+
 ### Security
 
 - **ecto 3.14.3 fixes EEF-CVE-2026-118391 (unbounded query cache growth), and
