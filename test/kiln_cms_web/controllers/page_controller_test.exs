@@ -58,7 +58,7 @@ defmodule KilnCMSWeb.PageControllerTest do
       assert html =~ heading
     end
 
-    assert html =~ "postBySlug"
+    assert html =~ "publishedPosts"
     assert html =~ ~s(href="https://github.com/The-Verscienta/kiln_cms")
   end
 
@@ -222,11 +222,71 @@ defmodule KilnCMSWeb.PageControllerTest do
     assert html =~ "/api/auth/sign_in"
   end
 
+  # #1872: every curl example can be pasted as it stands, so each names this
+  # site's own base URL rather than a `<this-site>` placeholder.
+  test "GET /developers fills the examples with this site's base URL", %{conn: conn} do
+    html = conn |> get(~p"/developers") |> html_response(200)
+    base = KilnCMSWeb.Tenant.base_url(nil)
+
+    refute html =~ "this-site"
+    assert html =~ ~s(curl -s "#{base}/api/json/posts?sort=-published_at)
+    assert html =~ ~s(curl -s -X POST "#{base}/gql")
+    assert html =~ ~s(curl -s -X POST "#{base}/api/auth/sign_in")
+  end
+
+  # With the served spec off, the page still links a spec: the committed one.
+  test "GET /developers links the stock OpenAPI spec when API docs are off", %{conn: conn} do
+    set_api_docs(false)
+    html = conn |> get(~p"/developers") |> html_response(200)
+
+    assert html =~
+             ~s(href="https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/openapi.json")
+  end
+
+  test "GET /developers links the served GraphQL SDL where introspection is on", %{conn: conn} do
+    set_flag(:graphql_introspection, true)
+    html = conn |> get(~p"/developers") |> html_response(200)
+
+    assert html =~ ~s(href="/api/graphql/schema.graphql")
+    refute html =~ "blob/main/docs/api/schema.graphql"
+  end
+
+  test "GET /developers links the stock GraphQL SDL where introspection is off", %{conn: conn} do
+    set_flag(:graphql_introspection, false)
+    html = conn |> get(~p"/developers") |> html_response(200)
+
+    refute html =~ ~s(href="/api/graphql/schema.graphql")
+
+    assert html =~
+             ~s(href="https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/schema.graphql")
+  end
+
+  # The homepage's GraphQL example must answer as written on any site — it used
+  # to look up a `hello-world` slug that most sites (kilncms.dev included) lack.
+  test "the homepage's GraphQL example runs against this site's schema", %{conn: conn} do
+    html = conn |> get(~p"/") |> html_response(200)
+
+    [_, query] = Regex.run(~r{<code>(query \{.*?\})</code>}s, html)
+    query = query |> String.replace("&quot;", ~s(")) |> String.replace("&amp;", "&")
+    refute query =~ "hello-world"
+
+    body =
+      build_conn()
+      |> put_req_header("content-type", "application/json")
+      |> post("/gql", Jason.encode!(%{query: query}))
+      |> json_response(200)
+
+    refute Map.has_key?(body, "errors")
+    assert %{"publishedPosts" => %{"count" => _, "results" => _}} = body["data"]
+  end
+
   # `:api_docs` is process-wide app config, which is why this module is not async.
-  defp set_api_docs(value) do
-    previous = Application.get_env(:kiln_cms, :api_docs)
-    Application.put_env(:kiln_cms, :api_docs, value)
-    on_exit(fn -> Application.put_env(:kiln_cms, :api_docs, previous) end)
+  defp set_api_docs(value), do: set_flag(:api_docs, value)
+
+  defp set_flag(key, value) do
+    previous = Application.get_env(:kiln_cms, key)
+    Application.put_env(:kiln_cms, key, value)
+    on_exit(fn -> Application.put_env(:kiln_cms, key, previous) end)
   end
 
   test "home and nav point API links at the docs page, not raw endpoints", %{conn: conn} do

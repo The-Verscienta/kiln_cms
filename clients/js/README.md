@@ -28,6 +28,26 @@ the WHATWG fetch API. ESM only.
 > `clients/js` first) — that is exactly what
 > [`examples/astro-blog`](../../examples/astro-blog) does.
 
+## Try it against kilncms.dev
+
+The project's own site, [kilncms.dev](https://kilncms.dev), answers anonymous
+reads of its published content. Its guides are entries of a dynamic `doc`
+type, so this runs as written, with no Kiln of your own:
+
+```ts
+import { createClient } from "@kiln-cms/client";
+
+const kiln = createClient({ baseUrl: "https://kilncms.dev" });
+
+const { items } = await kiln.list("entries", {
+  filter: { type_name: "doc" },
+  limit: 5,
+});
+const guide = await kiln.artifact("doc", "getting-started");
+```
+
+The quick start below uses `cms.example.com`, meaning a site of your own.
+
 ## Quick start
 
 ```ts
