@@ -68,18 +68,25 @@ defmodule KilnCMS.Search.QueryBudgetTest do
        %{admin: admin, page: page} do
     Application.put_env(:kiln_cms, :budget_test_delay, 3_000)
 
+    # Core's own sections, not `Search.content_sections/0`: every section
+    # must finish its keyword legs inside 400 ms, one at a time at
+    # concurrency 1. An overlay that registers a dozen more content types
+    # makes that a test of its section count on a slow runner, not of how an
+    # embedding miss is charged.
+    sections = [:pages, :posts, :entries]
+
     for concurrency <- [1, 2] do
       put_search_env(section_concurrency: concurrency, query_budget: 400)
 
       {micros, report} =
-        :timer.tc(fn -> Search.global_report("alpha", actor: admin) end)
+        :timer.tc(fn -> Search.global_report("alpha", actor: admin, sections: sections) end)
 
       # The keyword legs answered...
       assert Enum.map(report.sections.pages, & &1.id) == [page.id]
       # ...the request did not wait for the embedder's three seconds...
       assert micros < 1_500_000, "took #{div(micros, 1000)} ms at concurrency #{concurrency}"
-      # ...and every content section says which legs it went without.
-      for section <- Search.content_sections() do
+      # ...and every swept content section says which legs it went without.
+      for section <- sections do
         assert report.partial[section] == [:semantic, :block, :tag]
       end
 

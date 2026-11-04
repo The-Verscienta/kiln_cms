@@ -54,11 +54,23 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Changed
+
+- **The release image builds without warnings or notices from Kiln's own steps,
+  and with ~60 fewer from third-party deps.**
+  ([long form](docs/changelog/unreleased.md#quiet-image-build))
+
 ### Fixed
 
 - **Phoenix 1.8.16 with absinthe_phoenix 2.0.6: GraphQL subscription pushes still reach
   WebSocket clients after the bump, which silently dropped every push on absinthe_phoenix 2.0.5.**
   ([#2202](https://github.com/The-Verscienta/kiln_cms/pull/2202) · [long form](docs/changelog/unreleased.md#phoenix-1-8-16-subscription-pushes))
+
+### Security
+
+- **ecto 3.14.3 fixes EEF-CVE-2026-118391 (unbounded query cache growth), and
+  ash_sql 0.8.7 replaces the retired 0.8.4 (query cache returned wrong rows).**
+  ([#2204](https://github.com/The-Verscienta/kiln_cms/pull/2204) · [long form](docs/changelog/unreleased.md#ecto-query-cache-advisory))
 
 ## [1.8.0] - 2026-11-03
 

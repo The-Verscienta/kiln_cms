@@ -227,7 +227,27 @@ function setHighlight(range) {
     marked.push(el)
     return
   }
+  installHighlightStyle()
   CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(range))
+}
+
+// The `::highlight()` rule is adopted from here rather than written in
+// app.css: Tailwind's CSS optimizer (Lightning CSS) doesn't recognise the
+// pseudo-element and prints a warning on every `mix assets.deploy`. Only a
+// browser with the Highlight API reaches this, and every such browser also
+// has constructable stylesheets.
+let highlightStyleInstalled = false
+
+function installHighlightStyle() {
+  if (highlightStyleInstalled) return
+  highlightStyleInstalled = true
+  const sheet = new CSSStyleSheet()
+  sheet.replaceSync(
+    `::highlight(${HIGHLIGHT_NAME}) {` +
+      " background-color: color-mix(in oklch, var(--color-warning, oklch(0.8 0.15 85)) 40%, transparent);" +
+      " }",
+  )
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
 }
 
 function clearMarks() {
