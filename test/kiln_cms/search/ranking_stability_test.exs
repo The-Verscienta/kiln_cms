@@ -75,7 +75,11 @@ defmodule KilnCMS.Search.RankingStabilityTest do
     Application.put_env(:kiln_cms, KilnCMS.Search, Keyword.merge(base, overrides))
   end
 
+  # Exact vector scans, as in #2195: the hybrid snapshot asserts which embedded
+  # rows the semantic leg returns, and a filtered HNSW walk on CI's pg16 can
+  # miss rows the test just embedded, so the snapshot drifted with no change.
   setup do
+    exact_vector_scans!()
     original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, original) end)
     :ok
