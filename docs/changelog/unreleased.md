@@ -15,3 +15,4 @@ carries the reasoning.
   unpredictable results. Both were published 2026-11-04, after 1.8.0, and
   fail `mix hex.audit` on every branch until taken. Lock-only: `mix
   deps.unlock ecto ash_sql`, nothing else moved.
+  ([#2204](https://github.com/The-Verscienta/kiln_cms/pull/2204))
