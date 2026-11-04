@@ -54,67 +54,84 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [1.8.0] - 2026-11-03
+
+Long form: [docs/changelog/v1.8.0.md](docs/changelog/v1.8.0.md) —
+the 1.8.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
 ### Upgrade notes
 
 - **The upgrade migration rewrites `search_vector` on every content row holding
   Chinese characters, adding their bigrams. Nothing to run, overlays included.**
-  ([#2179](https://github.com/The-Verscienta/kiln_cms/pull/2179) · [long form](docs/changelog/unreleased.md#han-bigrams-upgrade))
+  ([#2179](https://github.com/The-Verscienta/kiln_cms/pull/2179) · [long form](docs/changelog/v1.8.0.md#han-bigrams-upgrade))
+
 - **Run the re-fire sweep after deploying (`mix kiln.refire_all`); overlays first run
   `mix ash.codegen`. Content tables gain `search_weighted`; old rows keep the old weights.**
-  ([#2183](https://github.com/The-Verscienta/kiln_cms/pull/2183) · [long form](docs/changelog/unreleased.md#field-role-weights-upgrade))
+  ([#2183](https://github.com/The-Verscienta/kiln_cms/pull/2183) · [long form](docs/changelog/v1.8.0.md#field-role-weights-upgrade))
 
 ### Added
 
 - **Chinese is searchable inside longer text: `吴茱萸` finds `本方以吴茱萸为君药`, and a query
   that is exactly a record's Chinese name ranks it first (`:han` leg).**
-  ([#2179](https://github.com/The-Verscienta/kiln_cms/pull/2179) · [long form](docs/changelog/unreleased.md#han-bigrams))
+  ([#2179](https://github.com/The-Verscienta/kiln_cms/pull/2179) · [long form](docs/changelog/v1.8.0.md#han-bigrams))
+
 - **Per-site search synonyms and aliases (`/editor/search-synonyms`): equivalent groups and
   one-way rules, applied by `/api/search` (`also_searched`), `/api/ask`, the new `/mcp`
-  `search_content` tool and site search alike.** ([long form](docs/changelog/unreleased.md#search-synonyms))
+  `search_content` tool and site search alike.** ([long form](docs/changelog/v1.8.0.md#search-synonyms))
+
 - **Search finds a name written spaced or joined differently from the site:
   `huangqi` finds Huang Qi, `xiao yao san` Xiaoyaosan, `SP 9` SP9.**
-  ([long form](docs/changelog/unreleased.md#compound-names))
+  ([long form](docs/changelog/v1.8.0.md#compound-names))
+
 - **Search: `explain=1` on `/api/search` (and `explain: true` on `hybrid/3`/`global/2`)
   reports each hit's leg ranks, raw scores, matched terms and coverage.**
-  ([#2177](https://github.com/The-Verscienta/kiln_cms/pull/2177) · [long form](docs/changelog/unreleased.md#search-explain))
+  ([#2177](https://github.com/The-Verscienta/kiln_cms/pull/2177) · [long form](docs/changelog/v1.8.0.md#search-explain))
+
 - **Search: an adversarial ranking fixture gates CI, and golden sets gain the
-  classes it uses.** ([long form](docs/changelog/unreleased.md#search-ranking-fixture))
+  classes it uses.** ([long form](docs/changelog/v1.8.0.md#search-ranking-fixture))
 
 ### Changed
 
 - **Search: keyword ranking weights a record's text by role (title and names `A`, fields `B`/`C`,
   body `D`) and ranks with `ts_rank_cd` plus a phrase score, so an adjacent phrase wins.**
-  ([#2183](https://github.com/The-Verscienta/kiln_cms/pull/2183) · [long form](docs/changelog/unreleased.md#field-role-weights))
+  ([#2183](https://github.com/The-Verscienta/kiln_cms/pull/2183) · [long form](docs/changelog/v1.8.0.md#field-role-weights))
+
 - **Search returns nothing for a query most of whose words are in no record's text or name;
   a word one edit from a name is a typo, and the fuzzy leg retries corrected. `SEARCH_TERM_GATE=false` reverts.**
-  ([long form](docs/changelog/unreleased.md#term-evidence-gate))
+  ([long form](docs/changelog/v1.8.0.md#term-evidence-gate))
+
 - **README, home page hero and kilncms.dev `/docs` lead with the wedge: content that has to be
   right, everywhere in seconds, provably. A new guide orders the six delivery and governance docs.**
-  ([#2197](https://github.com/The-Verscienta/kiln_cms/pull/2197) · [long form](docs/changelog/unreleased.md#wedge-positioning))
+  ([#2197](https://github.com/The-Verscienta/kiln_cms/pull/2197) · [long form](docs/changelog/v1.8.0.md#wedge-positioning))
+
 - **`/developers` curl examples name the site's own URL instead of `<this-site>`, and the page
   links the committed OpenAPI and GraphQL specs where a production build serves neither.**
-  ([#2196](https://github.com/The-Verscienta/kiln_cms/pull/2196) · [long form](docs/changelog/unreleased.md#developers-page-real-urls))
+  ([#2196](https://github.com/The-Verscienta/kiln_cms/pull/2196) · [long form](docs/changelog/v1.8.0.md#developers-page-real-urls))
 
 ### Fixed
 
 - **Search: a section with one or two records no longer ranks them first across a
   `global/2` sweep; ranks are taken over every section's candidates together.**
-  ([#2176](https://github.com/The-Verscienta/kiln_cms/pull/2176) · [long form](docs/changelog/unreleased.md#global-search-ranks))
+  ([#2176](https://github.com/The-Verscienta/kiln_cms/pull/2176) · [long form](docs/changelog/v1.8.0.md#global-search-ranks))
+
 - **Search: a deploy no longer stalls searches; probes hold traffic until search is warm, and
   each sweep answers within a budget, flagged `partial`, with per-leg `Server-Timing`.**
-  ([#2186](https://github.com/The-Verscienta/kiln_cms/pull/2186) · [long form](docs/changelog/unreleased.md#search-warmup-and-budget))
+  ([#2186](https://github.com/The-Verscienta/kiln_cms/pull/2186) · [long form](docs/changelog/v1.8.0.md#search-warmup-and-budget))
 
 ### Security
 
 - **phoenix_html 4.4.0, ssl_verify_fun 1.1.9 and jsv 0.26.2 fix three of
   the advisories published 2026-10-30 and 2026-10-31.**
-  ([#2174](https://github.com/The-Verscienta/kiln_cms/pull/2174) · [long form](docs/changelog/unreleased.md#html-tls-jsv-advisories))
+  ([#2174](https://github.com/The-Verscienta/kiln_cms/pull/2174) · [long form](docs/changelog/v1.8.0.md#html-tls-jsv-advisories))
+
 - **ash_authentication 5.0 and ash_authentication_phoenix 3.0 release candidates
   bring assent 0.3.2 (EEF-CVE-2026-117656, Sign in with Apple; Kiln not exposed).**
-  ([#2185](https://github.com/The-Verscienta/kiln_cms/pull/2185) · [long form](docs/changelog/unreleased.md#ash-authentication-5-assent))
+  ([#2185](https://github.com/The-Verscienta/kiln_cms/pull/2185) · [long form](docs/changelog/v1.8.0.md#ash-authentication-5-assent))
+
 - **ash_authentication 5.0.0-rc.16 fixes EEF-CVE-2026-119215 (TOTP setup) and
   EEF-CVE-2026-118505 (`brute_force_strategy`); Kiln uses neither, so not exposed.**
-  ([#2193](https://github.com/The-Verscienta/kiln_cms/pull/2193) · [long form](docs/changelog/unreleased.md#ash-authentication-rc16))
+  ([#2193](https://github.com/The-Verscienta/kiln_cms/pull/2193) · [long form](docs/changelog/v1.8.0.md#ash-authentication-rc16))
 
 ## [1.7.0] - 2026-10-29
 
