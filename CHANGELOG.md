@@ -62,8 +62,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Security
 
-- **ash_sql 0.8.4 → 0.8.6: Hex retired 0.8.4 for an Ecto query-cache bug that
-  can return the wrong rows.** ([long form](docs/changelog/unreleased.md#ash-sql-0-8-6))
+- **ecto 3.14.3 fixes EEF-CVE-2026-118391 (unbounded query cache growth), and
+  ash_sql 0.8.7 replaces the retired 0.8.4 (query cache returned wrong rows).**
+  ([#2204](https://github.com/The-Verscienta/kiln_cms/pull/2204) · [long form](docs/changelog/unreleased.md#ecto-query-cache-advisory))
 
 ## [1.8.0] - 2026-11-03
 
