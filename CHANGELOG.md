@@ -54,6 +54,17 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Changed
+
+- **The release image builds without warnings or notices from Kiln's own steps,
+  and with ~60 fewer from third-party deps.**
+  ([long form](docs/changelog/unreleased.md#quiet-image-build))
+
+### Security
+
+- **ash_sql 0.8.4 → 0.8.6: Hex retired 0.8.4 for an Ecto query-cache bug that
+  can return the wrong rows.** ([long form](docs/changelog/unreleased.md#ash-sql-0-8-6))
+
 ## [1.8.0] - 2026-11-03
 
 Long form: [docs/changelog/v1.8.0.md](docs/changelog/v1.8.0.md) —
