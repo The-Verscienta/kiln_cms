@@ -30,6 +30,16 @@ defmodule KilnCMS.Application do
     # loaded so they register with the protocol and prevent unhandled errors.
     _ = Code.ensure_loaded(KilnCMSWeb.AshFormErrors)
 
+    # A `FieldDefinition` row loads its `field_type` with
+    # `String.to_existing_atom/1`, and a plugin type's name (an overlay's
+    # `:money`) exists as an atom only once a module naming it is loaded. The
+    # registry names every type in a literal, so loading it here makes every
+    # stored type loadable. A release preloads all modules; `mix phx.server`
+    # and `mix run` load lazily, and there a page whose render read field
+    # definitions before anything had touched the registry raised
+    # `cannot load "money"` (the v1.8.0 upgrade rehearsal).
+    {:module, _} = Code.ensure_loaded(KilnCMS.CMS.FieldTypes)
+
     children = [
       KilnCMSWeb.Telemetry,
       # Aggregated log of CalendarLive's burst coalescing (#1336). The
