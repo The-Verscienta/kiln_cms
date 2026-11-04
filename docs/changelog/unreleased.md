@@ -331,6 +331,18 @@ carries the reasoning.
   search keeps its keyword legs rather than answering 500. Measurements are
   in `docs/benchmarks.md`.
 
+<a id="field-type-atoms-at-boot"></a>
+
+- **A plugin field type no longer breaks page renders under `mix phx.server`
+  or `mix run`.** A `FieldDefinition` row loads its `field_type` as an
+  existing atom, and a plugin type's name (the example overlay's `:money`)
+  exists only once a module naming it has loaded. A release preloads every
+  module, so production was unaffected. Dev and `mix run` load modules
+  lazily, and the v1.8.0 upgrade rehearsal failed every leg there: each page
+  render raised `cannot load "money"`. `KilnCMS.Application` now loads
+  `KilnCMS.CMS.FieldTypes`, whose registry names every type, at boot. The
+  rehearsal from v1.7.0 passes with it.
+
 ## Security
 
 <a id="html-tls-jsv-advisories"></a>
