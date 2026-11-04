@@ -39,7 +39,7 @@ defmodule KilnCMSWeb.PageControllerTest do
 
   test "GET /", %{conn: conn} do
     conn = get(conn, ~p"/")
-    assert html_response(conn, 200) =~ "Model content once"
+    assert html_response(conn, 200) =~ "Fix it once"
     assert html_response(conn, 200) =~ "KilnCMS"
   end
 
@@ -166,7 +166,7 @@ defmodule KilnCMSWeb.PageControllerTest do
       html = conn |> get(~p"/") |> html_response(200)
 
       assert html =~ "Hours and location"
-      refute html =~ "Model content once"
+      refute html =~ "Fix it once"
     end
 
     test "a draft Home page does not", %{conn: conn} do
@@ -174,7 +174,7 @@ defmodule KilnCMSWeb.PageControllerTest do
 
       html = conn |> get(~p"/") |> html_response(200)
 
-      assert html =~ "Model content once"
+      assert html =~ "Fix it once"
       refute html =~ "Hours and location"
     end
   end

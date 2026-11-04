@@ -1,14 +1,51 @@
 # KilnCMS
 
-A modern, high-performance headless + traditional CMS built on **Phoenix · Ash ·
-LiveView · Tailwind · Elixir**, with the **Ash Framework** at its core. Client
-interactivity is handled by LiveView + colocated JS hooks — no Surface, no Alpine.js.
+KilnCMS is a self-hosted CMS for **content that has to be right: everywhere in
+seconds, provably.** When you publish or correct something, every site, app
+and cache you connect is told within seconds, and Kiln keeps a signed record
+of who changed it, who approved it and exactly what readers saw at any
+moment. [Right, everywhere, provably](docs/right-everywhere-provably.md) is
+the guide to how that works.
+
+It is headless and traditional at once: the same app serves your website and
+the JSON:API and GraphQL APIs. It runs as one container plus PostgreSQL, and
+is built on **Phoenix · Ash · LiveView · Tailwind · Elixir**, with the **Ash
+Framework** at its core. Client interactivity is handled by LiveView +
+colocated JS hooks — no Surface, no Alpine.js.
 
 See [`KilnCMS_Project_Plan.md`](KilnCMS_Project_Plan.md) for the full vision, architecture, and
 the resolved architectural decisions (D1–D8), and [`docs/path-forward.md`](docs/path-forward.md)
 for where Kiln is going from 1.1: live content delivery plus provable, governed publishing.
 
+## Run it
+
+From a checkout, with Elixir 1.20+ / OTP 29+, Node.js 22 and Docker:
+
+```bash
+docker compose up -d postgres   # the only required service
+mix setup                       # deps, database, assets, and a seeded admin
+mix phx.server
+```
+
+Then open <http://localhost:4000/editor> and sign in as `admin@kiln.test` /
+`kilnadmin123` (dev only; [Creating an admin user](#creating-an-admin-user)
+says how to change them). [Getting started](docs/getting-started.md) is the
+fuller tour, and the [section below](#getting-started) has the optional
+services. To run the published image instead of a checkout, see
+[`docs/deploy.md`](docs/deploy.md) or a
+[one-click platform](docs/deploy-platforms.md).
+
 ## Status & maturity
+
+**Content that has to be right, shipped in steps.** The wedge ships in
+minors: webhooks that name the other pages a change touched (1.3), retractions that cannot be silently lost (1.4), every publish and
+withdrawal timed end to end (1.5; first number p95 0.58 s, unpublish to last
+endpoint, on [benchmarks](docs/benchmarks.md#live-delivery-unpublish-to-last-endpoint)),
+a "what readers saw" trail per document (1.6), and every published page
+signed by default (1.7). The public change feed and client subscribe helpers
+are not shipped yet; the
+[guide](docs/right-everywhere-provably.md#what-is-not-built-yet) lists what
+is still to come.
 
 **Stable (`v1.7.0`), single maintainer, and consumed as a source overlay
 rather than a package.** If you are evaluating KilnCMS for a team, read this

@@ -41,7 +41,7 @@ test("a published Home page takes over the site root", async ({ page }) => {
 
   // No Home page yet: the root is the stock template.
   await page.goto("/");
-  await expect(page.getByText("Model content once")).toBeVisible();
+  await expect(page.getByText("Fix it once")).toBeVisible();
 
   let id;
   try {
@@ -50,7 +50,7 @@ test("a published Home page takes over the site root", async ({ page }) => {
 
     // A draft Home page must not reach visitors.
     await page.goto("/");
-    await expect(page.getByText("Model content once")).toBeVisible();
+    await expect(page.getByText("Fix it once")).toBeVisible();
 
     await page.goto(`/editor/content/page/${id}`);
     await workflowButton(page, "publish").click();
@@ -59,7 +59,7 @@ test("a published Home page takes over the site root", async ({ page }) => {
 
     await page.goto("/");
     await expect(page.locator("article h1")).toContainText(TITLE);
-    await expect(page.getByText("Model content once")).toHaveCount(0);
+    await expect(page.getByText("Fix it once")).toHaveCount(0);
     await shot(page, "3-site-root");
   } finally {
     if (id) {

@@ -10,6 +10,8 @@ can do).
 *Last reconciled against `main`: 2026-09-11.* Claims about Kiln below are
 checked against the code; claims about the other products are a summary, not a
 benchmark.
+The [wedge table](#the-wedge-right-everywhere-provably) is the exception:
+it was added on 2026-11-03 with a dated source on every competitor claim.
 
 > **The public, sourced versions live in [docs/compare/](compare/how-kiln-compares.md)**
 > (#1876): one "Kiln vs X" page each for WordPress, Ghost, Strapi, Payload and
@@ -37,6 +39,55 @@ that: create / update / workflow verbs (`publish`, `unpublish`, …) and
 soft-delete are exposed over [JSON:API](json-api.md) and
 [GraphQL mutations](headless-graphql-api.md#mutations-writing), gated by the same
 Ash policies as the editor plus the API key's scope.
+
+## The wedge: right, everywhere, provably
+
+Kiln's position from 1.8 is **content that has to be right: everywhere in
+seconds, provably** ([right-everywhere-provably.md](right-everywhere-provably.md)).
+This table compares the four rivals a team weighing that claim is most likely
+to have open, on the four things the claim rests on.
+
+**Facts checked 2026-11-03**, each against the vendor's own docs or pricing
+page, linked in the cell. "Not documented" means we found nothing in the
+vendor's docs that day. It is not a claim that the feature cannot be built on
+top. Contentful's site rate-limited direct reads that day, so its cells rest
+on the excerpts of its pages that a search returned; re-read them at the next
+check.
+
+| | Live delivery: is every consumer told? | Point in time: what readers saw | Provenance: signed content | Governance: who changed and approved it |
+|---|---|---|---|---|
+| **Kiln (1.7)** | Signed webhooks on every publish, edit and withdrawal, naming the other pages a change touched; retractions exempt from auto-disable; optional CDN purge; every transition timed (first p95 0.58 s, unpublish to last endpoint). Public change-feed transports are not shipped (2.2) ([webhooks](webhooks.md), [benchmarks](benchmarks.md#live-delivery-unpublish-to-last-endpoint)) | `?as_of=` on the public delivery API serves a document as published at that moment, or `withdrawn` ([point in time](point-in-time.md)) | On by default: every fired page carries a signed manifest; anonymous `verify` endpoint and public key ([provenance](provenance.md)) | Per-document trail with approver, CDN purge, endpoint delivery times, `?as_of=` link and a tamper-evident history chain, in the free product ([governance dashboard](governance-dashboard.md)) |
+| **Sanity** | Live Content API: clients listen for sync tags and refetch on change; all plans; 15-minute event replay on Free and Growth ([Live Content API][sanity-live]). GROQ-powered webhooks signed with `X-Sanity-Signature` ([webhooks][sanity-webhooks]) | History API returns a document "as it was at a point in the past" (`time` parameter), authenticated only ([History API][sanity-history]). History kept 3 days (Free), 90 (Growth), 365 (Enterprise) ([history][sanity-history-ux]); the History API is Enterprise-only on the pricing page ([pricing][sanity-pricing]) | Not documented | "Full audit trail & History API", "Audit log: content changes and events" and Content Releases are Enterprise only ([pricing][sanity-pricing]). Approval workflows are in early access ([Workflows cookbook][sanity-workflows]) |
+| **Contentful** | Webhooks with optional request signing (`x-contentful-signature`) ([request verification][contentful-verify]). Publishing purges the CDN, with fresh content "within seconds" ([webhooks FAQ][contentful-webhooks-faq]). No push to open pages for published content is documented | Entry snapshots on each publish, master environment only, over the Management API (`/entries/:id/snapshots`), not the Delivery API ([versions][contentful-versions], [snapshots][contentful-snapshots]) | Not documented | Audit logs of content, model, role and environment changes, streamed to your cloud storage, Enterprise ([enterprise observability][contentful-audit]) |
+| **Payload (3.x)** | No webhooks built in: you write an `afterChange` hook to purge caches or call a front end ([collection hooks][payload-hooks]). Live Preview is for drafts ([live preview][payload-preview]) | Versions over REST, GraphQL and the Local API, 100 per document by default (`maxPerDoc`); no as-of-date read documented ([versions][payload-versions]) | Not documented | Enterprise lists "Audit Logs & Version Control" and approval workflows ([enterprise][payload-enterprise]) |
+| **Directus** | Realtime over WebSockets and GraphQL subscriptions, under the caller's permissions; off by default when self-hosted (`WEBSOCKETS_ENABLED=false`) ([realtime config][directus-realtime]). Flows can POST to a URL on an event ([triggers][directus-triggers]) | Revisions over `/revisions`, revert via `/utils/revert` ([revisions][directus-revisions]); with retention on, revisions and activity default to 90 days ([logging][directus-logging]). No as-of-date read documented | Not documented | Activity log and revisions record each change ([revisions][directus-revisions], [logging][directus-logging]). No approval workflow found in the docs we read |
+
+What the table says about positioning: every rival has fast change
+notification, and Sanity's Live Content API is the most finished push to
+clients, ahead of Kiln until 2.2 ships the public feed. None documents signed
+content, a public "as it was at this moment" read, or a per-document record
+of when each consumer was told. Where they keep an audit trail, it is an
+Enterprise tier; Kiln's is in the self-hosted product.
+
+[sanity-live]: https://www.sanity.io/docs/content-lake/live-content-api
+[sanity-webhooks]: https://www.sanity.io/docs/compute-and-ai/webhooks
+[sanity-history]: https://www.sanity.io/docs/http-reference/history
+[sanity-history-ux]: https://www.sanity.io/docs/user-guides/history-experience
+[sanity-pricing]: https://www.sanity.io/pricing
+[sanity-workflows]: https://www.sanity.io/docs/workflows/cookbook-coordinated-release
+[contentful-verify]: https://www.contentful.com/developers/docs/webhooks/request-verification/
+[contentful-webhooks-faq]: https://www.contentful.com/help/faq/webhooks/
+[contentful-versions]: https://www.contentful.com/help/content-and-entries/versions/
+[contentful-snapshots]: https://www.contentful.com/developers/docs/references/content-management-api/snapshots/
+[contentful-audit]: https://www.contentful.com/developers/docs/concepts/enterprise-observability/
+[payload-hooks]: https://payloadcms.com/docs/hooks/collections
+[payload-preview]: https://payloadcms.com/docs/live-preview/overview
+[payload-versions]: https://payloadcms.com/docs/versions/overview
+[payload-enterprise]: https://payloadcms.com/enterprise
+[directus-realtime]: https://directus.com/docs/configuration/realtime
+[directus-triggers]: https://directus.com/docs/guides/flows/triggers
+[directus-revisions]: https://directus.com/docs/api/revisions
+[directus-logging]: https://directus.com/docs/configuration/logging
 
 ## The original four (summary)
 
@@ -196,3 +247,9 @@ graduating it is Theme F of
 [content-editor-modernization.md](content-editor-modernization.md). Its
 most defensible ground is **structured content + real-time (vs. Sanity)** and
 **content + native email (vs. everyone)**.
+
+From 1.8 Kiln leads with one of these rather than a list: **content that has
+to be right, everywhere in seconds, provably** (see
+[the wedge table](#the-wedge-right-everywhere-provably) above and
+[path-forward.md](path-forward.md)). The other strengths stay true; they are
+no longer the headline.

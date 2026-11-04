@@ -1168,6 +1168,11 @@ msgstr "404 (%{count})"
 msgid "6-digit code"
 msgstr "Código de 6 dígitos"
 
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex
+#, elixir-autogen, elixir-format
+msgid "A CMS for content that has to be right"
+msgstr "Un CMS para contenido que tiene que ser correcto"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup can't run on this deployment."
@@ -7571,6 +7576,11 @@ msgstr "Primer valor"
 msgid "First value that isn't empty"
 msgstr "Primer valor que no esté vacío"
 
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex
+#, elixir-autogen, elixir-format
+msgid "Fix it once. It's fixed everywhere, and you can prove it."
+msgstr "Corríjalo una vez. Queda corregido en todas partes, y puede demostrarlo."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Fix the item above, then reopen to schedule or publish again."
@@ -8174,11 +8184,6 @@ msgstr "Los niveles de encabezado saltan de H%{from} a H%{to}: quienes usan lect
 msgid "Heading text"
 msgstr "Texto del encabezado"
 
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex
-#, elixir-autogen, elixir-format
-msgid "Headless CMS on Phoenix + Ash"
-msgstr "CMS headless sobre Phoenix + Ash"
-
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Headless access to the delivery and authoring APIs."
@@ -8311,6 +8316,11 @@ msgstr "¿Cómo publicas?"
 #, elixir-autogen, elixir-format
 msgid "How each item in the content list shows whether it is published, translated and scheduled."
 msgstr "Cómo indica cada elemento de la lista de contenido si está publicado, traducido y programado."
+
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex
+#, elixir-autogen, elixir-format
+msgid "How it works"
+msgstr "Cómo funciona"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -9018,11 +9028,6 @@ msgstr "Kiln publica como máximo una vez por documento, cuenta y publicación, 
 #, elixir-autogen, elixir-format
 msgid "Kiln version"
 msgstr "Versión de Kiln"
-
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex
-#, elixir-autogen, elixir-format
-msgid "KilnCMS combines Ash resources, a LiveView block editor, version history, and headless GraphQL + JSON:API delivery — Postgres-centric, real-time by default, and built for teams who want control without the ops tax."
-msgstr "KilnCMS combina recursos de Ash, un editor de bloques en LiveView, historial de versiones y entrega headless por GraphQL + JSON:API — centrado en Postgres, en tiempo real por defecto y hecho para equipos que quieren control sin la carga operativa."
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
@@ -9838,11 +9843,6 @@ msgstr "¿Falta un término?"
 #, elixir-autogen, elixir-format
 msgid "Missing translations"
 msgstr "Faltan traducciones"
-
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex
-#, elixir-autogen, elixir-format
-msgid "Model content once. Publish everywhere."
-msgstr "Modele el contenido una vez. Publíquelo en todas partes."
 
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
@@ -19576,6 +19576,11 @@ msgstr "Cuando se publique algo, haga esto."
 #, elixir-autogen, elixir-format
 msgid "When this happens"
 msgstr "Cuando esto ocurra"
+
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex
+#, elixir-autogen, elixir-format
+msgid "When you publish or correct something, every website, app and cache you connect hears about it within seconds. KilnCMS keeps a record of who changed it, who approved it and exactly what readers saw at any moment, and signs every published page so anyone can check it. It runs on your own server: one app and a Postgres database."
+msgstr "Cuando publica o corrige algo, cada sitio web, aplicación y caché que conecte se entera en cuestión de segundos. KilnCMS guarda un registro de quién lo cambió, quién lo aprobó y qué vieron exactamente los lectores en cada momento, y firma cada página publicada para que cualquiera pueda comprobarla. Se ejecuta en su propio servidor: una aplicación y una base de datos Postgres."
 
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format

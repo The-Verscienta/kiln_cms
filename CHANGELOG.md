@@ -88,6 +88,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Search returns nothing for a query most of whose words are in no record's text or name;
   a word one edit from a name is a typo, and the fuzzy leg retries corrected. `SEARCH_TERM_GATE=false` reverts.**
   ([long form](docs/changelog/unreleased.md#term-evidence-gate))
+- **README, home page hero and kilncms.dev `/docs` lead with the wedge: content that has to be
+  right, everywhere in seconds, provably. A new guide orders the six delivery and governance docs.**
+  ([#2197](https://github.com/The-Verscienta/kiln_cms/pull/2197) · [long form](docs/changelog/unreleased.md#wedge-positioning))
 - **`/developers` curl examples name the site's own URL instead of `<this-site>`, and the page
   links the committed OpenAPI and GraphQL specs where a production build serves neither.**
   ([#2196](https://github.com/The-Verscienta/kiln_cms/pull/2196) · [long form](docs/changelog/unreleased.md#developers-page-real-urls))

@@ -181,7 +181,14 @@ defmodule PublishDocs do
     end
   end
 
-  @doc "The `/docs` index page body: every guide, under its mix.exs section."
+  # The guide the `/docs` index leads with (#1930): what Kiln is for, and the
+  # order to read the delivery and governance guides in.
+  @start_here "docs/right-everywhere-provably.md"
+
+  @doc """
+  The `/docs` index page body: a "start here" pointer to the wedge guide, then
+  every guide, under its mix.exs section.
+  """
   def index_html(docs) do
     sections =
       docs
@@ -198,7 +205,25 @@ defmodule PublishDocs do
     source = ~s(<a href="#{@repo_url}/tree/main/docs">docs/ on GitHub</a>)
 
     "<p>Guides for running, authoring in, extending and integrating with Kiln. " <>
-      "Every page is published from #{source}.</p>" <> sections
+      "Every page is published from #{source}.</p>" <> start_here(docs) <> sections
+  end
+
+  # Nothing when the guide is not in the catalogue, so a rename in mix.exs
+  # drops the pointer rather than linking to a page that is not there.
+  defp start_here(docs) do
+    case Enum.find(docs, &(&1.path == @start_here)) do
+      nil ->
+        ""
+
+      doc ->
+        link = ~s(<a href="/docs/#{doc.slug}">#{Markdown.escape(doc.title)}</a>)
+
+        "<h2>Start here</h2>" <>
+          "<p>Kiln is a CMS for content that has to be right: a correction reaches " <>
+          "every site and app you connect within seconds, with a signed record of " <>
+          "who changed it, who approved it and what readers saw. #{link} explains " <>
+          "how, and gives the order to read the delivery and governance guides in.</p>"
+    end
   end
 
   # ── CLI ───────────────────────────────────────────────────────────────────

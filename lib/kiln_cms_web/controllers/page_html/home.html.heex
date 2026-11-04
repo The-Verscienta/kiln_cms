@@ -34,14 +34,17 @@
 
     <div class="relative max-w-3xl">
       <p class="text-sm font-medium uppercase tracking-[0.2em] text-base-content/70">
-        {gettext("Headless CMS on Phoenix + Ash")}
+        {gettext("A CMS for content that has to be right")}
       </p>
+      <%!-- Plain words, not a stack list (#1930): editors in the 2026-10-29
+            usability walkthrough found the old hero jargon-heavy. The claims
+            are the ones docs/right-everywhere-provably.md backs. --%>
       <h1 class="mt-4 text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-        {gettext("Model content once. Publish everywhere.")}
+        {gettext("Fix it once. It's fixed everywhere, and you can prove it.")}
       </h1>
       <p class="mt-5 max-w-2xl text-lg leading-8 text-base-content/70">
         {gettext(
-          "KilnCMS combines Ash resources, a LiveView block editor, version history, and headless GraphQL + JSON:API delivery — Postgres-centric, real-time by default, and built for teams who want control without the ops tax."
+          "When you publish or correct something, every website, app and cache you connect hears about it within seconds. KilnCMS keeps a record of who changed it, who approved it and exactly what readers saw at any moment, and signs every published page so anyone can check it. It runs on your own server: one app and a Postgres database."
         )}
       </p>
 
@@ -55,6 +58,12 @@
         </a>
         <a :if={is_nil(@current_user)} href={~p"/sign-in"} class="btn btn-primary">
           {gettext("Sign in to edit")}
+        </a>
+        <a
+          href="https://github.com/The-Verscienta/kiln_cms/blob/main/docs/right-everywhere-provably.md"
+          class="btn btn-default"
+        >
+          {gettext("How it works")}
         </a>
         <a href="/developers#graphql" class="btn btn-default">{gettext("GraphQL API")}</a>
         <a href="/developers#json-api" class="btn btn-default">{gettext("JSON:API")}</a>
