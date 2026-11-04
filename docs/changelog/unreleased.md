@@ -225,6 +225,23 @@ carries the reasoning.
   `term_gate: [min_share: …]` retunes it. `KilnCMS.Search.term_evidence/3`
   shows the verdict for a query. The migration adds the extension only.
 
+<a id="developers-page-real-urls"></a>
+
+- **`/developers` examples can be pasted as they stand, and the page always
+  links a spec (#1872, #2196).** The curl examples named `https://<this-site>`, so
+  none ran as written. They now carry the site's own base URL
+  (`KilnCMSWeb.Tenant.base_url/1`, so an org on a multi-org deployment sees
+  its own host). Where a production build serves no OpenAPI document or
+  GraphQL SDL (`API_DOCS_ENABLED`, `GRAPHQL_INTROSPECTION_ENABLED` unset), the
+  page links the stock copies committed under `docs/api/`, rather than
+  nothing. The homepage's GraphQL example looked up a `hello-world` post that
+  most sites lack. It is now `publishedPosts(limit: 3)`, which answers on any
+  site, and a test runs it against the schema. `docs/api.md` gains
+  [Serving a public read-only API](../api.md#serving-a-public-read-only-api):
+  the client IP behind a CDN, CDN caching of anonymous reads, raising a
+  bucket, and the two spec flags. The JS client's README opens with a snippet
+  that runs against kilncms.dev.
+
 ## Fixed
 
 <a id="global-search-ranks"></a>

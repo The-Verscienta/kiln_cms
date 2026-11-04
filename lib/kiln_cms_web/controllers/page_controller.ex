@@ -24,11 +24,18 @@ defmodule KilnCMSWeb.PageController do
 
   # Served summary of the headless API surfaces (#319): endpoints, auth in
   # brief, and onward links to the Swagger UI / OpenAPI spec / repo docs.
+  #
+  # The curl examples carry this site's own base URL (#1872), so each one can be
+  # pasted as it stands: `https://kilncms.dev/...` there, `http://localhost:4000`
+  # on a dev checkout, an org's own host on a multi-org deployment.
   def developers(conn, _params) do
+    current_org = KilnCMSWeb.Tenant.current_org(conn)
+
     render(conn, :developers,
       current_scope: nil,
       current_user: conn.assigns[:current_user],
-      current_org: KilnCMSWeb.Tenant.current_org(conn),
+      current_org: current_org,
+      site_url: KilnCMSWeb.Tenant.base_url(current_org),
       page_title: gettext("Developer APIs")
     )
   end

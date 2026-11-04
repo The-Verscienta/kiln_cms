@@ -8043,6 +8043,16 @@ msgstr "Referencia de la API GraphQL"
 msgid "GraphQL and JSON:API, both generated from one content model"
 msgstr "GraphQL y JSON:API, ambos generados a partir de un único modelo de contenido"
 
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex
+#, elixir-autogen, elixir-format
+msgid "GraphQL schema (SDL)"
+msgstr "Esquema GraphQL (SDL)"
+
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex
+#, elixir-autogen, elixir-format
+msgid "GraphQL schema (stock SDL)"
+msgstr "Esquema GraphQL (SDL base)"
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Grid"
@@ -18807,6 +18817,11 @@ msgstr "Darse de baja"
 #, elixir-autogen, elixir-format
 msgid "Untagged only"
 msgstr "Solo sin etiquetas"
+
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex
+#, elixir-autogen, elixir-format
+msgid "Until then, the stock spec describes every core route:"
+msgstr "Mientras tanto, la especificación base describe todas las rutas del núcleo:"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex

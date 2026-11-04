@@ -1674,6 +1674,39 @@ Over the limit returns **429** with a `retry-after` header.
 | `media_render` | `GET /media/:id/t/:ops` that misses the derivative cache (each is a render) | 120 renders / minute |
 | `media_upload` | `/api/media/*` (uploads, URL imports, direct-upload begin/complete) — charged **on top of** `api` | 60 requests / minute |
 
+### Serving a public read-only API
+
+Anonymous reads of published content need nothing turned on: every site
+answers them, as [kilncms.dev](https://kilncms.dev) does for the examples in
+the [consumer guide](headless-consumer-guide.md#try-it-live). A site that
+invites the public to try its API, as kilncms.dev does, should also check
+four things:
+
+- **The limits are per client IP, so the app has to see the visitor's IP.**
+  Behind a CDN or reverse proxy, set `TRUSTED_PROXIES` to every hop's address
+  range, or `CLIENT_IP_HEADER` on a platform that supports it (see
+  [Client addresses and rate limiting](deploy-platforms.md#client-addresses-and-rate-limiting)). Without either,
+  every visitor arrives from the proxy's address, and they all share one
+  120-a-minute `api` bucket.
+- **Let the CDN cache anonymous reads.** They carry
+  `cache-control: public, max-age=60, stale-while-revalidate=60` and vary on
+  `accept` and `authorization`, so a CDN that honours those headers absorbs
+  repeat reads before they reach the limiter. Some CDNs cache only by file
+  extension unless a rule says otherwise. Cloudflare is one: on kilncms.dev,
+  `/api/json/posts` answered `cf-cache-status: DYNAMIC` on 2026-11-03. See
+  [Caching](headless-consumer-guide.md#caching) before you write such a rule.
+- **Raise a bucket in the overlay if the defaults are too tight:**
+  `config :kiln_cms, KilnCMSWeb.RateLimit, limits: %{api: {600, :timer.minutes(1)}}`.
+  Buckets you leave out keep the defaults above.
+- **Decide whether to serve the specs.** A production build serves neither
+  the OpenAPI document nor the GraphQL SDL to anonymous callers. Set
+  `API_DOCS_ENABLED=true` (spec and Swagger UI) and
+  `GRAPHQL_INTROSPECTION_ENABLED=true` (introspection and
+  `/api/graphql/schema.graphql`) to publish them. With them off,
+  the `/developers` page links the committed stock specs
+  instead. Both describe the write routes too, which is the reason they are
+  off by default ([Served: a running site](#served-a-running-site)).
+
 ## Idempotent writes
 
 A write that times out leaves the client unsure whether it landed. Retrying a

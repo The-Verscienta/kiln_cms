@@ -33,7 +33,7 @@
         "Filterable lists, metadata, relationships, and search over every content type, following the JSON:API specification. Block bodies are not included on this surface — fetch rendered bodies from the artifact endpoint below."
       )}
     </p>
-    <pre class="mt-4 overflow-x-auto rounded-lg bg-base-200/60 p-4 text-xs leading-6"><code>curl -s "https://&lt;this-site&gt;/api/json/posts?sort=-published_at&amp;page[limit]=5"</code></pre>
+    <pre class="mt-4 overflow-x-auto rounded-lg bg-base-200/60 p-4 text-xs leading-6"><code>curl -s "{@site_url}/api/json/posts?sort=-published_at&amp;page[limit]=5"</code></pre>
     <%!-- The explorer and spec follow `:api_docs` (off in prod unless
          `API_DOCS_ENABLED`); `ApiDocs` 404s both when it is off, so only link
          to them when they will actually answer. --%>
@@ -45,6 +45,12 @@
       {gettext(
         "The interactive Swagger UI and the OpenAPI spec are switched off on this deployment. An operator can turn them on with API_DOCS_ENABLED=true."
       )}
+      {gettext("Until then, the stock spec describes every core route:")}
+      <a
+        id="stock-openapi-link"
+        href="https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/openapi.json"
+        class="font-medium text-primary-ink hover:underline"
+      >docs/api/openapi.json</a>.
     </p>
     <div class="mt-4 flex flex-wrap items-center gap-3">
       <a
@@ -80,10 +86,29 @@
     <pre
       phx-no-curly-interpolation
       class="mt-4 overflow-x-auto rounded-lg bg-base-200/60 p-4 text-xs leading-6"
-    ><code>curl -s -X POST "https://&lt;this-site&gt;/gql" \
+    ><code>curl -s -X POST "<%= @site_url %>/gql" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ health }"}'</code></pre>
     <div class="mt-4 flex flex-wrap items-center gap-3">
+      <%!-- The served SDL follows introspection (off in prod unless
+           `GRAPHQL_INTROSPECTION_ENABLED`); where it would 404, link the
+           committed stock schema instead (#1872). --%>
+      <a
+        :if={KilnCMSWeb.ApiSpecController.introspection_enabled?()}
+        id="graphql-schema-link"
+        href="/api/graphql/schema.graphql"
+        class="rounded-lg border border-base-content/20 px-4 py-2 text-sm font-semibold transition hover:bg-base-200"
+      >
+        {gettext("GraphQL schema (SDL)")}
+      </a>
+      <a
+        :if={!KilnCMSWeb.ApiSpecController.introspection_enabled?()}
+        id="graphql-schema-link"
+        href="https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/schema.graphql"
+        class="rounded-lg border border-base-content/20 px-4 py-2 text-sm font-semibold transition hover:bg-base-200"
+      >
+        {gettext("GraphQL schema (stock SDL)")}
+      </a>
       <a
         href="https://github.com/The-Verscienta/kiln_cms/blob/main/docs/headless-graphql-api.md"
         class="rounded-lg border border-base-content/20 px-4 py-2 text-sm font-semibold transition hover:bg-base-200"
@@ -103,16 +128,16 @@
     <pre
       phx-no-curly-interpolation
       class="mt-4 overflow-x-auto rounded-lg bg-base-200/60 p-4 text-xs leading-6"
-    ><code>curl -s -X POST "https://&lt;this-site&gt;/api/auth/sign_in" \
+    ><code>curl -s -X POST "<%= @site_url %>/api/auth/sign_in" \
   -H "Content-Type: application/json" \
   -d '{"email": "you@example.com", "password": "…"}'
 
 # 2FA account? That answers 200 with a pending_token instead of 201 with a token:
-curl -s -X POST "https://&lt;this-site&gt;/api/auth/sign_in/verify" \
+curl -s -X POST "<%= @site_url %>/api/auth/sign_in/verify" \
   -H "Content-Type: application/json" \
   -d '{"pending_token": "&lt;pending&gt;", "code": "123456"}'
 
-curl -s "https://&lt;this-site&gt;/api/json/posts" -H "Authorization: Bearer &lt;token&gt;"</code></pre>
+curl -s "<%= @site_url %>/api/json/posts" -H "Authorization: Bearer &lt;token&gt;"</code></pre>
     <p class="mt-4 rounded-lg border border-base-content/15 bg-base-200/60 px-4 py-3 text-sm text-base-content/70">
       {gettext(
         "If the account has two-factor authentication enabled, sign-in answers 200 with a pending token rather than 201 with a bearer token — branch on the status code, not on whether a token is present. Unattended clients should use an API key instead."

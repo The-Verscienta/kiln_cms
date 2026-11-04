@@ -169,18 +169,22 @@
       <a href="/developers" class="btn btn-default mt-8">{gettext("Read the API docs")}</a>
     </div>
 
-    <%!-- Delivery query, verbatim from the schema: `postBySlug` is the
-          published-only read every content type gets (`KilnCMS.CMS.Content`). --%>
+    <%!-- Delivery query, verbatim from the schema: `publishedPosts` is the
+          published-only list every site has, so the query answers as written on
+          any Kiln site, with no slug to guess (#1872). --%>
     <div class="card overflow-hidden">
       <div class="flex items-center justify-between border-b border-base-content/10 px-4 py-2.5">
         <span class="text-xs font-medium text-base-content/60">POST /gql</span>
         <span class="text-xs text-base-content/50">GraphQL</span>
       </div>
       <pre class="overflow-x-auto p-4 text-[13px] leading-6" phx-no-curly-interpolation><code>query {
-  postBySlug(slug: "hello-world", locale: "en") {
-    title
-    excerpt
-    seoDescription
+  publishedPosts(limit: 3) {
+    count
+    results {
+      title
+      slug
+      excerpt
+    }
   }
 }</code></pre>
     </div>

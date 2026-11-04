@@ -44,5 +44,11 @@ defmodule KilnCMSWeb.ApiSpecController do
     end
   end
 
-  defp introspection_enabled?, do: Application.get_env(:kiln_cms, :graphql_introspection, true)
+  @doc """
+  Whether `GET /api/graphql/schema.graphql` answers anonymous callers: the same
+  flag as GraphQL introspection (`GRAPHQL_INTROSPECTION_ENABLED` in production).
+  `/developers` reads it to link only a schema that will answer.
+  """
+  @spec introspection_enabled?() :: boolean()
+  def introspection_enabled?, do: Application.get_env(:kiln_cms, :graphql_introspection, true)
 end
