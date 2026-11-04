@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Fixed
+
+- **Phoenix 1.8.16 with absinthe_phoenix 2.0.6: GraphQL subscription pushes still reach
+  WebSocket clients after the bump, which silently dropped every push on absinthe_phoenix 2.0.5.**
+  ([long form](docs/changelog/unreleased.md#phoenix-1-8-16-subscription-pushes))
+
 ## [1.8.0] - 2026-11-03
 
 Long form: [docs/changelog/v1.8.0.md](docs/changelog/v1.8.0.md) —
