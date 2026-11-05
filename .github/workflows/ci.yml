@@ -1302,6 +1302,7 @@ jobs:
           if [ -f "$script" ]; then escript "$script"; else echo "::notice::no $script in this checkout; httpc left stock"; fi
 
       - name: Cache deps and ML build
+        id: ml-cache
         uses: actions/cache@v5
         with:
           path: |
@@ -1344,6 +1345,23 @@ jobs:
             }
           done
           echo "bumblebee, nx and exla are all present."
+
+      - name: Rebuild the EXLA NIF when the lock changed
+        # EXLA caches `libexla.so` (in deps/exla/cache and ~/.cache/xla) under a
+        # key of the Elixir, ERTS, xla and exla versions only. Its C++ also
+        # compiles against `fine`'s headers, which the key leaves out, so on a
+        # restore-keys hit a lock that moves `fine` reuses a NIF built against
+        # the old one and this job passes while every from-scratch build (the
+        # Docker image, an overlay's deploy) fails. #2202 did exactly that:
+        # fine 0.1.6 → 0.2.0 broke EXLA 1.0.0's compile, and only Verscienta's
+        # image build found it. On anything but an exact cache hit, build the
+        # NIF from source; the 110 MB XLA archive stays cached. The plain
+        # `deps.compile` first, because exla's compile needs xla's modules and
+        # `deps.compile exla` alone does not build them on a cold _build_ml.
+        if: steps.ml-cache.outputs.cache-hit != 'true'
+        run: |
+          mix deps.compile
+          EXLA_FORCE_REBUILD=true mix deps.compile exla --force
 
       - name: Compile (warnings as errors)
         # On a cold cache this unpacks the 666 MB xla_extension and builds the
