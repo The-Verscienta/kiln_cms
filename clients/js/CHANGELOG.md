@@ -5,7 +5,7 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `client-js-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
-## Unreleased
+## 0.3.0
 
 - **Headless routing, navigation and forms (kiln_cms#2128):**
   `resolvePath(path)` (`GET /api/resolve`), `menus()` and `menu(key)`
