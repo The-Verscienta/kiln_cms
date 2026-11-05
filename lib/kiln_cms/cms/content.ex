@@ -128,17 +128,59 @@ defmodule KilnCMS.CMS.Content do
         names
         |> Enum.map(&name_match(&1, locale, text, KilnCMS.Search.HanGrams.han?(text)))
         |> Enum.reduce(&Ash.Expr.expr(^&2 or ^&1))
-        |> then(&Ash.Query.do_filter(query, &1))
+        |> then(&Ash.Query.do_filter(query, Ash.Expr.expr(^names_guard(locale, text) and ^&1)))
         |> Ash.Query.sort([{:inserted_at, :desc}])
         |> cap_unbounded()
     end
+  end
+
+  # The alias leg's prefilter, what the title leg's lexeme overlap is to it:
+  # a field's value names the record only if every lexeme of it is in the
+  # query, so the record's names share at least one lexeme with the query;
+  # a Han query's exact name (`han_named/1`) shares its runs of Han instead.
+  # `name_lexemes` holds both, generated from the names already stored
+  # beside the title in `search_weighted`'s `A` bucket (see the column in
+  # the `postgres` block), so the per-name phrase match below, which unpacks
+  # `custom_fields` and builds a tsquery per name, runs only on the rows
+  # that pass a short array overlap — 15 ms to 0.3 ms over 2,000 rows with
+  # three name fields, measured on a synthetic catalogue shaped like the
+  # Verscienta report's herbs.
+  #
+  # A row whose `search_weighted` is `nil` (written before it, or by a
+  # writer that does not keep it, which the trigger nils) has no stored
+  # names, so it skips the guard and takes the full match. A field flagged
+  # `names_record` after a row was written is not in that row's bucket until
+  # the row is indexed again: `BustTypeRegistry` re-fires the type's
+  # published documents on the flip, and a draft catches up on its next
+  # save.
+  defp names_guard(query_locale, text) do
+    Ash.Expr.expr(
+      fragment(
+        "(name_lexemes IS NULL OR name_lexemes && (SELECT tsvector_to_array(to_tsvector(kiln_regconfig(?), ?)) || kiln_han_runs(?)))",
+        ^query_locale,
+        ^text,
+        ^text
+      )
+    )
+  end
+
+  # The same prefilter for the compound leg's alias half: a name that holds a
+  # span holds its lexemes.
+  defp names_span_guard(query_locale, spans) do
+    Ash.Expr.expr(
+      fragment(
+        "(name_lexemes IS NULL OR name_lexemes && (SELECT coalesce(array_agg(lexeme), '{}') FROM unnest(?::text[]) AS compound(span), unnest(tsvector_to_array(to_tsvector(kiln_regconfig(?), compound.span))) AS lexeme))",
+        ^spans,
+        ^query_locale
+      )
+    )
   end
 
   # One flagged field's match, with the Han exactness for a Han query.
   defp name_match(name, locale, text, true = _han?) do
     Ash.Expr.expr(
       fragment(
-        "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(coalesce(? ->> ?::text, '')) END) AS name_alias(value) WHERE (SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value) OR kiln_han_runs(name_alias.value) = (SELECT kiln_han_runs(?)))",
+        "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(? ->> ?::text) END) AS name_alias(value) WHERE name_alias.value <> '' AND ((SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value) OR kiln_han_runs(name_alias.value) = (SELECT kiln_han_runs(?))))",
         custom_fields,
         ^name,
         custom_fields,
@@ -156,7 +198,7 @@ defmodule KilnCMS.CMS.Content do
   defp name_match(name, locale, text, false = _han?) do
     Ash.Expr.expr(
       fragment(
-        "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(coalesce(? ->> ?::text, '')) END) AS name_alias(value) WHERE (SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value))",
+        "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(? ->> ?::text) END) AS name_alias(value) WHERE name_alias.value <> '' AND (SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value))",
         custom_fields,
         ^name,
         custom_fields,
@@ -238,7 +280,7 @@ defmodule KilnCMS.CMS.Content do
   # The title half keeps the title leg's GIN prefilter: the title's lexemes
   # overlap the spans' — implied, since a title that contains a span carries
   # its lexemes — so with no name field flagged the leg is index-served.
-  # The alias half has no index shape, as in `alias_filter/1`.
+  # The alias half takes the alias leg's prefilter (`names_span_guard/2`).
   def compound_filter(query) do
     locale = Ash.Query.get_argument(query, :locale)
     variants = Ash.Query.get_argument(query, :variants) || []
@@ -268,10 +310,24 @@ defmodule KilnCMS.CMS.Content do
 
     query.resource
     |> KilnCMS.CMS.NameFields.for_resource(query.tenant)
+    |> compound_names(locale, variants, spans)
+    |> Enum.reduce(title, &Ash.Expr.expr(^&2 or ^&1))
+    |> then(&Ash.Query.do_filter(query, &1))
+    |> Ash.Query.sort([{:title_length, :desc}, {:inserted_at, :desc}])
+    |> cap_unbounded()
+  end
+
+  # The compound leg's alias half: one match per flagged field, OR-ed, under
+  # the name-lexeme prefilter (`names_span_guard/2`) — none when no field is
+  # flagged.
+  defp compound_names([], _locale, _variants, _spans), do: []
+
+  defp compound_names(names, locale, variants, spans) do
+    names
     |> Enum.map(fn name ->
       Ash.Expr.expr(
         fragment(
-          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(coalesce(? ->> ?::text, '')) END) AS name_alias(value), unnest(?::text[], ?::text[]) AS compound(query, span) WHERE to_tsvector(kiln_regconfig(?), compound.query) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value) AND to_tsvector(kiln_regconfig(?), name_alias.value) @@ phraseto_tsquery(kiln_regconfig(?), compound.span))",
+          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(? ->> ?::text) END) AS name_alias(value), unnest(?::text[], ?::text[]) AS compound(query, span) WHERE name_alias.value <> '' AND to_tsvector(kiln_regconfig(?), compound.query) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value) AND to_tsvector(kiln_regconfig(?), name_alias.value) @@ phraseto_tsquery(kiln_regconfig(?), compound.span))",
           custom_fields,
           ^name,
           custom_fields,
@@ -287,10 +343,8 @@ defmodule KilnCMS.CMS.Content do
         )
       )
     end)
-    |> Enum.reduce(title, &Ash.Expr.expr(^&2 or ^&1))
-    |> then(&Ash.Query.do_filter(query, &1))
-    |> Ash.Query.sort([{:title_length, :desc}, {:inserted_at, :desc}])
-    |> cap_unbounded()
+    |> Enum.reduce(&Ash.Expr.expr(^&2 or ^&1))
+    |> then(&[Ash.Expr.expr(^names_span_guard(locale, spans) and ^&1)])
   end
 
   @doc false
@@ -424,13 +478,29 @@ defmodule KilnCMS.CMS.Content do
       resource
       |> Ash.Query.for_read(action, Map.take(query.arguments, arg_names))
       |> Ash.Query.select([:id])
-      # authorize?: false — see above: ids only, which only widen an exemption
-      # on rows the semantic action still reads under the caller's policies.
-      # The system actor holds no content read by design (#1402).
-      |> Ash.read!(tenant: query.tenant, authorize?: false)
+      |> read_named_or_none(query.tenant)
       |> Enum.map(& &1.id)
     end)
     |> Enum.uniq()
+  end
+
+  # An overlay type whose `name_lexemes` migration is not generated yet
+  # (`alias_filter/1`) names nothing by its fields, as
+  # `KilnCMS.Search.hybrid/3` answers without its alias leg, rather than
+  # failing the semantic read.
+  defp read_named_or_none(query, tenant) do
+    # authorize?: false — see above: ids only, which only widen an exemption
+    # on rows the semantic action still reads under the caller's policies.
+    # The system actor holds no content read by design (#1402).
+    Ash.read!(query, tenant: tenant, authorize?: false)
+  rescue
+    error ->
+      message = Exception.message(error)
+
+      if message =~ "name_lexemes" and
+           (message =~ "undefined_column" or message =~ "does not exist"),
+         do: [],
+         else: reraise(error, __STACKTRACE__)
   end
 
   # A caller running this leg across many resources can embed the query once
@@ -2361,6 +2431,36 @@ defmodule KilnCMS.CMS.Content do
         # published documents with it. Trash is archival and touches no FK.
         references do
           reference :parent, on_delete: :nilify
+        end
+
+        # The alias and compound legs' prefilter (`Content.alias_filter/1`):
+        # the lexemes of the record's names — `search_weighted`'s `A`
+        # bucket, its title and every field that `names_record` — under its
+        # own locale's text-search config, and their runs of Han
+        # (`kiln_han_runs/1`): the parser reads `黄芪abc` as one word, which a
+        # Han query `黄芪` names by its runs (`han_named/1`) without sharing a
+        # lexeme with it. Generated, so Postgres keeps it in
+        # step with `search_weighted` on every write, whichever path makes it,
+        # and fills it for every existing row when the column is added. `NULL`
+        # where `search_weighted` is (a row the guard cannot vouch for).
+        #
+        # A column rather than the same expression over `search_weighted`:
+        # reading one element of that array detoasts all of it, the body's
+        # bucket included, so the guard cost about as much per row as the
+        # match it skips. Like `search_vector`, it is not an Ash attribute;
+        # the legs read it in fragments.
+        custom_statements do
+          statement :name_lexemes do
+            up unquote(
+                 "ALTER TABLE #{table} ADD COLUMN IF NOT EXISTS name_lexemes text[] " <>
+                   "GENERATED ALWAYS AS (CASE WHEN search_weighted IS NULL THEN NULL " <>
+                   "ELSE tsvector_to_array(to_tsvector(kiln_regconfig(locale), " <>
+                   "coalesce(search_weighted[1], ''))) || " <>
+                   "kiln_han_runs(search_weighted[1]) END) STORED"
+               )
+
+            down unquote("ALTER TABLE #{table} DROP COLUMN IF EXISTS name_lexemes")
+          end
         end
 
         custom_indexes do
