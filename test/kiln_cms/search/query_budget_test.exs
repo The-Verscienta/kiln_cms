@@ -128,8 +128,17 @@ defmodule KilnCMS.Search.QueryBudgetTest do
     put_search_env(reranker: SlowReranker, query_budget: 400)
     Application.put_env(:kiln_cms, :budget_test_rerank_delay, 3_000)
 
+    # Core's sections only, for the reason the embedding-miss test above
+    # gives: under a 400 ms budget, an overlay's extra content types make
+    # this a test of the section count on a slow runner.
     {micros, report} =
-      :timer.tc(fn -> Search.global_report("alpha", actor: admin, rerank: true) end)
+      :timer.tc(fn ->
+        Search.global_report("alpha",
+          actor: admin,
+          rerank: true,
+          sections: [:pages, :posts, :entries]
+        )
+      end)
 
     assert Enum.map(report.sections.pages, & &1.id) == [page.id]
     assert micros < 1_500_000
