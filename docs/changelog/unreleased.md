@@ -104,6 +104,23 @@ carries the reasoning.
   `absinthe_phoenix >= 2.0.6` and `phoenix ~> 1.8.16`, so the lock can't pair
   them wrongly again.
 
+<a id="exla-fine-pin"></a>
+
+- **A from-scratch `KILN_ML=1` build compiles EXLA again.** The Phoenix
+  1.8.16 bump above also moved the test-only `lazy_html` to 0.1.14, which
+  requires `fine ~> 0.2.0`, so the lock took fine 0.2.0. EXLA 1.0.0 allows
+  `fine ~> 0.1` but its NIF does not compile against 0.2 (`'try_decode' is
+  not a member of 'fine::Decoder<xla::Shape>'`). Lean builds were
+  unaffected. The `-ml` image and any overlay building with `KILN_ML` on
+  failed, and an overlay could not pin around it, since
+  `mix kiln.plugins.doctor` holds core dependencies at core's lock.
+  `mix.exs` now caps `lazy_html` below 0.1.14, which puts both lock entries
+  back to their v1.8.0 versions. CI's ML leg missed the break because EXLA
+  caches `libexla.so` under a key without `fine`, and the leg restored that
+  cache on the lock change. It now rebuilds the NIF from source whenever its
+  cache isn't an exact hit. Overlays that re-seeded `project.lock` from the
+  1.8.16 bump re-seed once more.
+
 <a id="new-menu-button"></a>
 
 - **The content list's "New" menu is a real `<button>` with `aria-expanded`.**

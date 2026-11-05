@@ -810,7 +810,13 @@ defmodule KilnCMS.MixProject do
       {:remote_ip, "~> 1.2"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_view, "~> 1.2.0"},
-      {:lazy_html, ">= 0.1.0", only: :test},
+      # Held below 0.1.14: that release needs `fine ~> 0.2.0`, and EXLA 1.0.0's
+      # NIF does not compile against fine 0.2 (`try_decode` is not a member of
+      # `fine::Decoder<xla::Shape>`) although its own requirement, `~> 0.1`,
+      # lets the lock take it. The lock is shared with the KILN_ML build and
+      # overlays inherit it, so a test-only bump broke every ML image. Lift the
+      # cap once an EXLA release builds against fine 0.2.
+      {:lazy_html, ">= 0.1.0 and < 0.1.14", only: :test},
       {:phoenix_live_dashboard, "~> 0.8.3"},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.5.2", runtime: Mix.env() == :dev},
