@@ -56,7 +56,12 @@ defmodule KilnCMSWeb.SearchApiBudgetTest do
 
   test "a slow embedding is cut: keyword hits, flagged partial, not cached",
        %{conn: conn, word: word, page: page} do
-    put_search_env(semantic: true, embedder: SlowEmbedder, query_budget: 400)
+    # 1 s, not less: the embedding takes half, and the other half has to
+    # carry every section's lexical legs. `/api/search` sweeps every
+    # registered content type and has no parameter to narrow that, so an
+    # overlay with a dozen more types left 200 ms (at a 400 ms budget) too
+    # little on a 2-scheduler CI runner, and the pages section was cut.
+    put_search_env(semantic: true, embedder: SlowEmbedder, query_budget: 1_000)
 
     {micros, conn} = :timer.tc(fn -> get(conn, "/api/search?q=#{word}") end)
     body = json_response(conn, 200)
