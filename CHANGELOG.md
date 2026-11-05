@@ -80,6 +80,10 @@ Every summary line below that was shortened links to its own entry there.
   button that reports open/closed to assistive tech.**
   ([#2145](https://github.com/The-Verscienta/kiln_cms/issues/2145) · [long form](docs/changelog/unreleased.md#new-menu-button))
 
+- **`KILN_ML=1` builds compile EXLA again: `fine` is held at 0.1.x, since EXLA 1.0.0's NIF
+  does not build against fine 0.2.0, which lazy_html 0.1.14 had pulled into the lock.**
+  ([#2212](https://github.com/The-Verscienta/kiln_cms/pull/2212))
+
 ### Security
 
 - **ecto 3.14.3 fixes EEF-CVE-2026-118391 (unbounded query cache growth), and
