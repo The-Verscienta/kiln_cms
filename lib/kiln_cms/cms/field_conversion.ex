@@ -498,7 +498,7 @@ defmodule KilnCMS.CMS.FieldConversion do
   # `--lines`: a list of phrases kept as plain text, one item per line.
   defp lines(value, %{lines?: true, group: %{field_type: :string}}, _error)
        when is_binary(value) do
-    case value |> String.split(~r/\R/) |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
+    case value |> String.split(~r/\R/u) |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
       [] -> :empty
       items -> {:ok, items}
     end

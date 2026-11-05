@@ -88,6 +88,11 @@ Every summary line below that was shortened links to its own entry there.
   does not build against fine 0.2.0, which lazy_html 0.1.14 had pulled into the lock.**
   ([#2212](https://github.com/The-Verscienta/kiln_cms/pull/2212))
 
+- **A phrase list (multiple `:string`) holding a character whose UTF-8 contains byte 0x85
+  (`內`, many other CJK characters) saves again: line splitting reads Unicode, not bytes, so
+  the character is no longer cut in two and refused.**
+  ([#2214](https://github.com/The-Verscienta/kiln_cms/pull/2214))
+
 ### Security
 
 - **ecto 3.14.3 fixes EEF-CVE-2026-118391 (unbounded query cache growth), and

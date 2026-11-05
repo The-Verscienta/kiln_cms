@@ -162,7 +162,7 @@ defmodule KilnCMSWeb.FormSettingsLive do
   @spec parse_keywords(String.t()) :: [String.t()]
   def parse_keywords(raw) when is_binary(raw) do
     raw
-    |> String.split(~r/\R/)
+    |> String.split(~r/\R/u)
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
     |> Enum.uniq_by(&String.downcase/1)
