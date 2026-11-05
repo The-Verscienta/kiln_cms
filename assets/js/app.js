@@ -1368,6 +1368,23 @@ document.addEventListener("focusin", onSideTipTarget)
 document.addEventListener("scroll", hideSideTip, true)
 window.addEventListener("phx:page-loading-start", hideSideTip)
 
+// The disclosure shape of a `data-autoclose` menu (see the click handler
+// below). Its trigger opens it with a LiveView JS command, and LiveView
+// re-applies a JS command's attributes after every patch, so closing goes
+// through `liveSocket.js()` too: a plain setAttribute would be undone by the
+// next patch, reopening the menu.
+const openDisclosureTriggers = () => [
+  ...document.querySelectorAll(
+    '[data-autoclose]:not(details) [aria-expanded="true"][aria-controls]'
+  )
+]
+function closeDisclosure(trigger) {
+  const js = liveSocket.js()
+  js.setAttribute(trigger, "aria-expanded", "false")
+  const panel = document.getElementById(trigger.getAttribute("aria-controls"))
+  if (panel) js.setAttribute(panel, "hidden", "hidden")
+}
+
 document.addEventListener("click", e => {
   if (e.target.closest("[data-sidebar-toggle]")) {
     const collapse = document.documentElement.dataset.sidebar !== "collapsed"
@@ -1383,20 +1400,37 @@ document.addEventListener("click", e => {
   // already forces them open there; refuse the toggle so the two agree.
   const groupToggle = e.target.closest("[data-nav-group-toggle]")
   if (groupToggle && !railMode()) toggleNavGroup(groupToggle.dataset.navGroupToggle)
-  // Self-closing menus are <details data-autoclose> (the sidebar account menu,
-  // the top bar's notification bell): a click anywhere outside closes them.
-  // Keyed on the attribute rather than each class, so the next such menu opts
-  // in by declaring it instead of by editing this file.
+  // Self-closing menus declare `data-autoclose`, in one of two shapes:
+  //   - a <details data-autoclose> (the sidebar account menu, the top bar's
+  //     notification bell): closed = no `open` attribute;
+  //   - a disclosure, any other element holding a <button aria-expanded
+  //     aria-controls> that shows and hides the panel it names (the content
+  //     list's New menu): closed = panel `hidden`, trigger aria-expanded="false".
+  // A click anywhere outside closes them. Keyed on the attribute rather than
+  // each class, so the next such menu opts in by declaring it instead of by
+  // editing this file.
   document.querySelectorAll("details[data-autoclose][open]").forEach(d => {
     if (!d.contains(e.target)) d.removeAttribute("open")
   })
+  openDisclosureTriggers().forEach(t => {
+    if (!t.closest("[data-autoclose]").contains(e.target)) closeDisclosure(t)
+  })
 })
 document.addEventListener("keydown", e => {
-  const open = e.key === "Escape" && document.querySelector("details[data-autoclose][open]")
-  if (!open) return
-  open.removeAttribute("open")
-  // Focus goes back to the control that opened it, not to <body>.
-  open.querySelector("summary")?.focus()
+  if (e.key !== "Escape") return
+  // Only an open menu claims Escape; otherwise it belongs to whatever has
+  // focus (a search box, a modal), and focus stays where it is.
+  const details = document.querySelector("details[data-autoclose][open]")
+  if (details) {
+    details.removeAttribute("open")
+    // Focus goes back to the control that opened it, not to <body>.
+    details.querySelector("summary")?.focus()
+    return
+  }
+  const trigger = openDisclosureTriggers()[0]
+  if (!trigger) return
+  closeDisclosure(trigger)
+  trigger.focus()
 })
 
 // The mobile nav drawer (the same `console/1` shell). The checkbox + <label>

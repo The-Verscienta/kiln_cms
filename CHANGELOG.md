@@ -76,6 +76,10 @@ Every summary line below that was shortened links to its own entry there.
   WebSocket clients after the bump, which silently dropped every push on absinthe_phoenix 2.0.5.**
   ([#2202](https://github.com/The-Verscienta/kiln_cms/pull/2202) · [long form](docs/changelog/unreleased.md#phoenix-1-8-16-subscription-pushes))
 
+- **The content list's "New" menu (sites with more than three content types) is a real
+  button that reports open/closed to assistive tech.**
+  ([#2145](https://github.com/The-Verscienta/kiln_cms/issues/2145) · [long form](docs/changelog/unreleased.md#new-menu-button))
+
 ### Security
 
 - **ecto 3.14.3 fixes EEF-CVE-2026-118391 (unbounded query cache growth), and

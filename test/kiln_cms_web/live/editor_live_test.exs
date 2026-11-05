@@ -3048,10 +3048,28 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor")
 
-      # page + post + 2 dynamic types crosses the inline threshold: one summary
-      # trigger, with the per-type buttons inside the menu still wired to "new".
-      assert html =~ "content-new-menu"
+      # page + post + 2 dynamic types crosses the inline threshold: one
+      # disclosure trigger, with the per-type buttons inside the menu still
+      # wired to "new".
       assert html =~ "New recipe"
+
+      # #2145: the trigger is a real <button> announcing its collapsed state and
+      # the panel it controls, not a styled <summary>.
+      doc = LazyHTML.from_fragment(html)
+      assert [toggle] = doc |> LazyHTML.query("#content-new-menu > button") |> Enum.to_list()
+      assert LazyHTML.attribute(toggle, "id") == ["content-new-menu-toggle"]
+      assert LazyHTML.attribute(toggle, "type") == ["button"]
+      assert LazyHTML.attribute(toggle, "aria-expanded") == ["false"]
+      assert LazyHTML.attribute(toggle, "aria-controls") == ["content-new-menu-list"]
+
+      panel = LazyHTML.query(doc, "#content-new-menu > #content-new-menu-list")
+      assert LazyHTML.attribute(panel, "hidden") == [""]
+
+      assert doc
+             |> LazyHTML.query("#content-new-menu details, #content-new-menu summary")
+             |> Enum.empty?()
+
+      assert doc |> LazyHTML.query("details#content-new-menu") |> Enum.empty?()
 
       assert {:error, {:live_redirect, %{to: "/editor/content/page/new"}}} =
                lv
