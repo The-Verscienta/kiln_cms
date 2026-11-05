@@ -1066,11 +1066,14 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # A list of phrases (`multiple` `:string`, "Symptoms"): the terms rules
   # without a vocabulary — and an item holding several lines is several
   # items, so a pasted list (or an API client's `"a\nb"`) splits rather than
-  # storing one item with line breaks in it.
+  # storing one item with line breaks in it. `\R` needs the `u` flag: without
+  # it `:re` reads bytes, takes 0x85 (NEL) for a line break, and splits inside
+  # any character whose UTF-8 holds that byte (內 is E5 85 A7), leaving invalid
+  # UTF-8 that fails the write.
   defp coerce_phrases(value) do
     with {:ok, items} <- coerce_terms(value, %{allow_custom: true, options: []}) do
       items
-      |> Enum.flat_map(&String.split(&1, ~r/\R/))
+      |> Enum.flat_map(&String.split(&1, ~r/\R/u))
       |> Enum.map(&String.trim/1)
       |> Enum.reject(&(&1 == ""))
       |> Enum.uniq()

@@ -447,6 +447,13 @@ defmodule KilnCMS.CMS.FieldConversionTest do
              ]
     end
 
+    test "--lines keeps a character whose UTF-8 holds 0x85 whole", ctx do
+      post = post!(ctx, "Acupuncture\n內科 consults")
+
+      assert %{written: 1} = convert(ctx, dry_run?: false, lines?: true)
+      assert reload(post).custom_fields[ctx.group] == ["Acupuncture", "內科 consults"]
+    end
+
     test "refuses a string that holds one line", ctx do
       single =
         field!(ctx.admin, %{

@@ -326,6 +326,17 @@ defmodule KilnCMS.CMS.SelectAndTextFieldsTest do
       assert page!(%{field.name => "fatigue"}, admin).custom_fields[field.name] == ["fatigue"]
     end
 
+    test "splits on line breaks, never inside a character whose UTF-8 holds 0x85" do
+      admin = admin()
+      field = list_field!(admin)
+
+      # 內 is E5 85 A7: a byte-mode `\R` takes the 0x85 for NEL.
+      item = "Internal causes (內因), set against the Six Pernicious Influences (外因)"
+      page = page!(%{field.name => [item, "a\u0085b"]}, admin)
+
+      assert page.custom_fields[field.name] == [item, "a", "b"]
+    end
+
     test "refuses a JSON-encoded list and an item that is not text; holds the bounds" do
       admin = admin()
       field = list_field!(admin, %{max_items: 1})
