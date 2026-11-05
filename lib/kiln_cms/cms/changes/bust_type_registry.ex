@@ -46,8 +46,8 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
 
       # FieldDefinition — re-fire when the field name changed (affects
       # [field:<name>] tokens), and when what search indexes of it changed
-      # (#1585): the `searchable` flag flipped, or a flagged field was renamed
-      # or deleted. A re-fire recomputes each published document's
+      # (#1585): the `searchable` or `names_record` flag flipped, or a flagged
+      # field was renamed or deleted. A re-fire recomputes each published document's
       # `search_text` (`Firing.Engine`), which is what the public search
       # reads; a draft catches up on its next save.
       Map.has_key?(record, :name) and
@@ -138,9 +138,14 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
     end
   end
 
+  # `names_record` too: a flagged field's value is in the `A` bucket of
+  # `search_weighted`, which weights `search_vector` and is the alias and
+  # compound legs' prefilter (`KilnCMS.CMS.Content.alias_filter/1`), so a
+  # flip is not seen by either until each document is re-indexed.
   defp reindex_search?(changeset, record) do
-    Ash.Changeset.changing_attribute?(changeset, :searchable) or
-      (changeset.action_type == :destroy and Map.get(record, :searchable) == true)
+    Enum.any?([:searchable, :names_record], &Ash.Changeset.changing_attribute?(changeset, &1)) or
+      (changeset.action_type == :destroy and
+         (Map.get(record, :searchable) == true or Map.get(record, :names_record) == true))
   end
 
   # A `deliver_plain` flip adds or drops `custom_fields_plain.<name>` on the

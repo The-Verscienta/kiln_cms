@@ -20,7 +20,11 @@ defmodule KilnCMS.CMS.NameFields do
   Read per search, so cached per site the way the dynamic-type registry is,
   under the same TTL and busted by the same write hook
   (`KilnCMS.CMS.Changes.BustTypeRegistry` runs on every field-definition
-  write) — a flag flipped in the editor takes effect on the next search.
+  write) — a flag flipped in the editor is read by the next search. The
+  alias and compound legs prefilter on the names each row was indexed with
+  (`name_lexemes`, generated from `search_weighted`), so the flip reaches a
+  document as it is indexed again: the type's published documents are
+  re-fired on the flip, and a draft catches up on its next save.
   """
 
   alias KilnCMS.Cache

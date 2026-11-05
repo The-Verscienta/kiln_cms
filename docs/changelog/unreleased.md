@@ -5,7 +5,55 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Upgrade notes
+
+<a id="search-name-lexemes-upgrade"></a>
+
+- **Content tables gain `name_lexemes`, a generated column; overlays run
+  `mix ash.codegen` to add it to their own content types.** The column is
+  `GENERATED ALWAYS … STORED` from `search_weighted`, so the migration
+  fills it for every existing row and Postgres keeps it current on every
+  write. Adding a stored generated column rewrites the table under an
+  exclusive lock: seconds for a catalogue of a few thousand rows, longer for
+  a very large table. Until an overlay's own types have the column, their
+  alias and compound legs answer empty and log why, so generate and migrate
+  before deploying. No re-fire is needed: a row written before 1.8, with no
+  `search_weighted`, still takes the full match.
+
 ## Changed
+
+<a id="search-leg-performance"></a>
+
+- **Global search is several times cheaper on a large catalogue.** A
+  downstream catalogue of about 4,900 documents (2,047 herbs with three name
+  fields) took 1.2–1.6 s per `/api/search` sweep, so 1.8's 1.5 s
+  `query_budget` cut most queries short (`partial: true`). Three legs cost
+  most of it, and each was a query-shape problem:
+  - **Alias and compound legs.** The match runs "the query contains the
+    name", so its tsquery is built from the row, and no index can serve it:
+    every search unpacked every row's `custom_fields` and built a tsquery
+    per name field. Both legs now first check the row's `name_lexemes` (the
+    lexemes and Han runs of its title and names, from `search_weighted`'s
+    `A` bucket) against the query's, the way the title leg checks its title
+    lexemes, and run the phrase match only on the rows that share one. On a
+    synthetic 2,047-row table of the same shape, the alias filter went from
+    15 ms to 0.3 ms.
+  - **Empty names.** A missing or empty name was matched as `''`, and
+    `phraseto_tsquery('')` sends a `NOTICE` to the client for every row: about
+    2,500 per herbs query on that catalogue. Empty names are now skipped.
+  - **Tag leg.** Every section repeated the same nearest-tag vector search,
+    then ran one query per tag. A sweep now looks the tags up once. Each
+    section reads the documents carrying any of them in one query, and works
+    out per tag which ones it carries. When that read hits its cap, the leg
+    goes back to one query per tag, so results and distances don't change.
+
+  Flagging a field `names_record` now also re-fires the type's published
+  documents, as flagging it `searchable` already did: the flag reaches
+  `search_weighted`, which weights `search_vector` and feeds the new
+  prefilter. A draft picks it up on its next save. Before, the alias leg
+  saw a new flag on the next search, while `search_vector` kept the old
+  weights until each document was saved again. Type promotion
+  (`mix kiln.promote_data`) no longer copies generated columns.
 
 <a id="quiet-image-build"></a>
 

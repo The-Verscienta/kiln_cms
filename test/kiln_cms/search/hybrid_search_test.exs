@@ -1174,7 +1174,11 @@ defmodule KilnCMS.Search.HybridTest do
       assert :alias in Search.hit_legs(hd(results))
     end
 
-    test "a field that is not flagged names nothing, and a flag takes effect at once" do
+    # The leg's prefilter reads the names a row was indexed with
+    # (`name_lexemes`), so a flag takes effect as each document is indexed
+    # again: the flip re-fires the type's published documents, and a draft
+    # catches up on its next save.
+    test "a field that is not flagged names nothing, and a flag takes effect on re-index" do
       admin = admin()
 
       definition =
@@ -1189,6 +1193,13 @@ defmodule KilnCMS.Search.HybridTest do
           actor: admin
         )
 
+      draft =
+        CMS.create_page!(
+          %{title: "Gadget", slug: slug(), custom_fields: %{"trade_name" => "Zorptastic"}},
+          actor: admin
+        )
+
+      CMS.publish_page!(page, %{}, actor: admin)
       KilnCMS.DataCase.drain_oban()
 
       refute Enum.any?(
@@ -1197,9 +1208,59 @@ defmodule KilnCMS.Search.HybridTest do
              )
 
       CMS.update_field_definition!(definition, %{names_record: true}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
 
-      [hit] = Search.hybrid(:page, "zorptastic", actor: admin) |> Enum.filter(&(&1.id == page.id))
-      assert :alias in Search.hit_legs(hit)
+      alias_hits = fn ->
+        Search.hybrid(:page, "zorptastic", actor: admin)
+        |> Enum.filter(&(:alias in Search.hit_legs(&1)))
+        |> Enum.map(& &1.id)
+      end
+
+      assert alias_hits.() == [page.id]
+
+      CMS.update_page!(draft, %{title: "Gadget Two"}, actor: admin)
+      assert Enum.sort(alias_hits.()) == Enum.sort([page.id, draft.id])
+    end
+
+    test "an empty name names nothing, and a row indexed before the column is matched in full" do
+      admin = admin()
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "latin_name",
+          label: "Latin name",
+          field_type: :string,
+          names_record: true
+        },
+        actor: admin
+      )
+
+      blank =
+        CMS.create_page!(%{title: "Blank", slug: slug(), custom_fields: %{"latin_name" => ""}},
+          actor: admin
+        )
+
+      old =
+        CMS.create_page!(
+          %{title: "Old", slug: slug(), custom_fields: %{"latin_name" => "Radix Astragali"}},
+          actor: admin
+        )
+
+      # As a release before `search_weighted` left it: no stored names, so
+      # no `name_lexemes`, and the guard steps aside for the full match.
+      KilnCMS.Repo.query!("UPDATE pages SET search_weighted = NULL WHERE id = $1", [
+        Ecto.UUID.dump!(old.id)
+      ])
+
+      %{rows: [[nil]]} =
+        KilnCMS.Repo.query!("SELECT name_lexemes FROM pages WHERE id = $1", [
+          Ecto.UUID.dump!(old.id)
+        ])
+
+      hits = Search.hybrid(:page, "is radix astragali safe", actor: admin)
+      assert Enum.any?(hits, &(&1.id == old.id and :alias in Search.hit_legs(&1)))
+      refute Enum.any?(hits, &(&1.id == blank.id))
     end
 
     test "a dynamic type's flagged field names its entries" do
@@ -1312,6 +1373,69 @@ defmodule KilnCMS.Search.HybridTest do
       assert :tag in Search.hit_legs(hit)
       put_search_env(semantic_max_distance: 0.0)
       assert Search.hybrid(:page, query, actor: admin) == []
+    end
+
+    # One read per section for every nearest tag (`tagged_by_tag/4`), not one
+    # per tag: what each tag brings in, and at what distance, is unchanged.
+    test "a document carrying several of the nearest tags is kept once, at the nearest" do
+      admin = admin()
+      put_search_env(tag_leg_threshold: 2.0)
+      near = CMS.create_tag!(%{name: "immunity", slug: slug()}, actor: admin)
+      far = CMS.create_tag!(%{name: "winter colds", slug: slug()}, actor: admin)
+
+      both =
+        CMS.create_page!(%{title: "alpha", slug: slug(), tag_ids: [near.id, far.id]},
+          actor: admin
+        )
+
+      far_only = tagged_page(admin, "beta", far)
+      near_only = tagged_page(admin, "gamma", near)
+      KilnCMS.DataCase.drain_oban()
+
+      tag_score = fn results, page ->
+        results
+        |> Enum.find(&(&1.id == page.id))
+        |> Search.hit_explain()
+        |> get_in([:legs, :tag, :score])
+      end
+
+      results = Search.hybrid(:page, "immunity", actor: admin, explain: true)
+
+      assert tag_score.(results, both) == 0.0
+      assert tag_score.(results, near_only) == 0.0
+      assert tag_score.(results, far_only) > 0.0
+    end
+
+    test "a sweep looks the nearest tags up once, not once per section" do
+      admin = admin()
+      tag = CMS.create_tag!(%{name: "immunity", slug: slug()}, actor: admin)
+      page = tagged_page(admin, "Some remedy", tag)
+      CMS.create_post!(%{title: "Tonic", slug: slug(), tag_ids: [tag.id]}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      test_pid = self()
+      handler = "tag-lookups-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler,
+        [:kiln_cms, :repo, :query],
+        fn _event, _measurements, meta, _config ->
+          if meta[:source] == "tag_embeddings", do: send(test_pid, :tag_lookup)
+        end,
+        nil
+      )
+
+      report =
+        try do
+          Search.global_report("immunity", sections: [:pages, :posts], actor: admin)
+        after
+          :telemetry.detach(handler)
+        end
+
+      assert_received :tag_lookup
+      refute_received :tag_lookup
+      assert :tag in Search.hit_legs(Enum.find(report.sections.pages, &(&1.id == page.id)))
+      assert Keyword.has_key?(report.timings, :tag)
     end
 
     test "sits out under facet filters" do

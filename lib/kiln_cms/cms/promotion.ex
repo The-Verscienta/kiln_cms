@@ -374,13 +374,16 @@ defmodule KilnCMS.CMS.Promotion do
 
   # Quoted, comma-joined list of columns both tables have (minus the excluded
   # set) — resilient to shape differences between the entry tier and a target.
+  # A generated column (`name_lexemes`) is left out: Postgres refuses a
+  # value for one, and computes it again on the target row.
   defp shared_columns(source, target) do
     %{rows: rows} =
       Repo.query!(
         """
         SELECT column_name FROM information_schema.columns
-        WHERE table_name = $1 AND column_name IN (
-          SELECT column_name FROM information_schema.columns WHERE table_name = $2
+        WHERE table_name = $1 AND is_generated = 'NEVER' AND column_name IN (
+          SELECT column_name FROM information_schema.columns
+          WHERE table_name = $2 AND is_generated = 'NEVER'
         )
         """,
         [source, target]

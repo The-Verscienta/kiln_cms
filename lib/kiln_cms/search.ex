@@ -997,6 +997,7 @@ defmodule KilnCMS.Search do
   end
 
   # `Ash.Query.filter/2` is a macro — for `semantic_neighbours/3`.
+  require Ash.Expr
   require Ash.Query
 
   # What a leg reads: the id, which is all fusion keys on. Calculations a leg
@@ -1304,11 +1305,20 @@ defmodule KilnCMS.Search do
   end
 
   defp run_named_leg(:title, c, _ran), do: run_leg(c.resource, :search_title, c.args, c.read_opts)
-  defp run_named_leg(:alias, c, _ran), do: run_leg(c.resource, :search_alias, c.args, c.read_opts)
+
+  defp run_named_leg(:alias, c, _ran) do
+    without_name_lexemes(c.resource, fn ->
+      run_leg(c.resource, :search_alias, c.args, c.read_opts)
+    end)
+  end
+
   defp run_named_leg(:synonym, c, _ran), do: synonym_legs(c.resource, c.args, c.read_opts, c.opts)
 
-  defp run_named_leg(:compound, c, _ran),
-    do: compound_leg(c.resource, c.query, c.args, c.read_opts, c.opts)
+  defp run_named_leg(:compound, c, _ran) do
+    without_name_lexemes(c.resource, fn ->
+      compound_leg(c.resource, c.query, c.args, c.read_opts, c.opts)
+    end)
+  end
 
   # The fuzzy step also takes the term-evidence verdict (`term_gate/0`): both
   # read the keyword leg's result, and the verdict is consulted only when that
@@ -2344,6 +2354,11 @@ defmodule KilnCMS.Search do
   # kept once each at the nearest tag. The tag rows are read as the system:
   # a tag's name is world-readable and the rows yield only ids and
   # distances. Sits out under facet filters like the block and fuzzy legs.
+  #
+  # The nearest tags are the same for every section of a sweep, so
+  # `global_report/2` looks them up once and passes them in `:nearest_tags`
+  # (the Verscienta report: one identical vector search per section, about
+  # 17 a search). A direct `hybrid/3` call looks them up here.
   @spec tag_leg(module(), String.t(), map(), keyword(), keyword()) ::
           {[struct()], %{Ash.UUID.t() => float()}}
   defp tag_leg(resource, locale, filters, read_opts, opts) do
@@ -2351,12 +2366,15 @@ defmodule KilnCMS.Search do
          true <- filters == %{},
          true <- Ash.Resource.Info.relationship(resource, :tags) != nil,
          {:ok, vector} <- leg_vector(nil, opts),
-         [_ | _] = tags <- nearest_tags(vector, read_opts[:tenant]) do
-      tags
-      |> Enum.reduce({[], %{}}, fn tag, acc ->
-        resource
-        |> tagged_documents(locale, tag.tag_id, read_opts)
-        |> Enum.reduce(acc, &keep_nearest(&1, tag.semantic_distance, &2))
+         [_ | _] = tags <-
+           Keyword.get_lazy(opts, :nearest_tags, fn ->
+             nearest_tags(vector, read_opts[:tenant])
+           end) do
+      resource
+      |> tagged_by_tag(locale, tags, read_opts)
+      |> Enum.zip(tags)
+      |> Enum.reduce({[], %{}}, fn {records, tag}, acc ->
+        Enum.reduce(records, acc, &keep_nearest(&1, tag.semantic_distance, &2))
       end)
       |> then(fn {records, distances} ->
         {records |> Enum.reverse() |> Enum.take(@hybrid_candidates), distances}
@@ -2366,16 +2384,60 @@ defmodule KilnCMS.Search do
     end
   end
 
+  # Per tag, in `tags` order, the newest `@hybrid_candidates` documents of
+  # `resource` carrying it — in one query rather than one per tag (up to
+  # `tag_leg_limit/0` per section, so about 85 a sweep in the Verscienta
+  # report). The query reads every document carrying any of the tags, newest
+  # first, with one `exists` per tag computed alongside to say which; while
+  # that is fewer rows than the per-tag reads could return together, it is
+  # all of them, and each tag's newest are exactly what its own read would
+  # have returned. Past that, it falls back to one read per tag.
+  #
+  # The calculation names are `tagged_0` … `tagged_<n - 1>` for the `n`
+  # nearest tags, `n` at most `tag_leg_limit/0`: the same few atoms on
+  # every search, so the atom table does not grow with traffic.
+  # sobelow_skip ["DOS.BinToAtom"]
+  defp tagged_by_tag(resource, locale, tags, read_opts) do
+    cap = @hybrid_candidates * length(tags)
+    ids = Enum.map(tags, & &1.tag_id)
+
+    calcs =
+      tags
+      |> Enum.with_index()
+      |> Enum.map(fn {tag, index} -> {:"tagged_#{index}", tag.tag_id} end)
+
+    rows =
+      calcs
+      |> Enum.reduce(tagged_query(resource, locale, ids), fn {name, tag_id}, query ->
+        Ash.Query.calculate(query, name, :boolean, Ash.Expr.expr(exists(tags, id == ^tag_id)))
+      end)
+      |> Ash.Query.limit(cap)
+      |> Ash.read!(read_opts)
+
+    if length(rows) < cap do
+      Enum.map(calcs, fn {name, _tag_id} ->
+        rows |> Enum.filter(&(&1.calculations[name] == true)) |> Enum.take(@hybrid_candidates)
+      end)
+    else
+      Enum.map(ids, &tagged_documents(resource, locale, &1, read_opts))
+    end
+  end
+
   # The documents of `resource` carrying one tag, newest first, under the
   # caller's own read options.
   defp tagged_documents(resource, locale, tag_id, read_opts) do
     resource
-    |> Ash.Query.new()
-    |> Ash.Query.select(@leg_select)
-    |> Ash.Query.filter(locale == ^locale and exists(tags, id == ^tag_id))
-    |> Ash.Query.sort(inserted_at: :desc)
+    |> tagged_query(locale, [tag_id])
     |> Ash.Query.limit(@hybrid_candidates)
     |> Ash.read!(read_opts)
+  end
+
+  defp tagged_query(resource, locale, tag_ids) do
+    resource
+    |> Ash.Query.new()
+    |> Ash.Query.select(@leg_select)
+    |> Ash.Query.filter(locale == ^locale and exists(tags, id in ^tag_ids))
+    |> Ash.Query.sort(inserted_at: :desc)
   end
 
   # Tags arrive nearest first, so the first tag to bring a document in is
@@ -2665,15 +2727,37 @@ defmodule KilnCMS.Search do
     _ -> "<table>"
   end
 
+  # The alias and compound legs prefilter on `name_lexemes`, a generated
+  # column the `Content` macro declares (`custom_statements`). An overlay
+  # type whose migration has not been generated yet lacks it; its two legs
+  # answer empty, with the reason in the log, rather than failing the search.
+  defp without_name_lexemes(resource, fun) do
+    fun.()
+  rescue
+    error ->
+      if missing_column?(error, "name_lexemes") do
+        Logger.error("""
+        Search: #{inspect(resource)} has no `name_lexemes` column, so its alias and \
+        compound legs cannot run and this query answered without them. Run \
+        `mix ash.codegen` and migrate: the column is declared by `use KilnCMS.CMS.Content`.\
+        """)
+
+        []
+      else
+        reraise error, __STACKTRACE__
+      end
+  end
+
   # Ash wraps the Postgrex error, and how deeply depends on the action, so this
   # reads the rendered message rather than pattern-matching a nesting that
   # varies. Both markers are required: the column is only *this* problem when
   # the database says it does not exist.
-  defp missing_search_vector?(error) do
+  defp missing_search_vector?(error), do: missing_column?(error, "search_vector")
+
+  defp missing_column?(error, column) do
     message = Exception.message(error)
 
-    message =~ "search_vector" and
-      (message =~ "undefined_column" or message =~ "does not exist")
+    message =~ column and (message =~ "undefined_column" or message =~ "does not exist")
   rescue
     _ -> false
   end
@@ -2928,6 +3012,11 @@ defmodule KilnCMS.Search do
 
     snippet_args = %{query: query, locale: locale}
 
+    {tags_micros, nearest_tags} =
+      :timer.tc(fn ->
+        sweep_nearest_tags(query_vector, read_opts[:tenant], Keyword.get(opts, :filters, %{}))
+      end)
+
     content_load =
       Enum.flat_map([:highlight, :passage], fn calc ->
         if Keyword.get(opts, calc, false), do: [{calc, snippet_args}], else: []
@@ -2955,6 +3044,9 @@ defmodule KilnCMS.Search do
           # dominant cost of a global search by a wide margin. Within half
           # the budget (`budgeted_query_vector/2`).
           query_vector: query_vector,
+          # And the tag leg's nearest tags: the same vector, the same site,
+          # so the same answer for every section (`tag_leg/5`).
+          nearest_tags: nearest_tags,
           # Likewise the compound leg's rewrites: one dictionary read for
           # the sweep, not one per section.
           name_variants: name_variants(query, read_opts),
@@ -3002,9 +3094,29 @@ defmodule KilnCMS.Search do
     |> run_global(query, deadline, embedded)
     |> then(fn report ->
       total = System.monotonic_time(:microsecond) - started
+      report = %{report | timings: add_tag_lookup(report.timings, tags_micros, nearest_tags)}
       %{report | timings: [{:embed, embed_micros}] ++ report.timings ++ [{:total, total}]}
     end)
   end
+
+  # The tag leg's nearest tags for a whole sweep — `[]` when the leg sits
+  # out (off, no vector, a facet filter), which every section then reads as
+  # "no tags".
+  defp sweep_nearest_tags(vector, tenant, filters) do
+    if tag_leg?() and is_list(vector) and Map.take(filters, @facet_filters) == %{},
+      do: nearest_tags(vector, tenant),
+      else: []
+  end
+
+  # The one lookup is the tag leg's time, as it was when every section made
+  # its own: added to the leg's sum when the leg ran.
+  defp add_tag_lookup(timings, micros, [_ | _]) do
+    if Keyword.has_key?(timings, :tag),
+      do: Keyword.update!(timings, :tag, &(&1 + micros)),
+      else: timings
+  end
+
+  defp add_tag_lookup(timings, _micros, []), do: timings
 
   # The query embedding, inside `deadline` — half the sweep's budget, so a
   # serving that is slow to answer still leaves the other legs time to run.

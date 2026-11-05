@@ -54,7 +54,17 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Overlays: run `mix ash.codegen`. Content tables gain a generated `name_lexemes`
+  column, filled for every row by the migration (a table rewrite). Nothing else to run.**
+  ([long form](docs/changelog/unreleased.md#search-name-lexemes-upgrade))
+
 ### Changed
+
+- **Global search on a large catalogue: the alias and compound legs prefilter on stored
+  name lexemes, empty names skip the phrase match, and the tag leg runs once per sweep.**
+  ([long form](docs/changelog/unreleased.md#search-leg-performance))
 
 - **The release image builds without warnings or notices from Kiln's own steps,
   and with ~60 fewer from third-party deps.**
