@@ -920,12 +920,22 @@ defmodule KilnCMS.MixProject do
   # 0.8's Nx 1.0 cannot resolve without it. Kiln calls none of image's Nx
   # functions (`Image.to_nx/2`, `Image.Classification`, …); the override goes
   # once an `image` release accepts Nx 1.0.
+  #
+  # `fine` is held at 0.1.x: EXLA 1.0.0 (the latest) declares `fine ~> 0.1`,
+  # which admits fine 0.2.0 (2026-11-03), but EXLA's NIF does not compile
+  # against it (`'try_decode' is not a member of 'fine::Decoder<xla::Shape>'`).
+  # lazy_html 0.1.14 requires `fine ~> 0.2.0`, so a lock refresh moves both;
+  # this pin keeps lazy_html at 0.1.13. CI's EXLA build is cached, so only a
+  # from-scratch ML build (a fresh machine, an image build that re-enables
+  # EXLA) shows the failure. Drop the pin once an EXLA release builds with
+  # fine 0.2.
   defp ml_deps do
     if ml?() do
       [
         {:bumblebee, "~> 0.8"},
         {:nx, "~> 1.0", override: true},
-        {:exla, "~> 1.0", only: [:dev, :test], override: true}
+        {:exla, "~> 1.0", only: [:dev, :test], override: true},
+        {:fine, "~> 0.1.0"}
       ]
     else
       []
