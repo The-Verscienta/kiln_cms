@@ -174,12 +174,12 @@ async function signInAsEditor(page) {
 // cleanup and list selectors before anything is typed — and waits for the
 // patch to the real edit route.
 // Past @max_inline_new_buttons content types the per-type "New …" buttons
-// collapse into the #content-new-menu <details> dropdown, so open it first.
+// collapse into the #content-new-menu disclosure, so open it first.
 //
 // Returns the new record's id (the last URL segment).
 async function newDraftContent(page, kind = "page") {
   await page.goto("/editor");
-  const newMenu = page.locator("#content-new-menu summary");
+  const newMenu = page.locator("#content-new-menu-toggle");
   if (await newMenu.count()) await newMenu.click();
   await page.click(`button[phx-click="new"][phx-value-kind="${kind}"]`);
   await page.waitForURL(new RegExp(`/editor/content/${kind}/new$`));

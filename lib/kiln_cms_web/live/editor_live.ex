@@ -1000,7 +1000,12 @@ defmodule KilnCMSWeb.EditorLive do
       <:actions>
         <%!-- A handful of types reads best as direct buttons; past that the row
               (even wrapping) crowds out the top bar, so collapse into one menu.
-              CSS-only <details>, same pattern as the mobile nav disclosure. --%>
+              A disclosure (#2145): a real <button> carrying aria-expanded, so
+              assistive tech hears a button and its state, which a styled
+              <summary> did not reliably give. The click opens it client-side;
+              `data-autoclose` hands outside clicks and Escape to app.js. Both
+              sides write `hidden` and `aria-expanded`, so the patch that every
+              filter change sends leaves them alone and the menu stays open. --%>
         <.button
           :for={ct <- @content_types}
           :if={length(@content_types) <= @max_inline_new_buttons}
@@ -1013,17 +1018,37 @@ defmodule KilnCMSWeb.EditorLive do
           <.icon name="hero-plus" class="size-4" />
           {gettext("New %{type}", type: String.downcase(ct.label))}
         </.button>
-        <details
+        <div
           :if={length(@content_types) > @max_inline_new_buttons}
           id="content-new-menu"
           class="relative"
+          data-autoclose
         >
-          <summary class="btn btn-primary btn-sm cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+          <button
+            type="button"
+            id="content-new-menu-toggle"
+            class="btn btn-primary btn-sm group"
+            aria-expanded="false"
+            aria-controls="content-new-menu-list"
+            phx-mounted={JS.ignore_attributes(["aria-expanded"])}
+            phx-click={
+              JS.toggle_attribute({"aria-expanded", "true", "false"})
+              |> JS.toggle_attribute({"hidden", "hidden"}, to: "#content-new-menu-list")
+            }
+          >
             <.icon name="hero-plus" class="size-4" />
             {gettext("New")}
-            <.icon name="hero-chevron-down" class="size-3.5" />
-          </summary>
-          <div class="absolute right-0 z-30 mt-2 flex max-h-96 w-56 flex-col gap-0.5 overflow-y-auto rounded-lg border border-base-content/10 bg-base-100 p-1.5 shadow-lg">
+            <.icon
+              name="hero-chevron-down"
+              class="size-3.5 transition-transform group-aria-expanded:rotate-180"
+            />
+          </button>
+          <div
+            id="content-new-menu-list"
+            hidden
+            phx-mounted={JS.ignore_attributes(["hidden"])}
+            class="absolute right-0 z-30 mt-2 flex max-h-96 w-56 flex-col gap-0.5 overflow-y-auto rounded-lg border border-base-content/10 bg-base-100 p-1.5 shadow-lg"
+          >
             <button
               :for={ct <- @content_types}
               type="button"
@@ -1034,7 +1059,7 @@ defmodule KilnCMSWeb.EditorLive do
               {gettext("New %{type}", type: String.downcase(ct.label))}
             </button>
           </div>
-        </details>
+        </div>
       </:actions>
 
       <div class="space-y-6">

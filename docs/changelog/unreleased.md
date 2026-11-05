@@ -104,6 +104,20 @@ carries the reasoning.
   `absinthe_phoenix >= 2.0.6` and `phoenix ~> 1.8.16`, so the lock can't pair
   them wrongly again.
 
+<a id="new-menu-button"></a>
+
+- **The content list's "New" menu is a real `<button>` with `aria-expanded`.**
+  Past three content types, `/editor` folds its "New …" buttons into one
+  menu. Its trigger was a `<summary>` styled as a button, with the marker
+  hidden; an accessibility walkthrough found it wasn't announced as a button.
+  It is now a disclosure: a `<button aria-expanded aria-controls>` that shows
+  and hides the panel of per-type buttons. The shared `data-autoclose`
+  handler in `app.js` closes it on a click outside or on Escape, and only
+  claims Escape while the menu is open, so Escape in the search box or a
+  modal keeps its focus. The old `<details>` also lost its `open` state on
+  every LiveView patch, so a list refresh behind an open menu snapped it
+  shut; the new one keeps its state across patches it didn't cause.
+
 ## Security
 
 <a id="ecto-query-cache-advisory"></a>
