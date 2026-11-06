@@ -470,12 +470,6 @@ config :kiln_cms, :branding, []
 # expose a full schema map for reconnaissance.
 config :kiln_cms, :graphql_introspection, true
 
-# A request carrying `Authorization: Bearer <token>` that does not authenticate
-# (expired, revoked, malformed) is served as anonymous by default. On, it is a
-# 401 on `/api` and `/gql` (#2161); see `KilnCMSWeb.Plugs.RejectInvalidBearer`.
-# Set with KILN_API_REJECT_INVALID_BEARER (config/runtime/prod/web.exs).
-config :kiln_cms, :reject_invalid_bearer, false
-
 # The API documentation surface: the OpenAPI 3 document at
 # `/api/json/open_api` and the Swagger UI explorer over it. Enabled by default
 # for local/dev tooling; disabled in production (config/prod.exs) for the same

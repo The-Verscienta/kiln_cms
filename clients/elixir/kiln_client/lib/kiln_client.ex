@@ -79,6 +79,14 @@ defmodule KilnClient do
       KilnClient.create("posts", %{title: "Hi", slug: "hi"},
         api_key: System.fetch_env!("KILN_WRITE_KEY"))
 
+  A service that only **submits drafts for a person to review** should use a
+  `:draft_write` key instead (a server newer than Kiln 1.8, kiln_cms#2273): it may `create/3`, and
+  `update/4` a draft it authored that is still a draft, and nothing else —
+  every transition, `delete/3`, a live or someone else's document and all media
+  calls are `reason: :forbidden`. Pass `on_behalf_of:` to `create/3` to record
+  which of your users the draft is for (stored for reviewers, never
+  authorization). Kiln's `docs/headless-consumer-guide.md` has the full rules.
+
   ## Errors
 
   Every function returns `{:error, %KilnClient.Error{}}` on failure, reads and
@@ -1035,8 +1043,16 @@ defmodule KilnClient do
 
   Options:
 
-    * `:api_key` — the `:read_write` key for this call (falls back to the
-      configured `:api_key`; with neither, nothing is sent).
+    * `:api_key` — the `:read_write` (or `:draft_write`) key for this call
+      (falls back to the configured `:api_key`; with neither, nothing is sent).
+    * `:on_behalf_of` — sent as the `X-Kiln-On-Behalf-Of` header: an opaque
+      label (typically your own user id) that Kiln stores on a draft created
+      with a `:draft_write` key, beside the key's id and name, so a reviewer
+      sees who it was for. Stored only, never authorization; any other key
+      ignores it. `nil` sends no header. The created record carries it back as
+      `"on_behalf_of"` (with `"created_via_key_id"` / `"created_via_key_name"`)
+      to an editor, an admin, or the key that created it; other readers never
+      see those three attributes.
     * `:type` — the JSON:API resource type sent as `data.type`, which the
       server validates. Derived from `plural` (`"entries"` → `"entry"`,
       `"posts"` → `"post"`); pass it for an irregular plural.
@@ -1050,6 +1066,13 @@ defmodule KilnClient do
     # No `id`: the create schema is `additionalProperties: false`, so a
     # client-chosen id is a 400, not a hint.
     body = %{data: %{type: resource_type(plural, opts), attributes: attributes}}
+
+    opts =
+      case opts[:on_behalf_of] do
+        nil -> opts
+        who -> Keyword.put(opts, :extra_headers, [{"x-kiln-on-behalf-of", to_string(who)}])
+      end
+
     :post |> write_request("/api/json/#{plural}", body, opts) |> only_item()
   end
 
@@ -1413,20 +1436,24 @@ defmodule KilnClient do
 
       key ->
         accept = opts[:accept] || @json_api
+        extra = opts[:extra_headers] || []
 
         # Req's `:json` encodes the body but only *defaults* the content
         # type, so the media type set here is the one sent.
         req_opts =
           cond do
             opts[:form_multipart] ->
-              [headers: [{"accept", accept}], form_multipart: opts[:form_multipart]]
+              [headers: [{"accept", accept} | extra], form_multipart: opts[:form_multipart]]
 
             body == nil ->
-              [headers: [{"accept", accept}]]
+              [headers: [{"accept", accept} | extra]]
 
             true ->
               [
-                headers: [{"accept", accept}, {"content-type", opts[:content_type] || @json_api}],
+                headers: [
+                  {"accept", accept},
+                  {"content-type", opts[:content_type] || @json_api} | extra
+                ],
                 json: body
               ]
           end
