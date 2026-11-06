@@ -477,6 +477,12 @@ type Entry implements ContentRecord {
 
   pathAlias: String
 
+  createdViaKeyId: ID
+
+  createdViaKeyName: String
+
+  onBehalfOf: String
+
   seoImage: String
 
   canonicalUrl: String
@@ -665,6 +671,37 @@ input EntryFilterCategoryId {
   isNotDistinctFrom: ID
 }
 
+input EntryFilterCreatedViaKeyId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input EntryFilterCreatedViaKeyName {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
 input EntryFilterCustomFields {
   isNil: Boolean
   eq: JsonString
@@ -805,6 +842,9 @@ input EntryFilterInput {
   seoDescription: EntryFilterSeoDescription
   seoKeywords: EntryFilterSeoKeywords
   pathAlias: EntryFilterPathAlias
+  createdViaKeyId: EntryFilterCreatedViaKeyId
+  createdViaKeyName: EntryFilterCreatedViaKeyName
+  onBehalfOf: EntryFilterOnBehalfOf
   seoImage: EntryFilterSeoImage
   canonicalUrl: EntryFilterCanonicalUrl
   locale: EntryFilterLocale
@@ -891,6 +931,24 @@ input EntryFilterLockVersion {
   greaterThanOrEqual: Int
   isDistinctFrom: Int
   isNotDistinctFrom: Int
+}
+
+input EntryFilterOnBehalfOf {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
 }
 
 input EntryFilterPathAlias {
@@ -1164,6 +1222,9 @@ enum EntrySortField {
   SEO_DESCRIPTION
   SEO_KEYWORDS
   PATH_ALIAS
+  CREATED_VIA_KEY_ID
+  CREATED_VIA_KEY_NAME
+  ON_BEHALF_OF
   SEO_IMAGE
   CANONICAL_URL
   LOCALE
@@ -1654,6 +1715,12 @@ type Page implements ContentRecord {
 
   pathAlias: String
 
+  createdViaKeyId: ID
+
+  createdViaKeyName: String
+
+  onBehalfOf: String
+
   seoImage: String
 
   canonicalUrl: String
@@ -1838,6 +1905,37 @@ input PageFilterCategoryId {
   isNotDistinctFrom: ID
 }
 
+input PageFilterCreatedViaKeyId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input PageFilterCreatedViaKeyName {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
 input PageFilterCustomFields {
   isNil: Boolean
   eq: JsonString
@@ -1959,6 +2057,9 @@ input PageFilterInput {
   seoDescription: PageFilterSeoDescription
   seoKeywords: PageFilterSeoKeywords
   pathAlias: PageFilterPathAlias
+  createdViaKeyId: PageFilterCreatedViaKeyId
+  createdViaKeyName: PageFilterCreatedViaKeyName
+  onBehalfOf: PageFilterOnBehalfOf
   seoImage: PageFilterSeoImage
   canonicalUrl: PageFilterCanonicalUrl
   locale: PageFilterLocale
@@ -2043,6 +2144,24 @@ input PageFilterLockVersion {
   greaterThanOrEqual: Int
   isDistinctFrom: Int
   isNotDistinctFrom: Int
+}
+
+input PageFilterOnBehalfOf {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
 }
 
 input PageFilterPathAlias {
@@ -2356,6 +2475,9 @@ enum PageSortField {
   SEO_DESCRIPTION
   SEO_KEYWORDS
   PATH_ALIAS
+  CREATED_VIA_KEY_ID
+  CREATED_VIA_KEY_NAME
+  ON_BEHALF_OF
   SEO_IMAGE
   CANONICAL_URL
   LOCALE
@@ -2410,6 +2532,12 @@ type Post implements ContentRecord {
   seoKeywords: String
 
   pathAlias: String
+
+  createdViaKeyId: ID
+
+  createdViaKeyName: String
+
+  onBehalfOf: String
 
   seoImage: String
 
@@ -2595,6 +2723,37 @@ input PostFilterCategoryId {
   isNotDistinctFrom: ID
 }
 
+input PostFilterCreatedViaKeyId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input PostFilterCreatedViaKeyName {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
 input PostFilterCustomFields {
   isNil: Boolean
   eq: JsonString
@@ -2735,6 +2894,9 @@ input PostFilterInput {
   seoDescription: PostFilterSeoDescription
   seoKeywords: PostFilterSeoKeywords
   pathAlias: PostFilterPathAlias
+  createdViaKeyId: PostFilterCreatedViaKeyId
+  createdViaKeyName: PostFilterCreatedViaKeyName
+  onBehalfOf: PostFilterOnBehalfOf
   seoImage: PostFilterSeoImage
   canonicalUrl: PostFilterCanonicalUrl
   locale: PostFilterLocale
@@ -2819,6 +2981,24 @@ input PostFilterLockVersion {
   greaterThanOrEqual: Int
   isDistinctFrom: Int
   isNotDistinctFrom: Int
+}
+
+input PostFilterOnBehalfOf {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
 }
 
 input PostFilterPathAlias {
@@ -3061,6 +3241,9 @@ enum PostSortField {
   SEO_DESCRIPTION
   SEO_KEYWORDS
   PATH_ALIAS
+  CREATED_VIA_KEY_ID
+  CREATED_VIA_KEY_NAME
+  ON_BEHALF_OF
   SEO_IMAGE
   CANONICAL_URL
   LOCALE

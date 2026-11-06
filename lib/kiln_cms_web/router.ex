@@ -89,6 +89,8 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.ApiKeyAuth
     # A mutation is a `POST` like any other — see the JSON:API pipeline.
     plug KilnCMSWeb.Plugs.Idempotency
+    # `X-Kiln-On-Behalf-Of` on a mutation: provenance for a draft-write key (#2273).
+    plug KilnCMSWeb.Plugs.OnBehalfOf
     plug AshGraphql.Plug
   end
 
@@ -148,6 +150,8 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.PreviewGrant
     # `If-Match` on a single-record write → the action's version check (412).
     plug KilnCMSWeb.Plugs.IfMatch
+    # `X-Kiln-On-Behalf-Of` on a create: provenance for a draft-write key (#2273).
+    plug KilnCMSWeb.Plugs.OnBehalfOf
     # `Idempotency-Key` on a write: claim it, or replay what the first attempt
     # answered. Runs after the auth plugs above — the key is scoped to the actor.
     plug KilnCMSWeb.Plugs.Idempotency

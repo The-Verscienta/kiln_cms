@@ -50,7 +50,9 @@ defmodule KilnCMSWeb.OpenApi do
       the key's `access` scope. A `read` key reads what its account may read;
       a `read_write` key may also **write**: create and update drafts, submit
       for review, and — on an admin account — publish, unpublish, return to
-      draft and soft-delete. The key for server-to-server use.
+      draft and soft-delete. A `draft_write` key may only create drafts and
+      edit its own drafts (no review, publishing, deletes or media). The key
+      for server-to-server use.
     * **User JWT** (the `bearerAuth` scheme) — an AshAuthentication token from
       **`POST /api/auth/sign_in`** (documented below), with that user's role.
 
@@ -153,7 +155,8 @@ defmodule KilnCMSWeb.OpenApi do
         description:
           "An API key minted at `/editor/api-keys`, sent as " <>
             "`Authorization: Bearer kiln_…`. Acts as its owning account, bounded " <>
-            "by the key's `access` scope (`read` or `read_write`)."
+            "by the key's `access` scope (`read`, `read_write`, or `draft_write`, which " <>
+            "may only create drafts and edit its own drafts)."
       })
 
     Map.put(components, :securitySchemes, schemes)
