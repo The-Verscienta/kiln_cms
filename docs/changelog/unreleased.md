@@ -53,6 +53,58 @@ carries the reasoning.
     new settings table. Overlays run `mix ash.codegen` for their own content
     types. Until a site lists a field, nothing changes.
 
+<a id="graphql-typed-custom-fields"></a>
+
+- **GraphQL reads admin-defined custom fields typed by kind, with no deploy
+  and no schema change (#2290).** `customFields` stays a `JsonString`. Next to
+  it every content type (`Page`, `Post`, a project type, `Entry`) and the
+  `ContentRecord` interface gain `customString`, `customInt`, `customFloat`,
+  `customBoolean`, `customDate` and `customDateTime` (each `(name: String!)`,
+  nullable) and `fields(names: [String!]!): [CustomFieldValue!]!`. A field an
+  admin adds is readable at once; the GraphQL schema is compiled and the same
+  for every site, so what it types is the *accessor*, not the name.
+  - **What is and is not checked.** `customFloat(name: "price")` is a `Float`
+    or `null`. A typo, a rename, a deleted field, a field of another kind, a
+    legacy value that no longer fits, or a private field read below editor is
+    `null` (left out of `fields`), never an error. The server cannot catch the
+    typo; the exported contract below does.
+  - **`fields(names:)`.** `names` is required, at most 50. It returns the
+    `CustomFieldValue` interface (`name` plus the kind's members: `StringValue`,
+    `IntValue`, `FloatValue`, `BooleanValue`, `DateValue`, `DateTimeValue`,
+    `ListValue { items }`, `GroupValue { fields }`, `ReferenceValue { ids }`,
+    `MediaValue`, `JsonValue { value }`). A `multiple` field is a
+    `ListValue`; computed fields, `geolocation`, `datetime_range` and
+    `recurrence` are `JsonValue`. Groups nest to depth 3. A reference field
+    returns ids only: read the records through `references(field:)`. Cost is
+    1 plus the selection once per name; an accessor costs 1; the 200 limit is
+    unchanged.
+  - **Visibility and locale.** Values come from the record as the caller reads
+    it, so private fields read as unknown below editor. A
+    `localization: :fallback` field does not inherit along the locale chain in
+    this layer; name the locale you want. A page of records does one
+    definitions read per type, not one per record.
+  - **Typed contract per site.** `GET /api/schema?format=typescript` is the
+    existing document as a `.d.ts`; `?format=typescript-graphql` is a `.ts`
+    module that adds, per content type (and per `typeName` for dynamic types,
+    selected on `publishedEntries(filter: {typeName: {eq: "…"}})`), a
+    `<Type>CustomFields` interface and a ready `<Type>CustomFieldsFragment`.
+    An unknown `format` is a `400` with code `invalid_format`; without
+    `format` the response is the same JSON as before. Regenerate after an
+    admin changes fields. `filter` and `sort` still use
+    `customFilter`/`customSort`, unchanged.
+  - **Plugins.** `Kiln.FieldType` gains an optional `graphql_kind/1`
+    (`:string`, `:int`, `:float`, `:boolean`, `:date`, `:datetime`, `:json`)
+    in `kiln_plugin` 1.4.0. A type without it, or compiled against an older
+    SDK, is served as `JsonValue`, so nothing breaks. Publish the SDK to Hex
+    before a plugin requires `~> 1.4`.
+  - **Not yet.** Swift and Kotlin emitters for the GraphQL section, typed
+    filter operators, a per-site SDL with a regenerate step, and typed writes.
+  - **Upgrade.** Additive and org-independent: no migration, no config, and
+    rolling the pin back removes the new fields only. The new fields
+    are added to every content type in the schema's `:content_domains`, so an
+    overlay's types get them without code changes.
+    See [headless-graphql-api.md](../headless-graphql-api.md#read-custom-fields-typed-by-kind).
+
 ## Changed
 
 <a id="search-leg-performance"></a>

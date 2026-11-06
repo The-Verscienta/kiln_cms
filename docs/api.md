@@ -978,6 +978,7 @@ curl -s http://localhost:4000/api/schema | jq '.["$defs"] | keys'
 |-----------|--------|
 | `?type=post,page` | Only these content types. An unknown name is a `400`, not a silent full export. |
 | `?blocks=only` | The block union alone — no content types, no database read. |
+| `?format=json\|typescript\|typescript-graphql` | `json` (default) is this document. `typescript` is the same types as a `.d.ts`; `typescript-graphql` is a `.ts` module that adds a GraphQL fragment per type for the typed custom-field readers ([headless-graphql-api.md](headless-graphql-api.md#generate-types-and-fragments-for-your-site)). Any other value is a `400` with code `invalid_format`. |
 
 It is **per site**: dynamic content types and custom fields are
 organization-scoped, so the document is built for the org the request host

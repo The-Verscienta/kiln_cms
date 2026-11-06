@@ -349,6 +349,13 @@ UI" workflow, scoped to fields.
 - **Edit**: the content editor renders one input per definition automatically,
   in a *Custom fields* panel under the blocks.
 - **Deliver**: `custom_fields` is public, so headless clients get the values.
+- **Read typed over GraphQL**: `customFloat(name: "price")`,
+  `customString`, `customInt`, `customBoolean`, `customDate`,
+  `customDateTime` and `fields(names: [...])` return a field with a GraphQL
+  type, with no deploy when an admin adds the field (the schema types the
+  accessor, not the name). See
+  [headless-graphql-api.md](headless-graphql-api.md#read-custom-fields-typed-by-kind).
+  A plugin field type chooses its kind with `graphql_kind/1` (below).
 - **Query**: list/search reads accept `custom_filter`/`custom_sort` (JSON:API)
   and `customFilter`/`customSort` (GraphQL) — typed, registry-validated
   filtering and sorting on individual custom fields (see
@@ -791,6 +798,24 @@ children**, and **Oban queues** (merged at boot). Content types need no
 callback: build them on `KilnCMS.CMS.Content` in the plugin's own Ash domain
 and register that domain in `:ash_domains`/`:content_domains` — admin CRUD,
 webhooks, delivery and workers follow automatically.
+
+**Choosing a field type's GraphQL kind.** The GraphQL API serves every custom
+field through typed readers ([headless-graphql-api.md](headless-graphql-api.md#read-custom-fields-typed-by-kind)).
+A plugin `Kiln.FieldType` whose stored value is a plain scalar can say which
+one by implementing the optional `graphql_kind/1` (from `kiln_plugin` 1.4,
+`{:kiln_plugin, "~> 1.4"}`):
+
+```elixir
+@impl Kiln.FieldType
+def graphql_kind(_definition), do: :int   # a star rating stored as an integer
+```
+
+The answer is `:string`, `:int`, `:float`, `:boolean`, `:date`, `:datetime` or
+`:json`. Leave it out for a map, a list or any mixed shape: a type with no
+`graphql_kind/1` (or compiled against an older SDK) is served as a
+`JsonValue`, and a `multiple` field is always a `ListValue` of its kind. An
+unrecognised answer is also treated as `:json`. The kinds are fixed in the
+core, so this is a choice among them, not a way to add a GraphQL type.
 
 **Full-text search needs one migration per type.** The `:search` action
 filters on a trigger-maintained `search_vector` column that is not an Ash

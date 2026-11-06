@@ -66,6 +66,9 @@ Every summary line below that was shortened links to its own entry there.
   The editor asks before publishing; API writes default to notable; read back as `latest_edit_severity` / `latest_edit_at`.
   ([long form](docs/changelog/unreleased.md#change-severity))
 
+- **GraphQL reads admin-defined custom fields typed by kind (`customFloat(name:)`, `fields(names:)`), and `GET /api/schema?format=typescript-graphql` exports ready fragments and types.**
+  ([long form](docs/changelog/unreleased.md#graphql-typed-custom-fields))
+
 ### Changed
 
 - **Global search on a large catalogue: the alias and compound legs prefilter on stored
