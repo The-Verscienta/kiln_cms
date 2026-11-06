@@ -813,11 +813,18 @@ item is one of
 
 ```json
 {"op": "upsert", "type": "post", "id": "…", "slug": "hello", "locale": "en",
- "published_at": "…", "updated_at": "…", "artifact": { …the fired surface… }}
+ "published_at": "…", "updated_at": "…",
+ "latest_edit_severity": "critical", "latest_edit_at": "…",
+ "artifact": { …the fired surface… }}
 {"op": "delete", "type": "post", "id": "…"}
 ```
 
 `artifact` is exactly what `GET /api/content/:type/:slug?surface=…` serves.
+`latest_edit_severity` (`critical` / `notable` / `routine`) and `latest_edit_at`
+say how much the document's latest edit to a safety-relevant field mattered and
+when it was made; both are `null` when it has none. They sit beside the
+artifact, not in it (no `format_version` change), and an upsert is re-sent when
+the edit is made. See [json-api.md](json-api.md) → *Change severity*.
 Apply items **in order**, keyed by `id`: an upsert replaces your copy, a delete
 removes it.
 

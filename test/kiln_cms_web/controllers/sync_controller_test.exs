@@ -209,6 +209,8 @@ defmodule KilnCMSWeb.SyncControllerTest do
                 locale: doc.locale,
                 published_at: doc.published_at,
                 updated_at: doc.updated_at,
+                latest_edit_severity: nil,
+                latest_edit_at: nil,
                 artifact: stored_body(ctx, type, doc.id)
               }
             end),

@@ -359,6 +359,23 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for a site's resolved safety-field list (`KilnCMS.CMS.Severity`).
+  """
+  @spec safety_fields_key(Ash.UUID.t()) :: String.t()
+  def safety_fields_key(org_id), do: "safety_fields:#{org_id}"
+
+  @doc """
+  Drop a site's cached safety-field list after a `SiteSafetyFields` write.
+  Cluster-wide, like `bust_branding/1`: a node that kept the old list would
+  stop asking for a severity on a field the admin just listed.
+  """
+  @spec bust_safety_fields(Ash.UUID.t()) :: :ok
+  def bust_safety_fields(org_id) do
+    if enabled?(), do: ClusterBust.broadcast([safety_fields_key(org_id)])
+    :ok
+  end
+
+  @doc """
   Cache key for a site's delivery-`<head>` generation token (#1079).
 
   Folded into the public HTML ETag so a settings write that changes feed

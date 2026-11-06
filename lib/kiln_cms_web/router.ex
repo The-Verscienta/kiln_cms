@@ -534,6 +534,9 @@ defmodule KilnCMSWeb.Router do
       # branding is: full-text syndication is a disclosure decision, and it used
       # to live in a config file no tenant admin could reach.
       live "/editor/feeds", FeedSettingsLive, :index
+      # Per-site safety fields — which fields of which types need a severity when
+      # a published edit changes them. Org-scoped; writes are admin-only.
+      live "/editor/safety-fields", SafetyFieldsLive, :index
       # Per-site locale fallback chains (`fr-CA → fr → en`) — what every
       # delivery surface serves when a translation is missing. Org-scoped: one
       # site's "never fall back" must not decide another's.

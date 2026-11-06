@@ -2263,6 +2263,16 @@ defmodule KilnCMS.CMS.Content do
           on_delete: :nilify
         )
 
+        # How much a published edit matters (`KilnCMS.CMS.Severity`): stored on
+        # the version row of the edit itself, filled from
+        # `changeset.context[:paper_trail_metadata]` by `Changes.RecordChangeSeverity`.
+        # Nullable and without a default: `nil` means "no safety field changed
+        # on this version" (and is what every version written before this
+        # column existed reads as).
+        metadata :change_severity, :atom,
+          constraints: [one_of: [:critical, :notable, :routine]],
+          allow_nil?: true
+
         mixin({KilnCMS.CMS.VersionPolicies, :policies, []})
         version_extensions(authorizers: [Ash.Policy.Authorizer])
       end
@@ -2722,6 +2732,11 @@ defmodule KilnCMS.CMS.Content do
         update :update do
           primary? true
           require_atomic? false
+          # How much this edit matters, asked for only when it touches a field
+          # the site lists as safety-relevant (`KilnCMS.CMS.Severity`); stored on
+          # the edit's version row. Optional: omitted, a safety edit is recorded
+          # `:notable`. Ignored when no safety field changed.
+          argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           # `If-Match` / `expected_lock_version` (docs/json-api.md, "Concurrency"):
           # refused with a 412 unless the row is still the version the client
           # read. A no-op without either.
@@ -2975,6 +2990,11 @@ defmodule KilnCMS.CMS.Content do
         update :publish_changes do
           require_atomic? false
           accept []
+          # How much this edit matters, asked for only when it touches a field
+          # the site lists as safety-relevant (`KilnCMS.CMS.Severity`); stored on
+          # the edit's version row. Optional: omitted, a safety edit is recorded
+          # `:notable`. Ignored when no safety field changed.
+          argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           # The lost-update guard's decisions (#1815): `%{"seo_title" =>
           # "mine" | "theirs", ...}` or `%{"*" => ...}` for a key the live page
           # changed after the draft was saved. See `Changes.PromoteWorkingCopy`.
@@ -3094,6 +3114,11 @@ defmodule KilnCMS.CMS.Content do
 
         update :publish do
           require_atomic? false
+          # How much this edit matters, asked for only when it touches a field
+          # the site lists as safety-relevant (`KilnCMS.CMS.Severity`); stored on
+          # the edit's version row. Optional: omitted, a safety edit is recorded
+          # `:notable`. Ignored when no safety field changed.
+          argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           # FIRST, so its `before_action` hook registers before the two
           # block-reading validations below defer themselves to the same phase:
           # an open collab session's prose rides in on this write or is lost
@@ -3207,6 +3232,11 @@ defmodule KilnCMS.CMS.Content do
           # a new version itself). Workflow state is left unchanged.
           require_atomic? false
           accept []
+          # How much this edit matters, asked for only when it touches a field
+          # the site lists as safety-relevant (`KilnCMS.CMS.Severity`); stored on
+          # the edit's version row. Optional: omitted, a safety edit is recorded
+          # `:notable`. Ignored when no safety field changed.
+          argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           argument :version_id, :uuid, allow_nil?: false
           change KilnCMS.CMS.Changes.RestoreVersion
 
@@ -3864,6 +3894,13 @@ defmodule KilnCMS.CMS.Content do
         # the between-publish window. Off by default and skipped for publishes
         # (RecordPublishedVersion anchors those) — see the change module.
         change KilnCMS.CMS.Changes.AnchorVersion, on: [:create, :update, :destroy]
+
+        # Mandatory change severity: a published edit that touches a field the
+        # site lists as safety-relevant carries a severity on its version row
+        # (`KilnCMS.CMS.Severity`). LAST among the changes, so it sees what the
+        # others wrote — `PromoteWorkingCopy`'s promoted values included — and
+        # decides in a `before_action` hook, after `RestoreVersion`'s fold.
+        change KilnCMS.CMS.Changes.RecordChangeSeverity, on: [:update]
       end
 
       validations do
@@ -4823,6 +4860,33 @@ defmodule KilnCMS.CMS.Content do
           # No `expression/2`, so a filter or sort would raise out of AshSql as
           # a 500; declaring them unusable rejects at the query layer instead —
           # same reason `word_count` does.
+          filterable? false
+          sortable? false
+        end
+
+        # How much the document's latest safety edit mattered, and when it was
+        # made (`KilnCMS.CMS.LatestEdit`): read back from the version rows,
+        # `nil` unless the document is published. Public so a viewer-level key
+        # sees them on JSON:API and GraphQL, as on `/api/sync`.
+        calculate :latest_edit, :map, KilnCMS.CMS.Calculations.LatestEditLookup do
+          public? false
+          filterable? false
+          sortable? false
+        end
+
+        calculate :latest_edit_severity,
+                  :atom,
+                  KilnCMS.CMS.Calculations.LatestEditSeverity do
+          public? true
+          constraints one_of: [:critical, :notable, :routine]
+          filterable? false
+          sortable? false
+        end
+
+        calculate :latest_edit_at,
+                  :utc_datetime_usec,
+                  KilnCMS.CMS.Calculations.LatestEditAt do
+          public? true
           filterable? false
           sortable? false
         end

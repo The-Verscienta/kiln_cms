@@ -1370,6 +1370,30 @@
                 ],
                 "description": "Field included by default."
               },
+              "latest_edit_at": {
+                "anyOf": [
+                  {},
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "latest_edit_severity": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "critical",
+                      "notable",
+                      "routine"
+                    ],
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "locale": {
                 "anyOf": [
                   {
@@ -7552,6 +7576,30 @@
                 ],
                 "description": "Field included by default."
               },
+              "latest_edit_at": {
+                "anyOf": [
+                  {},
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "latest_edit_severity": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "critical",
+                      "notable",
+                      "routine"
+                    ],
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "locale": {
                 "anyOf": [
                   {
@@ -10022,6 +10070,30 @@
                   }
                 ],
                 "description": "Field included by default."
+              },
+              "latest_edit_at": {
+                "anyOf": [
+                  {},
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "latest_edit_severity": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "critical",
+                      "notable",
+                      "routine"
+                    ],
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "locale": {
                 "anyOf": [
@@ -19588,6 +19660,21 @@
                               }
                             ]
                           },
+                          "change_severity": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "critical",
+                                  "notable",
+                                  "routine"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "custom_fields": {
                             "anyOf": [
                               {
@@ -19981,6 +20068,21 @@
                       "attributes": {
                         "additionalProperties": false,
                         "properties": {
+                          "change_severity": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "critical",
+                                  "notable",
+                                  "routine"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "expected_lock_version": {
                             "anyOf": [
                               {
@@ -23738,6 +23840,21 @@
                               }
                             ]
                           },
+                          "change_severity": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "critical",
+                                  "notable",
+                                  "routine"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "custom_fields": {
                             "anyOf": [
                               {
@@ -24110,6 +24227,21 @@
                       "attributes": {
                         "additionalProperties": false,
                         "properties": {
+                          "change_severity": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "critical",
+                                  "notable",
+                                  "routine"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "expected_lock_version": {
                             "anyOf": [
                               {
@@ -27062,6 +27194,21 @@
                               }
                             ]
                           },
+                          "change_severity": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "critical",
+                                  "notable",
+                                  "routine"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "custom_fields": {
                             "anyOf": [
                               {
@@ -27444,6 +27591,21 @@
                       "attributes": {
                         "additionalProperties": false,
                         "properties": {
+                          "change_severity": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "critical",
+                                  "notable",
+                                  "routine"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "expected_lock_version": {
                             "anyOf": [
                               {
