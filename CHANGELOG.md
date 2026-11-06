@@ -70,10 +70,6 @@ Every summary line below that was shortened links to its own entry there.
   The editor asks before publishing; API writes default to notable; read back as `latest_edit_severity` / `latest_edit_at`.
   ([long form](docs/changelog/unreleased.md#change-severity))
 
-- **Opt-in `401` for an expired, revoked or malformed bearer token on `/api/*` and `/gql` (`KILN_API_REJECT_INVALID_BEARER`, off by default).**
-  Today such a request is served as anonymous; the default is planned to flip to on in a later release.
-  ([long form](docs/changelog/unreleased.md#reject-invalid-bearer))
-
 - **Drafts-only API keys (`access: draft_write`): a headless service can create and edit its own drafts
   and never publish, delete or touch live content. Drafts record the key and an optional `X-Kiln-On-Behalf-Of` label.**
   ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-api-keys))
