@@ -16,6 +16,12 @@ defmodule KilnCMS.Accounts.Checks.DraftWriteOwnDrafts do
       scope as the document. Once a person moves the draft on (review, publish),
       the key stops seeing its history too.
 
+      This is scoped by owner, not by key, so a second key on the same owner
+      reads the history of the first key's drafts (it can edit them, and its
+      autosaves coalesce over that history). That is why the provenance
+      columns, which ARE per key (`DraftWriteOwnProvenance`), are kept out of
+      version `changes` altogether (`ignore_attributes` in `Content`).
+
   Matches nothing for any actor that is not authenticated by a `:draft_write`
   key, so adding it as an `authorize_if` alongside the editor grant widens
   nothing for anyone else.

@@ -299,7 +299,7 @@ defmodule KilnCMSWeb.DraftWriteKeySurfacesTest do
       assert post.on_behalf_of == "u1"
     end
 
-    test "is on the creating version and the key's own response, not the webhook payload",
+    test "is on the key's own response, not the webhook payload or version history",
          %{key: key} do
       assert {201, %{"data" => %{"id" => id} = data}} =
                json(:post, "/api/json/posts", key, %{title: "Seen", slug: slug()}, [
@@ -322,7 +322,10 @@ defmodule KilnCMSWeb.DraftWriteKeySurfacesTest do
         |> Ash.read!(actor: user(:admin))
         |> Enum.filter(&(&1.version_source_id == id and &1.version_action_name == :create))
 
-      assert version.changes["on_behalf_of"] == "u9"
+      # Kept out of history: a second key on the same owner reads this
+      # version (`DraftWriteOwnDrafts` is per owner), the provenance is per key.
+      refute Map.has_key?(version.changes, "on_behalf_of")
+      refute Map.has_key?(version.changes, :on_behalf_of)
     end
 
     test "GraphQL create records it too", %{key: key} do

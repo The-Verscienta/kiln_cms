@@ -16,6 +16,7 @@ import {
   KilnServerError,
   KilnValidationError,
 } from "../src/index.js";
+import type { ContentProvenance, Item } from "../src/index.js";
 import { stubFetch, type FetchStub } from "./helpers.js";
 
 const KEY = "kiln_write_secret";
@@ -67,6 +68,30 @@ describe("create", () => {
     expect(post.id).toBe("p1");
     expect(post.title).toBe("Via SDK");
     expect(post.state).toBe("draft");
+  });
+
+  it("sends onBehalfOf as X-Kiln-On-Behalf-Of, and nothing without it", async () => {
+    const stub = stubFetch({
+      status: 201,
+      body: postDoc({ on_behalf_of: "user-42", created_via_key_name: "Sync" }),
+    });
+    const kiln = client(stub);
+
+    const draft = await kiln.create<Item & ContentProvenance>(
+      "posts",
+      { title: "Reader tip" },
+      { onBehalfOf: "user-42" },
+    );
+    await kiln.create("posts", { title: "Plain" });
+    await kiln.update("posts", "p1", { title: "Edited" });
+
+    expect(stub.calls[0]!.headers["x-kiln-on-behalf-of"]).toBe("user-42");
+    expect(stub.calls[0]!.headers.authorization).toBe(`Bearer ${KEY}`);
+    expect(stub.calls[0]!.headers["content-type"]).toBe("application/vnd.api+json");
+    expect(stub.calls[1]!.headers["x-kiln-on-behalf-of"]).toBeUndefined();
+    expect(stub.calls[2]!.headers["x-kiln-on-behalf-of"]).toBeUndefined();
+    expect(draft.on_behalf_of).toBe("user-42");
+    expect(draft.created_via_key_name).toBe("Sync");
   });
 
   it("derives entry from entries, and honours an explicit type", async () => {

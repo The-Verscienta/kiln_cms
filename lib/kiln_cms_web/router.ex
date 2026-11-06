@@ -86,7 +86,7 @@ defmodule KilnCMSWeb.Router do
     plug :load_from_bearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
-    plug KilnCMSWeb.Plugs.ApiKeyAuth
+    plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
     # Opt-in (`KILN_API_REJECT_INVALID_BEARER`): a bearer token that did not
     # authenticate is a 401, not an anonymous read (#2161).
     plug KilnCMSWeb.Plugs.RejectInvalidBearer, :graphql
@@ -135,7 +135,7 @@ defmodule KilnCMSWeb.Router do
     plug :load_from_bearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
-    plug KilnCMSWeb.Plugs.ApiKeyAuth
+    plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
     # Opt-in (`KILN_API_REJECT_INVALID_BEARER`): a bearer token that did not
     # authenticate is a 401, not an anonymous read (#2161).
     plug KilnCMSWeb.Plugs.RejectInvalidBearer, :api
@@ -738,6 +738,16 @@ defmodule KilnCMSWeb.Router do
 
     post "/sign_in", ApiAuthController, :sign_in
     post "/sign_in/verify", ApiAuthController, :verify
+  end
+
+  # A drafts-only key exchanging itself for a fresh one (ADR 0012). On the
+  # `:auth` bucket, not `:api`'s: it issues a credential. No bearer/actor plugs —
+  # the controller authenticates the key itself, so a refused key can be checked
+  # for reuse after rotation (`KilnCMS.Accounts.ApiKeyReuse`).
+  scope "/api/keys", KilnCMSWeb do
+    pipe_through :api_auth
+
+    post "/rotate", ApiKeyRotationController, :rotate
   end
 
   # MCP server for LLM authoring clients (docs/mcp.md). The tool list comes
