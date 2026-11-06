@@ -1492,7 +1492,7 @@
                 "object",
                 "null"
               ],
-              "x-kiln-graphql-kind": "json"
+              "x-kiln-graphql-kind": "geolocation"
             }
           },
           "type": "object"

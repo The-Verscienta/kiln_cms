@@ -207,16 +207,18 @@ generated types [below](#generate-types-and-fragments-for-your-site).
   `IntValue`, `FloatValue`, `BooleanValue`, `DateValue`, `DateTimeValue`,
   `ListValue { items }`, `GroupValue { fields }`, `ReferenceValue { ids }`,
   `MediaValue` (the shape every surface serves a media item: `id`, `url`,
-  `alt`, `width`, `height`, `mimeType`, `focal`, `variants`) and
-  `JsonValue { value }`.
+  `alt`, `width`, `height`, `mimeType`, `focal`, `variants`),
+  `GeolocationValue { lat lng label zoom }` and `JsonValue { value }`.
 - Alias `value` per member (`asString: value`, `asFloat: value`): GraphQL does
   not allow one response key to have two types, and the generated fragments do
   the same.
 - A field with `multiple` is a `ListValue`, whatever its item type. A group
   is a `GroupValue` of its sub-fields (a repeating group is a `ListValue` of
   `GroupValue`s), nested to depth 3.
-- `computed`, `geolocation`, `datetime_range` and `recurrence` fields, and a
-  plugin type that does not name a GraphQL kind, are `JsonValue`.
+- A `geolocation` field is a `GeolocationValue`: `lat` and `lng` are floats,
+  `label` (place name) and `zoom` are `null` when not set. A stored value that
+  is not a coordinate (a legacy shape) is left out, as for any other kind.
+- `computed`, `datetime_range` and `recurrence` fields, and a plugin type that does not name a GraphQL kind, are `JsonValue`.
 - **A reference field returns ids only** (`ReferenceValue { ids }`; a
   `multiple` one is a `ListValue` of `ReferenceValue`s, one id each). For the
   records, use [`references(field:)`](#relationships-references-and-referencedby).

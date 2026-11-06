@@ -144,8 +144,28 @@ defmodule KilnCMSWeb.Graphql.CustomFields do
   defp build_kind(:group, d, _name, v, depth) when is_map(v), do: group(d, v, depth)
   defp build_kind(:reference, _d, name, v, _depth), do: reference(name, v)
   defp build_kind(:media, _d, name, v, _depth), do: media(name, v)
+  defp build_kind(:geolocation, _d, name, v, _depth), do: geolocation(name, v)
   defp build_kind(:json, _d, name, v, _depth), do: %{__kind__: :json, name: name, value: v}
   defp build_kind(_kind, _d, _name, _v, _depth), do: nil
+
+  # `lat`/`lng` are always floats once stored (`Geolocation.cast/2`), but the
+  # column is plain jsonb: an out-of-range or non-numeric coordinate, or a
+  # `label`/`zoom` of another type, is a legacy shape and reads as absent
+  # rather than failing the whole document.
+  defp geolocation(name, %{"lat" => lat, "lng" => lng} = raw)
+       when is_number(lat) and is_number(lng) and lat >= -90 and lat <= 90 and lng >= -180 and
+              lng <= 180 do
+    %{
+      __kind__: :geolocation,
+      name: name,
+      lat: lat * 1.0,
+      lng: lng * 1.0,
+      label: if(is_binary(raw["label"]), do: raw["label"]),
+      zoom: if(is_integer(raw["zoom"]), do: raw["zoom"])
+    }
+  end
+
+  defp geolocation(_name, _raw), do: nil
 
   defp date(name, value) when is_binary(value) do
     case Date.from_iso8601(value) do

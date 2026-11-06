@@ -811,7 +811,8 @@ def graphql_kind(_definition), do: :int   # a star rating stored as an integer
 ```
 
 The answer is `:string`, `:int`, `:float`, `:boolean`, `:date`, `:datetime` or
-`:json`. Leave it out for a map, a list or any mixed shape: a type with no
+`:json`. A plugin cannot add a composite kind (the built-in `geolocation` has
+its own `GeolocationValue`). Leave it out for a map, a list or any mixed shape: a type with no
 `graphql_kind/1` (or compiled against an older SDK) is served as a
 `JsonValue`, and a `multiple` field is always a `ListValue` of its kind. An
 unrecognised answer is also treated as `:json`. The kinds are fixed in the

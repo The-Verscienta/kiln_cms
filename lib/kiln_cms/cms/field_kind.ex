@@ -19,14 +19,15 @@ defmodule KilnCMS.CMS.FieldKind do
   | `:group`     | `:group` (sub-fields come from `group_of_id` definitions)    |
   | `:reference` | `:reference`                                                 |
   | `:media`     | `:media`                                                     |
+  | `:geolocation` | `:geolocation` (`lat`, `lng`, `label`, `zoom`)             |
   | `:list`      | any definition with `multiple: true`                         |
-  | `:json`      | anything else: `:computed`, the composite built-ins, and a   |
-  |              | plugin type that does not implement `c:Kiln.FieldType.graphql_kind/1` |
+  | `:json`      | anything else: `:computed`, `:datetime_range`, `:recurrence`, |
+  |              | and a plugin type that does not implement `c:Kiln.FieldType.graphql_kind/1` |
 
   Core types are mapped here directly. A `Kiln.FieldType` module (built-in or
   plugin) answers through the optional `c:Kiln.FieldType.graphql_kind/1`,
   probed with `function_exported?/3`; no answer, or an answer outside
-  `t:scalar_kind/0`, is `:json`. A type that does not fit one scalar therefore
+  `t:scalar_kind/0`, is `:json` (a plugin cannot name a composite kind). A type that does not fit one scalar therefore
   needs no code to be served safely.
 
   `names/0` of `KilnCMS.CMS.FieldTypes` is covered exhaustively by this
@@ -46,6 +47,7 @@ defmodule KilnCMS.CMS.FieldKind do
           | :group
           | :reference
           | :media
+          | :geolocation
           | :json
 
   @typedoc "A kind as served: an `t:item_kind/0`, or `:list` for a `multiple` field."
@@ -69,6 +71,9 @@ defmodule KilnCMS.CMS.FieldKind do
     date: :date,
     datetime: :datetime,
     media: :media,
+    # A fixed shape (`lat`/`lng` and optional `label`/`zoom`), so it is typed
+    # here rather than through the plugin callback, which names scalars only.
+    geolocation: :geolocation,
     reference: :reference,
     group: :group
   }

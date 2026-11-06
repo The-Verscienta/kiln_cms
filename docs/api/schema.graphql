@@ -1348,6 +1348,15 @@ type FloatValue implements CustomFieldValue {
   value: Float!
 }
 
+"A `geolocation` field: a coordinate, with its optional place name and map zoom."
+type GeolocationValue implements CustomFieldValue {
+  name: String!
+  lat: Float!
+  lng: Float!
+  label: String
+  zoom: Int
+}
+
 """
 A `group` field: one object (or, in a `ListValue`, each row) of its
 sub-fields, as values.
@@ -1378,8 +1387,8 @@ human-readable json string.
 scalar JsonString
 
 """
-Anything that does not fit one scalar: a `computed` field, the composite
-built-ins (`geolocation`, `datetime_range`, `recurrence`) and a plugin type
+Anything that does not fit one scalar: a `computed` field, the other
+composite built-ins (`datetime_range`, `recurrence`) and a plugin type
 that does not name a GraphQL kind. `value` is the stored value as JSON.
 """
 type JsonValue implements CustomFieldValue {

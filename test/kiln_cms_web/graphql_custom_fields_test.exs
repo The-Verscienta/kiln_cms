@@ -76,6 +76,7 @@ defmodule KilnCMSWeb.GraphqlCustomFieldsTest do
         ... on GroupValue { fields { __typename name ... on FloatValue { value } ... on StringValue { value } } }
         ... on ReferenceValue { ids }
         ... on MediaValue { id url alt }
+        ... on GeolocationValue { lat lng label zoom }
         ... on JsonValue { value }
       }
     }
@@ -220,8 +221,45 @@ defmodule KilnCMSWeb.GraphqlCustomFieldsTest do
                "items" => [%{"__typename" => "StringValue", "value" => "a"}, %{"value" => "b"}]
              } = by_name["tags_list"]
 
-      assert %{"__typename" => "JsonValue", "value" => json} = by_name["place"]
-      assert %{"lat" => 51.5} = Jason.decode!(json)
+      assert %{
+               "__typename" => "GeolocationValue",
+               "lat" => 51.5,
+               "lng" => -0.12,
+               "label" => nil,
+               "zoom" => nil
+             } = by_name["place"]
+    end
+
+    test "a geolocation serves its label and zoom; a legacy shape is left out", %{admin: admin} do
+      define!(admin, %{name: "place", field_type: :geolocation})
+
+      post =
+        post!(admin, %{
+          "place" => %{"lat" => "51.5074", "lng" => "-0.1278", "label" => "London", "zoom" => 12}
+        })
+
+      assert %{"fields" => [place]} = one(post, ["place"])
+
+      assert %{
+               "__typename" => "GeolocationValue",
+               "lat" => 51.5074,
+               "lng" => -0.1278,
+               "label" => "London",
+               "zoom" => 12
+             } = place
+
+      # The column is plain jsonb: write shapes `cast/2` would refuse straight to it.
+      for legacy <- [
+            %{"lat" => "north", "lng" => 1.0},
+            %{"lat" => 91.0, "lng" => 1.0},
+            %{"lat" => 1.0},
+            "51.5,-0.1",
+            [1, 2]
+          ] do
+        Ash.Seed.update!(post, %{custom_fields: %{"place" => legacy}})
+
+        assert %{"fields" => []} = one(post, ["place"])
+      end
     end
 
     test "a group nests its sub-fields", %{admin: admin} do

@@ -36,6 +36,7 @@ defmodule KilnCMSWeb.Graphql.CustomFieldValues do
   defp object_for(:group), do: :group_value
   defp object_for(:reference), do: :reference_value
   defp object_for(:media), do: :media_value
+  defp object_for(:geolocation), do: :geolocation_value
   defp object_for(:json), do: :json_value
   defp object_for(_unknown), do: nil
 
@@ -157,9 +158,19 @@ defmodule KilnCMSWeb.Graphql.CustomFieldValues do
     field :cropped, :boolean
   end
 
+  @desc "A `geolocation` field: a coordinate, with its optional place name and map zoom."
+  object :geolocation_value do
+    interface :custom_field_value
+    field :name, non_null(:string)
+    field :lat, non_null(:float)
+    field :lng, non_null(:float)
+    field :label, :string
+    field :zoom, :integer
+  end
+
   @desc """
-  Anything that does not fit one scalar: a `computed` field, the composite
-  built-ins (`geolocation`, `datetime_range`, `recurrence`) and a plugin type
+  Anything that does not fit one scalar: a `computed` field, the other
+  composite built-ins (`datetime_range`, `recurrence`) and a plugin type
   that does not name a GraphQL kind. `value` is the stored value as JSON.
   """
   object :json_value do

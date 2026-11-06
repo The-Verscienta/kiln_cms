@@ -40,7 +40,19 @@ defmodule KilnCMS.CMS.FieldKindTest do
   test "every registered field type has a kind" do
     # A new core, built-in or plugin type that `kind_for/1` cannot place raises
     # or returns a non-kind here, so the registry cannot grow a silent gap.
-    kinds = [:string, :int, :float, :boolean, :date, :datetime, :group, :reference, :media, :json]
+    kinds = [
+      :string,
+      :int,
+      :float,
+      :boolean,
+      :date,
+      :datetime,
+      :group,
+      :reference,
+      :media,
+      :geolocation,
+      :json
+    ]
 
     for name <- FieldTypes.names() do
       assert FieldKind.kind_for(definition(name)) in kinds,
@@ -70,10 +82,18 @@ defmodule KilnCMS.CMS.FieldKindTest do
     for {type, kind} <- expected, do: assert(FieldKind.kind_for(definition(type)) == kind)
   end
 
-  test "the built-in Kiln.FieldType modules answer :json" do
-    for type <- [:geolocation, :computed, :datetime_range, :recurrence] do
+  test "the other built-in Kiln.FieldType modules answer :json" do
+    for type <- [:computed, :datetime_range, :recurrence] do
       assert FieldKind.kind_for(definition(type)) == :json
     end
+  end
+
+  test "geolocation is mapped by the core, not by a plugin callback" do
+    assert FieldKind.kind_for(definition(:geolocation)) == :geolocation
+    assert FieldKind.kind_for(definition(:geolocation, %{multiple: true})) == :list
+    assert FieldKind.item_kind_for(definition(:geolocation, %{multiple: true})) == :geolocation
+    refute :geolocation in FieldTypes.core()
+    refute function_exported?(KilnCMS.CMS.FieldTypes.Geolocation, :graphql_kind, 1)
   end
 
   test "the fixture plugin's rating type, which has no graphql_kind/1, is :json" do

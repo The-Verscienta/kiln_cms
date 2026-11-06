@@ -246,6 +246,13 @@ defmodule KilnCMS.SchemaExport.TypeScriptTest do
     end
   end
 
+  test "the header names both entry points, since either can serve the file" do
+    [first | _] = JsonSchema.defs(KilnCMS.Blocks.modules()) |> emit() |> String.split("\n")
+
+    assert first =~ "mix kiln.export.schema --format ts"
+    assert first =~ "GET /api/schema"
+  end
+
   test "a document with no content types still emits the block half" do
     ts = emit(JsonSchema.defs(KilnCMS.Blocks.modules()))
 
@@ -309,12 +316,15 @@ defmodule KilnCMS.SchemaExport.TypeScriptTest do
               content("post", %{"type" => "Post"}, %{
                 "gallery" => field("list", ["array", "null"]),
                 "seo" => field("group", ["object", "null"]),
+                "venue" => field("geolocation", ["object", "null"]),
                 "price" => field("float", ["number", "null"])
               })
           })
         )
 
-      assert ts =~ ~s|fields(names: ["gallery", "seo"]) {|
+      assert ts =~ ~s|fields(names: ["gallery", "seo", "venue"]) {|
+      assert ts =~ "... on GeolocationValue { lat lng label zoom }"
+      assert ts =~ ~s|__typename: "GeolocationValue";|
       assert ts =~ "  fields: KilnCustomFieldValue[];"
       assert ts =~ "... on ListValue {"
       assert ts =~ ~s|price: customFloat(name: "price")|
