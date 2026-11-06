@@ -72,6 +72,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Global search's compound leg (a name written spaced or joined: `huang qi`, `xiao yao san`) is about
+  3× cheaper per candidate name.** It rebuilt each rewrite's `to_tsvector` and each span's
+  `phraseto_tsquery` for every candidate row × variant; they are now built once per statement, and a
+  name's own tsvector and tsquery once per name. Same rows, same order. Verscienta reported 1.6–4.0 s
+  for the leg on multi-word queries after #2205.
 - **Phoenix 1.8.16 with absinthe_phoenix 2.0.6: GraphQL subscription pushes still reach
   WebSocket clients after the bump, which silently dropped every push on absinthe_phoenix 2.0.5.**
   ([#2202](https://github.com/The-Verscienta/kiln_cms/pull/2202) · [long form](docs/changelog/unreleased.md#phoenix-1-8-16-subscription-pushes))
