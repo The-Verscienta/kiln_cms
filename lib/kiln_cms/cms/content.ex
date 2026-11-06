@@ -2676,6 +2676,9 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.DeriveAlias
           # Stamp the acting user as the author (system/seed creates leave nil).
           change relate_actor(:author, allow_nil?: true)
+          # A draft a `:draft_write` API key creates records which key (and the
+          # service's opaque `X-Kiln-On-Behalf-Of`) it came from (#2273).
+          change KilnCMS.CMS.Changes.StampDraftWriteProvenance
           # Set the many-to-many links from lists of ids (nil/omitted = no change).
           # No merge verbs here: a create has no existing links to merge against,
           # so `tag_ids` is unambiguously the whole set (#521).
@@ -3939,6 +3942,16 @@ defmodule KilnCMS.CMS.Content do
         # aren't short-circuited. Defense-in-depth: the JSON:API/GraphQL
         # delivery surface exposes only reads regardless (D7).
         policy action_type([:create, :update]) do
+          # The `:draft_write` scope (#2273): the one key that is neither
+          # read-only nor `:read_write`. A SEPARATE policy, ABOVE the admin
+          # bypass, so it holds whatever role the key owner has at request time
+          # — promoting the owner after the key was minted widens nothing. It
+          # forbids everything but the allowlist in `Checks.DraftWriteKey`
+          # (create; update/autosave of the owner's own `:draft` rows), and
+          # `ApiKeyWithoutWriteAccess` below is left alone: it still matches
+          # this key, so the allowlisted case is authorized HERE and skips it.
+          forbid_if {KilnCMS.Accounts.Checks.DraftWriteKey, mode: :outside_allowlist}
+          authorize_if {KilnCMS.Accounts.Checks.DraftWriteKey, mode: :any}
           forbid_if KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess
           authorize_if always()
         end
@@ -3957,6 +3970,7 @@ defmodule KilnCMS.CMS.Content do
         # delete; a `:read_write` key falls through to the owning user's role
         # (admin-only, per the destroy policy below), same model as `/mcp`.
         policy action(:destroy) do
+          forbid_if {KilnCMS.Accounts.Checks.DraftWriteKey, mode: :any}
           forbid_if KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess
           authorize_if always()
         end
@@ -3995,6 +4009,10 @@ defmodule KilnCMS.CMS.Content do
           authorize_if expr(^ref(:state) == :published and ^ref(:audience) == :public)
           authorize_if KilnCMS.CMS.Checks.InAudience
           authorize_if KilnCMS.CMS.Checks.PreviewGrant
+
+          # A `:draft_write` key (#2273) also reads the drafts it authored, so a
+          # PATCH can load its row. Nothing else unpublished, no one else's.
+          authorize_if KilnCMS.Accounts.Checks.DraftWriteOwnDrafts
         end
 
         # Passphrase-locked content (#496) is invisible to every authorized
@@ -4032,6 +4050,12 @@ defmodule KilnCMS.CMS.Content do
         # unrestricted editors are unchanged.
         policy action_type([:create, :update]) do
           authorize_if KilnCMS.CMS.Checks.EditableContentType
+
+          # A `:draft_write` key (#2273) authors drafts regardless of its
+          # owner's tier (the owner is a viewer-tier service account). The
+          # allowlist and its row conditions live in `Checks.DraftWriteKey`;
+          # the forbid above, not this grant, is what bounds the key.
+          authorize_if {KilnCMS.Accounts.Checks.DraftWriteKey, mode: :within_allowlist}
 
           # The internal, system-only update actions (#1402). Admitted HERE
           # rather than through a `bypass action(...)` at the top of the stack,
@@ -4144,6 +4168,32 @@ defmodule KilnCMS.CMS.Content do
         end
       end
 
+      # Who may SEE the three provenance fields (#2273); see ADR 0012. The
+      # catch-all below is what keeps every other field exactly as the resource
+      # policies above decide it: Ash requires a field policy for ALL fields once
+      # one exists, and `authorize_if always()` on `:*` adds no restriction.
+      # A forbidden field is `%Ash.ForbiddenField{}` in an actor-scoped result:
+      # JSON:API omits it; GraphQL returns null plus a `forbidden_field` error
+      # entry for that field only, the rest of the read intact. A filter or sort
+      # on it sees `nil`, so it is no oracle. Reads with `authorize?: false`
+      # (webhooks, the preview endpoint, sync, fired artifacts, search indexing)
+      # are not subject to field policies and never serialize these fields:
+      # their serializers name their fields.
+      field_policies do
+        field_policy [:created_via_key_id, :created_via_key_name, :on_behalf_of] do
+          # Editor and admin tiers, by the same editorial-read notion that lets
+          # them see unpublished content (an out-of-scope editor does not).
+          authorize_if KilnCMS.CMS.Checks.ReadableContentType
+          # A `:draft_write` key sees the provenance of its own drafts, not of
+          # another key's (even one on the same owner).
+          authorize_if KilnCMS.Accounts.Checks.DraftWriteOwnProvenance
+        end
+
+        field_policy :* do
+          authorize_if always()
+        end
+      end
+
       attributes do
         uuid_primary_key :id
 
@@ -4217,6 +4267,28 @@ defmodule KilnCMS.CMS.Content do
         # Written only by `Changes.DeriveAlias` and
         # `Changes.TrackAliasDerivation`; no action accepts it.
         attribute :path_alias_derived, :boolean
+
+        # Provenance of a draft a headless service created with a
+        # `:draft_write` API key (#2273). Plain values, deliberately NOT a
+        # foreign key to `api_keys`: the record of how a draft arrived outlives
+        # the key being revoked, expired or deleted. Stamped only by
+        # `Changes.StampDraftWriteProvenance` (no action accepts them). Never
+        # read by a policy.
+        #
+        # Public so JSON:API and GraphQL can carry them, but ONLY through the
+        # field policies below: `on_behalf_of` is whatever opaque string the
+        # service sent, possibly an end-user identifier, and a published
+        # document is world-readable. An actor the policy refuses gets the field
+        # omitted (JSON:API) or null (GraphQL), never an error.
+        attribute :created_via_key_id, :uuid, public?: true
+
+        attribute :created_via_key_name, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.line()]
+
+        attribute :on_behalf_of, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.CMS.Changes.StampDraftWriteProvenance.max_length()]
 
         # og:image URL and rel=canonical for SEO/social.
         attribute :seo_image, :string,

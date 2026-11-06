@@ -70,6 +70,10 @@ Every summary line below that was shortened links to its own entry there.
   Today such a request is served as anonymous; the default is planned to flip to on in a later release.
   ([long form](docs/changelog/unreleased.md#reject-invalid-bearer))
 
+- **Drafts-only API keys (`access: draft_write`): a headless service can create and edit its own drafts
+  and never publish, delete or touch live content. Drafts record the key and an optional `X-Kiln-On-Behalf-Of` label.**
+  ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-api-keys))
+
 ### Changed
 
 - **Global search on a large catalogue: the alias and compound legs prefilter on stored
