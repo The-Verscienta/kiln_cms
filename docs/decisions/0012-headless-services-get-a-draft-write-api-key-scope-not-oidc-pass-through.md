@@ -110,6 +110,21 @@ fields would not appear unless asked for), and `authorize?: false` reads would
 compute it. Field policies are enforced by the framework on every actor-scoped
 read, are already used on `User`, and fail closed.
 
+**Cost: no query per row, and none per read.** `ReadableContentType` is a
+simple check, decided once per read by the same `Scoping` tier lookup the read
+policy already made (memoized per process), and `DraftWriteOwnProvenance` is a
+filter check compiled into the read's own SQL. Field policies never run a
+check's per-record `check/4`, so neither can go per row. Measured
+with and without the block (20 rows, cold memo as in a fresh request): an
+editor's `CMS.list_posts!` is 1 `posts` + 2 `org_memberships` queries both
+ways, a JSON:API list or single read with any key 5, a GraphQL list 6, a page
+with its 20 children 4; anonymous reads stay at 1. Wall time is unchanged
+within noise. With the memo off (the test config) the policy re-resolves the
+tier: +4 `org_memberships` lookups for a viewer and +8 for an editor per read,
+still constant in the row count. `test/kiln_cms_web/content_field_policy_query_count_test.exs`
+holds both: the counts for 1 row equal those for 20, on every surface, and
+with the production memo each read issues exactly the queries above.
+
 The attributes are therefore `public?: true`, which is what puts them on the
 API schemas. What a refused caller sees:
 
