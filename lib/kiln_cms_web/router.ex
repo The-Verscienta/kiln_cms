@@ -734,6 +734,16 @@ defmodule KilnCMSWeb.Router do
     post "/sign_in/verify", ApiAuthController, :verify
   end
 
+  # A drafts-only key exchanging itself for a fresh one (ADR 0012). On the
+  # `:auth` bucket, not `:api`'s: it issues a credential. No bearer/actor plugs —
+  # the controller authenticates the key itself, so a refused key can be checked
+  # for reuse after rotation (`KilnCMS.Accounts.ApiKeyReuse`).
+  scope "/api/keys", KilnCMSWeb do
+    pipe_through :api_auth
+
+    post "/rotate", ApiKeyRotationController, :rotate
+  end
+
   # MCP server for LLM authoring clients (docs/mcp.md). The tool list comes
   # from `config :kiln_cms, :mcp_tools` (compile-time, like `:content_domains`
   # in the GraphQL schema/JSON:API router) so a downstream project can expose

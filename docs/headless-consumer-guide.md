@@ -359,7 +359,8 @@ edit **its own drafts** and nothing else, whatever the account behind it can do
 * **Minting is admin-only**, at `/editor/api-keys`. Pick the `draft_write`
   access; the key must expire within `:draft_write_key_max_ttl_days` (default
   30 days), and its owner must be a viewer-tier service account, not an editor
-  or admin. Rotate it before it lapses; there is no self-service rotation yet.
+  or admin. An admin can also give it a **self-rotation window** (below), so
+  the service renews it without a person re-minting it every month.
 * **It may:** `create` (JSON:API `POST`, GraphQL `create…`, `/mcp` `create_*`),
   and `update`/autosave a document that is still a **draft** and that the key's
   account **authored**. Nothing in review, archived or live.
@@ -376,6 +377,43 @@ edit **its own drafts** and nothing else, whatever the account behind it can do
 * **It reads as its account does:** published content (audience permitting)
   plus the drafts it authored. It cannot read other authors' unpublished
   content and has no revision history.
+
+### Keeping the key alive: self-rotation
+
+If the admin minted the key with a self-rotation window ("Self-rotation" at
+`/editor/api-keys`; up to a year), the service can exchange it for a fresh one
+before it expires:
+
+```bash
+curl -X POST https://kiln.example.com/api/keys/rotate \
+  -H "Authorization: Bearer $KILN_DRAFT_KEY"
+```
+
+```json
+{"data": {"id": "…", "api_key": "kiln_…", "expires_at": "2026-12-06T…",
+          "rotatable_until": "2027-05-05T…", "rotated_from_id": "…"}}
+```
+
+* The new key has the same account, scope and name. It expires 30 days out
+  (`:draft_write_key_max_ttl_days`), or at `rotatable_until` if that is sooner.
+  After `rotatable_until`, ask an admin for a new key.
+* **The old key is revoked the moment this answers.** Write the new key to
+  your secret store first, then switch to it. Workers still using the old key
+  get `401` until they reload; that is expected.
+* **Rotate from one place**, on a schedule (for example when fewer than 7 days
+  are left), not from every worker on a 401.
+* **Never present a rotated-away key to this endpoint again.** Kiln reads that
+  as a stolen key: more than 120 seconds after the rotation it revokes the
+  whole chain, including your current key, and alerts the admins. If you lose
+  the `201` (a network failure mid-request), do not retry with the old key;
+  ask an admin to mint a new one.
+* `401` (`invalid_api_key`): no key, or it is revoked/expired. `403`
+  (`forbidden`): not a drafts-only key, or it has no rotation window or the
+  window has closed. `409` (`not_rotatable`): it was rotated by a concurrent
+  request, or its account was given an editor or admin role. `500`: a server
+  failure; the old key still works, so retry later. This endpoint
+  never treats a request as anonymous, with or without
+  `KILN_API_REJECT_INVALID_BEARER`.
 
 ### Telling reviewers who it was for: `X-Kiln-On-Behalf-Of`
 

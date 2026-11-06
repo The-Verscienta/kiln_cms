@@ -77,6 +77,23 @@ carries the reasoning.
   `errors`, so a codegen'd query that selects every field should drop them. See [decision 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)
   and the headless consumer guide.
 
+<a id="draft-write-key-rotation"></a>
+
+- **Self-rotating drafts-only keys.** A `draft_write` key's 30-day cap meant a person re-minted
+  the service's key every month. An admin can now give the key a rotation window at mint
+  (`rotatable_until`; "Self-rotation" at `/editor/api-keys`, at most
+  `draft_write_key_max_rotation_days`, default 365). Until then the service calls
+  `POST /api/keys/rotate` with the key and gets a fresh one: same account, scope and name,
+  expiring at the 30-day cap or the window's end, whichever is sooner. The old key is revoked in
+  the same transaction, under a row lock, so a chain has one live key and never outlives the date
+  the admin chose. The action takes no input; `read`/`read_write` keys, signed-in users and admins
+  are refused, and an owner promoted to editor since the mint stops the chain. Presenting a
+  rotated-away key to the endpoint again more than 120 seconds later revokes the whole chain and
+  mails the platform admins. Keys without a window behave as before. New nullable `api_keys`
+  columns `rotatable_until`, `lineage_id`, `rotated_from_id` (additive). See
+  [decision 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md#rotation)
+  and the headless consumer guide.
+
 ## Changed
 
 <a id="search-leg-performance"></a>
