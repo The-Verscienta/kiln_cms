@@ -348,6 +348,57 @@ left, or names one you were never sent.
 For an app on a phone, see [native-apps.md](native-apps.md#mirroring-with-sync)
 for where to keep the cursor and when (not) to start over.
 
+## Submitting drafts from your app: the `draft_write` key
+
+If your app needs to **send content to Kiln for a human to review** (a
+user-submitted article, an imported listing), give its service a
+`draft_write` API key rather than a `read_write` one. It can create content and
+edit **its own drafts** and nothing else, whatever the account behind it can do
+([ADR 0012](decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)).
+
+* **Minting is admin-only**, at `/editor/api-keys`. Pick the `draft_write`
+  access; the key must expire within `:draft_write_key_max_ttl_days` (default
+  30 days), and its owner must be a viewer-tier service account, not an editor
+  or admin. Rotate it before it lapses; there is no self-service rotation yet.
+* **It may:** `create` (JSON:API `POST`, GraphQL `create…`, `/mcp` `create_*`),
+  and `update`/autosave a document that is still a **draft** and that the key's
+  account **authored**. Nothing in review, archived or live.
+* **It may not:** publish, unpublish, schedule, archive, delete, submit for
+  review (a person moves a draft into the queue), restore a version, edit a
+  live document or someone else's draft, or touch media. Each is refused
+  (`403`; a row it may not read is a `404`).
+* **Drafts cannot set tags, a category or related links.** Those links are
+  separate writes the key is refused, so a human files the draft when they
+  review it. Custom fields, blocks, title and the like are fine.
+* **Media is refused** on every route: `/api/media*`, the media `PATCH` and
+  GraphQL `updateMediaItem`. Upload through a `read_write` key on an editor
+  account, or ask an editor to attach images.
+* **It reads as its account does:** published content (audience permitting)
+  plus the drafts it authored. It cannot read other authors' unpublished
+  content and has no revision history.
+
+### Telling reviewers who it was for: `X-Kiln-On-Behalf-Of`
+
+Send `X-Kiln-On-Behalf-Of: <your user id>` on the **create** (`POST`) and Kiln
+stores it on the draft, with the key's id and name, so a reviewer can see
+"submitted by Verscienta for user 42". It is an opaque label of your choosing,
+trimmed of control characters and capped in length. It is **stored only, never
+authorization**: Kiln does not check it, trust it or act on it, and sending it
+with any other key is ignored. These **provenance fields**
+(`created_via_key_id`, `created_via_key_name`, `on_behalf_of`) are readable on
+JSON:API, GraphQL and `/mcp` by **authenticated callers only**: an editor or
+admin, and your own `draft_write` key for the drafts *it* created (not another
+key's). Anonymous callers, preview-link holders and viewer-tier accounts never
+get them, on a published row or a draft: the label may identify an end user
+and a published document is world-readable. For them the field is **absent**
+from a JSON:API `attributes` object (also with `?fields[post]=on_behalf_of`),
+and `null` in GraphQL, where a query that selects the field also receives a
+`forbidden_field` entry in `errors` beside the data. They are deliberately not
+in webhook payloads, the preview endpoint or `/api/sync`. They show in the
+editor, read from the draft itself; they are **not** recorded in version
+history, whose read scope (every draft of the key's owner) is wider than theirs
+(the drafts this key created).
+
 ## Editorial tooling: version history and releases
 
 Two editor-tier reads exist for tools *about* the content rather than sites
