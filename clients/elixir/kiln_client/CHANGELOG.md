@@ -5,6 +5,14 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `kiln_client-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+### Added
+
+- `text_search/3` and `semantic_search/3` take `:custom_sort` (kiln_cms#2292).
+  The server also accepts a custom field's bare name in `:filter` / `:sort`,
+  but this client keeps emitting `custom_filter` / `custom_sort`, the stable form.
+
 ## 0.6.0
 
 ### Added

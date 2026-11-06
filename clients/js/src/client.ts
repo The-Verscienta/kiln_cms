@@ -328,6 +328,7 @@ export class KilnClient {
     appendArray(params, "tag_ids", options.tagIds);
     if (options.customFilter) appendFilter(params, "custom_filter", options.customFilter);
     appendIfPresent(params, "sort", options.sort?.join(","));
+    appendIfPresent(params, "custom_sort", options.customSort?.join(","));
     appendIfPresent(params, "page[limit]", options.limit);
     appendIfPresent(params, "include", options.include?.join(","));
     appendSparseFields(params, options.fields);

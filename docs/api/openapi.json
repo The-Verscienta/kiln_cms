@@ -17999,6 +17999,15 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
           }
         ],
         "responses": {
@@ -18212,6 +18221,15 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
           }
         ],
         "responses": {
@@ -18434,6 +18452,15 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
           }
         ],
         "responses": {
@@ -18647,6 +18674,15 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
           }
         ],
         "responses": {
@@ -22179,6 +22215,15 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
           }
         ],
         "responses": {
@@ -22392,6 +22437,15 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
           }
         ],
         "responses": {
@@ -22614,6 +22668,15 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
           }
         ],
         "responses": {
@@ -22827,6 +22890,15 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
           }
         ],
         "responses": {
@@ -25533,6 +25605,15 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
           }
         ],
         "responses": {
@@ -25746,6 +25827,15 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
           }
         ],
         "responses": {
@@ -25968,6 +26058,15 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
           }
         ],
         "responses": {
@@ -26181,6 +26280,15 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
           }
         ],
         "responses": {

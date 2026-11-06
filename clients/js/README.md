@@ -199,7 +199,7 @@ cold-cache 503 once before throwing; everything else that fails throws — see
 | `list(plural, opts)`                 | `GET /api/json/:plural[/published]`                 | filters, sorts, includes, sparse fieldsets, pagination       |
 | `one(plural, filter, opts)`          | 〃                                                  | first match or `null`, `included` merged in                  |
 | `byIds(plural, ids, opts)`           | 〃                                                  | chunked at the 100-row page cap, results in `ids` order      |
-| `textSearch(plural, q, opts)`        | `GET /api/json/:plural/search[/published]`          | relevance-ranked                                             |
+| `textSearch(plural, q, opts)`        | `GET /api/json/:plural/search[/published]`          | relevance-ranked; `customSort` sorts by custom fields        |
 | `semanticSearch(plural, q, opts)`    | `GET /api/json/:plural/semantic-search[/published]` | cosine distance; empty without embeddings                    |
 | `autocomplete(plural, prefix, opts)` | `GET /api/json/:plural/autocomplete[/published]`    | typo-tolerant, ≤ 10 suggestions                              |
 | `search(q, opts)`                    | `GET /api/search`                                   | hybrid; visibility follows the credential                    |

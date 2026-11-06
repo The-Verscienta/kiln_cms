@@ -22,6 +22,46 @@ carries the reasoning.
 
 ## Added
 
+<a id="custom-field-native-filter-sort"></a>
+
+- **A custom field can be named like a column in `filter[...]` and `sort=`, and
+  `custom_sort` works on the search routes.** `GET /api/json/posts?filter[price][gt]=10&sort=title,price`
+  now means what `custom_filter[price][gt]=10&custom_sort=title,price`
+  did, as long as no public attribute, calculation, aggregate or relationship
+  has that name (a built-in always wins). The built-in relations take their
+  set operators natively too: `filter[tags][has][]=<id>`,
+  `filter[related_posts][has_none]=<id>`. `custom_sort` (GraphQL
+  `customSort`) is a new argument on `search`, `search/published`,
+  `semantic-search` and `semantic-search/published`, with the precedence
+  explicit `sort` > `custom_sort` > relevance or distance > recency. A leading
+  custom sort on semantic search replaces distance ordering (the vector
+  index cannot serve it) and the rule that a name match comes first. The
+  null test `is_nil` is accepted as a synonym of `null` on custom fields. See
+  [Naming a custom field like a column](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/json-api.md#naming-a-custom-field-like-a-column).
+
+  What to know before relying on it:
+
+  - `custom_filter` / `custom_sort` remain the stable form. They always mean a
+    custom field, they are the only way to reach one named like a column,
+    and a later built-in with the same name would start shadowing `filter[x]`.
+    The official clients keep emitting `custom_*`; new `customSort` /
+    `:custom_sort` options on their search calls.
+  - A typo such as `filter[ttile]=x` used to get ash_json_api's "No such
+    field"; it is now `400` `invalid_argument` with detail
+    `unknown custom field "ttile"` and no `source` member. Code that matched
+    the old message needs updating. An anonymous typo costs one uncached
+    field-registry read before it is refused.
+  - Custom sorts must come last in `sort`: `sort=title,price` works,
+    `sort=price,title` is `invalid_sort`. Custom sorts are nulls-last; a native
+    `-x` is plain `desc`.
+  - The OpenAPI `sort` parameter's `format` lists built-in fields only, so a
+    client that validates it strictly rejects `sort=price`. Use `custom_sort`.
+  - `links.self` echoes the URL as sent.
+  - On `/entries` without `filter[type_name]`, a bare name declared with
+    different types by different dynamic types is refused ("has a different
+    type per content type"), as `custom_filter` already was.
+  - Sorting by `media` / `reference` custom fields is still unsupported.
+
 <a id="change-severity"></a>
 
 - **Change severity: how much a published edit matters, stored per edit.**

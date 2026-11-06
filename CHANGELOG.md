@@ -62,6 +62,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Custom fields can be filtered and sorted by bare name (`filter[price]`, `sort=title,price`), and `custom_sort` now works on search routes.**
+  ([long form](docs/changelog/unreleased.md#custom-field-native-filter-sort))
+
 - **Change severity: an edit to a safety-relevant field of published content is recorded as critical, notable or routine on its own version.**
   The editor asks before publishing; API writes default to notable; read back as `latest_edit_severity` / `latest_edit_at`.
   ([long form](docs/changelog/unreleased.md#change-severity))
