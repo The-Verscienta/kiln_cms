@@ -4725,6 +4725,11 @@ msgstr "No se pudieron contar las imágenes de este sitio. El registro del servi
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
+msgid "Couldn't create that key. A drafts-only key needs a name and an owner who is not an editor or admin."
+msgstr "No se pudo crear la clave. Una clave solo de borradores necesita un nombre y un propietario que no sea editor ni administrador."
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
 msgid "Couldn't create that key. Give it a name."
 msgstr "No se pudo crear esa clave. Póngale un nombre."
 
@@ -5285,6 +5290,11 @@ msgstr "Crea tu cuenta de administración"
 #, elixir-autogen, elixir-format
 msgid "Create your first page or post to get started."
 msgstr "Cree su primera página o entrada para comenzar."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Created via API key %{name}"
+msgstr "Creado con la clave de API %{name}"
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
@@ -6232,6 +6242,16 @@ msgstr "Borrador, revisión y publicación, con publicación programada y lanzam
 #, elixir-autogen, elixir-format
 msgid "Drafts"
 msgstr "Borradores"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts only"
+msgstr "Solo borradores"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts only (headless service)"
+msgstr "Solo borradores (servicio headless)"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -21326,6 +21346,11 @@ msgstr "correcto"
 #, elixir-autogen, elixir-format
 msgid "on"
 msgstr "activada"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "on behalf of %{who}"
+msgstr "en nombre de %{who}"
 
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format

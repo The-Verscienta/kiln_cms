@@ -20,6 +20,25 @@ carries the reasoning.
   before deploying. No re-fire is needed: a row written before 1.8, with no
   `search_weighted`, still takes the full match.
 
+## Added
+
+<a id="draft-write-api-keys"></a>
+
+- **Drafts-only API keys for headless services (#2273).** A new `draft_write` access
+  scope on API keys lets an app service (Verscienta's, for AI drafting) create drafts and edit
+  drafts it authored, and nothing else: no publishing, submitting for review, deleting, media,
+  tags or related links, and no edits to live or someone else's content. The bound is a policy
+  on `Content` that sits above the admin bypass and ignores the owner's role, so promoting the
+  owner later widens nothing. Keys are minted by an admin on a viewer-tier service account and
+  capped at 30 days (`draft_write_key_max_ttl_days`). Drafts created this way record the key
+  and an optional `X-Kiln-On-Behalf-Of` label (stored for display only, never used for
+  authorization); the fields appear in the editor and version history and, for editors, admins and
+  the creating key only, on JSON:API, GraphQL and `/mcp` (never for anonymous, preview-link or
+  viewer-tier callers, webhook payloads or the preview endpoint). A GraphQL query that selects
+  those three fields as someone not allowed them gets `null` plus a `forbidden_field` entry in
+  `errors`, so a codegen'd query that selects every field should drop them. See [decision 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)
+  and the headless consumer guide.
+
 ## Changed
 
 <a id="search-leg-performance"></a>

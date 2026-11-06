@@ -78,6 +78,10 @@ defmodule KilnCMS.CMS.VersionPolicies do
         # out-of-scope draft would leak through its history.
         policy action_type(:read) do
           authorize_if KilnCMS.CMS.Checks.ReadableContentType
+
+          # A `:draft_write` key (#2273) reads the history of its own drafts
+          # only (autosave coalescing reads it as the saving actor).
+          authorize_if KilnCMS.Accounts.Checks.DraftWriteOwnDrafts
         end
 
         # Version rows are created by AshPaperTrail (authorize?: false); manual

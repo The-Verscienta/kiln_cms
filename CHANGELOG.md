@@ -60,6 +60,12 @@ Every summary line below that was shortened links to its own entry there.
   column, filled for every row by the migration (a table rewrite). Nothing else to run.**
   ([long form](docs/changelog/unreleased.md#search-name-lexemes-upgrade))
 
+### Added
+
+- **Drafts-only API keys (`access: draft_write`): a headless service can create and edit its own drafts
+  and never publish, delete or touch live content. Drafts record the key and an optional `X-Kiln-On-Behalf-Of` label.**
+  ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-api-keys))
+
 ### Changed
 
 - **Global search on a large catalogue: the alias and compound legs prefilter on stored

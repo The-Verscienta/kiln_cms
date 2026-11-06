@@ -1059,12 +1059,14 @@ under the `AshObanInteraction` bypass.
 ## The API-key axis
 
 Role and audience are not the only axes. An actor authenticated by a `kiln_…`
-API key carries an immutable **access scope**, and two checks gate on it:
+API key carries an immutable **access scope** (`:read`, `:read_write` or
+`:draft_write`), and three checks gate on it:
 
 | Check | Matches |
 |---|---|
 | `KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess` | an API-key actor whose key is *not* `:read_write` — i.e. a `:read` key, or any key whose record cannot be inspected (**fails closed to read-only**) |
 | `AshAuthentication.Checks.UsingApiKey` | *any* API-key actor, regardless of scope |
+| `KilnCMS.Accounts.Checks.DraftWriteKey` | an actor whose key is `:draft_write`, in three modes: `:any`, `:outside_allowlist` (the `forbid_if` on `Content`), `:within_allowlist` (the grant inside `EditableContentType`'s policy) |
 
 Applied as `forbid_if` clauses placed **before** the `OrgAdmin` bypass, so a key
 minted on an admin account cannot skip them:
@@ -1075,8 +1077,23 @@ minted on an admin account cannot skip them:
 | `MediaItem`, `Tag`, `TagGroup`, `Category` | forbid `ApiKeyWithoutWriteAccess` | forbid **any** API key | — |
 | `Tagging`, `ContentLink`, `RelatedLink` | forbid `ApiKeyWithoutWriteAccess` (all write types) | — | — |
 
+`ApiKeyWithoutWriteAccess` is untouched and still matches a `:draft_write` key,
+so **every resource above refuses it** — media, taxonomy, menus, links — except
+`Page`/`Post`/`Entry`, which carve it back in through `DraftWriteKey` (#2273):
+
+| `:draft_write` on content | |
+|---|---|
+| Allowed | `create`; `update` and `autosave` of a row that is `state == :draft` AND `author_id ==` the key owner |
+| Refused | everything else, by allowlist: every other update action (`submit_for_review` included: a human moves work into review), publish/unpublish/schedule/archive, `destroy`, `purge`, a published row (also "Live · draft"), an in-review or archived row, another author's draft, any `scheduled_at` change |
+| Ordering | the `forbid_if ... mode: :outside_allowlist` sits ABOVE the `OrgAdmin` bypass, so promoting the key's owner after mint widens nothing |
+| Mint | admin-only; lifetime capped by `:draft_write_key_max_ttl_days` (default 30); owner must have no editor/admin tier (defense in depth, `Validations.DraftWriteKey`) |
+| Reads | published, audience-permitted content plus the key owner's **own drafts** (`DraftWriteOwnDrafts`, so a PATCH can load its row). Version history: only versions of such drafts, nothing for a viewer-tier owner via the revisions API. A promoted owner reads as that role |
+| Preview links | `POST …/preview-token` is bounded to drafts the key's owner authored, on top of the editor-tier gate (`PreviewToken.mint/3`); a viewer-tier owner mints none |
+| Links | a draft cannot set tags, category or related links (those writes are refused to the key) |
+| Provenance fields | `created_via_key_id`, `created_via_key_name`, `on_behalf_of` on `Content` are public attributes behind **field policies**: visible to `ReadableContentType` (editor/admin tier) and to a `:draft_write` key for drafts it created (`DraftWriteOwnProvenance`); everyone else (anonymous, preview-link, viewer tier, another key) gets them omitted (JSON:API) or null (GraphQL). `field_policy :*` is `authorize_if always()`, so no other field changes |
+
 The net rule: a `:read` key may read whatever its owner may read and write
-nothing; a `:read_write` key may author as its owner; **no** key may hard-delete
+nothing; a `:read_write` key may author as its owner; a `:draft_write` key may only create and edit its own drafts; **no** key may hard-delete
 anything, whoever owns it.
 
 ## Block field policies — `editable_by`

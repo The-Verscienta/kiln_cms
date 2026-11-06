@@ -4725,6 +4725,11 @@ msgstr "Impossible de compter les images de ce site. Le journal du serveur en do
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
+msgid "Couldn't create that key. A drafts-only key needs a name and an owner who is not an editor or admin."
+msgstr "Impossible de créer cette clé. Une clé réservée aux brouillons exige un nom et un propriétaire qui n'est ni éditeur ni administrateur."
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
 msgid "Couldn't create that key. Give it a name."
 msgstr "Création de cette clé impossible. Donnez-lui un nom."
 
@@ -5285,6 +5290,11 @@ msgstr "Créez votre compte administrateur"
 #, elixir-autogen, elixir-format
 msgid "Create your first page or post to get started."
 msgstr "Créez votre première page ou votre premier article pour commencer."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Created via API key %{name}"
+msgstr "Créé avec la clé d'API %{name}"
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
@@ -6232,6 +6242,16 @@ msgstr "Brouillon, relecture et publication, avec publication programmée et lot
 #, elixir-autogen, elixir-format
 msgid "Drafts"
 msgstr "Brouillons"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts only"
+msgstr "Brouillons uniquement"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts only (headless service)"
+msgstr "Brouillons uniquement (service headless)"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -21326,6 +21346,11 @@ msgstr "ok"
 #, elixir-autogen, elixir-format
 msgid "on"
 msgstr "activée"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "on behalf of %{who}"
+msgstr "au nom de %{who}"
 
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format

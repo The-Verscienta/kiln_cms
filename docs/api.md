@@ -52,7 +52,7 @@ mutation API. They grant nothing — every route is still enforced by the Ash
 policies and the API key's access scope — but an anonymous stranger has no need
 of the map. An API key is different: only an admin can mint one, so its holder
 is an integration the site chose, and generating a client against the site's
-own schema is exactly what it needs. Any key works, `read` or `read_write`. A
+own schema is exactly what it needs. Any key works, `read`, `read_write` or `draft_write`. A
 user JWT does not — open registration hands those to anyone.
 
 ```bash
@@ -98,7 +98,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Provenance** | `GET /api/provenance/verify/:type/:slug`, `GET /api/provenance/:type/:slug`, `…/verify`, `GET /api/provenance/public-key` | Whether an artifact is `verified`, `tampered` or `unsigned`, and the signed manifests behind the answer. On by default since 1.7; 404 when an operator switches provenance off. | [provenance.md](provenance.md) |
 | **Locales** | `GET /api/locales` | Configured content locales, the default, and each locale's fallback chain. | [§ Locale discovery](#locale-discovery), [§ Locale fallback](#locale-fallback) |
 | **Schema** | `GET /api/schema` | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
-| **Media upload** | `POST /api/media`, `POST /api/media/import-url`, `/api/media/uploads[/complete]` | Upload a file, import one from a public URL, or send a large one straight to object storage; metadata edits ride the JSON:API `PATCH`. `read_write` key on an editor account. | [§ Uploading media](#uploading-media) |
+| **Media upload** | `POST /api/media`, `POST /api/media/import-url`, `/api/media/uploads[/complete]` | Upload a file, import one from a public URL, or send a large one straight to object storage; metadata edits ride the JSON:API `PATCH`. `read_write` key on an editor account (a `draft_write` key is refused). | [§ Uploading media](#uploading-media) |
 | **MCP** | `/mcp` | Model Context Protocol server for LLM authoring clients; **API key required**. | [mcp.md](mcp.md) |
 | **Forms** | `GET /api/forms/:slug`, `POST /api/forms/:slug`, `<script src="…/embed.js">` | A form's schema and JSON submission, or an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
 | **Visual editing** | `<script src="…/bridge.js">` | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |

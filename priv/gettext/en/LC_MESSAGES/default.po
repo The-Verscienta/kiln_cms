@@ -4725,6 +4725,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
+msgid "Couldn't create that key. A drafts-only key needs a name and an owner who is not an editor or admin."
+msgstr ""
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
 msgid "Couldn't create that key. Give it a name."
 msgstr ""
 
@@ -5284,6 +5289,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Create your first page or post to get started."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Created via API key %{name}"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
@@ -6231,6 +6241,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Drafts"
+msgstr ""
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts only"
+msgstr ""
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts only (headless service)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex
@@ -21325,6 +21345,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "on"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "on behalf of %{who}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/release_preview_live.ex
