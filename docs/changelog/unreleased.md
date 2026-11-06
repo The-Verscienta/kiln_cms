@@ -20,6 +20,21 @@ carries the reasoning.
   before deploying. No re-fire is needed: a row written before 1.8, with no
   `search_weighted`, still takes the full match.
 
+<a id="reporting-views-upgrade"></a>
+
+- **Overlays: run `mix ash.codegen` and commit the migration; existing content
+  types gain the reporting views.** The reporting views (below) are created
+  by `use KilnCMS.CMS.Content`, so a project's own `mix kiln.gen.content` types
+  show codegen drift on the first release that has them. Run `mix ash.codegen`,
+  review and commit the migration it writes, and deploy it with the update.
+  Until then those types have no views; nothing else is affected. The
+  migration is additive (a schema, and two views per content table) and
+  rolling the pin back leaves them in place, unused. Core's own views arrive
+  by core's migration with nothing to do. A BI role made earlier does not exist
+  yet; when you create one (`mix kiln.reporting.sql`), re-run its `GRANT` lines
+  after every upgrade that adds views, and after a demo reset.
+
+
 ## Added
 
 <a id="change-severity"></a>
@@ -52,6 +67,36 @@ carries the reasoning.
   - **Upgrade.** Additive: a nullable column on each `*_versions` table and one
     new settings table. Overlays run `mix ash.codegen` for their own content
     types. Until a site lists a field, nothing changes.
+
+<a id="reporting-views"></a>
+
+- **Read-only SQL views of published content, for BI tools.** Custom fields
+  live in one JSONB map, so Metabase or Superset could not select a field as
+  a column. The new `kiln_reporting_v1` schema has, per content table, a wide
+  view (core columns plus an allowlisted `custom_fields`) and a
+  `<table>_field_values` view with one row per record and field
+  (`value_text`, `value_json`). `mix kiln.reporting.sql` prints a script that
+  creates a read-only role with `SELECT` on those views only. Guide:
+  [docs/reporting.md](../reporting.md); the reasoning is
+  [decision 0012](../decisions/0012-reporting-views-are-a-versioned-additive-only-sql-contract.md).
+  - **What is exposed.** Published, unarchived, public-audience rows without an
+    access password. A field appears only while a live definition names it and
+    it is not private or a `user` field; the list is read live, so a flip to
+    private applies on the next query. Reference values are `{id, type}` only.
+    Media snapshots pass through as stored.
+  - **Limits.** No typed columns (cast `value_text` / `value_json`; the guide
+    has a recipe). Every site's rows are visible to the role, so it must not
+    go to a tenant. Role settings (read-only, 60s timeout) are advisory; use a
+    read replica to enforce.
+  - **Developers.** The views are a versioned, additive-only contract; a
+    breaking change would be `kiln_reporting_v2`. They pin the columns they
+    read, so `mix kiln.migrations.check` now fails a migration that removes,
+    renames or retypes one without dropping both views of the pair first
+    (`kiln:contract-ok` does not excuse it); see `docs/releasing.md`. The
+    demo reset now drops the schema before restoring, and
+    the promotion column lookup filters on the current schema, so a view of the same name cannot add columns.
+  - **Upgrade.** Additive, no environment variable. Overlays: see the upgrade
+    note above.
 
 ## Changed
 

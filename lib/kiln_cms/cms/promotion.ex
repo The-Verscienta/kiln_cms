@@ -381,9 +381,11 @@ defmodule KilnCMS.CMS.Promotion do
       Repo.query!(
         """
         SELECT column_name FROM information_schema.columns
-        WHERE table_name = $1 AND is_generated = 'NEVER' AND column_name IN (
+        WHERE table_schema = current_schema() AND table_name = $1
+          AND is_generated = 'NEVER' AND column_name IN (
           SELECT column_name FROM information_schema.columns
-          WHERE table_name = $2 AND is_generated = 'NEVER'
+          WHERE table_schema = current_schema() AND table_name = $2
+            AND is_generated = 'NEVER'
         )
         """,
         [source, target]

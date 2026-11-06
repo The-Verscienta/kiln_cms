@@ -569,6 +569,7 @@ and only its forward direction (`up`/`change`). It fails on:
 | `modify` that changes the type | the old release reads the old type. The previous type comes from `from:` or the migration history. If it is unknown, the change is flagged too. |
 | `modify ... null: false`, or `add ... null: false` without `default:` on an existing table | the old release may still write `NULL`, or omit the column |
 | `execute` SQL containing `DROP TABLE/COLUMN/VIEW/SCHEMA/TYPE`, `RENAME`, `ALTER COLUMN ... TYPE` or `SET NOT NULL` | a heuristic that flags the statement for review. Dropping and re-creating a function or trigger is not flagged. |
+| removing, renaming or retyping a column a `kiln_reporting_v1` view reads, without dropping both views of the pair first | Postgres refuses it while the views exist (see below). A `kiln:contract-ok` marker does not excuse it. |
 | a non-concurrent index on a table listed in `Mix.Tasks.Kiln.Migrations.Check.large_tables/0` | the build blocks writes |
 | `concurrently: true` without `@disable_ddl_transaction true` | the migration would fail at boot |
 
@@ -604,6 +605,31 @@ marker above it covers every op inside. For an index build that is safe for
 another reason, such as a table that is small everywhere, use
 `# kiln:lock-ok — <reason>`. A malformed marker is itself a failure. So is
 a marker that names an unshipped release, or one that excuses nothing.
+
+### Columns the reporting views pin
+
+The SQL reporting views (`kiln_reporting_v1`, [reporting.md](reporting.md))
+are a public contract, and Postgres will not alter or drop a column a view
+reads. So the views **pin** their columns, and a migration that touches one
+fails at deploy even if the old release no longer reads it. The pinned
+columns are the ones in `KilnCMS.Reporting.ViewSql.pinned_columns/0` (the core
+columns plus `custom_fields`, `archived_at`, `access_password_hash`,
+`type_definition_id`) on every content table that has a view, and the
+`field_definitions` and `type_definitions` columns in
+`KilnCMS.Reporting.ViewSql.pinned_other_columns/0`.
+
+A migration that removes, renames or retypes one of them must, **in the same
+`up` or `down` function and before the change**, `DROP VIEW IF EXISTS
+kiln_reporting_v1.<table>` **and** `kiln_reporting_v1.<table>_field_values`
+(both views of the pair), then re-create the views after it. For a
+definition-table column that means every viewed table's pair. A drop in `up`
+does nothing for `down`, which runs on its own. The check applies to `up`,
+`down` and `change`, to the `alter table` DSL and to raw `ALTER TABLE ...
+DROP COLUMN / RENAME COLUMN / ALTER COLUMN ... TYPE` in an `execute`. The
+change is still a contract change, so it also needs the usual
+`kiln:contract-ok` marker, but the marker alone does not satisfy this rule;
+only dropping the views does. Re-creating the views with changed columns is
+a breaking change to the SQL contract: ship it as `kiln_reporting_v2`.
 
 ### What zero-downtime does and does not cover
 
