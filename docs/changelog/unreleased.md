@@ -55,6 +55,30 @@ carries the reasoning.
 
 ## Changed
 
+<a id="custom-field-history"></a>
+
+- **Custom fields are individual fields in version compare, restore and the publish-conflict panel.**
+  Until now a changed custom field read as one opaque "Custom fields" blob.
+  The compare modal now lists each key with its definition's label, a typed
+  value (select option labels, media filename, reference title, rich text
+  without tags, group `Label: value` pairs) and an Added / Removed / Changed
+  pill. Media and reference titles resolve as the signed-in reader, in one
+  batched read; an unreadable target shows its stored id. A retired
+  definition shows its raw key.
+  *Restore* (from the compare modal and the history list) now opens a
+  preview, **Restore this version?**, and writes only on *Restore this
+  version*; it replaces the browser confirm. The preview runs the same
+  `RestoreVersion.plan/3` as the action and lists stored custom keys no
+  definition declares any more as discarded. An editor with a field grant is
+  told restore needs full field access instead of being offered a confirm
+  that would fail. The publish-conflict panel still shows one *Custom fields*
+  row and still resolves the whole map with one choice (no per-key merge), but
+  now lists the per-key draft-versus-live difference beneath it.
+  No API, migration or config change; nothing to do on upgrade, and rolling
+  back the pin is safe. The revisions API still carries `custom_fields` as one
+  whole-map change; a per-key `changed_custom_fields` is deferred. See
+  [Comparing and restoring versions](../working-copy.md#comparing-and-restoring-versions).
+
 <a id="search-leg-performance"></a>
 
 - **Global search is several times cheaper on a large catalogue.** A
