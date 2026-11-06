@@ -62,6 +62,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Opt-in `KILN_API_REJECT_INVALID_BEARER=true` answers 401 for an unverifiable bearer token on the API
+  instead of serving anonymous data; the default flips on in the next release.**
+  ([#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161) · [long form](docs/changelog/unreleased.md#reject-invalid-bearer))
+
 - **Change severity: an edit to a safety-relevant field of published content is recorded as critical, notable or routine on its own version.**
   The editor asks before publishing; API writes default to notable; read back as `latest_edit_severity` / `latest_edit_at`.
   ([long form](docs/changelog/unreleased.md#change-severity))
