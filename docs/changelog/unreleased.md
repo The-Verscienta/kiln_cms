@@ -20,6 +20,39 @@ carries the reasoning.
   before deploying. No re-fire is needed: a row written before 1.8, with no
   `search_weighted`, still takes the full match.
 
+## Added
+
+<a id="change-severity"></a>
+
+- **Change severity: how much a published edit matters, stored per edit.**
+  A site lists the fields it treats as safety-relevant, per content type, at
+  `/editor/safety-fields` ("every field" is one switch; computed fields should
+  not be listed). An edit that changes a listed field of published content, or
+  first publishes one with a non-empty listed field, is recorded with a
+  severity — `critical`, `notable` or `routine` — in a new nullable
+  `change_severity` column of the content `*_versions` tables, so it belongs to
+  that edit and the next edit starts clean. Versions written before this read
+  as no severity.
+  - **Admin editor.** "Publish changes" and a first publish ask "How much does
+    this change matter?" when the edit touches a listed field; nothing is
+    preselected and the publish does not go through until one is chosen. Saving
+    a working copy and autosave never ask. The content list, calendar and bulk
+    publish refuse such an edit with a pointer to the editor.
+  - **API, MCP, GraphQL and automated writers.** `update` and
+    `publish` take an optional `change_severity` (`publish_changes` and
+    `restore_version` have no public route and default to `notable`); omitted, the edit is recorded `notable` — never routine, never empty.
+    There is no batch endpoint, so it is per request.
+  - **Read back.** `latest_edit_severity` and `latest_edit_at` are public
+    calculated fields on JSON:API and GraphQL (readable with a viewer key) and
+    sibling fields on every `/api/sync` upsert item. They describe the latest
+    *safety* edit (a later edit of an unlisted field does not move them) and
+    are `null` when the document is unpublished or has none. No artifact
+    `format_version` change. Webhooks and the change feed do not carry the
+    severity yet.
+  - **Upgrade.** Additive: a nullable column on each `*_versions` table and one
+    new settings table. Overlays run `mix ash.codegen` for their own content
+    types. Until a site lists a field, nothing changes.
+
 ## Changed
 
 <a id="search-leg-performance"></a>

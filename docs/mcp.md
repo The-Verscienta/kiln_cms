@@ -67,6 +67,13 @@ Authoring (require a write key + editor role): `create_page` / `update_page` /
 `create_tag` takes an optional `tag_group_id` — discover the groups with
 `read_tag_groups`.
 
+> **Change severity: `change_severity`.** `update_page` / `update_post` /
+> `update_entry` accept an optional `change_severity` (`critical`, `notable` or
+> `routine`). It is recorded on the edit only when the document is published and
+> the edit touches a field the site lists as safety-relevant; leave it out and
+> that edit is recorded `notable`. Per call — there is no batch tool. See
+> [json-api.md](json-api.md#change-severity-how-much-an-edit-matters).
+
 > **Body: `body_markdown`.** The create/update tools take the body either as
 > `block_tree` (typed block maps) or as `body_markdown` — plain Markdown, the
 > shape a model usually has already, converted server-side into the same

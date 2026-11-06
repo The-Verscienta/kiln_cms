@@ -581,6 +581,10 @@ type Entry implements ContentRecord {
 
   blockIds: [JsonString!]
 
+  latestEditSeverity: String
+
+  latestEditAt: DateTime
+
   highlight(locale: String!, query: String!): String
 
   """
@@ -1750,6 +1754,10 @@ type Page implements ContentRecord {
 
   blockIds: [JsonString!]
 
+  latestEditSeverity: String
+
+  latestEditAt: DateTime
+
   highlight(locale: String!, query: String!): String
 
   """
@@ -2503,6 +2511,10 @@ type Post implements ContentRecord {
 
   blockIds: [JsonString!]
 
+  latestEditSeverity: String
+
+  latestEditAt: DateTime
+
   highlight(locale: String!, query: String!): String
 
   """
@@ -3081,6 +3093,7 @@ input PostSortInput {
 }
 
 input PublishEntryInput {
+  changeSeverity: String
   expectedLockVersion: Int
 }
 
@@ -3094,6 +3107,7 @@ type PublishEntryResult {
 }
 
 input PublishPageInput {
+  changeSeverity: String
   expectedLockVersion: Int
 }
 
@@ -3107,6 +3121,7 @@ type PublishPageResult {
 }
 
 input PublishPostInput {
+  changeSeverity: String
   expectedLockVersion: Int
 }
 
@@ -4251,6 +4266,7 @@ input UpdateEntryInput {
   typeDefinitionId: ID
   categoryId: ID
   featuredImageId: ID
+  changeSeverity: String
   expectedLockVersion: Int
   tagIds: [ID!]
   addTagIds: [ID!]
@@ -4312,6 +4328,7 @@ input UpdatePageInput {
   reviewAfterDays: Int
   categoryId: ID
   featuredImageId: ID
+  changeSeverity: String
   expectedLockVersion: Int
   tagIds: [ID!]
   addTagIds: [ID!]
@@ -4354,6 +4371,7 @@ input UpdatePostInput {
   reviewAfterDays: Int
   categoryId: ID
   featuredImageId: ID
+  changeSeverity: String
   expectedLockVersion: Int
   tagIds: [ID!]
   addTagIds: [ID!]

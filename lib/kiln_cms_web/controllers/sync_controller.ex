@@ -14,10 +14,15 @@ defmodule KilnCMSWeb.SyncController do
   store the cursor and poll with it later. Items are
 
       {"op": "upsert", "type", "id", "slug", "locale", "published_at",
-       "updated_at", "artifact": {…}}
+       "updated_at", "latest_edit_severity", "latest_edit_at", "artifact": {…}}
       {"op": "delete", "type", "id"}
 
   where `artifact` is the fired surface `GET /api/content/:type/:slug` serves.
+  `latest_edit_severity` (`"critical" | "notable" | "routine"`) and
+  `latest_edit_at` say how much the document's latest safety edit mattered and
+  when it was made (`KilnCMS.CMS.LatestEdit`); both are `null` when the site
+  lists no safety field the document has touched. They sit beside the artifact,
+  not in it.
 
   The cursor is signed and opaque, and carries its own scope: the org it was
   issued for, the type (if any) and the surface, so `type` and `surface` on a

@@ -40,6 +40,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS.Mentions
   alias KilnCMS.CMS.PreviewToken
   alias KilnCMS.CMS.ReverseFields
+  alias KilnCMS.CMS.Severity
   alias KilnCMS.CMS.VersionDiff
   alias KilnCMS.CMS.VersionSnapshot
   alias KilnCMS.CMS.WorkingCopy
@@ -324,6 +325,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # "Publish changes" panel is open. `nil` when it is closed.
     |> assign(:publish_conflicts, nil)
     |> assign(:conflict_choices, %{})
+    # The change-severity question (`KilnCMS.CMS.Severity`), asked when a
+    # published edit touches a field the site lists as safety-relevant: `nil`
+    # while closed, else `%{action:, resolve:}` of the publish waiting on the
+    # answer. The choice never outlives the publish it was made for.
+    |> assign(:severity_ask, nil)
+    |> assign(:severity_choice, nil)
+    |> assign(:severity_error?, false)
     # When the record was last written, by anyone: the stamp the save
     # line shows between saves (`SavedTicker`). Follows `updated_at` so
     # two tabs agree on it.
@@ -932,6 +940,90 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket
     |> assign(:parent_options, ContentTree.candidate_parents(kind, record, opts))
     |> assign(:parent_path, ContentTree.ancestors(kind, record, opts))
+  end
+
+  attr :choice, :string, default: nil
+  attr :error?, :boolean, default: false
+
+  # How much a published edit matters (`KilnCMS.CMS.Severity`), asked when the
+  # edit touches a field the site lists as safety-relevant. Empty until the
+  # editor picks; Publish stays off until then. Buttons, not radios, because
+  # this renders inside the editor's own form and a radio would post with it.
+  defp severity_ask(assigns) do
+    assigns = assign(assigns, :options, severity_options())
+
+    ~H"""
+    <div
+      id="severity-ask"
+      role="group"
+      aria-labelledby="severity-ask-title"
+      class="card card-pad border border-warning/40 bg-warning/5"
+    >
+      <h2 id="severity-ask-title" class="text-sm font-medium">
+        {gettext("How much does this change matter?")}
+      </h2>
+      <p class="mt-1 text-sm text-base-content/70">
+        {gettext(
+          "This edit touches a field your site marks as safety-relevant. Sites that read this content use your answer to decide how loudly to surface the change."
+        )}
+      </p>
+      <div class="mt-3 grid gap-2 sm:grid-cols-3">
+        <button
+          :for={{value, label, hint} <- @options}
+          id={"severity-#{value}"}
+          type="button"
+          phx-click="severity_choose"
+          phx-value-severity={value}
+          aria-pressed={to_string(@choice == value)}
+          class={[
+            "rounded-lg border p-3 text-left transition-colors duration-150",
+            if(@choice == value,
+              do: "border-primary bg-primary/10",
+              else: "border-base-content/15 hover:bg-base-200"
+            )
+          ]}
+        >
+          <span class="block text-sm font-medium">{label}</span>
+          <span class="mt-0.5 block text-xs text-base-content/70">{hint}</span>
+        </button>
+      </div>
+      <p
+        :if={@error?}
+        id="severity-ask-error"
+        role="alert"
+        class="mt-2 flex items-center gap-1 text-sm text-error"
+      >
+        <.icon name="hero-exclamation-circle" class="size-4" />
+        {gettext("Choose how much this change matters before publishing.")}
+      </p>
+      <div class="mt-3 flex justify-end gap-2">
+        <button type="button" phx-click="severity_cancel" class="btn btn-sm btn-default">
+          {gettext("Cancel")}
+        </button>
+        <button
+          id="severity-confirm"
+          type="button"
+          phx-click="severity_confirm"
+          phx-disable-with={gettext("Publishing…")}
+          disabled={is_nil(@choice)}
+          class="btn btn-sm btn-primary"
+        >
+          {gettext("Publish")}
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  defp severity_options do
+    [
+      {"critical", gettext("Critical"),
+       gettext("Sites should surface this prominently, like a safety or legal correction.")},
+      {"notable", gettext("Notable"),
+       gettext("Worth knowing about, but not urgent: a real correction or addition.")},
+      {"routine", gettext("Routine"),
+       gettext("Nothing to alert anyone about: wording, formatting, housekeeping.")}
+    ]
   end
 
   attr :keys, :list, required: true
@@ -1690,8 +1782,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp side({:current, _}), do: %{label: gettext("Current draft"), version_id: nil}
   defp side({:version, version}), do: %{label: version_label(version), version_id: version.id}
 
-  defp do_workflow(kind, verb, record, actor),
-    do: ContentTypes.transition(kind, verb, record, actor: actor, tenant: record.org_id)
+  defp do_workflow(kind, verb, record, actor, extra \\ []),
+    do:
+      ContentTypes.transition(
+        kind,
+        verb,
+        record,
+        Keyword.merge([actor: actor, tenant: record.org_id], extra)
+      )
 
   # Which half of a live document a form change touched (docs/working-copy.md):
   # the title or the body autosave into the working copy; every other field is
@@ -3423,6 +3521,38 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("conflict_cancel", _params, socket), do: {:noreply, close_conflicts(socket)}
 
+  # The change-severity question (`KilnCMS.CMS.Severity`). Choosing only records
+  # the answer; the action is the judge of whether it was needed, so a forged
+  # choice buys nothing. Only the three severities are taken, and only while the
+  # question is open.
+  def handle_event("severity_choose", %{"severity" => severity}, socket)
+      when is_binary(severity) do
+    chosen = Enum.find(Severity.severities(), &(Atom.to_string(&1) == severity))
+
+    if socket.assigns.may_write? and socket.assigns.severity_ask != nil and chosen != nil do
+      {:noreply, socket |> assign(:severity_choice, severity) |> assign(:severity_error?, false)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("severity_choose", _params, socket), do: {:noreply, socket}
+
+  def handle_event("severity_cancel", _params, socket), do: {:noreply, close_severity(socket)}
+
+  def handle_event("severity_confirm", _params, socket) do
+    case socket.assigns do
+      %{may_write?: true, severity_ask: %{} = ask, severity_choice: choice} when choice != nil ->
+        {:noreply, publish_asked(socket, ask)}
+
+      %{severity_ask: %{}} ->
+        {:noreply, assign(socket, :severity_error?, true)}
+
+      _closed ->
+        {:noreply, socket}
+    end
+  end
+
   def handle_event("conflict_publish", _params, socket) do
     keys = socket.assigns.publish_conflicts || []
     choices = Map.take(socket.assigns.conflict_choices, keys)
@@ -4680,18 +4810,28 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp publish_changes(socket, resolve) do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
+    # The marker makes the action itself the judge of whether a safety field
+    # changed: it refuses a publish that touches one without a severity, and
+    # the editor answers by asking (`severity_asked/3`).
     form =
-      AshPhoenix.Form.for_update(record, :publish_changes, actor: actor, tenant: record.org_id)
+      AshPhoenix.Form.for_update(record, :publish_changes,
+        actor: actor,
+        tenant: record.org_id,
+        context: %{require_change_severity: true}
+      )
 
     result =
       EditorTelemetry.span(:workflow, %{kind: kind, action: "publish_changes"}, fn ->
-        AshPhoenix.Form.submit(form, params: %{"resolve" => resolve})
+        AshPhoenix.Form.submit(form,
+          params: Map.merge(%{"resolve" => resolve}, severity_params(socket))
+        )
       end)
 
     case result do
       {:ok, updated} ->
         socket
         |> close_conflicts()
+        |> close_severity()
         |> assign_record(fetch!(kind, updated.id, actor, record.org_id))
         |> broadcast_saved()
         |> mark_saved()
@@ -4699,10 +4839,68 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> put_flash(:info, gettext("Published your changes."))
 
       {:error, form} ->
-        if stale_conflict?(form),
-          do: flag_conflict(socket),
-          else: put_flash(socket, :error, live_transition_error(form.source.errors))
+        cond do
+          stale_conflict?(form) ->
+            flag_conflict(socket)
+
+          severity_missing?(form.source.errors) ->
+            socket |> close_conflicts() |> severity_asked("publish_changes", resolve)
+
+          true ->
+            socket
+            |> close_severity()
+            |> put_flash(:error, live_transition_error(form.source.errors))
+        end
     end
+  end
+
+  # ── Change severity ─────────────────────────────────────────────────────────
+
+  defp severity_params(%{assigns: %{severity_choice: nil}}), do: %{}
+  defp severity_params(%{assigns: %{severity_choice: choice}}), do: %{"change_severity" => choice}
+
+  defp severity_missing?(errors) do
+    errors
+    |> List.wrap()
+    |> Enum.any?(fn error -> Map.get(error, :field) == :change_severity end)
+  end
+
+  # Opens the question for the publish that was refused. A choice already made
+  # (the publish was refused for it all the same) is kept and flagged, so the
+  # editor sees why nothing happened.
+  defp severity_asked(socket, action, resolve) do
+    socket
+    |> assign(:severity_ask, %{action: action, resolve: resolve})
+    |> assign(:severity_error?, socket.assigns.severity_ask != nil)
+  end
+
+  # The publish the question was holding, re-run with the answer: what is on
+  # screen is flushed first, as the button's own click would.
+  defp publish_asked(socket, %{action: "publish_changes", resolve: resolve}) do
+    params =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> inject_children(socket.assigns.block_children)
+      |> inject_rich_bodies(socket.assigns.rich_bodies)
+
+    case flush_working_copy(socket, params) do
+      {:ok, socket} -> publish_changes(socket, resolve)
+      {:error, socket} -> socket
+    end
+  end
+
+  defp publish_asked(socket, %{action: "publish"}) do
+    case settle_before_workflow(socket) do
+      {:ok, socket} -> transition(socket, "publish")
+      {:error, socket} -> socket
+    end
+  end
+
+  defp close_severity(socket) do
+    socket
+    |> assign(:severity_ask, nil)
+    |> assign(:severity_choice, nil)
+    |> assign(:severity_error?, false)
   end
 
   defp close_conflicts(socket) do
@@ -4772,13 +4970,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     result =
       EditorTelemetry.span(event, meta, fn ->
-        do_workflow(socket.assigns.kind, action, socket.assigns.record, socket.assigns.actor)
+        do_workflow(
+          socket.assigns.kind,
+          action,
+          socket.assigns.record,
+          socket.assigns.actor,
+          severity_opts(socket, action)
+        )
       end)
 
     case result do
       {:ok, record} ->
         socket
         |> cancel_autosave_timer()
+        |> close_severity()
         |> assign_record(record)
         |> broadcast_saved()
         |> mark_saved()
@@ -4788,9 +4993,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
       # Described by the error returned, not by the button pressed — see
       # WorkflowMessages; the content list shares the copy.
       {:error, error} ->
-        put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error(action, error))
+        if action == "publish" and severity_missing?(error_list(error)),
+          do: severity_asked(socket, "publish", nil),
+          else: put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error(action, error))
     end
   end
+
+  # A first publish asks for a severity when a listed field has content
+  # (`KilnCMS.CMS.Severity`); every other transition is not an edit.
+  defp severity_opts(socket, "publish"),
+    do: [params: severity_params(socket), context: %{require_change_severity: true}]
+
+  defp severity_opts(_socket, _action), do: []
+
+  defp error_list(error), do: error |> Ash.Error.to_error_class() |> Map.get(:errors, [])
 
   defp live_transition(socket, verb, flash) do
     %{kind: kind, record: record, actor: actor} = socket.assigns
@@ -6728,6 +6944,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
           keys={@publish_conflicts}
           choices={@conflict_choices}
           resource={@record.__struct__}
+        />
+
+        <.severity_ask
+          :if={@severity_ask}
+          choice={@severity_choice}
+          error?={@severity_error?}
         />
 
         <div class={[
