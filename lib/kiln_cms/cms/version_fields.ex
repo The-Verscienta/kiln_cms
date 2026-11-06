@@ -64,10 +64,13 @@ defmodule KilnCMS.CMS.VersionFields do
   # the editor actually came to read; restoring them would rewrite tenancy.
   # `path_alias_derived` (#1890) records who wrote `path_alias`; a restore
   # writes the alias back as an edit, which `Changes.TrackAliasDerivation`
-  # records as a person's.
+  # records as a person's. `created_via_key_*` / `on_behalf_of` (#2273) are
+  # provenance stamped once at create: a restore must not rewrite who made a
+  # draft, and no action accepts them.
   @bookkeeping ~w(
     org_id type_definition_id published_version_id
     archived_at deleted_at search_text path_alias_derived
+    created_via_key_id created_via_key_name on_behalf_of
   )a
 
   # The block tree gets its own section in the diff, keyed on stable block ids —

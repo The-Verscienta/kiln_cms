@@ -15,6 +15,14 @@ defmodule KilnCMS.Accounts.ApiKey do
       workflow transitions) as its owning user, within that user's role. Built
       for LLM / automation clients on the `/mcp` endpoint (see `docs/mcp.md`).
       Hard deletes stay forbidden for every key, whatever its scope.
+    * `:draft_write` — for a headless consumer's service (#2273): may create
+      drafts and edit **its own** drafts, and nothing else — no publishing,
+      submitting for review, deleting, media, or touching a document that is
+      live or someone else's. The bound is a policy on `Content`
+      (`KilnCMS.Accounts.Checks.DraftWriteKey`) that does not consult the
+      owner's role. Mint it on a viewer-tier service account with a lifetime
+      under `:draft_write_key_max_ttl_days` (default 30); both are enforced
+      here (`Validations.DraftWriteKey`).
 
   For a pure public-content integrator, mint a `:read` key on a dedicated
   `:viewer` account. For an LLM author, mint a `:read_write` key on an
@@ -55,6 +63,8 @@ defmodule KilnCMS.Accounts.ApiKey do
       primary? true
       description "Mint an API key. The plaintext is returned once in metadata."
       accept [:user_id, :name, :expires_at, :access]
+
+      validate KilnCMS.Accounts.Validations.DraftWriteKey
 
       change {AshAuthentication.Strategy.ApiKey.GenerateApiKey,
               prefix: @prefix, hash: :api_key_hash}
@@ -113,7 +123,7 @@ defmodule KilnCMS.Accounts.ApiKey do
       allow_nil? false
       public? true
       default :read
-      constraints one_of: [:read, :read_write]
+      constraints one_of: [:read, :read_write, :draft_write]
     end
 
     # Keys are always expiring — no immortal credentials.
