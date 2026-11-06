@@ -1,9 +1,9 @@
 # 0012. Headless services get a draft-write API-key scope, not OIDC pass-through
 
 - **Status** — accepted; unreleased. The scope and its policy, provenance on
-  token drafts and the surface audit (below) are in. The opt-in #2161 flag lands
-  in its own change; the rotation endpoint and flipping the #2161 default are
-  follow-ups.
+  token drafts and the surface audit (below) are in. The opt-in #2161 flag
+  shipped in its own change (#2297), and its default flipped on in the release
+  after (#FLIP_PR); the rotation endpoint is a follow-up.
 - **References** — [#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273);
   settles the direction of [#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161);
   builds on [#330](https://github.com/The-Verscienta/kiln_cms/issues/330) (the write API).
@@ -180,6 +180,19 @@ other `/api` routes; `Bearer kiln_…` with a bad key was already a `401` and is
 unchanged. The flag is its own change and its own pull request, separable from
 the scope. **Flip-default-next-release is a commitment:** the release after the
 one that ships the flag changes its default to on.
+
+**Where it stands.**
+
+| Release | `KILN_API_REJECT_INVALID_BEARER` | Change |
+|---|---|---|
+| The one containing #2297 | opt-in, default **off** | added, with an Added note announcing the flip |
+| The next one | default **on**; `false` restores the anonymous fallback | flipped by #FLIP_PR, with an Upgrade note |
+| The one after that | the escape hatch is **removed**; an unverifiable bearer is always a `401` | still to do |
+
+Removing the escape hatch is the same kind of commitment as the flip: delete the
+`reject_invalid_bearer` config and the `KILN_API_REJECT_INVALID_BEARER` read,
+keep the rejection, and say so under Upgrade notes. An operator who still has
+the variable set to `false` then gets the `401` like everyone else.
 
 ## Surface audit
 

@@ -28,7 +28,10 @@ and reads an optional bearer token (`load_from_bearer`). Anonymous requests are 
 supported — they simply run through the resource read policies, which already
 make **published content world-readable and everything else editor-only**. So an
 unauthenticated query can only ever see published content and world-readable
-taxonomy; there is nothing to leak.
+taxonomy; there is nothing to leak. Anonymous means *no* `Authorization` header:
+a bearer token that does not verify (garbled, expired, another instance's) is a
+`401` `invalid_token`, not an anonymous read (#2161; see
+[`KILN_API_REJECT_INVALID_BEARER`](environment-variables.md)).
 
 ## Design: delivery reads, authenticated writes
 

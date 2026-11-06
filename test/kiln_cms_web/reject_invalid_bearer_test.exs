@@ -1,9 +1,10 @@
 defmodule KilnCMSWeb.RejectInvalidBearerTest do
   @moduledoc """
-  `KILN_API_REJECT_INVALID_BEARER` (#2161): with the flag on, an
-  `Authorization: Bearer` value that verifies as nothing is a `401` in the
-  standard error envelope on `/api/json` and `/gql`; with it off it is served
-  as anonymous, as before.
+  `KILN_API_REJECT_INVALID_BEARER` (#2161): with the flag on (the default
+  since the release after it shipped, ADR 0012), an `Authorization: Bearer`
+  value that verifies as nothing is a `401` in the standard error envelope on
+  `/api/json` and `/gql`; set explicitly to `false` it is served as anonymous,
+  the escape hatch kept for one more release.
   """
   # async: false — flips process-global application env.
   use KilnCMSWeb.ConnCase, async: false
@@ -138,17 +139,34 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
     end
   end
 
-  describe "flag off (the default)" do
+  describe "default (unset)" do
+    test "unset config is on: an unverifiable bearer is a 401" do
+      Application.delete_env(:kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth)
+      assert KilnCMSWeb.Plugs.ApiKeyAuth.reject_invalid_bearer?()
+      assert_envelope(api_get("Bearer not.a.jwt"))
+      assert_envelope(gql("Bearer not.a.jwt"))
+    end
+
+    test "unset config still serves a request with no Authorization header" do
+      Application.delete_env(:kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth)
+      assert api_get(nil).status == 200
+    end
+  end
+
+  describe "flag explicitly off (the escape hatch)" do
+    setup do: flag(false)
+
     test "an unverifiable bearer is served as anonymous" do
-      flag(false)
+      refute KilnCMSWeb.Plugs.ApiKeyAuth.reject_invalid_bearer?()
       assert api_get("Bearer not.a.jwt").status == 200
       assert gql("Bearer not.a.jwt").status == 200
     end
 
-    test "unset config is off" do
-      Application.delete_env(:kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth)
-      refute KilnCMSWeb.Plugs.ApiKeyAuth.reject_invalid_bearer?()
-      assert api_get("Bearer not.a.jwt").status == 200
+    # Served as anonymous, but it carried a credential: never publicly cached.
+    test "the anonymous fallback is still private, no-store" do
+      conn = api_get("Bearer not.a.jwt")
+      assert get_resp_header(conn, "cache-control") == ["private, no-store"]
+      assert get_resp_header(conn, "surrogate-key") == []
     end
   end
 end

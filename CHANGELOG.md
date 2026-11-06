@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **API consumers: a stale, expired or garbled `Authorization: Bearer` JWT is now a 401 (`invalid_token`), not anonymous
+  data. Fix the client; `KILN_API_REJECT_INVALID_BEARER=false` restores the old fallback for this release only.**
+  ([#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161) · [long form](docs/changelog/unreleased.md#reject-invalid-bearer-default-on))
+
 - **Overlays: run `mix ash.codegen`. Content tables gain a generated `name_lexemes`
   column, filled for every row by the migration (a table rewrite). Nothing else to run.**
   ([long form](docs/changelog/unreleased.md#search-name-lexemes-upgrade))
