@@ -54,7 +54,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_UPDATE_REPO KILN_UPDATE_RELEASES_URL KILN_UPDATE_FEED_URL KILN_PIN_PATH
             MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
             KILN_PROVENANCE_ENABLED TENANT_STRICT_HOST API_DOCS_ENABLED
-            GRAPHQL_INTROSPECTION_ENABLED
+            GRAPHQL_INTROSPECTION_ENABLED KILN_API_REJECT_INVALID_BEARER
             BACKUP_ENABLED OEMBED_ENABLED
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
@@ -313,6 +313,34 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
     test "an unrecognized value writes nothing rather than reading as on" do
       assert visual_editing("enabled") == nil
+    end
+  end
+
+  describe "KILN_API_REJECT_INVALID_BEARER" do
+    defp reject_bearer(value) do
+      %{"KILN_API_REJECT_INVALID_BEARER" => value}
+      |> eval()
+      |> get_in([:kiln_cms, :reject_invalid_bearer])
+    end
+
+    test "unset writes nothing, leaving config.exs's `false` in force" do
+      assert reject_bearer(nil) == nil
+    end
+
+    test "on-spellings turn the rejection on" do
+      for value <- ["true", "True", " 1 ", "yes", "On"] do
+        assert reject_bearer(value) == true
+      end
+    end
+
+    test "off-spellings write an explicit false" do
+      for value <- ["false", "0", "no", "OFF"] do
+        assert reject_bearer(value) == false
+      end
+    end
+
+    test "an unrecognized value writes nothing rather than reading as on" do
+      assert reject_bearer("enabled") == nil
     end
   end
 

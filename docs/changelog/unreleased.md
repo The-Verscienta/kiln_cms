@@ -53,6 +53,37 @@ carries the reasoning.
     new settings table. Overlays run `mix ash.codegen` for their own content
     types. Until a site lists a field, nothing changes.
 
+<a id="reject-invalid-bearer"></a>
+
+- **A bearer token that does not authenticate can now be answered with `401`
+  instead of an anonymous `200` (`KILN_API_REJECT_INVALID_BEARER`, off by
+  default).** When a JWT expired, was revoked, is malformed, or belongs to a
+  deleted user, Kiln drops the actor and serves the request as anonymous: a
+  `200` with the published subset. A client holding a stale token never learns
+  it has been signed out, and silently shows public content where it expected
+  drafts. With the variable on, a request whose `Authorization` scheme is
+  `Bearer` (any case; an empty value counts) and that resolves no user is
+  refused on `/api/*` and `/gql` with `401`, `www-authenticate: Bearer`,
+  `cache-control: private, no-store` and `vary: authorization`. The message is
+  generic and does not say why the token failed. JSON:API and the other REST
+  routes use Kiln's error envelope; `/gql` answers
+  `{"errors": [{"message": ..., "extensions": {"code": "unauthenticated"}}]}`.
+  No `Authorization` header, or another scheme such as `Basic`, is unaffected.
+  API keys (`Bearer kiln_...`) already answered `401` when invalid and still do.
+  - **Measure first.** With the variable off, each request that the flag
+    would refuse emits the telemetry event
+    `[:kiln_cms, :api, :invalid_bearer]` (measurement `count: 1`, metadata
+    `pipeline: :api | :graphql` and `enforced: boolean`). Attach a handler or
+    watch your metrics to count the callers before enabling it.
+  - **Upgrade.** Nothing changes on upgrade: the default is off, there is no
+    migration, and rolling the pin back is safe. The default is planned to
+    become on in a later release, at which point a client that sends a stale
+    token to public routes will see `401`; have it drop the header or sign in
+    again. Set `KILN_API_REJECT_INVALID_BEARER=true` (see
+    [environment variables](../environment-variables.md)) to try it now.
+    Overlays can reuse the detection through
+    `KilnCMSWeb.Plugs.RejectInvalidBearer.invalid_bearer?/1`.
+
 ## Changed
 
 <a id="search-leg-performance"></a>

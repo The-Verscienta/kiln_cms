@@ -126,6 +126,28 @@ Authorization: Bearer <token>
 The same token authenticates GraphQL (`POST /gql` and its WebSocket) — see the
 `bearerAuth` security scheme in the OpenAPI spec.
 
+### Expired or invalid bearer tokens
+
+By default a request whose `Authorization: Bearer <token>` does not verify
+(the JWT expired, was revoked or is malformed, or its user was deleted) is
+served as an **anonymous** request: a `200` with the published subset. A client
+holding a stale token is never told it has been signed out.
+
+An operator can switch that to a refusal with
+`KILN_API_REJECT_INVALID_BEARER=true` (see
+[environment variables](environment-variables.md)). Then, on `/api/*` and
+`/gql`, such a request gets `401` with `www-authenticate: Bearer`,
+`cache-control: private, no-store` and `vary: authorization`. The body is
+generic and does not say why the token failed. JSON:API and the other REST
+routes use Kiln's error envelope; `/gql` answers
+`{"errors": [{"message": "...", "extensions": {"code": "unauthenticated"}}]}`.
+A request with no `Authorization` header, or with another scheme such as
+`Basic`, is unaffected. A client should treat the `401` as "sign in again", or
+drop the header to read public content.
+
+The default is planned to become on in a later release, so a client that sends
+a possibly stale token to public routes should handle the `401` now.
+
 ### Obtaining a token
 
 Tokens are AshAuthentication user JWTs. Headless clients get one by posting

@@ -66,6 +66,10 @@ Every summary line below that was shortened links to its own entry there.
   The editor asks before publishing; API writes default to notable; read back as `latest_edit_severity` / `latest_edit_at`.
   ([long form](docs/changelog/unreleased.md#change-severity))
 
+- **Opt-in `401` for an expired, revoked or malformed bearer token on `/api/*` and `/gql` (`KILN_API_REJECT_INVALID_BEARER`, off by default).**
+  Today such a request is served as anonymous; the default is planned to flip to on in a later release.
+  ([long form](docs/changelog/unreleased.md#reject-invalid-bearer))
+
 ### Changed
 
 - **Global search on a large catalogue: the alias and compound legs prefilter on stored
