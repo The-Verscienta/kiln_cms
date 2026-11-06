@@ -2188,8 +2188,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Open the media browser to fill a specific existing image block, addressed by
   # its stable id — the block is looked up again at pick time, so a reorder or
   # removal in between can't redirect the image to the wrong block (audit T5.1).
-  def handle_event("open_picker", %{"bid" => bid}, socket) when is_binary(bid) and bid != "",
-    do: {:noreply, assign(socket, :picking, {:block, bid})}
+  #
+  # Neither opens for a block whose image is shared across locales on a
+  # translation (#2270, #1896): the disabled button is not a boundary, and the
+  # save would be refused.
+  def handle_event("open_picker", %{"bid" => bid}, socket) when is_binary(bid) and bid != "" do
+    if block_fields_locked?(socket, bid, [:media_id, :url]),
+      do: {:noreply, socket},
+      else: {:noreply, assign(socket, :picking, {:block, bid})}
+  end
 
   def handle_event("open_picker", _params, socket), do: {:noreply, socket}
 
@@ -3358,7 +3365,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `@file_picking` machinery.
   def handle_event("open_av_picker", %{"bid" => bid, "field" => field}, socket)
       when is_binary(bid) and bid != "" and field in ~w(media poster captions) do
-    {:noreply, assign(socket, :av_picking, {bid, field})}
+    if block_fields_locked?(socket, bid, av_media_fields(field)),
+      do: {:noreply, socket},
+      else: {:noreply, assign(socket, :av_picking, {bid, field})}
   end
 
   def handle_event("open_av_picker", _params, socket), do: {:noreply, socket}
@@ -3389,6 +3398,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # (a search result outside the mounted window lives only in `@picker_av`).
   def handle_event("pick_av", %{"id" => media_id}, socket) when is_binary(media_id) do
     with {bid, field} <- socket.assigns.av_picking,
+         false <- block_fields_locked?(socket, bid, av_media_fields(field)),
          {:ok, item} <-
            CMS.get_media_item(media_id,
              actor: socket.assigns.actor,
@@ -3981,7 +3991,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
     mark_dirty(socket)
   end
 
-  defp apply_pick(socket, {:block, bid}, media_id, url) do
+  # Not into a block whose image is shared across locales, on a translation
+  # (#2270): the save would be refused, so the pick is not staged.
+  defp apply_pick(socket, {:block, bid} = target, media_id, url) do
+    if block_fields_locked?(socket, bid, [:media_id, :url]),
+      do: socket,
+      else: apply_block_pick(socket, target, media_id, url)
+  end
+
+  defp apply_block_pick(socket, {:block, bid}, media_id, url) do
     case block_index_by_id(socket.assigns.form, bid) do
       # The target block is gone (removed by a co-editor) — drop the pick.
       nil ->
@@ -6402,6 +6420,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp av_picker_kind({_bid, "captions"}), do: :captions
   defp av_picker_kind(_target), do: :av
 
+  # The block fields each A/V pick writes, for the shared-field check.
+  defp av_media_fields("media"), do: [:media_id, :url]
+  defp av_media_fields("poster"), do: [:poster_media_id, :poster_url]
+  defp av_media_fields("captions"), do: [:captions_media_id]
+
+  # Whether any of `names` is a field of block `bid` that this type shares
+  # across locales, on a translation (#2270): read-only in the editor, and a
+  # write to it is refused (#1896). Asked again here because a disabled
+  # button is not a boundary.
+  defp block_fields_locked?(socket, bid, names) do
+    with %{} = loc <- socket.assigns[:localization],
+         module when not is_nil(module) <- block_module_by_id(socket.assigns.form, bid) do
+      Enum.any?(names, &KilnCMSWeb.ContentEditor.Localization.locked?(loc, {:block, module, &1}))
+    else
+      _none -> false
+    end
+  end
+
   # The block fields each pick writes. `duration_seconds` rides along with the
   # media itself (it feeds the JSON-LD `duration` and the editor's summary
   # line) but is NOT written for the poster or the track — the poster's own
@@ -7347,32 +7383,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           conflict={@conflict}
                         />
                       </div>
-                      <div :if={block_type_string(bf) == "image"} class="space-y-2">
-                        <img
-                          :if={safe_preview_src(bf[:url].value)}
-                          src={safe_preview_src(bf[:url].value)}
-                          alt=""
-                          class="max-h-40 rounded border border-base-content/10"
-                        />
-                        <input type="hidden" name={bf[:media_id].name} value={media_id_of(bf)} />
-                        <div class="flex items-center gap-2">
-                          <button
-                            type="button"
-                            phx-click="open_picker"
-                            phx-value-bid={bf[:id].value}
-                            class="btn btn-sm btn-default"
-                          >
-                            <.icon name="hero-photo" class="size-4" />{gettext("Choose from library")}
-                          </button>
-                        </div>
-                        <.input
-                          field={bf[:url]}
-                          label={gettext("Image URL")}
-                          placeholder={gettext("…or paste a URL")}
-                        />
-                        <.input field={bf[:alt]} label={gettext("Alt text")} />
-                        <.input field={bf[:caption]} label={gettext("Caption")} />
-                      </div>
+                      <.image_editor
+                        :if={block_type_string(bf) == "image"}
+                        bf={bf}
+                        localization={@localization}
+                        kind={@kind}
+                      />
                       <div :if={block_type_string(bf) == "file"} class="space-y-2">
                         <input type="hidden" name={bf[:media_id].name} value={media_id_of(bf)} />
                         <input type="hidden" name={bf[:filename].name} value={bf[:filename].value} />
@@ -7428,8 +7444,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           )}
                         </p>
                       </div>
-                      <.video_editor :if={block_type_string(bf) == "video"} bf={bf} />
-                      <.audio_editor :if={block_type_string(bf) == "audio"} bf={bf} />
+                      <.video_editor
+                        :if={block_type_string(bf) == "video"}
+                        bf={bf}
+                        localization={@localization}
+                        kind={@kind}
+                      />
+                      <.audio_editor
+                        :if={block_type_string(bf) == "audio"}
+                        bf={bf}
+                        localization={@localization}
+                        kind={@kind}
+                      />
                       <.gallery_editor :if={block_type_string(bf) == "gallery"} bf={bf} />
                       <.columns_editor
                         :if={block_type_string(bf) == "columns"}
