@@ -40,9 +40,26 @@ defmodule KilnCMSWeb.Plugs.RejectInvalidBearer do
   refuse before turning it on.
 
     * `[:kiln_cms, :api, :invalid_bearer]`, measurements `%{count: 1}`,
-      metadata `%{pipeline: :api | :graphql, enforced: boolean()}`
+      metadata `%{pipeline: :api | :graphql, enforced: boolean(),
+      surface: :json_api | :graphql | :media | :other, read?: boolean(),
+      reason: :expired | :malformed | :invalid}`
 
   With the flag on the event is emitted too, with `enforced: true`.
+  `read?` is a request that reads (`GET`/`HEAD`, or anything on `/gql`), the
+  nearest cheap proxy for "a public route that never needed the token".
+  `reason` is read from the unverified JWT: `:malformed` is not a JWT,
+  `:expired` has an `exp` in the past, `:invalid` is everything else (revoked,
+  deleted user, bad signature). It is never sent to the client, and the event
+  carries no token, user or address.
+
+  ## Staleness header (flag off)
+
+  With the flag off the request is still served, but the response carries
+  `x-kiln-token-status: invalid`, so a client can notice that its token no
+  longer authenticates (ADR 0013). The value is one fixed word: it does not say
+  why. Such a request presents a credential, so `PublicCache` already treats it
+  as non-anonymous and varies on `authorization`; the header never reaches an
+  anonymous cache entry.
 
   `invalid_bearer?/1` exposes the detection for other plugs that need the same
   verdict.
@@ -70,10 +87,13 @@ defmodule KilnCMSWeb.Plugs.RejectInvalidBearer do
 
       :telemetry.execute([:kiln_cms, :api, :invalid_bearer], %{count: 1}, %{
         pipeline: pipeline,
-        enforced: enforced?
+        enforced: enforced?,
+        surface: surface(conn, pipeline),
+        read?: read?(conn, pipeline),
+        reason: reason(conn)
       })
 
-      if enforced?, do: reject(conn, pipeline), else: conn
+      if enforced?, do: reject(conn, pipeline), else: flag_stale(conn)
     else
       conn
     end
@@ -103,6 +123,50 @@ defmodule KilnCMSWeb.Plugs.RejectInvalidBearer do
       |> hd()
       |> bearer_scheme?()
     end)
+  end
+
+  defp flag_stale(conn) do
+    conn
+    |> put_resp_header("x-kiln-token-status", "invalid")
+    |> PublicCache.put_vary(["authorization"])
+  end
+
+  defp surface(_conn, :graphql), do: :graphql
+
+  defp surface(%Plug.Conn{path_info: ["api", "json" | _]}, :api), do: :json_api
+  defp surface(%Plug.Conn{path_info: ["api", "media" | _]}, :api), do: :media
+  defp surface(_conn, :api), do: :other
+
+  defp read?(_conn, :graphql), do: true
+  defp read?(%Plug.Conn{method: method}, :api), do: method in ["GET", "HEAD"]
+
+  # Classified from the unverified payload, for telemetry only.
+  defp reason(conn) do
+    token = bearer_token(conn)
+
+    case token && Joken.peek_claims(token) do
+      {:ok, %{"exp" => exp}} when is_number(exp) ->
+        if exp < System.os_time(:second), do: :expired, else: :invalid
+
+      {:ok, _claims} ->
+        :invalid
+
+      _ ->
+        :malformed
+    end
+  end
+
+  defp bearer_token(conn) do
+    conn
+    |> get_req_header("authorization")
+    |> Enum.find_value(&token_of/1)
+  end
+
+  defp token_of(value) do
+    case String.split(String.trim_leading(value), ~r/\s+/, parts: 2) do
+      [scheme, token] -> if bearer_scheme?(scheme), do: String.trim(token)
+      _ -> nil
+    end
   end
 
   defp bearer_scheme?(scheme), do: String.downcase(scheme) == "bearer"

@@ -232,6 +232,43 @@ defmodule KilnCMSWeb.Plugs.RejectInvalidBearerTest do
       assert_receive {@event, %{count: 1}, %{pipeline: :api, enforced: false}}
     end
 
+    test "the response says the token is stale, in one fixed word", %{conn: conn} do
+      garbage = conn |> authorized("Bearer garbage") |> get(~p"/api/json/posts")
+      expired = jwt!(user!(), token_lifetime: {-1, :minutes})
+      stale = conn |> authorized("Bearer #{expired}") |> get(~p"/api/json/posts")
+
+      assert get_resp_header(garbage, "x-kiln-token-status") == ["invalid"]
+      assert get_resp_header(stale, "x-kiln-token-status") == ["invalid"]
+      assert "authorization" in vary(stale)
+    end
+
+    test "no header for anonymous, valid or non-bearer requests", %{conn: conn} do
+      anon = get(conn, ~p"/api/json/posts")
+      ok = conn |> authorized("Bearer #{jwt!(user!())}") |> get(~p"/api/json/posts")
+      basic = conn |> authorized("Basic abc") |> get(~p"/api/json/posts")
+
+      for c <- [anon, ok, basic], do: assert(get_resp_header(c, "x-kiln-token-status") == [])
+    end
+
+    test "the event classifies the reason, surface and read-ness", %{conn: conn} do
+      attach()
+      expired = jwt!(user!(), token_lifetime: {-1, :minutes})
+
+      conn |> authorized("Bearer garbage") |> get(~p"/api/json/posts")
+      assert_receive {@event, _, %{reason: :malformed, surface: :json_api, read?: true}}
+
+      conn |> authorized("Bearer #{expired}") |> get(~p"/api/json/posts")
+      assert_receive {@event, _, %{reason: :expired, surface: :json_api, read?: true}}
+
+      revoked = jwt!(user!())
+      :ok = AshAuthentication.TokenResource.revoke(Token, revoked)
+      conn |> authorized("Bearer #{revoked}") |> get(~p"/api/json/posts")
+      assert_receive {@event, _, %{reason: :invalid}}
+
+      conn |> authorized("Bearer garbage") |> gql()
+      assert_receive {@event, _, %{surface: :graphql, read?: true}}
+    end
+
     test "no event for a request that is not an invalid bearer", %{conn: conn} do
       attach()
       get(conn, ~p"/api/json/posts")

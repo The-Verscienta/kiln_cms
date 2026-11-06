@@ -1,7 +1,7 @@
 # 0013. An unverifiable bearer token is refused only after the telemetry says it is safe
 
-- **Status** — accepted (2026-11-06): the in-band header first (E), then the
-  flip (A) only if the evidence clears the gate; the versioning reading and the
+- **Status** — accepted (2026-11-06): the in-band header first (E, built in the
+  stacked change on #2298), then the flip (A) only if the evidence clears the gate; the versioning reading and the
   14-day / 0.1% gate below are still to be confirmed. Nothing here changes a
   default. The opt-in flag itself is in [#2298](https://github.com/The-Verscienta/kiln_cms/pull/2298)
   (default off); this record decides when, and whether, that default flips.
@@ -90,13 +90,16 @@ The current event is a bare counter with `pipeline` and `enforced` metadata. It
 cannot tell a stale token from garbage, nor name the route or client. Before the
 flip is decided:
 
-1. **Enrich the event** (additive, no behaviour change): add the request path
-   group, whether the route is public-readable, and a coarse reason
-   (`expired` / `revoked` / `malformed`), and nothing user-identifying.
+1. **Enrich the event** (additive, no behaviour change; built with the header):
+   `surface` (`json_api` / `graphql` / `media` / `other`), `read?` (a `GET`/`HEAD`,
+   or anything on `/gql`: whether a route is public is a policy question the plug
+   cannot answer, so this is the nearest cheap proxy), and `reason` (`expired` /
+   `malformed` / `invalid`; revoked and deleted-user cannot be told from a bad
+   signature without a lookup), and nothing user-identifying.
 2. **Collect** on kilncms.dev and every Verscienta site that runs #2298:
    at least 14 days, covering a release cycle and any scheduled build.
 3. **Threshold (proposed):** the flip is justified only if invalid-bearer
-   requests to *public-readable* routes are under 0.1% of API requests and no
+   requests with `read?: true` are under 0.1% of API requests and no
    single client accounts for most of them, or each such client has been fixed.
    "Zero" is not required: a browser holding an expired JWT will always show
    some, and those clients should be told.

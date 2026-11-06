@@ -73,8 +73,17 @@ carries the reasoning.
   - **Measure first.** With the variable off, each request that the flag
     would refuse emits the telemetry event
     `[:kiln_cms, :api, :invalid_bearer]` (measurement `count: 1`, metadata
-    `pipeline: :api | :graphql` and `enforced: boolean`). Attach a handler or
-    watch your metrics to count the callers before enabling it.
+    `pipeline: :api | :graphql`, `enforced: boolean`, `surface`
+    (`:json_api | :graphql | :media | :other`), `read?` (a `GET`/`HEAD`, or
+    anything on `/gql`) and `reason` (`:expired | :malformed | :invalid`, read
+    from the unverified token and never sent to the client). Attach a handler
+    or watch your metrics to count the callers before enabling it.
+  - **Staleness header.** With the variable off, such a request is still
+    served as anonymous but the response carries `x-kiln-token-status: invalid`
+    (one fixed word, and `vary: authorization`), so a client can notice that
+    its token no longer authenticates. Additive; no client needs to change.
+    The decision on flipping the default is
+    [ADR 0013](../decisions/0013-an-unverifiable-bearer-token-is-refused-only-after-the-telemetry-says-it-is-safe.md).
   - **Upgrade.** Nothing changes on upgrade: the default is off, there is no
     migration, and rolling the pin back is safe. The default is planned to
     become on in a later release, at which point a client that sends a stale

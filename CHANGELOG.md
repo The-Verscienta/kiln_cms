@@ -67,7 +67,7 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#change-severity))
 
 - **Opt-in `401` for an expired, revoked or malformed bearer token on `/api/*` and `/gql` (`KILN_API_REJECT_INVALID_BEARER`, off by default).**
-  Today such a request is served as anonymous; the default is planned to flip to on in a later release.
+  With the flag off such a request is served as anonymous, with an `x-kiln-token-status: invalid` response header and richer telemetry; the default may flip later only if the telemetry says it is safe (ADR 0013).
   ([long form](docs/changelog/unreleased.md#reject-invalid-bearer))
 
 ### Changed

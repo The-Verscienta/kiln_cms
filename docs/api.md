@@ -145,7 +145,12 @@ A request with no `Authorization` header, or with another scheme such as
 `Basic`, is unaffected. A client should treat the `401` as "sign in again", or
 drop the header to read public content.
 
-The default is planned to become on in a later release, so a client that sends
+With the flag off, a stale token is still served as anonymous, but the response
+carries `x-kiln-token-status: invalid` so a client can tell it is signed out
+without a hard failure.
+
+The default may become on in a later release, only if telemetry shows it is safe
+(see [ADR 0013](decisions/0013-an-unverifiable-bearer-token-is-refused-only-after-the-telemetry-says-it-is-safe.md)), so a client that sends
 a possibly stale token to public routes should handle the `401` now.
 
 ### Obtaining a token
