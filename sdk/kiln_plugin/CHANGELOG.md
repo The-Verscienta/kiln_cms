@@ -17,7 +17,7 @@ Releases are tagged `kiln_plugin-vX.Y.Z` in the
 
 ### Added
 
-- **`Kiln.FieldType.graphql_kind/1`, an optional callback naming how the
+- **`c:Kiln.FieldType.graphql_kind/1`, an optional callback naming how the
   GraphQL API types a field's value (kiln_cms#2290).** Return `:string`,
   `:int`, `:float`, `:boolean`, `:date`, `:datetime` or `:json` for the value
   `cast/2` stores. The core serves it through the matching typed reader
