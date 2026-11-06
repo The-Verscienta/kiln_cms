@@ -22,6 +22,23 @@ defmodule KilnCMS.SchemaExport.TypeScript do
 
   alias KilnCMS.SchemaExport.Walk
 
+  # Reserved GraphQL names a custom field's alias must not shadow: the document's
+  # own properties (camelized by AshGraphql) and the typed readers themselves.
+  @reserved_aliases ~w(id title slug excerpt blocks type locale status audience customFields
+                       customFieldsPlain customFieldsPortable fields typeName inheritedFields
+                       seoTitle seoDescription seoKeywords pathAlias seoImage canonicalUrl
+                       state published publishedAt insertedAt updatedAt references referencedBy
+                       customString customInt customFloat customBoolean customDate customDateTime)
+
+  @scalar_accessors %{
+    "string" => {"customString", "string"},
+    "int" => {"customInt", "number"},
+    "float" => {"customFloat", "number"},
+    "boolean" => {"customBoolean", "boolean"},
+    "date" => {"customDate", "string"},
+    "datetime" => {"customDateTime", "string"}
+  }
+
   @doc """
   Emit TypeScript declarations for a schema document from
   `KilnCMS.SchemaExport.json_schema/1`.
@@ -42,9 +59,238 @@ defmodule KilnCMS.SchemaExport.TypeScript do
     |> Enum.join("\n")
   end
 
+  @doc """
+  `emit/1` plus a GraphQL section (#2290): per content type, a `Fields` type and
+  a ready GraphQL fragment for the site's custom fields.
+
+  The document must come from `KilnCMS.SchemaExport.json_schema(graphql: true)`:
+  the accessor chosen for a field is the `x-kiln-graphql-kind` annotation, i.e.
+  what `KilnCMS.CMS.FieldKind` decides, not an inference from the JSON type. A
+  document without the annotations gets no GraphQL section.
+
+  The output is a `.ts` module, not a `.d.ts`: the fragments are values.
+  """
+  @spec emit_graphql(map()) :: String.t()
+  def emit_graphql(document) do
+    model = Walk.model(document)
+
+    sections =
+      model.documents
+      |> Enum.filter(& &1.graphql)
+      |> Enum.map(
+        &{&1, custom_fields(Enum.find(elem(&1.shape, 1), fn f -> f.key == "custom_fields" end))}
+      )
+      # A type with no (public) custom field has nothing to select, and an empty
+      # selection set is not valid GraphQL.
+      |> Enum.reject(fn {_decl, custom} -> custom == [] end)
+      |> Enum.map(fn {decl, custom} -> graphql_type(decl, custom) end)
+
+    if sections == [] do
+      emit(document)
+    else
+      emit(document) <> "\n" <> graphql_prelude() <> "\n" <> Enum.join(sections, "\n")
+    end
+  end
+
+  defp graphql_prelude do
+    """
+    // -- GraphQL custom fields #{String.duplicate("-", 40)}
+    //
+    // The GraphQL schema is the same for every site; a custom field cannot be a
+    // GraphQL field of its own, so it is read through an *accessor* typed by
+    // the field's kind. For each content type this section has:
+    //
+    //   * `<Type>CustomFields`         the shape of the fragment's result;
+    //   * `<Type>CustomFieldsFragment` a named GraphQL fragment to spread.
+    //
+    // A string, integer, float, boolean, date or datetime field is read as an
+    // alias of its accessor (`price: customFloat(name: "price")`) and is typed
+    // here. Every other kind (list, group, reference, media, geolocation, json) has no scalar
+    // accessor, so those names are read together through
+    // `fields(names: [...])`, which returns `CustomFieldValue`s; narrow them on
+    // `__typename`. Values arrive under per-kind aliases (`asString`, `asInt`,
+    // ...) because GraphQL forbids one response key with several types. The
+    // fragment goes one level into lists and groups.
+    //
+    // A field that is unknown, deleted, private to the reader or of another
+    // kind than the accessor is `null` (or absent from `fields`), so the
+    // server never rejects a stale fragment. A dynamic content type is an
+    // `Entry`: select its fragment on `publishedEntries(filter: {typeName: ...})`.
+    // The names here are the site's definitions *now*: regenerate after an admin
+    // changes them. Filtering and sorting still use `customFilter`/`customSort`.
+
+    /** A custom-field value as `fields(names:)` returns it. */
+    export type KilnCustomFieldValue =
+      | { __typename: "StringValue"; name: string; asString: string }
+      | { __typename: "IntValue"; name: string; asInt: number }
+      | { __typename: "FloatValue"; name: string; asFloat: number }
+      | { __typename: "BooleanValue"; name: string; asBoolean: boolean }
+      | { __typename: "DateValue"; name: string; asDate: string }
+      | { __typename: "DateTimeValue"; name: string; asDateTime: string }
+      | {
+          __typename: "GeolocationValue";
+          name: string;
+          lat: number;
+          lng: number;
+          label: string | null;
+          zoom: number | null;
+        }
+      | { __typename: "JsonValue"; name: string; asJson: string | null }
+      | { __typename: "ReferenceValue"; name: string; ids: string[] }
+      | {
+          __typename: "MediaValue";
+          name: string;
+          id: string;
+          url: string | null;
+          alt: string | null;
+          width: number | null;
+          height: number | null;
+          mimeType: string | null;
+          focal: { x: number; y: number } | null;
+          variants: Array<{
+            label: string | null;
+            width: number | null;
+            height: number | null;
+            format: string | null;
+            url: string | null;
+            bytes: number | null;
+            cropped: boolean | null;
+          }>;
+        }
+      | { __typename: "ListValue"; name: string; items: KilnCustomFieldValue[] }
+      | { __typename: "GroupValue"; name: string; fields: KilnCustomFieldValue[] };
+    """
+  end
+
+  defp graphql_type(decl, custom) do
+    {scalars, others} =
+      Enum.split_with(custom, fn field -> Map.has_key?(@scalar_accessors, field.graphql_kind) end)
+
+    scalars = put_aliases(scalars)
+
+    base = decl.name |> String.replace_prefix("content_", "") |> pascal()
+    on = decl.graphql["type"]
+    name = base <> "CustomFields"
+
+    members =
+      Enum.map(scalars, fn field ->
+        {_accessor, ts} = Map.fetch!(@scalar_accessors, field.graphql_kind)
+        "  #{property_key(field.alias)}: #{ts} | null;"
+      end) ++
+        if others == [], do: [], else: ["  fields: KilnCustomFieldValue[];"]
+
+    selection =
+      Enum.map(scalars, fn field ->
+        {accessor, _ts} = Map.fetch!(@scalar_accessors, field.graphql_kind)
+        "  #{field.alias}: #{accessor}(name: #{inspect(field.key)})"
+      end) ++ fields_selection(others)
+
+    """
+    #{graphql_comment(decl, on)}export interface #{name} {
+    #{Enum.join(members, "\n")}
+    }
+
+    export const #{name}Fragment = `
+    fragment #{name} on #{on} {
+    #{Enum.join(selection, "\n")}
+    }
+    `;
+    """
+  end
+
+  defp graphql_comment(%{graphql: %{"type_name" => type_name}}, on),
+    do: "/** On `#{on}` with `typeName: #{literal(type_name)}`. */\n"
+
+  defp graphql_comment(_decl, on), do: "/** On `#{on}`. */\n"
+
+  defp custom_fields(nil), do: []
+
+  defp custom_fields(%{type: {:object, fields, _open?}}),
+    do: Enum.filter(fields, & &1.graphql_kind)
+
+  defp custom_fields(_other), do: []
+
+  # Aliases must be unique within one fragment: `Macro.camelize/1` is not
+  # injective (`foo_bar` and `foo__bar` both give `fooBar`), so a taken alias
+  # gets a numeric suffix.
+  defp put_aliases(fields) do
+    {fields, _taken} =
+      Enum.map_reduce(fields, MapSet.new(), fn field, taken ->
+        base = field_alias(field.key)
+
+        alias_name =
+          Enum.find(
+            [base | Enum.map(2..1000, &"#{base}#{&1}")],
+            &(not MapSet.member?(taken, &1))
+          )
+
+        {Map.put(field, :alias, alias_name), MapSet.put(taken, alias_name)}
+      end)
+
+    fields
+  end
+
+  # `custom_fields` is a nullable-free inline object in the walked model; every
+  # field name is `[a-z][a-z0-9_]*` (`FieldDefinition`), a valid GraphQL name.
+  defp field_alias(key) do
+    <<first::utf8, rest::binary>> = Macro.camelize(key)
+    camel = String.downcase(<<first::utf8>>) <> rest
+
+    if camel in @reserved_aliases, do: "custom" <> Macro.camelize(key), else: camel
+  end
+
+  defp fields_selection([]), do: []
+
+  defp fields_selection(others) do
+    names = Enum.map_join(others, ", ", &inspect(&1.key))
+
+    ["  fields(names: [#{names}]) {", value_selection(2, true), "  }"]
+  end
+
+  # The selection under `fields(names:)`, as lines already indented. One level
+  # into lists and groups; a row of a repeating group is a `GroupValue` item.
+  defp value_selection(indent, true) do
+    items = ["... on ListValue {", "  items {"] ++ indent_lines(value_parts() ++ [group_row()], 4)
+    group = ["... on GroupValue {", "  fields {"] ++ indent_lines(value_parts(), 4)
+
+    (value_parts() ++ items ++ ["  }", "}"] ++ group ++ ["  }", "}"])
+    |> indent_lines(indent * 2)
+    |> Enum.join("\n")
+  end
+
+  defp indent_lines(lines, n), do: Enum.map(lines, &(String.duplicate(" ", n) <> &1))
+
+  defp value_parts do
+    [
+      "__typename",
+      "name"
+    ] ++ scalar_parts() ++ ["... on ReferenceValue { ids }", media_part()]
+  end
+
+  defp scalar_parts do
+    [
+      "... on StringValue { asString: value }",
+      "... on IntValue { asInt: value }",
+      "... on FloatValue { asFloat: value }",
+      "... on BooleanValue { asBoolean: value }",
+      "... on DateValue { asDate: value }",
+      "... on DateTimeValue { asDateTime: value }",
+      "... on GeolocationValue { lat lng label zoom }",
+      "... on JsonValue { asJson: value }"
+    ]
+  end
+
+  defp media_part,
+    do:
+      "... on MediaValue { id url alt width height mimeType focal { x y } " <>
+        "variants { label width height format url bytes cropped } }"
+
+  defp group_row,
+    do: "... on GroupValue { fields { __typename name #{Enum.join(scalar_parts(), " ")} } }"
+
   defp header(model) do
     """
-    // Generated by `mix kiln.export.schema --format ts`. Do not edit.
+    // Generated by KilnCMS (`mix kiln.export.schema --format ts` or `GET /api/schema`). Do not edit.
     //
     // The `:json` fired-artifact shape served by
     // `GET /api/content/:type/:slug?surface=json`.

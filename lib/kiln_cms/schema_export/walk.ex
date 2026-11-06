@@ -45,6 +45,7 @@ defmodule KilnCMS.SchemaExport.Walk do
           required?: boolean(),
           description: String.t() | nil,
           target_types: [String.t()],
+          graphql_kind: String.t() | nil,
           type: type()
         }
 
@@ -73,6 +74,7 @@ defmodule KilnCMS.SchemaExport.Walk do
   @type decl :: %{
           name: String.t(),
           description: String.t() | nil,
+          graphql: %{String.t() => String.t()} | nil,
           shape: {:object, [field()], boolean()} | :opaque
         }
 
@@ -187,11 +189,17 @@ defmodule KilnCMS.SchemaExport.Walk do
     do: %{
       name: name,
       description: Map.get(schema, "description"),
+      graphql: Map.get(schema, "x-kiln-graphql"),
       shape: {:object, fields(properties, schema), open?(schema)}
     }
 
   defp declaration(name, schema),
-    do: %{name: name, description: Map.get(schema, "description"), shape: :opaque}
+    do: %{
+      name: name,
+      description: Map.get(schema, "description"),
+      graphql: Map.get(schema, "x-kiln-graphql"),
+      shape: :opaque
+    }
 
   # Sorted by key: a schema written to disk is diffed, and map order past 32
   # keys is a hash order.
@@ -206,6 +214,7 @@ defmodule KilnCMS.SchemaExport.Walk do
         required?: MapSet.member?(required, key),
         description: Map.get(value, "description"),
         target_types: target_types(value),
+        graphql_kind: Map.get(value, "x-kiln-graphql-kind"),
         type: type(value)
       }
     end)
