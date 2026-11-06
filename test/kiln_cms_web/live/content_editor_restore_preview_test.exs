@@ -238,14 +238,23 @@ defmodule KilnCMSWeb.ContentEditorRestorePreviewTest do
     assert unchanged.custom_fields["badge"] == "new"
   end
 
-  test "an editor with a field grant is refused: no preview, no confirm, no write",
+  test "an editor with a field grant sees no enabled Restore button, and a forged event is refused",
        %{conn: conn} do
     {admin, page, first} = page_with_history()
     granted = authed_user(:editor, %{field_grants: %{"page" => ["title"]}})
     lv = open_editor(conn, granted, page)
 
-    html = lv |> element(restore_button(first.id)) |> render_click()
+    # The button is rendered disabled, with the reason, and carries no event.
+    refute has_element?(lv, restore_button(first.id))
 
+    assert has_element?(
+             lv,
+             ~s{button[disabled][title*="requires full field access"]},
+             "Restore"
+           )
+
+    # A forged event is still refused by the handler.
+    html = render_click(lv, "restore", %{"version_id" => first.id})
     assert html =~ "Restoring a version requires full field access"
     refute has_element?(lv, "#restore-preview-dialog")
     refute has_element?(lv, "#confirm-restore")
@@ -253,6 +262,15 @@ defmodule KilnCMSWeb.ContentEditorRestorePreviewTest do
     # A forged confirm is refused the same way.
     render_click(lv, "confirm_restore", %{"version_id" => first.id})
     assert CMS.get_page!(page.id, actor: admin).title == "Revised"
+  end
+
+  test "an editor without a grant still gets an enabled Restore button", %{conn: conn} do
+    {_admin, page, first} = page_with_history()
+    editor = authed_user(:editor)
+    lv = open_editor(conn, editor, page)
+
+    assert has_element?(lv, restore_button(first.id))
+    refute has_element?(lv, ~s{button[disabled]}, "Restore")
   end
 
   test "a viewer cannot reach the editor, so cannot reach the preview", %{conn: conn} do
