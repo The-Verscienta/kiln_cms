@@ -119,12 +119,35 @@ defmodule KilnCMSWeb.Plugs.RejectInvalidBearerTest do
       assert conn |> authorized("Bearer #{token}") |> get(~p"/api/json/posts") |> assert_refusal()
     end
 
+    # `KilnCMS.Accounts.User` has no suspended, disabled, locked or
+    # pending-approval state, and `get_by_subject` filters on the subject alone
+    # (no `confirmed_at` or role check), so an account's state cannot by itself
+    # stop a live JWT resolving. The ways one stops are all token rows: revoked
+    # (password change, "sign out everywhere", erasure; covered above), held
+    # for a second factor (below), or the row's user being gone (this test).
     test "a valid JWT for a deleted user is refused", %{conn: conn} do
       user = user!()
       token = jwt!(user)
 
       {1, _} =
         KilnCMS.Repo.delete_all(from(u in "users", where: u.id == type(^user.id, :binary_id)))
+
+      assert conn |> authorized("Bearer #{token}") |> get(~p"/api/json/posts") |> assert_refusal()
+    end
+
+    test "a first-factor JWT held while its account owes a second factor is refused",
+         %{conn: conn} do
+      {user, _secret} = KilnCMS.TwoFactorFixtures.enabled_user(role: :editor)
+      {_user, token} = KilnCMS.TwoFactorFixtures.with_first_factor_token(user)
+      {:ok, %{"jti" => jti}} = AshAuthentication.Jwt.peek(token)
+
+      # Served until it is parked, so the 401 below is the hold's doing.
+      assert (conn |> authorized("Bearer #{token}") |> get(~p"/api/json/posts")).status == 200
+
+      {1, _} =
+        KilnCMS.Repo.update_all(from(t in "tokens", where: t.jti == ^jti),
+          set: [purpose: Token.second_factor_hold_purpose()]
+        )
 
       assert conn |> authorized("Bearer #{token}") |> get(~p"/api/json/posts") |> assert_refusal()
     end
