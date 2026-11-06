@@ -80,4 +80,152 @@ defmodule KilnCMSWeb.PluginPlugRoutesTest do
                Map.take(KilnCMSWeb.RateLimit.default_limits(), [:plugin_endpoint])
     end
   end
+
+  describe "the raw body, by content type (#2272)" do
+    @json ~s({ "id" :"evt_1",  "note":"café — ünï" })
+    @text "  line one\r\n{ id :evt_1 }  café "
+
+    for {type, body} <- [
+          {"application/json", :json},
+          {"application/activity+json", :json},
+          {"application/x-www-form-urlencoded", :form},
+          {"text/plain", :text},
+          {"text/plain; charset=utf-8", :text},
+          {"application/octet-stream", :text},
+          {"application/xml", :text},
+          {"text/xml; charset=utf-8", :text},
+          {"application/x-unheard-of", :text}
+        ] do
+      test "#{type}: the exact bytes reach the plug", %{conn: conn} do
+        body = body(unquote(body))
+
+        conn =
+          conn
+          |> put_req_header("content-type", unquote(type))
+          |> post("/fixture-hooks/echo", body)
+
+        assert response(conn, 200) == body
+      end
+
+      test "#{type}: over the 1 MB cap is a 413", %{conn: conn} do
+        assert_over_cap(conn, unquote(type))
+      end
+    end
+
+    test "a locale-prefixed plugin path gets the bytes too", %{conn: conn} do
+      conn =
+        conn
+        |> put_req_header("content-type", "text/plain")
+        |> post("/fr/fixture-hooks/echo", @text)
+
+      assert response(conn, 200) == @text
+    end
+
+    test "a parameterised plugin route gets the bytes", %{conn: conn} do
+      conn =
+        conn
+        |> put_req_header("content-type", "application/octet-stream")
+        |> post("/fixture-hooks/provider/acme", @text)
+
+      assert response(conn, 200) == @text
+    end
+
+    test "a body with no content type is read under the same cap", %{conn: conn} do
+      conn = post_without_content_type("/fixture-hooks/echo", @text)
+      assert response(conn, 200) == @text
+    end
+
+    test "a body with no content type over the cap is a 413", %{conn: conn} do
+      assert_over_cap(conn, nil)
+    end
+
+    test "the 413 body is JSON for a JSON client and plain text otherwise", %{conn: conn} do
+      big = String.duplicate("a", KilnCMSWeb.Plugs.RawBodyReader.max_bytes() + 1)
+
+      {413, _headers, html} =
+        assert_error_sent(413, fn ->
+          conn |> put_req_header("content-type", "text/plain") |> post("/fixture-hooks/echo", big)
+        end)
+
+      assert html =~ "Request Entity Too Large"
+
+      {413, _headers, json} =
+        assert_error_sent(413, fn ->
+          conn
+          |> put_req_header("content-type", "text/plain")
+          |> put_req_header("accept", "application/json")
+          |> post("/fixture-hooks/echo", big)
+        end)
+
+      assert %{"errors" => [%{"status" => "413"}]} = Jason.decode!(json)
+    end
+
+    test "an empty body is an empty string, not an error", %{conn: conn} do
+      conn =
+        conn |> put_req_header("content-type", "text/plain") |> post("/fixture-hooks/echo", "")
+
+      assert response(conn, 200) == ""
+    end
+
+    test "params stay the query and path params; the body is not parsed", %{conn: conn} do
+      conn =
+        conn
+        |> put_req_header("content-type", "text/plain")
+        |> post("/fixture-hooks/provider/acme?x=1", @text)
+
+      assert conn.params == %{"name" => "acme", "x" => "1"}
+    end
+
+    test "multipart is parsed to params, not preserved (documented exception)", %{conn: conn} do
+      body =
+        "--B\r\ncontent-disposition: form-data; name=\"a\"\r\n\r\n1\r\n--B--\r\n"
+
+      conn =
+        conn
+        |> put_req_header("content-type", "multipart/form-data; boundary=B")
+        |> post("/fixture-hooks/echo", body)
+
+      assert conn.params["a"] == "1"
+      assert response(conn, 200) == ""
+    end
+
+    test "a path no plugin mounts keeps leaving an unparsed type unread", %{conn: conn} do
+      conn =
+        conn
+        |> put_req_header("content-type", "text/plain")
+        |> post("/nope/not-a-plugin", @text)
+
+      refute conn.private[:raw_body]
+    end
+
+    test "a GET is untouched", %{conn: conn} do
+      assert get(conn, "/fixture-hooks/ping").status == 200
+    end
+
+    defp body(:json), do: @json
+    defp body(:form), do: "b=2&a=1&a=%C3%A9"
+    defp body(:text), do: @text
+
+    defp assert_over_cap(conn, type) do
+      big = String.duplicate("a", KilnCMSWeb.Plugs.RawBodyReader.max_bytes() + 1)
+
+      assert_error_sent 413, fn ->
+        if type do
+          conn |> put_req_header("content-type", type) |> post("/fixture-hooks/echo", big)
+        else
+          post_without_content_type("/fixture-hooks/echo", big)
+        end
+      end
+    end
+
+    # `Phoenix.ConnTest` refuses a binary body without a content type, which is
+    # exactly the request under test — so build it with `Plug.Test`.
+    defp post_without_content_type(path, body) do
+      :post
+      |> Plug.Test.conn(path, body)
+      |> Plug.Conn.delete_req_header("content-type")
+      |> Plug.Conn.put_private(:phoenix_endpoint, KilnCMSWeb.Endpoint)
+      |> KilnCMSWeb.Endpoint.call(KilnCMSWeb.Endpoint.init([]))
+    end
+  end
 end

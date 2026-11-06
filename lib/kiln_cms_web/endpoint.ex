@@ -161,6 +161,10 @@ defmodule KilnCMSWeb.Endpoint do
   # covers the `application/activity+json` a fediverse server POSTs to the
   # ActivityPub inbox (#491) — so that route reaches the body reader below with
   # no parser change.
+  # Plugin paths only: a body with no content type would skip `Plug.Parsers`
+  # altogether, so default it to a type the raw-body parser below claims.
+  plug KilnCMSWeb.Plugs.PluginRawBody.DefaultType
+
   plug Plug.Parsers,
     # `MultipartParser` is `:multipart` with one exception: it leaves the media
     # upload API's body (`POST /api/media`) unread, for its controller to parse
@@ -170,7 +174,10 @@ defmodule KilnCMSWeb.Endpoint do
       KilnCMSWeb.Plugs.MultipartParser,
       :json,
       AshJsonApi.Plug.Parser,
-      Absinthe.Plug.Parser
+      Absinthe.Plug.Parser,
+      # Last on purpose: claims whatever the parsers above left unread, but
+      # only on plugin paths (#2272) — see the module.
+      KilnCMSWeb.Plugs.PluginRawBody
     ],
     pass: ["*/*"],
     # Explicit request-body cap (Plug's default is 8MB). Bounds the memory a

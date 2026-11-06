@@ -74,8 +74,9 @@ carries the reasoning.
     (`current_user` is never set; the plugin authenticates its own caller).
     `conn.assigns.current_org` is set, but the plugin passes `tenant:` to Ash
     itself. Requests are limited to 300 a minute per client address in their
-    own `:plugin_endpoint` bucket. A JSON or form body is also kept in
-    `conn.private[:raw_body]`, capped at 1 MB, so an HMAC can be verified.
+    own `:plugin_endpoint` bucket. The body, of any content type
+    except `multipart/*`, is also kept byte for byte in `conn.private[:raw_body]`,
+    capped at 1 MB (over it, `413`), so an HMAC can be verified.
   - **Checks.** A malformed route stops the build, naming the plugin.
     `mix kiln.plugins.doctor` also reports a path under a root core routes own
     (`/editor`, `/api`, `/gql`, `/mcp`, …) and overlap with another plugin's
