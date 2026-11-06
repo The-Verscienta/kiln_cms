@@ -6781,6 +6781,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
               {(@form[:title].value not in [nil, ""] && @form[:title].value) ||
                 gettext("Edit %{kind}", kind: @kind)}
             </h1>
+            <%!-- Provenance of a draft a service created with a drafts-only
+                  API key (#2273). Text only: `on_behalf_of` is whatever the
+                  service sent, shown for context and never trusted. --%>
+            <p
+              :if={is_binary(@record.created_via_key_name)}
+              id="draft-write-provenance"
+              class="mt-1 flex items-center gap-1.5 text-sm text-base-content/60"
+            >
+              <.icon name="hero-key" class="size-4" />
+              <span>
+                {gettext("Created via API key %{name}", name: @record.created_via_key_name)}
+                <span :if={is_binary(@record.on_behalf_of)}>
+                  &middot; {gettext("on behalf of %{who}", who: @record.on_behalf_of)}
+                </span>
+              </span>
+            </p>
           </div>
           <%!-- The page's secondary actions (#1679). Two groups: how to LOOK at
                 the document (Preview, side-by-side, Visual) keep their words;

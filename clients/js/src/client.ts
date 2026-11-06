@@ -117,6 +117,7 @@ import type {
   UploadMediaOptions,
   WorkflowVerb,
   WriteOptions,
+  CreateOptions,
 } from "./types.js";
 
 const JSON_API = "application/vnd.api+json";
@@ -1043,17 +1044,26 @@ export class KilnClient {
    *       body_markdown: "# Hello\n\nFrom the SDK.",
    *     });
    *
+   * A service holding a `:draft_write` key (kiln_cms#2273) may create, and
+   * `update()` its own drafts, nothing else. Pass `onBehalfOf` to record which
+   * of your users the draft is for (the `X-Kiln-On-Behalf-Of` header); read it
+   * back with `create<Item & ContentProvenance>(…)`.
+   *
    * Resolves to the created record, flattened like a read.
    */
   async create<T extends Item = Item>(
     plural: string,
     attributes: Record<string, unknown>,
-    options: WriteOptions = {},
+    options: CreateOptions = {},
   ): Promise<T> {
     // No `id`: the create schema is `additionalProperties: false`, so a
     // client-chosen id is a 400, not a hint.
     const body = { data: { type: resourceType(plural, options), attributes } };
-    const doc = await this.write("POST", `/api/json/${plural}`, body, options.signal);
+    const headers =
+      options.onBehalfOf === undefined
+        ? undefined
+        : { "x-kiln-on-behalf-of": options.onBehalfOf };
+    const doc = await this.write("POST", `/api/json/${plural}`, body, options.signal, headers);
     return onlyItem<T>(doc);
   }
 
@@ -1253,6 +1263,7 @@ export class KilnClient {
     path: string,
     body: unknown,
     signal: AbortSignal | undefined,
+    headers?: Record<string, string>,
   ): Promise<unknown> {
     this.requireApiKey(method, path);
     return this.send(method, path, {
@@ -1260,6 +1271,7 @@ export class KilnClient {
       accept: JSON_API,
       contentType: body === undefined ? undefined : JSON_API,
       body,
+      headers,
     });
   }
 
@@ -1294,6 +1306,8 @@ export class KilnClient {
        * only hand the credential to a route that ignores it.
        */
       anonymous?: boolean;
+      /** Per-request headers, over the client's own (never over auth). */
+      headers?: Record<string, string>;
     },
   ): Promise<unknown> {
     // A `FormData` goes to `fetch` untouched: it must not be stringified, and
@@ -1302,7 +1316,11 @@ export class KilnClient {
     const query = request.params?.toString() ?? "";
     const url = this.baseUrl + path + (query === "" ? "" : `?${query}`);
 
-    const headers: Record<string, string> = { accept: request.accept, ...this.headers };
+    const headers: Record<string, string> = {
+      accept: request.accept,
+      ...this.headers,
+      ...request.headers,
+    };
     if (request.contentType !== undefined && !form)
       headers["content-type"] = request.contentType;
     if (this.hasApiKey() && request.anonymous !== true) {

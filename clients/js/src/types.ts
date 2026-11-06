@@ -695,6 +695,36 @@ export interface WriteOptions extends RequestOptions {
   type?: string;
 }
 
+/** Options for `create()`: a write, plus who a draft is for. */
+export interface CreateOptions extends WriteOptions {
+  /**
+   * Sent as the `X-Kiln-On-Behalf-Of` header: an opaque label (typically your
+   * own user id) that Kiln stores on a draft created with a `:draft_write`
+   * API key, beside the key's id and name, so a reviewer sees who it was for
+   * (kiln_cms#2273; a server newer than 1.8). Stored only, never
+   * authorization; any other key's request ignores it. Omitted or `undefined`
+   * sends no header.
+   */
+  onBehalfOf?: string;
+}
+
+/**
+ * The provenance attributes Kiln records on content created with a
+ * `:draft_write` API key (kiln_cms#2273). They are returned only to an
+ * editor, an admin, or the key that created the record; every other reader's
+ * response simply lacks them, so each is optional. `null` on a record no
+ * `:draft_write` key created. Intersect with `Item`:
+ * `writer.create<Item & ContentProvenance>(…)`.
+ */
+export interface ContentProvenance {
+  /** The id of the `:draft_write` key that created the record. */
+  created_via_key_id?: string | null;
+  /** That key's name when it created the record. */
+  created_via_key_name?: string | null;
+  /** The `X-Kiln-On-Behalf-Of` label sent on the create, if any. */
+  on_behalf_of?: string | null;
+}
+
 // ── GraphQL ─────────────────────────────────────────────────────────────────
 
 export interface GraphQLOptions extends RequestOptions {
