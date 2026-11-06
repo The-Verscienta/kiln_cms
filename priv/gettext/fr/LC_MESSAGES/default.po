@@ -1153,6 +1153,16 @@ msgid_plural "%{count} published documents are in no menu."
 msgstr[0] "1 document publié n'est dans aucun menu."
 msgstr[1] "%{count} documents publiés ne sont dans aucun menu."
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 year"
+msgstr "1 an"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "180 days"
+msgstr "180 jours"
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "2FA on"
@@ -1172,6 +1182,11 @@ msgstr "404 (%{count})"
 #, elixir-autogen, elixir-format
 msgid "6-digit code"
 msgstr "Code à 6 chiffres"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "90 days"
+msgstr "90 jours"
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
@@ -4741,6 +4756,11 @@ msgstr "Impossible de compter les images de ce site. Le journal du serveur en do
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
+msgid "Couldn't create that key. A drafts-only key needs a name and an owner who is not an editor or admin."
+msgstr "Impossible de créer cette clé. Une clé réservée aux brouillons exige un nom et un propriétaire qui n'est ni éditeur ni administrateur."
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
 msgid "Couldn't create that key. Give it a name."
 msgstr "Création de cette clé impossible. Donnez-lui un nom."
 
@@ -5301,6 +5321,11 @@ msgstr "Créez votre compte administrateur"
 #, elixir-autogen, elixir-format
 msgid "Create your first page or post to get started."
 msgstr "Créez votre première page ou votre premier article pour commencer."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Created via API key %{name}"
+msgstr "Créé avec la clé d'API %{name}"
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
@@ -6261,10 +6286,25 @@ msgstr "Brouillon, relecture et publication, avec publication programmée et lot
 msgid "Drafts"
 msgstr "Brouillons"
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts only"
+msgstr "Brouillons uniquement"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts only (headless service)"
+msgstr "Brouillons uniquement (service headless)"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Drafts that have never been published are not listed."
 msgstr "Les brouillons jamais publiés ne sont pas listés."
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts-only keys only. Until this date the service can swap the key for a fresh one itself; after it, mint a new key. Other scopes ignore it."
+msgstr "Clés brouillons uniquement. Jusqu’à cette date, le service peut lui-même remplacer la clé par une nouvelle ; ensuite, créez une nouvelle clé. Les autres portées l’ignorent."
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
@@ -11505,6 +11545,7 @@ msgstr "Le stockage d'objets, l'e-mail sortant et la recherche se configurent pa
 msgid "October"
 msgstr "octobre"
 
+#: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
 msgid "Off"
@@ -14267,6 +14308,21 @@ msgstr[1] "Renouveler la clé push de ce site ? %{count} appareils ne recevront 
 msgid "Rotate this site's push key? No devices use the current one, so nothing stops working."
 msgstr "Renouveler la clé push de ce site ? Aucun appareil n'utilise la clé actuelle, rien ne cessera donc de fonctionner."
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotated"
+msgstr "Renouvelée"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotated from %{id}"
+msgstr "Renouvelée depuis %{id}"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotates itself until %{date}"
+msgstr "Se renouvelle seule jusqu’au %{date}"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #, elixir-autogen, elixir-format
@@ -15054,6 +15110,11 @@ msgstr "Sélection"
 #, elixir-autogen, elixir-format
 msgid "Select…"
 msgstr "Sélectionner…"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Self-rotation"
+msgstr "Renouvellement automatique"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
@@ -21446,6 +21507,11 @@ msgstr "ok"
 #, elixir-autogen, elixir-format
 msgid "on"
 msgstr "activée"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "on behalf of %{who}"
+msgstr "au nom de %{who}"
 
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format

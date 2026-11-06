@@ -23,7 +23,8 @@ defmodule KilnClientWriteTest do
         %{
           "accept" => Plug.Conn.get_req_header(conn, "accept"),
           "content-type" => Plug.Conn.get_req_header(conn, "content-type"),
-          "authorization" => Plug.Conn.get_req_header(conn, "authorization")
+          "authorization" => Plug.Conn.get_req_header(conn, "authorization"),
+          "x-kiln-on-behalf-of" => Plug.Conn.get_req_header(conn, "x-kiln-on-behalf-of")
         },
         if(raw == "", do: nil, else: Jason.decode!(raw))
       })
@@ -92,6 +93,37 @@ defmodule KilnClientWriteTest do
       assert_received {:request, _, _, _, %{"data" => %{"type" => "entry"}}}
       assert_received {:request, _, _, _, %{"data" => %{"type" => "person"}}}
       assert_received {:request, _, _, _, %{"data" => %{"type" => "page"}}}
+    end
+
+    test ":on_behalf_of sends X-Kiln-On-Behalf-Of; omitted or nil sends none" do
+      stub(201, post_doc(%{"on_behalf_of" => "user-42", "created_via_key_name" => "Sync"}))
+
+      assert {:ok, post} =
+               KilnClient.create("posts", %{title: "x"}, api_key: @key, on_behalf_of: "user-42")
+
+      assert_received {:request, "POST", "/api/json/posts", headers, _}
+      assert headers["x-kiln-on-behalf-of"] == ["user-42"]
+      assert headers["authorization"] == ["Bearer #{@key}"]
+      assert headers["content-type"] == ["application/vnd.api+json"]
+      assert post["on_behalf_of"] == "user-42"
+      assert post["created_via_key_name"] == "Sync"
+
+      assert {:ok, _} = KilnClient.create("posts", %{}, api_key: @key, on_behalf_of: 42)
+      assert_received {:request, _, _, %{"x-kiln-on-behalf-of" => ["42"]}, _}
+
+      assert {:ok, _} = KilnClient.create("posts", %{}, api_key: @key)
+      assert {:ok, _} = KilnClient.create("posts", %{}, api_key: @key, on_behalf_of: nil)
+      assert_received {:request, _, _, %{"x-kiln-on-behalf-of" => []}, _}
+      assert_received {:request, _, _, %{"x-kiln-on-behalf-of" => []}, _}
+    end
+
+    test ":on_behalf_of is not sent on update/4: the server reads it on POST only" do
+      stub()
+
+      assert {:ok, _} =
+               KilnClient.update("posts", "p1", %{title: "y"}, api_key: @key, on_behalf_of: "u")
+
+      assert_received {:request, "PATCH", _, %{"x-kiln-on-behalf-of" => []}, _}
     end
   end
 

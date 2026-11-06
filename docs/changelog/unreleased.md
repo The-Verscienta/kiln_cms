@@ -22,6 +22,13 @@ carries the reasoning.
 
 ## Added
 
+<a id="reject-invalid-bearer"></a>
+
+- **`KILN_API_REJECT_INVALID_BEARER` (#2161).** With it on, an `Authorization: Bearer` token that
+  fails verification gets a 401 `invalid_token` envelope instead of silently reading as anonymous.
+  Off by default for this release, because a consumer sending a stale token today gets 200;
+  the default flips next release, so announce it in that release's upgrade notes.
+
 <a id="change-severity"></a>
 
 - **Change severity: how much a published edit matters, stored per edit.**
@@ -72,9 +79,9 @@ carries the reasoning.
     `CustomFieldValue` interface (`name` plus the kind's members: `StringValue`,
     `IntValue`, `FloatValue`, `BooleanValue`, `DateValue`, `DateTimeValue`,
     `ListValue { items }`, `GroupValue { fields }`, `ReferenceValue { ids }`,
-    `MediaValue`, `JsonValue { value }`). A `multiple` field is a
-    `ListValue`; computed fields, `geolocation`, `datetime_range` and
-    `recurrence` are `JsonValue`. Groups nest to depth 3. A reference field
+    `MediaValue`, `GeolocationValue { lat lng label zoom }`,
+    `JsonValue { value }`). A `multiple` field is a `ListValue`; computed
+    fields, `datetime_range` and `recurrence` are `JsonValue`. Groups nest to depth 3. A reference field
     returns ids only: read the records through `references(field:)`. Cost is
     1 plus the selection once per name; an accessor costs 1; the 200 limit is
     unchanged.
@@ -104,6 +111,40 @@ carries the reasoning.
     are added to every content type in the schema's `:content_domains`, so an
     overlay's types get them without code changes.
     See [headless-graphql-api.md](../headless-graphql-api.md#read-custom-fields-typed-by-kind).
+
+<a id="draft-write-api-keys"></a>
+
+- **Drafts-only API keys for headless services (#2273).** A new `draft_write` access
+  scope on API keys lets an app service (Verscienta's, for AI drafting) create drafts and edit
+  drafts it authored, and nothing else: no publishing, submitting for review, deleting, media,
+  tags or related links, and no edits to live or someone else's content. The bound is a policy
+  on `Content` that sits above the admin bypass and ignores the owner's role, so promoting the
+  owner later widens nothing. Keys are minted by an admin on a viewer-tier service account and
+  capped at 30 days (`draft_write_key_max_ttl_days`). Drafts created this way record the key
+  and an optional `X-Kiln-On-Behalf-Of` label (stored for display only, never used for
+  authorization); the fields appear in the editor (not in version history, which a second key
+  on the same owner can read) and, for editors, admins and the creating key only, on JSON:API, GraphQL and `/mcp` (never for anonymous, preview-link or
+  viewer-tier callers, webhook payloads or the preview endpoint). A GraphQL query that selects
+  those three fields as someone not allowed them gets `null` plus a `forbidden_field` entry in
+  `errors`, so a codegen'd query that selects every field should drop them. See [decision 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)
+  and the headless consumer guide.
+
+<a id="draft-write-key-rotation"></a>
+
+- **Self-rotating drafts-only keys.** A `draft_write` key's 30-day cap meant a person re-minted
+  the service's key every month. An admin can now give the key a rotation window at mint
+  (`rotatable_until`; "Self-rotation" at `/editor/api-keys`, at most
+  `draft_write_key_max_rotation_days`, default 365). Until then the service calls
+  `POST /api/keys/rotate` with the key and gets a fresh one: same account, scope and name,
+  expiring at the 30-day cap or the window's end, whichever is sooner. The old key is revoked in
+  the same transaction, under a row lock, so a chain has one live key and never outlives the date
+  the admin chose. The action takes no input; `read`/`read_write` keys, signed-in users and admins
+  are refused, and an owner promoted to editor since the mint stops the chain. Presenting a
+  rotated-away key to the endpoint again more than 120 seconds later revokes the whole chain and
+  mails the platform admins. Keys without a window behave as before. New nullable `api_keys`
+  columns `rotatable_until`, `lineage_id`, `rotated_from_id` (additive). See
+  [decision 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md#rotation)
+  and the headless consumer guide.
 
 ## Changed
 
