@@ -413,6 +413,15 @@ defmodule KilnCMSWeb.ConsoleNav do
             icon: "hero-rss",
             description: gettext("Which types syndicate, and whether in full."),
             keywords: ["rss", "atom", "syndication", "json feed"]
+          },
+          %{
+            key: :safety_fields,
+            label: gettext("Safety fields"),
+            path: ~p"/editor/safety-fields",
+            icon: "hero-shield-check",
+            description:
+              gettext("Which fields need a severity when a published edit changes them."),
+            keywords: ["severity", "critical", "notable", "routine", "change", "safety"]
           }
         ]
       },

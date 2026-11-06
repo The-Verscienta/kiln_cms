@@ -216,6 +216,12 @@ published text back over it.
   the copy's (`WorkingCopy.with_held_relationships/2`), so the pickers show
   what the copy holds.
 - *Publish changes* flushes first too, so what goes live is what is on screen.
+- *Publish changes* is also where the **change severity** is asked
+  ([json-api.md](json-api.md#change-severity-how-much-an-edit-matters)): saving
+  a working copy and autosave write no live text and never prompt, but if the
+  promotion would change a field the site lists as safety-relevant, the editor
+  asks how much the change matters (critical / notable / routine) before it goes
+  live, and the answer is stored on that publish's version.
 
 ## Shared fields across locales
 

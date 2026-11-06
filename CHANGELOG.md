@@ -60,6 +60,12 @@ Every summary line below that was shortened links to its own entry there.
   column, filled for every row by the migration (a table rewrite). Nothing else to run.**
   ([long form](docs/changelog/unreleased.md#search-name-lexemes-upgrade))
 
+### Added
+
+- **Change severity: an edit to a safety-relevant field of published content is recorded as critical, notable or routine on its own version.**
+  The editor asks before publishing; API writes default to notable; read back as `latest_edit_severity` / `latest_edit_at`.
+  ([long form](docs/changelog/unreleased.md#change-severity))
+
 ### Changed
 
 - **Global search on a large catalogue: the alias and compound legs prefilter on stored

@@ -586,6 +586,8 @@ default. `GET /api/json/open_api` describes each of them on the resource's
 | `effective_seo_description` | string | No — same as above, for `seo_description` |
 | `related_links` | array | No — curated related links, projected to `[{id, title, slug}]`, in the order the editor set |
 | `inherited_fields` | object | No — what this locale variant inherits along the site's fallback chain for its `:fallback` fields, with the source locale: `{"excerpt": {"value", "locale"}, "custom_fields": {…}}` (#1327). Served only when asked for with `fields[<type>]=…` |
+| `latest_edit_severity` | string \| null | No — `critical` / `notable` / `routine`: how much the document's latest safety-field edit mattered. `null` when unpublished or none; see *Change severity* under Writing. Readable with a viewer key |
+| `latest_edit_at` | datetime \| null | No — when that edit was made (the version's time, not `published_at`) |
 | `custom_fields_plain` | object | No — the plain-text rendition of the `:text` custom fields marked "Also deliver as plain text" (`deliver_plain`): `{"<name>": "text without tags" \| null}`, `null` when the type marks none — one line, or with `"\n\n"` between paragraphs and `"\n"` per line break for a field marked "Keep paragraph breaks" (`plain_breaks`). `custom_fields` keeps the stored HTML. Served only when asked for with `fields[<type>]=…`; the fired artifact (`/api/content`, `/api/sync`) carries it whenever the type marks a field |
 | `custom_fields_portable` | object | No — the Portable Text rendition of the rich `:text` custom fields marked "Also deliver as Portable Text" (`deliver_portable`): `{"<name>": [<Portable Text block>, …] \| null}`, the shape a `rich_text` block's `body` holds; `null` when the type marks none. `custom_fields` keeps the stored HTML. Served only when asked for with `fields[<type>]=…`; the fired artifact (`/api/content`, `/api/sync`) carries it whenever the type marks a field |
 
@@ -977,6 +979,42 @@ rather track versions yourself. The write routes accept it as an optional
 `expected_lock_version` attribute, which compares `lock_version` alone, like
 the GraphQL argument. Browsers can read `ETag` and send `If-Match` cross-origin:
 both are allowed in the CORS headers.
+
+### Change severity: how much an edit matters
+
+An edit to a **published** document that touches a field the site lists as
+safety-relevant (`/editor/safety-fields`, per content type, or "every field")
+is recorded with a *severity* on the version it creates: `critical`, `notable`
+or `routine`. Sites that mirror the content use it to decide how loudly to
+surface the change. The answer belongs to that one edit; it is never a field of
+the record and never carries over to the next edit.
+
+`PATCH` (`update`) and the `publish` route accept an optional
+`change_severity` attribute (so do the GraphQL `update*` / `publish*` mutations;
+`publish_changes` and `restore_version` have no public route, and the editor and
+internal callers of those actions default to `notable`):
+
+```json
+{"data": {"type": "post", "id": "…",
+          "attributes": {"title": "…", "change_severity": "critical"}}}
+```
+
+* **Omitted:** a safety edit is recorded `notable`. Never `routine`, and never
+  empty. (The admin editor is the one surface that asks: it will not publish a
+  safety edit until a severity is chosen.)
+* **Sent without a safety edit:** ignored. The version records none.
+* **Per request only.** There is no batch write endpoint, so each write names
+  its own severity; MCP's `update_page` / `update_post` / `update_entry` take the
+  same `change_severity` argument.
+* **Computed fields:** don't list them as safety fields. The daily refresh
+  rewrites them, and each new value would be recorded as a `notable` edit.
+
+Read the latest one back with the `latest_edit_severity` and `latest_edit_at`
+[calculated fields](#calculated-fields) (and on every `/api/sync` upsert item).
+They describe the document's last **safety** edit, not its last edit of any
+kind, and are `null` for a document that is not published or has none. A first
+publish counts as an edit when a listed field is non-empty. Webhooks and the
+change feed do not carry the severity yet.
 
 ### Retrying a write safely
 
