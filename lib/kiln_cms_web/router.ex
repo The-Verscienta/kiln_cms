@@ -86,7 +86,7 @@ defmodule KilnCMSWeb.Router do
     plug :load_from_bearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
-    plug KilnCMSWeb.Plugs.ApiKeyAuth
+    plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
     # A mutation is a `POST` like any other — see the JSON:API pipeline.
     plug KilnCMSWeb.Plugs.Idempotency
     plug AshGraphql.Plug
@@ -130,7 +130,7 @@ defmodule KilnCMSWeb.Router do
     plug :load_from_bearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
-    plug KilnCMSWeb.Plugs.ApiKeyAuth
+    plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
     # The OpenAPI document is served from inside the `KilnCMSWeb.AshJsonApiRouter`
     # forward below, so there is no route here to gate. This plug knows the two
     # documentation paths and passes every other `/api` request through (#567).

@@ -22,6 +22,13 @@ carries the reasoning.
 
 ## Added
 
+<a id="reject-invalid-bearer"></a>
+
+- **`KILN_API_REJECT_INVALID_BEARER` (#2161).** With it on, an `Authorization: Bearer` token that
+  fails verification gets a 401 `invalid_token` envelope instead of silently reading as anonymous.
+  Off by default for this release, because a consumer sending a stale token today gets 200;
+  the default flips next release, so announce it in that release's upgrade notes.
+
 <a id="change-severity"></a>
 
 - **Change severity: how much a published edit matters, stored per edit.**

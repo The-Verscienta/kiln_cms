@@ -312,6 +312,14 @@ Treat "what can this credential see" as part of its blast radius: a leaked
 editor-keyed delivery config exposes drafts, and an admin-keyed one exposes
 every paying member's content as well — not just rate-limit headroom.
 
+### A bad bearer token is a `401` (opt-in)
+
+By default a malformed or expired JWT in `Authorization: Bearer …` is treated
+as no credential and the request is served as anonymous. Set
+`KILN_API_REJECT_INVALID_BEARER=true` to answer `401` instead; the default
+flips on in the next release. A request with no `Authorization` header is
+unchanged, and a bad `kiln_` key is already a `401`.
+
 ## Mirroring: sync instead of re-reading everything
 
 A static build or search index that polls JSON:API with
