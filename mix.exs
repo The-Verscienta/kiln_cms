@@ -1025,7 +1025,12 @@ defmodule KilnCMS.MixProject do
             # (six CRITICAL, in ash_authentication) that hex.audit listed
             # against v0.9.0's lock. Advisories with no fixed release are
             # acknowledged in this file's `:hex` project config, not skipped.
-            "hex.audit",
+            #
+            # Shelled out to a fresh Mix process: `hex.audit` lives in the Hex
+            # archive, and the `compile`/`format` steps above prune the code path
+            # so the task can no longer be found in this process ("The task
+            # hex.audit could not be found"), though it runs fine alone.
+            "cmd mix hex.audit",
             "kiln.plugins.doctor",
             # Cheap, and says in a second what CI's `image` job takes a full
             # dependency compile to discover: a Dockerfile pin that can't satisfy
