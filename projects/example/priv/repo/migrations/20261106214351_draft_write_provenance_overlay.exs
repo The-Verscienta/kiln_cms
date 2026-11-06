@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.DraftWriteProvenance do
+defmodule KilnCMS.Repo.Migrations.DraftWriteProvenanceOverlay do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 
