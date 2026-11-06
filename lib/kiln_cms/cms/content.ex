@@ -2229,7 +2229,19 @@ defmodule KilnCMS.CMS.Content do
         # carrying it would show a redundant field in every diff of an event —
         # and one that moves on its own, since the sweep advances it without any
         # editorial change at all.
+        #
+        # The draft-write provenance (#2273) is ignored because the version
+        # read scope is wider than its field policy: a `:draft_write` key reads
+        # the history of every draft its OWNER authored (`DraftWriteOwnDrafts`,
+        # which autosave coalescing needs), but may see provenance only on the
+        # drafts IT created (`DraftWriteOwnProvenance`). In `changes` a second
+        # key on the same owner would read the first key's `on_behalf_of`. The
+        # columns are stamped once at create and no action writes them, so the
+        # row already holds the only value history could: nothing is lost.
         ignore_attributes([
+          :created_via_key_id,
+          :created_via_key_name,
+          :on_behalf_of,
           :inserted_at,
           :updated_at,
           :embedding,

@@ -425,7 +425,9 @@ from a JSON:API `attributes` object (also with `?fields[post]=on_behalf_of`),
 and `null` in GraphQL, where a query that selects the field also receives a
 `forbidden_field` entry in `errors` beside the data. They are deliberately not
 in webhook payloads, the preview endpoint or `/api/sync`. They show in the
-editor and in version history.
+editor, read from the draft itself; they are **not** recorded in version
+history, whose read scope (every draft of the key's owner) is wider than theirs
+(the drafts this key created).
 
 ## Editorial tooling: version history and releases
 

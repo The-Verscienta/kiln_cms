@@ -278,6 +278,45 @@ defmodule KilnCMS.Accounts.DraftWriteKeyTest do
       refute theirs.id in sources
     end
 
+    test "a second key on the same owner reads no provenance through version history",
+         %{owner: owner, actor: key_a} do
+      key_b = key_actor_for(owner)
+
+      draft =
+        CMS.create_post!(%{title: "From A"},
+          actor: key_a,
+          context: %{kiln_on_behalf_of: "end-user-of-a"}
+        )
+
+      assert draft.on_behalf_of == "end-user-of-a"
+      assert draft.created_via_key_id == key_a.__metadata__.api_key.id
+
+      # B edits A's draft (same owner), so it keeps reading that history:
+      # its autosaves coalesce over it.
+      draft
+      |> Ash.Changeset.for_update(:autosave, %{title: "B 1"}, actor: key_b)
+      |> Ash.update!()
+      |> Ash.Changeset.for_update(:autosave, %{title: "B 2"}, actor: key_b)
+      |> Ash.update!()
+
+      versions =
+        Post.Version
+        |> Ash.read!(actor: key_b)
+        |> Enum.filter(&(&1.version_source_id == draft.id))
+
+      assert Enum.any?(versions, &(&1.version_action_name == :create))
+      assert Enum.count(versions, &(&1.version_action_name == :autosave)) == 1
+
+      # ...but A's provenance is in none of it, raw or folded.
+      provenance = ~w(created_via_key_id created_via_key_name on_behalf_of)
+
+      for version <- versions do
+        keys = version.changes |> Map.keys() |> Enum.map(&to_string/1)
+        assert keys -- provenance == keys, "version #{version.id} carries #{inspect(keys)}"
+        refute inspect(version.changes) =~ "end-user-of-a"
+      end
+    end
+
     test "loses the versions of a draft once a person moves it out of draft",
          %{owner: owner, actor: actor} do
       mine = CMS.create_post!(%{title: "Mine"}, actor: key_actor_for(owner))
