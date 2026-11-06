@@ -70,6 +70,10 @@ Every summary line below that was shortened links to its own entry there.
   and never publish, delete or touch live content. Drafts record the key and an optional `X-Kiln-On-Behalf-Of` label.**
   ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-api-keys))
 
+- **Drafts-only keys can rotate themselves: an admin sets a window at mint, and until then `POST /api/keys/rotate`
+  swaps the key for an identical fresh one and revokes the old. Reusing a rotated-away key burns the chain.**
+  ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-key-rotation))
+
 ### Changed
 
 - **Global search on a large catalogue: the alias and compound legs prefilter on stored
