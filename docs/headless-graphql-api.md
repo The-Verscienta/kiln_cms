@@ -297,6 +297,15 @@ create/update/submit; **return-to-draft, publish, unpublish and delete require a
 (approve or return) is the admin's half. The hard delete (`:purge`) is **never** exposed as a mutation and is
 API-key-banned regardless of scope.
 
+A **`:draft_write` key** (#2273) may run `create…` and `update…` on a draft its
+account authored while it is still a draft, whatever the owner's role; every
+other mutation above is refused, as are the reference, tag, category and media
+mutations. An HTTP `X-Kiln-On-Behalf-Of` header on the create is stored as
+`onBehalfOf` (beside `createdViaKeyId` / `createdViaKeyName`); those fields
+resolve to `null`, with a `forbidden_field` error, for anyone but editors,
+admins and the creating key. See
+[headless-consumer-guide.md](headless-consumer-guide.md#submitting-drafts-from-your-app-the-draft_write-key).
+
 ### Media metadata — `updateMediaItem`
 
 `updateMediaItem(id:, input:)` edits what a media item says about itself —

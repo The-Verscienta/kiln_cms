@@ -676,6 +676,15 @@ and delete require an `:admin`** account. An editor submits for review; deciding
 the outcome — approve or return — is the admin's half. Hard delete (`:purge`) is **never** routed and is
 API-key-banned regardless of scope — `DELETE` is the reversible soft-delete.
 
+A **`:draft_write` key** (#2273) may `POST` a create and `PATCH` a draft its
+account authored while it is still a draft, whatever the owner's role; every
+other route in the table is refused, as are tag, category, link and media
+writes. A create may send `X-Kiln-On-Behalf-Of: <your user id>`, which Kiln
+stores on the draft (`on_behalf_of`, beside `created_via_key_id` /
+`created_via_key_name`) for reviewers; those three attributes are returned only
+to editors, admins and the creating key. See
+[headless-consumer-guide.md](headless-consumer-guide.md#submitting-drafts-from-your-app-the-draft_write-key).
+
 ### Creating and editing
 
 ```bash
