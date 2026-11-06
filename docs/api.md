@@ -271,6 +271,13 @@ curl -s 'http://localhost:4000/api/json/posts' \
     authoring is draft-only). See [json-api.md](json-api.md) → "Writing",
     [headless-graphql-api.md](headless-graphql-api.md) → "Mutations", and
     [mcp.md](mcp.md).
+  - **Draft write** (`draft_write`, #2273): for a headless service that submits
+    content for a person to review. It may create drafts and edit **its own**
+    drafts while they are drafts, and nothing else (no transitions, deletes,
+    tags, categories, links or media), whatever its owner's role. Minted on a
+    viewer-tier service account with a short lifetime. A create may carry
+    `X-Kiln-On-Behalf-Of`, stored as provenance, never authorization. See
+    [headless-consumer-guide.md](headless-consumer-guide.md#submitting-drafts-from-your-app-the-draft_write-key).
 - **`tag_ids` replaces, it doesn't merge** (#521): sending it on a content write
   overwrites the *entire* tag set, so a partial list detaches every tag not
   named. To attach/detach a subset instead, use `add_tag_ids`/`remove_tag_ids`
@@ -711,6 +718,12 @@ your credential as the actor and the request host's org as the tenant:
 | Admin; editor whose read scope covers the type | ✅ | ✅ with a JWT or a **`:read_write`** key |
 | Same, with a **read-only** key | ✅ | `403` — refused by the content policies |
 | Viewer; editor whose `readable_types` leave the type out | `404` | `404` |
+| **`:draft_write`** key on its (viewer-tier) service account | `404`, its own drafts included | `404` |
+| **`:draft_write`** key whose owner was later promoted | as that role | `403` — the key's draft-only bound outlives the promotion |
+
+A `:draft_write` key's policies do let it read the versions of drafts it
+authored (autosave needs that), but only as a per-row filter, and this surface
+serves a document's whole history or nothing, so the revisions API refuses it.
 
 Anything the caller may not read history for is a `404`, never a `403`, whether
 or not the document exists — a document in another org, a document of a
