@@ -70,6 +70,10 @@ Every summary line below that was shortened links to its own entry there.
   No session or CSRF check, raw body kept for HMACs, own 300/min rate limit; `mix kiln.plugins.doctor` checks paths.
   ([#2272](https://github.com/The-Verscienta/kiln_cms/issues/2272) · [long form](docs/changelog/unreleased.md#plugin-plug-routes))
 
+- **Drafts-only API keys (`access: draft_write`): a headless service can create and edit its own drafts
+  and never publish, delete or touch live content. Drafts record the key and an optional `X-Kiln-On-Behalf-Of` label.**
+  ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-api-keys))
+
 ### Changed
 
 - **Global search on a large catalogue: the alias and compound legs prefilter on stored
