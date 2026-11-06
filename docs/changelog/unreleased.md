@@ -53,6 +53,32 @@ carries the reasoning.
     new settings table. Overlays run `mix ash.codegen` for their own content
     types. Until a site lists a field, nothing changes.
 
+<a id="plugin-plug-routes"></a>
+
+- **A plugin can mount plain-Plug endpoints, such as a webhook receiver, a JSON
+  API or a feed variant, with the new `plug_routes/0` callback
+  (`kiln_plugin` 1.4.0).** Until now a plugin could only route to a LiveView
+  page (`public_routes/0`), so an endpoint with no page had to be an overlay.
+  A route is `{verb, path, plug_module, plug_opts}` (a Phoenix controller is a
+  Plug whose opts is the action atom) or `{:forward, path, plug_module,
+  plug_opts}`. The package needs only `plug`, so it works as a Mix dependency.
+  - **What the core does.** Mounts the routes before the content-delivery
+    catch-alls, in a scope with no session, no CSRF check and no `accepts`
+    (`current_user` is never set; the plugin authenticates its own caller).
+    `conn.assigns.current_org` is set, but the plugin passes `tenant:` to Ash
+    itself. Requests are limited to 300 a minute per client address in their
+    own `:plugin_endpoint` bucket. A JSON or form body is also kept in
+    `conn.private[:raw_body]`, capped at 1 MB, so an HMAC can be verified.
+  - **Checks.** A malformed route stops the build, naming the plugin.
+    `mix kiln.plugins.doctor` also reports a path under a root core routes own
+    (`/editor`, `/api`, `/gql`, `/mcp`, …) and overlap with another plugin's
+    plug or public routes. `mix kiln.plugins.list` and System → Plugins count
+    plug routes.
+  - **Upgrade.** Additive. A plugin that does not define `plug_routes/0`
+    (including one built against `kiln_plugin` older than 1.4) declares none. A
+    plugin using it requires `{:kiln_plugin, "~> 1.4"}`. See
+    [Plugin extensibility](../plugin-extensibility.md).
+
 ## Changed
 
 <a id="search-leg-performance"></a>

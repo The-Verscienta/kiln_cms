@@ -13,6 +13,17 @@ read for a plugin contract:
 Releases are tagged `kiln_plugin-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## 1.4.0
+
+### Added
+
+- **`c:Kiln.Plugin.plug_routes/0` (kiln_cms#2272).** Controller-style routes
+  (`{:post, "/hooks/ping", MyController, :create}`) and `forward`s to a Plug
+  (`{:forward, "/feeds", MyRouter, []}`), mounted before the content-delivery
+  catch-alls in a scope with no session or CSRF check. Defaults to `[]`; a
+  plugin that does not override it is unchanged. A plugin using it should
+  require `{:kiln_plugin, "~> 1.4"}`.
+
 ## 1.3.1
 
 ### Changed

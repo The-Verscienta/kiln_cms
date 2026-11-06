@@ -351,6 +351,19 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :billing_webhook
   end
 
+  # Plugin endpoints (#2272, `Kiln.Plugin.plug_routes/0`): a webhook receiver, a
+  # JSON endpoint, a feed variant. Same posture as `:provider_webhook` and for
+  # the same reason: the caller is a machine, so there is no CSRF check and no
+  # session read (`conn.assigns.current_user` is never set; the plugin
+  # authenticates its own caller). Deliberately no `:accepts`, so a plugin can
+  # answer any content type, and no browser headers: the response is the
+  # plugin's to shape. The tenant is already on `conn.assigns.current_org` from
+  # the endpoint's `SetTenant`. Its own bucket, so a plugin's traffic cannot
+  # spend the budget of the core APIs.
+  pipeline :plugin_endpoint do
+    plug KilnCMSWeb.Plugs.RateLimit, :plugin_endpoint
+  end
+
   # The ActivityPub inbox (#491). Same situation as a payment webhook and the
   # same shape: no CSRF, no session, the caller is a remote server, and
   # authorization is an HTTP Signature over the raw body (preserved by
@@ -1299,6 +1312,16 @@ defmodule KilnCMSWeb.Router do
       import KilnCMSWeb.PluginRouter
       plugin_public_routes()
     end
+  end
+
+  # Plugin plug routes (#2272) — compiled in from each installed plugin's
+  # `plug_routes/0`. Registered BEFORE the delivery catch-alls below, for the
+  # same reason as the public routes above. No `:browser`: see the pipeline.
+  scope "/" do
+    pipe_through :plugin_endpoint
+
+    import KilnCMSWeb.PluginRouter
+    plugin_plug_routes()
   end
 
   # Document downloads (#481) and A/V playback (#494) — anonymous-tolerant

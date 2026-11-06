@@ -6873,6 +6873,7 @@ msgstr "Endpoint"
 msgid "Endpoint URL"
 msgstr "URL del endpoint"
 
+#: lib/kiln_cms_web/live/system_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Endpoints"
@@ -12468,6 +12469,11 @@ msgstr "Rol de plataforma"
 #, elixir-autogen, elixir-format
 msgid "Please fix the errors below."
 msgstr "Corrija los errores a continuación."
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Plug routes"
+msgstr "Rutas Plug"
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
