@@ -5,6 +5,20 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `kiln_client-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+### Added
+
+- **`:draft_write` keys (kiln_cms#2273):** `create/3` takes `on_behalf_of:`,
+  sent as the `X-Kiln-On-Behalf-Of` header, which Kiln records on a draft
+  created with a `:draft_write` API key so reviewers see which of your users
+  it was for. Stored only, never authorization; `nil` sends nothing, and
+  other writes never send it (the server reads it on `POST` only). The module
+  doc and README describe what a `:draft_write` key may do, and the three
+  optional provenance attributes (`"created_via_key_id"`,
+  `"created_via_key_name"`, `"on_behalf_of"`) a created record carries back.
+  Needs a Kiln server newer than 1.8; an older one ignores the header.
+
 ## 0.6.0
 
 ### Added

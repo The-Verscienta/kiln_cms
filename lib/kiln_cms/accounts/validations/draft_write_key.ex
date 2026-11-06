@@ -14,6 +14,15 @@ defmodule KilnCMS.Accounts.Validations.DraftWriteKey do
       owner, so an editor-capable owner would make the scope a request to be
       careful.
 
+    * **A bounded rotation window.** `rotatable_until`, when set, is at most
+      `config :kiln_cms, :draft_write_key_max_rotation_days` days away (default
+      365) and in the future. Any other scope refuses it: only a draft-write key
+      can self-rotate.
+
+  The same validation runs on `:rotate`, so a successor is held to these rules
+  too — in particular the owner is re-checked, and an owner promoted to editor
+  since the original mint stops the lineage.
+
   The owner rule is **defense in depth**. The control is the forbid in the
   `Content` policy, which sits above the admin bypass and does not look at the
   owner's role, so promoting the owner after the key was minted widens nothing.
@@ -25,6 +34,7 @@ defmodule KilnCMS.Accounts.Validations.DraftWriteKey do
   alias KilnCMS.Accounts.RoleGrant
 
   @default_max_ttl_days 30
+  @default_max_rotation_days 365
   @capable [:editor, :admin]
 
   @doc "The configured ceiling, in days, on a `:draft_write` key's lifetime."
@@ -32,14 +42,61 @@ defmodule KilnCMS.Accounts.Validations.DraftWriteKey do
   def max_ttl_days,
     do: Application.get_env(:kiln_cms, :draft_write_key_max_ttl_days, @default_max_ttl_days)
 
+  @doc """
+  The configured ceiling, in days from mint, on a `:draft_write` key's
+  `rotatable_until`.
+  """
+  @spec max_rotation_days() :: pos_integer()
+  def max_rotation_days,
+    do:
+      Application.get_env(
+        :kiln_cms,
+        :draft_write_key_max_rotation_days,
+        @default_max_rotation_days
+      )
+
   @impl true
   def validate(changeset, _opts, _context) do
     if Ash.Changeset.get_attribute(changeset, :access) == :draft_write do
-      with :ok <- check_ttl(changeset) do
+      with :ok <- check_ttl(changeset),
+           :ok <- check_rotation_window(changeset) do
         check_owner(changeset)
       end
     else
+      check_not_rotatable(changeset)
+    end
+  end
+
+  defp check_not_rotatable(changeset) do
+    if is_nil(Ash.Changeset.get_attribute(changeset, :rotatable_until)) do
       :ok
+    else
+      {:error, field: :rotatable_until, message: "only a draft-write key can self-rotate"}
+    end
+  end
+
+  defp check_rotation_window(changeset) do
+    case Ash.Changeset.get_attribute(changeset, :rotatable_until) do
+      %DateTime{} = until ->
+        now = DateTime.utc_now()
+        limit = DateTime.add(now, max_rotation_days(), :day)
+
+        cond do
+          DateTime.compare(until, now) != :gt ->
+            {:error,
+             field: :rotatable_until, message: "the rotation window must end in the future"}
+
+          DateTime.compare(until, limit) == :gt ->
+            {:error,
+             field: :rotatable_until,
+             message: "a draft-write key may rotate for at most #{max_rotation_days()} days"}
+
+          true ->
+            :ok
+        end
+
+      _ ->
+        :ok
     end
   end
 
