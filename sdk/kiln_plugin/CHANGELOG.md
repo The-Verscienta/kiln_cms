@@ -13,6 +13,20 @@ read for a plugin contract:
 Releases are tagged `kiln_plugin-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## 1.4.0
+
+### Added
+
+- **`c:Kiln.FieldType.graphql_kind/1`, an optional callback naming how the
+  GraphQL API types a field's value (kiln_cms#2290).** Return `:string`,
+  `:int`, `:float`, `:boolean`, `:date`, `:datetime` or `:json` for the value
+  `cast/2` stores. The core serves it through the matching typed reader
+  (`customInt(name:)`, …) and `fields(names:)`. It has no default and is not
+  required: a type without it, or compiled against an older `kiln_plugin`, is
+  served as `:json`, and so is any other return. A plugin that implements it
+  should require `{:kiln_plugin, "~> 1.4"}`; publish this version to Hex before
+  a plugin does. Additive: no callback or return shape changed.
+
 ## 1.3.1
 
 ### Changed
