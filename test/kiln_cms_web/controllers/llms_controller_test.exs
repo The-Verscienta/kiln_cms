@@ -88,4 +88,25 @@ defmodule KilnCMSWeb.LlmsControllerTest do
     assert body =~ "[#{post.title}](#{base_url}/blog/#{post.slug})"
     refute body =~ "http://localhost:4000"
   end
+
+  test "noindex documents are left out; nofollow-only ones stay (#2256)", %{conn: conn} do
+    actor = admin()
+
+    mk = fn attrs ->
+      post =
+        CMS.create_post!(Map.merge(%{title: "T #{slug()}", slug: slug()}, attrs), actor: actor)
+
+      CMS.publish_post!(post, %{}, actor: actor)
+    end
+
+    hidden = mk.(%{noindex: true})
+    nofollow = mk.(%{nofollow: true})
+    plain = mk.(%{})
+
+    body = conn |> get(~p"/llms.txt") |> response(200)
+
+    refute body =~ hidden.title
+    assert body =~ nofollow.title
+    assert body =~ plain.title
+  end
 end

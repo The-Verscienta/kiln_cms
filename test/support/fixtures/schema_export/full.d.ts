@@ -281,6 +281,7 @@ export interface PageDocument {
   id: string;
   inherited_fields?: Record<string, unknown>;
   locale: string | null;
+  robots?: { nofollow: boolean; noindex: boolean };
   slug: string | null;
   title: string | null;
   type: "page";
@@ -294,6 +295,7 @@ export interface PostDocument {
   id: string;
   inherited_fields?: Record<string, unknown>;
   locale: string | null;
+  robots?: { nofollow: boolean; noindex: boolean };
   slug: string | null;
   title: string | null;
   type: "post";

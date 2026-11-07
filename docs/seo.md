@@ -355,6 +355,56 @@ and a site that moves to a custom domain follows at once.
 Only admins can edit it (`KilnCMS.CMS.SiteSecurityTxt`); the file, and the row
 behind it, are public.
 
+## Robots: `noindex` and `nofollow`
+
+Each document carries two flags, **noindex** and **nofollow** (#2256), both off
+by default. They are sent as `<meta name="robots">` and an `x-robots-tag`
+response header (one helper builds both, so they agree) when either is set.
+
+`noindex` also removes the document from the discovery surfaces Kiln
+generates, so the site does not advertise a page it asks crawlers to skip:
+
+- `/sitemap.xml` and `/news-sitemap.xml`
+- `/llms.txt`
+- every feed: the site feed, per-type, category and tag feeds (Atom and JSON)
+
+`nofollow` on its own changes nothing in those lists; a nofollow-only document
+stays listed.
+
+The flags are an instruction to crawlers, not a delivery switch. The document is
+still served, and still appears in the sync/change feed, the fired artifacts,
+the static export, JSON:API and GraphQL, each carrying the flags so a separate
+frontend can honour them.
+
+The flags are part of the document's working copy: while a published document
+has a pending working copy, changing them takes effect on the live page when
+the working copy is published, like any other field.
+
+In the editor, both flags are checkboxes in the SEO section beside the canonical
+URL. They follow the same field grants and soft locks as the canonical URL: an
+editor whose grant leaves them out cannot change them.
+
+The SEO panel also carries an advisory warning, `noindex_nav_linked`, when a
+published document is hidden from search but an enabled menu item links to it.
+"Enabled" is the same test the structure view's "not in any menu" badge uses
+(`KilnCMS.CMS.Menus.linked_content_ids/1`): the item is visible, and so is every
+ancestor up to a root. It is a prompt to confirm, not a block; `nofollow` alone
+never triggers it. The menu lookup is one read per editor session and document,
+and is skipped for drafts.
+
+### Per-type defaults
+
+A content type can start its new documents with either flag on: the
+`noindex_default` / `nofollow_default` options of `use KilnCMS.CMS.Content` for a
+compiled type, or the two checkboxes on the type's page under **Content types**
+for an admin-defined one. A flag takes the default only when the create does not
+name it, so an explicit `false` (or `true`) from an editor, the API or an import
+always wins. Duplicates and translations copy the source document's flags and
+ignore the default; an editor whose field grant leaves the flags out still gets
+them copied, so a copy never makes a hidden page indexable. Defaults are not retroactive: documents that already exist
+keep what they have, and changing a default touches only documents created
+afterwards.
+
 ## Google News sitemap
 
 `/news-sitemap.xml` is the sitemap Google News reads beside `/sitemap.xml`.

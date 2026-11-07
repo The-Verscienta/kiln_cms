@@ -60,6 +60,17 @@ Every summary line below that was shortened links to its own entry there.
   column, filled for every row by the migration (a table rewrite). Nothing else to run.**
   ([long form](docs/changelog/unreleased.md#search-name-lexemes-upgrade))
 
+- **Overlays: run `mix ash.codegen` again for the per-document `noindex` / `nofollow` columns
+  on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
+  ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
+
+### Added
+
+- **Per-document `noindex` / `nofollow` (with per-type defaults for new documents): sent as
+  `<meta name="robots">` and `x-robots-tag`, carried in versions, copies and the API, left out
+  of sitemap, news sitemap, llms.txt and feeds, with an advisory for a menu-linked noindex page.**
+  ([#2256](https://github.com/The-Verscienta/kiln_cms/issues/2256) · [long form](docs/changelog/unreleased.md#robots-flags))
+
 ### Changed
 
 - **Global search on a large catalogue: the alias and compound legs prefilter on stored

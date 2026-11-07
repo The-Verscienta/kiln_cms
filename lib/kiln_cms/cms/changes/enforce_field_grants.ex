@@ -68,7 +68,6 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
   defp enforce(changeset, allowed) do
     changeset.action.accept
     |> Enum.filter(&violation?(changeset, &1, allowed))
-    |> Enum.map(&to_string/1)
     |> Enum.reduce(changeset, &add_violation(&2, &1))
     |> maybe_block_tree_violation(allowed)
   end
@@ -116,12 +115,14 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
         Ash.Changeset.get_argument(changeset, :body_markdown) != nil
 
     if body_arg? and "blocks" not in allowed do
-      add_violation(changeset, "blocks")
+      add_violation(changeset, :blocks)
     else
       changeset
     end
   end
 
+  # The error carries the attribute as an ATOM: a form field's `.errors` only
+  # matches atom keys, so a string field name was shown nowhere in the editor.
   defp add_violation(changeset, field) do
     Ash.Changeset.add_error(changeset,
       field: field,

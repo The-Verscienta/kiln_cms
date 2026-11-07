@@ -433,7 +433,19 @@ defmodule KilnCMS.SchemaExport do
         "slug" => %{"type" => ["string", "null"]},
         "locale" => %{"type" => ["string", "null"]},
         "custom_fields" => custom_fields_schema(ct.field_definitions),
-        "blocks" => %{"type" => "array", "items" => JsonSchema.block_ref()}
+        "blocks" => %{"type" => "array", "items" => JsonSchema.block_ref()},
+        # Optional: present only when the document sets a robots flag (#2256).
+        "robots" => %{
+          "type" => "object",
+          "description" =>
+            "The document's robots flags. Absent when neither is set; absent means both false.",
+          "properties" => %{
+            "noindex" => %{"type" => "boolean"},
+            "nofollow" => %{"type" => "boolean"}
+          },
+          "required" => ["noindex", "nofollow"],
+          "additionalProperties" => false
+        }
       },
       "required" => ["blocks", "custom_fields", "id", "locale", "slug", "title", "type"],
       "additionalProperties" => false

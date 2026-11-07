@@ -97,6 +97,7 @@
     />
     <meta :if={assigns[:meta_description]} name="description" content={@meta_description} />
     <meta :if={assigns[:meta_keywords]} name="keywords" content={@meta_keywords} />
+    <meta :if={assigns[:robots]} name="robots" content={@robots} />
     <link :if={assigns[:canonical_url]} rel="canonical" href={@canonical_url} />
     <%!-- Feed autodiscovery (#486). Assigned by the delivery controllers only —
           the console and auth pages leave it unset, so `/editor/*` never

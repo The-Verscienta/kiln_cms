@@ -81,6 +81,8 @@ defmodule KilnCMS.CMS.WorkingCopy do
     :seo_keywords,
     :seo_image,
     :canonical_url,
+    :noindex,
+    :nofollow,
     :custom_fields,
     :category_id,
     :featured_image_id

@@ -6084,6 +6084,13 @@ msgstr "Nombre para mostrar"
 msgid "Display name (optional)"
 msgstr "Nombre para mostrar (opcional)"
 
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Do not follow links"
+msgstr "No seguir los enlaces"
+
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Do this"
@@ -8231,6 +8238,13 @@ msgstr "Texto de ayuda"
 msgid "Hidden"
 msgstr "Oculto"
 
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Hide from search engines"
+msgstr "Ocultar a los motores de búsqueda"
+
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "Hide password"
@@ -10277,6 +10291,16 @@ msgstr "Nuevo tipo de contenido"
 #, elixir-autogen, elixir-format
 msgid "New devices on this site subscribe with this site's own key."
 msgstr "Los dispositivos nuevos de este sitio se suscriben con la clave propia del sitio."
+
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "New entries are hidden from search engines (noindex)"
+msgstr "Las entradas nuevas se ocultan a los motores de búsqueda (noindex)"
+
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "New entries tell search engines not to follow links (nofollow)"
+msgstr "Las entradas nuevas indican a los motores de búsqueda que no sigan los enlaces (nofollow)"
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -16436,6 +16460,11 @@ msgstr "Equipo"
 msgid "Team workload"
 msgstr "Carga de trabajo del equipo"
 
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Tells search engines not to list this page, or not to follow its links. If the page is already published, the change goes live when you publish."
+msgstr "Indica a los motores de búsqueda que no listen esta página o que no sigan sus enlaces. Al editar una página publicada, el cambio se aplica cuando la publicas."
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Temporary role"
@@ -17919,6 +17948,11 @@ msgstr "Este texto es solo para miembros"
 #, elixir-autogen, elixir-format
 msgid "This page has no blocks yet. Add one below."
 msgstr "Esta página aún no tiene bloques. Añade uno abajo."
+
+#: lib/kiln_cms_web/components/seo_components.ex
+#, elixir-autogen, elixir-format
+msgid "This page is hidden from search engines but a menu links to it. Turn off “Hide from search engines” if that is not intended."
+msgstr "Esta página está oculta a los motores de búsqueda, pero un menú enlaza a ella. Desactiva «Ocultar a los motores de búsqueda» si no es lo que pretendías."
 
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format

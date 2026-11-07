@@ -69,11 +69,20 @@ defmodule KilnCMS.CMS.Content do
     :alias_pattern,
     :seo_title_pattern,
     :seo_description_pattern,
+    :noindex_default,
+    :nofollow_default,
     :localization
   ]
 
   @doc false
   def use_options, do: @use_options
+
+  # A `noindex_default:` / `nofollow_default:` option: a boolean, or absent
+  # (false). Anything else fails the build at the caller's `use` line.
+  defp robots_default!(value, _key) when is_boolean(value), do: value
+
+  defp robots_default!(other, key),
+    do: raise(ArgumentError, "#{inspect(key)} must be true or false, got: #{inspect(other)}")
 
   # Days trashed content is retained before the nightly auto-purge.
   @trash_retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
@@ -567,6 +576,14 @@ defmodule KilnCMS.CMS.Content do
     seo_description_pattern =
       opts |> Keyword.get(:seo_description_pattern) |> KilnCMS.Seo.Pattern.validate!()
 
+    # Robots defaults for NEW documents of this type (#2256): what `noindex` /
+    # `nofollow` start as when the caller does not say. Not retroactive.
+    noindex_default =
+      opts |> Keyword.get(:noindex_default, false) |> robots_default!(:noindex_default)
+
+    nofollow_default =
+      opts |> Keyword.get(:nofollow_default, false) |> robots_default!(:nofollow_default)
+
     # Field-level localization of record attributes (#1327), e.g.
     # `[shared: [:seo_image], fallback: [:excerpt]]` — see
     # `KilnCMS.I18n.FieldLocalization`. Validated here, so a typo fails the
@@ -740,6 +757,8 @@ defmodule KilnCMS.CMS.Content do
           :seo_keywords,
           :seo_image,
           :canonical_url,
+          :noindex,
+          :nofollow,
           :locale,
           :audience,
           :custom_fields,
@@ -1232,6 +1251,8 @@ defmodule KilnCMS.CMS.Content do
         :seo_description,
         :seo_image,
         :canonical_url,
+        :noindex,
+        :nofollow,
         # `path_alias` so the canonical redirect still works on a teaser.
         :path_alias,
         :published_at,
@@ -2098,6 +2119,12 @@ defmodule KilnCMS.CMS.Content do
           def __kiln_seo_title_pattern__, do: unquote(seo_title_pattern)
 
           def __kiln_seo_description_pattern__, do: unquote(seo_description_pattern)
+
+          # Robots defaults for new documents (#2256); dynamic entries carry
+          # theirs on the TypeDefinition row.
+          def __kiln_noindex_default__, do: unquote(noindex_default)
+
+          def __kiln_nofollow_default__, do: unquote(nofollow_default)
         end
       end
 
@@ -2664,6 +2691,8 @@ defmodule KilnCMS.CMS.Content do
           # stripped), so a title alone is enough to create content.
           change KilnCMS.CMS.Changes.DeriveSlug
           change KilnCMS.CMS.Changes.DeriveAlias
+          # The type's robots defaults, only where the caller left a flag out (#2256).
+          change KilnCMS.CMS.Changes.ApplyRobotsDefaults
           # Stamp the acting user as the author (system/seed creates leave nil).
           change relate_actor(:author, allow_nil?: true)
           # Set the many-to-many links from lists of ids (nil/omitted = no change).
@@ -4189,6 +4218,20 @@ defmodule KilnCMS.CMS.Content do
         attribute :canonical_url, :string,
           public?: true,
           constraints: [max_length: KilnCMS.Limits.url()]
+
+        # Robots directives for this document (#2256). Document-level and shared
+        # across locales; a copy and a translation inherit them from the source.
+        # Rendered as `<meta name="robots">` / `x-robots-tag` and used to leave the
+        # document out of discovery surfaces — delivery (APIs, sync) is unaffected.
+        attribute :noindex, :boolean,
+          default: false,
+          allow_nil?: false,
+          public?: true
+
+        attribute :nofollow, :boolean,
+          default: false,
+          allow_nil?: false,
+          public?: true
 
         attribute :locale, :string,
           default: "en",

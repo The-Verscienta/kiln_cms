@@ -307,6 +307,7 @@ config :kiln_cms, Kiln.Advisory,
   checks: [
     KilnCMS.Seo.Checks.Meta,
     KilnCMS.Seo.Checks.Keyphrase,
+    KilnCMS.Seo.Checks.Indexability,
     KilnCMS.Seo.Checks.Readability,
     # #551 parity gaps. Both are `:info`-only and English-gated: a pixel width
     # is a model of a font Google can change, and a regex-grade passive

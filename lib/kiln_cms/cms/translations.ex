@@ -47,7 +47,8 @@ defmodule KilnCMS.CMS.Translations do
   # document in another locale, and the `[slug, locale]` identity is what pairs
   # them. Workflow (state, schedules) and delivery bookkeeping
   # (published_version, artifacts) start fresh; canonical_url is locale-specific
-  # by nature, so it isn't carried over.
+  # by nature, so it isn't carried over. The robots flags are document-level, so
+  # they are (via `ContentCopy`).
   @copied_attrs [:slug | ContentCopy.content_attrs()]
 
   # Carried whatever the acting editor's field grant says (#1157), each for its
@@ -63,9 +64,13 @@ defmodule KilnCMS.CMS.Translations do
   #     (`:public`), which is strictly *less* restrictive than the source. A
   #     grant would silently move a members-only body to the public tier.
   #
-  # `Duplication` exempts the same two it can (it rewrites `title` rather than
+  #   * `noindex` / `nofollow` (#2256) — dropping one falls back to `false`,
+  #     which would make a page that asked to stay out of search engines
+  #     indexable the moment a field-granted editor copies it.
+  #
+  # `Duplication` exempts the same ones it can (it rewrites `title` rather than
   # copying it), and states the same reasons.
-  @grant_exempt_attrs [:slug, :title, :audience]
+  @grant_exempt_attrs [:slug, :title, :audience, :noindex, :nofollow]
 
   @doc """
   Every locale variant sharing `record`'s slug (including `record` itself),

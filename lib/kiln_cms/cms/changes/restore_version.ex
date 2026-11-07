@@ -166,14 +166,27 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
     end
   end
 
+  # Robots flags (#2256) added after most history was written. A version from
+  # before them has no key, and "what the record carried then" (`false`) would
+  # make a page that has since been hidden from search engines indexable again
+  # as a side effect of restoring its text. Absent means: leave the current
+  # value alone. A snapshot that does carry the key restores it like any field.
+  @keep_current_when_absent [:noindex, :nofollow]
+
   defp restore_fields(changeset, state, restorable) do
-    Enum.reduce(restorable, changeset, fn name, acc ->
+    Enum.reduce(restorable, changeset, &restore_field(&2, &1, state))
+  end
+
+  defp restore_field(changeset, name, state) do
+    if name in @keep_current_when_absent and not Map.has_key?(state, to_string(name)) do
+      changeset
+    else
       # Values arrive in the shape PaperTrail stored (JSON), which
       # `force_change_attribute/3` casts back.
-      value = Map.get_lazy(state, to_string(name), fn -> default(acc.resource, name) end)
-      value = acc |> restorable_value(name, value) |> upcast_blocks(name)
-      Ash.Changeset.force_change_attribute(acc, name, value)
-    end)
+      value = Map.get_lazy(state, to_string(name), fn -> default(changeset.resource, name) end)
+      value = changeset |> restorable_value(name, value) |> upcast_blocks(name)
+      Ash.Changeset.force_change_attribute(changeset, name, value)
+    end
   end
 
   # A working copy is only meaningful beside a published text

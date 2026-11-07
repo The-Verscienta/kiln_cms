@@ -255,6 +255,8 @@ input CreateEntryInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -292,6 +294,8 @@ input CreatePageInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -329,6 +333,8 @@ input CreatePostInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -374,6 +380,8 @@ input DeleteEntryInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -406,6 +414,8 @@ input DeletePageInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -438,6 +448,8 @@ input DeletePostInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -480,6 +492,10 @@ type Entry implements ContentRecord {
   seoImage: String
 
   canonicalUrl: String
+
+  noindex: Boolean!
+
+  nofollow: Boolean!
 
   locale: String
 
@@ -803,6 +819,8 @@ input EntryFilterInput {
   pathAlias: EntryFilterPathAlias
   seoImage: EntryFilterSeoImage
   canonicalUrl: EntryFilterCanonicalUrl
+  noindex: EntryFilterNoindex
+  nofollow: EntryFilterNofollow
   locale: EntryFilterLocale
   audience: EntryFilterAudience
   customFields: EntryFilterCustomFields
@@ -887,6 +905,32 @@ input EntryFilterLockVersion {
   greaterThanOrEqual: Int
   isDistinctFrom: Int
   isNotDistinctFrom: Int
+}
+
+input EntryFilterNofollow {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
+}
+
+input EntryFilterNoindex {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
 }
 
 input EntryFilterPathAlias {
@@ -1162,6 +1206,8 @@ enum EntrySortField {
   PATH_ALIAS
   SEO_IMAGE
   CANONICAL_URL
+  NOINDEX
+  NOFOLLOW
   LOCALE
   AUDIENCE
   CUSTOM_FIELDS
@@ -1654,6 +1700,10 @@ type Page implements ContentRecord {
 
   canonicalUrl: String
 
+  noindex: Boolean!
+
+  nofollow: Boolean!
+
   locale: String
 
   audience: String!
@@ -1953,6 +2003,8 @@ input PageFilterInput {
   pathAlias: PageFilterPathAlias
   seoImage: PageFilterSeoImage
   canonicalUrl: PageFilterCanonicalUrl
+  noindex: PageFilterNoindex
+  nofollow: PageFilterNofollow
   locale: PageFilterLocale
   audience: PageFilterAudience
   customFields: PageFilterCustomFields
@@ -2035,6 +2087,32 @@ input PageFilterLockVersion {
   greaterThanOrEqual: Int
   isDistinctFrom: Int
   isNotDistinctFrom: Int
+}
+
+input PageFilterNofollow {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
+}
+
+input PageFilterNoindex {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
 }
 
 input PageFilterPathAlias {
@@ -2350,6 +2428,8 @@ enum PageSortField {
   PATH_ALIAS
   SEO_IMAGE
   CANONICAL_URL
+  NOINDEX
+  NOFOLLOW
   LOCALE
   AUDIENCE
   CUSTOM_FIELDS
@@ -2406,6 +2486,10 @@ type Post implements ContentRecord {
   seoImage: String
 
   canonicalUrl: String
+
+  noindex: Boolean!
+
+  nofollow: Boolean!
 
   locale: String
 
@@ -2725,6 +2809,8 @@ input PostFilterInput {
   pathAlias: PostFilterPathAlias
   seoImage: PostFilterSeoImage
   canonicalUrl: PostFilterCanonicalUrl
+  noindex: PostFilterNoindex
+  nofollow: PostFilterNofollow
   locale: PostFilterLocale
   audience: PostFilterAudience
   customFields: PostFilterCustomFields
@@ -2807,6 +2893,32 @@ input PostFilterLockVersion {
   greaterThanOrEqual: Int
   isDistinctFrom: Int
   isNotDistinctFrom: Int
+}
+
+input PostFilterNofollow {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
+}
+
+input PostFilterNoindex {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
 }
 
 input PostFilterPathAlias {
@@ -3051,6 +3163,8 @@ enum PostSortField {
   PATH_ALIAS
   SEO_IMAGE
   CANONICAL_URL
+  NOINDEX
+  NOFOLLOW
   LOCALE
   AUDIENCE
   CUSTOM_FIELDS
@@ -4240,6 +4354,8 @@ input UpdateEntryInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -4302,6 +4418,8 @@ input UpdatePageInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -4344,6 +4462,8 @@ input UpdatePostInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString

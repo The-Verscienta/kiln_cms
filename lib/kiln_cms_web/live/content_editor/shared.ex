@@ -354,6 +354,8 @@ defmodule KilnCMSWeb.ContentEditor.Shared do
   def field_label("seo_keywords"), do: gettext("SEO keywords")
   def field_label("seo_image"), do: gettext("Social image")
   def field_label("canonical_url"), do: gettext("Canonical URL")
+  def field_label("noindex"), do: gettext("Hide from search engines")
+  def field_label("nofollow"), do: gettext("Do not follow links")
 
   def field_label(field) do
     case Regex.run(~r/\[([a-z_]+)\]$/, field) do

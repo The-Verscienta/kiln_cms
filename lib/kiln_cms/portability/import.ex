@@ -76,7 +76,7 @@ defmodule KilnCMS.Portability.Import do
   # excludes it for exactly this reason.
   @envelope_attrs ~w(
     seo_title seo_description seo_keywords seo_image
-    path_alias audience custom_fields
+    path_alias audience custom_fields noindex nofollow
   )
 
   @type report :: %{

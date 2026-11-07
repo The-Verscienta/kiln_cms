@@ -497,12 +497,20 @@ public data class PageDocument(
     /** Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited. */
     @SerialName("inherited_fields") public val inheritedFields: JsonObject? = null,
     public val locale: String? = null,
+    /** The document's robots flags. Absent when neither is set; absent means both false. */
+    public val robots: Robots? = null,
     public val slug: String? = null,
     public val title: String? = null,
     public val type: String,
 ) : Document {
     @Serializable
     public data object CustomFields
+
+    @Serializable
+    public data class Robots(
+        public val nofollow: Boolean,
+        public val noindex: Boolean,
+    )
 }
 
 /** A published `Post` as fired to the `:json` surface. */
@@ -517,6 +525,8 @@ public data class PostDocument(
     /** Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited. */
     @SerialName("inherited_fields") public val inheritedFields: JsonObject? = null,
     public val locale: String? = null,
+    /** The document's robots flags. Absent when neither is set; absent means both false. */
+    public val robots: Robots? = null,
     public val slug: String? = null,
     public val title: String? = null,
     public val type: String,
@@ -591,6 +601,12 @@ public data class PostDocument(
     @Serializable
     public data class CustomFieldsPlain(
         public val summary: String? = null,
+    )
+
+    @Serializable
+    public data class Robots(
+        public val nofollow: Boolean,
+        public val noindex: Boolean,
     )
 }
 

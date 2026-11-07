@@ -296,6 +296,8 @@ defmodule KilnCMSWeb.VersionDiffComponents do
     seo_keywords: "SEO keywords",
     seo_image: "SEO image",
     canonical_url: "Canonical URL",
+    noindex: "Hide from search engines",
+    nofollow: "Do not follow links",
     published_at: "Published at",
     scheduled_at: "Scheduled at",
     proposed_publish_at: "Proposed publish date",
