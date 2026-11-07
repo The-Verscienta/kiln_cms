@@ -201,6 +201,11 @@ defmodule KilnCMSWeb.Endpoint do
   # scoped to the right site. Bare-host/localhost requests resolve to the default org.
   plug KilnCMSWeb.Plugs.SetTenant
 
+  # The operator's IP block list (#2242). Per-org, so it needs the tenant and
+  # sits straight after it; dynamic routes only (static files and uploads are
+  # served above and are not tenant-scoped). The sockets check it themselves.
+  plug KilnCMSWeb.Plugs.IpBlock
+
   # Attach request context (method, path, scrubbed headers/params) to any Sentry
   # event raised while handling this request. No-op without a configured DSN. On
   # Bandit this is the capture path — `Sentry.PlugCapture` is deliberately

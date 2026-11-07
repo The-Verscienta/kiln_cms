@@ -650,6 +650,13 @@ defmodule KilnCMS.CMS do
       define :destroy_search_synonym, action: :destroy
     end
 
+    resource KilnCMS.CMS.IpBlockRule do
+      define :list_ip_block_rules, action: :list
+      define :get_ip_block_rule, action: :read, get_by: [:id]
+      define :create_ip_block_rule, action: :create
+      define :destroy_ip_block_rule, action: :destroy
+    end
+
     resource KilnCMS.CMS.SavedView do
       define :list_saved_views, action: :visible
       define :get_saved_view, action: :read, get_by: [:id]

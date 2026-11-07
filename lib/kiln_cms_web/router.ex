@@ -569,6 +569,9 @@ defmodule KilnCMSWeb.Router do
       # by the live session's tier gate AND the resource policy; the snippet is
       # rendered only by the `:delivery` pipeline, never here.
       live "/editor/code-injection", CodeInjectionLive, :index
+      # The site's IP/CIDR block list (#2242). Admin-only by the tier gate AND the
+      # resource policy; enforcement is `KilnCMSWeb.Plugs.IpBlock` and the sockets.
+      live "/editor/ip-blocks", IpBlockLive, :index
       # In-app backups (#484) — status, "back up now", retention. Admin-only:
       # the artifact list names the database dump, and an editor has no action
       # to take on it. Restore stays a documented ops procedure.
