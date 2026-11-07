@@ -426,6 +426,11 @@ defmodule KilnCMS.Accounts.User do
       validate {AshAuthentication.Strategy.Password.PasswordValidation,
                 strategy_name: :password, password_argument: :current_password}
 
+      # Breached-password lookup (#2240), from a `before_transaction` hook so a
+      # rejected form never calls out. After the validations above: a wrong
+      # current password makes the changeset invalid and nothing is sent.
+      change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :change}
+
       change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
 
       # Revokes every stored token the account holds — every session, the
@@ -445,6 +450,10 @@ defmodule KilnCMS.Accounts.User do
       # reconnect cannot beat the revocation.
       change {KilnCMS.Accounts.Changes.EvictSessions,
               reason: :password_changed, after_commit?: true}
+
+      metadata :password_breach, :map do
+        description "Set to `%{status: :breached}` when the new password is in a known breach and the site's policy allows it with a warning."
+      end
     end
 
     read :sign_in_with_password do
@@ -569,6 +578,10 @@ defmodule KilnCMS.Accounts.User do
       # replaying `submit` was unlimited account creation.
       change KilnCMS.Accounts.Changes.ThrottleRegistration
 
+      # Breached-password lookup (#2240). After the throttle, so a flood of
+      # registrations is bounded before it can fan out to a third party.
+      change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :register}
+
       # Invite-only mode: reject self-registration when
       # `config :kiln_cms, :registration_enabled` is false.
       validate KilnCMS.Accounts.Validations.RegistrationEnabled
@@ -605,6 +618,10 @@ defmodule KilnCMS.Accounts.User do
       metadata :token, :string do
         description "A JWT that can be used to authenticate the user."
         allow_nil? false
+      end
+
+      metadata :password_breach, :map do
+        description "Set to `%{status: :breached}` when the password is in a known breach and the site's policy allows it with a warning."
       end
     end
 
@@ -645,6 +662,15 @@ defmodule KilnCMS.Accounts.User do
 
       validate {AshAuthentication.Strategy.Password.PasswordConfirmationValidation,
                 strategy_name: :password}
+
+      # Breached-password verdict (#2240). `KilnCMS.Accounts.Bootstrap` takes
+      # the lookup BEFORE its advisory-locked transaction and passes the verdict
+      # in the changeset context; here the hook only applies it.
+      change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :bootstrap}
+
+      metadata :password_breach, :map do
+        description "Set to `%{status: :breached}` when the password is in a known breach and the site's policy allows it with a warning."
+      end
     end
 
     # Written out rather than generated, so a per-address budget can go in front
@@ -755,6 +781,10 @@ defmodule KilnCMS.Accounts.User do
       # validates that the password matches the confirmation
       validate AshAuthentication.Strategy.Password.PasswordConfirmationValidation
 
+      # Breached-password lookup (#2240), after the token and confirmation
+      # validations above so an invalid reset never calls out.
+      change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :reset}
+
       # Hashes the provided password
       change AshAuthentication.Strategy.Password.HashPasswordChange
 
@@ -782,6 +812,10 @@ defmodule KilnCMS.Accounts.User do
       # releases the per-account sign-in budget (#478) — otherwise the remedy
       # the throttle's own alert mail recommends leaves the owner still locked.
       change KilnCMS.Accounts.Changes.ForgiveSignInThrottle
+
+      metadata :password_breach, :map do
+        description "Set to `%{status: :breached}` when the new password is in a known breach and the site's policy allows it with a warning."
+      end
     end
 
     # --- Two-factor authentication (TOTP) self-service (issue #331) ---

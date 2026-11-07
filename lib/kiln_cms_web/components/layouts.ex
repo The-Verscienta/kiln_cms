@@ -128,23 +128,36 @@ defmodule KilnCMSWeb.Layouts do
     <%!-- Sign-in is where an operator forms their belief about which deployment
           they are on, and a scrubbed clone shows production's logo and site name
           here (#469). Telling them after they authenticate is one page too late. --%>
-    <div :if={KilnCMS.Environment.label()} class="-mt-4 mb-4 flex justify-center">
-      <.environment_banner />
-    </div>
-    <.auth_brand brand={@brand} class="mb-6" />
-    <%!-- The library's own live layout renders `Components.Flash`; replacing it
-          with this layout (for the white-label banner above) dropped it, so a
-          flash set on an auth page was held in the socket and never drawn (#884).
-          `Password.ResetForm` / `MagicLink` report success *only* by flashing —
-          without this the /reset and magic-link forms gave no feedback at all.
-          Kiln's own `flash_group` (as `Layouts.app/1` uses) rather than the
-          library's `Components.Flash`, so auth toasts match the rest of the
-          console; that is why the `Components.Flash` override is now gone. --%>
-    <.flash_group flash={@flash} />
+    <%!-- The banner and brand row are the page's `<header>` landmark, so nothing
+          sits outside a landmark (axe `region`, #2162). --%>
+    <header>
+      <div :if={KilnCMS.Environment.label()} class="-mt-4 mb-4 flex justify-center">
+        <.environment_banner />
+      </div>
+      <.auth_brand brand={@brand} class="mb-6" />
+    </header>
     <%!-- `#main` matches the global skip link in `root.html.heex` — auth was the
           only shell that omitted the landmark, so keyboard users had nowhere to
           land after "Skip to content". --%>
     <main id="main">
+      <%!-- The page's one `h1` (#2162). Visually hidden because every view here
+            already draws a visible heading of its own, and the library's
+            `h2` labels cannot be turned into an `h1` from outside. It is the
+            title the tab shows, which `KilnCMSWeb.AuthPageTitle` sets from the
+            `live_action` and re-sets on `live_patch`, so it follows
+            sign-in / register / reset without a second mapping. `/sign-in/verify`
+            hands the layout the same assign from its controller. --%>
+      <h1 :if={assigns[:page_title]} class="sr-only">{@page_title}</h1>
+      <%!-- The library's own live layout renders `Components.Flash`; replacing it
+            with this layout (for the white-label banner above) dropped it, so a
+            flash set on an auth page was held in the socket and never drawn (#884).
+            `Password.ResetForm` / `MagicLink` report success *only* by flashing —
+            without this the /reset and magic-link forms gave no feedback at all.
+            Kiln's own `flash_group` (as `Layouts.app/1` uses) rather than the
+            library's `Components.Flash`, so auth toasts match the rest of the
+            console; that is why the `Components.Flash` override is now gone.
+            Inside `<main>` so the toast is in a landmark too. --%>
+      <.flash_group flash={@flash} />
       {@inner_content}
     </main>
     """
@@ -167,7 +180,7 @@ defmodule KilnCMSWeb.Layouts do
     ~H"""
     <div class={["flex w-full justify-center", @class]}>
       <a href="/" class="auth-brand">
-        <img src={@brand.logo_url} class="h-10 w-auto" alt="" referrerpolicy="no-referrer" />
+        <.brand_mark brand={@brand} class="h-10 w-auto" />
         <span>{@brand.site_name}</span>
       </a>
     </div>
@@ -298,6 +311,43 @@ defmodule KilnCMSWeb.Layouts do
 
   @doc "The header logo URL for an org, resolved through the branding fallback chain."
   def brand_logo(org), do: Branding.for_org(org).logo_url
+
+  @doc """
+  The brand's logo `<img>`, decorative (the site name sits beside it).
+
+  The built-in mark is a 278x379 PNG that is shown at 20-40 css px, so it gets
+  a right-sized WebP/PNG pair in a `<picture>` (#2165). Anything else — an
+  operator's own `logo_url` — renders as a plain `<img>` of that URL, untouched.
+  The built-in mark carries explicit dimensions so the row does not shift while
+  it loads; a custom URL's size is unknown, so it carries none rather than a wrong one.
+  """
+  attr :brand, :map, required: true
+  attr :class, :string, default: nil
+
+  def brand_mark(assigns) do
+    assigns = assign(assigns, :default?, assigns.brand.logo_url == Branding.default_logo_url())
+
+    ~H"""
+    <picture :if={@default?}>
+      <source type="image/webp" srcset={~p"/images/logo-mark-sm.webp"} />
+      <img
+        src={~p"/images/logo-mark-sm.png"}
+        width="88"
+        height="120"
+        class={@class}
+        alt=""
+        referrerpolicy="no-referrer"
+      />
+    </picture>
+    <img
+      :if={!@default?}
+      src={@brand.logo_url}
+      class={@class}
+      alt=""
+      referrerpolicy="no-referrer"
+    />
+    """
+  end
 
   @doc """
   Renders your app layout.
@@ -1250,7 +1300,7 @@ defmodule KilnCMSWeb.Layouts do
               narrow column beside it. --%>
         <div class="public-measure flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
           <a href="/" class="flex min-w-0 items-center gap-3">
-            <img src={@brand.logo_url} class="h-7 w-auto" alt="" referrerpolicy="no-referrer" />
+            <.brand_mark brand={@brand} class="h-7 w-auto" />
             <span class="public-site-name text-sm font-semibold tracking-tight">
               {@brand.site_name}
             </span>
@@ -1492,7 +1542,7 @@ defmodule KilnCMSWeb.Layouts do
           "rounded px-1.5 py-1 uppercase",
           if(loc == @current,
             do: "font-semibold text-base-content",
-            else: "text-base-content/60 hover:text-base-content"
+            else: "text-base-content/70 hover:text-base-content"
           )
         ]}
       >

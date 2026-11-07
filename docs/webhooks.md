@@ -12,14 +12,15 @@ as [#570](https://github.com/The-Verscienta/kiln_cms/issues/570) — the feature
 
 Admins manage endpoints at **`/editor/webhooks`**. Adding one takes a URL and a
 set of events to subscribe to; Kiln generates a signing secret at creation time.
-It never changes, even across edits, and there is no way to rotate it short of
-deleting the endpoint and adding it again. Each row shows the secret masked
+It does not change when you edit the endpoint; an admin replaces it on purpose with
+**Rotate secret** ([Rotate a webhook signing secret](#rotate-a-webhook-signing-secret)
+below). Each row shows the secret masked
 until an admin reveals it ([Copy a webhook signing secret](#copy-a-webhook-signing-secret)
 below). The secret
 is stored encrypted with the app's vault key, which is derived from
 `SECRET_KEY_BASE`. Rotating that key leaves every endpoint's secret unreadable:
 the row says so, and deliveries are refused rather than sent unsigned.
-Re-create the endpoints after a rotation ([secrets rotation](secrets-rotation.md)). Toggling
+Rotate each endpoint's secret after that ([secrets rotation](secrets-rotation.md)). Toggling
 **Active** or editing an endpoint gives it a clean slate: its failure count
 resets (see [Auto-disable](#auto-disable) below).
 
@@ -71,12 +72,73 @@ What can go wrong:
   page to see the current list.
 - **The row says the secret is "unreadable"** and has no **Reveal** or
   **Copy**: it was encrypted under a `SECRET_KEY_BASE` this server no longer
-  has. Delete the endpoint, add it again, and give the receiver the new
-  secret ([secrets rotation](secrets-rotation.md)).
+  has. Click **Rotate secret** and give the receiver the new secret
+  ([Rotate a webhook signing secret](#rotate-a-webhook-signing-secret),
+  [secrets rotation](secrets-rotation.md)).
 - **Copy does nothing and no "copied" message appears**: the browser refused
   the clipboard write, which it does on a page not served over HTTPS (other
   than `localhost`) or when clipboard access is blocked. Select the revealed
   secret and copy it by hand.
+
+## Rotate a webhook signing secret
+
+Replace an endpoint's signing secret when it may have leaked, or when the row
+says the secret is "unreadable". You need the admin role; `/editor/webhooks`
+is admin-only, and so is the rotation. The URL, events and **Active** setting
+stay as they are.
+
+The old secret stops working at once. There is no window in which both are
+accepted: rotation is the remedy for a leaked secret, and a grace period would
+leave the leaked one valid. If your receiver can accept two secrets at a time,
+do this in order:
+
+1. Change the receiver to accept signatures made with either the old or the
+   new secret. You have the old one; you get the new one in step 4. If the
+   receiver can't do this, skip to step 3 and expect the gap described below.
+2. Open **Webhooks** in the console navigation (`/editor/webhooks`) and find
+   the endpoint's row.
+3. Click **Rotate secret**. The browser asks: "Rotate this signing secret?
+   Deliveries start using the new secret now, and the old one stops working,
+   so update the receiver with the new secret." Click **OK**.
+4. The page says "Signing secret replaced. Copy the new secret into your
+   receiver; the old one no longer works." and the row's secret is already
+   revealed, with **Copy** beside it. Click **Copy** and put it in the
+   receiver ([Copy a webhook signing secret](#copy-a-webhook-signing-secret)).
+5. Once the receiver uses the new secret, remove the old one from it.
+6. Click **Ping** on the row and check the receiver accepts it.
+
+What to expect:
+
+- **Deliveries sign at send time.** Queued deliveries and retries read the
+  endpoint's secret when each attempt is sent, so everything sent after the
+  click uses the new secret, whatever its age.
+- **One in-flight attempt can fail.** An attempt already on the wire when you
+  click was signed with the old secret. A receiver that has switched to the
+  new one rejects it; Oban retries it, and the retry carries the new
+  signature. A receiver that has not switched yet rejects every attempt made
+  after the click until it does.
+- **Failures count toward auto-disable.** Rotation leaves `consecutive_failures`
+  and `auto_disabled_at` as they are. An endpoint near the limit of 10 can be
+  auto-disabled by deliveries that exhaust their retries while the receiver
+  still holds the old secret ([Auto-disable](#auto-disable)). Update the
+  receiver promptly, and check the row afterwards. Rotating does not
+  re-enable an auto-disabled endpoint; tick **Active** for that.
+- **An unreadable secret can be rotated.** Kiln never opens the old value, so
+  an endpoint whose secret was encrypted under a lost `SECRET_KEY_BASE` gets a
+  working one, and the receiver then needs it ([secrets rotation](secrets-rotation.md)).
+- **The record is a log line.** Each rotation logs at info level
+  `webhook secret rotated endpoint_id=… org_id=… actor_id=…`, never the
+  secret. There is no other audit trail.
+
+What can go wrong:
+
+- **"Couldn't rotate that signing secret."**: the endpoint was not found
+  (another admin deleted it after your page loaded) or the rotation was
+  refused. Reload the page to see the current list.
+- **No Rotate secret button**: your role can't rotate secrets. Ask an admin.
+- **The receiver answers 4xx after the rotation**: it still holds the old
+  secret. Reveal the new one and update the receiver; failed deliveries retry
+  on their own and can be redelivered ([Ping and redeliver](#ping-and-redeliver)).
 
 ## Delete an endpoint
 
@@ -85,8 +147,8 @@ delete itself. An endpoint can be deleted whether it is active, disabled or
 auto-disabled: there is no need to disable it first.
 
 1. Open **Webhooks** in the console navigation (`/editor/webhooks`). Each
-   endpoint's row ends with **Ping**, **Disable** (or **Enable**), **Edit**
-   and a red **Delete**.
+   endpoint's row ends with **Ping**, **Disable** (or **Enable**), **Edit**,
+   **Rotate secret** and a red **Delete**.
 2. Click **Delete** on the endpoint's row. If you already have the endpoint
    open under **Edit**, the form's **Delete webhook** button, to the right of
    **Save** and **Cancel**, does the same.

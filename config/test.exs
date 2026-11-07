@@ -396,3 +396,8 @@ config :kiln_cms, :embed_origins_locked, false
 # key in the developer's shell or a generated one left in the test database; the
 # provenance tests turn it on and supply a key themselves.
 config :kiln_cms, KilnCMS.Provenance, enabled: false
+
+# Breached-password check (#2240): off in the suite, so no test calls a third
+# party; the tests that exercise it switch it on with a stub for their own
+# duration (`KilnCMS.BreachedPasswordFixtures`).
+config :kiln_cms, KilnCMS.Accounts.BreachedPassword, enabled: false

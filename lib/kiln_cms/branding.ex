@@ -142,6 +142,14 @@ defmodule KilnCMS.Branding do
 
   def verified_app_icon(_unverified), do: nil
 
+  @doc """
+  The stock logo path. A brand whose `logo_url` equals it is showing the
+  built-in mark, which has right-sized variants (#2165); any other value is an
+  operator's own and is rendered as given.
+  """
+  @spec default_logo_url() :: String.t()
+  def default_logo_url, do: @default_logo_url
+
   @doc "The instance-wide (config + stock) tokens, ignoring any per-site row."
   @spec defaults() :: t()
   def defaults, do: build(nil)

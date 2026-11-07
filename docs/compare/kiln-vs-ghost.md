@@ -85,7 +85,7 @@ All checked 2026-10-06.
 [ghost-install]: https://docs.ghost.org/install/ubuntu
 [ghost-config]: https://docs.ghost.org/config
 [ghost-6]: https://github.com/TryGhost/Ghost/releases/tag/v6.0.0
-[ghost-schema]: https://github.com/TryGhost/Ghost/blob/main/ghost/core/core/server/data/schema/schema.js
+[ghost-schema]: https://github.com/TryGhost/Ghost/blob/v6.75.0/ghost/core/server/data/schema/schema.js
 [ghost-content-api]: https://docs.ghost.org/content-api
 [ghost-admin-api]: https://docs.ghost.org/admin-api
 [ghost-pricing]: https://ghost.org/pricing/

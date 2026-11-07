@@ -167,6 +167,16 @@ defmodule KilnCMSWeb.Telemetry do
         tag_values: kind,
         description: "Number of non-publish workflow transitions"
       ),
+      # Breached-password lookups (#2240). Every tag is a small closed set
+      # (`result` clean|breached|error, `action` register|change|reset|
+      # bootstrap, `enforcement` allowed|warned|blocked); the event carries no
+      # org, account, password or hash, so none can become a label.
+      counter("kiln_cms.password.breach_check.count",
+        tags: [:result, :action, :enforcement],
+        description:
+          "Breached-password lookups by outcome; a rising result=error share means " <>
+            "api.pwnedpasswords.com is unreachable and passwords are accepted unchecked"
+      ),
       # Untagged on purpose: the event's `org_id` is metadata for
       # KilnCMS.CMS.CalendarRequeryMonitor's per-org log line, not a label.
       distribution("kiln_cms.calendar.requery.messages",

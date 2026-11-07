@@ -392,6 +392,7 @@ defmodule KilnCMS.CMS do
       define :create_webhook_endpoint, action: :create
       define :update_webhook_endpoint, action: :update
       define :destroy_webhook_endpoint, action: :destroy
+      define :rotate_webhook_secret, action: :rotate_secret
       define :record_webhook_success, action: :record_delivery_success
       define :record_webhook_failure, action: :record_delivery_failure
     end
@@ -853,6 +854,14 @@ defmodule KilnCMS.CMS do
       define :list_site_locale_settings, action: :read
       define :save_site_locale_settings, action: :save
       define :reset_site_locale_settings, action: :destroy
+    end
+
+    # Per-org stance on breached passwords (#2240): off / warn / block (admins).
+    # Resolved through `KilnCMS.Accounts.PasswordPolicy`.
+    resource KilnCMS.CMS.SitePasswordPolicy do
+      define :list_site_password_policy, action: :read
+      define :save_site_password_policy, action: :save
+      define :reset_site_password_policy, action: :destroy
     end
 
     # Per-org `/.well-known/security.txt` (RFC 9116, #1873). Served through

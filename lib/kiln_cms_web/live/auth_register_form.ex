@@ -35,7 +35,13 @@ defmodule KilnCMSWeb.AuthRegisterForm do
   import AshAuthentication.Phoenix.Components.Helpers, only: [auth_path: 5]
 
   alias AshAuthentication.Phoenix.Components.Password.Input
-  alias KilnCMSWeb.{AuthConfirmationFeedback, AuthOverrides, AuthPasswordInput}
+
+  alias KilnCMSWeb.{
+    AuthConfirmationFeedback,
+    AuthIdentityInput,
+    AuthOverrides,
+    AuthPasswordInput
+  }
 
   # Aliased, not spelled out: the template below names it, and inside `~H` a
   # `@`-prefixed name is an assign rather than a module attribute.
@@ -69,13 +75,14 @@ defmodule KilnCMSWeb.AuthRegisterForm do
         method="POST"
         class={AuthOverrides.override_for(@overrides, Upstream, :form_class)}
       >
-        <Input.identity_field
+        <AuthIdentityInput.identity_field
           strategy={@strategy}
           form={form}
           overrides={@overrides}
           gettext_fn={@gettext_fn}
         />
         <AuthPasswordInput.password_field
+          autocomplete="new-password"
           strategy={@strategy}
           form={form}
           overrides={@overrides}
@@ -85,6 +92,7 @@ defmodule KilnCMSWeb.AuthRegisterForm do
 
         <%= if @strategy.confirmation_required? do %>
           <AuthPasswordInput.password_confirmation_field
+            autocomplete="new-password"
             strategy={@strategy}
             form={form}
             overrides={@overrides}
