@@ -6399,6 +6399,16 @@ msgstr "Terminé :"
 msgid "Done: %{changed} renamed, %{pinned} hand-picked skipped, %{scanned} scanned."
 msgstr "Terminé : %{changed} renommés, %{pinned} définis manuellement ignorés, %{scanned} analysés."
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Download CSV"
+msgstr "Télécharger le CSV"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Download JSON"
+msgstr "Télécharger le JSON"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Download a copy of your account profile and notification preferences as JSON."
@@ -7502,10 +7512,16 @@ msgstr "Expiration"
 msgid "Expires in"
 msgstr "Expire dans"
 
+#: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Export"
 msgstr "Exporter"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Export %{count} matching"
+msgstr "Exporter les %{count} résultats"
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -7533,11 +7549,21 @@ msgstr "Exporter (JSON)"
 msgid "Export CSV"
 msgstr "Exporter en CSV"
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Export matching"
+msgstr "Exporter les résultats"
+
 #: lib/kiln_cms_web/live/account_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Export my data"
 msgstr "Exporter mes données"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Export selected"
+msgstr "Exporter la sélection"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -7548,6 +7574,16 @@ msgstr "Exporter la piste d'audit (CSV)"
 #, elixir-autogen, elixir-format
 msgid "Export trail (JSON)"
 msgstr "Exporter la piste d'audit (JSON)"
+
+#: lib/kiln_cms_web/controllers/content_export_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Exporting content needs an editor account."
+msgstr "L'export de contenu nécessite un compte éditeur."
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Exports the columns shown in the list."
+msgstr "Exporte les colonnes affichées dans la liste."
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
@@ -8997,6 +9033,11 @@ msgstr "Inclure %{type} dans les flux de ce site"
 msgid "Include in the XLIFF export"
 msgstr "Inclure dans l'export XLIFF"
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Include private fields"
+msgstr "Inclure les champs privés"
+
 #: lib/kiln_cms_web/controllers/auth_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Incorrect email or password"
@@ -10296,6 +10337,11 @@ msgstr "Plus de filtres"
 #, elixir-autogen, elixir-format
 msgid "More surfaces"
 msgstr "Autres surfaces"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "More than %{max} rows — narrow the list first"
+msgstr "Plus de %{max} lignes : réduisez d'abord la liste"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
@@ -15534,6 +15580,12 @@ msgstr "Sélectionner tous les éléments chargés"
 msgid "Select all visible"
 msgstr "Sélectionner tout ce qui est visible"
 
+#: lib/kiln_cms_web/controllers/content_export_controller.ex
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Select at most %{max} rows to export."
+msgstr "Sélectionnez au plus %{max} lignes à exporter."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Select content in the content list and use “Add to release”."
@@ -18047,6 +18099,11 @@ msgstr "L'instance de recherche n'a pas pu être enregistrée."
 msgid "The section editors see it under"
 msgstr "La section sous laquelle les éditeurs le voient"
 
+#: lib/kiln_cms_web/controllers/content_export_controller.ex
+#, elixir-autogen, elixir-format
+msgid "The selection is not a list of content ids."
+msgstr "La sélection n'est pas une liste d'identifiants de contenu."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "The shipped pack deliberately leaves out bare marketing words — \"best\", \"free\", \"proven\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
@@ -18497,6 +18554,11 @@ msgstr "Cette expérience s'est conclue sans gagnante."
 #, elixir-autogen, elixir-format
 msgid "This expiry date is more than a year away."
 msgstr "Cette date d'expiration est à plus d'un an."
+
+#: lib/kiln_cms_web/controllers/content_export_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This export has more than %{max} rows. Narrow the list with a filter and try again."
+msgstr "Cet export dépasse %{max} lignes. Réduisez la liste avec un filtre et réessayez."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -20702,6 +20764,11 @@ msgstr "Vous ne pouvez pas fixer la date de publication de ce contenu."
 #, elixir-autogen, elixir-format
 msgid "You can't share a preview of this document."
 msgstr "Vous ne pouvez pas partager un aperçu de ce document."
+
+#: lib/kiln_cms_web/controllers/content_export_controller.ex
+#, elixir-autogen, elixir-format
+msgid "You cannot export that content type."
+msgstr "Vous ne pouvez pas exporter ce type de contenu."
 
 #: lib/kiln_cms_web/controllers/billing_controller.ex
 #, elixir-autogen, elixir-format

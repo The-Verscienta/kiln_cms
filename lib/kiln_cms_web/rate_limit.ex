@@ -147,7 +147,14 @@ defmodule KilnCMSWeb.RateLimit do
     # `/ws/collab` session then pays for from the same office NAT.
     gql_join: {300, :timer.minutes(1)},
     bridge_join: {300, :timer.minutes(1)},
-    collab_join: {300, :timer.minutes(1)}
+    collab_join: {300, :timer.minutes(1)},
+    # Content-list downloads (#2293, `KilnCMSWeb.ContentExportController`), per
+    # ACCOUNT (`"actor:" <> id`, like `:collab_event`): an export reads up to
+    # 10,000 rows, so the cost bound is how many one editor may start, and an
+    # office NAT must not share it. Ten a minute is far above anyone
+    # downloading by hand and far below a script looping on the endpoint.
+    # Counted in this node's ETS, so a cluster admits that many per node.
+    export: {10, :timer.minutes(1)}
   }
 
   @doc false
