@@ -5619,6 +5619,7 @@ msgstr "Types définis"
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
+#: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete"
 msgstr "Supprimer"
@@ -5830,8 +5831,8 @@ msgstr "Supprimer ce niveau ? Le retirer est généralement plus sûr que le sup
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
-msgid "Delete this webhook? Deliveries will stop."
-msgstr "Supprimer ce webhook ? Les envois cesseront."
+msgid "Delete this webhook? Queued deliveries, including retractions, won't be sent. Delivery history is kept."
+msgstr "Supprimer ce webhook ? Les envois en attente, y compris les retraits, ne seront pas effectués. L'historique des envois est conservé."
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format

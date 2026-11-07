@@ -20,7 +20,8 @@ Re-create the endpoints after a rotation ([secrets rotation](secrets-rotation.md
 **Active** or editing an endpoint gives it a clean slate: its failure count
 resets (see [Auto-disable](#auto-disable) below).
 
-Deleting an endpoint takes its delivery history with it.
+Deleting an endpoint keeps its delivery history (see
+[Delete an endpoint](#delete-an-endpoint) below).
 
 The form starts with the default subscription ticked, the same list an
 endpoint created over code or AshAdmin gets when it names no events: the
@@ -31,6 +32,45 @@ defaults** act on the whole list, and each group (one per content type, plus
 tasks, releases, experiments, memberships, and the tag, tag group and category
 taxonomy) has its own toggle. An endpoint
 that receives unpublished content says so on its row.
+
+## Delete an endpoint
+
+You need the admin role; `/editor/webhooks` is admin-only, and so is the
+delete itself. An endpoint can be deleted whether it is active, disabled or
+auto-disabled: there is no need to disable it first.
+
+1. Open **Webhooks** in the console navigation (`/editor/webhooks`). Each
+   endpoint's row ends with **Ping**, **Disable** (or **Enable**), **Edit**
+   and a red **Delete**.
+2. Click **Delete** on the endpoint's row. If you already have the endpoint
+   open under **Edit**, the form's **Delete webhook** button, to the right of
+   **Save** and **Cancel**, does the same.
+3. The browser asks: "Delete this webhook? Queued deliveries, including
+   retractions, won't be sent. Delivery history is kept." Click **OK**.
+4. The page says "Webhook deleted." and the endpoint's row is gone.
+
+What deleting does:
+
+- **Nothing more is sent to the URL.** A delivery already queued or waiting
+  to retry settles as `failed` with the error `endpoint deleted` on its next
+  attempt, instead of being sent. That includes retractions
+  (`unpublished`, `archived`, `deleted`), which disabling an endpoint does not
+  stop ([Retractions are exempt](#retractions-are-exempt)).
+- **The history stays.** Past deliveries keep their ledger rows under the
+  usual [retention](#delivery-history), with an empty endpoint column in
+  **Recent deliveries**. They can't be redelivered: there is no endpoint to
+  send them to.
+- **It can't be undone.** The signing secret goes with the endpoint. To
+  deliver to the same URL again, add it as a new endpoint and give the
+  receiver its new secret.
+
+What can go wrong:
+
+- **"Couldn't delete that webhook."**: the endpoint was not found (another
+  admin deleted it first, or the page was stale) or the delete was refused.
+  Reload the page to see the current list.
+- **"Couldn't redeliver that webhook."** on a delivery whose endpoint column
+  is empty: its endpoint was deleted, so there is nothing to replay it to.
 
 ## Event names & payload
 
