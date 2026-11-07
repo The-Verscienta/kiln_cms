@@ -80,7 +80,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Site admins can block an IP address or range at `/editor/ip-blocks` ("Blocked addresses"): an empty 403 on dynamic routes and sockets.
   Static assets and `/uploads` are not covered; behind a proxy set `TRUSTED_PROXIES` first.**
-  ([long form](docs/changelog/unreleased.md#ip-block-rules))
+  ([#2242](https://github.com/The-Verscienta/kiln_cms/issues/2242) · [long form](docs/changelog/unreleased.md#ip-block-rules))
 
 - **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
   A wrong operand type is a schema error; `contains` and `startsWith` (case-insensitive, literal) also work in `customFilter`.
