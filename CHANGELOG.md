@@ -88,6 +88,10 @@ Every summary line below that was shortened links to its own entry there.
   swaps the key for an identical fresh one and revokes the old. Reusing a rotated-away key burns the chain.**
   ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-key-rotation))
 
+- **`config :kiln_cms, :i18n, block_fields:` makes core image/video/audio block fields shared or
+  fallback across locales; the editor locks them on translations.**
+  ([long form](docs/changelog/unreleased.md#block-field-localization-config))
+
 ### Changed
 
 - **Version compare, restore and the publish-conflict panel show custom fields one by one.**
