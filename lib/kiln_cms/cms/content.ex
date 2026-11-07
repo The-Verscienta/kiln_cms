@@ -277,6 +277,16 @@ defmodule KilnCMS.CMS.Content do
     Ash.Expr.expr(fragment("kiln_han_runs(?) = (SELECT kiln_han_runs(?))", title, ^text))
   end
 
+  # The compound leg builds its variants as rows of `(qv, sq)` — each rewrite's
+  # tsvector and each span's phrase tsquery — in two scalar subselects that
+  # name nothing of the row, so Postgres runs each once per statement as an
+  # InitPlan. Written inline, `to_tsvector(variant)` and `phraseto_tsquery(span)`
+  # were rebuilt for every candidate name × variant (Verscienta's 1.6–4.0 s
+  # compound leg); a name's own tsvector and tsquery are now built once, in a
+  # `LATERAL ... OFFSET 0` that stops the planner pulling them back into the
+  # join. `WITH ORDINALITY` keeps the two arrays paired. The same text is in
+  # both fragments below because a fragment must be a literal string.
+
   @doc false
   # The `:search_compound` prepare: the title and alias legs' phrase match,
   # run against each rewrite of the query `KilnCMS.Search.NameTerms` made
@@ -305,15 +315,15 @@ defmodule KilnCMS.CMS.Content do
           ^locale
         ) and
           fragment(
-            "EXISTS (SELECT 1 FROM unnest(?::text[], ?::text[]) AS compound(query, span) WHERE to_tsvector(kiln_regconfig(?), compound.query) @@ phraseto_tsquery(kiln_regconfig(?), ?) AND to_tsvector(kiln_regconfig(?), ?) @@ phraseto_tsquery(kiln_regconfig(?), compound.span))",
+            "EXISTS (SELECT 1 FROM (SELECT to_tsvector(kiln_regconfig(?), ?) AS tv, phraseto_tsquery(kiln_regconfig(?), ?) AS tq OFFSET 0) AS t, unnest((SELECT array_agg(to_tsvector(kiln_regconfig(?), u.q) ORDER BY u.n) FROM unnest(?::text[]) WITH ORDINALITY AS u(q, n)), (SELECT array_agg(phraseto_tsquery(kiln_regconfig(?), u.s) ORDER BY u.n) FROM unnest(?::text[]) WITH ORDINALITY AS u(s, n))) AS compound(qv, sq) WHERE compound.qv @@ t.tq AND t.tv @@ compound.sq)",
+            ^locale,
+            title,
+            ^locale,
+            title,
+            ^locale,
             ^variants,
-            ^spans,
             ^locale,
-            ^locale,
-            title,
-            ^locale,
-            title,
-            ^locale
+            ^spans
           )
       )
 
@@ -336,19 +346,19 @@ defmodule KilnCMS.CMS.Content do
     |> Enum.map(fn name ->
       Ash.Expr.expr(
         fragment(
-          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(? ->> ?::text) END) AS name_alias(value), unnest(?::text[], ?::text[]) AS compound(query, span) WHERE name_alias.value <> '' AND to_tsvector(kiln_regconfig(?), compound.query) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value) AND to_tsvector(kiln_regconfig(?), name_alias.value) @@ phraseto_tsquery(kiln_regconfig(?), compound.span))",
+          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(? ->> ?::text) END) AS name_alias(value), LATERAL (SELECT to_tsvector(kiln_regconfig(?), name_alias.value) AS nv, phraseto_tsquery(kiln_regconfig(?), name_alias.value) AS nq WHERE name_alias.value <> '' OFFSET 0) AS n, unnest((SELECT array_agg(to_tsvector(kiln_regconfig(?), u.q) ORDER BY u.n) FROM unnest(?::text[]) WITH ORDINALITY AS u(q, n)), (SELECT array_agg(phraseto_tsquery(kiln_regconfig(?), u.s) ORDER BY u.n) FROM unnest(?::text[]) WITH ORDINALITY AS u(s, n))) AS compound(qv, sq) WHERE compound.qv @@ n.nq AND n.nv @@ compound.sq)",
           custom_fields,
           ^name,
           custom_fields,
           ^name,
           custom_fields,
           ^name,
+          ^locale,
+          ^locale,
+          ^locale,
           ^variants,
-          ^spans,
           ^locale,
-          ^locale,
-          ^locale,
-          ^locale
+          ^spans
         )
       )
     end)
