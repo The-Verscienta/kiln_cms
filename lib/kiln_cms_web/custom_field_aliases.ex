@@ -144,10 +144,7 @@ defmodule KilnCMSWeb.CustomFieldAliases do
   defp filter_map(filter) when is_map(filter), do: {:ok, filter}
 
   defp filter_map(filter) when is_binary(filter) do
-    case Plug.Conn.Query.decode(filter) do
-      decoded when is_map(decoded) -> {:ok, decoded}
-      _ -> :error
-    end
+    {:ok, Plug.Conn.Query.decode(filter)}
   rescue
     _ in [Plug.Conn.InvalidQueryError, ArgumentError] -> :error
   end
