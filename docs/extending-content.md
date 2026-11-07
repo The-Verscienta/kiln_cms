@@ -975,6 +975,92 @@ filtered/sorted on every request still belongs as a hand-declared Ash attribute
 on the resource (with a `mix ash.codegen` migration). Custom fields are jsonb —
 queryable via `custom_filter`/`custom_sort`, but never index-backed.
 
+### Make a field conditional
+
+A field can appear only when another field has a certain value, and be
+required only then: a "Reason" that shows up when "Kind" is "Other", a "Venue"
+that is required for events. You need the admin role. Rules are per field and
+read the fields beside it (the same content type or dynamic type, or, for a
+group's sub-field, the same row).
+
+1. Open `/editor/fields`, find the field and choose **Edit** (or fill in the
+   **Add a field** form for a new one).
+2. Expand **Conditions**. It lists **Show when** and **Required when**. If it
+   says there are no other fields to test yet, the type has no text, number,
+   date, yes/no or choice field to read.
+3. Under **Show when**, choose **Add a condition**. Pick the field, the test
+   (**is**, **is not**, **is one of**, **is empty**, **is not empty**, and
+   **is greater than** / **is less than** for number and date fields) and the
+   value. For **is one of**, type the values separated by commas.
+4. Add more tests if you need them. With two or more, a selector appears:
+   **All of these are true** or **Any of these is true**.
+5. Do the same under **Required when** if the field should be mandatory only
+   in some cases.
+6. Save (**Add field** or **Save**). The Conditions heading now shows how many
+   conditions the field has.
+7. Open a document of that type. Change the field the rule reads: the
+   conditional field appears or disappears at once, and saving is blocked
+   with "is required" while a **Required when** rule holds and the field is
+   empty.
+
+The same rule, as a code interface call:
+
+```elixir
+CMS.create_field_definition!(%{
+  content_type: :post, name: "reason", label: "Reason",
+  field_type: :string,
+  visible_when: %{"field" => "kind", "op" => "eq", "value" => "other"},
+  required_when: %{"all" => [
+    %{"field" => "kind", "op" => "eq", "value" => "other"},
+    %{"field" => "reviewed", "op" => "eq", "value" => true}
+  ]}
+}, actor: admin)
+```
+
+A rule is a leaf (`field`, `op`, `value`; `empty` and `not_empty` take no
+`value`, `in` takes a list of 1 to 50) or an `all` / `any` list of rules,
+nested at most 3 levels with at most 10 tests. The same attributes read back as
+`visible_when` / `required_when` on a field definition in
+`?include=field_definitions` ([json-api.md](json-api.md)) and in the OpenAPI
+document; JSON:API and GraphQL do not create or edit definitions.
+
+What to know before relying on it:
+
+- **Hidden is not private.** A hidden field keeps its stored value, and the
+  JSON:API, GraphQL, search and computed fields still see it. Mark the field
+  **Private** to keep a value out of public reads.
+- **The server enforces it on a normal write.** A hidden field is never
+  required. A value sent for a hidden field is still checked and stored. A
+  restore and a copy that drops custom fields skip **Required when**, and a
+  record saved before the rule existed is not rechecked by an unrelated
+  write.
+- **No cascade.** A rule reads the stored or submitted value of the field it
+  names even if that field is itself hidden.
+- **Dates and times.** `is greater than` / `is less than` compare numbers and
+  ISO dates or datetimes with seconds, and are false when a value can't be read
+  as one. The browser's `datetime-local` input sends no seconds, so on a
+  datetime field these two tests never hold; use a date field, or `is empty`
+  / `is not empty`.
+- **Renaming and removing.** Renaming a field rewrites the rules that read it.
+
+If saving a definition fails, the message appears under **Conditions**:
+
+| Message | Meaning |
+|---|---|
+| `is not a valid condition: it …` | The rule has a bad shape, an unknown operator, a missing value, or exceeds the depth or size limit. |
+| `names X, which is not a field beside this one` | The field was removed or sits in another type or group. |
+| `can't depend on the field itself` / `would depend on itself through other conditions` | A self reference or a cycle. |
+| `can't depend on X, a private field` | A private value may not steer what a viewer sees. |
+| `can't depend on X: a … field has no simple value to test` | Only text, number, date, yes/no and choice fields can be read. |
+| `can't compare X with greater/less than: it is not a number or a date` | `gt` / `lt` on another type. |
+| `is not available for a link field` / `… for a computed field` / `… for a group field` | These carry no conditions. |
+| `is used in the conditions of …; remove those conditions first` | Deleting a field other rules read. |
+| `… reads this field in its condition: …` | Changing the type of, or making private, a field another rule reads. |
+
+A rule nested beyond one level (set through the code interface) is shown in
+the admin UI with a note and a **Remove condition** button; it is left as it is
+until removed.
+
 ## 2. Relations that carry data
 
 `KilnCMS.CMS.ContentLink` links any two content records by id with a named

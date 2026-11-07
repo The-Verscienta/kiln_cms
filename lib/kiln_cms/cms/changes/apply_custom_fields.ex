@@ -138,6 +138,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   alias Ash.Error.Changes.InvalidAttribute
   alias KilnCMS.CMS.FieldConstraints
+  alias KilnCMS.CMS.Conditions
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.PrivateFields
   alias KilnCMS.CMS.UniqueValues
@@ -361,6 +362,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     # the record already holds (a restore, a copy): `custom_fields_constraints:
     # :skip` in the changeset context.
     check? = changeset.context[:custom_fields_constraints] != :skip
+    # `required_when` (#2277) binds an ordinary write only: a restore, a copy
+    # and the media/convert passes (which hand their own `supplied`) skip it.
+    required_when? = mode == :strict and is_nil(supplied)
 
     supplied =
       supplied ||
@@ -379,6 +383,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       if changeset.context[:custom_fields_unique] == :blank,
         do: Enum.reject(editable, &UniqueValues.unique_def?/1),
         else: editable
+
+    # Conditional rules (#2277) read the merged view; they only adjust `required`.
+    editable =
+      Conditions.apply_to(editable, Map.merge(existing, supplied), required_when: required_when?)
 
     {cleaned, errors} =
       Enum.reduce(
@@ -874,7 +882,11 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # key is absent), and every key no sub-field declares refused.
   defp coerce_row(%{} = row, def, path, mode, held) when not is_struct(row) do
     given = stringify_keys(row)
-    subs = FieldDefinition.group_fields(def)
+
+    subs =
+      Conditions.apply_to(FieldDefinition.group_fields(def), given,
+        required_when: mode == :strict
+      )
 
     {cleaned, problems} =
       Enum.reduce(subs, {%{}, []}, fn sub, {cleaned, problems} ->

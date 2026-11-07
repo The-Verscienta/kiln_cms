@@ -4191,6 +4191,18 @@
                 "description": "Field included by default.",
                 "type": "boolean"
               },
+              "required_when": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
               "schema_org_property": {
                 "anyOf": [
                   {
@@ -4269,6 +4281,18 @@
               "validation": {
                 "description": "Field included by default.",
                 "type": "object"
+              },
+              "visible_when": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
               }
             },
             "required": [
@@ -4567,6 +4591,9 @@
           "required": {
             "$ref": "#/components/schemas/field_definition-filter-required"
           },
+          "required_when": {
+            "$ref": "#/components/schemas/field_definition-filter-required_when"
+          },
           "schema_org_property": {
             "$ref": "#/components/schemas/field_definition-filter-schema_org_property"
           },
@@ -4590,6 +4617,9 @@
           },
           "validation": {
             "$ref": "#/components/schemas/field_definition-filter-validation"
+          },
+          "visible_when": {
+            "$ref": "#/components/schemas/field_definition-filter-visible_when"
           }
         },
         "type": "deepObject"
@@ -5833,6 +5863,45 @@
         },
         "type": "object"
       },
+      "field_definition-filter-required_when": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "type": "object"
+          },
+          "greater_than": {
+            "type": "object"
+          },
+          "greater_than_or_equal": {
+            "type": "object"
+          },
+          "in": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "object"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "object"
+          },
+          "less_than": {
+            "type": "object"
+          },
+          "less_than_or_equal": {
+            "type": "object"
+          },
+          "not_eq": {
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
       "field_definition-filter-schema_org_property": {
         "additionalProperties": false,
         "properties": {
@@ -6146,6 +6215,45 @@
         "type": "object"
       },
       "field_definition-filter-validation": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "type": "object"
+          },
+          "greater_than": {
+            "type": "object"
+          },
+          "greater_than_or_equal": {
+            "type": "object"
+          },
+          "in": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "object"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "object"
+          },
+          "less_than": {
+            "type": "object"
+          },
+          "less_than_or_equal": {
+            "type": "object"
+          },
+          "not_eq": {
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-visible_when": {
         "additionalProperties": false,
         "properties": {
           "eq": {

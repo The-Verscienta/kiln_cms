@@ -317,7 +317,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :inverse_name,
       :private,
       :schema_org_property,
-      :validation
+      :validation,
+      :visible_when,
+      :required_when
     ]
 
     create :create, primary?: true
@@ -533,6 +535,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     # Switching `unique` on over values that already repeat is refused (#2276).
     validate KilnCMS.CMS.Validations.UniqueFieldClean
+    # `visible_when` / `required_when` are well-formed rules over this
+    # field's siblings, with no cycle (#2277). On destroy it refuses to
+    # remove a field other rules read.
+    validate KilnCMS.CMS.Validations.FieldCondition, on: [:create, :update, :destroy]
   end
 
   # Multi-tenancy (epic #336): a field belongs to the same site as the content
@@ -728,6 +734,14 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # `Validations.FieldConstraints`; the value rules live in
     # `KilnCMS.CMS.FieldConstraints`, applied by `Changes.ApplyCustomFields`.
     attribute :validation, :map, allow_nil?: false, default: %{}, public?: true
+    # Conditional rules (#2277), `KilnCMS.CMS.Conditions` JSON: the field is
+    # hidden in the editor while `visible_when` is false, and required while
+    # `required_when` is true. Both nil — always shown, `required` alone —
+    # by default. Judged by `Validations.FieldCondition`, enforced on write by
+    # `Changes.ApplyCustomFields`. Hidden is an editor concept, not a privacy
+    # control: a hidden field's stored value stays in every read.
+    attribute :visible_when, :map, public?: true
+    attribute :required_when, :map, public?: true
 
     # Optional helper text rendered under the input.
     attribute :help_text, :string,
