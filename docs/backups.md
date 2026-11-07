@@ -152,6 +152,12 @@ needs only one part keeps the legacy `kiln-media-<stamp>.tar.gz`.
 **What is and is not in the set**
 
 - Regular files and symlinks (stored as symlinks). Sockets and devices are skipped.
+- **File names are archived byte-exact, including names that are not valid
+  UTF-8.** A name the server's file-name encoding cannot represent or stat is
+  left out of the set, never silently: it is counted and shown as a warning in
+  the run's log (and in the server log), with up to five examples, so an
+  operator can see that files are missing from the backup. (`plan.json` carries
+  the two additive keys `unreadable_names` and `unreadable_examples`.)
 - **Empty directories and directory timestamps are not preserved.** Restoring
   recreates directories as it extracts files into them.
 - The file list is fixed when the backup starts. A file uploaded after that is

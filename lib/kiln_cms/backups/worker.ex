@@ -516,6 +516,8 @@ defmodule KilnCMS.Backups.Worker do
         "Planned #{plan.files} file(s) in #{length(plan.parts)} part(s)#{excluded}"
       )
 
+    rec = log_unreadable(rec, plan)
+
     case Enum.count(plan.parts, & &1.oversize) do
       0 ->
         rec
@@ -528,6 +530,18 @@ defmodule KilnCMS.Backups.Worker do
           "#{n} file(s) larger than the part size were archived as parts of their own"
         )
     end
+  end
+
+  defp log_unreadable(rec, %{unreadable_names: 0}), do: rec
+
+  defp log_unreadable(rec, plan) do
+    Recorder.log(
+      rec,
+      :warn,
+      "media",
+      "#{plan.unreadable_names} file(s) NOT in this backup: their names cannot be represented " <>
+        "in the server's file-name encoding (e.g. #{Enum.join(plan.unreadable_examples, ", ")})"
+    )
   end
 
   # One part at a time (rather than `MediaArchive.archive/3`) so the state is

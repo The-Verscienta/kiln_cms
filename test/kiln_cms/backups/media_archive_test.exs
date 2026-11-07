@@ -337,17 +337,13 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
       assert snapshot(dest) == snapshot(ctx.media)
     end
 
-    test "odd file names round-trip: leading dash, newline, spaces, unicode, non-UTF-8", ctx do
+    test "odd file names round-trip: leading dash, newline, spaces, unicode", ctx do
       names = ["-weird", "two\nlines.txt", "sp ace/ü ñ.jpg", "--also=weird", "-C"]
       for name <- names, do: put(ctx.media, name, "data:" <> name)
 
-      raw = <<0xFF, 0xFE, "latin1-é"::binary>>
-
-      raw_ok? =
-        match?(:ok, File.write(Path.join(ctx.media, raw), "raw bytes"))
-
       plan = plan!(ctx, part_bytes: 40)
       parts = archive!(plan, ctx)
+      assert plan.unreadable_names == 0
 
       dest = Path.join(ctx.tmp, "restored")
       extract_all(parts, dest)
@@ -355,7 +351,84 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
       assert snapshot(dest) == snapshot(ctx.media)
       assert File.read!(Path.join(dest, "-weird")) == "data:-weird"
       assert File.read!(Path.join(dest, "two\nlines.txt")) == "data:two\nlines.txt"
-      if raw_ok?, do: assert(File.read!(Path.join(dest, raw)) == "raw bytes")
+      assert File.read!(Path.join(dest, "sp ace/ü ñ.jpg")) == "data:sp ace/ü ñ.jpg"
+    end
+
+    # `File.ls` omits a name that is not valid in the VM's file-name encoding
+    # (UTF-8 on Linux); `:file.list_dir_all` returns it as a raw binary. The
+    # planner must see it and archive it byte for byte. APFS refuses the name,
+    # so there the creation is skipped (the stub test below covers the logic).
+    test "a non-UTF-8 file name is archived byte-exact, not left out", ctx do
+      put(ctx.media, "plain.txt", "plain")
+      raw = <<0xFF, 0xFE, "latin1-é"::binary>>
+
+      if File.write(Path.join(ctx.media, raw), "raw bytes") == :ok do
+        plan = plan!(ctx)
+        assert plan.files == 2
+        assert plan.unreadable_names == 0
+
+        parts = archive!(plan, ctx)
+        dest = Path.join(ctx.tmp, "restored")
+        extract_all(parts, dest)
+
+        assert File.read!(Path.join(dest, "plain.txt")) == "plain"
+        assert {:ok, names} = :file.list_dir_all(String.to_charlist(dest))
+        assert raw in names
+        assert File.read!(Path.join(dest, raw)) == "raw bytes"
+      end
+    end
+
+    test "names the VM lists but cannot stat are counted and warned, the rest archived",
+         ctx do
+      put(ctx.media, "ok.txt", "fine")
+      bad = <<0xFF, "bad">>
+
+      list_dir = fn path ->
+        # A raw binary and a decoded charlist, as `:file.list_dir_all` returns.
+        {:ok, names} = :file.list_dir_all(path)
+        {:ok, [bad, ~c"ok.txt"] ++ (names -- [~c"ok.txt"])}
+      end
+
+      lstat = fn path ->
+        if Path.basename(path) == bad, do: {:error, :no_translation}, else: File.lstat(path)
+      end
+
+      log =
+        capture_log(fn ->
+          send(self(), {:plan, plan!(ctx, list_dir: list_dir, lstat: lstat)})
+        end)
+
+      assert_received {:plan, plan}
+      assert plan.files == 1
+      assert plan.unreadable_names == 1
+      assert plan.unreadable_examples == [inspect("\uFFFDbad")]
+      assert log =~ "could not archive 1 file name(s)"
+
+      # Survives the frozen-plan round trip.
+      assert {:ok, loaded} = MediaArchive.load_plan(ctx.media, ctx.work)
+      assert loaded.unreadable_names == 1
+      assert loaded.unreadable_examples == plan.unreadable_examples
+
+      parts = archive!(plan, ctx)
+      assert Enum.flat_map(parts, &listing(&1.path)) == ["./ok.txt"]
+    end
+
+    test "a plan.json without the unreadable fields (an older plan) loads as zero", ctx do
+      put(ctx.media, "a.txt", "a")
+      plan!(ctx)
+
+      path = Path.join(ctx.work, "plan.json")
+
+      stripped =
+        path
+        |> File.read!()
+        |> Jason.decode!()
+        |> Map.drop(["unreadable_names", "unreadable_examples"])
+
+      File.write!(path, Jason.encode!(stripped))
+
+      assert {:ok, %{unreadable_names: 0, unreadable_examples: []}} =
+               MediaArchive.load_plan(ctx.media, ctx.work)
     end
 
     test "a file that vanished after planning is dropped (and counted), not fatal", ctx do

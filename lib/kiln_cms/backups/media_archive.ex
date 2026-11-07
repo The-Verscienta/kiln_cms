@@ -89,6 +89,8 @@ defmodule KilnCMS.Backups.MediaArchive do
           files: non_neg_integer(),
           bytes: non_neg_integer(),
           excluded: non_neg_integer(),
+          unreadable_names: non_neg_integer(),
+          unreadable_examples: [String.t()],
           part_bytes: pos_integer()
         }
 
@@ -113,6 +115,15 @@ defmodule KilnCMS.Backups.MediaArchive do
   Options: `:stamp` (required), `:part_bytes` (default `Backups.media_part_bytes/0`),
   `:exclude` (default `Backups.media_exclude/0`).
 
+  The tree is listed with `:file.list_dir_all/1`, which also returns the names
+  the VM's file-name encoding cannot decode (raw binaries, e.g. a Latin-1 name
+  under a UTF-8 VM); `File.ls/1` would omit those silently. Such a name is
+  `lstat`ed and archived byte for byte like any other. One the VM cannot even
+  `lstat` is not archivable; it is counted in `:unreadable_names` (with up to
+  5 lossy-printed `:unreadable_examples`) and warned about, never dropped
+  quietly. `:list_dir` and `:lstat` (functions with the `:file` signatures)
+  exist so a test can stand in for a filesystem that refuses such names.
+
   Always produces at least one part: an empty (or fully excluded) tree is one
   part with no files, archived as a valid empty tarball.
   """
@@ -122,10 +133,15 @@ defmodule KilnCMS.Backups.MediaArchive do
     cap = Keyword.get_lazy(opts, :part_bytes, &Backups.media_part_bytes/0)
     globs = Keyword.get_lazy(opts, :exclude, &Backups.media_exclude/0)
 
+    fs = %{
+      list_dir: opts[:list_dir] || (&:file.list_dir_all/1),
+      lstat: opts[:lstat] || (&File.lstat/1)
+    }
+
     with :ok <- media_dir_exists(media_dir),
          :ok <- mkdir_private(work_dir),
          :ok <- clear_plan(work_dir),
-         {:ok, state} <- walk(media_dir, work_dir, cap, compile_globs(globs)) do
+         {:ok, state} <- walk(media_dir, work_dir, cap, compile_globs(globs), fs) do
       plan = %{
         stamp: stamp,
         media_dir: media_dir,
@@ -134,8 +150,17 @@ defmodule KilnCMS.Backups.MediaArchive do
         files: state.files,
         bytes: state.bytes,
         excluded: state.excluded,
+        unreadable_names: state.unreadable,
+        unreadable_examples: Enum.reverse(state.unreadable_examples),
         part_bytes: cap
       }
+
+      if state.unreadable > 0 do
+        Logger.warning(
+          "Media backup could not archive #{state.unreadable} file name(s) the file-name " <>
+            "encoding cannot represent, e.g. #{Enum.join(plan.unreadable_examples, ", ")}"
+        )
+      end
 
       if globs != [] do
         Logger.info(
@@ -170,12 +195,20 @@ defmodule KilnCMS.Backups.MediaArchive do
          files: Enum.sum(Enum.map(parts, & &1.files)),
          bytes: Enum.sum(Enum.map(parts, & &1.bytes)),
          excluded: map["excluded"] || 0,
+         unreadable_names: nonneg(map["unreadable_names"]),
+         unreadable_examples: examples(map["unreadable_examples"]),
          part_bytes: map["part_bytes"] || Backups.media_part_bytes()
        }}
     else
       _ -> {:error, :no_plan}
     end
   end
+
+  defp nonneg(n) when is_integer(n) and n >= 0, do: n
+  defp nonneg(_), do: 0
+
+  defp examples(list) when is_list(list), do: Enum.filter(list, &is_binary/1)
+  defp examples(_), do: []
 
   @doc "`load_plan/2` when a complete plan exists, else `plan/3`."
   @spec plan_or_load(Path.t(), Path.t(), keyword()) :: {:ok, plan()} | {:error, term()}
@@ -215,6 +248,8 @@ defmodule KilnCMS.Backups.MediaArchive do
       "stamp" => plan.stamp,
       "part_bytes" => plan.part_bytes,
       "excluded" => plan.excluded,
+      "unreadable_names" => plan.unreadable_names,
+      "unreadable_examples" => plan.unreadable_examples,
       "parts" =>
         Enum.map(plan.parts, fn p ->
           %{
@@ -256,11 +291,12 @@ defmodule KilnCMS.Backups.MediaArchive do
 
   # The walk. `stack` holds directories still to list (paths relative to the
   # media dir, "" for the root); `state` the open list and the finished parts.
-  defp walk(media_dir, work_dir, cap, matcher) do
+  defp walk(media_dir, work_dir, cap, matcher, fs) do
     state = %{
       work_dir: work_dir,
       cap: cap,
       matcher: matcher,
+      fs: fs,
       io: nil,
       index: 0,
       count: 0,
@@ -268,7 +304,9 @@ defmodule KilnCMS.Backups.MediaArchive do
       oversize: false,
       parts: [],
       files: 0,
-      excluded: 0
+      excluded: 0,
+      unreadable: 0,
+      unreadable_examples: []
     }
 
     try do
@@ -283,10 +321,11 @@ defmodule KilnCMS.Backups.MediaArchive do
   defp walk_dirs([rel | stack], media_dir, state) do
     abs = if rel == "", do: media_dir, else: Path.join(media_dir, rel)
 
-    case File.ls(abs) do
+    case state.fs.list_dir.(abs) do
       {:ok, names} ->
         {dirs, state} =
           names
+          |> Enum.map(&raw_name/1)
           |> Enum.sort()
           |> Enum.reduce({[], state}, &visit(&1, rel, media_dir, &2))
 
@@ -303,24 +342,48 @@ defmodule KilnCMS.Backups.MediaArchive do
     end
   end
 
+  # `:file.list_dir_all/1` gives a charlist for a name it decoded and a binary
+  # for one it could not; both become the bytes tar will be handed.
+  defp raw_name(name) when is_binary(name), do: name
+  defp raw_name(name) when is_list(name), do: :unicode.characters_to_binary(name)
+
   defp visit(name, rel, media_dir, {dirs, state}) do
     child = if rel == "", do: name, else: rel <> "/" <> name
 
     if excluded?(state.matcher, child, name) do
       {dirs, %{state | excluded: state.excluded + 1}}
     else
-      case File.lstat(Path.join(media_dir, child)) do
+      case state.fs.lstat.(Path.join(media_dir, child)) do
         {:ok, %{type: :directory}} ->
           {[child | dirs], state}
 
         {:ok, %{type: type, size: size}} when type in [:regular, :symlink] ->
           {dirs, add_file(state, child, size)}
 
-        # Sockets, devices, and anything that vanished since `ls`.
+        # Vanished since the listing.
+        {:error, :enoent} ->
+          {dirs, state}
+
+        # A name the VM listed but cannot stat cannot be archived: say so.
+        {:error, _reason} ->
+          {dirs, note_unreadable(state, child)}
+
+        # Sockets, devices.
         _other ->
           {dirs, state}
       end
     end
+  end
+
+  @max_examples 5
+
+  defp note_unreadable(state, child) do
+    examples =
+      if length(state.unreadable_examples) < @max_examples,
+        do: [inspect(String.replace_invalid(child)) | state.unreadable_examples],
+        else: state.unreadable_examples
+
+    %{state | unreadable: state.unreadable + 1, unreadable_examples: examples}
   end
 
   defp add_file(state, rel, size) do
