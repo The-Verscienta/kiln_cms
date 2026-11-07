@@ -87,6 +87,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Version compare, restore and the publish-conflict panel show custom fields one by one.**
+  Restore now previews before it writes; the conflict stays whole-map.
+  ([long form](docs/changelog/unreleased.md#custom-field-history))
+
 - **Global search on a large catalogue: the alias and compound legs prefilter on stored
   name lexemes, empty names skip the phrase match, and the tag leg runs once per sweep.**
   ([long form](docs/changelog/unreleased.md#search-leg-performance))

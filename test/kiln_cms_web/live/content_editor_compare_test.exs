@@ -181,6 +181,94 @@ defmodule KilnCMSWeb.ContentEditorCompareTest do
     assert html =~ "Moved"
   end
 
+  test "custom field rows show the definition label, typed values and a per-entry pill",
+       %{conn: conn} do
+    admin = authed_user(:admin)
+
+    for attrs <- [
+          %{
+            name: "tier",
+            label: "Membership tier",
+            field_type: :select,
+            options: ["gold", "silver"],
+            option_labels: %{"gold" => "Gold plan", "silver" => "Silver plan"}
+          },
+          %{name: "subtitle", label: "Page subtitle", field_type: :string},
+          %{name: "legacy", label: "Legacy note", field_type: :string}
+        ] do
+      CMS.create_field_definition!(Map.merge(%{content_type: :page}, attrs), actor: admin)
+    end
+
+    page =
+      CMS.create_page!(
+        %{
+          title: "Fields",
+          slug: slug(),
+          custom_fields: %{"tier" => "gold", "legacy" => "old note"}
+        },
+        actor: admin
+      )
+
+    page =
+      CMS.update_page!(
+        page,
+        %{custom_fields: %{"tier" => "silver", "subtitle" => "Hello", "legacy" => nil}},
+        actor: admin
+      )
+
+    [first, second] = versions(page, admin)
+
+    lv = open_editor(conn, admin, page)
+    pick(lv, first.id)
+    pick(lv, second.id)
+    render_click(lv, "open_compare", %{})
+
+    entry = fn name -> lv |> element(~s{[data-custom-field="#{name}"]}) |> render() end
+
+    changed = entry.("tier")
+    assert changed =~ "Membership tier"
+    assert changed =~ "Gold plan"
+    assert changed =~ "Silver plan"
+    assert changed =~ "Changed"
+    refute changed =~ ">gold<"
+
+    added = entry.("subtitle")
+    assert added =~ "Page subtitle"
+    assert added =~ "Hello"
+    assert added =~ "Added"
+
+    removed = entry.("legacy")
+    assert removed =~ "Legacy note"
+    assert removed =~ "old note"
+    assert removed =~ "Removed"
+  end
+
+  test "a retired definition still renders, under its raw key", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    definition =
+      CMS.create_field_definition!(
+        %{content_type: :page, name: "gone_soon", label: "Gone soon", field_type: :string},
+        actor: admin
+      )
+
+    page = CMS.create_page!(%{title: "Retire", slug: slug(), custom_fields: %{}}, actor: admin)
+    page = CMS.update_page!(page, %{custom_fields: %{"gone_soon" => "kept value"}}, actor: admin)
+    [first, second] = versions(page, admin)
+
+    CMS.destroy_field_definition!(definition, actor: admin)
+
+    lv = open_editor(conn, admin, page)
+    pick(lv, first.id)
+    pick(lv, second.id)
+    render_click(lv, "open_compare", %{})
+
+    row = lv |> element(~s{[data-custom-field="gone_soon"]}) |> render()
+    assert row =~ "gone_soon"
+    assert row =~ "kept value"
+    refute row =~ "Gone soon"
+  end
+
   test "a third pick retires the older selection rather than being ignored", %{conn: conn} do
     editor = authed_user(:editor)
     page = CMS.create_page!(%{title: "One", slug: slug()}, actor: editor)
@@ -252,7 +340,9 @@ defmodule KilnCMSWeb.ContentEditorCompareTest do
     pick(lv, second.id)
     render_click(lv, "open_compare", %{})
 
-    html = render_click(lv, "restore", %{"version_id" => first.id})
+    # Restore previews first (#2294); only the confirm writes.
+    render_click(lv, "restore", %{"version_id" => first.id})
+    html = render_click(lv, "confirm_restore", %{"version_id" => first.id})
 
     assert html =~ "Restored that version."
     refute html =~ "Compare versions"

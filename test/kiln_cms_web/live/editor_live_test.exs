@@ -2320,6 +2320,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       |> element("button[phx-click='restore'][phx-value-version_id='#{create_version.id}']")
       |> render_click()
 
+      # Restore previews first; only the confirm step writes.
+      assert CMS.get_page!(page.id, authorize?: false).title == "Changed"
+      render_click(lv, "confirm_restore", %{"version_id" => create_version.id})
+
       assert CMS.get_page!(page.id, authorize?: false).title == "Original"
     end
 
