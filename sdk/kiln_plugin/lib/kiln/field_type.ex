@@ -259,6 +259,32 @@ defmodule Kiln.FieldType do
   """
   @callback json_schema(definition :: struct()) :: map()
 
+  @typedoc """
+  How the GraphQL API types a field's value: see `c:graphql_kind/1`.
+  """
+  @type graphql_kind ::
+          :string | :int | :float | :boolean | :date | :datetime | :json
+
+  @doc """
+  The GraphQL kind of this type's **delivered** value (#2290): which typed
+  accessor (`customString`, `customInt`, `customFloat`, `customBoolean`,
+  `customDate`, `customDateTime`) returns it, and which `CustomFieldValue`
+  member `fields(names:)` wraps it in.
+
+  Implement this when the value `c:cast/2` stores is a plain scalar of one of
+  those kinds (`StarRating` stores an integer: `:int`). `:json` is the answer
+  for anything else — a map, a list, a mixed shape — and is what a type with no
+  implementation gets, so a type never has to answer. Any other return is
+  treated as `:json`.
+
+  A `multiple` field is always a list of this kind; the host handles that.
+
+  Optional, and not defaulted by `use Kiln.FieldType` (the host probes for it
+  with `function_exported?/3`). A type compiled against an older `kiln_plugin`
+  has no such function and is served as `:json`. Added in `kiln_plugin` 1.4.
+  """
+  @callback graphql_kind(definition :: struct()) :: graphql_kind()
+
   @typedoc "A client hook for the field's editor widget: see `c:input_hook/1`."
   @type input_hook :: %{required(:hook) => String.t(), optional(:data) => map()}
 
@@ -315,12 +341,15 @@ defmodule Kiln.FieldType do
   # `KilnCMS.SchemaExport` probes for it with `function_exported?` and falls
   # back to widget inference, so defining a default would mean every type
   # silently claiming to describe itself.
+  # `graphql_kind/1` (#2290) is the same: the host probes for it and serves
+  # `:json` when absent, so a default would claim every type is a scalar.
   # `input_hook/1` (#1918) is the same story: defaulted to `nil` by `use`.
   # `handle_input_event/3` is not defaulted — the editor probes for it, and a
   # type without one answers its hook's events with an error.
   @optional_callbacks input_parts: 1,
                       tokens: 1,
                       json_schema: 1,
+                      graphql_kind: 1,
                       description: 0,
                       input_hook: 1,
                       handle_input_event: 3

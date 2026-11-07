@@ -22,6 +22,13 @@ carries the reasoning.
 
 ## Added
 
+<a id="reject-invalid-bearer"></a>
+
+- **`KILN_API_REJECT_INVALID_BEARER` (#2161).** With it on, an `Authorization: Bearer` token that
+  fails verification gets a 401 `invalid_token` envelope instead of silently reading as anonymous.
+  Off by default for this release, because a consumer sending a stale token today gets 200;
+  the default flips next release, so announce it in that release's upgrade notes.
+
 <a id="change-severity"></a>
 
 - **Change severity: how much a published edit matters, stored per edit.**
@@ -53,6 +60,58 @@ carries the reasoning.
     new settings table. Overlays run `mix ash.codegen` for their own content
     types. Until a site lists a field, nothing changes.
 
+<a id="graphql-typed-custom-fields"></a>
+
+- **GraphQL reads admin-defined custom fields typed by kind, with no deploy
+  and no schema change (#2290).** `customFields` stays a `JsonString`. Next to
+  it every content type (`Page`, `Post`, a project type, `Entry`) and the
+  `ContentRecord` interface gain `customString`, `customInt`, `customFloat`,
+  `customBoolean`, `customDate` and `customDateTime` (each `(name: String!)`,
+  nullable) and `fields(names: [String!]!): [CustomFieldValue!]!`. A field an
+  admin adds is readable at once; the GraphQL schema is compiled and the same
+  for every site, so what it types is the *accessor*, not the name.
+  - **What is and is not checked.** `customFloat(name: "price")` is a `Float`
+    or `null`. A typo, a rename, a deleted field, a field of another kind, a
+    legacy value that no longer fits, or a private field read below editor is
+    `null` (left out of `fields`), never an error. The server cannot catch the
+    typo; the exported contract below does.
+  - **`fields(names:)`.** `names` is required, at most 50. It returns the
+    `CustomFieldValue` interface (`name` plus the kind's members: `StringValue`,
+    `IntValue`, `FloatValue`, `BooleanValue`, `DateValue`, `DateTimeValue`,
+    `ListValue { items }`, `GroupValue { fields }`, `ReferenceValue { ids }`,
+    `MediaValue`, `GeolocationValue { lat lng label zoom }`,
+    `JsonValue { value }`). A `multiple` field is a `ListValue`; computed
+    fields, `datetime_range` and `recurrence` are `JsonValue`. Groups nest to depth 3. A reference field
+    returns ids only: read the records through `references(field:)`. Cost is
+    1 plus the selection once per name; an accessor costs 1; the 200 limit is
+    unchanged.
+  - **Visibility and locale.** Values come from the record as the caller reads
+    it, so private fields read as unknown below editor. A
+    `localization: :fallback` field does not inherit along the locale chain in
+    this layer; name the locale you want. A page of records does one
+    definitions read per type, not one per record.
+  - **Typed contract per site.** `GET /api/schema?format=typescript` is the
+    existing document as a `.d.ts`; `?format=typescript-graphql` is a `.ts`
+    module that adds, per content type (and per `typeName` for dynamic types,
+    selected on `publishedEntries(filter: {typeName: {eq: "…"}})`), a
+    `<Type>CustomFields` interface and a ready `<Type>CustomFieldsFragment`.
+    An unknown `format` is a `400` with code `invalid_format`; without
+    `format` the response is the same JSON as before. Regenerate after an
+    admin changes fields. `filter` and `sort` still use
+    `customFilter`/`customSort`, unchanged.
+  - **Plugins.** `Kiln.FieldType` gains an optional `graphql_kind/1`
+    (`:string`, `:int`, `:float`, `:boolean`, `:date`, `:datetime`, `:json`)
+    in `kiln_plugin` 1.4.0. A type without it, or compiled against an older
+    SDK, is served as `JsonValue`, so nothing breaks. Publish the SDK to Hex
+    before a plugin requires `~> 1.4`.
+  - **Not yet.** Swift and Kotlin emitters for the GraphQL section, typed
+    filter operators, a per-site SDL with a regenerate step, and typed writes.
+  - **Upgrade.** Additive and org-independent: no migration, no config, and
+    rolling the pin back removes the new fields only. The new fields
+    are added to every content type in the schema's `:content_domains`, so an
+    overlay's types get them without code changes.
+    See [headless-graphql-api.md](../headless-graphql-api.md#read-custom-fields-typed-by-kind).
+
 <a id="draft-write-api-keys"></a>
 
 - **Drafts-only API keys for headless services (#2273).** A new `draft_write` access
@@ -63,11 +122,28 @@ carries the reasoning.
   owner later widens nothing. Keys are minted by an admin on a viewer-tier service account and
   capped at 30 days (`draft_write_key_max_ttl_days`). Drafts created this way record the key
   and an optional `X-Kiln-On-Behalf-Of` label (stored for display only, never used for
-  authorization); the fields appear in the editor and version history and, for editors, admins and
-  the creating key only, on JSON:API, GraphQL and `/mcp` (never for anonymous, preview-link or
+  authorization); the fields appear in the editor (not in version history, which a second key
+  on the same owner can read) and, for editors, admins and the creating key only, on JSON:API, GraphQL and `/mcp` (never for anonymous, preview-link or
   viewer-tier callers, webhook payloads or the preview endpoint). A GraphQL query that selects
   those three fields as someone not allowed them gets `null` plus a `forbidden_field` entry in
   `errors`, so a codegen'd query that selects every field should drop them. See [decision 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)
+  and the headless consumer guide.
+
+<a id="draft-write-key-rotation"></a>
+
+- **Self-rotating drafts-only keys.** A `draft_write` key's 30-day cap meant a person re-minted
+  the service's key every month. An admin can now give the key a rotation window at mint
+  (`rotatable_until`; "Self-rotation" at `/editor/api-keys`, at most
+  `draft_write_key_max_rotation_days`, default 365). Until then the service calls
+  `POST /api/keys/rotate` with the key and gets a fresh one: same account, scope and name,
+  expiring at the 30-day cap or the window's end, whichever is sooner. The old key is revoked in
+  the same transaction, under a row lock, so a chain has one live key and never outlives the date
+  the admin chose. The action takes no input; `read`/`read_write` keys, signed-in users and admins
+  are refused, and an owner promoted to editor since the mint stops the chain. Presenting a
+  rotated-away key to the endpoint again more than 120 seconds later revokes the whole chain and
+  mails the platform admins. Keys without a window behave as before. New nullable `api_keys`
+  columns `rotatable_until`, `lineage_id`, `rotated_from_id` (additive). See
+  [decision 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md#rotation)
   and the headless consumer guide.
 
 ## Changed

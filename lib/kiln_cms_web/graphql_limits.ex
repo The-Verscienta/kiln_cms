@@ -76,6 +76,9 @@ defmodule KilnCMSWeb.GraphqlLimits do
   # a smaller page or pass `limit` on the lists.
   @unlimited_list_rows 5
 
+  # `fields(names:)` lists at most this many custom fields (#2290).
+  @max_custom_field_names 50
+
   @doc "The complexity cap, enforced by Absinthe's complexity result phase."
   @spec max_complexity() :: pos_integer()
   def max_complexity, do: @max_complexity
@@ -163,4 +166,21 @@ defmodule KilnCMSWeb.GraphqlLimits do
 
     rows * max(child_complexity, 1)
   end
+
+  @doc """
+  The complexity of `fields(names:)` (#2290): one, plus the child selection once
+  per name. The price cannot see which kind each name is, so every name pays for
+  the whole selection. A list longer than `max_custom_field_names/0` is refused
+  by the resolver, and a list that long is already over the cap.
+  """
+  @spec custom_fields_complexity(map(), non_neg_integer(), term()) :: pos_integer()
+  def custom_fields_complexity(args, child_complexity, _info) do
+    names = Map.get(args, :names)
+    count = if is_list(names), do: length(names), else: 0
+    1 + count * max(child_complexity, 1)
+  end
+
+  @doc "The most names one `fields(names:)` may ask for."
+  @spec max_custom_field_names() :: pos_integer()
+  def max_custom_field_names, do: @max_custom_field_names
 end

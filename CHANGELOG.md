@@ -62,13 +62,24 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Opt-in `KILN_API_REJECT_INVALID_BEARER=true` answers 401 for an unverifiable bearer token on the API
+  instead of serving anonymous data; the default flips on in the next release.**
+  ([#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161) · [long form](docs/changelog/unreleased.md#reject-invalid-bearer))
+
 - **Change severity: an edit to a safety-relevant field of published content is recorded as critical, notable or routine on its own version.**
   The editor asks before publishing; API writes default to notable; read back as `latest_edit_severity` / `latest_edit_at`.
   ([long form](docs/changelog/unreleased.md#change-severity))
 
+- **GraphQL reads admin-defined custom fields typed by kind (`customFloat(name:)`, `fields(names:)`), and `GET /api/schema?format=typescript-graphql` exports ready fragments and types.**
+  ([long form](docs/changelog/unreleased.md#graphql-typed-custom-fields))
+
 - **Drafts-only API keys (`access: draft_write`): a headless service can create and edit its own drafts
   and never publish, delete or touch live content. Drafts record the key and an optional `X-Kiln-On-Behalf-Of` label.**
   ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-api-keys))
+
+- **Drafts-only keys can rotate themselves: an admin sets a window at mint, and until then `POST /api/keys/rotate`
+  swaps the key for an identical fresh one and revokes the old. Reusing a rotated-away key burns the chain.**
+  ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-key-rotation))
 
 ### Changed
 
