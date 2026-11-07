@@ -120,7 +120,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A publish hands its change-feed event to a per-site relay instead of sending to every local subscriber;
   feed telemetry now fires at hand-off. 10k-subscriber publish p99 1.5 s → 143 ms; p95 still ~4× the 0 leg.**
-  ([long form](docs/changelog/unreleased.md#feed-relay))
+  ([#2327](https://github.com/The-Verscienta/kiln_cms/pull/2327) · [long form](docs/changelog/unreleased.md#feed-relay))
 
 ### Fixed
 
