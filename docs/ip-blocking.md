@@ -126,9 +126,10 @@ never blocked.
 
 ## Things to know
 
-- **Expired rules are not swept.** An expired rule stops matching but stays on the
-  page, marked **Expired**, and still occupies its slot: adding the same range
-  again says "is already blocked" until you **Remove** the old one.
+- **Expired rules are not swept, but they do not hold the range.** An expired rule
+  stops matching and stays on the page, marked **Expired**, until you **Remove** it
+  or add the same range again: the new rule replaces the expired one. Adding a
+  range that has an *active* rule still says "is already blocked".
 - **It fails open.** If the rule list cannot be read (database down), requests are
   let through and a warning without any address is logged. Nothing is cached from
   a failed read, so the next request tries again.

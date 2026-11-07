@@ -377,8 +377,9 @@ carries the reasoning.
     leaves it unused. No new environment variables. If an admin locks
     themselves out, `bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(remove: true)'`
     lists (without `remove: true`) or lifts the site's rules and clears every
-    node's cache at once; SQL still works within the one-minute cache. Expired rules are not swept and still
-    hold their slot until removed in the console.
+    node's cache at once; SQL still works within the one-minute cache. Expired
+    rules are not swept, but adding the same range again replaces the expired
+    row; an active rule still refuses a duplicate.
   - **Developers.** The resource, `KilnCMS.CMS.IpBlockRule`, is org-admin only
     and deliberately absent from JSON:API, GraphQL and MCP. The request path
     reads it as the `:ip_block` system actor. New counter
