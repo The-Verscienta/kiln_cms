@@ -323,6 +323,14 @@ changes when an admin edits them, without a redeploy.
 - The fieldset caveat above applies: generated types describe the full
   document.
 
+If the app reads with GraphQL rather than the `json` artifact, ask for
+`?format=typescript-graphql` (a `.ts` module) or `?format=typescript` (a `.d.ts`)
+for web and React Native clients. They include a ready fragment per content type
+that reads the site's custom fields through typed accessors; see
+[headless-graphql-api.md → Generate types and fragments for your site](headless-graphql-api.md#generate-types-and-fragments-for-your-site).
+Swift and Kotlin models still come from the JSON document; they have no GraphQL
+section yet.
+
 The schema is cacheable (`public, max-age=300`). An app can fetch it at runtime
 to detect drift, but it can't change its compiled types. Use it in CI
 instead: fail the build when the live schema no longer matches the committed

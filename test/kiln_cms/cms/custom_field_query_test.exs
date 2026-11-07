@@ -320,4 +320,143 @@ defmodule KilnCMS.CMS.CustomFieldQueryTest do
       assert Exception.message(error) =~ "different type per content type"
     end
   end
+
+  describe "is_nil operator" do
+    test "is a synonym of null, on a field and on a link field" do
+      admin = admin()
+      rare = field_name("rare")
+      define!(%{name: rare, field_type: :string}, admin)
+
+      with_value = page!(%{rare => "x"}, admin)
+      without_value = page!(%{}, admin)
+
+      present = list_ids!(%{custom_filter: %{rare => %{"is_nil" => "false"}}}, admin)
+      assert with_value.id in present
+      refute without_value.id in present
+
+      absent = list_ids!(%{custom_filter: %{rare => %{"is_nil" => "true"}}}, admin)
+      assert without_value.id in absent
+      refute with_value.id in absent
+
+      assert_invalid(
+        %{custom_filter: %{rare => %{"is_nil" => "maybe"}}},
+        admin,
+        "must be true or false"
+      )
+    end
+  end
+
+  describe "custom_sort on keyset-paginated reads" do
+    defp keyset_walk(read, admin, limit) do
+      Stream.unfold(nil, fn
+        :done ->
+          nil
+
+        cursor ->
+          page_opts = [limit: limit] ++ if(cursor, do: [after: cursor], else: [])
+          page = read.(page_opts, admin)
+
+          case page.results do
+            [] ->
+              nil
+
+            results ->
+              {Enum.map(results, & &1.id),
+               if(page.more?, do: List.last(results).__metadata__.keyset, else: :done)}
+          end
+      end)
+      |> Enum.to_list()
+    end
+
+    test "page 2 continues a custom sort on :read and :published" do
+      admin = admin()
+      price = field_name("price")
+      define!(%{name: price, field_type: :integer}, admin)
+
+      published =
+        for p <- [40, 10, 30, 20, 50] do
+          page = page!(%{price => p}, admin)
+          {p, CMS.publish_page!(page, %{}, actor: admin)}
+        end
+
+      expected = published |> Enum.sort() |> Enum.map(fn {_, page} -> page.id end)
+      inputs = %{custom_filter: %{price => %{"null" => "false"}}, custom_sort: price}
+
+      assert keyset_walk(&CMS.list_pages!(inputs, page: &1, actor: &2), admin, 2)
+             |> List.flatten() == expected
+
+      assert keyset_walk(&CMS.list_published_pages!(inputs, page: &1, actor: &2), admin, 2)
+             |> List.flatten() == expected
+    end
+  end
+
+  describe "custom_sort on search" do
+    test "sorts keyword search results; an explicit sort still wins; relevance is the fallback" do
+      admin = admin()
+      price = field_name("price")
+      define!(%{name: price, field_type: :integer}, admin)
+      term = "cfsearch#{System.unique_integer([:positive])}"
+
+      mk = fn title, p ->
+        CMS.create_page!(%{title: title, slug: slug(), custom_fields: %{price => p}},
+          actor: admin
+        )
+        |> then(&CMS.publish_page!(&1, %{}, actor: admin))
+      end
+
+      # Same title shape, so equal relevance: the default order is newest first.
+      pricey = mk.("Aaa #{term}", 30)
+      cheap = mk.("Zzz #{term}", 10)
+      mid = mk.("Mmm #{term}", 20)
+
+      args = fn extra -> Map.merge(%{locale: "en"}, extra) end
+      ids = fn results -> Enum.map(results, & &1.id) end
+
+      for read <- [&CMS.search_pages!/3, &CMS.search_published_pages!/3] do
+        assert read.(term, args.(%{}), actor: admin) |> ids.() == [mid.id, cheap.id, pricey.id]
+
+        assert read.(term, args.(%{custom_sort: price}), actor: admin) |> ids.() ==
+                 [cheap.id, mid.id, pricey.id]
+
+        assert read.(term, args.(%{custom_sort: "-#{price}"}), actor: admin) |> ids.() ==
+                 [pricey.id, mid.id, cheap.id]
+
+        # explicit sort > custom_sort
+        assert read.(term, args.(%{custom_sort: price}),
+                 actor: admin,
+                 query: [sort: [title: :asc]]
+               )
+               |> ids.() == [pricey.id, mid.id, cheap.id]
+      end
+
+      # Keyset page 2 with a jsonb sort key on a search action.
+      first =
+        CMS.search_pages!(term, args.(%{custom_sort: price}), actor: admin, page: [limit: 2])
+
+      assert ids.(first.results) == [cheap.id, mid.id]
+      cursor = List.last(first.results).__metadata__.keyset
+
+      second =
+        CMS.search_pages!(term, args.(%{custom_sort: price}),
+          actor: admin,
+          page: [limit: 2, after: cursor]
+        )
+
+      assert ids.(second.results) == [pricey.id]
+    end
+
+    test "the internal search legs do not take custom_sort" do
+      resource = KilnCMS.CMS.Page
+
+      for leg <- [:search_title, :search_alias, :search_han, :search_compound, :search_any] do
+        action = Ash.Resource.Info.action(resource, leg)
+        refute Enum.any?(action.arguments, &(&1.name == :custom_sort)), "#{leg} takes custom_sort"
+      end
+
+      for action <- [:search, :search_published, :search_semantic, :search_semantic_published] do
+        action = Ash.Resource.Info.action(resource, action)
+        assert Enum.any?(action.arguments, &(&1.name == :custom_sort))
+      end
+    end
+  end
 end

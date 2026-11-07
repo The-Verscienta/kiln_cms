@@ -35,7 +35,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/governance/health.csv /editor/inbox
     /editor/links /editor/locales /editor/mail /editor/menus /editor/menus/:id /editor/newsletter /editor/organize
     /editor/overview /editor/pages/:id /editor/posts/:id /editor/presentation/:type/:slug
-    /editor/preview/:kind/:id /editor/redirects /editor/releases /editor/releases/:id
+    /editor/preview/:kind/:id /editor/redirects /editor/releases /editor/releases/:id /editor/safety-fields
     /editor/search /editor/search-synonyms /editor/security-txt /editor/settings /editor/site-ai /editor/site-mail /editor/site-push
     /editor/site-search /editor/site-sso /editor/site/:type/:slug /editor/slugs
     /editor/social /editor/structure/:type
@@ -51,7 +51,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /api/content/:type/:id/revisions/:version_id
     /api/content/:type/:id/revisions/:version_id/restore /api/content/:type/:slug
     /api/content/:type/:slug/related /api/content/:type/:slug/unlock /api/forms/:slug
-    /api/graphql/schema.graphql /api/json /api/json/swaggerui /api/locales /api/media
+    /api/graphql/schema.graphql /api/json /api/json/swaggerui /api/keys/rotate /api/locales /api/media
     /api/media/import-url /api/media/uploads /api/media/uploads/complete /api/menus
     /api/menus/:key /api/provenance/:type/:slug /api/provenance/:type/:slug/verify
     /api/provenance/public-key /api/provenance/verify/:type/:slug /api/resolve /api/schema /api/search /api/sync

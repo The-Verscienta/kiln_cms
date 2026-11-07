@@ -219,6 +219,24 @@ defmodule KilnClientTest do
       assert params["sort"] == "-published_at,title"
     end
 
+    test "text_search/3 and semantic_search/3 forward :custom_sort" do
+      stub_doc(empty_doc())
+
+      assert {:ok, _} =
+               KilnClient.text_search("posts", "elixir", custom_sort: ["price", "-rating"])
+
+      assert_received {:request, "/api/json/posts/search/published", params}
+      assert params["custom_sort"] == "price,-rating"
+
+      assert {:ok, _} = KilnClient.semantic_search("posts", "elixir", custom_sort: ["-price"])
+      assert_received {:request, "/api/json/posts/semantic-search/published", params}
+      assert params["custom_sort"] == "-price"
+
+      assert {:ok, _} = KilnClient.text_search("posts", "elixir")
+      assert_received {:request, "/api/json/posts/search/published", params}
+      refute Map.has_key?(params, "custom_sort")
+    end
+
     test "semantic_search/3 and autocomplete/3 hit their published twins" do
       stub_doc(empty_doc())
 

@@ -5,7 +5,7 @@ defmodule Mix.Tasks.Kiln.Plugins.List do
   Prints every plugin in `config :kiln_cms, :plugins` (decision D18) with its
   declared **catalog metadata** (`version`/`summary`/`homepage`) and its
   contribution surface (domains, blocks, field types, advisories, spam checks,
-  nav items, admin/editor/public routes, Oban queues, supervision children).
+  nav items, admin/editor/public/plug routes, Oban queues, supervision children).
 
   This is the local "discovery" half of the vetted-plugin marketplace — the
   data a catalog UI would render, straight from `Kiln.Plugins.manifests/0`
@@ -71,6 +71,7 @@ defmodule Mix.Tasks.Kiln.Plugins.List do
         # as visibly as one with an admin panel.
         count("editor route", m.editor_routes),
         count("public route", m.public_routes),
+        count("plug route", m.plug_routes),
         count("Oban queue", length(m.oban_queues)),
         count("child", m.children)
       ]

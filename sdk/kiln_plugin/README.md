@@ -79,11 +79,12 @@ has to be a `projects/<name>/` overlay, which is compiled *inside* the core.
 | Contribution | As a dependency |
 | --- | --- |
 | Blocks (`blocks/0`) | Yes |
-| Field types (`field_types/0`) | Yes, except a colocated client hook (`input_hook/1`): Phoenix writes a dependency's colocated hooks under its own app name, which the core's `app.js` does not import |
+| Field types (`field_types/0`) | Yes, except a colocated client hook (`input_hook/1`): Phoenix writes a dependency's colocated hooks under its own app name, which the core's `app.js` does not import. The optional `graphql_kind/1` (how the GraphQL API types the value) is from 1.4 (`{:kiln_plugin, "~> 1.4"}`) |
 | Spam checks (`spam_checks/0`) | Yes |
 | Image backends (`image_backends/0`) | Yes. The connection check, `check/0`, from 1.2 (`{:kiln_plugin, "~> 1.2"}`) |
 | Nav items, supervision children, Oban queues | Yes |
 | Admin, editor and public routes | Only for a LiveView that depends on `phoenix_live_view` directly; one that does `use KilnCMSWeb, :live_view` or renders `Layouts.app` needs the core, so it stays an overlay |
+| Plug routes (`plug_routes/0`) | Yes, from 1.4 (`{:kiln_plugin, "~> 1.4"}`). A route is `{verb, path, plug_module, plug_opts}` or `{:forward, path, plug, opts}`, so the dependency needs `plug` and nothing else |
 | Content types (`use KilnCMS.CMS.Content`), Ash domains (`domains/0`) | No: they need the core's repo, domains and policies. Overlay only |
 | Advisory checks (`advisories/0`, `Kiln.Advisory`) | Yes, from 1.1 (`{:kiln_plugin, "~> 1.1"}`). The core walks the blocks and fills `%Kiln.Advisory.Body{}`; a check only reads it |
 | Outbound HTTP to a URL the plugin didn't write (`Kiln.SafeFetch`) | Yes, from 1.3 (`{:kiln_plugin, "~> 1.3"}`). The core does the fetch; with no core loaded (a plugin's own test suite) every call is an error unless `config :kiln_plugin, :safe_fetch` names a stand-in |

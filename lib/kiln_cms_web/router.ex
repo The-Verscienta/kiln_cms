@@ -86,9 +86,11 @@ defmodule KilnCMSWeb.Router do
     plug :load_from_bearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
-    plug KilnCMSWeb.Plugs.ApiKeyAuth
+    plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
     # A mutation is a `POST` like any other — see the JSON:API pipeline.
     plug KilnCMSWeb.Plugs.Idempotency
+    # `X-Kiln-On-Behalf-Of` on a mutation: provenance for a draft-write key (#2273).
+    plug KilnCMSWeb.Plugs.OnBehalfOf
     plug AshGraphql.Plug
   end
 
@@ -130,7 +132,7 @@ defmodule KilnCMSWeb.Router do
     plug :load_from_bearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
-    plug KilnCMSWeb.Plugs.ApiKeyAuth
+    plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
     # The OpenAPI document is served from inside the `KilnCMSWeb.AshJsonApiRouter`
     # forward below, so there is no route here to gate. This plug knows the two
     # documentation paths and passes every other `/api` request through (#567).
@@ -148,6 +150,8 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.PreviewGrant
     # `If-Match` on a single-record write → the action's version check (412).
     plug KilnCMSWeb.Plugs.IfMatch
+    # `X-Kiln-On-Behalf-Of` on a create: provenance for a draft-write key (#2273).
+    plug KilnCMSWeb.Plugs.OnBehalfOf
     # `Idempotency-Key` on a write: claim it, or replay what the first attempt
     # answered. Runs after the auth plugs above — the key is scoped to the actor.
     plug KilnCMSWeb.Plugs.Idempotency
@@ -351,6 +355,19 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :billing_webhook
   end
 
+  # Plugin endpoints (#2272, `Kiln.Plugin.plug_routes/0`): a webhook receiver, a
+  # JSON endpoint, a feed variant. Same posture as `:provider_webhook` and for
+  # the same reason: the caller is a machine, so there is no CSRF check and no
+  # session read (`conn.assigns.current_user` is never set; the plugin
+  # authenticates its own caller). Deliberately no `:accepts`, so a plugin can
+  # answer any content type, and no browser headers: the response is the
+  # plugin's to shape. The tenant is already on `conn.assigns.current_org` from
+  # the endpoint's `SetTenant`. Its own bucket, so a plugin's traffic cannot
+  # spend the budget of the core APIs.
+  pipeline :plugin_endpoint do
+    plug KilnCMSWeb.Plugs.RateLimit, :plugin_endpoint
+  end
+
   # The ActivityPub inbox (#491). Same situation as a payment webhook and the
   # same shape: no CSRF, no session, the caller is a remote server, and
   # authorization is an HTTP Signature over the raw body (preserved by
@@ -530,6 +547,9 @@ defmodule KilnCMSWeb.Router do
       # branding is: full-text syndication is a disclosure decision, and it used
       # to live in a config file no tenant admin could reach.
       live "/editor/feeds", FeedSettingsLive, :index
+      # Per-site safety fields — which fields of which types need a severity when
+      # a published edit changes them. Org-scoped; writes are admin-only.
+      live "/editor/safety-fields", SafetyFieldsLive, :index
       # Per-site locale fallback chains (`fr-CA → fr → en`) — what every
       # delivery surface serves when a translation is missing. Org-scoped: one
       # site's "never fall back" must not decide another's.
@@ -725,6 +745,16 @@ defmodule KilnCMSWeb.Router do
 
     post "/sign_in", ApiAuthController, :sign_in
     post "/sign_in/verify", ApiAuthController, :verify
+  end
+
+  # A drafts-only key exchanging itself for a fresh one (ADR 0012). On the
+  # `:auth` bucket, not `:api`'s: it issues a credential. No bearer/actor plugs —
+  # the controller authenticates the key itself, so a refused key can be checked
+  # for reuse after rotation (`KilnCMS.Accounts.ApiKeyReuse`).
+  scope "/api/keys", KilnCMSWeb do
+    pipe_through :api_auth
+
+    post "/rotate", ApiKeyRotationController, :rotate
   end
 
   # MCP server for LLM authoring clients (docs/mcp.md). The tool list comes
@@ -1246,6 +1276,11 @@ defmodule KilnCMSWeb.Router do
       # (e2e/tests/field_localization.spec.js); the rest of the suite stays
       # single-locale. Same gating and :prod refusal.
       forward "/e2e-locales", KilnCMSWeb.Plugs.E2ELocales
+
+      # Marks core block fields shared / fallback per locale (#2270) for the
+      # block cases of that spec; the site configures none otherwise.
+      # Same gating and :prod refusal.
+      forward "/e2e-block-fields", KilnCMSWeb.Plugs.E2EBlockFields
     end
   end
 
@@ -1296,6 +1331,16 @@ defmodule KilnCMSWeb.Router do
       import KilnCMSWeb.PluginRouter
       plugin_public_routes()
     end
+  end
+
+  # Plugin plug routes (#2272) — compiled in from each installed plugin's
+  # `plug_routes/0`. Registered BEFORE the delivery catch-alls below, for the
+  # same reason as the public routes above. No `:browser`: see the pipeline.
+  scope "/" do
+    pipe_through :plugin_endpoint
+
+    import KilnCMSWeb.PluginRouter
+    plugin_plug_routes()
   end
 
   # Document downloads (#481) and A/V playback (#494) — anonymous-tolerant

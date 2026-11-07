@@ -165,6 +165,42 @@
       "references": null,
       "scale": null,
       "size": null,
+      "source": "created_via_key_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "created_via_key_name",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "on_behalf_of",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
       "source": "seo_image",
       "type": "text"
     },
@@ -179,30 +215,6 @@
       "size": null,
       "source": "canonical_url",
       "type": "text"
-    },
-    {
-      "allow_nil?": false,
-      "default": "false",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "noindex",
-      "type": "boolean"
-    },
-    {
-      "allow_nil?": false,
-      "default": "false",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "nofollow",
-      "type": "boolean"
     },
     {
       "allow_nil?": true,
@@ -1027,7 +1039,7 @@
     }
   ],
   "has_create_action": true,
-  "hash": "C6EC90BDB970888D8BC6FBE29B973E4CD456A6D3141505A893E62A51F2EB828E",
+  "hash": "60584029A9A6925BD3338C3A27F1550B97D986000012C919494C1C261885EBB3",
   "identities": [
     {
       "all_tenants?": false,

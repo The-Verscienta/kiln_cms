@@ -758,7 +758,10 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   @doc "Run a workflow transition: publish, unpublish, submit, archive, or unarchive."
   def transition(type, verb, record, opts \\ []) do
-    call(type, transition_fun(atom(type, opts), verb), [record, %{}, opts], opts)
+    # `:params` carries an action argument (the editor's `change_severity`); it
+    # is not an option of the interface call itself.
+    {params, opts} = Keyword.pop(opts, :params, %{})
+    call(type, transition_fun(atom(type, opts), verb), [record, params, opts], opts)
   end
 
   def list_trashed!(type, opts \\ []) do

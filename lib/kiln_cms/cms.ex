@@ -575,6 +575,13 @@ defmodule KilnCMS.CMS do
       define :save_site_editorial_settings, action: :save
     end
 
+    # Which fields of which content types need a change severity on a live edit
+    # (`KilnCMS.CMS.Severity`). An absent row means nothing is safety-relevant.
+    resource KilnCMS.CMS.SiteSafetyFields do
+      define :list_site_safety_fields, action: :read
+      define :save_site_safety_fields, action: :save
+    end
+
     # Per-org claim-checking settings (#857): whether the compliance panel runs
     # for this site, whether it gates publishing, and the site's own claim
     # vocabulary. The layer above `config :kiln_cms, KilnCMS.Compliance`,

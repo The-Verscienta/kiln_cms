@@ -50,7 +50,9 @@ defmodule KilnCMSWeb.OpenApi do
       the key's `access` scope. A `read` key reads what its account may read;
       a `read_write` key may also **write**: create and update drafts, submit
       for review, and — on an admin account — publish, unpublish, return to
-      draft and soft-delete. The key for server-to-server use.
+      draft and soft-delete. A `draft_write` key may only create drafts and
+      edit its own drafts (no review, publishing, deletes or media). The key
+      for server-to-server use.
     * **User JWT** (the `bearerAuth` scheme) — an AshAuthentication token from
       **`POST /api/auth/sign_in`** (documented below), with that user's role.
 
@@ -153,7 +155,8 @@ defmodule KilnCMSWeb.OpenApi do
         description:
           "An API key minted at `/editor/api-keys`, sent as " <>
             "`Authorization: Bearer kiln_…`. Acts as its owning account, bounded " <>
-            "by the key's `access` scope (`read` or `read_write`)."
+            "by the key's `access` scope (`read`, `read_write`, or `draft_write`, which " <>
+            "may only create drafts and edit its own drafts)."
       })
 
     Map.put(components, :securitySchemes, schemes)
@@ -270,6 +273,71 @@ defmodule KilnCMSWeb.OpenApi do
             429 => %OpenApiSpex.Response{
               description: "Per-account second-factor budget spent — see `Retry-After`"
             }
+          }
+        }
+      },
+      "/api/keys/rotate" => %OpenApiSpex.PathItem{
+        post: %OpenApiSpex.Operation{
+          tags: ["Authentication"],
+          operationId: "rotateApiKey",
+          summary: "Exchange a drafts-only API key for a fresh one",
+          description:
+            "A `draft_write` key minted with a rotation window (`rotatable_until`) " <>
+              "exchanges itself for a new key with the same owner, scope and name. " <>
+              "The new key expires at the draft-write lifetime cap or at " <>
+              "`rotatable_until`, whichever is sooner. The presenting key is " <>
+              "revoked in the same transaction: store the new key before you stop " <>
+              "using the old one, and rotate from one place. Presenting a " <>
+              "rotated-away key here again more than 120 seconds after it was " <>
+              "rotated revokes the whole rotation chain and alerts the " <>
+              "administrators. Empty body. Rate limited by the `auth` bucket.",
+          security: [%{"bearerAuth" => []}],
+          responses: %{
+            201 => %OpenApiSpex.Response{
+              description: "Rotated. `api_key` is shown once.",
+              content: %{
+                "application/json" => %OpenApiSpex.MediaType{schema: rotated_key_schema()}
+              }
+            },
+            401 => %OpenApiSpex.Response{
+              description:
+                "No `Bearer kiln_…` key, or it is revoked, expired or unknown " <>
+                  "(`invalid_api_key`)"
+            },
+            403 => %OpenApiSpex.Response{
+              description: "Not a drafts-only key with an open rotation window (`forbidden`)"
+            },
+            409 => %OpenApiSpex.Response{
+              description:
+                "The key was revoked or rotated by a concurrent request, or its " <>
+                  "owner may now edit or publish (`not_rotatable`)"
+            },
+            429 => %OpenApiSpex.Response{description: "Rate limited — see `Retry-After`"},
+            500 => %OpenApiSpex.Response{
+              description: "Server failure; the key is unchanged, retry later"
+            }
+          }
+        }
+      }
+    }
+  end
+
+  defp rotated_key_schema do
+    %OpenApiSpex.Schema{
+      type: :object,
+      properties: %{
+        data: %OpenApiSpex.Schema{
+          type: :object,
+          required: [:id, :api_key, :expires_at, :rotatable_until, :rotated_from_id],
+          properties: %{
+            id: %OpenApiSpex.Schema{type: :string, format: :uuid},
+            api_key: %OpenApiSpex.Schema{
+              type: :string,
+              description: "The new key's plaintext, `kiln_…`. Shown once."
+            },
+            expires_at: %OpenApiSpex.Schema{type: :string, format: :"date-time"},
+            rotatable_until: %OpenApiSpex.Schema{type: :string, format: :"date-time"},
+            rotated_from_id: %OpenApiSpex.Schema{type: :string, format: :uuid}
           }
         }
       }

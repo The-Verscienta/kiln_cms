@@ -576,8 +576,8 @@ defmodule KilnCMSWeb.EditorLive do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
-    {ok, skipped} =
-      Enum.reduce(socket.assigns.selected, {0, 0}, fn key, {ok, skipped} ->
+    {ok, skipped, needs_severity} =
+      Enum.reduce(socket.assigns.selected, {0, 0, 0}, fn key, counts ->
         [kind, id] = String.split(key, ":", parts: 2)
 
         result =
@@ -585,19 +585,28 @@ defmodule KilnCMSWeb.EditorLive do
             do: destroy(kind, id, actor, org),
             else: do_transition(kind, verb, get!(kind, id, actor, org), actor, org)
 
-        case result do
-          :ok -> {ok + 1, skipped}
-          {:ok, _} -> {ok + 1, skipped}
-          _ -> {ok, skipped + 1}
-        end
+        tally_bulk(result, counts)
       end)
+
+    flash = bulk_flash(verb, ok, skipped + needs_severity)
+
+    flash =
+      if needs_severity > 0,
+        do:
+          flash <>
+            " " <>
+            gettext(
+              "%{count} of them touch a safety field — open each in the editor to publish and say how much the change matters.",
+              count: needs_severity
+            ),
+        else: flash
 
     {:noreply,
      socket
      |> refresh()
      |> assign(:selected, MapSet.new())
      |> assign(:confirming_bulk, nil)
-     |> put_flash(:info, bulk_flash(verb, ok, skipped))}
+     |> put_flash(:info, flash)}
   end
 
   def handle_event("publish", params, socket),
@@ -837,7 +846,17 @@ defmodule KilnCMSWeb.EditorLive do
         |> put_flash(:info, KilnCMSWeb.WorkflowMessages.success(verb, record.state))
 
       {:error, error} ->
-        put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error(verb, error))
+        if severity_required?(error) do
+          put_flash(
+            socket,
+            :error,
+            gettext(
+              "This change touches a safety field. Open it in the editor to publish and say how much it matters."
+            )
+          )
+        else
+          put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error(verb, error))
+        end
     end
   end
 
@@ -848,8 +867,28 @@ defmodule KilnCMSWeb.EditorLive do
   defp get!(kind, id, actor, org),
     do: ContentTypes.get_record!(kind, id, actor: actor, tenant: org)
 
+  # A publish from the list has no severity picker, so the action is told to
+  # refuse (rather than default to :notable) a publish that touches a site
+  # safety field; the editor has the panel that asks.
+  defp do_transition(kind, "publish", record, actor, org) do
+    ContentTypes.transition(kind, "publish", record,
+      actor: actor,
+      tenant: org,
+      context: %{require_change_severity: true}
+    )
+  end
+
   defp do_transition(kind, verb, record, actor, org),
     do: ContentTypes.transition(kind, verb, record, actor: actor, tenant: org)
+
+  defp severity_required?(error) when is_exception(error) do
+    error
+    |> Ash.Error.to_error_class()
+    |> Map.get(:errors, [])
+    |> Enum.any?(&(Map.get(&1, :field) == :change_severity))
+  end
+
+  defp severity_required?(_error), do: false
 
   # Hard delete (soft via archival). Admin-only; the policy rejects others, in
   # which case the item is counted as skipped.
@@ -2137,4 +2176,13 @@ defmodule KilnCMSWeb.EditorLive do
 
   defp status_filter_label(other) when is_atom(other),
     do: other |> to_string() |> String.replace("_", " ") |> String.capitalize()
+
+  defp tally_bulk(:ok, {ok, skipped, sev}), do: {ok + 1, skipped, sev}
+  defp tally_bulk({:ok, _}, {ok, skipped, sev}), do: {ok + 1, skipped, sev}
+
+  defp tally_bulk({:error, error}, {ok, skipped, sev}) do
+    if severity_required?(error), do: {ok, skipped, sev + 1}, else: {ok, skipped + 1, sev}
+  end
+
+  defp tally_bulk(_other, {ok, skipped, sev}), do: {ok, skipped + 1, sev}
 end
