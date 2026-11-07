@@ -1,9 +1,9 @@
 # 0012. Headless services get a draft-write API-key scope, not OIDC pass-through
 
 - **Status** — accepted; unreleased. The scope and its policy, provenance on
-  token drafts and the surface audit (below) are in. The opt-in #2161 flag
-  shipped in its own change (#2297), and its default flipped on in the release
-  after (#2301); the rotation endpoint is a follow-up.
+  token drafts and the surface audit (below) are in. Self-rotation (below,
+  "Rotation") is its own change. The opt-in #2161 flag shipped in its own
+  change (#2297), and its default flipped on in the release after (#2301).
 - **References** — [#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273);
   settles the direction of [#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161);
   builds on [#330](https://github.com/The-Verscienta/kiln_cms/issues/330) (the write API).
@@ -49,9 +49,91 @@ The bound is a policy on `Content`, not a property of the owner:
   default 30), and the owner must have no editor or admin tier anywhere.
 
 "Short-lived" is therefore a ceiling an operator sets, not a token-exchange
-protocol. A rotation endpoint a service can call to mint its own replacement is
-a follow-up, deliberately not built here: it would let a credential mint
-credentials, which wants its own review.
+protocol. With a 30-day cap and admin-only minting, a person had to re-mint
+the service's key every month; the next section is how a key that an admin
+opted in keeps itself alive without that, and without minting anything it was
+not already.
+
+## Rotation
+
+A `:draft_write` key may **exchange itself for a fresh one**, if and only if the
+admin who minted it gave it a rotation window.
+
+- **Opt-in, per key, with an end date.** `rotatable_until` is set at mint
+  (the admin UI offers off / 90 / 180 days / 1 year), at most
+  `:draft_write_key_max_rotation_days` (default 365) from mint. It is nil by
+  default: a key minted without one behaves exactly as before. Only a
+  `:draft_write` key may carry it.
+- **`POST /api/keys/rotate`**, `Authorization: Bearer kiln_…`, empty body. A
+  plain controller, not JSON:API, GraphQL or `/mcp`: `ApiKey` is on none of
+  those today, and putting credential minting into the public schemas (and the
+  clients generated from them) would widen them for one caller. The answer is
+  `201` with the new plaintext once, `Cache-Control: no-store`, on the tight
+  `:auth` rate bucket.
+- **Same owner, same scope, same name, same window.** The `:rotate` action
+  accepts no input at all; everything is copied from the key the actor
+  authenticated with. There is nothing to narrow because `:draft_write` is
+  already the narrowest scope that writes, and nothing a caller can widen.
+- **The chain cannot outlive the admin's date.** The new key expires at
+  `min(now + :draft_write_key_max_ttl_days, rotatable_until)` and inherits
+  `rotatable_until` unchanged. After that date the key simply expires and a
+  person re-mints.
+- **One live key per lineage.** The presenting key is re-read under a row lock
+  and revoked in the same transaction that creates its successor. Two
+  concurrent rotations serialize; the second finds the row revoked and fails.
+  Revoking the live key (the admin list shows it, with "Rotated from …") ends
+  the lineage. `lineage_id` (the original mint's id) and `rotated_from_id`
+  record it.
+- **The mint rules run again.** The same `Validations.DraftWriteKey` runs on
+  rotation, so an owner who has been given an editor or admin tier since the
+  mint cannot rotate (`409`), and the lineage ends at its current expiry.
+- **Who may run it.** `ApiKey`'s `:rotate` policy is
+  `Checks.RotatableDraftWriteKey` alone: a `:draft_write` key, unrevoked,
+  unexpired, inside its window. A `:read` or `:read_write` key, a JWT or
+  session user, an admin, or no actor is `Forbidden`. Admins mint; they do not
+  rotate. The existing admin-only policies are now scoped by action type, so a
+  create action added later matches no policy and is refused.
+
+**Rejected: a separate rotation credential an admin issues to the service.** It
+is a second secret, longer-lived than the key, whose one power is minting keys,
+and the service has to store it next to the key it renews. A leak of it is
+strictly worse than a leak of the key. Self-rotation never produces a
+credential stronger, longer-lived or differently owned than the one presented.
+
+### Reuse detection
+
+A leaked key with a rotation window could otherwise rotate itself until the
+window closes, with the service none the wiser until its own key stops working.
+So rotation follows the refresh-token rule: once a key is rotated away, nobody
+should ever present it again. If somebody does, **on the rotation endpoint**,
+more than **120 seconds** after it was rotated, and the presented secret
+**verifies** against the revoked row (`KilnCMS.Accounts.ApiKeyReuse`):
+
+1. every live key of the lineage is revoked (Kiln cannot tell whether the
+   service or the thief holds it), and
+2. every platform admin is mailed, naming the key and its owner, and it is
+   logged and emitted as `[:kiln_cms, :api_key, :reuse_detected]` telemetry.
+
+Why only the rotation endpoint: a service with several workers has requests in
+flight on the old key while one worker rotates. Those 401s are expected, and
+burning the lineage on them would turn every rotation into an outage. Why the
+grace period: a retry after a lost `201`, or two workers rotating at once,
+looks exactly like reuse a second later. Inside it the old key still gets a
+plain `401` (it is revoked either way); the grace only withholds the alarm. The
+cost of the rule, accepted: a service that loses the `201` has lost the new key
+and must ask for a re-mint.
+
+Every successful rotation is logged and emitted as
+`[:kiln_cms, :api_key, :rotated]` telemetry. Kiln has no audit-log resource;
+the key list in the admin UI is the durable record (status "Rotated", the
+window, and the predecessor).
+
+### Rotation and #2161
+
+`/api/keys/rotate` is authenticated-only whatever `KILN_API_REJECT_INVALID_BEARER`
+says: no `Authorization` header, a non-`kiln_` bearer, or a key that does not
+verify is a `401` (`invalid_api_key`), never an anonymous request. The flag only
+changes surfaces with an anonymous fallback, and this one has none.
 
 ## The two options
 
@@ -110,6 +192,21 @@ fields would not appear unless asked for), and `authorize?: false` reads would
 compute it. Field policies are enforced by the framework on every actor-scoped
 read, are already used on `User`, and fail closed.
 
+**Cost: no query per row, and none per read.** `ReadableContentType` is a
+simple check, decided once per read by the same `Scoping` tier lookup the read
+policy already made (memoized per process), and `DraftWriteOwnProvenance` is a
+filter check compiled into the read's own SQL. Field policies never run a
+check's per-record `check/4`, so neither can go per row. Measured
+with and without the block (20 rows, cold memo as in a fresh request): an
+editor's `CMS.list_posts!` is 1 `posts` + 2 `org_memberships` queries both
+ways, a JSON:API list or single read with any key 5, a GraphQL list 6, a page
+with its 20 children 4; anonymous reads stay at 1. Wall time is unchanged
+within noise. With the memo off (the test config) the policy re-resolves the
+tier: +4 `org_memberships` lookups for a viewer and +8 for an editor per read,
+still constant in the row count. `test/kiln_cms_web/content_field_policy_query_count_test.exs`
+holds both: the counts for 1 row equal those for 20, on every surface, and
+with the production memo each read issues exactly the queries above.
+
 The attributes are therefore `public?: true`, which is what puts them on the
 API schemas. What a refused caller sees:
 
@@ -147,10 +244,12 @@ block and custom-field definitions, not these attributes, and are unchanged.
 |---|---|
 | **Leaked key.** The credential escapes a service's logs or repo. | It can only create and edit drafts it authored: nothing live changes, nothing is deleted, nothing is sent to review. It expires within the cap, is revocable, and has a secret-scannable prefix. The worst case is junk drafts and reading what a viewer reads. |
 | **Privilege escalation through the owner's role.** The key rides an account later promoted to editor or admin. | The forbid sits above the admin bypass and ignores the role. Mint refuses editor-capable owners as a second line. A test promotes the owner after mint and shows it still cannot publish. |
-| **Confused deputy.** The service is tricked into acting on a document it should not touch, or a draft is made to look human-authored. | The row condition requires the key owner to be the author, and a document with a live version or working copy is refused. Provenance marks token drafts (the creating key's id and name, and the service's opaque `on_behalf_of`) so a reviewer can tell them apart. |
+| **Confused deputy.** The service is tricked into acting on a document it should not touch, or a draft is made to look human-authored. | The row condition requires the key owner to be the author, and a document with a live version or working copy is refused. Provenance marks token drafts (the creating key's id and name, and the service's opaque `on_behalf_of`) so a reviewer can tell them apart. It lives on the row only, not in version history: a key reads the history of every draft its owner authored, but the provenance of only the drafts it created, so recording it in a version would show one key's `on_behalf_of` to another key on the same owner. |
 | **A new `Content` action** grants the key something nobody reviewed. | Allowlist, not denylist, and a test that enumerates every update and destroy action on `Content` and asserts the unlisted ones are refused. |
 | **Another resource lacks the carve-out and is more permissive than intended.** | The other resources forbid on `ApiKeyWithoutWriteAccess`, which fails closed for any access value but `:read_write`. Media writes are refused and tested. |
 | **Replay of a stolen key.** | Not prevented by the scope. Bounded by the lifetime cap and revocation. A bearer secret is replayable by design. |
+| **A leaked key rotates itself forever.** | Only if an admin gave it a rotation window, and never past that window's end (at most a year from mint). Rotating revokes the presenting key, so a thief who rotates first locks the service out, and the service's next rotation attempt (after the 120-second grace) is detected as reuse: the lineage is revoked and admins are mailed. |
+| **Rotation as escalation.** | The action takes no input and copies owner, scope, name and window from the presenting key; the mint-time owner check runs again. A key can only ever become an identical key with a fresh secret and a no-later end date. |
 | **Spam of the review queue.** | The key cannot submit for review, so drafts do not reach a reviewer's queue until a person moves them. Request rate limiting is not changed by this record. |
 
 Out of scope: **audience-restricted reads on behalf of a subject.** The key reads
@@ -209,6 +308,7 @@ Every way in with a `kiln_` key, checked with a real bearer in
 | `POST …/preview-token` | bounded to drafts the key's owner authored, on top of the tier gate; a viewer-tier owner mints nothing |
 | Bridge socket (`api_key=`) | read-only; streams published documents and the key's own drafts; the scope survives the periodic re-check |
 | Collab socket | a key is not a credential for it (it takes a signed-in session's token), and the viewer-tier owner joins no room |
+| `POST /api/keys/rotate` | only a `:draft_write` key with an open rotation window; issues an identical key and revokes the presenting one (`test/kiln_cms/accounts/draft_write_key_rotation_test.exs`, `test/kiln_cms_web/draft_write_key_rotation_test.exs`) |
 
 Reads follow the owner's role like any key's: a promoted owner reads as that
 role. Only writes are bounded above the role.

@@ -99,6 +99,67 @@ defmodule KilnCMSWeb.DeliveryGraphqlTest do
       assert Enum.map(sorted, & &1["id"]) == [cheap.id, mid.id, dear.id]
     end
 
+    test "customSort orders the keyword and semantic search queries; explicit sort wins (#2292)" do
+      admin = admin()
+      price = "price#{System.unique_integer([:positive])}"
+      term = "gqlsort#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{content_type: :post, name: price, label: "Price", field_type: :integer},
+        actor: admin
+      )
+
+      publish = fn title, value ->
+        CMS.create_post!(
+          %{title: "#{title} #{term}", slug: slug(), custom_fields: %{price => value}},
+          actor: admin
+        )
+        |> then(&CMS.publish_post!(&1, %{}, actor: admin))
+      end
+
+      pricey = publish.("Aaa", 30)
+      cheap = publish.("Zzz", 10)
+      mid = publish.("Mmm", 20)
+
+      ids = fn field, vars ->
+        query = """
+        query ($q: String!, $cs: String, $sort: [PostSortInput]) {
+          #{field}(query: $q, locale: "en", customSort: $cs, sort: $sort) { id }
+        }
+        """
+
+        assert {:ok, %{data: %{^field => results}}} =
+                 run(query, Map.merge(%{"q" => term}, vars))
+
+        Enum.map(results, & &1["id"])
+      end
+
+      for field <- ["searchPosts", "searchPublishedPosts"] do
+        assert ids.(field, %{}) == [mid.id, cheap.id, pricey.id]
+        assert ids.(field, %{"cs" => price}) == [cheap.id, mid.id, pricey.id]
+        assert ids.(field, %{"cs" => "-#{price}"}) == [pricey.id, mid.id, cheap.id]
+
+        assert ids.(field, %{
+                 "cs" => price,
+                 "sort" => [%{"field" => "TITLE", "order" => "ASC"}]
+               }) == [pricey.id, mid.id, cheap.id]
+      end
+
+      # The semantic queries take the argument too (results need embeddings,
+      # which a semantic-less test run does not have; the schema accepting it is
+      # the contract here).
+      for field <- ["semanticSearchPosts", "semanticSearchPublishedPosts"] do
+        query = """
+        query ($q: String!, $cs: String) {
+          #{field}(query: $q, customSort: $cs) { id }
+        }
+        """
+
+        assert {:ok, result} = run(query, %{"q" => term, "cs" => price})
+        refute result[:errors]
+      end
+    end
+
     test "customFilter takes the relationship operators, and tags (R6)" do
       admin = admin()
       refs = "refs#{System.unique_integer([:positive])}"

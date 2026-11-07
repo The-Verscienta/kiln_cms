@@ -16,9 +16,23 @@
 // default locale, so the chain is `fr → en`. The setting is VM-global; the
 // suite's `workers: 1` keeps it to this spec.
 //
+// The block cases (#2270) opt the core `image` block in through
+// `/dev/e2e-block-fields` (KilnCMSWeb.Plugs.E2EBlockFields), the runtime twin of
+// `config :kiln_cms, :i18n, block_fields: ...`, and clear it afterwards. Image
+// URLs are http(s): the sanitizer strips a bare filename.
+//
 // Oban runs every queue in the e2e env (config/e2e.exs), so the worker runs
 // for real on `:firing`. The spec reloads until its result shows.
-const { test, expect, signInAsAdmin, newDraftPage, saveDraft, save, deleteContentById } = require("./fixtures");
+const {
+  test,
+  expect,
+  signInAsAdmin,
+  newDraftPage,
+  saveDraft,
+  save,
+  addBlock,
+  deleteContentById,
+} = require("./fixtures");
 
 // Set the deployment's locales, returning the list it had. Sent from a
 // signed-in page, which carries the CSRF token the dev-tools scope's
@@ -37,6 +51,45 @@ async function setLocales(page, locales) {
   expect(reply.status).toBe(200);
   expect(reply.body.locales).toEqual(locales);
   return reply.body.was;
+}
+
+// The `block_fields` setting for the core image block, in the plug's JSON shape.
+const IMAGE_FIELDS = { image: { shared: ["url", "media_id"], fallback: ["alt", "caption"] } };
+
+// Set the deployment's per-locale block fields, returning the setting it had.
+// `{}` clears it.
+/** @param {import("@playwright/test").Page} page @param {Record<string, {shared: string[], fallback: string[]}>} blockFields */
+async function setBlockFields(page, blockFields) {
+  const reply = await page.evaluate(async blockFields => {
+    const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content");
+    const res = await fetch("/dev/e2e-block-fields", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-csrf-token": token || "" },
+      body: JSON.stringify({ block_fields: blockFields }),
+    });
+    return { status: res.status, body: await res.json() };
+  }, blockFields);
+  expect(reply.status).toBe(200);
+  expect(reply.body.block_fields).toEqual(blockFields);
+  return reply.body.was;
+}
+
+// Every block in a delivered `blocks` tree, nested ones included, as a flat list.
+/** @param {any} tree @returns {any[]} */
+function flattenBlocks(tree) {
+  if (Array.isArray(tree)) return tree.flatMap(flattenBlocks);
+  if (tree && typeof tree === "object") return [tree, ...Object.values(tree).flatMap(flattenBlocks)];
+  return [];
+}
+
+// Create the FR translation from the History tab of the open EN page, and
+// return its id. The editor is then on the FR page.
+/** @param {import("@playwright/test").Page} page @param {string} enId */
+async function translateToFr(page, enId) {
+  await page.click('button[role="tab"][phx-value-tab="history"]');
+  await page.locator('button[phx-click="create_translation"][phx-value-locale="fr"]').click();
+  await page.waitForURL(url => /\/editor\/content\/page\/[0-9a-f-]{36}$/.test(url.pathname) && !url.pathname.endsWith(enId));
+  return new URL(page.url()).pathname.split("/").pop() || "";
 }
 
 // A page custom field from /editor/fields, with its *Across locales* mode.
@@ -84,6 +137,8 @@ test.describe("field-level localization", () => {
   let ids;
   /** @type {string[] | undefined} */
   let locales;
+  /** @type {Record<string, {shared: string[], fallback: string[]}> | undefined} */
+  let blockFields;
 
   test.beforeEach(async ({ page }) => {
     stamp = String(Date.now());
@@ -91,6 +146,7 @@ test.describe("field-level localization", () => {
     fallback = `e2e_fallback_${stamp}`;
     ids = [];
     locales = undefined;
+    blockFields = undefined;
     await signInAsAdmin(page);
     locales = await setLocales(page, ["en", "fr"]);
   });
@@ -110,6 +166,9 @@ test.describe("field-level localization", () => {
       await expect(fields).toHaveCount(n - 1);
     }
 
+    // Even when the test failed: a stale `block_fields` would lock the image
+    // block of every later spec's translations.
+    if (blockFields) await setBlockFields(page, blockFields);
     if (locales) await setLocales(page, locales);
   });
 
@@ -184,6 +243,119 @@ test.describe("field-level localization", () => {
       expect(body.locale).toBe("fr");
       expect(body.custom_fields).toMatchObject({ [shared]: "Twelve euros", [fallback]: "Inherited caption" });
       expect(body.inherited_fields).toEqual({ custom_fields: { [fallback]: "en" } });
+    }).toPass({ timeout: 20_000 });
+  });
+
+  test("a shared image url follows the source; empty fallback alt and caption inherit", async ({ page }) => {
+    blockFields = await setBlockFields(page, IMAGE_FIELDS);
+
+    const slug = `floc-img-${stamp}`;
+    const enUrl = `https://example.com/e2e-${stamp}-en.png`;
+    const enId = await newDraftPage(page);
+    ids.push(enId);
+    await addBlock(page, "image");
+    const enBlock = page.locator('[data-block-type="image"]').first();
+    await enBlock.locator('input[name$="[url]"]').fill(enUrl);
+    await enBlock.locator('input[name$="[alt]"]').fill("English alt");
+    await enBlock.locator('input[name$="[caption]"]').fill("English caption");
+    await saveDraft(page, { title: `Image ${stamp}`, slug });
+    // The source stays editable and says how many translations follow it.
+    await expect(enBlock.locator('input[name$="[url]"]')).not.toHaveAttribute("readonly", /.*/);
+    await publish(page, PUBLISH_NOW);
+
+    const frId = await translateToFr(page, enId);
+    ids.push(frId);
+    const frUrl = page.url();
+
+    // Shared: read-only, its picker unavailable, and the note says where to edit.
+    const block = page.locator('[data-block-type="image"]').first();
+    await expect(block.locator('input[name$="[url]"]')).toHaveValue(enUrl);
+    await expect(block.locator('input[name$="[url]"]')).toHaveAttribute("readonly", /.*/);
+    await expect(block.locator('button[phx-click="open_picker"]')).toBeDisabled();
+    await expect(block.locator("[data-localization=shared]").first()).toContainText("Shared: edited in the EN version.");
+
+    // Fallback: emptied, alt and caption show what readers get instead.
+    await block.locator('input[name$="[alt]"]').fill("");
+    await block.locator('input[name$="[caption]"]').fill("");
+    await save(page);
+    await page.reload();
+    const reloaded = page.locator('[data-block-type="image"]').first();
+    await expect(reloaded.locator('input[name$="[alt]"]')).toHaveValue("");
+    await expect(reloaded.locator('input[name$="[alt]"]')).toHaveAttribute("placeholder", "English alt");
+    await expect(reloaded.locator('input[name$="[caption]"]')).toHaveAttribute("placeholder", "English caption");
+    await expect(reloaded.locator("[data-localization=fallback]").first()).toContainText("readers get the EN value");
+
+    // Change the EN url and publish: SharedFieldsWorker copies it into FR.
+    const newEnUrl = `https://example.com/e2e-${stamp}-en-2.png`;
+    await page.goto(`/editor/content/page/${enId}`);
+    await page.locator('[data-block-type="image"] input[name$="[url]"]').first().fill(newEnUrl);
+    await save(page);
+    await publish(page, PUBLISH_CHANGES);
+
+    await page.goto(frUrl);
+    await expect(async () => {
+      await page.reload();
+      await expect(page.locator('[data-block-type="image"] input[name$="[url]"]').first()).toHaveValue(newEnUrl, {
+        timeout: 1_000,
+      });
+    }).toPass({ timeout: 20_000 });
+
+    // Publish FR with alt and caption still empty: the delivered image carries
+    // the shared url and the inherited alt and caption.
+    await publish(page, PUBLISH_NOW);
+    await expect(async () => {
+      const res = await page.request.get(`/api/content/page/${slug}?locale=fr`);
+      expect(res.status()).toBe(200);
+      const body = await res.json();
+      expect(body.locale).toBe("fr");
+      const image = flattenBlocks(body.blocks).find(b => b.url === newEnUrl);
+      expect(image).toMatchObject({ url: newEnUrl, alt: "English alt", caption: "English caption" });
+    }).toPass({ timeout: 20_000 });
+  });
+
+  test("an image nested in columns: shared url, inherited alt", async ({ page }) => {
+    blockFields = await setBlockFields(page, IMAGE_FIELDS);
+
+    const slug = `floc-col-${stamp}`;
+    const enUrl = `https://example.com/e2e-${stamp}-col.png`;
+    const enId = await newDraftPage(page);
+    ids.push(enId);
+    await addBlock(page, "columns");
+    await page.click('button[phx-click="col_add_child"][phx-value-col="0"][phx-value-type="image"]');
+    const enChild = page.locator("[data-child-id]").first();
+    await enChild.locator("input[phx-value-field=url]").fill(enUrl);
+    await enChild.locator("input[phx-value-field=url]").blur();
+    await enChild.locator("input[phx-value-field=alt]").fill("Nested alt");
+    await enChild.locator("input[phx-value-field=alt]").blur();
+    await saveDraft(page, { title: `Columns ${stamp}`, slug });
+    await publish(page, PUBLISH_NOW);
+
+    const frId = await translateToFr(page, enId);
+    ids.push(frId);
+
+    // Nested image exposes only url and alt: url is locked, alt inherits.
+    const child = page.locator("[data-child-id]").first();
+    await expect(child.locator("input[phx-value-field=url]")).toHaveValue(enUrl);
+    await expect(child.locator("input[phx-value-field=url]")).toHaveAttribute("readonly", /.*/);
+    await expect(child.locator("[data-localization=shared]").first()).toContainText("Shared: edited in the EN version.");
+    await child.locator("input[phx-value-field=alt]").fill("");
+    await child.locator("input[phx-value-field=alt]").blur();
+    await save(page);
+    await page.reload();
+    const reloaded = page.locator("[data-child-id]").first();
+    await expect(reloaded.locator("input[phx-value-field=alt]")).toHaveValue("");
+    await expect(reloaded.locator("input[phx-value-field=alt]")).toHaveAttribute("placeholder", "Nested alt");
+    await expect(reloaded.locator("input[phx-value-field=alt]")).not.toHaveAttribute("readonly", /.*/);
+    await expect(reloaded.locator("[data-localization=fallback]").first()).toContainText("readers get the EN value");
+
+    await publish(page, PUBLISH_NOW);
+    await expect(async () => {
+      const res = await page.request.get(`/api/content/page/${slug}?locale=fr`);
+      expect(res.status()).toBe(200);
+      const body = await res.json();
+      expect(body.locale).toBe("fr");
+      const image = flattenBlocks(body.blocks).find(b => b.url === enUrl);
+      expect(image).toMatchObject({ url: enUrl, alt: "Nested alt" });
     }).toPass({ timeout: 20_000 });
   });
 });

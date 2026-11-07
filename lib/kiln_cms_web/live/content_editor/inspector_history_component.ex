@@ -112,10 +112,12 @@ defmodule KilnCMSWeb.ContentEditor.InspectorHistoryComponent do
               </span>
               <button
                 type="button"
-                phx-click="restore"
+                phx-click={@can_restore? && "restore"}
                 phx-value-version_id={version.id}
-                data-confirm={gettext("Restore content to this version?")}
-                class="btn btn-sm btn-default"
+                disabled={!@can_restore?}
+                aria-disabled={to_string(!@can_restore?)}
+                title={@restore_refusal}
+                class="btn btn-sm btn-default disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {gettext("Restore")}
               </button>

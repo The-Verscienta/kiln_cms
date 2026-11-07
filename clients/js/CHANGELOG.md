@@ -5,6 +5,22 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `client-js-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+- `textSearch` / `semanticSearch` take `customSort` (kiln_cms#2292). The server
+  also accepts a custom field's bare name in `filter` / `sort`, but this client
+  keeps emitting `custom_filter` / `custom_sort`, the stable form.
+
+- **`:draft_write` keys (kiln_cms#2273):** `create()` takes `onBehalfOf`
+  (`CreateOptions`), sent as the `X-Kiln-On-Behalf-Of` header, which Kiln
+  records on a draft created with a `:draft_write` API key so reviewers see
+  which of your users it was for. Stored only, never authorization; other
+  writes never send it (the server reads it on `POST` only). New
+  `ContentProvenance` type for the three optional attributes a created record
+  carries back (`created_via_key_id`, `created_via_key_name`, `on_behalf_of`):
+  `create<Item & ContentProvenance>(…)`. Needs a Kiln server newer than 1.8;
+  an older one ignores the header.
+
 ## 0.3.0
 
 - **Headless routing, navigation and forms (kiln_cms#2128):**

@@ -28,15 +28,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   import KilnCMSWeb.BlockDiscussionComponents,
     only: [block_discussion: 1, discussion_state: 3]
 
-  import KilnCMSWeb.VersionDiffComponents, only: [version_compare: 1]
+  import KilnCMSWeb.VersionDiffComponents, only: [restore_preview: 1, version_compare: 1]
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.Changes.RestoreVersion
   alias KilnCMS.CMS.ContentLinks
   alias KilnCMS.CMS.ContentTree
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.FieldDisplay
   alias KilnCMS.CMS.Mentions
   alias KilnCMS.CMS.PreviewToken
   alias KilnCMS.CMS.ReverseFields
@@ -56,6 +58,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMSWeb.ContentEditor.InlineTerms
   alias KilnCMSWeb.ContentEditor.NewDraft
   alias KilnCMSWeb.ContentEditor.ReferenceValues
+  alias KilnCMSWeb.ContentTrash
   alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
   alias KilnCMSWeb.VersionDiffComponents
@@ -184,6 +187,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:reverse_fields, [])
     |> assign(:actor, socket.assigns.current_user)
     |> assign(:record, nil)
+    |> assign(:can_restore?, false)
+    |> assign(:restore_refusal, nil)
     |> assign(:page_title, gettext("New %{type}", type: String.downcase(content_type.label)))
     |> assign(:form, to_form(%{"title" => ""}, as: :form))
   end
@@ -324,6 +329,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # after the draft was saved, and what the editor chose for each, while the
     # "Publish changes" panel is open. `nil` when it is closed.
     |> assign(:publish_conflicts, nil)
+    |> assign(:custom_conflict_detail, nil)
     |> assign(:conflict_choices, %{})
     # The change-severity question (`KilnCMS.CMS.Severity`), asked when a
     # published edit touches a field the site lists as safety-relevant: `nil`
@@ -360,6 +366,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:current_pick, @current_pick)
     |> assign(:compare_pick, [])
     |> assign(:compare, nil)
+    # Restore preview (#2294): what a restore would change, shown before the
+    # confirm. Both Restore buttons post "restore"; only "confirm_restore"
+    # writes, and only for the version this preview shows.
+    |> assign(:restore_preview, nil)
     # Right inspector rail (Theme A): which panel is showing. All panels stay
     # mounted (form fields must survive submit) — the tab only toggles CSS
     # visibility, never `:if`. Always mounts as `:preview` here (even for
@@ -893,6 +903,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:page_title, view.title)
     |> assign(:slug_customized?, slug_customized?(socket))
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    |> assign_restore_refusal()
+    # Only OFFERS the Settings tab's Move to trash (#2137); `move_to_trash`
+    # asks again. Computed when a record is assigned (mount, reload), not on
+    # every save: the destroy policy doesn't depend on the record's state, and
+    # the handler's own check is the one that counts.
+    |> assign(
+      :may_trash?,
+      ContentTypes.can_destroy?(socket.assigns.kind, record, socket.assigns.actor,
+        tenant: record.org_id
+      )
+    )
     # Only OFFERS the Copy preview link action; `share_preview` asks again.
     |> assign(:may_share_preview?, PreviewToken.mintable?(record, socket.assigns.actor))
     # Recomputed alongside `may_write?` and for the same reason: a reload that
@@ -1029,6 +1050,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :keys, :list, required: true
   attr :choices, :map, required: true
   attr :resource, :atom, required: true
+  # Per-key detail for the whole-map "custom_fields" row (#2294): entries, the
+  # definitions by name, and the resolved media / reference labels.
+  attr :custom_detail, :map, default: nil
 
   # The lost-update guard's question (#1815), asked before "Publish changes"
   # would overwrite a live value someone changed after the draft was saved.
@@ -1056,6 +1080,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
           class="flex flex-wrap items-center justify-between gap-2 py-2"
         >
           <span class="text-sm font-medium">{held_key_label(@resource, key)}</span>
+          <VersionDiffComponents.entry_detail
+            :if={key == "custom_fields" && @custom_detail}
+            id="publish-conflict-custom_fields-detail"
+            entries={@custom_detail.entries}
+            definitions={@custom_detail.definitions}
+            display={@custom_detail.display}
+          />
           <span class="flex gap-1">
             <button
               type="button"
@@ -1729,9 +1760,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
          false <- Enum.any?(resolved, &is_nil/1),
          [left, right] <- Enum.sort(resolved, &pick_before?/2),
          {:ok, old, new} <- snapshots(Module.concat(resource, Version), record, left, right, opts) do
+      diff = VersionDiff.between(old, new, resource)
+      definitions = Map.new(socket.assigns.field_definitions, &{&1.name, &1})
+
       {:ok,
        %{
-         diff: VersionDiff.between(old, new, resource),
+         diff: diff,
+         definitions: definitions,
+         display:
+           FieldDisplay.context(
+             socket.assigns.field_definitions,
+             diff,
+             opts[:actor],
+             opts[:tenant]
+           ),
          left: side(left),
          right: side(right)
        }}
@@ -2085,16 +2127,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     body = KilnCMS.Blocks.PortableText.from_tiptap(doc)
     rich_bodies = Map.put(socket.assigns.rich_bodies, key, body)
 
-    # A pristine form has no "blocks" params yet — synthesize them from the
-    # form's current values (full typed maps) so the injected body has a block
-    # list to land in.
-    base = AshPhoenix.Form.params(socket.assigns.form)
-
-    base =
-      case base["blocks"] do
-        nil -> Map.put(base, "blocks", preview_block_maps(socket.assigns.form))
-        _ -> base
-      end
+    base = form_params_with_blocks(socket.assigns.form)
 
     params =
       base
@@ -2188,8 +2221,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Open the media browser to fill a specific existing image block, addressed by
   # its stable id — the block is looked up again at pick time, so a reorder or
   # removal in between can't redirect the image to the wrong block (audit T5.1).
-  def handle_event("open_picker", %{"bid" => bid}, socket) when is_binary(bid) and bid != "",
-    do: {:noreply, assign(socket, :picking, {:block, bid})}
+  #
+  # Neither opens for a block whose image is shared across locales on a
+  # translation (#2270, #1896): the disabled button is not a boundary, and the
+  # save would be refused.
+  def handle_event("open_picker", %{"bid" => bid}, socket) when is_binary(bid) and bid != "" do
+    if block_fields_locked?(socket, bid, [:media_id, :url]),
+      do: {:noreply, socket},
+      else: {:noreply, assign(socket, :picking, {:block, bid})}
+  end
 
   def handle_event("open_picker", _params, socket), do: {:noreply, socket}
 
@@ -3358,7 +3398,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `@file_picking` machinery.
   def handle_event("open_av_picker", %{"bid" => bid, "field" => field}, socket)
       when is_binary(bid) and bid != "" and field in ~w(media poster captions) do
-    {:noreply, assign(socket, :av_picking, {bid, field})}
+    if block_fields_locked?(socket, bid, av_media_fields(field)),
+      do: {:noreply, socket},
+      else: {:noreply, assign(socket, :av_picking, {bid, field})}
   end
 
   def handle_event("open_av_picker", _params, socket), do: {:noreply, socket}
@@ -3389,6 +3431,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # (a search result outside the mounted window lives only in `@picker_av`).
   def handle_event("pick_av", %{"id" => media_id}, socket) when is_binary(media_id) do
     with {bid, field} <- socket.assigns.av_picking,
+         false <- block_fields_locked?(socket, bid, av_media_fields(field)),
          {:ok, item} <-
            CMS.get_media_item(media_id,
              actor: socket.assigns.actor,
@@ -3691,6 +3734,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # "Move to trash" from the Settings tab (#2137). The section is drawn only
+  # for `@may_trash?`, and the policy is asked again here, so a forged event
+  # from someone the section was never offered to is refused before any
+  # write. Edits still waiting for the autosave debounce are saved first, the
+  # way a workflow transition settles them (`settle_before_workflow/1`): the
+  # trash is restorable, and what comes back should be what was on screen. A
+  # save that fails stops the trash and says why.
+  def handle_event("move_to_trash", _params, socket) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+
+    if socket.assigns.may_trash? and
+         ContentTypes.can_destroy?(kind, record, actor, tenant: record.org_id) do
+      case settle_before_workflow(socket) do
+        {:ok, socket} -> {:noreply, move_to_trash(socket)}
+        {:error, socket} -> {:noreply, socket}
+      end
+    else
+      {:noreply, put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.forbidden("trash"))}
+    end
+  end
+
   # ── Version compare (#467) ─────────────────────────────────────────────────
 
   def handle_event("toggle_compare", %{"version_id" => version_id}, socket)
@@ -3726,7 +3790,50 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, assign(socket, :compare, nil)}
   end
 
+  # Restore is two steps (#2294): "restore" (both buttons, the compare modal's
+  # and the history list's) only PREVIEWS; "confirm_restore" writes. The gate is
+  # here rather than on the buttons because a forged event arrives regardless of
+  # what is rendered. A preview is offered only to someone whose restore could
+  # succeed: `Ash.can?` is blind to the field-grant refusal (it lives in a
+  # change, not a policy), so that is checked by hand in `restore_refusal/1`.
   def handle_event("restore", %{"version_id" => version_id}, socket) when is_binary(version_id) do
+    with :ok <- restore_refusal(socket),
+         {:ok, preview} <- build_restore_preview(socket, version_id) do
+      {:noreply, assign(socket, :restore_preview, preview)}
+    else
+      {:refused, message} -> {:noreply, put_flash(socket, :error, message)}
+      :error -> {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
+    end
+  end
+
+  def handle_event("cancel_restore", _params, socket) do
+    {:noreply, assign(socket, :restore_preview, nil)}
+  end
+
+  def handle_event("confirm_restore", %{"version_id" => version_id}, socket)
+      when is_binary(version_id) do
+    with :ok <- restore_refusal(socket),
+         %{version_id: ^version_id, error: nil} = shown <- socket.assigns.restore_preview,
+         {:ok, fresh} <- build_restore_preview(socket, version_id) do
+      if same_restore?(shown, fresh) do
+        {:noreply, run_restore(socket, version_id)}
+      else
+        # The document or the schema moved since the preview was drawn: what
+        # would be restored is no longer what the editor agreed to.
+        {:noreply,
+         socket
+         |> assign(:restore_preview, fresh)
+         |> put_flash(:info, gettext("That version changed since the preview. Review it again."))}
+      end
+    else
+      {:refused, message} -> {:noreply, put_flash(socket, :error, message)}
+      :error -> {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
+      # No preview for this version (a forged or stale confirm): nothing to do.
+      _no_preview -> {:noreply, socket}
+    end
+  end
+
+  defp run_restore(socket, version_id) do
     result =
       restore_version(
         socket.assigns.kind,
@@ -3735,6 +3842,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
         socket.assigns.actor
       )
 
+    socket = assign(socket, :restore_preview, nil)
+
     case result do
       {:ok, record} ->
         # Re-read rather than adopted: a restore can bring back a working
@@ -3742,25 +3851,130 @@ defmodule KilnCMSWeb.ContentEditorLive do
         # those from what `fetch!/4` loads, not from the action's result.
         record = fetch!(socket.assigns.kind, record.id, socket.assigns.actor, record.org_id)
 
-        {:noreply,
-         socket
-         |> assign_record(record)
-         |> broadcast_saved()
-         |> reset_editors()
-         |> mark_saved()
-         # Restore can be fired from inside the compare modal; the diff it was
-         # showing describes a document that no longer exists.
-         |> assign(:compare, nil)
-         |> assign(:compare_pick, [])
-         |> put_flash(:info, gettext("Restored that version."))}
+        socket
+        |> assign_record(record)
+        |> broadcast_saved()
+        |> reset_editors()
+        |> mark_saved()
+        # Restore can be fired from inside the compare modal; the diff it was
+        # showing describes a document that no longer exists.
+        |> assign(:compare, nil)
+        |> assign(:compare_pick, [])
+        |> put_flash(:info, gettext("Restored that version."))
 
       {:error, error} ->
-        {:noreply, put_flash(socket, :error, restore_error_message(error))}
+        put_flash(socket, :error, restore_error_message(error))
 
       _ ->
-        {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
+        put_flash(socket, :error, gettext("Couldn't restore that version."))
     end
   end
+
+  # Whether this actor may restore a version of this record, or the message to
+  # show instead. Mirrors what the action will do: the policy chain (`Ash.can?`)
+  # and `Changes.EnforceFieldGrants`, which refuses `:restore_version` outright
+  # to an effective editor with a field grant for this type.
+  defp restore_refusal(socket) do
+    %{record: record, actor: actor} = socket.assigns
+    restore_refusal_for(record, actor)
+  end
+
+  defp restore_refusal_for(record, actor) do
+    org = record.org_id
+
+    cond do
+      not Ash.can?({record, :restore_version}, actor, tenant: org) ->
+        {:refused, gettext("You can't restore versions of this content.")}
+
+      restore_field_grant?(record, actor, org) ->
+        {:refused,
+         gettext("Restoring a version requires full field access for this content type.")}
+
+      true ->
+        :ok
+    end
+  end
+
+  # Computed once per record change (not per render) for the Restore buttons:
+  # `restore_refusal` is the refusal message, `can_restore?` its absence. The
+  # buttons only reflect it; the `restore` / `confirm_restore` handlers still
+  # call `restore_refusal/1` afresh, so a forged event is refused regardless.
+  defp assign_restore_refusal(socket) do
+    case restore_refusal_for(socket.assigns.record, socket.assigns.actor) do
+      :ok ->
+        socket |> assign(:can_restore?, true) |> assign(:restore_refusal, nil)
+
+      {:refused, message} ->
+        socket |> assign(:can_restore?, false) |> assign(:restore_refusal, message)
+    end
+  end
+
+  defp restore_field_grant?(record, actor, org) do
+    Scoping.effective_tier(actor, org) == :editor and
+      Scoping.field_grant(actor, org, ContentTypes.type_name_for(record)) != nil
+  end
+
+  # What the restore would do, as the same `RestoreVersion.plan/3` the action
+  # runs, rendered with the compare modal's diff. A failing plan still yields a
+  # preview, carrying the reason and no confirm.
+  defp build_restore_preview(socket, version_id) do
+    %{record: record, actor: actor} = socket.assigns
+    opts = [actor: actor, tenant: record.org_id]
+    plan = RestoreVersion.preview(record, version_id, opts)
+    label = restore_version_label(socket.assigns.versions, version_id)
+
+    if plan.errors == [] do
+      resource = record.__struct__
+      planned = struct(record, plan.values)
+
+      diff =
+        VersionDiff.between(
+          VersionSnapshot.current(record),
+          VersionSnapshot.current(planned),
+          resource
+        )
+
+      {:ok,
+       %{
+         version_id: version_id,
+         label: label,
+         diff: diff,
+         definitions: Map.new(socket.assigns.field_definitions, &{&1.name, &1}),
+         display:
+           FieldDisplay.context(socket.assigns.field_definitions, diff, actor, record.org_id),
+         dropped: plan.dropped,
+         error: nil
+       }}
+    else
+      {:ok,
+       %{
+         version_id: version_id,
+         label: label,
+         diff: nil,
+         definitions: %{},
+         display: nil,
+         dropped: [],
+         error: restore_error_message(plan.errors)
+       }}
+    end
+  rescue
+    error ->
+      # A forbidden history read raises rather than previewing a partial one
+      # (see `RestoreVersion`, "As the caller"); same logging as `build_compare/2`.
+      Logger.error("restore preview failed: #{Exception.format(:error, error, __STACKTRACE__)}")
+
+      :error
+  end
+
+  defp restore_version_label(versions, version_id) do
+    case Enum.find(versions, &(&1.id == version_id)) do
+      nil -> gettext("Selected version")
+      version -> version_label(version)
+    end
+  end
+
+  defp same_restore?(shown, fresh),
+    do: shown.diff == fresh.diff and shown.dropped == fresh.dropped and is_nil(fresh.error)
 
   # Apply a picked media item to whatever the picker was opened for. Shared by
   # the "pick_image" handlers above and `route_picked_item/2` below (an
@@ -3981,7 +4195,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
     mark_dirty(socket)
   end
 
-  defp apply_pick(socket, {:block, bid}, media_id, url) do
+  # Not into a block whose image is shared across locales, on a translation
+  # (#2270): the save would be refused, so the pick is not staged.
+  defp apply_pick(socket, {:block, bid} = target, media_id, url) do
+    if block_fields_locked?(socket, bid, [:media_id, :url]),
+      do: socket,
+      else: apply_block_pick(socket, target, media_id, url)
+  end
+
+  defp apply_block_pick(socket, {:block, bid}, media_id, url) do
     case block_index_by_id(socket.assigns.form, bid) do
       # The target block is gone (removed by a co-editor) — drop the pick.
       nil ->
@@ -4800,6 +5022,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       keys ->
         socket
         |> assign(:publish_conflicts, keys)
+        |> assign(:custom_conflict_detail, custom_conflict_detail(socket, keys))
         |> assign(:conflict_choices, %{})
     end
   end
@@ -4903,9 +5126,39 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:severity_error?, false)
   end
 
+  # The per-key detail under the whole-map "Custom fields" row (#2294), for a
+  # draft-versus-live conflict. Computed fields are the system's, not the
+  # editor's edits, so they are left out; `nil` when nothing is left, so the
+  # panel never draws an empty detail. Values are shown as stored (never
+  # through `MaskPrivateFields`: a masked side would read as a false change);
+  # media / reference labels resolve as the signed-in reader.
+  defp custom_conflict_detail(socket, keys) do
+    with true <- "custom_fields" in keys,
+         %{record: record, actor: actor, field_definitions: definitions} <- socket.assigns,
+         entries when entries != [] <-
+           record
+           |> WorkingCopy.custom_field_changes()
+           |> Enum.reject(fn entry ->
+             Enum.any?(definitions, &(&1.name == entry.key and &1.field_type == :computed))
+           end) do
+      diff = %VersionDiff{
+        fields: [%VersionDiff.Field{name: :custom_fields, status: :changed, entries: entries}]
+      }
+
+      %{
+        entries: entries,
+        definitions: Map.new(definitions, &{&1.name, &1}),
+        display: FieldDisplay.context(definitions, diff, actor, record.org_id)
+      }
+    else
+      _none -> nil
+    end
+  end
+
   defp close_conflicts(socket) do
     socket
     |> assign(:publish_conflicts, nil)
+    |> assign(:custom_conflict_detail, nil)
     |> assign(:conflict_choices, %{})
   end
 
@@ -4932,6 +5185,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       true ->
         key
+    end
+  end
+
+  # The record as settled (a flush reloads it), so the destroy sees the lock
+  # version the last save left behind.
+  defp move_to_trash(socket) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+    socket = cancel_autosave_timer(socket)
+
+    case ContentTrash.trash(kind, record, actor, record.org_id) do
+      :ok ->
+        socket
+        |> put_flash(:info, ContentTrash.moved(record))
+        |> push_navigate(to: ~p"/editor")
+
+      {:error, error} ->
+        put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("trash", error))
     end
   end
 
@@ -5417,6 +5687,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:saved_at, record.updated_at)
     |> assign(:page_title, record.title)
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    |> assign_restore_refusal()
     |> assign(
       :may_suggest_seo?,
       may_write_fields?(
@@ -6402,6 +6673,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp av_picker_kind({_bid, "captions"}), do: :captions
   defp av_picker_kind(_target), do: :av
 
+  # The block fields each A/V pick writes, for the shared-field check.
+  defp av_media_fields("media"), do: [:media_id, :url]
+  defp av_media_fields("poster"), do: [:poster_media_id, :poster_url]
+  defp av_media_fields("captions"), do: [:captions_media_id]
+
+  # Whether any of `names` is a field of block `bid` that this type shares
+  # across locales, on a translation (#2270): read-only in the editor, and a
+  # write to it is refused (#1896). Asked again here because a disabled
+  # button is not a boundary.
+  defp block_fields_locked?(socket, bid, names) do
+    with %{} = loc <- socket.assigns[:localization],
+         module when not is_nil(module) <- block_module_by_id(socket.assigns.form, bid) do
+      Enum.any?(names, &KilnCMSWeb.ContentEditor.Localization.locked?(loc, {:block, module, &1}))
+    else
+      _none -> false
+    end
+  end
+
   # The block fields each pick writes. `duration_seconds` rides along with the
   # media itself (it feeds the JSON-LD `duration` and the editor's summary
   # line) but is NOT written for the poster or the track — the poster's own
@@ -6957,6 +7246,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
         <.publish_conflicts
           :if={@publish_conflicts}
+          custom_detail={@custom_conflict_detail}
           keys={@publish_conflicts}
           choices={@conflict_choices}
           resource={@record.__struct__}
@@ -7347,32 +7637,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           conflict={@conflict}
                         />
                       </div>
-                      <div :if={block_type_string(bf) == "image"} class="space-y-2">
-                        <img
-                          :if={safe_preview_src(bf[:url].value)}
-                          src={safe_preview_src(bf[:url].value)}
-                          alt=""
-                          class="max-h-40 rounded border border-base-content/10"
-                        />
-                        <input type="hidden" name={bf[:media_id].name} value={media_id_of(bf)} />
-                        <div class="flex items-center gap-2">
-                          <button
-                            type="button"
-                            phx-click="open_picker"
-                            phx-value-bid={bf[:id].value}
-                            class="btn btn-sm btn-default"
-                          >
-                            <.icon name="hero-photo" class="size-4" />{gettext("Choose from library")}
-                          </button>
-                        </div>
-                        <.input
-                          field={bf[:url]}
-                          label={gettext("Image URL")}
-                          placeholder={gettext("…or paste a URL")}
-                        />
-                        <.input field={bf[:alt]} label={gettext("Alt text")} />
-                        <.input field={bf[:caption]} label={gettext("Caption")} />
-                      </div>
+                      <.image_editor
+                        :if={block_type_string(bf) == "image"}
+                        bf={bf}
+                        localization={@localization}
+                        kind={@kind}
+                      />
                       <div :if={block_type_string(bf) == "file"} class="space-y-2">
                         <input type="hidden" name={bf[:media_id].name} value={media_id_of(bf)} />
                         <input type="hidden" name={bf[:filename].name} value={bf[:filename].value} />
@@ -7428,8 +7698,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           )}
                         </p>
                       </div>
-                      <.video_editor :if={block_type_string(bf) == "video"} bf={bf} />
-                      <.audio_editor :if={block_type_string(bf) == "audio"} bf={bf} />
+                      <.video_editor
+                        :if={block_type_string(bf) == "video"}
+                        bf={bf}
+                        localization={@localization}
+                        kind={@kind}
+                      />
+                      <.audio_editor
+                        :if={block_type_string(bf) == "audio"}
+                        bf={bf}
+                        localization={@localization}
+                        kind={@kind}
+                      />
                       <.gallery_editor :if={block_type_string(bf) == "gallery"} bf={bf} />
                       <.columns_editor
                         :if={block_type_string(bf) == "columns"}
@@ -7664,6 +7944,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               locked_fields={@locked_fields}
               cursors={@cursors}
               may_write?={@may_write?}
+              may_trash?={@may_trash?}
               may_suggest_seo?={@may_suggest_seo?}
               conflict={@conflict}
               editor_version={@editor_version}
@@ -7687,6 +7968,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
               versions={@versions}
               current_pick={@current_pick}
               compare_pick={@compare_pick}
+              can_restore?={@can_restore?}
+              restore_refusal={@restore_refusal}
             />
           </div>
         </div>
@@ -7733,11 +8016,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
       />
 
       <.version_compare
-        :if={@compare}
+        :if={@compare && !@restore_preview}
         diff={@compare.diff}
         left={@compare.left}
         right={@compare.right}
+        definitions={@compare.definitions}
+        display={@compare.display}
+        can_restore?={@can_restore?}
+        restore_refusal={@restore_refusal}
       />
+
+      <.restore_preview :if={@restore_preview} preview={@restore_preview} />
     </Layouts.console>
     """
   end

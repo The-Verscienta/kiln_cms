@@ -348,7 +348,21 @@ UI" workflow, scoped to fields.
   readable. See `KilnCMS.CMS.ReferenceSnapshots`.
 - **Edit**: the content editor renders one input per definition automatically,
   in a *Custom fields* panel under the blocks.
+- **History**: the editor's version compare shows each custom key on its own
+  with its label, a typed value (`KilnCMS.CMS.FieldDisplay`) and an
+  added / removed / changed pill, and a restore previews itself first, listing
+  stored keys whose definition is gone as discarded. The stored history is
+  unchanged: a version's `changes` still carry `custom_fields` as one whole map
+  (the revisions API deliberately has no per-key `changed_custom_fields` yet).
+  See [Comparing and restoring versions](working-copy.md#comparing-and-restoring-versions).
 - **Deliver**: `custom_fields` is public, so headless clients get the values.
+- **Read typed over GraphQL**: `customFloat(name: "price")`,
+  `customString`, `customInt`, `customBoolean`, `customDate`,
+  `customDateTime` and `fields(names: [...])` return a field with a GraphQL
+  type, with no deploy when an admin adds the field (the schema types the
+  accessor, not the name). See
+  [headless-graphql-api.md](headless-graphql-api.md#read-custom-fields-typed-by-kind).
+  A plugin field type chooses its kind with `graphql_kind/1` (below).
 - **Query**: list/search reads accept `custom_filter`/`custom_sort` (JSON:API)
   and `customFilter`/`customSort` (GraphQL) — typed, registry-validated
   filtering and sorting on individual custom fields (see
@@ -365,6 +379,65 @@ CMS.create_field_definition!(%{
 CMS.create_page!(%{title: "Habanero salsa", slug: "habanero-salsa",
   custom_fields: %{"spice_level" => "hot"}}, actor: editor)
 ```
+
+### Show custom fields on the content list
+
+Editors and admins can put a few custom fields on each row of the content list
+(`/editor`), so a catalogue can be scanned without opening every record. The
+choice is personal: it is stored on your own user, per site and per content
+type, and does not change what anyone else sees.
+
+1. Open **Content** (`/editor`) and, in the type filter ("Filter by type"),
+   choose one content type. On a site with several types, "All types" shows
+   the hint *Choose a content type to show its fields as columns.* instead,
+   because field names can repeat across types. A site with one authorable
+   type needs no choice.
+2. In the list's header bar (beside the select-all box and count), click
+   **Columns**. A panel opens listing the type's fields. If the button is
+   missing, the type has no field that can be shown.
+3. Tick the fields you want. The panel says *Show fields on each row. Pick up
+   to 6; the first 4 show.* The list reloads at once and each row gains a
+   strip of `label value` pairs under its date line. Once six are ticked, the
+   unticked boxes are disabled.
+4. Untick a field to remove it. Your choice is remembered for this site and
+   type the next time you open the list, and is not in the URL or in saved
+   views.
+
+"First 4" means the first four in the panel's order (the field order of the
+type), not the order you ticked them in. Ticks beyond four are kept but not
+shown.
+
+Fields offered: string, text, integer, float, boolean, date, datetime, url,
+select, reference, user and media, if they hold one value. Groups,
+geolocation, date ranges, recurrence, computed fields and multi-valued fields
+are not offered. Private fields are offered, as editors already see them in
+the content editor.
+
+What a cell shows:
+
+| Field | Cell |
+| --- | --- |
+| reference | the target's current title as you can read it, or "Unavailable" (the title saved in the field is never shown) |
+| user | the person's name; "Unnamed user" without one; never the email; "Unavailable" for someone no longer on the site |
+| select | the option's label |
+| boolean | Yes / No |
+| media | alt text, else the file name |
+| empty | a dash |
+
+Long values are cut at 80 characters.
+
+**What can go wrong.** *Your choice could not be saved.* means the write was
+refused (for example the field was deleted or made unavailable since the panel
+loaded); reload the list and pick again. A remembered field that has since been
+deleted, or made something the picker does not offer, drops out silently.
+
+For code: the choice is `User.content_list_columns`, a nullable map
+`%{org_id => %{type => [field name]}}`, written by
+`KilnCMS.Accounts.set_content_list_columns(user, org_id, type, names, actor: user)`
+(self only). Names are checked against the site's field definitions, at most 6
+per type, and merged into the stored map under a row lock. Which definitions
+may be offered is decided by `KilnCMS.CMS.ListFields.readable_fields/4`; cell
+text comes from `KilnCMSWeb.EditorLive.FieldCells`.
 
 ### Geolocation fields
 
@@ -791,6 +864,25 @@ children**, and **Oban queues** (merged at boot). Content types need no
 callback: build them on `KilnCMS.CMS.Content` in the plugin's own Ash domain
 and register that domain in `:ash_domains`/`:content_domains` — admin CRUD,
 webhooks, delivery and workers follow automatically.
+
+**Choosing a field type's GraphQL kind.** The GraphQL API serves every custom
+field through typed readers ([headless-graphql-api.md](headless-graphql-api.md#read-custom-fields-typed-by-kind)).
+A plugin `Kiln.FieldType` whose stored value is a plain scalar can say which
+one by implementing the optional `graphql_kind/1` (from `kiln_plugin` 1.4,
+`{:kiln_plugin, "~> 1.4"}`):
+
+```elixir
+@impl Kiln.FieldType
+def graphql_kind(_definition), do: :int   # a star rating stored as an integer
+```
+
+The answer is `:string`, `:int`, `:float`, `:boolean`, `:date`, `:datetime` or
+`:json`. A plugin cannot add a composite kind (the built-in `geolocation` has
+its own `GeolocationValue`). Leave it out for a map, a list or any mixed shape: a type with no
+`graphql_kind/1` (or compiled against an older SDK) is served as a
+`JsonValue`, and a `multiple` field is always a `ListValue` of its kind. An
+unrecognised answer is also treated as `:json`. The kinds are fixed in the
+core, so this is a choice among them, not a way to add a GraphQL type.
 
 **Full-text search needs one migration per type.** The `:search` action
 filters on a trigger-maintained `search_vector` column that is not an Ash

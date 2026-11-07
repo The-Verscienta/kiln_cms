@@ -125,6 +125,23 @@ defmodule KilnCMS.Demo.RestoreTest do
       assert rows(ctx.conn, "SELECT 'ok'::mood::text") == [["ok"]]
     end
 
+    test "a golden listing a non-public schema is restored over a database that has it", ctx do
+      golden!(ctx)
+      vandalize!(ctx.conn)
+
+      {:ok, golden} = Restore.read_golden(ctx.golden)
+      assert golden.listing =~ ~r/SCHEMA - kiln_reporting_v1 /
+      assert {:ok, work} = Restore.prepare(golden, ctx.work)
+      assert Restore.run(work, ctx.url) == :ok
+
+      # The vandalized schema (a view the snapshot never had) is gone with the
+      # wipe; the snapshot's own view is back.
+      assert rows(ctx.conn, "SELECT name FROM kiln_reporting_v1.item_names") == [["golden"]]
+
+      assert rows(ctx.conn, "SELECT to_regclass('kiln_reporting_v1.newer_view')::text") ==
+               [[nil]]
+    end
+
     test "a restore that fails partway changes nothing — the wipe rolls back with it", ctx do
       golden!(ctx)
       vandalize!(ctx.conn)
@@ -183,6 +200,8 @@ defmodule KilnCMS.Demo.RestoreTest do
       "CREATE FUNCTION shout(t text) RETURNS text LANGUAGE sql AS $$ SELECT upper(t) $$",
       "CREATE TYPE mood AS ENUM ('ok', 'meh')",
       "CREATE VIEW item_names AS SELECT name FROM items",
+      "CREATE SCHEMA kiln_reporting_v1",
+      "CREATE VIEW kiln_reporting_v1.item_names AS SELECT name FROM items",
       "INSERT INTO items VALUES (1, 'golden', '[1,2,3]')",
       "INSERT INTO tokens VALUES ('captured-session')"
     ])
@@ -196,6 +215,7 @@ defmodule KilnCMS.Demo.RestoreTest do
       "UPDATE items SET name = 'vandalized' WHERE id = 1",
       "INSERT INTO items VALUES (2, 'visitor', NULL)",
       "CREATE TABLE newer_table (id int)",
+      "CREATE VIEW kiln_reporting_v1.newer_view AS SELECT id FROM newer_table",
       "INSERT INTO tokens VALUES ('visitor-session')"
     ])
   end

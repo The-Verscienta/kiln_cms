@@ -133,6 +133,11 @@ defmodule KilnCMS.Accounts do
       define :list_all_api_keys, action: :read
       define :get_api_key, action: :read, get_by: [:id]
       define :revoke_api_key, action: :revoke
+      # A `:draft_write` key exchanging itself for a fresh one: pass the actor
+      # the key authenticated as (`actor_from_api_key/1`). Takes no input.
+      define :rotate_api_key, action: :rotate
+      define :retire_rotated_api_key, action: :retire_rotated
+      define :list_live_api_keys_in_lineage, action: :live_in_lineage, args: [:lineage_id]
     end
 
     # The `Idempotency-Key` ledger (`KilnCMSWeb.Plugs.Idempotency`). Every
@@ -168,6 +173,11 @@ defmodule KilnCMS.Accounts do
       define :set_nav_preset, action: :set_nav_preset, args: [:nav_preset]
       # The content list's status marks — self only; pass `actor: user`.
       define :set_status_marks, action: :set_status_marks, args: [:status_marks]
+
+      define :set_content_list_columns,
+        action: :set_content_list_columns,
+        args: [:org_id, :type, :names]
+
       # Two-factor (TOTP) self-service (issue #331) — pass `actor: user` (self).
       define :setup_totp, action: :setup_totp
       define :confirm_totp, action: :confirm_totp

@@ -509,6 +509,7 @@ defmodule KilnCMSWeb.SystemLive do
       {gettext("Admin routes"), manifest.admin_routes},
       {gettext("Editor routes"), manifest.editor_routes},
       {gettext("Public routes"), manifest.public_routes},
+      {gettext("Plug routes"), manifest.plug_routes},
       {gettext("Background queues"), length(manifest.oban_queues)},
       {gettext("Supervised children"), manifest.children}
     ]
@@ -533,6 +534,7 @@ defmodule KilnCMSWeb.SystemLive do
       {gettext("Image backends"), Enum.map(manifest.image_backends, &image_backend_feature/1)},
       {gettext("Console pages"), console_pages(plugin)},
       {gettext("Public pages"), Enum.map(plugin.public_routes(), &route_feature/1)},
+      {gettext("Endpoints"), Enum.map(Kiln.Plugins.PlugRoute.of(plugin), &endpoint_feature/1)},
       {gettext("Background queues"),
        Enum.map(manifest.oban_queues, fn {queue, limit} ->
          {to_string(queue), ngettext("%{count} worker", "%{count} workers", limit)}
@@ -575,6 +577,9 @@ defmodule KilnCMSWeb.SystemLive do
   end
 
   defp route_feature({path, _live_view, _action}), do: {path, nil}
+
+  defp endpoint_feature({verb, path, _plug, _opts}),
+    do: {path, verb |> to_string() |> String.upcase()}
 
   # Installed is not in use: say which backend new uploads actually go to, so
   # an operator who installed one and forgot its credentials can tell.

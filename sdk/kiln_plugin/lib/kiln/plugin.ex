@@ -34,6 +34,12 @@ defmodule Kiln.Plugin do
       pipeline BEFORE the content-delivery catch-alls (booking pages,
       signup flows). Same route shape; paths must not sit under `/editor`,
       `/api`, `/gql`, or `/mcp`, and shadow same-named content slugs.
+    * `plug_routes/0` — controller-style routes and `forward`s to a Plug,
+      mounted BEFORE the content-delivery catch-alls in a scope with no
+      session, no CSRF check and no content negotiation (a JSON endpoint, a
+      webhook receiver, a form handler, a feed variant). Paths must not sit
+      under a core root (`/editor`, `/api`, `/gql`, `/mcp`, …); shadowing
+      follows `public_routes/0`. See `t:plug_route/0`.
     * `children/0` — supervision child specs appended to the app tree.
     * `oban_queues/0` — background queues merged into the Oban config at
       boot (`[my_queue: 3]`).
@@ -83,6 +89,25 @@ defmodule Kiln.Plugin do
   @type nav_item :: %{label: String.t(), path: String.t(), role: :editor | :admin}
   @type admin_route :: {path :: String.t(), live_view :: module(), action :: atom()}
 
+  @typedoc """
+  A route to a plain Plug, for `c:plug_routes/0`:
+
+    * `{verb, path, plug_module, plug_opts}` — `verb` is `:get`, `:post`,
+      `:put`, `:patch`, `:delete` or `:match` (any method). A Phoenix
+      controller is a Plug whose `plug_opts` is the action atom, so
+      `{:post, "/hooks/ping", MyPlugin.PingController, :create}` works with no
+      dependency on Phoenix in this package. `:get` also answers `HEAD`.
+    * `{:forward, path, plug_module, plug_opts}` — hands every request under
+      `path` to the Plug (a `Plug.Router`, say), with `path` stripped.
+
+  `plug_opts` must survive `Macro.escape/1` (atoms, strings, numbers, lists,
+  keyword lists, maps of those): it is baked into the router at compile time.
+  """
+  @type plug_route ::
+          {:get | :post | :put | :patch | :delete | :match, path :: String.t(), plug :: module(),
+           plug_opts :: term()}
+          | {:forward, path :: String.t(), plug :: module(), plug_opts :: term()}
+
   @doc "Machine name (used in diagnostics). Defaults to the module's last segment."
   @callback name() :: String.t()
 
@@ -105,6 +130,7 @@ defmodule Kiln.Plugin do
   @callback admin_routes() :: [admin_route()]
   @callback editor_routes() :: [admin_route()]
   @callback public_routes() :: [admin_route()]
+  @callback plug_routes() :: [plug_route()]
   @callback children() :: [Supervisor.child_spec() | {module(), term()} | module()]
   @callback oban_queues() :: keyword(pos_integer())
 
@@ -162,6 +188,9 @@ defmodule Kiln.Plugin do
       def public_routes, do: []
 
       @impl Kiln.Plugin
+      def plug_routes, do: []
+
+      @impl Kiln.Plugin
       def children, do: []
 
       @impl Kiln.Plugin
@@ -181,6 +210,7 @@ defmodule Kiln.Plugin do
                      admin_routes: 0,
                      editor_routes: 0,
                      public_routes: 0,
+                     plug_routes: 0,
                      children: 0,
                      oban_queues: 0
     end

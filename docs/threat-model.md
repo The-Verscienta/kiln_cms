@@ -23,7 +23,8 @@ document is about the network edge.
   passkey credentials, and the `role` / `audiences` attributes driving RBAC.
 - **Auth tokens** — AshAuthentication JWTs, magic-link and password-reset
   tokens, preview tokens, collab and bridge socket tokens.
-- **API keys** — `kiln_…` bearer keys carrying a `:read` or `:read_write` scope.
+- **API keys** — `kiln_…` bearer keys carrying a `:read`, `:read_write` or
+  `:draft_write` scope.
 - **Tenant isolation** — one deployment serves multiple organizations; content,
   media, branding and analytics must not cross org boundaries.
 - **Media & object storage** — uploaded files and their storage credentials.
@@ -65,6 +66,7 @@ the router so preflights are answered before route matching).
 | MCP (LLM authoring) | `/mcp` | **API key required** | `:api` |
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
 | Form embed | `GET /forms/:slug/embed` | none | `:delivery` (framing CSP) |
+| Form page | `GET /forms/:slug` (#2138): not a route, the last fallback of `/:type/:slug` delivery; active forms of the serving org only | none | `:delivery` (site CSP) |
 | Preview | `/preview/:token`, `/preview/:token/live`, `/preview/release/:token` | signed token *is* the credential | `:preview` |
 | Headless draft mode | `GET /api/json/*`, `GET /api/content/:type/:slug` and `GET /api/visual-editing/:type/:slug` with `x-kiln-preview-token` / `?preview_token=` (#1887) | signed token, pinned to the serving site, admits its one record on the primary read only; never read on a write | `:api` + `:preview_api` |
 | Newsletter | `POST /newsletter/subscribe`, `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | honeypot / opaque token; the confirm and unsubscribe GETs only render a page, the POST changes the subscription (#1664) — confirm's POST is also CSRF-checked | `:form` |
@@ -110,8 +112,10 @@ build if a resource is ever registered without that authorizer.
   block-level `editable_by` field policies (below). Backed by the policy test
   suite and [`policy-matrix.md`](policy-matrix.md).
 - **API-key scoping** — keys store only a SHA-256 hash, carry an immutable
-  `:read` / `:read_write` access scope, require an expiry, and can be revoked.
-  A `:read` key is refused every write action; no key may hard-delete.
+  `:read` / `:read_write` / `:draft_write` access scope, require an expiry, and
+  can be revoked. A `:read` key is refused every write action; a `:draft_write`
+  key may only create drafts and edit its own, by an allowlist placed above the
+  admin bypass (#2273); no key may hard-delete.
 - **Multi-tenancy** — `Plugs.SetTenant` resolves the org from the HTTP host
   (subdomain of `TENANT_BASE_HOST`, then custom domain) and sets it as the Ash
   tenant for the whole request, so tenant scoping applies to GraphQL and

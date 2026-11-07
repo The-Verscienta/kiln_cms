@@ -327,6 +327,53 @@ defmodule KilnCMSWeb.WebhookLiveTest do
 
       assert {:error, _} = CMS.get_webhook_endpoint(endpoint.id, authorize?: false)
     end
+
+    # #2136: Delete used to be an unlabelled trash icon, easy to miss beside
+    # three text buttons. It is a labelled button whatever the endpoint's state.
+    test "the row offers a labelled Delete on an active endpoint", %{conn: conn} do
+      endpoint = seed_endpoint()
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/webhooks")
+
+      assert lv
+             |> element(
+               ~s(#webhook-#{endpoint.id} button[phx-click="delete"][phx-value-id="#{endpoint.id}"]),
+               "Delete"
+             )
+             |> has_element?()
+    end
+
+    test "the row offers a labelled Delete on a disabled endpoint", %{conn: conn} do
+      endpoint = seed_endpoint()
+      Ash.Seed.update!(endpoint, %{active: false})
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/webhooks")
+
+      assert lv
+             |> element(
+               ~s(#webhook-#{endpoint.id} button[phx-click="delete"][phx-value-id="#{endpoint.id}"]),
+               "Delete"
+             )
+             |> has_element?()
+    end
+
+    test "the edit form offers Delete, which deletes and closes the form", %{conn: conn} do
+      endpoint = seed_endpoint()
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/webhooks")
+
+      lv
+      |> element(~s(button[phx-click="edit"][phx-value-id="#{endpoint.id}"]))
+      |> render_click()
+
+      delete_in_form =
+        ~s(#edit-webhook-#{endpoint.id} button[type="button"][phx-click="delete"][phx-value-id="#{endpoint.id}"])
+
+      assert has_element?(lv, delete_in_form, "Delete webhook")
+
+      lv |> element(delete_in_form) |> render_click()
+
+      assert {:error, _} = CMS.get_webhook_endpoint(endpoint.id, authorize?: false)
+      refute has_element?(lv, "#edit-webhook-#{endpoint.id}")
+      refute has_element?(lv, "#webhook-#{endpoint.id}")
+    end
   end
 
   describe "deliveries panel" do

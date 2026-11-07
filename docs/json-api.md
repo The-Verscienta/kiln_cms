@@ -231,7 +231,8 @@ GET /api/json/posts/search?query=tea&sort=title  # A → Z, relevance breaks tie
 
 `/…/semantic-search` behaves the same way with cosine distance as the default
 order (overriding it usually defeats the point — but it is not an error).
-`custom_sort` is not accepted on the search routes.
+A custom field can lead the order instead: `custom_sort=-price` on a search
+route, see "Sorting" under "Custom fields" below.
 
 ## Custom fields (`custom_filter` / `custom_sort`)
 
@@ -243,7 +244,8 @@ caller below editor, and naming it in `custom_filter` or `custom_sort` is a
 Admin-defined custom fields (see
 [extending-content.md](extending-content.md)) live in one `custom_fields`
 JSONB map, so the derived `filter[...]`/`sort=` machinery above can't reach
-them. Two dedicated params close the gap:
+them. Two dedicated params close the gap (and a field's bare name works in
+`filter[...]` / `sort=` too, see "Naming a custom field like a column" below):
 
 ```
 # Equality (bare value) and operators
@@ -256,7 +258,7 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
 
 **Filtering** — `custom_filter[<name>]=<value>` (equality) or
 `custom_filter[<name>][<op>]=<value>` with `eq`, `not_eq`, `gt`, `gte`, `lt`,
-`lte`, `in`, `ilike`, `null`. Conditions are ANDed (with each other and with
+`lte`, `in`, `ilike`, `null` (`is_nil` is a synonym). Conditions are ANDed (with each other and with
 `filter[...]`). Semantics:
 
 - Field names are validated against the `FieldDefinition` registry — an
@@ -268,7 +270,8 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
 - `ilike` (text-like fields only) takes the usual `%` wildcards:
   `custom_filter[subtitle][ilike]=%leather%`.
 - `null` takes `true`/`false` and tests whether the record has the field at
-  all.
+  all. `is_nil` is accepted as the same operator, so `filter[x][is_nil]=true`
+  reads the same on a column and on a custom field.
 - `media`/`reference` fields match on their snapshot's stable `id`
   (`custom_filter[hero_image]=<media uuid>`) and support `eq`/`not_eq`/`in`/`null`
   (references also take the relationship operators below).
@@ -370,19 +373,87 @@ In the response a reference's snapshot carries its link values as an added
 comma-separated for multi-key. Records lacking the field always sort last.
 `custom_sort` composes with `sort=`: explicit `sort` keys take precedence, but
 `custom_sort` outranks an action's *default* order (e.g. `/posts/published`'s
-`-published_at`). `media`/`reference` fields are not sortable.
+`-published_at`). `media`/`reference` fields are not sortable (a follow-up may
+add it).
+
+Custom sorts are always **nulls last**, ascending or descending. A native
+`sort=-x` is plain `desc`, which in Postgres puts nulls first.
+
+### Naming a custom field like a column
+
+In `filter[...]` and `sort=` on the
+index routes you can drop the `custom_` prefix. A name that is not a public
+attribute, calculation, aggregate or relationship of the type is looked up as a
+custom field:
+
+```
+GET /api/json/posts?filter[price][gt]=10&sort=title,price
+GET /api/json/posts?filter[tags][has_none][]=<tag id>
+```
+
+- **A built-in name always wins.** `filter[title]` is the column. Use
+  `custom_filter[title]` / `custom_sort=title` for a custom field that shares a
+  column's name. They always mean a custom field.
+- **`custom_filter` / `custom_sort` are the stable form.** If a later release
+  adds a built-in with your field's name, `filter[x]` silently starts meaning
+  the built-in. Programmatic consumers should keep sending `custom_*`; the
+  official clients do.
+- **Custom sorts come last in `sort`.** `sort=title,price` and
+  `sort=title&custom_sort=price` work. `sort=price,title` is a `400`
+  `invalid_sort`. Custom tokens found in `sort` run before an explicit
+  `custom_sort`.
+- **Both spellings together.** `filter[x]` and `custom_filter[x]` for the same
+  custom field merge into one condition. A built-in `x` applies both (ANDed). The same
+  operator on both is a `400`.
+- **Unknown names.** `filter[ttile]=x` and `sort=ttile` are `400`
+  `invalid_argument`, detail `unknown custom field "ttile"`, with no `source`
+  member. Before this, `filter[ttile]` got ash_json_api's own "No such field".
+  A private field answers the same way for a caller below editor, so the
+  message does not reveal it exists. An anonymous typo costs one uncached
+  registry read before the `400`.
+- **Built-in relations.** `filter[tags][has][]=…`, `has_all`, `has_none` and
+  `count` work natively on `tags` and `related_<type>s`
+  (`filter[related_posts][has_none]=<id>`). `filter[tags][slug]=x` stays the
+  derived relationship filter.
+- **Only index routes.** Get-by-id, relationship routes and writes are not
+  rewritten.
+- **OpenAPI.** The `sort` parameter's `format` lists built-in fields only. A
+  client that validates `sort` strictly against it rejects `sort=price`; use
+  `custom_sort` there.
+- **`links.self`** echoes the URL as you sent it, with the original
+  `filter[price]` / `sort=price`.
+
+What differs between a custom field and a column, in one table:
+
+| | Custom field | Column |
+|---|---|---|
+| Operators | `eq`, `not_eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ilike` (text only), `null` / `is_nil` | the derived ash_json_api set |
+| Value typing | cast to the field's declared type, compared as jsonb | the attribute's type |
+| Records without the field | excluded by every comparison | per the column's nulls |
+| Unknown name | `400` `invalid_argument`, `unknown custom field "x"` | native `400` |
+| Sort | nulls last in both directions; after built-in keys | plain `asc` / `desc` |
+| Sort on `media` / `reference` | not supported | n/a |
+| Relationship operators (`has`, `has_all`, `has_none`, `count`) | on `reference` fields and on `tags` / `related_<type>s` | not available |
+| Index | none (unindexed jsonb) | per column |
+
+### Entries and search facets
 
 **Entries (dynamic types)** — the same params work on `/api/json/entries`,
 where the field's type is resolved through the query's
 `filter[type_name]=<name>` (or `filter[type_definition_id]=<uuid>`) scope.
 Unscoped queries still work when every dynamic type declaring the field agrees
 on its type; if declarations diverge, the API asks you to scope rather than
-guessing a cast.
+guessing a cast ("has a different type per content type"). That includes a bare
+`filter[x]` / `sort=x` without `filter[type_name]`.
 
 **Search facets** — `/…/search` and `/…/semantic-search` accept
-`custom_filter` too (not `custom_sort`; relevance/distance is the default
-order, and only an explicit `sort=` overrides it — see "Sorting search
-results" above).
+`custom_filter`, and, on `/search`, `/search/published`, `/semantic-search` and
+`/semantic-search/published`, `custom_sort` (GraphQL `customSort`). Precedence
+is explicit `sort` > `custom_sort` > relevance (distance on semantic search) >
+recency. On semantic search a leading custom sort replaces the distance order
+(the vector index cannot serve it) and the rule that a record whose name
+matches the query comes first no longer holds. `/autocomplete` does not take
+`custom_sort`.
 
 > **Performance.** These predicates run on unindexed JSONB extractions. They're
 > built for the long tail of editor-owned fields; a field you filter or sort by
@@ -390,6 +461,58 @@ results" above).
 > column, D4). GraphQL exposes the same capability as `customFilter` /
 > `customSort` arguments — see
 > [headless-graphql-api.md](headless-graphql-api.md).
+
+### Which custom filters use an index
+
+Since #2291 a GIN index (`jsonb_path_ops`) on each content table's
+`custom_fields` serves the filters that ask "does this record hold exactly
+this value": `eq` (a bare value), `in`, membership in a multiple select,
+string, media or reference field (`eq`, `in`), and a single media or
+reference field matched by id. One index covers every field name of every
+dynamic type. The rows returned are the same as before; only the speed
+changes, and the planner still prefers a scan when a filter matches a large
+share of the table.
+
+These are **not** accelerated: `not_eq`, `gt`, `gte`, `lt`, `lte`, `ilike`,
+`null`, and `custom_sort`. `not_eq` stays on the older `->` form on purpose,
+because a record without the field must stay excluded from it. If a field
+needs fast range filters or sorting, make it a compiled attribute (the D4
+answer in [dynamic-content-types-plan.md](dynamic-content-types-plan.md)).
+
+The index costs about 26% of the table's size, slows bulk inserts by about
+25% and single saves by 10-35%; see
+[Custom-field filters at 100k rows](benchmarks.md#custom-field-filters-at-100k-rows)
+for the method and the caveats.
+
+**A recipe, not a feature: a range or sort index for one hot field.** If you
+must keep a field dynamic and sort or range-filter on it, add two expression
+btrees for that field, one `ASC NULLS LAST` and one `DESC NULLS LAST`, from
+a reviewed migration (with `@disable_ddl_transaction true` and
+`@disable_migration_lock true`, see
+[releasing.md](releasing.md#migrations-expand-migrate-contract)):
+
+```elixir
+create index(:posts, ["(custom_fields -> 'price') ASC NULLS LAST"],
+  name: "posts_cf_price_asc_index", concurrently: true)
+
+create index(:posts, ["(custom_fields -> 'price') DESC NULLS LAST"],
+  name: "posts_cf_price_desc_index", concurrently: true)
+```
+
+An overlay can instead declare the same expression strings as
+`custom_indexes` entries on its resource (column strings pass through to the
+DDL, as the GIN index's `"custom_fields jsonb_path_ops"` does) and let
+`mix ash.codegen` write the migration. Limits to know before you do:
+
+- Postgres uses the index only when the field name is a literal in the
+  query. Kiln's query binds the name, so a prepared statement can use the
+  btree for roughly its first five executions, then switches to a generic plan
+  that cannot. Expect it to help in a benchmark and fade in production.
+- Use it for integer, float, boolean, date and datetime fields. A string btree
+  can hit the index row limit (about 2.7 KB).
+- Each index adds write cost like the GIN one. Measure with your own data.
+
+Kiln does not create, test or support these indexes.
 
 ## Pagination
 
@@ -675,6 +798,15 @@ on an `:editor`** can create/update/submit; **return-to-draft, publish, unpublis
 and delete require an `:admin`** account. An editor submits for review; deciding
 the outcome — approve or return — is the admin's half. Hard delete (`:purge`) is **never** routed and is
 API-key-banned regardless of scope — `DELETE` is the reversible soft-delete.
+
+A **`:draft_write` key** (#2273) may `POST` a create and `PATCH` a draft its
+account authored while it is still a draft, whatever the owner's role; every
+other route in the table is refused, as are tag, category, link and media
+writes. A create may send `X-Kiln-On-Behalf-Of: <your user id>`, which Kiln
+stores on the draft (`on_behalf_of`, beside `created_via_key_id` /
+`created_via_key_name`) for reviewers; those three attributes are returned only
+to editors, admins and the creating key. See
+[headless-consumer-guide.md](headless-consumer-guide.md#submitting-drafts-from-your-app-the-draft_write-key).
 
 ### Creating and editing
 

@@ -38,10 +38,17 @@ defmodule KilnCMS.Delivery.FeedTest do
   defp published!(admin, attrs \\ %{}),
     do: admin |> draft!(attrs) |> CMS.publish_page!(%{}, actor: admin)
 
-  # Every feed event for document `id` already in the mailbox, oldest first.
-  defp events_for(id) do
+  # Every feed event for document `id` published to `site`, oldest first. The
+  # feed delivers through the site's relay (#2083), so wait for it first: an
+  # absence asserted before the relay has caught up would prove nothing.
+  defp events_for(id, site \\ org()) do
+    :ok = Feed.sync(site)
+    drain(id)
+  end
+
+  defp drain(id) do
     receive do
-      {:kiln_feed, %Event{id: ^id} = event} -> [event | events_for(id)]
+      {:kiln_feed, %Event{id: ^id} = event} -> [event | drain(id)]
     after
       0 -> []
     end
@@ -181,11 +188,11 @@ defmodule KilnCMS.Delivery.FeedTest do
       id = Ecto.UUID.generate()
 
       Feed.publish("page.published", %{id: id, state: :published}, other)
-      assert events_for(id) == []
+      assert events_for(id, other) == []
 
       :ok = Feed.subscribe(other)
       Feed.publish("page.published", %{id: id, state: :published}, other)
-      assert [%Event{kind: :published}] = events_for(id)
+      assert [%Event{kind: :published}] = events_for(id, other)
     end
 
     test "keeps identity only from `affected`, and reads string-keyed payloads" do
@@ -215,7 +222,7 @@ defmodule KilnCMS.Delivery.FeedTest do
       assert affected == %{type: "formula", id: ref, slug: "f", locale: "en"}
     end
 
-    test "emits the telemetry event once per broadcast" do
+    test "emits the telemetry event once per event, in the publisher" do
       test_pid = self()
       handler = "feed-test-#{System.unique_integer([:positive])}"
       id = Ecto.UUID.generate()

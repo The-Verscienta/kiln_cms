@@ -9,6 +9,8 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
   # async: false — flips process-global application env.
   use KilnCMSWeb.ConnCase, async: false
 
+  import Ecto.Query, only: [from: 2]
+
   alias KilnCMS.Accounts
 
   @password "password123456"
@@ -120,6 +122,29 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
         |> Ash.Resource.get_metadata(:plaintext_api_key)
 
       assert api_get("Bearer " <> key).status == 200
+    end
+
+    # `KilnCMS.Accounts.User` has no suspended, disabled, locked or
+    # pending-approval state, and `get_by_subject` filters on the subject alone
+    # (no `confirmed_at` or role check), so account state cannot by itself stop
+    # a live JWT resolving. The ways one stops are all token rows: revoked
+    # (password change, "sign out everywhere", erasure), held for a second
+    # factor (below), or the user row being gone.
+    test "a first-factor JWT held while its account owes a second factor is a 401" do
+      {user, _secret} = KilnCMS.TwoFactorFixtures.enabled_user(role: :editor)
+      {_user, token} = KilnCMS.TwoFactorFixtures.with_first_factor_token(user)
+      {:ok, %{"jti" => jti}} = AshAuthentication.Jwt.peek(token)
+
+      # Served until it is parked, so the 401 below is the hold's doing.
+      assert api_get("Bearer " <> token).status == 200
+
+      {1, _} =
+        KilnCMS.Repo.update_all(from(t in "tokens", where: t.jti == ^jti),
+          set: [purpose: KilnCMS.Accounts.Token.second_factor_hold_purpose()]
+        )
+
+      assert_envelope(api_get("Bearer " <> token))
+      assert_envelope(gql("Bearer " <> token))
     end
 
     # `:api_spec` runs `ApiKeyAuth` without `:load_from_bearer`, so a valid
