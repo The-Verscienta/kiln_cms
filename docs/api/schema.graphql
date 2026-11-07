@@ -3807,6 +3807,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customSort: String
   ): [Page!]!
 
   semanticSearchPages(
@@ -3829,6 +3831,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customSort: String
   ): [Page!]!
 
   autocompletePages(
@@ -3861,6 +3865,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customSort: String
   ): [Page!]!
 
   semanticSearchPublishedPages(
@@ -3881,6 +3887,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customSort: String
   ): [Page!]!
 
   autocompletePublishedPages(
@@ -3945,6 +3953,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customSort: String
   ): [Post!]!
 
   semanticSearchPosts(
@@ -3967,6 +3977,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customSort: String
   ): [Post!]!
 
   autocompletePosts(
@@ -3999,6 +4011,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customSort: String
   ): [Post!]!
 
   semanticSearchPublishedPosts(
@@ -4019,6 +4033,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customSort: String
   ): [Post!]!
 
   autocompletePublishedPosts(
@@ -4085,6 +4101,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customSort: String
   ): [Entry!]!
 
   semanticSearchEntries(
@@ -4107,6 +4125,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customSort: String
   ): [Entry!]!
 
   autocompleteEntries(
@@ -4139,6 +4159,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customSort: String
   ): [Entry!]!
 
   semanticSearchPublishedEntries(
@@ -4159,6 +4181,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customSort: String
   ): [Entry!]!
 
   autocompletePublishedEntries(

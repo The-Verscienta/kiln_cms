@@ -1576,6 +1576,17 @@ defmodule KilnCMS.CMS.Content do
       |> Enum.reject(&is_nil/1)
     end
 
+    # `custom_sort` on the PUBLIC search actions only (`:search`, `:search_published`
+    # and the two semantic ones) — deliberately not in `facet_args`, which is
+    # also spliced into the internal legs (`:search_title`, `:search_alias`,
+    # `:search_han`, `:search_compound`, `:search_any*`): `read_named_ids/1`
+    # forwards a semantic request's arguments to those, so a custom sort there
+    # would change which rows count as "named". Order: explicit `sort` >
+    # `custom_sort` > relevance/distance > recency (the `CustomFieldQuery`
+    # prepare in `facet_args` runs before each action's own relevance sort,
+    # and `Ash.Query.sort/2` appends).
+    sort_arg = [quote(do: argument(:custom_sort, :string))]
+
     facet_clauses = fn published? ->
       [
         quote(do: is_nil(^arg(:category_id)) or ^ref(:category_id) == ^arg(:category_id)),
@@ -1701,6 +1712,7 @@ defmodule KilnCMS.CMS.Content do
           unquote(search_pagination)
 
           unquote_splicing(facet_args.(published?))
+          unquote_splicing(if(terms == :all, do: sort_arg, else: []))
 
           filter expr(unquote(filter_ast))
 
@@ -1741,6 +1753,7 @@ defmodule KilnCMS.CMS.Content do
           unquote(search_pagination)
 
           unquote_splicing(facet_args.(published?))
+          unquote_splicing(sort_arg)
 
           filter expr(unquote(filter_ast))
 
@@ -2482,6 +2495,29 @@ defmodule KilnCMS.CMS.Content do
                )
 
             down unquote("ALTER TABLE #{table} DROP COLUMN IF EXISTS name_lexemes")
+          end
+
+          # The read-only SQL reporting views (#2295, `KilnCMS.Reporting.ViewSql`):
+          # the schema, then this table's two views. They read the live
+          # `field_definitions` and `type_definitions`, hence `after_tables`.
+          statement :reporting_schema do
+            up unquote(KilnCMS.Reporting.ViewSql.create_schema())
+            down unquote(KilnCMS.Reporting.ViewSql.keep_schema())
+          end
+
+          statement :reporting_view do
+            up unquote(KilnCMS.Reporting.ViewSql.records_view(table, to_string(type), dynamic?))
+            down unquote(KilnCMS.Reporting.ViewSql.drop_records_view(table))
+            after_tables ["field_definitions", "type_definitions"]
+          end
+
+          statement :reporting_field_values_view do
+            up unquote(
+                 KilnCMS.Reporting.ViewSql.field_values_view(table, to_string(type), dynamic?)
+               )
+
+            down unquote(KilnCMS.Reporting.ViewSql.drop_field_values_view(table))
+            after_tables ["field_definitions", "type_definitions"]
           end
         end
 

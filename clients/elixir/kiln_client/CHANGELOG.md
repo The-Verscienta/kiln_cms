@@ -9,6 +9,10 @@ tagged `kiln_client-vX.Y.Z` in the
 
 ### Added
 
+- `text_search/3` and `semantic_search/3` take `:custom_sort` (kiln_cms#2292).
+  The server also accepts a custom field's bare name in `:filter` / `:sort`,
+  but this client keeps emitting `custom_filter` / `custom_sort`, the stable form.
+
 - **`:draft_write` keys (kiln_cms#2273):** `create/3` takes `on_behalf_of:`,
   sent as the `X-Kiln-On-Behalf-Of` header, which Kiln records on a draft
   created with a `:draft_write` API key so reviewers see which of your users

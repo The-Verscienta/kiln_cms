@@ -129,7 +129,13 @@ defmodule KilnClient do
       relationship filters (`%{tags: %{slug: "x"}}`).
     * `:custom_filter` — same shape, for admin-defined fields living in
       `custom_fields` (validated against Kiln's FieldDefinition registry).
+      The server also accepts a custom field's bare name in `:filter`
+      (`filter[price]`) when no built-in attribute has that name, but
+      `:custom_filter` is the stable form (a later built-in with the same name
+      would shadow it); this client keeps emitting `custom_filter`.
     * `:sort` / `:custom_sort` — list of field strings, `-` prefix descends.
+      A custom name also works in `:sort` (`sort=-price`) if custom names come
+      last; `:custom_sort` is the stable form and has no ordering rule.
     * `:include` — list of relationship paths (`["tags", "content_links"]`).
     * `:fields` — sparse fieldsets, `%{"post" => ["title", "slug"]}`. Also the
       way to pull public calculations, which are not serialized by default.
@@ -230,7 +236,10 @@ defmodule KilnClient do
   Options: `:locale`, `:tag_ids` (match content carrying any of these tag
   ids), `:custom_filter` (facets compose with the search), `:sort` (an
   explicit sort overrides relevance, which degrades to the tiebreaker — the
-  contract kiln_cms#310 pinned), `:limit` (`page[limit]`; the action caps its
+  contract kiln_cms#310 pinned), `:custom_sort` (list of custom-field names,
+  `-` prefix descends; precedence is `:sort`, then `:custom_sort`, then
+  relevance; on `semantic_search/3` a leading custom sort replaces distance
+  ordering; not accepted by `autocomplete/3`), `:limit` (`page[limit]`; the action caps its
   own maximum), `:include`, `:fields`, `:published`, `:req`.
   """
   @spec text_search(String.t(), String.t(), keyword()) ::
@@ -281,6 +290,7 @@ defmodule KilnClient do
       |> array_param("tag_ids", opts[:tag_ids])
       |> filter_params("custom_filter", opts[:custom_filter])
       |> put_param(:sort, join_sort(opts[:sort]))
+      |> put_param(:custom_sort, join_sort(opts[:custom_sort]))
       |> put_param("page[limit]", opts[:limit])
       |> put_param(:include, join_list(opts[:include]))
       |> sparse_fields(opts[:fields])

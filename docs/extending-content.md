@@ -380,6 +380,65 @@ CMS.create_page!(%{title: "Habanero salsa", slug: "habanero-salsa",
   custom_fields: %{"spice_level" => "hot"}}, actor: editor)
 ```
 
+### Show custom fields on the content list
+
+Editors and admins can put a few custom fields on each row of the content list
+(`/editor`), so a catalogue can be scanned without opening every record. The
+choice is personal: it is stored on your own user, per site and per content
+type, and does not change what anyone else sees.
+
+1. Open **Content** (`/editor`) and, in the type filter ("Filter by type"),
+   choose one content type. On a site with several types, "All types" shows
+   the hint *Choose a content type to show its fields as columns.* instead,
+   because field names can repeat across types. A site with one authorable
+   type needs no choice.
+2. In the list's header bar (beside the select-all box and count), click
+   **Columns**. A panel opens listing the type's fields. If the button is
+   missing, the type has no field that can be shown.
+3. Tick the fields you want. The panel says *Show fields on each row. Pick up
+   to 6; the first 4 show.* The list reloads at once and each row gains a
+   strip of `label value` pairs under its date line. Once six are ticked, the
+   unticked boxes are disabled.
+4. Untick a field to remove it. Your choice is remembered for this site and
+   type the next time you open the list, and is not in the URL or in saved
+   views.
+
+"First 4" means the first four in the panel's order (the field order of the
+type), not the order you ticked them in. Ticks beyond four are kept but not
+shown.
+
+Fields offered: string, text, integer, float, boolean, date, datetime, url,
+select, reference, user and media, if they hold one value. Groups,
+geolocation, date ranges, recurrence, computed fields and multi-valued fields
+are not offered. Private fields are offered, as editors already see them in
+the content editor.
+
+What a cell shows:
+
+| Field | Cell |
+| --- | --- |
+| reference | the target's current title as you can read it, or "Unavailable" (the title saved in the field is never shown) |
+| user | the person's name; "Unnamed user" without one; never the email; "Unavailable" for someone no longer on the site |
+| select | the option's label |
+| boolean | Yes / No |
+| media | alt text, else the file name |
+| empty | a dash |
+
+Long values are cut at 80 characters.
+
+**What can go wrong.** *Your choice could not be saved.* means the write was
+refused (for example the field was deleted or made unavailable since the panel
+loaded); reload the list and pick again. A remembered field that has since been
+deleted, or made something the picker does not offer, drops out silently.
+
+For code: the choice is `User.content_list_columns`, a nullable map
+`%{org_id => %{type => [field name]}}`, written by
+`KilnCMS.Accounts.set_content_list_columns(user, org_id, type, names, actor: user)`
+(self only). Names are checked against the site's field definitions, at most 6
+per type, and merged into the stored map under a row lock. Which definitions
+may be offered is decided by `KilnCMS.CMS.ListFields.readable_fields/4`; cell
+text comes from `KilnCMSWeb.EditorLive.FieldCells`.
+
 ### Geolocation fields
 
 A `:geolocation` field stores a structured coordinate — `lat` and `lng`, plus

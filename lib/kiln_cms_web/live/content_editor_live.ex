@@ -186,6 +186,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:reverse_fields, [])
     |> assign(:actor, socket.assigns.current_user)
     |> assign(:record, nil)
+    |> assign(:can_restore?, false)
+    |> assign(:restore_refusal, nil)
     |> assign(:page_title, gettext("New %{type}", type: String.downcase(content_type.label)))
     |> assign(:form, to_form(%{"title" => ""}, as: :form))
   end
@@ -900,6 +902,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:page_title, view.title)
     |> assign(:slug_customized?, slug_customized?(socket))
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    |> assign_restore_refusal()
     # Only OFFERS the Copy preview link action; `share_preview` asks again.
     |> assign(:may_share_preview?, PreviewToken.mintable?(record, socket.assigns.actor))
     # Recomputed alongside `may_write?` and for the same reason: a reload that
@@ -2113,16 +2116,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     body = KilnCMS.Blocks.PortableText.from_tiptap(doc)
     rich_bodies = Map.put(socket.assigns.rich_bodies, key, body)
 
-    # A pristine form has no "blocks" params yet — synthesize them from the
-    # form's current values (full typed maps) so the injected body has a block
-    # list to land in.
-    base = AshPhoenix.Form.params(socket.assigns.form)
-
-    base =
-      case base["blocks"] do
-        nil -> Map.put(base, "blocks", preview_block_maps(socket.assigns.form))
-        _ -> base
-      end
+    base = form_params_with_blocks(socket.assigns.form)
 
     params =
       base
@@ -3850,6 +3844,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # to an effective editor with a field grant for this type.
   defp restore_refusal(socket) do
     %{record: record, actor: actor} = socket.assigns
+    restore_refusal_for(record, actor)
+  end
+
+  defp restore_refusal_for(record, actor) do
     org = record.org_id
 
     cond do
@@ -3862,6 +3860,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       true ->
         :ok
+    end
+  end
+
+  # Computed once per record change (not per render) for the Restore buttons:
+  # `restore_refusal` is the refusal message, `can_restore?` its absence. The
+  # buttons only reflect it; the `restore` / `confirm_restore` handlers still
+  # call `restore_refusal/1` afresh, so a forged event is refused regardless.
+  defp assign_restore_refusal(socket) do
+    case restore_refusal_for(socket.assigns.record, socket.assigns.actor) do
+      :ok ->
+        socket |> assign(:can_restore?, true) |> assign(:restore_refusal, nil)
+
+      {:refused, message} ->
+        socket |> assign(:can_restore?, false) |> assign(:restore_refusal, message)
     end
   end
 
@@ -5626,6 +5638,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:saved_at, record.updated_at)
     |> assign(:page_title, record.title)
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    |> assign_restore_refusal()
     |> assign(
       :may_suggest_seo?,
       may_write_fields?(
@@ -7905,6 +7918,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
               versions={@versions}
               current_pick={@current_pick}
               compare_pick={@compare_pick}
+              can_restore?={@can_restore?}
+              restore_refusal={@restore_refusal}
             />
           </div>
         </div>
@@ -7957,6 +7972,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
         right={@compare.right}
         definitions={@compare.definitions}
         display={@compare.display}
+        can_restore?={@can_restore?}
+        restore_refusal={@restore_refusal}
       />
 
       <.restore_preview :if={@restore_preview} preview={@restore_preview} />

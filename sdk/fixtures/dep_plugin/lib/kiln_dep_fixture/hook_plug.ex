@@ -85,9 +85,9 @@ defmodule KilnDepFixture.HookPlug do
     given = conn |> get_req_header("x-fixture-signature") |> List.first()
 
     cond do
-      # The core keeps the raw body for JSON and form bodies only.
+      # The core keeps the raw body for every content type but multipart.
       not is_binary(raw) ->
-        {:error, 400, "a JSON body is required"}
+        {:error, 400, "a raw body is required"}
 
       is_binary(given) and Plug.Crypto.secure_compare(given, sign(secret, raw)) ->
         :ok

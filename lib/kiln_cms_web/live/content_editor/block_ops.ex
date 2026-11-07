@@ -16,7 +16,12 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
   import KilnCMSWeb.ContentEditor.BlockParams
 
   import KilnCMSWeb.ContentEditor.Preview,
-    only: [broadcast_preview: 1, broadcast_preview_and_refresh: 1, refresh_preview: 1]
+    only: [
+      broadcast_preview: 1,
+      broadcast_preview_and_refresh: 1,
+      form_params_with_blocks: 1,
+      refresh_preview: 1
+    ]
 
   import KilnCMSWeb.ContentEditor.Session, only: [mark_dirty: 1]
 
@@ -555,7 +560,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
   defp apply_children(socket, block_children) do
     params =
       socket.assigns.form
-      |> AshPhoenix.Form.params()
+      |> form_params_with_blocks()
       |> inject_children(block_children)
 
     socket

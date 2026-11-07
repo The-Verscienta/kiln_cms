@@ -104,6 +104,9 @@ its visibility follows the credential, which is why viewer-minted keys matter.
     custom_filter: %{price: {:lte, 10}}
   )
 
+# Sort search results by a custom field (explicit :sort wins, then :custom_sort, then relevance)
+{:ok, %{items: hits}} = KilnClient.text_search("entries", "tea", custom_sort: ["price"])
+
 # The dynamic-type registry (editor-or-above key) and its custom-field schema
 {:ok, product_type} =
   KilnClient.one("type-definitions", %{name: "product"}, include: ["field_definitions"])
