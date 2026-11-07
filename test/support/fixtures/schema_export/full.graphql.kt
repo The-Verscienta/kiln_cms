@@ -497,12 +497,20 @@ public data class PageDocument(
     /** Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited. */
     @SerialName("inherited_fields") public val inheritedFields: JsonObject? = null,
     public val locale: String? = null,
+    /** The document's robots flags. Absent when neither is set; absent means both false. */
+    public val robots: Robots? = null,
     public val slug: String? = null,
     public val title: String? = null,
     public val type: String,
 ) : Document {
     @Serializable
     public data object CustomFields
+
+    @Serializable
+    public data class Robots(
+        public val nofollow: Boolean,
+        public val noindex: Boolean,
+    )
 }
 
 /** A published `Post` as fired to the `:json` surface. */
@@ -517,28 +525,36 @@ public data class PostDocument(
     /** Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited. */
     @SerialName("inherited_fields") public val inheritedFields: JsonObject? = null,
     public val locale: String? = null,
+    /** The document's robots flags. Absent when neither is set; absent means both false. */
+    public val robots: Robots? = null,
     public val slug: String? = null,
     public val title: String? = null,
     public val type: String,
 ) : Document {
     @Serializable
     public data class CustomFields(
+        public val accent: String? = null,
         @SerialName("code_sample") public val codeSample: String? = null,
+        @SerialName("contact_email") public val contactEmail: String? = null,
         /** Rows of this group, in the order the editor arranged them. */
         public val dosages: List<DosagesItem>? = null,
+        public val extra: JsonElement? = null,
         public val featured: Boolean? = null,
         /** Snapshots of the picked media items, in gallery order. */
         public val gallery: List<MediaSnapshot>? = null,
+        public val handle: String? = null,
         /** Snapshot of the picked media item. */
         public val hero: MediaSnapshot? = null,
         public val homepage: String? = null,
         @SerialName("launch_date") public val launchDate: String? = null,
+        @SerialName("opens_at") public val opensAt: String? = null,
         /**
          * Write-time snapshot of a referenced record.
          *
          * Links to: `post`.
          */
         public val parent: JsonObject? = null,
+        public val phone: String? = null,
         /** The chosen terms, in the order the editor arranged them. */
         public val properties: List<String>? = null,
         @SerialName("published_at") public val publishedAt: String? = null,
@@ -591,6 +607,12 @@ public data class PostDocument(
     @Serializable
     public data class CustomFieldsPlain(
         public val summary: String? = null,
+    )
+
+    @Serializable
+    public data class Robots(
+        public val nofollow: Boolean,
+        public val noindex: Boolean,
     )
 }
 
@@ -821,10 +843,15 @@ private fun JsonElement.kilnTagged(typename: String): JsonObject =
 /** The result of [PostCustomFields.FRAGMENT] — the site's custom fields. On `Post`. */
 @Serializable
 public data class PostCustomFields(
+    public val accent: String? = null,
     public val codeSample: String? = null,
+    public val contactEmail: String? = null,
     public val featured: Boolean? = null,
+    public val handle: String? = null,
     public val homepage: String? = null,
     public val launchDate: String? = null,
+    public val opensAt: String? = null,
+    public val phone: String? = null,
     public val customPublishedAt: String? = null,
     public val rating: Double? = null,
     public val readTime: Long? = null,
@@ -837,17 +864,22 @@ public data class PostCustomFields(
         /** The GraphQL fragment to spread into a query; it decodes into [PostCustomFields]. */
         public val FRAGMENT: String = """
             fragment PostCustomFields on Post {
+              accent: customString(name: "accent")
               codeSample: customString(name: "code_sample")
+              contactEmail: customString(name: "contact_email")
               featured: customBoolean(name: "featured")
+              handle: customString(name: "handle")
               homepage: customString(name: "homepage")
               launchDate: customDate(name: "launch_date")
+              opensAt: customString(name: "opens_at")
+              phone: customString(name: "phone")
               customPublishedAt: customDateTime(name: "published_at")
               rating: customFloat(name: "rating")
               readTime: customInt(name: "read_time")
               subtitle: customString(name: "subtitle")
               summary: customString(name: "summary")
               tier: customString(name: "tier")
-              fields(names: ["dosages", "gallery", "parent", "properties", "related", "seo", "synonyms", "where"]) {
+              fields(names: ["dosages", "extra", "gallery", "parent", "properties", "related", "seo", "synonyms", "where"]) {
                 __typename
                 name
                 ... on StringValue { asString: value }

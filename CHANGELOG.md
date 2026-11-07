@@ -83,9 +83,13 @@ Every summary line below that was shortened links to its own entry there.
   on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
   ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
 
+- **Overlays and plugins: the field type names `email`, `telephone`, `color`, `slug`, `time` and `json` are now built in. Rename a type that uses one; stored definitions with that name get the new strict check.**
+  ([long form](docs/changelog/unreleased.md#builtin-field-type-names-upgrade))
+
 - **Overlays: run `mix ash.codegen`, commit the migration and run `mix ash.migrate`. Users, memberships and roles gain a `field_read_grants` column.**
   Additive (`NOT NULL DEFAULT '{}'`). Rolling the pin back is safe for data, but an older release ignores read grants, so a private field you restricted shows to editors again.
   ([long form](docs/changelog/unreleased.md#custom-field-grants-upgrade))
+
 - **Field definitions gain a `validation` column (`NOT NULL DEFAULT '{}'`, additive, safe to roll back). Overlays: run `mix ash.codegen`.
   `unique` fields have no database backstop; audit with `mix kiln.fields.duplicates`.**
   ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation-upgrade))
@@ -105,7 +109,6 @@ Every summary line below that was shortened links to its own entry there.
   Platform admins, at `/editor/backups`; no new settings.
   ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217) · [long form](docs/changelog/unreleased.md#backup-history))
 
-
 - **Site admins can block an IP address or range at `/editor/ip-blocks` ("Blocked addresses"): an empty 403 on dynamic routes and sockets.
   Static assets and `/uploads` are not covered; behind a proxy set `TRUSTED_PROXIES` first.
   If an admin blocks their own network, `bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(remove: true)'` lifts the blocks.**
@@ -121,6 +124,11 @@ Every summary line below that was shortened links to its own entry there.
   ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation))
 - **Admins can replace a webhook's signing secret with Rotate secret on `/editor/webhooks`; it works even when the old secret is unreadable.**
   ([#2347](https://github.com/The-Verscienta/kiln_cms/issues/2347) · [long form](docs/changelog/unreleased.md#webhook-rotate-secret))
+
+- **Six built-in custom field types check and tidy a value: `:email`, `:telephone` (E.164), `:color`, `:slug`, `:time` and `:json`.**
+  Those six names are now reserved: rename an overlay or plugin type that uses one (`mix kiln.plugins.doctor` fails).
+  ([long form](docs/changelog/unreleased.md#builtin-format-field-types))
+
 - **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
   A wrong operand type is a schema error; `contains` and `startsWith` (case-insensitive, literal) also work in `customFilter`.
   ([#2290](https://github.com/The-Verscienta/kiln_cms/issues/2290) · [long form](docs/changelog/unreleased.md#graphql-custom-where))

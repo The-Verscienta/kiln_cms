@@ -1021,6 +1021,37 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       else: group_input(assign(assigns, :row, GroupRows.row(assigns.value)))
   end
 
+  # A `:json` field (#2278): a monospace textarea, with the stored structure
+  # pretty-printed. After a failed save the value is what was posted, so the
+  # editor sees their own text (and the parse error beside it), not a
+  # normalised copy.
+  def custom_field_input(%{definition: %{field_type: :json}} = assigns) do
+    assigns = assign(assigns, :json_text, json_text(assigns.value))
+
+    ~H"""
+    <div>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
+      <textarea
+        id={cf_id(@definition)}
+        name={@name}
+        rows="8"
+        spellcheck="false"
+        placeholder={@placeholder}
+        required={@definition.required}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        class="field-input font-mono text-xs"
+      >{@json_text}</textarea>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/70">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
   # Everything else is registry-driven. A composite field type
   # (`Kiln.FieldType` declaring `input_parts/1`, e.g. `:geolocation`) renders a
   # labelled input per part; anything else renders a single `<input>`.
@@ -1641,6 +1672,13 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   defp list_items(["" | items]), do: Enum.map(items, &to_string/1)
   defp list_items(items) when is_list(items), do: Enum.map(items, &to_string/1)
   defp list_items(value), do: select_terms(value)
+
+  defp json_text(value) when is_binary(value), do: value
+
+  defp json_text(value) when is_map(value) or is_list(value),
+    do: Jason.encode!(value, pretty: true)
+
+  defp json_text(_value), do: ""
 
   defp full?(%{max_items: max}, count) when is_integer(max), do: count >= max
   defp full?(_definition, _count), do: false

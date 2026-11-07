@@ -262,6 +262,21 @@ defmodule KilnCMSWeb.GraphqlCustomFieldsTest do
       end
     end
 
+    test "the format types: strings through customString, json as the generic value (#2278)",
+         %{admin: admin} do
+      define!(admin, %{name: "contact", field_type: :email})
+      define!(admin, %{name: "extra", field_type: :json})
+
+      post = post!(admin, %{"contact" => "Ann@Example.COM", "extra" => ~s({"a": [1]})})
+
+      assert %{"fields" => fields} = one(post, ["contact", "extra"])
+      by_name = Map.new(fields, &{&1["name"], &1})
+
+      assert %{"__typename" => "StringValue", "value" => "Ann@example.com"} = by_name["contact"]
+      assert %{"__typename" => typename} = by_name["extra"]
+      assert typename =~ "Json"
+    end
+
     test "a group nests its sub-fields", %{admin: admin} do
       group = define!(admin, %{name: "dose", field_type: :group, multiple: true})
 

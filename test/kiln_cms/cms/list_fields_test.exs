@@ -51,6 +51,13 @@ defmodule KilnCMS.CMS.ListFieldsTest do
     end
   end
 
+  test "the format types are pickable, json is not (#2278)" do
+    for type <- [:email, :telephone, :color, :slug, :time],
+        do: assert(ListFields.pickable?(def_("x", type)))
+
+    refute ListFields.pickable?(def_("x", :json))
+  end
+
   test "types the picker does not offer, and multiple-valued fields, are dropped", %{defs: defs} do
     names = actor(:admin) |> ListFields.readable_fields(@org, defs, true) |> Enum.map(& &1.name)
     refute "shape" in names
@@ -58,10 +65,10 @@ defmodule KilnCMS.CMS.ListFieldsTest do
     refute "tags" in names
   end
 
-  test "picker_types covers the v1 set" do
+  test "picker_types covers the v1 set and the format types" do
     assert Enum.sort(ListFields.picker_types()) ==
              Enum.sort(
-               ~w(string text integer float boolean date datetime url select reference user media)a
+               ~w(string text integer float boolean date datetime url select reference user media email telephone color slug time)a
              )
   end
 
