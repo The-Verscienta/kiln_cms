@@ -11,6 +11,8 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   backup or a read replica, and anyone holding it can sign deliveries a
   receiver will accept as Kiln's.
   """
+  require Logger
+
   use Ash.Resource,
     domain: KilnCMS.CMS,
     data_layer: AshPostgres.DataLayer,
@@ -299,6 +301,31 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
           changeset
         end
       end
+    end
+
+    # Replace the signing secret (#2347). The old one stops working at once: no
+    # dual-secret window, because rotation is the remedy for a leaked secret.
+    # `accept []` keeps `default_accept` (url, events, active) out of this
+    # action, so it is not a second, unvalidated way to re-point an endpoint.
+    # The old ciphertext is never decrypted, so an endpoint whose secret no
+    # longer opens (`SECRET_KEY_BASE` lost) can be rotated back to health.
+    # Health counters are left as they are.
+    update :rotate_secret do
+      require_atomic? false
+      accept []
+
+      change set_attribute(:secret_encrypted, &__MODULE__.generate_encrypted_secret/0)
+
+      change after_action(fn _changeset, endpoint, context ->
+               actor = context.actor
+
+               Logger.info(
+                 "webhook secret rotated endpoint_id=#{endpoint.id} org_id=#{endpoint.org_id} " <>
+                   "actor_id=#{is_map(actor) && Map.get(actor, :id)}"
+               )
+
+               {:ok, endpoint}
+             end)
     end
 
     # A delivery got through: an ACTIVE endpoint is healthy again (system

@@ -111,7 +111,7 @@ defmodule KilnCMSWeb.ReleasePreviewLive do
             <ul class="space-y-1 text-sm">
               <li :for={entry <- @publishing}>
                 <a href={"##{anchor(entry)}"} class="link">{entry.title}</a>
-                <span class="ml-1 text-xs text-base-content/50">{entry.label}</span>
+                <span class="ml-1 text-xs text-base-content/70">{entry.label}</span>
               </li>
             </ul>
           </nav>
@@ -122,7 +122,7 @@ defmodule KilnCMSWeb.ReleasePreviewLive do
           <ul class="mt-2 space-y-1 text-sm">
             <li :for={entry <- @removing} class="flex items-center gap-2">
               <span>{entry.title}</span>
-              <span class="text-xs text-base-content/50">{entry.label}</span>
+              <span class="text-xs text-base-content/70">{entry.label}</span>
             </li>
           </ul>
         </section>
@@ -132,7 +132,7 @@ defmodule KilnCMSWeb.ReleasePreviewLive do
           id={anchor(entry)}
           class="mb-12 border-t border-base-content/10 pt-8 first:border-t-0 first:pt-0"
         >
-          <p class="mb-2 text-xs uppercase tracking-wide text-base-content/50">{entry.label}</p>
+          <p class="mb-2 text-xs uppercase tracking-wide text-base-content/70">{entry.label}</p>
 
           <%= if entry.record do %>
             <h2 class="text-2xl font-bold tracking-tight">{entry.title}</h2>

@@ -96,6 +96,28 @@ carries the reasoning.
 
 ## Added
 
+<a id="webhook-rotate-secret"></a>
+
+- **Admins can rotate a webhook endpoint's signing secret (#2347).** Each row
+  on `/editor/webhooks` has a **Rotate secret** button (admin only, with a
+  confirmation). It replaces the secret and reveals the new one so you can
+  copy it into the receiver. Before this, the only way to change a secret was
+  to delete the endpoint and add it again, which also lost its settings.
+  Rotation takes effect immediately and there is no dual-secret window: it is
+  the remedy for a leaked secret, so the old one must stop working. Queued and
+  retried deliveries sign at send time and use the new secret; one attempt
+  already in flight can fail and is retried. Health counters
+  (`consecutive_failures`, `auto_disabled_at`) are not touched, so an endpoint
+  near the auto-disable limit can tip over while the receiver still holds the
+  old secret. The old ciphertext is never decrypted, so an endpoint whose
+  secret is unreadable after `SECRET_KEY_BASE` was lost can be rotated back to
+  health; the unreadable-secret message now points at the button. Rotation
+  logs `webhook secret rotated endpoint_id=… org_id=… actor_id=…` at info
+  level (never the secret) and leaves no other audit trail. Over code it is
+  `KilnCMS.CMS.rotate_webhook_secret/2`. No migration, no env var, no upgrade
+  step; rolling the pin back is safe. See
+  [Rotate a webhook signing secret](../webhooks.md#rotate-a-webhook-signing-secret).
+
 <a id="graphql-custom-where"></a>
 
 - **GraphQL filters custom fields with typed operators (`customWhere`, #2290).**
@@ -592,6 +614,36 @@ carries the reasoning.
 
 ## Changed
 
+<a id="public-image-weight"></a>
+
+- **The signed-out home page and the built-in logo no longer ship oversized
+  images (#2165).** The home page loaded about 1,030 KB of images: four 2880x1800
+  console screenshots, and a 278x379 PNG logo shown at 20 to 40 pixels. It now
+  loads about 102 KB on a browser that takes WebP (about 63 KB on a small
+  1x screen), and about 570 KB on the JPEG-only fallback.
+  - **Screenshots.** Each is a `<picture>` with a WebP `srcset` and a 1440-wide
+    JPEG fallback. The hero (the editor shot) is offered at 720, 1440 and 2880
+    pixels wide, loads eagerly and with `fetchpriority="high"`, since it is
+    the likely largest paint. The three tour shots are offered at 720 and 1440
+    and load lazily.
+  - **Logo.** When the brand's logo is the built-in one
+    (`KilnCMS.Branding.default_logo_url/0`), the header, footer and
+    sign-in brand render it through `KilnCMSWeb.Layouts.brand_mark/1` as a
+    `<picture>` of `logo-mark-sm.webp` (6 KB) over `logo-mark-sm.png` (14 KB),
+    88x120 with explicit width and height. A custom `logo_url` is rendered
+    exactly as given. `logo-mark.png` is unchanged and is still the default
+    `logo_url`, so the branding values in the headless and API responses are
+    the same as before.
+  - **Contributors.** Raw captures from `e2e/screenshots/home.spec.js` now go
+    to the gitignored `e2e/screenshots/raw/`. `scripts/optimize_home_images.sh`
+    is the only way to produce the files the page serves, and a new test
+    (`home_image_weight_test.exs`) fails if the committed files go over a byte
+    budget. See *Refreshing the home page screenshots* in `CONTRIBUTING.md`.
+  - **Overlays.** An overlay that replaces `home.html.heex`, or renders
+    `brand.logo_url` in its own `<img>`, does not get the right-sized images;
+    it keeps what it renders today. To get them, call `Layouts.brand_mark/1`.
+    Nothing to set, no migration, and rolling the pin back is safe.
+
 <a id="csv-numbers-unguarded"></a>
 
 - **A real number in a CSV export is written as itself.** The CSV writer
@@ -871,6 +923,43 @@ carries the reasoning.
 
 <a id="custom-sort-json-null-last"></a>
 
+<a id="auth-pages-landmarks-autocomplete"></a>
+
+- **The sign-in, register and reset pages now have a header landmark, one `h1`,
+  and `autocomplete` on their email and password boxes (#2162).** An
+  accessibility audit found auth content outside any landmark, no `h1`, and
+  fields a password manager had to guess at.
+  - **Landmarks and heading.** The environment banner and logo row are a
+    `<header>`, and the flash toast sits inside `<main id="main">`. The page
+    carries one screen-reader-only `h1` holding the page title (the tab title
+    the page already had), so it follows sign-in, register and reset as the
+    view changes. Each view keeps its visible heading, which stays an `h2`.
+    The two-factor prompt at `/sign-in/verify` follows the same rule: its
+    visible "Two-factor authentication" heading is now an `h2`, under the
+    hidden `h1`. Nothing looks different.
+  - **`autocomplete`.** The email box on sign-in, register and the
+    reset-request form has `autocomplete="email"`. The password box has
+    `current-password` on sign-in and `new-password` on register and on the
+    reset-token form, as do the confirmation boxes, so a password manager
+    offers to save a new password and does not fill a saved one into a "choose
+    a password" box (WCAG 1.3.5).
+  - **Not covered.** The email box on the magic-link request form still has no
+    `autocomplete`: it is rendered inside the library's component, and
+    changing it would mean copying that whole component.
+  - **For overlay authors.** Two more library renders are now Kiln copies:
+    `KilnCMSWeb.AuthIdentityInput` (the email box) and
+    `KilnCMSWeb.AuthResetRequestForm` (the `/reset` request form), next to
+    `AuthSignInForm`, `AuthRegisterForm`, `AuthResetForm` and
+    `AuthPasswordInput`. `KilnCMSWeb.AuthOverridesTest` renders the sign-in,
+    register and reset-token forms against upstream's and fails if they differ
+    by more than the `autocomplete` attribute, so re-run it when bumping
+    `ash_authentication_phoenix`; the `/reset` request form is not in that
+    comparison, so re-read `AuthResetRequestForm` against upstream's
+    `Password.ResetForm` by hand.
+    `AuthPasswordInput.password_field/1` and `password_confirmation_field/1`
+    now require an `autocomplete` attribute; an overlay that calls them must
+    pass one. No configuration, migration or upgrade step.
+
 - **`custom_sort` treats a stored JSON `null`, array or object as no value, and
   page 2 of a keyset-paged `custom_sort` no longer fails on one.** On the
   JSON:API and GraphQL reads, a record whose custom field was stored as a JSON
@@ -1024,6 +1113,36 @@ carries the reasoning.
   modal keeps its focus. The old `<details>` also lost its `open` state on
   every LiveView patch, so a list refresh behind an open menu snapped it
   shut; the new one keeps its state across patches it didn't cause.
+
+<a id="public-muted-text-contrast"></a>
+
+- **Secondary text on public pages and in the shared form components moves from 50-60% to 70% opacity, so it clears WCAG 1.4.3 (4.5:1).**
+  Muted text is `text-base-content` at reduced opacity, and nothing renders
+  wrong when the opacity is too low. Measured against the theme tokens in
+  `assets/css/app.css`, `/60` is 4.12:1 on the light theme's page background
+  and `/50` is 3.09:1; `/70` is about 5.1:1 or better on every surface in both
+  themes. The public templates (blog and event indexes, search, newsletter
+  confirmation, the home page), the release preview, the setup wizard, public
+  forms, the block components, form field hints, the empty-state text, the
+  password show/hide toggle and the flash close icon (`opacity-40` to
+  `opacity-70`) now use `/70`. Overlays and plugins that copy these classes
+  are unaffected; nothing changes in markup structure or in any API.
+  - **A guard keeps it that way.** `test/kiln_cms_web/muted_text_contrast_test.exs`
+    scans `lib/kiln_cms_web` for `text-base-content/N` (and bare `opacity-N`)
+    below 70. Public paths must be at zero. The console is a ratchet against
+    `test/kiln_cms_web/muted_text_console_baseline.txt`: a file may not gain
+    offenders, and the count only goes down. A non-text use (an icon glyph, a
+    disabled control) is exempted with a `contrast-ok: <why>` comment on the
+    same line or the line above.
+  - **What the guard does not do.** It reads class names, not rendered
+    contrast: it does not run axe (there is none in the repo), and it does not
+    see templates authored outside this repo, such as a plugin's. The
+    authenticated console still has muted text below the floor; it is counted
+    in the baseline and lowered as files are touched.
+  - **Contributors.** After lowering a console count, regenerate the baseline
+    with `KILN_UPDATE_CONTRAST_BASELINE=1 mix test test/kiln_cms_web/muted_text_contrast_test.exs`
+    and commit the file. See [Muted text](../design-language.md#muted-text).
+  ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163))
 
 ## Security
 

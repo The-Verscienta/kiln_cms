@@ -44,7 +44,13 @@ defmodule KilnCMSWeb.SetupLiveTest do
       # identity — the one a fresh install's sign-in page shows too.
       brand = KilnCMS.Branding.defaults()
 
-      assert has_element?(lv, "#main a.auth-brand[href='/'] img[src='#{brand.logo_url}']")
+      # The stock mark is served as its right-sized variants (#2165), so the
+      # <img> is the small fallback, not `brand.logo_url` itself.
+      assert has_element?(
+               lv,
+               "#main a.auth-brand[href='/'] picture img[src$='/logo-mark-sm.png']"
+             )
+
       assert lv |> element("#main a.auth-brand") |> render() =~ brand.site_name
     end
 

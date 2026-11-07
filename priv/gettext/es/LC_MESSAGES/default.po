@@ -5159,6 +5159,11 @@ msgstr "No se pudo mostrar ese secreto de firma."
 msgid "Couldn't revoke that key."
 msgstr "No se pudo revocar esa clave."
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't rotate that signing secret."
+msgstr "No se pudo rotar ese secreto de firma."
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't save that item."
@@ -14874,6 +14879,11 @@ msgstr "Girar a la izquierda"
 msgid "Rotate right"
 msgstr "Girar a la derecha"
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotate secret"
+msgstr "Rotar secreto"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Rotate the DKIM key? You must publish the new DNS record before signed mail verifies again."
@@ -14883,6 +14893,11 @@ msgstr "¿Rotar la clave DKIM? Debe publicar el nuevo registro DNS antes de que 
 #, elixir-autogen, elixir-format
 msgid "Rotate the key"
 msgstr "Rotar la clave"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotate this signing secret? Deliveries start using the new secret now, and the old one stops working, so update the receiver with the new secret."
+msgstr "¿Rotar este secreto de firma? Los envíos empiezan a usar el nuevo secreto ahora y el anterior deja de funcionar, así que actualice el receptor con el nuevo secreto."
 
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
@@ -14910,6 +14925,11 @@ msgstr "Rotada desde %{id}"
 #, elixir-autogen, elixir-format
 msgid "Rotates itself until %{date}"
 msgstr "Se rota sola hasta el %{date}"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotating…"
+msgstr "Rotando…"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
@@ -16301,6 +16321,11 @@ msgstr "Secreto de firma"
 #, elixir-autogen, elixir-format
 msgid "Signing secret copied."
 msgstr "Secreto de firma copiado."
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signing secret replaced. Copy the new secret into your receiver; the old one no longer works."
+msgstr "Secreto de firma reemplazado. Copie el nuevo secreto en su receptor; el anterior ya no funciona."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -22827,8 +22852,8 @@ msgstr "ilegible: los envíos fallan. Probablemente se rotó SECRET_KEY_BASE sin
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
-msgid "unreadable — it was encrypted under a SECRET_KEY_BASE this server no longer has. Delete and re-create the endpoint."
-msgstr "ilegible — se cifró con un SECRET_KEY_BASE que este servidor ya no tiene. Elimine y vuelva a crear el endpoint."
+msgid "unreadable — it was encrypted under a SECRET_KEY_BASE this server no longer has. Rotate the secret, or delete and re-create the endpoint."
+msgstr "ilegible — se cifró con un SECRET_KEY_BASE que este servidor ya no tiene. Rote el secreto, o elimine y vuelva a crear el endpoint."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
