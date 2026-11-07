@@ -73,12 +73,12 @@ defmodule KilnCMSWeb.AccountsLive do
        |> assign(:page_title, gettext("Accounts"))
        |> assign(:removing, nil)}
     else
-      # Defense-in-depth: `:live_admin_required` already bounced non-admins
-      # before mount; mirror its flash so the two paths read the same.
+      # Not redundant: the `:live_admin_required` hook admits any ADMIN of this
+      # site, and this page needs a PLATFORM admin (#419), so it refuses the rest
+      # itself, to the same access-denied page (#2143).
       {:ok,
        socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
+       |> push_navigate(to: KilnCMSWeb.AccessDenied.path(:platform))}
     end
   end
 

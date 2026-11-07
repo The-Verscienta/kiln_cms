@@ -67,10 +67,8 @@ defmodule KilnCMSWeb.FederationLiveTest do
     end
 
     test "turns away a non-admin", %{conn: conn} do
-      assert {:error, {:redirect, %{to: "/", flash: flash}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
                conn |> log_in(authed_user(:editor)) |> live(~p"/editor/federation")
-
-      assert flash["error"] =~ "admin access"
     end
   end
 

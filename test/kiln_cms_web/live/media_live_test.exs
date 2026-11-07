@@ -66,7 +66,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
     test "viewers are redirected away", %{conn: conn} do
       conn = log_in(conn, authed_user(:viewer))
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/media")
+      assert {:error, {:redirect, %{to: "/access-denied?needs=editor"}}} = live(conn, ~p"/media")
     end
 
     test "editors can load the media library", %{conn: conn} do

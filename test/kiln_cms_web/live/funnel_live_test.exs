@@ -48,7 +48,7 @@ defmodule KilnCMSWeb.FunnelLiveTest do
   defp slug, do: "funl-#{System.unique_integer([:positive])}"
 
   test "editors are redirected away", %{conn: conn} do
-    assert {:error, {:redirect, %{to: "/"}}} =
+    assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
              conn |> log_in(authed_user(:editor)) |> live(~p"/editor/funnels")
   end
 

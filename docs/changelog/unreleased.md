@@ -496,6 +496,31 @@ carries the reasoning.
 
 ## Changed
 
+<a id="access-denied-page"></a>
+
+- **A console page you lack the role for now lands on a persistent `/access-denied`
+  page instead of bouncing you home with a toast (#2143).** Every console role
+  guard (editor-only, admin-only and the instance-wide pages such as API keys,
+  accounts, team, backups and system) used to flash "You need admin access to
+  view that page." and redirect to `/`, so the explanation vanished in seconds
+  and you landed somewhere unrelated. They now redirect to
+  `/access-denied?needs=editor|admin|platform`, a `403` page that names the role
+  the page needs, shows your own role on this site and what it can do, and says
+  who to ask (an admin of the site, or whoever administers the installation for
+  `platform`). A signed-out visitor gets a **Sign in** button; a signed-in editor
+  or admin gets **Back to the console**. `needs` is whitelisted: any other value
+  renders generic copy and is never echoed, your role is read from the session
+  rather than the URL, and no return path is accepted. The page is sent with
+  `x-robots-tag: noindex`. For overlay authors: build the URL with
+  `KilnCMSWeb.AccessDenied.path/1` instead of a flash and `redirect(to: ~p"/")`.
+  **`access-denied` is now a reserved root slug and path segment.** Content
+  whose slug is `access-denied` at the site root is shadowed by the new page;
+  the reserved list now refuses it as a content type path segment and a path
+  alias, but nothing renames existing records, so change the slug or alias of
+  any such page. There are no migrations, environment
+  variables or upgrade steps; rolling the pin back restores the redirect and toast.
+  ([#2143](https://github.com/The-Verscienta/kiln_cms/issues/2143))
+
 <a id="team-scope-pickers"></a>
 
 - **The scope of a custom role or a member on `/editor/team` is now picked

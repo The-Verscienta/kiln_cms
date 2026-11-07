@@ -81,7 +81,7 @@ defmodule KilnCMSWeb.PresentationLiveTest do
     assert {:error, {:redirect, %{to: to}}} =
              conn |> log_in(viewer) |> live(~p"/editor/presentation/post/#{post.slug}")
 
-    assert to in ["/", "/sign-in"]
+    assert to == KilnCMSWeb.AccessDenied.path(:editor)
   end
 
   test "renders the framed front end at the configured preview URL", %{conn: conn} do

@@ -17,25 +17,18 @@ defmodule KilnCMSWeb.NewsletterLive do
     actor = socket.assigns.current_user
     org = socket.assigns.current_org
 
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
-      {:ok,
-       socket
-       |> assign(:actor, actor)
-       |> assign(:page_title, gettext("Newsletter"))
-       |> assign(:segment_form, segment_form(actor, org))
-       |> assign(:subscriber_form, subscriber_form(actor, org))
-       |> assign(:send_params, %{"post_id" => "", "segment_id" => "", "subject" => ""})
-       |> load_segments()
-       |> load_subscribers()
-       |> load_posts()
-       |> load_sends()
-       |> load_recipients()}
-    else
-      {:ok,
-       socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
-    end
+    {:ok,
+     socket
+     |> assign(:actor, actor)
+     |> assign(:page_title, gettext("Newsletter"))
+     |> assign(:segment_form, segment_form(actor, org))
+     |> assign(:subscriber_form, subscriber_form(actor, org))
+     |> assign(:send_params, %{"post_id" => "", "segment_id" => "", "subject" => ""})
+     |> load_segments()
+     |> load_subscribers()
+     |> load_posts()
+     |> load_sends()
+     |> load_recipients()}
   end
 
   # --- segments --------------------------------------------------------------

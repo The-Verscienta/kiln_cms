@@ -48,39 +48,32 @@ defmodule KilnCMSWeb.FormBuilderLive do
   def mount(%{"id" => id}, _session, socket) do
     actor = socket.assigns.current_user
 
-    with :admin <- KilnCMSWeb.LiveUserAuth.effective_tier(socket),
-         {:ok, form} <-
-           CMS.get_form(id, actor: actor, tenant: socket.assigns.current_org) do
-      {:ok,
-       socket
-       |> assign(:actor, actor)
-       |> assign(:form, form)
-       |> assign(:page_title, form.name)
-       |> assign(:tab, :fields)
-       |> select_field(nil)
-       |> assign(:submissions, [])
-       # Entries moderation (#477): nil = every status; a submission id set
-       # for the bulk mark actions, cleared on every filter change or reload
-       # so a stale selection can't act on rows no longer in view.
-       |> assign(:status_filter, nil)
-       |> assign(:selected_submissions, MapSet.new())
-       # The Embed tab's origins box as last typed, kept only while a save is
-       # being refused (#648); nil means "render what is stored".
-       |> assign(:embed_origins_draft, nil)
-       |> assign_embed_policy(form)
-       |> reload_fields()}
-    else
+    case CMS.get_form(id, actor: actor, tenant: socket.assigns.current_org) do
+      {:ok, form} ->
+        {:ok,
+         socket
+         |> assign(:actor, actor)
+         |> assign(:form, form)
+         |> assign(:page_title, form.name)
+         |> assign(:tab, :fields)
+         |> select_field(nil)
+         |> assign(:submissions, [])
+         # Entries moderation (#477): nil = every status; a submission id set
+         # for the bulk mark actions, cleared on every filter change or reload
+         # so a stale selection can't act on rows no longer in view.
+         |> assign(:status_filter, nil)
+         |> assign(:selected_submissions, MapSet.new())
+         # The Embed tab's origins box as last typed, kept only while a save is
+         # being refused (#648); nil means "render what is stored".
+         |> assign(:embed_origins_draft, nil)
+         |> assign_embed_policy(form)
+         |> reload_fields()}
+
       {:error, _error} ->
         {:ok,
          socket
          |> put_flash(:error, gettext("That form doesn't exist."))
          |> push_navigate(to: ~p"/editor/forms")}
-
-      _tier ->
-        {:ok,
-         socket
-         |> put_flash(:error, gettext("You need admin access to view that page."))
-         |> push_navigate(to: ~p"/")}
     end
   end
 

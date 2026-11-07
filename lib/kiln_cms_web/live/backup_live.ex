@@ -54,14 +54,14 @@ defmodule KilnCMSWeb.BackupLive do
        |> assign(:polls_left, @max_polls)
        |> load_status()}
     else
-      # `push_navigate`, matching the admin siblings: it ends the LiveView
-      # rather than rendering a refusal panel, so nothing below is reachable
+      # Platform-only, which the `:live_admin_required` hook (any site admin)
+      # does not enforce. `push_navigate` to the access-denied page (#2143): it
+      # ends the LiveView rather than rendering a refusal panel, so nothing below is reachable
       # from this socket. The handler re-checks anyway — see the moduledoc for
       # why that is not redundant.
       {:ok,
        socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
+       |> push_navigate(to: KilnCMSWeb.AccessDenied.path(:platform))}
     end
   end
 

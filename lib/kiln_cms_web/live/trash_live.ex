@@ -22,23 +22,13 @@ defmodule KilnCMSWeb.TrashLive do
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
 
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
-      {:ok,
-       socket
-       |> assign(:actor, actor)
-       |> assign(:page_title, gettext("Trash"))
-       |> assign(:confirming_empty, false)
-       |> assign(:retention_days, @retention_days)
-       |> load_items()}
-    else
-      # Defense-in-depth: the `:live_admin_required` on_mount guard already
-      # redirects non-admins with this flash before mount runs; mirror it here so
-      # this fallback stays consistent rather than silently bouncing to /editor.
-      {:ok,
-       socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
-    end
+    {:ok,
+     socket
+     |> assign(:actor, actor)
+     |> assign(:page_title, gettext("Trash"))
+     |> assign(:confirming_empty, false)
+     |> assign(:retention_days, @retention_days)
+     |> load_items()}
   end
 
   # Display fields plus what restore/purge's after-action hooks read (slug,

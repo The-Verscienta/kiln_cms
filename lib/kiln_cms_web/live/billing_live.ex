@@ -43,12 +43,12 @@ defmodule KilnCMSWeb.BillingLive do
        |> load_tiers()
        |> assign_tier_form()}
     else
-      # Defense-in-depth: the `:live_admin_required` on_mount guard already
-      # redirects non-admins before mount runs; mirror it for consistency.
+      # Not redundant: the `:live_admin_required` hook admits any ADMIN of this
+      # site, and this page needs a PLATFORM admin (#419), so it refuses the rest
+      # itself, to the same access-denied page (#2143).
       {:ok,
        socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
+       |> push_navigate(to: KilnCMSWeb.AccessDenied.path(:platform))}
     end
   end
 

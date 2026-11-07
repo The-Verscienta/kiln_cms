@@ -703,7 +703,9 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
   test "non-admins are redirected away", %{conn: conn} do
     editor = authed_user(:editor)
-    assert {:error, {:redirect, %{to: "/"}}} = conn |> log_in(editor) |> live(~p"/editor/fields")
+
+    assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+             conn |> log_in(editor) |> live(~p"/editor/fields")
   end
 
   test "the content editor renders an input per defined field", %{conn: conn} do

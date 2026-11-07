@@ -23,32 +23,25 @@ defmodule KilnCMSWeb.SlugRegenLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
-      org = socket.assigns.current_org
+    org = socket.assigns.current_org
 
-      if connected?(socket) do
-        Phoenix.PubSub.subscribe(
-          KilnCMS.PubSub,
-          SlugRegenerationWorker.topic(Accounts.org_id(org))
-        )
-      end
-
-      {:ok,
-       socket
-       |> assign(:actor, socket.assigns.current_user)
-       |> assign(:page_title, gettext("Slugs"))
-       |> assign(:kind, "all")
-       |> assign(:include_pinned, false)
-       |> assign(:preview, nil)
-       |> assign(:running?, false)
-       |> assign(:progress, nil)
-       |> assign(:result, nil)}
-    else
-      {:ok,
-       socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(
+        KilnCMS.PubSub,
+        SlugRegenerationWorker.topic(Accounts.org_id(org))
+      )
     end
+
+    {:ok,
+     socket
+     |> assign(:actor, socket.assigns.current_user)
+     |> assign(:page_title, gettext("Slugs"))
+     |> assign(:kind, "all")
+     |> assign(:include_pinned, false)
+     |> assign(:preview, nil)
+     |> assign(:running?, false)
+     |> assign(:progress, nil)
+     |> assign(:result, nil)}
   end
 
   @impl true
