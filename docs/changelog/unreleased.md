@@ -600,6 +600,36 @@ carries the reasoning.
 
 ## Changed
 
+<a id="public-image-weight"></a>
+
+- **The signed-out home page and the built-in logo no longer ship oversized
+  images (#2165).** The home page loaded about 1,030 KB of images: four 2880x1800
+  console screenshots, and a 278x379 PNG logo shown at 20 to 40 pixels. It now
+  loads about 102 KB on a browser that takes WebP (about 63 KB on a small
+  1x screen), and about 570 KB on the JPEG-only fallback.
+  - **Screenshots.** Each is a `<picture>` with a WebP `srcset` and a 1440-wide
+    JPEG fallback. The hero (the editor shot) is offered at 720, 1440 and 2880
+    pixels wide, loads eagerly and with `fetchpriority="high"`, since it is
+    the likely largest paint. The three tour shots are offered at 720 and 1440
+    and load lazily.
+  - **Logo.** When the brand's logo is the built-in one
+    (`KilnCMS.Branding.default_logo_url/0`), the header, footer and
+    sign-in brand render it through `KilnCMSWeb.Layouts.brand_mark/1` as a
+    `<picture>` of `logo-mark-sm.webp` (6 KB) over `logo-mark-sm.png` (14 KB),
+    88x120 with explicit width and height. A custom `logo_url` is rendered
+    exactly as given. `logo-mark.png` is unchanged and is still the default
+    `logo_url`, so the branding values in the headless and API responses are
+    the same as before.
+  - **Contributors.** Raw captures from `e2e/screenshots/home.spec.js` now go
+    to the gitignored `e2e/screenshots/raw/`. `scripts/optimize_home_images.sh`
+    is the only way to produce the files the page serves, and a new test
+    (`home_image_weight_test.exs`) fails if the committed files go over a byte
+    budget. See *Refreshing the home page screenshots* in `CONTRIBUTING.md`.
+  - **Overlays.** An overlay that replaces `home.html.heex`, or renders
+    `brand.logo_url` in its own `<img>`, does not get the right-sized images;
+    it keeps what it renders today. To get them, call `Layouts.brand_mark/1`.
+    Nothing to set, no migration, and rolling the pin back is safe.
+
 <a id="csv-numbers-unguarded"></a>
 
 - **A real number in a CSV export is written as itself.** The CSV writer

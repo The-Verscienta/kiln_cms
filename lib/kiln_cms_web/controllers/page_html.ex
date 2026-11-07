@@ -60,24 +60,58 @@ defmodule KilnCMSWeb.PageHTML do
   # this page is the first description of Kiln most visitors read, and an
   # overclaim here is one they find out about after installing (#1324).
 
+  # One home-page screenshot: WebP at each width in a `srcset`, with the 1440w
+  # JPEG as the fallback `src`. Every URL goes through `~p` so it takes the
+  # digest manifest (long cache headers). Below-the-fold shots are lazy; the
+  # hero (`hero`) is not and is fetched at high priority (#2165).
+  attr :name, :string, required: true
+  attr :widths, :list, required: true
+  attr :sizes, :string, required: true
+  attr :alt, :string, required: true
+  attr :class, :string, default: nil
+  attr :hero, :boolean, default: false
+
+  defp home_shot(assigns) do
+    ~H"""
+    <picture>
+      <source
+        type="image/webp"
+        sizes={@sizes}
+        srcset={Enum.map_join(@widths, ", ", &"#{~p"/images/home/#{"#{@name}-#{&1}.webp"}"} #{&1}w")}
+      />
+      <img
+        src={~p"/images/home/#{"#{@name}.jpg"}"}
+        width="1440"
+        height="900"
+        loading={if @hero, do: "eager", else: "lazy"}
+        fetchpriority={if @hero, do: "high"}
+        decoding="async"
+        class={["block w-full", @class]}
+        alt={@alt}
+      />
+    </picture>
+    """
+  end
+
   # Screenshots under priv/static/images/home/, captured by
-  # e2e/screenshots/home.spec.js; `editor.jpg` is the hero, not in this list.
+  # e2e/screenshots/home.spec.js and derived by scripts/optimize_home_images.sh;
+  # `editor` is the hero, not in this list.
   defp tour_shots do
     [
       %{
-        src: ~p"/images/home/content.jpg",
+        name: "content",
         title: gettext("All your content in one list"),
         text: gettext("Pages and posts with their workflow state, author and last change."),
         alt: gettext("The KilnCMS content list, showing pages and posts with their states.")
       },
       %{
-        src: ~p"/images/home/calendar.jpg",
+        name: "calendar",
         title: gettext("A publishing calendar"),
         text: gettext("See what goes live when, and drag an item to reschedule it."),
         alt: gettext("The KilnCMS publishing calendar with scheduled posts.")
       },
       %{
-        src: ~p"/images/home/media.jpg",
+        name: "media",
         title: gettext("A media library"),
         text: gettext("Uploads get responsive variants, alt text and tags."),
         alt: gettext("The KilnCMS media library with a grid of images.")
