@@ -696,6 +696,11 @@ msgstr "%{min} min %{sec} s"
 msgid "%{min} to %{max}"
 msgstr "de %{min} à %{max}"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{min} to %{max} characters."
+msgstr "De %{min} à %{max} caractères."
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{names} are typing…"
@@ -1466,6 +1471,11 @@ msgstr "Un aperçu. Rien n’est envoyé, publié ni enregistré."
 #, elixir-autogen, elixir-format
 msgid "A publishing calendar"
 msgstr "Un calendrier de publication"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A regular expression the whole value must match."
+msgstr "Une expression régulière à laquelle la valeur entière doit correspondre."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -3015,6 +3025,18 @@ msgstr "Assignation"
 msgid "At least"
 msgstr "Au moins"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "At least %{count} character."
+msgid_plural "At least %{count} characters."
+msgstr[0] "Au moins %{count} caractère."
+msgstr[1] "Au moins %{count} caractères."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "At least %{min}."
+msgstr "Au moins %{min}."
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "At least 8 characters."
@@ -3032,6 +3054,18 @@ msgstr[1] "Au moins %{count} lignes."
 #, elixir-autogen, elixir-format
 msgid "At most"
 msgstr "Au maximum"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "At most %{count} character."
+msgid_plural "At most %{count} characters."
+msgstr[0] "Au plus %{count} caractère."
+msgstr[1] "Au plus %{count} caractères."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "At most %{max}."
+msgstr "Au plus %{max}."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -6663,6 +6697,11 @@ msgstr "Chaque soumission est envoyée par e-mail ici. Laissez vide pour ne rece
 msgid "Each tier grants one audience. Configure the price in your provider's dashboard and paste its price ID here, so there is one source of truth for money."
 msgstr "Chaque niveau accorde une audience. Configurez le prix dans le tableau de bord de votre prestataire et collez son identifiant de prix ici, afin qu'il n'y ait qu'une seule source de vérité pour les montants."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Each value used once."
+msgstr "Chaque valeur n’est utilisée qu’une fois."
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -8143,6 +8182,11 @@ msgstr "ven."
 #, elixir-autogen, elixir-format
 msgid "From"
 msgstr "De"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "From %{min} to %{max}."
+msgstr "De %{min} à %{max}."
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
@@ -10139,6 +10183,16 @@ msgstr "Enregistrements correspondants"
 msgid "Maximum"
 msgstr "Maximum"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Maximum length"
+msgstr "Longueur maximale"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Maximum value"
+msgstr "Valeur maximale"
+
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "May"
@@ -10238,8 +10292,23 @@ msgstr "Message"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "Message when it doesn't match"
+msgstr "Message en cas de non-correspondance"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "Minimum"
 msgstr "Minimum"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Minimum length"
+msgstr "Longueur minimale"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Minimum value"
+msgstr "Valeur minimale"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -10555,6 +10624,11 @@ msgstr "Multiplier"
 #, elixir-autogen, elixir-format
 msgid "Must be an address your provider will send for."
 msgstr "Doit être une adresse pour laquelle votre fournisseur accepte d’envoyer."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Must match a pattern."
+msgstr "Doit correspondre à un motif."
 
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #, elixir-autogen, elixir-format
@@ -11550,6 +11624,11 @@ msgstr "Aucun terme n'est utilisé une seule fois."
 #, elixir-autogen, elixir-format
 msgid "No tiers yet"
 msgstr "Aucun niveau pour l'instant"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "No two documents of this type and language may hold the same value."
+msgstr "Deux documents de ce type et de cette langue ne peuvent pas avoir la même valeur."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
@@ -12781,6 +12860,11 @@ msgstr "Modèle d'alias de chemin (facultatif)"
 #, elixir-autogen, elixir-format
 msgid "Paths visitors asked for that nothing on the site could serve, most-requested first. Counters only — no IPs, no user agents. Rows are dropped %{days} days after they were last hit, and common vulnerability probing — dotfiles, scanner roots, script and asset extensions — is filtered out before it is recorded."
 msgstr "Chemins demandés par les visiteurs que rien sur le site n'a pu servir, les plus demandés en premier. Uniquement des compteurs : ni adresses IP, ni agents utilisateurs. Les lignes sont supprimées %{days} jours après la dernière requête, et les sondages de vulnérabilités courants — fichiers cachés, racines de scanners, extensions de scripts et de ressources — sont filtrés avant d'être enregistrés."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Pattern"
+msgstr "Motif"
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
@@ -16074,6 +16158,11 @@ msgstr "Affiché dans votre fuseau horaire local ; stocké en UTC."
 #, elixir-autogen, elixir-format
 msgid "Shown on the thank-you page after a successful submission."
 msgstr "Affiché sur la page de remerciement après une soumission réussie."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shown to editors. Leave empty for the standard message."
+msgstr "Affiché aux éditeurs. Laissez vide pour le message standard."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -19496,6 +19585,11 @@ msgstr "Sans groupe"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "Unique"
+msgstr "Unique"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "Unit"
 msgstr "Unité"
 
@@ -19935,6 +20029,11 @@ msgstr "Utilise la date du jour (%{date}). Les valeurs enregistrées sont actual
 #, elixir-autogen, elixir-format
 msgid "Valid for one hour."
 msgstr "Valable une heure."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Validation"
+msgstr "Validation"
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #: lib/kiln_cms_web/live/editor_live.ex

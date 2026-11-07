@@ -182,7 +182,12 @@ defmodule KilnCMS.CMS.Duplication do
   defp create_opts(opts) do
     opts
     |> ContentCopy.create_opts()
-    |> Keyword.update!(:context, &Map.merge(&1, AfterCommit.context()))
+    # A duplicate is a new record: it must not claim the source's unique
+    # field values (#2276).
+    |> Keyword.update!(
+      :context,
+      &Map.merge(&1, Map.put(AfterCommit.context(), :custom_fields_unique, :blank))
+    )
   end
 
   defp id(%{id: id}), do: id

@@ -55,6 +55,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Computed
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMSWeb.ComputedBuilder
 
@@ -703,7 +704,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   defp link_params(params, %{id: nil, parent: parent_id, kind: kind}, assigns) do
     column = if kind == :group, do: "group_of_id", else: "link_of_id"
-    params = params |> normalize() |> Map.put(column, parent_id)
+    params = params |> normalize() |> without_unique() |> Map.put(column, parent_id)
 
     case assigns do
       nil -> params
@@ -712,7 +713,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   end
 
   defp link_params(params, _link_form, _assigns),
-    do: params |> normalize() |> Map.drop(["link_of_id", "group_of_id"])
+    do: params |> normalize() |> without_unique() |> Map.drop(["link_of_id", "group_of_id"])
 
   defp reorder_links(socket, parent_id, order) do
     by_id = socket.assigns.link_fields |> Map.get(parent_id, []) |> Map.new(&{&1.id, &1})
@@ -945,11 +946,89 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> Map.put("options", options)
     |> Map.put("option_labels", labels)
     |> Map.put("default", default)
+    |> unpack_validation()
     |> unpack_targets()
     |> unpack_sources_limit()
     |> unpack_inverse()
     |> unpack_scope(scope)
   end
+
+  # The Validation fieldset posts every constraint as text (#2276). Blank
+  # ones are dropped, numbers parsed, and the keys that mean nothing for the
+  # chosen type left out — its inputs leave the page on a type change, and
+  # `Validations.FieldConstraints` refuses what is stale. A value that is no
+  # number stays text, so the save names the input it is wrong in. Without a
+  # type in the params the constraints are left as they were.
+  defp unpack_validation(%{"field_type" => type} = params) when is_binary(type) do
+    allowed = FieldConstraints.allowed_keys(type_atom(type), format_atom(params["format"]))
+
+    allowed =
+      if params["multiple"] in [true, "true"], do: allowed -- ["unique"], else: allowed
+
+    posted = if is_map(params["validation"]), do: params["validation"], else: %{}
+
+    validation =
+      for key <- allowed,
+          {:ok, value} <- [constraint_value(key, type, posted[key])],
+          into: %{},
+          do: {key, value}
+
+    validation =
+      if Map.has_key?(validation, "pattern"),
+        do: validation,
+        else: Map.delete(validation, "pattern_message")
+
+    Map.put(params, "validation", validation)
+  end
+
+  defp unpack_validation(params), do: params
+
+  defp constraint_value("unique", _type, value),
+    do: if(value in [true, "true"], do: {:ok, true}, else: :error)
+
+  defp constraint_value(key, type, value) when key in ["min", "max"] and is_binary(value) do
+    value = String.trim(value)
+
+    cond do
+      value == "" -> :error
+      type == "integer" -> {:ok, number(Integer.parse(value), value)}
+      true -> {:ok, number(Float.parse(value), value)}
+    end
+  end
+
+  defp constraint_value(key, _type, value)
+       when key in ["min_length", "max_length"] and is_binary(value) do
+    value = String.trim(value)
+    if value == "", do: :error, else: {:ok, number(Integer.parse(value), value)}
+  end
+
+  defp constraint_value(key, _type, value) when key in ["pattern", "pattern_message"] do
+    if is_binary(value) and String.trim(value) != "", do: {:ok, value}, else: :error
+  end
+
+  defp constraint_value(_key, _type, value) when is_number(value), do: {:ok, value}
+  defp constraint_value(_key, _type, _value), do: :error
+
+  defp number({number, ""}, _text), do: number
+  defp number(_unparsed, text), do: text
+
+  defp type_atom("integer"), do: :integer
+  defp type_atom("float"), do: :float
+  defp type_atom("string"), do: :string
+  defp type_atom("url"), do: :url
+  defp type_atom("text"), do: :text
+  defp type_atom("date"), do: :date
+  defp type_atom("datetime"), do: :datetime
+  defp type_atom(_other), do: :other
+
+  defp format_atom("plain"), do: :plain
+  defp format_atom(_other), do: :rich
+
+  # A detail on a connection or a field in a group is never unique.
+  defp without_unique(%{"validation" => %{} = validation} = params),
+    do: Map.put(params, "validation", Map.delete(validation, "unique"))
+
+  defp without_unique(params), do: params
 
   # Emptying the other side's name removes the reverse list (R4), so its
   # machine name goes with it rather than standing alone.
@@ -1509,6 +1588,36 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       {min, max} -> gettext("Between %{min} and %{max} rows.", min: min, max: max)
     end
   end
+
+  # A field's value constraints in the list (#2276), when it has any.
+  defp constraints_summary(%{validation: validation}) do
+    validation = FieldConstraints.normalize(validation)
+
+    [
+      range_summary(validation["min"], validation["max"]),
+      length_summary(validation["min_length"], validation["max_length"]),
+      if(validation["pattern"], do: gettext("Must match a pattern.")),
+      if(validation["unique"] == true, do: gettext("Each value used once."))
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" ")
+  end
+
+  defp range_summary(nil, nil), do: nil
+  defp range_summary(min, nil), do: gettext("At least %{min}.", min: min)
+  defp range_summary(nil, max), do: gettext("At most %{max}.", max: max)
+  defp range_summary(min, max), do: gettext("From %{min} to %{max}.", min: min, max: max)
+
+  defp length_summary(nil, nil), do: nil
+
+  defp length_summary(min, nil),
+    do: ngettext("At least %{count} character.", "At least %{count} characters.", min)
+
+  defp length_summary(nil, max),
+    do: ngettext("At most %{count} character.", "At most %{count} characters.", max)
+
+  defp length_summary(min, max),
+    do: gettext("%{min} to %{max} characters.", min: min, max: max)
 
   # The structured-data meaning in the list (#2044), when it has one.
   defp schema_org_summary(%{schema_org_property: :author}),
@@ -2474,6 +2583,159 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   attr :form, :any, required: true
   attr :id, :string, required: true
+  attr :nested?, :boolean, default: false
+
+  # The value constraints of a field (#2276), as a fieldset of the inputs its
+  # type takes: bounds for a number, length and pattern for text, and whether
+  # every value must be unique. The server stays the authority; a constraint
+  # the type doesn't take is not offered (and `unpack_validation/1` drops it).
+  defp validation_field(assigns) do
+    type = to_string(assigns.form[:field_type].value)
+    format = assigns.form[:format].value |> to_string() |> format_atom()
+    keys = FieldConstraints.allowed_keys(type_atom(type), format)
+    multiple? = assigns.form[:multiple].value in [true, "true"]
+    validation = FieldConstraints.normalize(assigns.form[:validation].value)
+
+    errors =
+      if Phoenix.Component.used_input?(assigns.form[:validation]),
+        do: Enum.map(assigns.form[:validation].errors, fn {message, _opts} -> message end),
+        else: []
+
+    assigns =
+      assigns
+      |> assign(:type, type)
+      |> assign(:keys, keys)
+      |> assign(:unique?, "unique" in keys and not assigns.nested? and not multiple?)
+      |> assign(:validation, validation)
+      |> assign(:errors, errors)
+      |> assign(:name, assigns.form[:validation].name)
+
+    ~H"""
+    <fieldset
+      :if={@keys != []}
+      id={@id}
+      class="rounded-lg border border-base-content/10 bg-base-200/40 p-3 sm:col-span-2"
+    >
+      <legend class="px-1 text-sm font-medium">
+        {gettext("Validation")}
+        <span class="font-normal text-base-content/60">{gettext("(optional)")}</span>
+      </legend>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <.input
+          :if={"min" in @keys}
+          id={"#{@id}-min"}
+          name={"#{@name}[min]"}
+          value={@validation["min"]}
+          type="number"
+          step={if @type == "integer", do: "1", else: "any"}
+          label={gettext("Minimum value")}
+          placeholder={gettext("No minimum")}
+          errors={key_errors(@errors, "min")}
+        />
+        <.input
+          :if={"max" in @keys}
+          id={"#{@id}-max"}
+          name={"#{@name}[max]"}
+          value={@validation["max"]}
+          type="number"
+          step={if @type == "integer", do: "1", else: "any"}
+          label={gettext("Maximum value")}
+          placeholder={gettext("No limit")}
+          errors={key_errors(@errors, "max")}
+        />
+        <.input
+          :if={"min_length" in @keys}
+          id={"#{@id}-min-length"}
+          name={"#{@name}[min_length]"}
+          value={@validation["min_length"]}
+          type="number"
+          min="0"
+          step="1"
+          inputmode="numeric"
+          label={gettext("Minimum length")}
+          placeholder={gettext("No minimum")}
+          errors={key_errors(@errors, "min_length")}
+        />
+        <.input
+          :if={"max_length" in @keys}
+          id={"#{@id}-max-length"}
+          name={"#{@name}[max_length]"}
+          value={@validation["max_length"]}
+          type="number"
+          min="0"
+          step="1"
+          inputmode="numeric"
+          label={gettext("Maximum length")}
+          placeholder={gettext("No limit")}
+          errors={key_errors(@errors, "max_length")}
+        />
+        <.input
+          :if={"pattern" in @keys}
+          id={"#{@id}-pattern"}
+          name={"#{@name}[pattern]"}
+          value={@validation["pattern"]}
+          label={gettext("Pattern")}
+          placeholder="[A-Z]{3}-[0-9]+"
+          hint={gettext("A regular expression the whole value must match.")}
+          errors={key_errors(@errors, "pattern")}
+        />
+        <.input
+          :if={"pattern_message" in @keys}
+          id={"#{@id}-pattern-message"}
+          name={"#{@name}[pattern_message]"}
+          value={@validation["pattern_message"]}
+          label={gettext("Message when it doesn't match")}
+          hint={gettext("Shown to editors. Leave empty for the standard message.")}
+          errors={key_errors(@errors, "pattern_message")}
+        />
+        <label :if={@unique?} for={"#{@id}-unique"} class="flex items-start gap-2 text-sm">
+          <input type="hidden" name={"#{@name}[unique]"} value="false" />
+          <input
+            type="checkbox"
+            id={"#{@id}-unique"}
+            name={"#{@name}[unique]"}
+            value="true"
+            checked={@validation["unique"] == true}
+            class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
+          />
+          <span>
+            {gettext("Unique")}
+            <span class="block text-xs text-base-content/60">
+              {gettext("No two documents of this type and language may hold the same value.")}
+            </span>
+          </span>
+        </label>
+      </div>
+      <p
+        :for={message <- other_errors(@errors, @keys)}
+        class="mt-2 text-sm text-error"
+        role="alert"
+      >
+        {message}
+      </p>
+    </fieldset>
+    """
+  end
+
+  # A validation error belongs to the input of the constraint it opens with
+  # ("pattern is not a valid regular expression: ...").
+  defp key_errors(errors, key) do
+    Enum.filter(errors, &(constraint_of(&1) == key))
+  end
+
+  defp other_errors(errors, keys) do
+    Enum.reject(errors, &(constraint_of(&1) in keys))
+  end
+
+  defp constraint_of(message) do
+    message
+    |> String.split(" ", parts: 2)
+    |> List.first()
+    |> then(&if &1 in FieldConstraints.keys(), do: &1)
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
 
   # Whether the value is for editors and admins only (#2044,
   # `KilnCMS.CMS.PrivateFields`). Offered for the types that can be private;
@@ -2787,6 +3049,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <.text_format_field form={@form} id="new-field-format" />
             <.deliver_plain_field form={@form} id="new-field-deliver-plain" />
             <.deliver_portable_field form={@form} id="new-field-deliver-portable" />
+            <.validation_field form={@form} id="new-field-validation" />
             <.private_field form={@form} id="new-field-private" />
             <label class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="field_definition[required]" value="false" />
@@ -3004,6 +3267,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                       {gettext("Formula")}: <code>{definition.compute}</code>
                     </p>
                     <p
+                      :if={constraints_summary(definition) != ""}
+                      id={"field-#{definition.id}-validation"}
+                      class="text-xs text-base-content/60"
+                    >
+                      {constraints_summary(definition)}
+                    </p>
+                    <p
                       :if={definition.field_type == :group and definition.multiple}
                       id={"field-#{definition.id}-bounds"}
                       class="text-xs text-base-content/60"
@@ -3155,6 +3425,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   <.deliver_portable_field
                     form={@edit.form}
                     id={"edit-field-deliver-portable-#{@edit.id}"}
+                  />
+                  <.validation_field
+                    form={@edit.form}
+                    id={"edit-field-validation-#{@edit.id}"}
                   />
                   <.private_field form={@edit.form} id={"edit-field-private-#{@edit.id}"} />
                   <label class="flex items-center gap-2 self-end text-sm">
@@ -3342,6 +3616,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               >
                 {options_summary(link)}
               </span>
+              <span
+                :if={constraints_summary(link) != ""}
+                id={"field-#{link.id}-validation"}
+                class="text-xs text-base-content/60"
+              >
+                {constraints_summary(link)}
+              </span>
             </div>
             <div class="flex shrink-0 items-center gap-1">
               <button
@@ -3450,6 +3731,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       <.input field={@form[:help_text]} label={gettext("Help text")} />
       <.options_field form={@form} id={"#{@id}-options"} />
       <.default_field form={@form} />
+      <.validation_field form={@form} id={"#{@id}-validation"} nested? />
       <label class="flex items-center gap-2 self-end text-sm">
         <input type="hidden" name={@form[:required].name} value="false" />
         <input

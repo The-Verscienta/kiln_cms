@@ -316,7 +316,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :inverse_label,
       :inverse_name,
       :private,
-      :schema_org_property
+      :schema_org_property,
+      :validation
     ]
 
     create :create, primary?: true
@@ -525,6 +526,13 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # A private field (#2044) is a plain top-level type, and nothing copies
     # its value somewhere public.
     validate KilnCMS.CMS.Validations.PrivateField
+
+    # Value constraints (#2276) are well-formed, fit the field's type, and
+    # its default satisfies them.
+    validate KilnCMS.CMS.Validations.FieldConstraints
+
+    # Switching `unique` on over values that already repeat is refused (#2276).
+    validate KilnCMS.CMS.Validations.UniqueFieldClean
   end
 
   # Multi-tenancy (epic #336): a field belongs to the same site as the content
@@ -711,6 +719,15 @@ defmodule KilnCMS.CMS.FieldDefinition do
       constraints one_of: [:author, :contributor]
       public? true
     end
+
+    # Value constraints an editor's input must satisfy (#2276), as string keys:
+    # `min`/`max` (numbers), `min_length`/`max_length`/`pattern`/
+    # `pattern_message` (text) and `unique`. A plain map, not an embedded
+    # resource: each new constraint is then a validation rule, not a schema
+    # change. Shape, type fit and regex safety are checked on save by
+    # `Validations.FieldConstraints`; the value rules live in
+    # `KilnCMS.CMS.FieldConstraints`, applied by `Changes.ApplyCustomFields`.
+    attribute :validation, :map, allow_nil?: false, default: %{}, public?: true
 
     # Optional helper text rendered under the input.
     attribute :help_text, :string,
