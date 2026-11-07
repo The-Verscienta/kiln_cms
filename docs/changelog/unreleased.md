@@ -486,6 +486,50 @@ carries the reasoning.
   change; rolling back the pin is safe. See
   [Scope a custom role](../granular-rbac.md#scope-a-custom-role).
 
+<a id="effective-role-display"></a>
+
+- **Every screen that shows a role now leads with the tier that applies now,
+  and says in words when a temporary one ends and what it returns to.** The
+  accounts register, an account's page, the team page and the account's
+  Sites panel showed the standing role, a live grant and the account's status
+  as look-alike badges side by side, with nothing saying which one counts
+  (#2142). A platform admin's team row showed their membership tier, which the
+  policies ignore.
+
+  Each role now reads as one badge after a scope label: **Platform:** on
+  `/editor/accounts` (the list and an account's header), and **On this site:**
+  on `/editor/team`, an account's **Sites** panel, and a new **Your access**
+  box in **Profile** on **Your settings**. The site tier is decided by the
+  same function the policies use, so a platform admin reads as *Admin*, with
+  the note "Site tier Viewer, overridden by the platform admin role." when
+  their membership holds less. While a grant is live, a line under the badge
+  says "Admin is temporary: until 2026-11-14 17:00 UTC (7 days left), then
+  Viewer.", or names both steps when a second live grant outlasts the first.
+  No line appears when nothing would change. **Your settings** also says
+  "Your access to this console ends at …" when your tier will drop to viewer
+  or no access. Platform admins who have no membership on a site are listed
+  on its team page with **On this site:** *Admin*.
+
+  Account status is now its own group of badges under the role. *unconfirmed*
+  is now **Email not confirmed**, and the account page explains it: it doesn't
+  affect the role or password sign-in, and only a site's own single sign-on
+  waits for it. On the register, the filters read **Standing role** /
+  **Any standing role** and **Email not confirmed**; they match the same
+  rows as before (the role filter is still the stored role, not the badge).
+  Role names are translated wherever they appear, including the owner label
+  on API keys.
+
+  For developers, `KilnCMS.Accounts.Scoping.tier_source/2` returns
+  `{tier, source, record}`, the tier with the branch that decided it, and
+  `effective_tier/2` now returns its first element (same decisions as before).
+  `Scoping.tier_changes/2` lists `{expires_at, tier}` changes ahead; the
+  `tier_source_for_membership/3` and `tier_changes_for_membership/3` twins take
+  an already-read membership. `KilnCMSWeb.RoleDisplay` renders them. A page
+  left open past an expiry still shows the old tier until it is reloaded; the
+  policies stop honouring the grant on time regardless. No migration, config
+  or API change; rolling back the pin is safe. See
+  [See which role applies now](../account-administration.md#see-which-role-applies-now).
+
 <a id="webhook-secret-masked"></a>
 
 - **A webhook's signing secret is masked on `/editor/webhooks` until an admin

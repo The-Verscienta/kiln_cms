@@ -22,7 +22,10 @@ defmodule KilnCMSWeb.AccountsLive do
 
   `role` on every record here is the **standing** role, as stored; a live
   temporary one is `granted_role` beside it (`KilnCMS.Accounts.RoleGrant`). The
-  page shows both, and writes only the standing one through `:manage_access`.
+  page shows the role that applies now up front and explains a live grant under
+  it (`KilnCMSWeb.RoleDisplay`, #2142), and writes only the standing one through
+  `:manage_access`. Account status (email confirmation, 2FA, erasure) is a
+  separate group, because none of it changes the role.
 
   ## Audiences are per site
 
@@ -42,15 +45,16 @@ defmodule KilnCMSWeb.AccountsLive do
   alias KilnCMS.Accounts.SessionEviction
   alias KilnCMS.Accounts.SiteAudiences
   alias KilnCMSWeb.Params
+  alias KilnCMSWeb.RoleDisplay
   alias KilnCMSWeb.RoleGrantForm
+
+  import KilnCMSWeb.RoleDisplay, only: [role_label: 1, role_summary: 1]
 
   # One page of the register. The read action carries no `pagination`, so paging
   # is `limit`/`offset` with one extra row fetched to know whether "Next" exists
   # — the same trick `KilnCMSWeb.TrashLive` uses, and cheaper than teaching the
   # authentication resource's primary read to count.
   @per_page 25
-
-  @role_options [{"Viewer", :viewer}, {"Editor", :editor}, {"Admin", :admin}]
 
   @statuses ~w(all unconfirmed temporary erased)
 
@@ -203,7 +207,7 @@ defmodule KilnCMSWeb.AccountsLive do
          reload_account(
            socket,
            gettext("%{role} until %{when}.",
-             role: String.capitalize(to_string(user.granted_role)),
+             role: role_label(user.granted_role),
              when: format_datetime(user.granted_role_expires_at)
            )
          )}
@@ -369,6 +373,17 @@ defmodule KilnCMSWeb.AccountsLive do
 
     socket
     |> assign(:memberships, memberships)
+    # The account's tier on each of its sites, through the same decision the
+    # policies make — a platform admin is admin there whatever the membership
+    # says — but from the rows just read, never the policy checks' memo, so a
+    # reload after a write shows what the write left.
+    |> assign(
+      :site_access,
+      Map.new(
+        memberships,
+        &{&1.id, RoleDisplay.site_access_for_membership(user, &1.organization_id, &1)}
+      )
+    )
     |> assign(
       :site_audiences,
       SiteAudiences.for_site(user, memberships, socket.assigns.current_org.id)
@@ -461,12 +476,12 @@ defmodule KilnCMSWeb.AccountsLive do
     )
   end
 
-  defp role_options, do: @role_options
+  defp role_options, do: RoleDisplay.role_options()
 
   # Only tiers ABOVE the standing one can be granted (`RoleGrant.elevation?/2`),
   # so offering the others would be offering a refusal.
   defp grantable_roles(user) do
-    Enum.filter(@role_options, fn {_label, role} ->
+    Enum.filter(role_options(), fn {_label, role} ->
       RoleGrant.elevation?(role, user.role)
     end)
   end
@@ -488,7 +503,7 @@ defmodule KilnCMSWeb.AccountsLive do
   defp status_options do
     [
       {gettext("Any status"), "all"},
-      {gettext("Unconfirmed"), "unconfirmed"},
+      {gettext("Email not confirmed"), "unconfirmed"},
       {gettext("Temporary role"), "temporary"},
       {gettext("Erased"), "erased"}
     ]
@@ -496,8 +511,8 @@ defmodule KilnCMSWeb.AccountsLive do
 
   defp role_filter_options,
     do:
-      [{gettext("Any role"), "all"}] ++
-        Enum.map(@role_options, fn {l, r} -> {l, to_string(r)} end)
+      [{gettext("Any standing role"), "all"}] ++
+        Enum.map(role_options(), fn {l, r} -> {l, to_string(r)} end)
 
   # --- render ----------------------------------------------------------------
 
@@ -548,7 +563,7 @@ defmodule KilnCMSWeb.AccountsLive do
             name="role"
             value={to_string(@role_filter)}
             type="select"
-            label={gettext("Role")}
+            label={gettext("Standing role")}
             options={role_filter_options()}
           />
           <.input
@@ -573,19 +588,12 @@ defmodule KilnCMSWeb.AccountsLive do
                 {user.email}
               </.link>
               <p :if={user.name} class="text-sm text-base-content/70">{user.name}</p>
-              <p class="flex flex-wrap items-center gap-1">
-                <.badge>{user.role}</.badge>
-                <.badge :if={live_grant?(user)} variant="warning">
-                  {gettext("%{role} · %{remaining}",
-                    role: user.granted_role,
-                    remaining: time_left(user.granted_role_expires_at)
-                  )}
-                </.badge>
-                <.badge :if={is_nil(user.confirmed_at)} variant="outline">
-                  {gettext("unconfirmed")}
-                </.badge>
-                <.badge :if={user.anonymized_at} variant="error">{gettext("erased")}</.badge>
-              </p>
+              <.role_summary
+                id={"account-#{user.id}-role"}
+                label={gettext("Platform:")}
+                access={RoleDisplay.platform_access(user)}
+              />
+              <.account_status user={user} id={"account-#{user.id}-status"} />
             </div>
             <.link
               navigate={~p"/editor/accounts/#{user.id}"}
@@ -631,23 +639,18 @@ defmodule KilnCMSWeb.AccountsLive do
           &larr; {gettext("All accounts")}
         </.link>
         <h1 class="mt-1 text-2xl font-semibold break-all">{@account.email}</h1>
-        <p class="flex flex-wrap items-center gap-1">
-          <.badge>{@account.role}</.badge>
-          <.badge :if={live_grant?(@account)} variant="warning">
-            {gettext("%{role} until %{when}",
-              role: @account.granted_role,
-              when: format_datetime(@account.granted_role_expires_at)
-            )}
-          </.badge>
-          <.badge :if={is_nil(@account.confirmed_at)} variant="outline">
-            {gettext("unconfirmed")}
-          </.badge>
-          <.badge :if={KilnCMS.Accounts.totp_enabled?(@account)} variant="success">
-            {gettext("2FA on")}
-          </.badge>
-          <.badge :if={@account.anonymized_at} variant="error">{gettext("erased")}</.badge>
-          <.badge :if={own_account?(assigns)} variant="primary">{gettext("this is you")}</.badge>
-        </p>
+        <.role_summary
+          id="account-role"
+          label={gettext("Platform:")}
+          access={RoleDisplay.platform_access(@account)}
+        />
+        <.account_status
+          user={@account}
+          id="account-status"
+          totp?={KilnCMS.Accounts.totp_enabled?(@account)}
+          you?={own_account?(assigns)}
+          explain
+        />
         <p :if={own_account?(assigns)} class="mt-1 text-sm text-base-content/70">
           {gettext(
             "Changes here apply to the session you are reading this in: a demotion or a sign-out takes effect immediately."
@@ -788,7 +791,7 @@ defmodule KilnCMSWeb.AccountsLive do
       <div :if={live_grant?(@account)} class="space-y-3">
         <p class="text-sm">
           {gettext("%{role} until %{when} — %{remaining}.",
-            role: @account.granted_role,
+            role: role_label(@account.granted_role),
             when: format_datetime(@account.granted_role_expires_at),
             remaining: time_left(@account.granted_role_expires_at)
           )}
@@ -865,24 +868,62 @@ defmodule KilnCMSWeb.AccountsLive do
 
       <ul :if={@memberships != []} class="divide-y divide-base-content/10">
         <li :for={membership <- @memberships} class="flex items-center justify-between gap-4 py-2">
-          <div class="min-w-0">
+          <div class="min-w-0 space-y-1">
             <span class="text-sm font-medium">{membership.organization.name}</span>
-            <p class="flex flex-wrap items-center gap-1">
-              <.badge>{membership.role}</.badge>
-              <.badge :if={live_grant?(membership)} variant="warning">
-                {gettext("%{role} · %{remaining}",
-                  role: membership.granted_role,
-                  remaining: time_left(membership.granted_role_expires_at)
+            <.role_summary
+              id={"site-#{membership.id}-role"}
+              label={gettext("On this site:")}
+              access={@site_access[membership.id]}
+            >
+              <:note :if={@site_access[membership.id].source == :platform}>
+                {gettext("Site tier %{tier}, overridden by the platform admin role.",
+                  tier: role_label(RoleGrant.effective_role(membership))
                 )}
-              </.badge>
-              <.badge :if={membership.custom_role} variant="outline">
-                {membership.custom_role.name}
-              </.badge>
+              </:note>
+            </.role_summary>
+            <p :if={membership.custom_role} class="text-xs text-base-content/60">
+              {gettext("Custom role:")}
+              <.badge variant="outline">{membership.custom_role.name}</.badge>
             </p>
           </div>
         </li>
       </ul>
     </section>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :user, :map, required: true
+  attr :totp?, :boolean, default: false
+  attr :you?, :boolean, default: false
+  attr :explain, :boolean, default: false
+
+  # The account's status, kept apart from its role: none of it changes what the
+  # role allows. "Email not confirmed" in particular is not a sign-in block —
+  # password sign-in, magic links and the instance's own SSO all work
+  # unconfirmed; what waits on confirmation is a site's own single sign-on
+  # (`KilnCMS.Accounts.SiteSso.Admission`, rule 4) admitting into it.
+  defp account_status(assigns) do
+    ~H"""
+    <div
+      :if={is_nil(@user.confirmed_at) or not is_nil(@user.anonymized_at) or @totp? or @you?}
+      id={@id}
+      class="space-y-0.5"
+    >
+      <p class="flex flex-wrap items-center gap-1" aria-label={gettext("Account status")}>
+        <.badge :if={is_nil(@user.confirmed_at)} variant="outline">
+          {gettext("Email not confirmed")}
+        </.badge>
+        <.badge :if={@totp?} variant="success">{gettext("2FA on")}</.badge>
+        <.badge :if={@user.anonymized_at} variant="error">{gettext("erased")}</.badge>
+        <.badge :if={@you?} variant="info">{gettext("this is you")}</.badge>
+      </p>
+      <p :if={@explain and is_nil(@user.confirmed_at)} class="text-xs text-base-content/60">
+        {gettext(
+          "Email not confirmed doesn't affect the role or password sign-in. A site's own single sign-on won't sign in to this account until the email is confirmed."
+        )}
+      </p>
+    </div>
     """
   end
 

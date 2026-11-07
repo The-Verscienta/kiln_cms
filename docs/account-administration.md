@@ -24,11 +24,107 @@ interacts with the scope axes.
 
 ## The register
 
-Search matches email or name; the filters narrow by platform role and by status
-(*unconfirmed*, *temporary role*, *erased*). The role filter is the **standing**
-role, not the effective one: it is what an admin set, and hiding someone because
-they happen to be an admin until Friday would hide them from the page that ends
-the grant.
+Search matches email or name; the filters narrow by **Standing role** and by
+**Status** (*Email not confirmed*, *Temporary role*, *Erased*). The role filter
+is the **standing** role, not the effective one: it is what an admin set, and
+hiding someone because they happen to be an admin until Friday would hide them
+from the page that ends the grant. So a standing viewer with a live admin grant
+is listed under *Viewer*, even though their row's badge reads *Admin*.
+
+Each row leads with **Platform:** and one badge, the platform role that applies
+now (see [See which role applies now](#see-which-role-applies-now)). The
+account's status (*Email not confirmed*, *erased*) is a separate line of badges
+under it, because none of it changes what the role allows.
+
+**Email not confirmed is not a sign-in block.** Password sign-in, magic links
+and the instance's own SSO all work for an unconfirmed account, and a magic
+link sign-in confirms the address on the way. The one thing that
+waits on confirmation is a site's **own** single sign-on: it refuses to sign
+its provider's user into an existing account whose address was never
+confirmed, because someone else may have registered that address in advance
+(`KilnCMS.Accounts.SiteSso.Admission`, rule 4).
+
+## See which role applies now
+
+Every screen that shows a role leads with the tier that applies **now**, as one
+badge after a label that says which scope it is:
+
+- **Platform:** is the account's platform role (`User.role`, or a live grant on
+  the user). It decides instance-wide administration, such as this page.
+- **On this site:** is the tier on one site, decided the same way the
+  policies decide it (`Scoping.effective_tier/2`). A platform admin is admin on
+  every site whatever their membership holds; otherwise it's the membership's
+  tier, or for an account with no memberships at all, its platform role on the
+  default site.
+
+When a live temporary grant is behind the badge, a line under it says until
+when and what it returns to:
+
+> Admin is temporary: until 2026-11-14 17:00 UTC (7 days left), then Viewer.
+
+When two grants are live and the second outlasts the first (a temporary
+platform admin who also holds a temporary site tier), the line names both
+steps:
+
+> Admin is temporary: until 2026-11-10 09:00 UTC (3 days left), then Editor until 2026-11-14 17:00 UTC, then Viewer.
+
+No line means nothing is due to change. That includes a temporary platform
+admin whose membership on the site is a standing admin: the grant expiring
+changes nothing there, so it isn't mentioned. Times are UTC; the count in
+brackets reads *under an hour left*, *N hours left* below two days, and
+*N days left* after that.
+
+### Check an account's role
+
+You need the platform admin role.
+
+1. Open **Accounts** (`/editor/accounts`). Each row shows **Platform:** and the
+   platform role that applies now, with the grant line under it if a temporary
+   role is live.
+2. Click the account's email (or **Manage**). The header repeats **Platform:**
+   and its badge; the status line under it adds *2FA on* and *this is you* where
+   they apply, and explains *Email not confirmed* in a sentence.
+3. Scroll to **Sites**. Each site the account is a member of shows
+   **On this site:** and the tier there. For a platform admin the badge reads
+   *Admin* and a note names the tier the membership holds, for example
+   "Site tier Viewer, overridden by the platform admin role." A custom role is
+   listed under the badge as **Custom role:**.
+
+### Check a team member's role on this site
+
+You need the admin tier on the site.
+
+1. Open **Team** (`/editor/team`). Each member row shows **On this site:** and
+   the tier that applies now, with the grant line when a temporary tier is
+   live.
+2. A platform admin's row carries the *Site admin* badge and the
+   "Site tier …, overridden by the platform admin role." note. Platform admins
+   with no membership on the site are listed too, each with
+   **On this site:** *Admin*.
+
+### Check your own access
+
+Anyone who can reach the console (editor or admin on the site) can do this.
+
+1. Open **Your settings** (`/editor/settings`).
+2. In **Profile**, the **Your access** box shows **On this site:** and your tier
+   now, with *platform admin* beside it when that's why. A temporary tier has
+   its grant line.
+3. If your tier will drop to viewer or no access, which ends your use of the
+   console, the box also says "Your access to this console ends at
+   2026-11-14 17:00 UTC."
+
+### When the badge looks wrong
+
+- **The badge still shows a tier whose grant has expired.** The page worked it
+  out when it loaded. Reload it. The policies stopped honouring the grant the
+  moment it expired, whatever the page still says.
+- **A standing viewer with an admin grant doesn't appear under the *Admin*
+  filter.** The **Standing role** filter matches the stored role, not the
+  badge. Use the *Temporary role* status filter to find live grants.
+- **The accounts list says *Viewer*, but the person edits a site.** **Platform:**
+  is the platform role. Their tier on a site is under **Sites** on the account
+  page, or on that site's **Team** page.
 
 Paging is `limit`/`offset` with one extra row read to decide whether "Next"
 exists — the authentication resource's primary read carries no `pagination`, and
@@ -83,6 +179,28 @@ today merely ignores a live one.
 **Reading a tier in new code.** `user.role` is the standing tier. To ask what
 someone may do *now*, call `RoleGrant.effective_role(user)` (platform role) or
 `Scoping.effective_tier(user, org)` (on a site).
+
+**Showing a tier on a page.** A page that has to *explain* a tier, not only act
+on it, uses `KilnCMS.Accounts.Scoping.tier_source/2`. It returns the same tier
+with the branch that decided it and the row whose grant columns govern it:
+
+```elixir
+Scoping.tier_source(user, org)
+#=> {:admin, :platform, %User{}}       # platform admin, standing or granted
+#=> {:editor, :member, %OrgMembership{}}
+#=> {:viewer, :legacy, %User{}}        # no memberships, on the default org
+#=> {:none, :none, nil}
+```
+
+`effective_tier/2` is `elem(tier_source(actor, subject), 0)`, so the two can't
+disagree. `Scoping.tier_changes/2` lists the changes ahead as live grants
+expire, as `[{expires_at, tier_after}]`, and `[]` when nothing is due to
+change. The `*_for_membership/3` twins take a membership the page has just
+read (`nil` for none on that org), so a re-read after a write shows what the
+write left rather than the policy checks' memo. They are for display only; no
+policy calls them. `KilnCMSWeb.RoleDisplay` renders all of this (`role_summary/1`,
+`role_label/1`, `platform_access/1`, `site_access/2`); use it rather than
+re-deriving a tier in a template.
 
 **A grantee cannot grant.** `Validations.StandingAdminOnly` refuses
 `:manage_access` and `:grant_temporary_role` on `User`, and every create/update
