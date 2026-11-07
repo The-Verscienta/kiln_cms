@@ -554,6 +554,83 @@ an order of magnitude and as a regression baseline, not as capacity.
 Compare with the delivery baseline in [`performance.md`](performance.md#baseline),
 which measured a single hot document.
 
+## Custom-field filters at 100k rows
+
+**Measured for #2291; not a v1.0 metric.** Does a GIN index on `custom_fields`
+speed up `custom_filter` / `custom_sort`, and what does it cost? Measured on
+2026-11-06 against the work tree of #2291 (not yet released).
+
+### What was found
+
+- With the old `(custom_fields -> name) = value` predicate the index is
+  **never used** (variant b below: every plan is a sequential scan or the
+  published-feed index). The predicate is now `custom_fields @>
+  jsonb_build_object(name, value)` for positive `eq` / `in` (and the list and
+  media/reference equivalents), which a GIN `jsonb_path_ops` index serves.
+- With both, a selective filter drops from about 40 ms to about 3 ms (page of
+  20, 100,000 rows in the big tenant). The planner still picks the index at 30%
+  and 50% selectivity, at about the cost of the sequential scan it replaces: no
+  regression showed up there, within the noise of this run.
+- A forced generic plan (`plan_cache_mode = force_generic_plan`) keeps using
+  the index, so the bound field name does not defeat it after the fifth
+  execution.
+- Not accelerated, and not meant to be: `not_eq`, `gt`/`gte`/`lt`/`lte`,
+  `ilike`, `null`, `custom_sort` (all sequential scans in every variant).
+  `not_eq` is deliberately left on the old `->` form: an absent key must stay
+  excluded from it.
+- The index is 13.6 MB per 52 MB of heap, per content table. Bulk insert and
+  bulk `custom_fields` updates of 20,000 rows ran roughly 25% slower with it
+  (medians of three rounds); 200 saves through `update_page` were 10-35%
+  slower, inside the run-to-run noise. `custom_fields` is rewritten on every
+  save, so no update is a heap-only tuple once it is indexed.
+
+### How it was measured
+
+| | |
+|---|---|
+| Machine | Apple M5 Pro, macOS; client and PostgreSQL 17 on the same machine |
+| Other load | **Heavy.** Load average 70+ from other sessions during the run; absolute times are inflated and p95 has outliers. Read the ratios, and rerun on a quiet host |
+| Build | `MIX_ENV=test`, plain connection pool of 10, 4 schedulers, lean build |
+| Database | Its own, `kiln_cms_test_bench_cf`, dropped after the run |
+| Corpus | 100,000 pages and 100,000 entries cloned in SQL from one published row; 5 tenants (80% in the big one); 5% of rows with wrong types and most keys absent; string, boolean, integer, date, multiple select and media fields |
+| Queries | Each through `list_published_pages` / `list_published_entries` with `custom_filter` / `custom_sort`, a page of 20, 200 timed runs. The plan is `EXPLAIN (ANALYZE)` of the SQL the read ran, once as planned and once with a forced generic plan |
+| Variants | a: no index. b: GIN `jsonb_path_ops`. Each on the old and on the containment predicate. The index exists only in the bench database |
+
+### Results
+
+Pages, big tenant, p50 / p95 ms:
+
+| Query | a, `->` | b, `->` + GIN | a, `@>` | c, `@>` + GIN |
+|---|---|---|---|---|
+| eq, 1 row | 40.7 / 62.0 | 43.5 / 63.6 | 46.8 / 62.3 | **2.6 / 3.4** |
+| eq, 30% (grade) | 43.3 / 60.9 | 49.4 / 63.7 | 63.7 / 77.9 | 32.1 / 174.8 |
+| eq, boolean 50% | 50.7 / 203.3 | 50.5 / 61.5 | 73.8 / 184.9 | 44.2 / 53.3 |
+| `in` of 3 (15%) | 76.9 / 102.2 | 69.6 / 86.3 | 88.1 / 167.9 | **20.3 / 27.7** |
+| list contains, rare | 30.7 / 52.3 | 34.2 / 104.8 | 58.5 / 81.6 | **2.7 / 4.1** |
+| list contains, 16% | 32.3 / 94.7 | 41.8 / 59.2 | 63.6 / 148.1 | 25.3 / 31.1 |
+| media id, 1 row | 25.8 / 31.9 | 30.6 / 46.3 | 72.4 / 92.6 | **2.6 / 3.2** |
+| range, 1% | 30.8 / 45.4 | 23.8 / 35.5 | 28.9 / 36.4 | 20.8 / 24.4 |
+| `not_eq` | 64.8 / 80.5 | 36.2 / 65.9 | 53.1 / 58.5 | 30.3 / 43.3 |
+| sort, limit 20 | 43.6 / 112.7 | 45.0 / 79.7 | 44.7 / 68.5 | 53.7 / 116.2 |
+
+The entries tier and the small tenant follow the same shape; the full tables
+are what the script prints. The small tenant is already fast without the
+index (5-11 ms), because the planner seeks by slug or tenant there.
+
+### Rerunning
+
+```bash
+MIX_ENV=test MIX_TEST_PARTITION=_bench_cf mix ash.setup
+CF_VARIANT=a MIX_ENV=test MIX_TEST_PARTITION=_bench_cf mix run --no-start scripts/benchmarks/custom_fields_index.exs
+CF_VARIANT=b MIX_ENV=test MIX_TEST_PARTITION=_bench_cf mix run --no-start scripts/benchmarks/custom_fields_index.exs
+dropdb kiln_cms_test_bench_cf
+```
+
+The first run seeds (about a minute); each run takes about ten minutes, most
+of it the write section. Knobs (`CF_ROWS`, `CF_RUNS`, `CF_WRITE_ROWS`,
+`CF_WRITE_UPDATES`) are listed at the top of the script. Use `--no-start`: the
+test config's sandbox pool drops a connection held for 120 s.
+
 ## Test coverage over 80%
 
 **Met.** The `Coverage (full suite)` job of CI run

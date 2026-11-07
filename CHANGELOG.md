@@ -64,11 +64,19 @@ Every summary line below that was shortened links to its own entry there.
   Additive; re-run `mix kiln.reporting.sql` grants after upgrading.
   ([long form](docs/changelog/unreleased.md#reporting-views-upgrade))
 
+- **Content tables gain a GIN index on `custom_fields`, built concurrently: slow on a large
+  `entries`; a failed build leaves an INVALID index to drop. Overlays run `mix ash.codegen`.**
+  ([#2321](https://github.com/The-Verscienta/kiln_cms/pull/2321) · [long form](docs/changelog/unreleased.md#custom-fields-gin-upgrade))
+
 ### Added
 
 - **The content list can show up to four custom fields on each row; pick them under Columns once one content type is listed.**
   Remembered per person, site and type; additive migration, nothing to run.
   ([long form](docs/changelog/unreleased.md#content-list-field-columns))
+
+- **`custom_filter` equality, `in` and list membership use a new GIN index on `custom_fields`: a selective filter on 100,000 rows drops from about 40 ms to about 3 ms.**
+  Range, `not_eq`, `ilike`, `null` and `custom_sort` are unchanged.
+  ([#2321](https://github.com/The-Verscienta/kiln_cms/pull/2321) · [long form](docs/changelog/unreleased.md#custom-field-indexes))
 
 - **Custom fields can be filtered and sorted by bare name (`filter[price]`, `sort=title,price`), and `custom_sort` now works on search routes.**
   ([long form](docs/changelog/unreleased.md#custom-field-native-filter-sort))

@@ -555,6 +555,14 @@ The cases that come up:
   `CREATE INDEX CONCURRENTLY` inside a transaction. An index on a table the
   same migration creates needs none of this.
 
+  A concurrent build that fails or is cancelled leaves an `INVALID` index:
+  Postgres keeps updating it on every write and never reads it, and a retry
+  of the same migration fails on the name. List them with
+  `SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid;`, drop the
+  one that belongs to the migration with `DROP INDEX CONCURRENTLY <name>;`,
+  and run the migration again. The `custom_fields` GIN indexes (#2291) are an
+  example: they are large on `entries`, so the build can take a while.
+
 ### The check
 
 `mix kiln.migrations.check` runs on every pull request (the `build` job in

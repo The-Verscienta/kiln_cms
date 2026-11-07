@@ -2578,6 +2578,20 @@ defmodule KilnCMS.CMS.Content do
             all_tenants?: true,
             concurrently: true
 
+          # Custom-field equality, `in` and list-has (#2291). The filter is
+          # `custom_fields @> jsonb_build_object(name, value)`, so ONE index
+          # covers every field name on every dynamic type: the name sits inside
+          # the indexed value. `jsonb_path_ops` is the smaller, faster opclass
+          # and supports exactly `@>`. It does NOT serve range, sort, `not_eq`,
+          # `ilike` or `null` (see `CustomFieldQuery.contains/3`). Built
+          # CONCURRENTLY: `entries` is large. A failed build leaves an INVALID
+          # index; drop it and retry.
+          index ["custom_fields jsonb_path_ops"],
+            name: unquote("#{table}_custom_fields_gin_index"),
+            using: "gin",
+            all_tenants?: true,
+            concurrently: true
+
           # Point-lookup index for the delivery hot path (`public_by_slug`).
           # `:unique_slug` is now the `org_id`-LEADING `(org_id, slug, locale)`
           # composite, which Postgres can't seek for a tenant-less delivery read
