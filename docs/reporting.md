@@ -9,7 +9,7 @@ filter and pivot. This guide is for the operator who sets the role up and the
 analyst who queries it.
 
 The views are a public SQL contract, additive-only in 1.x
-([decision 0012](decisions/0012-reporting-views-are-a-versioned-additive-only-sql-contract.md)).
+([decision 0015](decisions/0015-reporting-views-are-a-versioned-additive-only-sql-contract.md)).
 A breaking change would ship as a new `kiln_reporting_v2` schema next to this
 one, not as an edit to it.
 

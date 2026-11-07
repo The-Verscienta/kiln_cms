@@ -85,7 +85,7 @@ carries the reasoning.
   (`value_text`, `value_json`). `mix kiln.reporting.sql` prints a script that
   creates a read-only role with `SELECT` on those views only. Guide:
   [docs/reporting.md](../reporting.md); the reasoning is
-  [decision 0012](../decisions/0012-reporting-views-are-a-versioned-additive-only-sql-contract.md).
+  [decision 0015](../decisions/0015-reporting-views-are-a-versioned-additive-only-sql-contract.md).
   - **What is exposed.** Published, unarchived, public-audience rows without an
     access password. A field appears only while a live definition names it and
     it is not private or a `user` field; the list is read live, so a flip to
@@ -104,6 +104,84 @@ carries the reasoning.
     the promotion column lookup filters on the current schema, so a view of the same name cannot add columns.
   - **Upgrade.** Additive, no environment variable. Overlays: see the upgrade
     note above.
+
+<a id="plugin-plug-routes"></a>
+
+- **A plugin can mount plain-Plug endpoints, such as a webhook receiver, a JSON
+  API or a feed variant, with the new `plug_routes/0` callback
+  (`kiln_plugin` 1.4.0).** Until now a plugin could only route to a LiveView
+  page (`public_routes/0`), so an endpoint with no page had to be an overlay.
+  A route is `{verb, path, plug_module, plug_opts}` (a Phoenix controller is a
+  Plug whose opts is the action atom) or `{:forward, path, plug_module,
+  plug_opts}`. The package needs only `plug`, so it works as a Mix dependency.
+  - **What the core does.** Mounts the routes before the content-delivery
+    catch-alls, in a scope with no session, no CSRF check and no `accepts`
+    (`current_user` is never set; the plugin authenticates its own caller).
+    `conn.assigns.current_org` is set, but the plugin passes `tenant:` to Ash
+    itself. Requests are limited to 300 a minute per client address in their
+    own `:plugin_endpoint` bucket. A JSON or form body is also kept in
+    `conn.private[:raw_body]`, capped at 1 MB, so an HMAC can be verified.
+  - **Checks.** A malformed route stops the build, naming the plugin.
+    `mix kiln.plugins.doctor` also reports a path under a root core routes own
+    (`/editor`, `/api`, `/gql`, `/mcp`, …) and overlap with another plugin's
+    plug or public routes. `mix kiln.plugins.list` and System → Plugins count
+    plug routes.
+  - **Upgrade.** Additive. A plugin that does not define `plug_routes/0`
+    (including one built against `kiln_plugin` older than 1.4) declares none. A
+    plugin using it requires `{:kiln_plugin, "~> 1.4"}`. See
+    [Plugin extensibility](../plugin-extensibility.md).
+
+<a id="graphql-typed-custom-fields"></a>
+
+- **GraphQL reads admin-defined custom fields typed by kind, with no deploy
+  and no schema change (#2290).** `customFields` stays a `JsonString`. Next to
+  it every content type (`Page`, `Post`, a project type, `Entry`) and the
+  `ContentRecord` interface gain `customString`, `customInt`, `customFloat`,
+  `customBoolean`, `customDate` and `customDateTime` (each `(name: String!)`,
+  nullable) and `fields(names: [String!]!): [CustomFieldValue!]!`. A field an
+  admin adds is readable at once; the GraphQL schema is compiled and the same
+  for every site, so what it types is the *accessor*, not the name.
+  - **What is and is not checked.** `customFloat(name: "price")` is a `Float`
+    or `null`. A typo, a rename, a deleted field, a field of another kind, a
+    legacy value that no longer fits, or a private field read below editor is
+    `null` (left out of `fields`), never an error. The server cannot catch the
+    typo; the exported contract below does.
+  - **`fields(names:)`.** `names` is required, at most 50. It returns the
+    `CustomFieldValue` interface (`name` plus the kind's members: `StringValue`,
+    `IntValue`, `FloatValue`, `BooleanValue`, `DateValue`, `DateTimeValue`,
+    `ListValue { items }`, `GroupValue { fields }`, `ReferenceValue { ids }`,
+    `MediaValue`, `GeolocationValue { lat lng label zoom }`,
+    `JsonValue { value }`). A `multiple` field is a `ListValue`; computed
+    fields, `datetime_range` and `recurrence` are `JsonValue`. Groups nest to depth 3. A reference field
+    returns ids only: read the records through `references(field:)`. Cost is
+    1 plus the selection once per name; an accessor costs 1; the 200 limit is
+    unchanged.
+  - **Visibility and locale.** Values come from the record as the caller reads
+    it, so private fields read as unknown below editor. A
+    `localization: :fallback` field does not inherit along the locale chain in
+    this layer; name the locale you want. A page of records does one
+    definitions read per type, not one per record.
+  - **Typed contract per site.** `GET /api/schema?format=typescript` is the
+    existing document as a `.d.ts`; `?format=typescript-graphql` is a `.ts`
+    module that adds, per content type (and per `typeName` for dynamic types,
+    selected on `publishedEntries(filter: {typeName: {eq: "…"}})`), a
+    `<Type>CustomFields` interface and a ready `<Type>CustomFieldsFragment`.
+    An unknown `format` is a `400` with code `invalid_format`; without
+    `format` the response is the same JSON as before. Regenerate after an
+    admin changes fields. `filter` and `sort` still use
+    `customFilter`/`customSort`, unchanged.
+  - **Plugins.** `Kiln.FieldType` gains an optional `graphql_kind/1`
+    (`:string`, `:int`, `:float`, `:boolean`, `:date`, `:datetime`, `:json`)
+    in `kiln_plugin` 1.4.0. A type without it, or compiled against an older
+    SDK, is served as `JsonValue`, so nothing breaks. Publish the SDK to Hex
+    before a plugin requires `~> 1.4`.
+  - **Not yet.** Swift and Kotlin emitters for the GraphQL section, typed
+    filter operators, a per-site SDL with a regenerate step, and typed writes.
+  - **Upgrade.** Additive and org-independent: no migration, no config, and
+    rolling the pin back removes the new fields only. The new fields
+    are added to every content type in the schema's `:content_domains`, so an
+    overlay's types get them without code changes.
+    See [headless-graphql-api.md](../headless-graphql-api.md#read-custom-fields-typed-by-kind).
 
 <a id="draft-write-api-keys"></a>
 
@@ -140,6 +218,30 @@ carries the reasoning.
   and the headless consumer guide.
 
 ## Changed
+
+<a id="custom-field-history"></a>
+
+- **Custom fields are individual fields in version compare, restore and the publish-conflict panel.**
+  Until now a changed custom field read as one opaque "Custom fields" blob.
+  The compare modal now lists each key with its definition's label, a typed
+  value (select option labels, media filename, reference title, rich text
+  without tags, group `Label: value` pairs) and an Added / Removed / Changed
+  pill. Media and reference titles resolve as the signed-in reader, in one
+  batched read; an unreadable target shows its stored id. A retired
+  definition shows its raw key.
+  *Restore* (from the compare modal and the history list) now opens a
+  preview, **Restore this version?**, and writes only on *Restore this
+  version*; it replaces the browser confirm. The preview runs the same
+  `RestoreVersion.plan/3` as the action and lists stored custom keys no
+  definition declares any more as discarded. An editor with a field grant is
+  told restore needs full field access instead of being offered a confirm
+  that would fail. The publish-conflict panel still shows one *Custom fields*
+  row and still resolves the whole map with one choice (no per-key merge), but
+  now lists the per-key draft-versus-live difference beneath it.
+  No API, migration or config change; nothing to do on upgrade, and rolling
+  back the pin is safe. The revisions API still carries `custom_fields` as one
+  whole-map change; a per-key `changed_custom_fields` is deferred. See
+  [Comparing and restoring versions](../working-copy.md#comparing-and-restoring-versions).
 
 <a id="search-leg-performance"></a>
 

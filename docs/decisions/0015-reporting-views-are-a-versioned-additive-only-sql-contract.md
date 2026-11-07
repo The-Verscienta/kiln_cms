@@ -1,4 +1,4 @@
-# 0012. The reporting views are a versioned, additive-only SQL contract
+# 0015. The reporting views are a versioned, additive-only SQL contract
 
 - **Status** — accepted; unreleased.
 - **References** — [#2295](https://github.com/The-Verscienta/kiln_cms/issues/2295); guide: [docs/reporting.md](../reporting.md).

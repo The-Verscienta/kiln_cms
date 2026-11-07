@@ -82,9 +82,9 @@ defmodule Mix.Tasks.Kiln.Gen.PluginTest do
         end)
       end
 
-      # The bundled SDK's minor: 1.3.0 → "~> 1.3".
+      # The bundled SDK's minor: 1.4.0 → "~> 1.4".
       sdk = Plugin.sdk_requirement()
-      assert sdk == "~> 1.3"
+      assert sdk == "~> 1.4"
 
       assert deps.(Plugin.dep_mix_source("Ratings", "ratings", nil)) ==
                [{:kiln_plugin, sdk}]

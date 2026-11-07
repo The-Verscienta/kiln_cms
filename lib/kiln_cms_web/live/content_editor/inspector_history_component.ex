@@ -114,7 +114,6 @@ defmodule KilnCMSWeb.ContentEditor.InspectorHistoryComponent do
                 type="button"
                 phx-click="restore"
                 phx-value-version_id={version.id}
-                data-confirm={gettext("Restore content to this version?")}
                 class="btn btn-sm btn-default"
               >
                 {gettext("Restore")}
