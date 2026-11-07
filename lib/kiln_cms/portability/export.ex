@@ -216,6 +216,8 @@ defmodule KilnCMS.Portability.Export do
       "seo_keywords" => Map.get(record, :seo_keywords),
       "seo_image" => Map.get(record, :seo_image),
       "canonical_url" => Map.get(record, :canonical_url),
+      "noindex" => Map.get(record, :noindex, false),
+      "nofollow" => Map.get(record, :nofollow, false),
       "path_alias" => Map.get(record, :path_alias),
       "audience" => record |> Map.get(:audience) |> to_string_or_nil(),
       "custom_fields" => Map.get(record, :custom_fields),

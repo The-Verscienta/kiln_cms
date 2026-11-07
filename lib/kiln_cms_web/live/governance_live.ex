@@ -13,14 +13,7 @@ defmodule KilnCMSWeb.GovernanceLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
-      {:ok, assign(socket, :page_title, gettext("Governance"))}
-    else
-      {:ok,
-       socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
-    end
+    {:ok, assign(socket, :page_title, gettext("Governance"))}
   end
 
   @impl true

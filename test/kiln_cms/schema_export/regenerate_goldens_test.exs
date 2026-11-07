@@ -15,7 +15,7 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
 
       mix test --only regenerate_schema_goldens test/kiln_cms/schema_export/regenerate_goldens_test.exs
 
-  then review the diff of `full.schema.json`, `full.graphql.schema.json`, `full.graphql.ts`, `full.d.ts`, `full.swift` and `full.kt`.
+  then review the diff of `full.schema.json`, `full.graphql.schema.json`, `full.graphql.ts`, `full.graphql.swift`, `full.graphql.kt`, `full.d.ts`, `full.swift` and `full.kt`.
   `clients/js/test/parity.test.ts` reads `full.d.ts` too. Run `npm test` in
   `clients/js` as well; if a change to the TypeScript emitter isn't mirrored
   in `kiln-types`, that run fails.
@@ -101,7 +101,7 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
     )
 
     # The same definitions with the GraphQL annotations (#2290), for the
-    # `typescript-graphql` golden.
+    # `*-graphql` goldens.
     graphql_document =
       SchemaExport.json_schema(
         org_id: KilnCMS.Accounts.default_org_id(),
@@ -117,6 +117,16 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
     File.write!(
       Path.join(@dir, "full.graphql.ts"),
       SchemaExport.TypeScript.emit_graphql(graphql_document)
+    )
+
+    File.write!(
+      Path.join(@dir, "full.graphql.swift"),
+      SchemaExport.Swift.emit_graphql(graphql_document)
+    )
+
+    File.write!(
+      Path.join(@dir, "full.graphql.kt"),
+      SchemaExport.Kotlin.emit_graphql(graphql_document)
     )
 
     File.write!(Path.join(@dir, "full.d.ts"), SchemaExport.TypeScript.emit(document))

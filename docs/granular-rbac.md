@@ -305,6 +305,11 @@ role from `/editor/accounts`. A grant carries **no scope axes** — it moves the
 tier only, leaving `editable_types`, `readable_types`, `field_grants` and the
 custom role exactly as they were.
 
+The member's row on `/editor/team` leads with the tier that applies on the site
+now, and while a grant is live a line under it says until when and what it
+returns to ("Editor is temporary: until …, then Viewer."). See
+[See which role applies now](account-administration.md#see-which-role-applies-now).
+
 Full rules: [Account administration](account-administration.md).
 
 ## Later phases

@@ -88,13 +88,15 @@ defmodule KilnCMSWeb.BillingLiveTest do
     test "a viewer is bounced", %{conn: conn} do
       conn = log_in(conn, authed_user(:viewer))
 
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/billing")
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+               live(conn, ~p"/editor/billing")
     end
 
     test "an editor is bounced — payment credentials are not an editorial concern", %{conn: conn} do
       conn = log_in(conn, authed_user(:editor))
 
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/billing")
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+               live(conn, ~p"/editor/billing")
     end
 
     test "a platform admin mounts", %{conn: conn} do

@@ -416,6 +416,7 @@ defmodule KilnCMSWeb.ContentController do
     # being indexed in the document's place — the canonical below still points at
     # the document's own URL, so nothing about it moves in an index.
     |> put_resp_header("x-robots-tag", "noindex, nofollow")
+    |> assign(:robots, "noindex, nofollow")
     |> put_resp_header("content-language", teaser.locale)
     |> put_status(:unauthorized)
     |> assign(:locale, teaser.locale)
@@ -488,6 +489,7 @@ defmodule KilnCMSWeb.ContentController do
     # URL returns the full document for an entitled reader — a shared cache keyed
     # on URL alone would eventually cross the two.
     |> put_private_delivery_headers()
+    |> KilnCMSWeb.Robots.put(teaser)
     |> put_resp_header("content-language", teaser.locale)
     |> assign(:locale, teaser.locale)
     |> assign(:page_title, teaser.seo_title || teaser.title)
@@ -1006,6 +1008,9 @@ defmodule KilnCMSWeb.ContentController do
     # follows `record.locale`; this is the same fact for HTTP.
     conn = put_resp_header(conn, "content-language", record.locale)
 
+    # Before the 304 branch below, so a conditional hit carries the same header.
+    conn = KilnCMSWeb.Robots.put(conn, record)
+
     start = System.monotonic_time()
 
     result =
@@ -1489,6 +1494,7 @@ defmodule KilnCMSWeb.ContentController do
     raw =
       "#{record.id}:#{record.locale}:#{record.updated_at}:#{record.published_version_id}" <>
         ":#{record.seo_title}:#{record.seo_description}" <>
+        ":#{KilnCMSWeb.Robots.directive(record)}" <>
         ":#{KilnCMS.Cache.head_generation(org_id)}"
 
     digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)

@@ -20,7 +20,7 @@ defmodule KilnCMSWeb.SecurityTxtLiveTest do
   end
 
   test "turns away a non-admin", %{conn: conn} do
-    assert {:error, {:redirect, %{to: "/"}}} =
+    assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
              conn |> log_in(authed_user(:editor)) |> live(~p"/editor/security-txt")
   end
 

@@ -72,7 +72,15 @@ Every summary line below that was shortened links to its own entry there.
   `entries`; a failed build leaves an INVALID index to drop. Overlays run `mix ash.codegen`.**
   ([#2321](https://github.com/The-Verscienta/kiln_cms/pull/2321) · [long form](docs/changelog/unreleased.md#custom-fields-gin-upgrade))
 
+- **Overlays: run `mix ash.codegen` again for the per-document `noindex` / `nofollow` columns
+  on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
+  ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
+
 ### Added
+
+- **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
+  A wrong operand type is a schema error; `contains` and `startsWith` (case-insensitive, literal) also work in `customFilter`.
+  ([#2290](https://github.com/The-Verscienta/kiln_cms/issues/2290) · [long form](docs/changelog/unreleased.md#graphql-custom-where))
 
 - **Admins can move one document to the trash from the content list's row menu or the editor's Settings tab.**
   Same soft delete as bulk Delete; pending autosave edits are saved first. Guide: [docs/trash.md](docs/trash.md).
@@ -113,8 +121,8 @@ Every summary line below that was shortened links to its own entry there.
   No session or CSRF check, raw body kept for HMACs, own 300/min rate limit; `mix kiln.plugins.doctor` checks paths.
   ([#2272](https://github.com/The-Verscienta/kiln_cms/issues/2272) · [long form](docs/changelog/unreleased.md#plugin-plug-routes))
 
-- **GraphQL reads admin-defined custom fields typed by kind (`customFloat(name:)`, `fields(names:)`), and `GET /api/schema?format=typescript-graphql` exports ready fragments and types.**
-  ([long form](docs/changelog/unreleased.md#graphql-typed-custom-fields))
+- **GraphQL reads admin-defined custom fields typed by kind (`customFloat(name:)`, `fields(names:)`), and `GET /api/schema?format=typescript-graphql` exports ready fragments and types; `swift-graphql` and `kotlin-graphql` do the same for native apps.**
+  ([#2361](https://github.com/The-Verscienta/kiln_cms/pull/2361) · [long form](docs/changelog/unreleased.md#graphql-typed-custom-fields))
 
 - **Drafts-only API keys (`access: draft_write`): a headless service can create and edit its own drafts
   and never publish, delete or touch live content. Drafts record the key and an optional `X-Kiln-On-Behalf-Of` label.**
@@ -128,11 +136,23 @@ Every summary line below that was shortened links to its own entry there.
   fallback across locales; the editor locks them on translations.**
   ([long form](docs/changelog/unreleased.md#block-field-localization-config))
 
+- **Per-document `noindex` / `nofollow` (with per-type defaults for new documents): sent as
+  `<meta name="robots">` and `x-robots-tag`, carried in versions, copies and the API, left out
+  of sitemap, news sitemap, llms.txt and feeds, with an advisory for a menu-linked noindex page.**
+  ([#2256](https://github.com/The-Verscienta/kiln_cms/issues/2256) · [long form](docs/changelog/unreleased.md#robots-flags))
+
 ### Changed
 
 - **CSV exports write a negative number as `-5`, not `'-5`; text starting with `=`, `+`, `-` or `@` is still prefixed.**
   Affects any CSV that passes a negative number to `KilnCMSWeb.CSV`; text is unchanged.
   ([long form](docs/changelog/unreleased.md#csv-numbers-unguarded))
+
+- **A console page you lack the role for now lands on a 403 `/access-denied` page naming the role it needs, instead of home with a toast; `access-denied` is now a reserved root slug.**
+  ([#2143](https://github.com/The-Verscienta/kiln_cms/issues/2143) · [long form](docs/changelog/unreleased.md#access-denied-page))
+
+- **Roles on accounts, team and settings lead with the tier that applies now ("Platform:" / "On this site:"), with
+  a line saying when a temporary one ends and what follows; "unconfirmed" is now "Email not confirmed", apart from it.**
+  ([#2366](https://github.com/The-Verscienta/kiln_cms/pull/2366) · [long form](docs/changelog/unreleased.md#effective-role-display))
 
 - **On `/editor/team`, a custom role's or member's content types and field grants are picked from the site's types
   and fields instead of typed as a list and JSON; "No fields" stores `[]`, and unrecognized stored names are kept.**
@@ -180,21 +200,21 @@ Every summary line below that was shortened links to its own entry there.
   in `AshPhoenix.Form`; the editor now builds the block list from the form's current values.
   ([long form](docs/changelog/unreleased.md#columns-child-fresh-form))
 
+- **Global search's compound leg (`huang qi`, `xiao yao san`) is about 3× cheaper per candidate name: variant
+  tsvectors and span tsqueries are built once per statement, not per row.**
+  ([#2367](https://github.com/The-Verscienta/kiln_cms/pull/2367) · [long form](docs/changelog/unreleased.md#compound-leg-hoist))
+
 - **Phoenix 1.8.16 with absinthe_phoenix 2.0.6: GraphQL subscription pushes still reach
   WebSocket clients after the bump, which silently dropped every push on absinthe_phoenix 2.0.5.**
   ([#2202](https://github.com/The-Verscienta/kiln_cms/pull/2202) · [long form](docs/changelog/unreleased.md#phoenix-1-8-16-subscription-pushes))
 
-- **The KILN_ML build compiles again: lazy_html stays below 0.1.14, which keeps `fine` at
-  0.1.6, the version EXLA 1.0.0's NIF builds against.**
-  ([long form](docs/changelog/unreleased.md#exla-fine-pin))
+- **`KILN_ML=1` builds compile EXLA again: `fine` is held at 0.1.x, since EXLA 1.0.0's NIF
+  does not build against fine 0.2.0, which lazy_html 0.1.14 had pulled into the lock.**
+  ([#2212](https://github.com/The-Verscienta/kiln_cms/pull/2212) · [#2213](https://github.com/The-Verscienta/kiln_cms/pull/2213) · [long form](docs/changelog/unreleased.md#exla-fine-pin))
 
 - **The content list's "New" menu (sites with more than three content types) is a real
   button that reports open/closed to assistive tech.**
   ([#2145](https://github.com/The-Verscienta/kiln_cms/issues/2145) · [long form](docs/changelog/unreleased.md#new-menu-button))
-
-- **`KILN_ML=1` builds compile EXLA again: `fine` is held at 0.1.x, since EXLA 1.0.0's NIF
-  does not build against fine 0.2.0, which lazy_html 0.1.14 had pulled into the lock.**
-  ([#2212](https://github.com/The-Verscienta/kiln_cms/pull/2212))
 
 - **A phrase list (multiple `:string`) holding a character whose UTF-8 contains byte 0x85
   (`內`, many other CJK characters) saves again: line splitting reads Unicode, not bytes, so

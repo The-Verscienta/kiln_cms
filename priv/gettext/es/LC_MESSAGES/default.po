@@ -855,12 +855,21 @@ msgstr "%{published} publicados · %{in_review} en revisión · %{draft} borrado
 msgid "%{publishing} going live, %{removing} coming down."
 msgstr "%{publishing} se publican, %{removing} se retiran."
 
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgid "%{role} is temporary: until %{when} (%{left}), then %{after}."
+msgstr "%{role} es temporal: hasta %{when} (%{left}); después, %{after}."
+
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgid "%{role} is temporary: until %{when} (%{left}), then %{next} until %{next_when}, then %{after}."
+msgstr "%{role} es temporal: hasta %{when} (%{left}); después, %{next} hasta %{next_when}, y luego %{after}."
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{role} on this site until %{when}."
 msgstr "%{role} en este sitio hasta el %{when}."
 
-#: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{role} until %{when}"
@@ -875,11 +884,6 @@ msgstr "%{role} hasta el %{when} — %{remaining}."
 #, elixir-autogen, elixir-format
 msgid "%{role} until %{when}."
 msgstr "%{role} hasta el %{when}."
-
-#: lib/kiln_cms_web/live/accounts_live.ex
-#, elixir-autogen, elixir-format
-msgid "%{role} · %{remaining}"
-msgstr "%{role} · %{remaining}"
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -1598,6 +1602,11 @@ msgstr "Un valor, o un valor alternativo cuando está vacío."
 msgid "A version you were comparing was superseded."
 msgstr "Una versión que estabas comparando fue reemplazada."
 
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "A viewer can read content and manage their own account, but cannot use the editing console."
+msgstr "Un lector puede leer contenido y gestionar su propia cuenta, pero no puede usar la consola de edición."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A web address. For a link to an external site, a source or a download."
@@ -1724,6 +1733,8 @@ msgid "Access"
 msgstr "Acceso"
 
 #: lib/kiln_cms_web/controllers/error_html/403.html.heex
+#: lib/kiln_cms_web/controllers/page_controller.ex
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
 #, elixir-autogen, elixir-format
 msgid "Access denied"
 msgstr "Acceso denegado"
@@ -1802,6 +1813,11 @@ msgstr "Menú de la cuenta"
 #, elixir-autogen, elixir-format
 msgid "Account removed."
 msgstr "Cuenta eliminada."
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Account status"
+msgstr "Estado de la cuenta"
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -2281,6 +2297,12 @@ msgstr "Añade detalles extraídos de este bloque y del resto de la página."
 msgid "Admin"
 msgstr "Administración"
 
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgctxt "role"
+msgid "Admin"
+msgstr "Administrador"
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Admin on every site through their account role, so there is no site tier to set here."
@@ -2543,6 +2565,11 @@ msgstr "Ya existe una cuenta con este correo electrónico. Hemos enviado un enla
 msgid "An admin approves everything"
 msgstr "Un administrador aprueba todo"
 
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "An admin can use the whole editing console for this site."
+msgstr "Un administrador puede usar toda la consola de edición de este sitio."
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "An admin confirms the date. Nothing is published until then."
@@ -2572,6 +2599,11 @@ msgstr "Un icono de aplicación debe ser cuadrado; ese es de %{width}×%{height}
 #, elixir-autogen, elixir-format
 msgid "An app icon must be under %{max} MB; that one is larger."
 msgstr "Un icono de aplicación debe pesar menos de %{max} MB; ese pesa más."
+
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "An editor can write and edit content, manage media and use the editing tools, but cannot change site settings."
+msgstr "Un editor puede escribir y editar contenido, gestionar medios y usar las herramientas de edición, pero no puede cambiar los ajustes del sitio."
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -2729,8 +2761,8 @@ msgstr "Cualquier número de filas."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Any role"
-msgstr "Cualquier rol"
+msgid "Any standing role"
+msgstr "Cualquier rol permanente"
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
@@ -3181,6 +3213,11 @@ msgstr "Volver"
 #, elixir-autogen, elixir-format
 msgid "Back to sign in"
 msgstr "Volver a iniciar sesión"
+
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
+#, elixir-autogen, elixir-format
+msgid "Back to the console"
+msgstr "Volver a la consola"
 
 #: lib/kiln_cms_web/plugs/rate_limit.ex
 #, elixir-autogen, elixir-format
@@ -5569,6 +5606,12 @@ msgstr "Los campos personalizados se conceden todos juntos: no existe un permiso
 msgid "Custom role"
 msgstr "Rol personalizado"
 
+#: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Custom role:"
+msgstr "Rol personalizado:"
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Custom roles"
@@ -6254,6 +6297,13 @@ msgstr "Nombre para mostrar"
 msgid "Display name (optional)"
 msgstr "Nombre para mostrar (opcional)"
 
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Do not follow links"
+msgstr "No seguir los enlaces"
+
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #, elixir-autogen, elixir-format
 msgid "Do not list computed fields. The daily refresh rewrites them, and each new value would be recorded as a notable edit."
@@ -6731,6 +6781,12 @@ msgstr "Edición, revisión y entrega en una sola aplicación que usted mismo al
 msgid "Editor"
 msgstr "Editor"
 
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgctxt "role"
+msgid "Editor"
+msgstr "Editor"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editor checks"
@@ -6766,6 +6822,11 @@ msgstr "Espacio de trabajo editorial"
 #, elixir-autogen, elixir-format
 msgid "Editorial — serif, narrower reading column"
 msgstr "Editorial — serif, columna de lectura más estrecha"
+
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "Editors and admins of this site can open it. Your account has a different role."
+msgstr "Los editores y administradores de este sitio pueden abrirla. Tu cuenta tiene otro rol."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -6872,6 +6933,16 @@ msgstr "Dominios de correo"
 #, elixir-autogen, elixir-format
 msgid "Email me when something is published"
 msgstr "Enviarme un correo cuando se publique algo"
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Email not confirmed"
+msgstr "Correo no confirmado"
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Email not confirmed doesn't affect the role or password sign-in. A site's own single sign-on won't sign in to this account until the email is confirmed."
+msgstr "Que el correo no esté confirmado no afecta al rol ni al inicio de sesión con contraseña. El inicio de sesión único propio de un sitio no entrará en esta cuenta hasta que se confirme el correo."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -8259,6 +8330,11 @@ msgstr "Ir a contenido"
 msgid "Go to the homepage"
 msgstr "Ir a la página de inicio"
 
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
+#, elixir-autogen, elixir-format
+msgid "Go to your account"
+msgstr "Ir a tu cuenta"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Go-live"
@@ -8544,6 +8620,13 @@ msgstr "Oculto"
 msgid "Hide"
 msgstr "Ocultar"
 
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Hide from search engines"
+msgstr "Ocultar a los motores de búsqueda"
+
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "Hide password"
@@ -8590,6 +8673,7 @@ msgid "Holds"
 msgstr "Contiene"
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Home"
@@ -9170,6 +9254,11 @@ msgstr "Responde 404 hasta que se defina un contacto abajo. Añada al menos un c
 msgid "It can go to the trash, but can't be deleted for good while anything still links to it."
 msgstr "Puede ir a la papelera, pero no se puede eliminar definitivamente mientras algo lo siga enlazando."
 
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "It is limited to people with a role your account does not have on this site."
+msgstr "Está limitada a personas con un rol que tu cuenta no tiene en este sitio."
+
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "It is selected but reports its settings missing, so new uploads go to this server's storage. Images it already holds are still served from it. Its plugin's README lists the settings it needs."
@@ -9184,6 +9273,11 @@ msgstr "Se sigue sirviendo, pero los investigadores deben tratar un archivo cadu
 #, elixir-autogen, elixir-format
 msgid "It is taken out of every record that links to it, and published ones are updated."
 msgstr "Se quita de todos los registros que lo enlazan, y los publicados se actualizan."
+
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "It manages settings that apply to the whole installation, so only a platform admin can open it, not even an admin of a single site."
+msgstr "Gestiona ajustes que afectan a toda la instalación, así que solo un administrador de la plataforma puede abrirla, ni siquiera el administrador de un único sitio."
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -10657,6 +10751,16 @@ msgstr "Nuevo tipo de contenido"
 msgid "New devices on this site subscribe with this site's own key."
 msgstr "Los dispositivos nuevos de este sitio se suscriben con la clave propia del sitio."
 
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "New entries are hidden from search engines (noindex)"
+msgstr "Las entradas nuevas se ocultan a los motores de búsqueda (noindex)"
+
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "New entries tell search engines not to follow links (nofollow)"
+msgstr "Las entradas nuevas indican a los motores de búsqueda que no sigan los enlaces (nofollow)"
+
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "New experiment"
@@ -10814,6 +10918,12 @@ msgstr "Sin metadescripción — los buscadores inventarán una a partir del tex
 #, elixir-autogen, elixir-format
 msgid "No SEO title — the page title will be used instead."
 msgstr "Sin título SEO — se usará el título de la página en su lugar."
+
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgctxt "role"
+msgid "No access"
+msgstr "Sin acceso"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -11945,6 +12055,13 @@ msgstr "Al publicar: dejarla abierta (ajuste del sitio)"
 msgid "On this page"
 msgstr "En esta página"
 
+#: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "On this site:"
+msgstr "En este sitio:"
+
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
 msgid "On-site searches that returned nothing. Each is a reader who looked for something this site doesn't cover."
@@ -12063,6 +12180,11 @@ msgstr "Solo %{count} palabras — las páginas de menos de %{min} rara vez posi
 #, elixir-autogen, elixir-format
 msgid "Only .xlf, .xliff and .xml files can be imported."
 msgstr "Solo se pueden importar archivos .xlf, .xliff y .xml."
+
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "Only admins of this site can open it. Your account has a different role."
+msgstr "Solo los administradores de este sitio pueden abrirla. Tu cuenta tiene otro rol."
 
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
@@ -12857,6 +12979,11 @@ msgstr "Acceso a la plataforma"
 #, elixir-autogen, elixir-format
 msgid "Platform role"
 msgstr "Rol de plataforma"
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Platform:"
+msgstr "Plataforma:"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -14602,11 +14729,6 @@ msgstr "Editor de texto enriquecido"
 msgid "Right now editors submit their work for review and only an admin can publish. Pick what fits this site."
 msgstr "Ahora mismo los editores envían su trabajo a revisión y solo un administrador puede publicar. Elige lo que encaje con este sitio."
 
-#: lib/kiln_cms_web/live/accounts_live.ex
-#, elixir-autogen, elixir-format
-msgid "Role"
-msgstr "Rol"
-
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Role added."
@@ -15965,6 +16087,7 @@ msgstr "Barra lateral"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/error_html/403.html.heex
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
 #: lib/kiln_cms_web/live/auth_page_title.ex
 #, elixir-autogen, elixir-format
 msgid "Sign in"
@@ -16167,6 +16290,12 @@ msgstr "Nombre del sitio"
 #, elixir-autogen, elixir-format
 msgid "Site tier"
 msgstr "Nivel del sitio"
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Site tier %{tier}, overridden by the platform admin role."
+msgstr "Nivel en el sitio: %{tier}, anulado por el rol de administrador de la plataforma."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -16423,6 +16552,11 @@ msgstr "Campaña de primavera"
 #, elixir-autogen, elixir-format
 msgid "Standard — the stock look"
 msgstr "Estándar — el aspecto de serie"
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Standing role"
+msgstr "Rol permanente"
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
@@ -16989,6 +17123,11 @@ msgstr "Equipo"
 #, elixir-autogen, elixir-format
 msgid "Team workload"
 msgstr "Carga de trabajo del equipo"
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Tells search engines not to list this page, or not to follow its links. If the page is already published, the change goes live when you publish."
+msgstr "Indica a los motores de búsqueda que no listen esta página o que no sigan sus enlaces. Si la página ya está publicada, el cambio se aplica cuando la publicas."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -18529,6 +18668,16 @@ msgstr "Este texto es solo para miembros"
 msgid "This page has no blocks yet. Add one below."
 msgstr "Esta página aún no tiene bloques. Añade uno abajo."
 
+#: lib/kiln_cms_web/components/seo_components.ex
+#, elixir-autogen, elixir-format
+msgid "This page is hidden from search engines but a menu links to it. Turn off “Hide from search engines” if that is not intended."
+msgstr "Esta página está oculta a los motores de búsqueda, pero un menú enlaza a ella. Desactiva «Ocultar a los motores de búsqueda» si no es lo que pretendías."
+
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "This page needs %{role} access"
+msgstr "Esta página requiere acceso de %{role}"
+
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
 msgid "This page needs a connection. Your work isn't lost — reconnect and the editor picks up where it left off."
@@ -18915,6 +19064,16 @@ msgstr "Para adoptarlas, ejecuta estos comandos en el servidor. El primero solo 
 #, elixir-autogen, elixir-format
 msgid "To date"
 msgstr "Hasta la fecha"
+
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
+#, elixir-autogen, elixir-format
+msgid "To get access, ask an admin of %{site} to change your role."
+msgstr "Para obtener acceso, pide a un administrador de %{site} que cambie tu rol."
+
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
+#, elixir-autogen, elixir-format
+msgid "To get access, ask the person who administers this installation."
+msgstr "Para obtener acceso, consulta a la persona que administra esta instalación."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -19313,11 +19472,6 @@ msgstr "Desbloqueado."
 #, elixir-autogen, elixir-format
 msgid "Unchanged"
 msgstr "Sin cambios"
-
-#: lib/kiln_cms_web/live/accounts_live.ex
-#, elixir-autogen, elixir-format
-msgid "Unconfirmed"
-msgstr "Sin confirmar"
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
@@ -19935,6 +20089,12 @@ msgstr "Ver sitio (se abre en una pestaña nueva)"
 msgid "View your site"
 msgstr "Ver tu sitio"
 
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgctxt "role"
+msgid "Viewer"
+msgstr "Lector"
+
 #: lib/kiln_cms_web/components/chart_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -20523,6 +20683,11 @@ msgstr "Sí, darme de baja"
 msgid "You are all caught up."
 msgstr "Estás al día."
 
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
+#, elixir-autogen, elixir-format
+msgid "You are not signed in. If you have an account with the right role, sign in first."
+msgstr "No has iniciado sesión. Si tienes una cuenta con el rol adecuado, inicia sesión primero."
+
 #: lib/kiln_cms_web/controllers/auth_controller.ex
 #: lib/kiln_cms_web/controllers/two_factor_controller.ex
 #, elixir-autogen, elixir-format
@@ -20533,6 +20698,11 @@ msgstr "Ha iniciado sesión"
 #, elixir-autogen, elixir-format
 msgid "You are now signed out"
 msgstr "Ha cerrado la sesión"
+
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
+#, elixir-autogen, elixir-format
+msgid "You are signed in as %{role} on %{site}."
+msgstr "Has iniciado sesión como %{role} en %{site}."
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -20599,6 +20769,11 @@ msgstr "No puedes exportar ese tipo de contenido."
 #, elixir-autogen, elixir-format
 msgid "You don't have a membership to manage yet."
 msgstr "Aún no tienes una suscripción que gestionar."
+
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have access to this page"
+msgstr "No tienes acceso a esta página"
 
 #: lib/kiln_cms_web/live/content_editor/inline_terms.ex
 #, elixir-autogen, elixir-format
@@ -20769,38 +20944,6 @@ msgstr "Necesitas acceso de administrador para hacer eso."
 msgid "You need admin access to run a check."
 msgstr "Necesitas acceso de administrador para ejecutar una comprobación."
 
-#: lib/kiln_cms_web/live/accounts_live.ex
-#: lib/kiln_cms_web/live/api_key_live.ex
-#: lib/kiln_cms_web/live/automation_live.ex
-#: lib/kiln_cms_web/live/backup_live.ex
-#: lib/kiln_cms_web/live/billing_live.ex
-#: lib/kiln_cms_web/live/field_definition_live.ex
-#: lib/kiln_cms_web/live/form_builder_live.ex
-#: lib/kiln_cms_web/live/form_live.ex
-#: lib/kiln_cms_web/live/funnel_builder_live.ex
-#: lib/kiln_cms_web/live/funnel_live.ex
-#: lib/kiln_cms_web/live/governance_live.ex
-#: lib/kiln_cms_web/live/image_backend_live.ex
-#: lib/kiln_cms_web/live/mail_settings_live.ex
-#: lib/kiln_cms_web/live/newsletter_live.ex
-#: lib/kiln_cms_web/live/redirect_live.ex
-#: lib/kiln_cms_web/live/slug_regen_live.ex
-#: lib/kiln_cms_web/live/social_live.ex
-#: lib/kiln_cms_web/live/system_live.ex
-#: lib/kiln_cms_web/live/team_live.ex
-#: lib/kiln_cms_web/live/trash_live.ex
-#: lib/kiln_cms_web/live/webhook_live.ex
-#: lib/kiln_cms_web/live_user_auth.ex
-#, elixir-autogen, elixir-format
-msgid "You need admin access to view that page."
-msgstr "Necesita acceso de administrador para ver esa página."
-
-#: lib/kiln_cms_web/live/link_report_live.ex
-#: lib/kiln_cms_web/live_user_auth.ex
-#, elixir-autogen, elixir-format
-msgid "You need editor access to view that page."
-msgstr "Necesita acceso de editor para ver esa página."
-
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "You picked %{count} file, but you can upload up to %{max} at a time. Remove some, then upload the rest afterwards."
@@ -20892,6 +21035,16 @@ msgstr "Tu contenido de tipo %{kind} ya está publicado."
 #, elixir-autogen, elixir-format
 msgid "Your %{kind} was returned to draft."
 msgstr "Tu contenido de tipo %{kind} volvió a borrador."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your access"
+msgstr "Su acceso"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your access to this console ends at %{when}."
+msgstr "Su acceso a esta consola termina el %{when}."
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
@@ -21107,6 +21260,11 @@ msgstr "se añade justo antes de </body>"
 #, elixir-autogen, elixir-format
 msgid "added just before </head>"
 msgstr "se añade justo antes de </head>"
+
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "admin"
+msgstr "administrador"
 
 #: lib/kiln_cms_web/live/automation_live/preview.ex
 #, elixir-autogen, elixir-format
@@ -21513,6 +21671,11 @@ msgstr "edición"
 #, elixir-autogen, elixir-format
 msgid "edited since publishing"
 msgstr "editado tras publicar"
+
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "editor"
+msgstr "editor"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
@@ -22086,6 +22249,12 @@ msgstr "huérfano"
 msgid "plain"
 msgstr "texto plano"
 
+#: lib/kiln_cms_web/controllers/page_html.ex
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "platform admin"
+msgstr "administrador de la plataforma"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "portable"
@@ -22506,11 +22675,6 @@ msgstr "traducido"
 msgid "translation gaps"
 msgstr "huecos de traducción"
 
-#: lib/kiln_cms_web/live/accounts_live.ex
-#, elixir-autogen, elixir-format
-msgid "unconfirmed"
-msgstr "sin confirmar"
-
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "under a minute"
@@ -22604,6 +22768,11 @@ msgstr "mediante %{field}"
 #, elixir-autogen, elixir-format
 msgid "view"
 msgstr "ver"
+
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "viewer"
+msgstr "lector"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format

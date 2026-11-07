@@ -177,13 +177,7 @@ defmodule KilnCMSWeb.LiveUserAuth do
         if effective_tier(socket) in [:editor, :admin] do
           {:cont, assign(socket, :pwa, true)}
         else
-          {:halt,
-           socket
-           |> Phoenix.LiveView.put_flash(
-             :error,
-             gettext("You need editor access to view that page.")
-           )
-           |> Phoenix.LiveView.redirect(to: ~p"/")}
+          {:halt, Phoenix.LiveView.redirect(socket, to: KilnCMSWeb.AccessDenied.path(:editor))}
         end
 
       _ ->
@@ -200,13 +194,7 @@ defmodule KilnCMSWeb.LiveUserAuth do
         if effective_tier(socket) == :admin do
           {:cont, assign(socket, :pwa, true)}
         else
-          {:halt,
-           socket
-           |> Phoenix.LiveView.put_flash(
-             :error,
-             gettext("You need admin access to view that page.")
-           )
-           |> Phoenix.LiveView.redirect(to: ~p"/")}
+          {:halt, Phoenix.LiveView.redirect(socket, to: KilnCMSWeb.AccessDenied.path(:admin))}
         end
 
       _ ->

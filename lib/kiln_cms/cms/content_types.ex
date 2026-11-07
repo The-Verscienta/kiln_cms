@@ -31,6 +31,8 @@ defmodule KilnCMS.CMS.ContentTypes do
           alias_pattern: String.t() | nil,
           seo_title_pattern: String.t() | nil,
           seo_description_pattern: String.t() | nil,
+          noindex_default: boolean(),
+          nofollow_default: boolean(),
           published_feed?: boolean(),
           source: :compiled | :dynamic,
           definition: struct() | nil
@@ -48,7 +50,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   # its own type's feed — the silent-shadowing failure `Validations.SlugAvailable`
   # exists to prevent. `calendar.ics` (#480) and `index.json` (#766) are the same
   # shape: two-segment delivery routes declared ahead of `/:type/:slug`.
-  @reserved_path_segments ~w(account admin api auth billing blog calendar.ics
+  @reserved_path_segments ~w(access-denied account admin api auth billing blog calendar.ics
                              content dev editor feed.json feed.xml gql index.json
                              locale mailbox media membership playground preview
                              register reset search sign_in swaggerui up)
@@ -364,6 +366,16 @@ defmodule KilnCMS.CMS.ContentTypes do
         if(function_exported?(resource, :__kiln_seo_description_pattern__, 0),
           do: resource.__kiln_seo_description_pattern__()
         ),
+      noindex_default:
+        if(function_exported?(resource, :__kiln_noindex_default__, 0),
+          do: resource.__kiln_noindex_default__(),
+          else: false
+        ),
+      nofollow_default:
+        if(function_exported?(resource, :__kiln_nofollow_default__, 0),
+          do: resource.__kiln_nofollow_default__(),
+          else: false
+        ),
       # Compiled types (Page/Post) all have a public index of published records;
       # a dynamic type says so per type (#486 reads this to decide syndication).
       published_feed?: true,
@@ -387,6 +399,8 @@ defmodule KilnCMS.CMS.ContentTypes do
       alias_pattern: definition.alias_pattern,
       seo_title_pattern: definition.seo_title_pattern,
       seo_description_pattern: definition.seo_description_pattern,
+      noindex_default: definition.noindex_default,
+      nofollow_default: definition.nofollow_default,
       published_feed?: definition.has_published_feed,
       source: :dynamic,
       definition: definition

@@ -20,6 +20,8 @@ defmodule KilnCMSWeb.ApiKeyLive do
 
   alias KilnCMS.Accounts
 
+  import KilnCMSWeb.RoleDisplay, only: [role_label: 1]
+
   # Offered key lifetimes (days). Keys always expire — no immortal credentials.
   @durations [{"30 days", 30}, {"90 days", 90}, {"1 year", 365}]
 
@@ -38,12 +40,12 @@ defmodule KilnCMSWeb.ApiKeyLive do
        |> assign(:new_key, nil)
        |> load_keys()}
     else
-      # Defense-in-depth: the `:live_admin_required` on_mount guard already
-      # bounces non-admins before mount; mirror its flash for consistency.
+      # Not redundant: the `:live_admin_required` hook admits any ADMIN of this
+      # site, and this page needs a PLATFORM admin (#419), so it refuses the rest
+      # itself, to the same access-denied page (#2143).
       {:ok,
        socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
+       |> push_navigate(to: KilnCMSWeb.AccessDenied.path(:platform))}
     end
   end
 
@@ -119,9 +121,9 @@ defmodule KilnCMSWeb.ApiKeyLive do
   end
 
   defp owner_label(%{id: id} = user, %{id: id}),
-    do: gettext("%{email} (%{role}) — you", email: user.email, role: user.role)
+    do: gettext("%{email} (%{role}) — you", email: user.email, role: role_label(user.role))
 
-  defp owner_label(user, _actor), do: "#{user.email} (#{user.role})"
+  defp owner_label(user, _actor), do: "#{user.email} (#{role_label(user.role)})"
 
   defp load_keys(socket) do
     keys =

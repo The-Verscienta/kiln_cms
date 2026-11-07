@@ -22,6 +22,11 @@ defmodule KilnCMSWeb.TeamLive do
   `KilnCMS.Accounts.RoleGrant`. A membership's `role` is always that standing
   tier; this page shows a live grant beside it and never writes one into it.
 
+  Each row leads with the tier that applies on this site **now** — resolved by
+  `KilnCMS.Accounts.Scoping.tier_source/2`, the same answer the policies get, so a
+  platform admin reads as admin whatever their membership holds — and explains a
+  live grant under it (`KilnCMSWeb.RoleDisplay`, #2142).
+
   The instance-wide account register — who has signed up at all, their platform
   role, password resets, account removal — is `KilnCMSWeb.AccountsLive`.
   """
@@ -32,11 +37,12 @@ defmodule KilnCMSWeb.TeamLive do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Role
   alias KilnCMS.Accounts.RoleGrant
+  alias KilnCMSWeb.RoleDisplay
   alias KilnCMSWeb.RoleGrantForm
   alias KilnCMSWeb.ScopeParams
   alias KilnCMSWeb.ScopePickers
 
-  @tier_options [{"Viewer", :viewer}, {"Editor", :editor}, {"Admin", :admin}]
+  import KilnCMSWeb.RoleDisplay, only: [role_label: 1, role_summary: 1]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -57,10 +63,12 @@ defmodule KilnCMSWeb.TeamLive do
        )
        |> load_data()}
     else
+      # Not redundant: the `:live_admin_required` hook admits any ADMIN of this
+      # site, and this page needs a PLATFORM admin (#419), so it refuses the rest
+      # itself, to the same access-denied page (#2143).
       {:ok,
        socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
+       |> push_navigate(to: KilnCMSWeb.AccessDenied.path(:platform))}
     end
   end
 
@@ -229,7 +237,7 @@ defmodule KilnCMSWeb.TeamLive do
        |> put_flash(
          :info,
          gettext("%{role} on this site until %{when}.",
-           role: role,
+           role: role_label(role),
            when: RoleGrantForm.format(expires_at)
          )
        )}
@@ -391,10 +399,16 @@ defmodule KilnCMSWeb.TeamLive do
     roles =
       Accounts.list_roles_for_org!(org.id, actor: actor, query: [sort: [name: :asc]])
 
+    site_admins = site_admins_without_membership(actor, org.id)
+
     socket
     |> assign(:catalog, ScopePickers.catalog(org))
     |> assign(:members, members)
-    |> assign(:site_admins, site_admins_without_membership(actor, org.id))
+    |> assign(:site_admins, site_admins)
+    # Each person's tier on this site through the decision the policies make,
+    # keyed by user — fed the rows just read rather than the policy checks'
+    # memo, so the row shows what a save or a revoke left.
+    |> assign(:access, access(members, site_admins, org))
     |> assign(:roles, roles)
   end
 
@@ -414,6 +428,13 @@ defmodule KilnCMSWeb.TeamLive do
         filter: Ash.Expr.expr(^admin and not exists(org_memberships, organization_id == ^org_id)),
         sort: [email: :asc]
       ]
+    )
+  end
+
+  defp access(members, site_admins, org) do
+    Map.new(
+      Enum.map(members, &{&1.user.id, RoleDisplay.site_access_for_membership(&1.user, org, &1)}) ++
+        Enum.map(site_admins, &{&1.id, RoleDisplay.site_access_for_membership(&1, org, nil)})
     )
   end
 
@@ -526,12 +547,12 @@ defmodule KilnCMSWeb.TeamLive do
   defp presence(""), do: nil
   defp presence(value), do: value
 
-  defp tier_options, do: @tier_options
+  defp tier_options, do: RoleDisplay.role_options()
 
   # Only tiers ABOVE the membership's standing one can be granted
   # (`RoleGrant.elevation?/2`), so offering the rest would offer a refusal.
   defp grantable_tiers(membership) do
-    Enum.filter(@tier_options, fn {_label, tier} ->
+    Enum.filter(tier_options(), fn {_label, tier} ->
       RoleGrant.elevation?(tier, membership.role)
     end)
   end
@@ -539,7 +560,7 @@ defmodule KilnCMSWeb.TeamLive do
   defp grant_summary(%{granted_role: role, granted_role_expires_at: at} = membership) do
     if RoleGrant.live?(membership) do
       gettext("%{role} until %{when}",
-        role: role,
+        role: role_label(role),
         when: RoleGrantForm.format(at)
       )
     end
@@ -669,6 +690,11 @@ defmodule KilnCMSWeb.TeamLive do
             <li :for={user <- @site_admins} id={"site-admin-#{user.id}"} class="p-4">
               <div class="min-w-0 space-y-1">
                 <span class="font-medium">{user.email}</span>
+                <.role_summary
+                  id={"site-admin-#{user.id}-role"}
+                  label={gettext("On this site:")}
+                  access={@access[user.id]}
+                />
                 <p class="text-sm text-base-content/70">
                   <.badge variant="info">{gettext("Site admin")}</.badge>
                 </p>
@@ -693,18 +719,29 @@ defmodule KilnCMSWeb.TeamLive do
               >
                 <div class="min-w-0 space-y-1">
                   <span class="font-medium">{membership.user.email}</span>
-                  <p class="text-sm text-base-content/70">
-                    <%!-- A membership never demotes a platform admin
-                          (`Scoping.effective_tier/2`), so say so beside
-                          whatever tier the row holds. --%>
-                    <.badge :if={site_admin?(membership.user)} variant="info" class="mr-1">
+                  <%!-- A membership never demotes a platform admin
+                        (`Scoping.effective_tier/2`), so the row leads with
+                        the tier that applies and names the one it overrides. --%>
+                  <.role_summary
+                    id={"member-#{membership.id}-role"}
+                    label={gettext("On this site:")}
+                    access={@access[membership.user.id]}
+                  >
+                    <:note :if={@access[membership.user.id].source == :platform}>
+                      {gettext("Site tier %{tier}, overridden by the platform admin role.",
+                        tier: role_label(RoleGrant.effective_role(membership))
+                      )}
+                    </:note>
+                  </.role_summary>
+                  <p
+                    :if={site_admin?(membership.user) or membership.custom_role}
+                    class="flex flex-wrap items-center gap-1 text-xs text-base-content/60"
+                  >
+                    <.badge :if={site_admin?(membership.user)} variant="info">
                       {gettext("Site admin")}
                     </.badge>
-                    <.badge>{membership.role}</.badge>
-                    <.badge :if={grant_summary(membership)} variant="warning" class="ml-1">
-                      {grant_summary(membership)}
-                    </.badge>
-                    <.badge :if={membership.custom_role} variant="outline" class="ml-1">
+                    <span :if={membership.custom_role}>{gettext("Custom role:")}</span>
+                    <.badge :if={membership.custom_role} variant="outline">
                       {membership.custom_role.name}
                     </.badge>
                   </p>

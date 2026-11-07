@@ -69,11 +69,20 @@ defmodule KilnCMS.CMS.Content do
     :alias_pattern,
     :seo_title_pattern,
     :seo_description_pattern,
+    :noindex_default,
+    :nofollow_default,
     :localization
   ]
 
   @doc false
   def use_options, do: @use_options
+
+  # A `noindex_default:` / `nofollow_default:` option: a boolean, or absent
+  # (false). Anything else fails the build at the caller's `use` line.
+  defp robots_default!(value, _key) when is_boolean(value), do: value
+
+  defp robots_default!(other, key),
+    do: raise(ArgumentError, "#{inspect(key)} must be true or false, got: #{inspect(other)}")
 
   # Days trashed content is retained before the nightly auto-purge.
   @trash_retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
@@ -268,6 +277,16 @@ defmodule KilnCMS.CMS.Content do
     Ash.Expr.expr(fragment("kiln_han_runs(?) = (SELECT kiln_han_runs(?))", title, ^text))
   end
 
+  # The compound leg builds its variants as rows of `(qv, sq)` — each rewrite's
+  # tsvector and each span's phrase tsquery — in two scalar subselects that
+  # name nothing of the row, so Postgres runs each once per statement as an
+  # InitPlan. Written inline, `to_tsvector(variant)` and `phraseto_tsquery(span)`
+  # were rebuilt for every candidate name × variant (Verscienta's 1.6–4.0 s
+  # compound leg); a name's own tsvector and tsquery are now built once, in a
+  # `LATERAL ... OFFSET 0` that stops the planner pulling them back into the
+  # join. `WITH ORDINALITY` keeps the two arrays paired. The same text is in
+  # both fragments below because a fragment must be a literal string.
+
   @doc false
   # The `:search_compound` prepare: the title and alias legs' phrase match,
   # run against each rewrite of the query `KilnCMS.Search.NameTerms` made
@@ -296,15 +315,15 @@ defmodule KilnCMS.CMS.Content do
           ^locale
         ) and
           fragment(
-            "EXISTS (SELECT 1 FROM unnest(?::text[], ?::text[]) AS compound(query, span) WHERE to_tsvector(kiln_regconfig(?), compound.query) @@ phraseto_tsquery(kiln_regconfig(?), ?) AND to_tsvector(kiln_regconfig(?), ?) @@ phraseto_tsquery(kiln_regconfig(?), compound.span))",
+            "EXISTS (SELECT 1 FROM (SELECT to_tsvector(kiln_regconfig(?), ?) AS tv, phraseto_tsquery(kiln_regconfig(?), ?) AS tq OFFSET 0) AS t, unnest((SELECT array_agg(to_tsvector(kiln_regconfig(?), u.q) ORDER BY u.n) FROM unnest(?::text[]) WITH ORDINALITY AS u(q, n)), (SELECT array_agg(phraseto_tsquery(kiln_regconfig(?), u.s) ORDER BY u.n) FROM unnest(?::text[]) WITH ORDINALITY AS u(s, n))) AS compound(qv, sq) WHERE compound.qv @@ t.tq AND t.tv @@ compound.sq)",
+            ^locale,
+            title,
+            ^locale,
+            title,
+            ^locale,
             ^variants,
-            ^spans,
             ^locale,
-            ^locale,
-            title,
-            ^locale,
-            title,
-            ^locale
+            ^spans
           )
       )
 
@@ -327,19 +346,19 @@ defmodule KilnCMS.CMS.Content do
     |> Enum.map(fn name ->
       Ash.Expr.expr(
         fragment(
-          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(? ->> ?::text) END) AS name_alias(value), unnest(?::text[], ?::text[]) AS compound(query, span) WHERE name_alias.value <> '' AND to_tsvector(kiln_regconfig(?), compound.query) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value) AND to_tsvector(kiln_regconfig(?), name_alias.value) @@ phraseto_tsquery(kiln_regconfig(?), compound.span))",
+          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(? ->> ?::text) END) AS name_alias(value), LATERAL (SELECT to_tsvector(kiln_regconfig(?), name_alias.value) AS nv, phraseto_tsquery(kiln_regconfig(?), name_alias.value) AS nq WHERE name_alias.value <> '' OFFSET 0) AS n, unnest((SELECT array_agg(to_tsvector(kiln_regconfig(?), u.q) ORDER BY u.n) FROM unnest(?::text[]) WITH ORDINALITY AS u(q, n)), (SELECT array_agg(phraseto_tsquery(kiln_regconfig(?), u.s) ORDER BY u.n) FROM unnest(?::text[]) WITH ORDINALITY AS u(s, n))) AS compound(qv, sq) WHERE compound.qv @@ n.nq AND n.nv @@ compound.sq)",
           custom_fields,
           ^name,
           custom_fields,
           ^name,
           custom_fields,
           ^name,
+          ^locale,
+          ^locale,
+          ^locale,
           ^variants,
-          ^spans,
           ^locale,
-          ^locale,
-          ^locale,
-          ^locale
+          ^spans
         )
       )
     end)
@@ -567,6 +586,14 @@ defmodule KilnCMS.CMS.Content do
     seo_description_pattern =
       opts |> Keyword.get(:seo_description_pattern) |> KilnCMS.Seo.Pattern.validate!()
 
+    # Robots defaults for NEW documents of this type (#2256): what `noindex` /
+    # `nofollow` start as when the caller does not say. Not retroactive.
+    noindex_default =
+      opts |> Keyword.get(:noindex_default, false) |> robots_default!(:noindex_default)
+
+    nofollow_default =
+      opts |> Keyword.get(:nofollow_default, false) |> robots_default!(:nofollow_default)
+
     # Field-level localization of record attributes (#1327), e.g.
     # `[shared: [:seo_image], fallback: [:excerpt]]` — see
     # `KilnCMS.I18n.FieldLocalization`. Validated here, so a typo fails the
@@ -740,6 +767,8 @@ defmodule KilnCMS.CMS.Content do
           :seo_keywords,
           :seo_image,
           :canonical_url,
+          :noindex,
+          :nofollow,
           :locale,
           :audience,
           :custom_fields,
@@ -819,6 +848,7 @@ defmodule KilnCMS.CMS.Content do
           # see the preparation). Declared before the default-sort build so a
           # `custom_sort` outranks `published_at` but not an explicit `sort`.
           argument :custom_filter, :map
+          argument :custom_where, {:array, KilnCMS.CMS.Types.CustomFieldCondition}
           argument :custom_sort, :string
           prepare KilnCMS.CMS.Preparations.CustomFieldQuery
 
@@ -844,7 +874,9 @@ defmodule KilnCMS.CMS.Content do
     # surface can't be asked to load every published row at once.
     published_query =
       quote do
-        list unquote(:"published_#{type}s"), :published, paginate_with: :offset
+        list unquote(:"published_#{type}s"), :published,
+          paginate_with: :offset,
+          complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
       end
 
     # JSON:API route for the published feed.
@@ -927,19 +959,30 @@ defmodule KilnCMS.CMS.Content do
 
               # The published index (newest first), across all dynamic types —
               # scope by the `type_name` filter like the plain list.
-              list :published_entries, :published, paginate_with: :offset
+              list :published_entries, :published,
+                paginate_with: :offset,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               # `paginate_with: nil` keeps these plain lists (the pre-pagination
               # schema shape); the actions' prepare caps unpaginated reads.
-              list :search_entries, :search, paginate_with: nil
-              list :semantic_search_entries, :search_semantic, paginate_with: nil
+              list :search_entries, :search,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
+
+              list :semantic_search_entries, :search_semantic,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
+
               list :autocomplete_entries, :autocomplete
 
               # Published-only delivery twins (#297) — state pinned server-side.
-              list :search_published_entries, :search_published, paginate_with: nil
+              list :search_published_entries, :search_published,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               list :semantic_search_published_entries, :search_semantic_published,
-                paginate_with: nil
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               list :autocomplete_published_entries, :autocomplete_published
             end
@@ -1080,15 +1123,24 @@ defmodule KilnCMS.CMS.Content do
               # title autocomplete, per content type. `paginate_with: nil` keeps
               # these plain lists (the pre-pagination schema shape); the actions'
               # prepare caps unpaginated reads instead.
-              list unquote(:"search_#{type}s"), :search, paginate_with: nil
-              list unquote(:"semantic_search_#{type}s"), :search_semantic, paginate_with: nil
+              list unquote(:"search_#{type}s"), :search,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
+
+              list unquote(:"semantic_search_#{type}s"), :search_semantic,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
+
               list unquote(:"autocomplete_#{type}s"), :autocomplete
 
               # Published-only delivery twins (#297) — state pinned server-side.
-              list unquote(:"search_published_#{type}s"), :search_published, paginate_with: nil
+              list unquote(:"search_published_#{type}s"), :search_published,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               list unquote(:"semantic_search_published_#{type}s"), :search_semantic_published,
-                paginate_with: nil
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               list unquote(:"autocomplete_published_#{type}s"), :autocomplete_published
             end
@@ -1232,6 +1284,8 @@ defmodule KilnCMS.CMS.Content do
         :seo_description,
         :seo_image,
         :canonical_url,
+        :noindex,
+        :nofollow,
         # `path_alias` so the canonical redirect still works on a teaser.
         :path_alias,
         :published_at,
@@ -1571,6 +1625,7 @@ defmodule KilnCMS.CMS.Content do
         if(published?, do: nil, else: quote(do: argument(:state, :atom))),
         quote(do: argument(:tag_ids, {:array, :uuid})),
         quote(do: argument(:custom_filter, :map)),
+        quote(do: argument(:custom_where, {:array, KilnCMS.CMS.Types.CustomFieldCondition})),
         quote(do: prepare(KilnCMS.CMS.Preparations.CustomFieldQuery))
       ]
       |> Enum.reject(&is_nil/1)
@@ -2111,6 +2166,12 @@ defmodule KilnCMS.CMS.Content do
           def __kiln_seo_title_pattern__, do: unquote(seo_title_pattern)
 
           def __kiln_seo_description_pattern__, do: unquote(seo_description_pattern)
+
+          # Robots defaults for new documents (#2256); dynamic entries carry
+          # theirs on the TypeDefinition row.
+          def __kiln_noindex_default__, do: unquote(noindex_default)
+
+          def __kiln_nofollow_default__, do: unquote(nofollow_default)
         end
       end
 
@@ -2699,6 +2760,7 @@ defmodule KilnCMS.CMS.Content do
           # preparation turns these into typed `get_path` predicates/sort keys
           # validated against the FieldDefinition registry (docs/json-api.md).
           argument :custom_filter, :map
+          argument :custom_where, {:array, KilnCMS.CMS.Types.CustomFieldCondition}
           argument :custom_sort, :string
           prepare KilnCMS.CMS.Preparations.CustomFieldQuery
 
@@ -2736,6 +2798,8 @@ defmodule KilnCMS.CMS.Content do
           # stripped), so a title alone is enough to create content.
           change KilnCMS.CMS.Changes.DeriveSlug
           change KilnCMS.CMS.Changes.DeriveAlias
+          # The type's robots defaults, only where the caller left a flag out (#2256).
+          change KilnCMS.CMS.Changes.ApplyRobotsDefaults
           # Stamp the acting user as the author (system/seed creates leave nil).
           change relate_actor(:author, allow_nil?: true)
           # A draft a `:draft_write` API key creates records which key (and the
@@ -4360,6 +4424,20 @@ defmodule KilnCMS.CMS.Content do
         attribute :canonical_url, :string,
           public?: true,
           constraints: [max_length: KilnCMS.Limits.url()]
+
+        # Robots directives for this document (#2256). Document-level and shared
+        # across locales; a copy and a translation inherit them from the source.
+        # Rendered as `<meta name="robots">` / `x-robots-tag` and used to leave the
+        # document out of discovery surfaces — delivery (APIs, sync) is unaffected.
+        attribute :noindex, :boolean,
+          default: false,
+          allow_nil?: false,
+          public?: true
+
+        attribute :nofollow, :boolean,
+          default: false,
+          allow_nil?: false,
+          public?: true
 
         attribute :locale, :string,
           default: "en",

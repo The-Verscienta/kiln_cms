@@ -270,7 +270,7 @@ defmodule KilnCMSWeb.OverviewLiveTest do
   end
 
   test "viewers are redirected away", %{conn: conn} do
-    assert {:error, {:redirect, %{to: "/"}}} =
+    assert {:error, {:redirect, %{to: "/access-denied?needs=editor"}}} =
              conn |> log_in(authed_user(:viewer)) |> live(~p"/editor/overview")
   end
 

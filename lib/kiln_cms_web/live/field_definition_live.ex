@@ -63,34 +63,25 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     actor = socket.assigns.current_user
     org = socket.assigns.current_org
 
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
-      {:ok,
-       socket
-       |> assign(:actor, actor)
-       |> assign(:page_title, gettext("Custom fields"))
-       |> assign(:content_types, ContentTypes.all())
-       |> assign(:dynamic_types, ContentTypes.dynamic_all(org))
-       |> assign(:field_types, FieldDefinition.field_types())
-       |> assign(:target_types, ContentTypes.options(org))
-       |> assign(:edit, nil)
-       |> assign(:link_form, nil)
-       |> assign(:default_scopes, [])
-       |> assign(:samples, %{})
-       # The builder's static lists, built once: each is a page of gettext
-       # calls, and rebuilding them per keystroke is wasted work.
-       |> assign(:recipes, Computed.Recipes.all())
-       |> assign(:function_categories, KilnCMSWeb.ComputedBuilderComponents.categories())
-       |> reset_create_form()
-       |> load_definitions()
-       |> assign_create_builder()}
-    else
-      # Defense-in-depth: the `:live_admin_required` on_mount guard already
-      # redirects non-admins before mount; mirror its flash here for consistency.
-      {:ok,
-       socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
-    end
+    {:ok,
+     socket
+     |> assign(:actor, actor)
+     |> assign(:page_title, gettext("Custom fields"))
+     |> assign(:content_types, ContentTypes.all())
+     |> assign(:dynamic_types, ContentTypes.dynamic_all(org))
+     |> assign(:field_types, FieldDefinition.field_types())
+     |> assign(:target_types, ContentTypes.options(org))
+     |> assign(:edit, nil)
+     |> assign(:link_form, nil)
+     |> assign(:default_scopes, [])
+     |> assign(:samples, %{})
+     # The builder's static lists, built once: each is a page of gettext
+     # calls, and rebuilding them per keystroke is wasted work.
+     |> assign(:recipes, Computed.Recipes.all())
+     |> assign(:function_categories, KilnCMSWeb.ComputedBuilderComponents.categories())
+     |> reset_create_form()
+     |> load_definitions()
+     |> assign_create_builder()}
   end
 
   # `?type=<scope>` arrives from the content-types screen right after a type is

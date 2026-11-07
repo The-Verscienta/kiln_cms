@@ -258,7 +258,7 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
 
 **Filtering** — `custom_filter[<name>]=<value>` (equality) or
 `custom_filter[<name>][<op>]=<value>` with `eq`, `not_eq`, `gt`, `gte`, `lt`,
-`lte`, `in`, `ilike`, `null` (`is_nil` is a synonym). Conditions are ANDed (with each other and with
+`lte`, `in`, `ilike`, `contains`, `starts_with`, `null` (`is_nil` is a synonym). Conditions are ANDed (with each other and with
 `filter[...]`). Semantics:
 
 - Field names are validated against the `FieldDefinition` registry — an
@@ -269,6 +269,10 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
 - `in` matches any of a list: `custom_filter[color][in][]=red&custom_filter[color][in][]=blue`.
 - `ilike` (text-like fields only) takes the usual `%` wildcards:
   `custom_filter[subtitle][ilike]=%leather%`.
+- `contains` / `starts_with` (text-like fields only) match case-insensitively
+  and take the value literally: `%`, `_` and `\` are escaped, unlike `ilike`.
+  GraphQL's typed `customWhere` uses them too
+  ([headless-graphql-api.md](headless-graphql-api.md)).
 - `null` takes `true`/`false` and tests whether the record has the field at
   all. `is_nil` is accepted as the same operator, so `filter[x][is_nil]=true`
   reads the same on a column and on a custom field.

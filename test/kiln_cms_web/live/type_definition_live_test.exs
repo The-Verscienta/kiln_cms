@@ -216,7 +216,9 @@ defmodule KilnCMSWeb.TypeDefinitionLiveTest do
 
   test "non-admins are redirected away", %{conn: conn} do
     editor = authed_user(:editor)
-    assert {:error, {:redirect, %{to: "/"}}} = conn |> log_in(editor) |> live(~p"/editor/types")
+
+    assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+             conn |> log_in(editor) |> live(~p"/editor/types")
   end
 
   test "a dynamic type is offered as a scope on the custom-fields page", %{conn: conn} do
@@ -247,5 +249,49 @@ defmodule KilnCMSWeb.TypeDefinitionLiveTest do
     assert definition.id
            |> CMS.field_definitions_for_definition!(authorize?: false)
            |> Enum.any?(&(&1.name == "servings"))
+  end
+
+  # #2256: a type's robots defaults are set where its other defaults are.
+  test "the robots defaults are set when a type is created", %{conn: conn} do
+    admin = authed_user(:admin)
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/types")
+    name = "robots#{System.unique_integer([:positive])}"
+
+    lv
+    |> form("#new-type-form",
+      type_definition: %{name: name, label: "Robots", noindex_default: "true"}
+    )
+    |> render_submit()
+
+    definition = CMS.get_type_definition_by_name!(name, authorize?: false)
+    assert definition.noindex_default == true
+    assert definition.nofollow_default == false
+  end
+
+  # The edit form is on the page beside the new-type form; their input ids
+  # must differ or LiveViewTest raises on the duplicate id.
+  test "the robots defaults are edited on an existing type", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    definition =
+      CMS.create_type_definition!(
+        %{name: "edrobots#{System.unique_integer([:positive])}", label: "Ed"},
+        actor: admin
+      )
+
+    refute definition.noindex_default
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/types")
+    lv |> element("#type-#{definition.id} button[phx-click=edit]") |> render_click()
+
+    lv
+    |> form("#edit-type-#{definition.id}",
+      type_definition: %{noindex_default: "true", nofollow_default: "true"}
+    )
+    |> render_submit()
+
+    saved = CMS.get_type_definition!(definition.id, actor: admin)
+    assert saved.noindex_default == true
+    assert saved.nofollow_default == true
   end
 end

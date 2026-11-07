@@ -551,6 +551,19 @@ defmodule KilnCMS.Firing.Engine do
 
   defp annotate(body, _surface, _inherited), do: body
 
+  # The document's robots flags (#2256), so a consumer rendering its own pages
+  # can emit the directive. Additive and absent unless a flag is set — an
+  # artifact of an ordinary document is byte-identical to what it was, which is
+  # why `@format_version` does not move. Absent means both false.
+  defp put_robots(body, document) do
+    noindex = Map.get(document, :noindex) == true
+    nofollow = Map.get(document, :nofollow) == true
+
+    if noindex or nofollow,
+      do: Map.put(body, "robots", %{"noindex" => noindex, "nofollow" => nofollow}),
+      else: body
+  end
+
   # ── per-surface composition (whole-doc artifact of per-block fragments, A1) ──
 
   defp compose(_document, typed, _custom, :web) do
@@ -583,6 +596,7 @@ defmodule KilnCMS.Firing.Engine do
     }
     |> put_plain_fields(custom)
     |> put_portable_fields(custom)
+    |> put_robots(document)
   end
 
   # Clean chunked Markdown for LLM/answer-engine extraction (#357, GEO).

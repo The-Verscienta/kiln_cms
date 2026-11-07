@@ -50,7 +50,7 @@ defmodule KilnCMSWeb.SitePushLiveTest do
       user = authed_user(:editor)
       grant_tier(user, org, :editor)
 
-      assert {:error, {:redirect, %{to: "/"}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
                conn |> org_conn(org) |> log_in(user) |> live(~p"/editor/site-push")
     end
 

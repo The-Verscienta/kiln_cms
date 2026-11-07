@@ -81,7 +81,43 @@ carries the reasoning.
   back: the previous release ignores the indexes, and the migration's `down`
   drops them. See [Custom fields](../json-api.md#which-custom-filters-use-an-index).
 
+<a id="robots-flags-upgrade"></a>
+
+- **Content tables gain `noindex` and `nofollow`; `type_definitions` gains
+  `noindex_default` and `nofollow_default`. Overlays run `mix ash.codegen` for
+  their own content types.** All four are `boolean NOT NULL DEFAULT false`, so
+  the migrations are expand-only: the previous release ignores the columns and
+  gets `false` on insert. No re-fire is needed.
+
 ## Added
+
+<a id="graphql-custom-where"></a>
+
+- **GraphQL filters custom fields with typed operators (`customWhere`, #2290).**
+  Every GraphQL list that takes `customFilter` (published, keyword and semantic
+  search, their `…Published` twins, for compiled types and `Entry`) also takes
+  `customWhere: [CustomFieldCondition!]`. A condition is `name` plus exactly one
+  kind key (`string`, `int`, `float`, `boolean`, `date`, `dateTime`) holding that
+  kind's operators, so a wrong operand (`float: {gt: "abc"}`) fails GraphQL
+  validation. Conditions are ANDed. `customFilter` and `customSort` are unchanged.
+  - **One authority.** The conditions are translated into `customFilter`'s own
+    conditions inside `CustomFieldQuery`, so casting, jsonb comparison, tenant and
+    Entry scoping, and privacy are the same code. The kind given must be the
+    field's (`FieldKind`); a mismatch names the field's actual kind. A private
+    field is the same `unknown custom field` error as a missing one below editor.
+  - **Not typed in v1.** A `multiple` field takes only `string: {eq | in}` (list
+    contains, as before); reference, media, group, geolocation, link fields and the
+    relationship operators stay on `customFilter`.
+  - **New operators.** `contains` and `startsWith` match text case-insensitively
+    and take `%`, `_` and `\` literally. `customFilter` accepts them as
+    `contains` / `starts_with` (additive; text-like fields only).
+  - **Limits.** At most 10 conditions per query, 50 values in an `in`; each
+    condition adds 5 to the query's complexity. Nothing indexes these predicates
+    beyond the equality index of #2321.
+  - **API surface.** Additive. `docs/api/schema.graphql` and
+    `docs/api/openapi.json` gain the argument (the JSON:API routes list
+    `custom_where` as an array of objects; the GraphQL mutations that load a
+    record list it beside `customFilter`).
 
 <a id="move-to-trash-in-editor"></a>
 
@@ -450,8 +486,18 @@ carries the reasoning.
     in `kiln_plugin` 1.4.0. A type without it, or compiled against an older
     SDK, is served as `JsonValue`, so nothing breaks. Publish the SDK to Hex
     before a plugin requires `~> 1.4`.
-  - **Not yet.** Swift and Kotlin emitters for the GraphQL section, typed
-    filter operators, a per-site SDL with a regenerate step, and typed writes.
+  - **Swift and Kotlin.** `?format=swift-graphql` and `?format=kotlin-graphql`
+    add the same section to the native-app models: per content type a
+    `<Type>CustomFields` result type (`Codable` struct / `@Serializable` data
+    class) with the fragment as `fragment` / `FRAGMENT`, and a
+    `KilnCustomFieldValue` enum / sealed interface for the `fields(names:)`
+    kinds, `GeolocationValue` and `MediaValue` included, with an `unknown` case
+    for a kind added later. Aliases, collision rules and fragment text are
+    shared with the TypeScript emitter (`KilnCMS.SchemaExport.GraphQL`), so the
+    three cannot disagree. The Kotlin form uses package `kiln`; call
+    `KilnCMS.SchemaExport.Kotlin.emit_graphql/2` for another.
+  - **Not yet.** Typed filter operators, a per-site SDL with a regenerate step,
+    and typed writes.
   - **Upgrade.** Additive and org-independent: no migration, no config, and
     rolling the pin back removes the new fields only. The new fields
     are added to every content type in the schema's `:content_domains`, so an
@@ -512,6 +558,24 @@ carries the reasoning.
   block exposes only `url` and `alt`. Removing the key is safe. No migration.
   See [Field-level localization](../field-level-localization.md#making-core-block-fields-per-locale-2270).
 
+<a id="robots-flags"></a>
+
+- **Editors can keep a document out of search engines.** Pages, posts and
+  entries gain `noindex` and `nofollow` flags, edited under the canonical URL
+  in the SEO panel (and subject to field grants). They render as
+  `<meta name="robots">` and an `x-robots-tag` header, both built by one
+  helper so they cannot disagree; the password-lock page keeps its
+  unconditional `noindex, nofollow`. Noindex documents are left out of
+  `sitemap.xml`, the news sitemap, `llms.txt` and every feed. Delivery is
+  unaffected: the JSON:API, GraphQL, change feed and fired artifacts still
+  carry them, and the `:json` artifact gains an optional `robots` object only
+  when a flag is set (no `format_version` bump). Versions, working copies,
+  duplicates, translations and export/import carry the flags; restoring a
+  version written before the flags existed leaves the current values alone. A type can set
+  `noindex_default` / `nofollow_default` (compiled option or Content-type
+  setting) for new documents only. An advisory warns when a published page
+  linked from an enabled menu item is set to noindex.
+
 ## Changed
 
 <a id="csv-numbers-unguarded"></a>
@@ -526,6 +590,31 @@ carries the reasoning.
   is given one (core exports mostly write counts, which are not negative; an
   overlay's may). `parse/1` reads
   both forms back to `-5`.
+
+<a id="access-denied-page"></a>
+
+- **A console page you lack the role for now lands on a persistent `/access-denied`
+  page instead of bouncing you home with a toast (#2143).** Every console role
+  guard (editor-only, admin-only and the instance-wide pages such as API keys,
+  accounts, team, backups and system) used to flash "You need admin access to
+  view that page." and redirect to `/`, so the explanation vanished in seconds
+  and you landed somewhere unrelated. They now redirect to
+  `/access-denied?needs=editor|admin|platform`, a `403` page that names the role
+  the page needs, shows your own role on this site and what it can do, and says
+  who to ask (an admin of the site, or whoever administers the installation for
+  `platform`). A signed-out visitor gets a **Sign in** button; a signed-in editor
+  or admin gets **Back to the console**. `needs` is whitelisted: any other value
+  renders generic copy and is never echoed, your role is read from the session
+  rather than the URL, and no return path is accepted. The page is sent with
+  `x-robots-tag: noindex`. For overlay authors: build the URL with
+  `KilnCMSWeb.AccessDenied.path/1` instead of a flash and `redirect(to: ~p"/")`.
+  **`access-denied` is now a reserved root slug and path segment.** Content
+  whose slug is `access-denied` at the site root is shadowed by the new page;
+  the reserved list now refuses it as a content type path segment and a path
+  alias, but nothing renames existing records, so change the slug or alias of
+  any such page. There are no migrations, environment
+  variables or upgrade steps; rolling the pin back restores the redirect and toast.
+  ([#2143](https://github.com/The-Verscienta/kiln_cms/issues/2143))
 
 <a id="team-scope-pickers"></a>
 
@@ -554,6 +643,50 @@ carries the reasoning.
   names a grant can usefully name for a type. No migration, config or API
   change; rolling back the pin is safe. See
   [Scope a custom role](../granular-rbac.md#scope-a-custom-role).
+
+<a id="effective-role-display"></a>
+
+- **Every screen that shows a role now leads with the tier that applies now,
+  and says in words when a temporary one ends and what it returns to.** The
+  accounts register, an account's page, the team page and the account's
+  Sites panel showed the standing role, a live grant and the account's status
+  as look-alike badges side by side, with nothing saying which one counts
+  (#2142). A platform admin's team row showed their membership tier, which the
+  policies ignore.
+
+  Each role now reads as one badge after a scope label: **Platform:** on
+  `/editor/accounts` (the list and an account's header), and **On this site:**
+  on `/editor/team`, an account's **Sites** panel, and a new **Your access**
+  box in **Profile** on **Your settings**. The site tier is decided by the
+  same function the policies use, so a platform admin reads as *Admin*, with
+  the note "Site tier Viewer, overridden by the platform admin role." when
+  their membership holds less. While a grant is live, a line under the badge
+  says "Admin is temporary: until 2026-11-14 17:00 UTC (7 days left), then
+  Viewer.", or names both steps when a second live grant outlasts the first.
+  No line appears when nothing would change. **Your settings** also says
+  "Your access to this console ends at …" when your tier will drop to viewer
+  or no access. Platform admins who have no membership on a site are listed
+  on its team page with **On this site:** *Admin*.
+
+  Account status is now its own group of badges under the role. *unconfirmed*
+  is now **Email not confirmed**, and the account page explains it: it doesn't
+  affect the role or password sign-in, and only a site's own single sign-on
+  waits for it. On the register, the filters read **Standing role** /
+  **Any standing role** and **Email not confirmed**; they match the same
+  rows as before (the role filter is still the stored role, not the badge).
+  Role names are translated wherever they appear, including the owner label
+  on API keys.
+
+  For developers, `KilnCMS.Accounts.Scoping.tier_source/2` returns
+  `{tier, source, record}`, the tier with the branch that decided it, and
+  `effective_tier/2` now returns its first element (same decisions as before).
+  `Scoping.tier_changes/2` lists `{expires_at, tier}` changes ahead; the
+  `tier_source_for_membership/3` and `tier_changes_for_membership/3` twins take
+  an already-read membership. `KilnCMSWeb.RoleDisplay` renders them. A page
+  left open past an expiry still shows the old tier until it is reloaded; the
+  policies stop honouring the grant on time regardless. No migration, config
+  or API change; rolling back the pin is safe. See
+  [See which role applies now](../account-administration.md#see-which-role-applies-now).
 
 <a id="webhook-secret-masked"></a>
 
@@ -838,8 +971,12 @@ carries the reasoning.
   unaffected. The `-ml` image and any overlay building with `KILN_ML` on
   failed, and an overlay could not pin around it, since
   `mix kiln.plugins.doctor` holds core dependencies at core's lock.
-  `mix.exs` now caps `lazy_html` below 0.1.14, which puts both lock entries
-  back to their v1.8.0 versions. CI's ML leg missed the break because EXLA
+  Two guards now hold it, landed in parallel: the KILN_ML dependency list
+  requires `fine ~> 0.1.0` (#2212), and `lazy_html` is capped below 0.1.14
+  (#2213), so a lean lock refresh, where the KILN_ML list isn't loaded, can't
+  pull fine 0.2.0 back in either. Both lock entries are back to their v1.8.0
+  versions; lift both guards together once an EXLA release builds against
+  fine 0.2. CI's ML leg missed the break because EXLA
   caches `libexla.so` under a key without `fine`, and the leg restored that
   cache on the lock change. It now rebuilds the NIF from source whenever its
   cache isn't an exact hit. Overlays that re-seeded `project.lock` from the
@@ -872,3 +1009,18 @@ carries the reasoning.
   fail `mix hex.audit` on every branch until taken. Lock-only: `mix
   deps.unlock ecto ash_sql`, nothing else moved.
   ([#2204](https://github.com/The-Verscienta/kiln_cms/pull/2204))
+
+<a id="compound-leg-hoist"></a>
+
+- **Global search's compound leg is about 3× cheaper per candidate name.**
+  The leg matches a name written spaced or joined differently from the query
+  (`huang qi` for Huangqi, `xiao yao san`). It rebuilt each rewrite's
+  `to_tsvector` and each span's `phraseto_tsquery` for every candidate row ×
+  variant, though neither depends on the row. Both are now scalar subselects
+  Postgres runs once per statement, and a name's own tsvector and tsquery are
+  built once per name in a `LATERAL ... OFFSET 0`. Same rows, same order;
+  empty names are still skipped before any tsquery is built. On a synthetic
+  2,047-row table with 16 variants, `EXPLAIN ANALYZE` went from about 30 ms to
+  about 10 ms. Verscienta reported 1.6–4.0 s for the leg on multi-word queries
+  after #2205; that figure has not been re-measured on their data.
+  ([#2367](https://github.com/The-Verscienta/kiln_cms/pull/2367))

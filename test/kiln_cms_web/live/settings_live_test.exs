@@ -10,15 +10,21 @@ defmodule KilnCMSWeb.SettingsLiveTest do
 
   @password "password123456"
 
-  defp authed_user(role) do
+  defp authed_user(role, attrs \\ %{}) do
     email = "settings-live-#{System.unique_integer([:positive])}@example.com"
 
-    Ash.Seed.seed!(User, %{
-      email: email,
-      hashed_password: Bcrypt.hash_pwd_salt(@password),
-      confirmed_at: DateTime.utc_now(),
-      role: role
-    })
+    Ash.Seed.seed!(
+      User,
+      Map.merge(
+        %{
+          email: email,
+          hashed_password: Bcrypt.hash_pwd_salt(@password),
+          confirmed_at: DateTime.utc_now(),
+          role: role
+        },
+        attrs
+      )
+    )
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
@@ -43,6 +49,24 @@ defmodule KilnCMSWeb.SettingsLiveTest do
   end
 
   defp reload(user), do: Ash.get!(User, user.id, authorize?: false)
+
+  defp in_hours(hours), do: DateTime.add(DateTime.utc_now(), hours, :hour)
+
+  defp access_tier(view) do
+    view
+    |> element("#settings-access-role-tier")
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.text()
+    |> String.trim()
+  end
+
+  defp seed_membership(user, attrs) do
+    Ash.Seed.seed!(
+      KilnCMS.Accounts.OrgMembership,
+      Map.merge(%{user_id: user.id, organization_id: KilnCMS.Accounts.default_org_id()}, attrs)
+    )
+  end
 
   describe "authorization" do
     test "anonymous users are redirected to sign-in", %{conn: conn} do
@@ -425,6 +449,130 @@ defmodule KilnCMSWeb.SettingsLiveTest do
       refute is_nil(reload(user).totp_secret)
 
       on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
+    end
+  end
+
+  # #2142: "Your access" — the tier this page was reached with on this site, as
+  # the policies resolve it, and when a temporary one ends.
+  describe "your access" do
+    test "a viewer with a live editor grant sees it, its end, and what that ends",
+         %{conn: conn} do
+      user = authed_user(:viewer, %{granted_role: :editor, granted_role_expires_at: in_hours(5)})
+      {:ok, view, _html} = conn |> log_in(user) |> live(~p"/editor/settings")
+
+      assert access_tier(view) == "Editor"
+      assert has_element?(view, "#settings-access-role", "On this site:")
+      assert has_element?(view, "#settings-access-role-grant", "Editor is temporary: until")
+      assert has_element?(view, "#settings-access-role-grant", "then Viewer.")
+      assert has_element?(view, "#settings-access", "Your access to this console ends at")
+    end
+
+    test "an editor with a live admin grant on their membership", %{conn: conn} do
+      user = authed_user(:viewer)
+
+      seed_membership(user, %{
+        role: :editor,
+        granted_role: :admin,
+        granted_role_expires_at: in_hours(5)
+      })
+
+      {:ok, view, _html} = conn |> log_in(user) |> live(~p"/editor/settings")
+
+      assert access_tier(view) == "Admin"
+      assert has_element?(view, "#settings-access-role-grant", "then Editor.")
+      refute has_element?(view, "#settings-access", "ends at")
+      refute has_element?(view, "#settings-access-role", "platform admin")
+    end
+
+    test "a standing platform admin is labelled so, with nothing temporary", %{conn: conn} do
+      {:ok, view, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/settings")
+
+      assert access_tier(view) == "Admin"
+      assert has_element?(view, "#settings-access-role", "platform admin")
+      refute has_element?(view, "#settings-access-role-grant")
+    end
+
+    test "a membership-less editor on the default site gets their account role",
+         %{conn: conn} do
+      {:ok, view, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/settings")
+
+      assert access_tier(view) == "Editor"
+      refute has_element?(view, "#settings-access-role-grant")
+    end
+
+    # A temporary platform admin whose membership grant expires first is a
+    # viewer when the platform grant ends — and loses the console then.
+    test "a membership grant that ends first is not where the tier lands", %{conn: conn} do
+      user = authed_user(:viewer, %{granted_role: :admin, granted_role_expires_at: in_hours(5)})
+
+      seed_membership(user, %{
+        role: :viewer,
+        granted_role: :editor,
+        granted_role_expires_at: in_hours(2)
+      })
+
+      {:ok, view, _html} = conn |> log_in(user) |> live(~p"/editor/settings")
+
+      assert access_tier(view) == "Admin"
+      assert has_element?(view, "#settings-access-role-grant", "then Viewer.")
+      refute has_element?(view, "#settings-access-role-grant", "Editor")
+      assert has_element?(view, "#settings-access", "Your access to this console ends at")
+    end
+
+    test "a membership grant that outlasts the platform one is a second step",
+         %{conn: conn} do
+      platform_until = in_hours(5)
+      member_until = in_hours(9)
+
+      user =
+        authed_user(:viewer, %{granted_role: :admin, granted_role_expires_at: platform_until})
+
+      seed_membership(user, %{
+        role: :viewer,
+        granted_role: :editor,
+        granted_role_expires_at: member_until
+      })
+
+      {:ok, view, _html} = conn |> log_in(user) |> live(~p"/editor/settings")
+      line = view |> element("#settings-access-role-grant") |> render()
+
+      assert access_tier(view) == "Admin"
+
+      assert line =~
+               "Admin is temporary: until #{KilnCMSWeb.RoleGrantForm.format(platform_until)}"
+
+      assert line =~
+               "then Editor until #{KilnCMSWeb.RoleGrantForm.format(member_until)}, then Viewer."
+
+      # Console access ends with the second step, not the first.
+      assert has_element?(
+               view,
+               "#settings-access",
+               "ends at #{KilnCMSWeb.RoleGrantForm.format(member_until)}"
+             )
+    end
+
+    test "a temporary platform admin who is admin here anyway is not temporary",
+         %{conn: conn} do
+      user = authed_user(:viewer, %{granted_role: :admin, granted_role_expires_at: in_hours(5)})
+      seed_membership(user, %{role: :admin})
+
+      {:ok, view, _html} = conn |> log_in(user) |> live(~p"/editor/settings")
+
+      assert access_tier(view) == "Admin"
+      refute has_element?(view, "#settings-access-role-grant")
+      refute has_element?(view, "#settings-access", "ends at")
+    end
+
+    test "shows only the signed-in user's access", %{conn: conn} do
+      colleague =
+        authed_user(:editor, %{granted_role: :admin, granted_role_expires_at: in_hours(5)})
+
+      {:ok, view, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/settings")
+
+      assert access_tier(view) == "Editor"
+      refute has_element?(view, "#settings-access-role-grant")
+      refute html =~ to_string(colleague.email)
     end
   end
 end

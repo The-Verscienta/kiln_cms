@@ -70,10 +70,8 @@ defmodule KilnCMSWeb.ExperimentsLiveTest do
     end
 
     test "turns away a non-admin", %{conn: conn} do
-      assert {:error, {:redirect, %{to: "/", flash: flash}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
                conn |> log_in(authed_user(:editor)) |> live(~p"/editor/experiments")
-
-      assert flash["error"] =~ "admin access"
     end
 
     test "loads for an admin, with the switch-off notice when experiments are off", %{conn: conn} do
