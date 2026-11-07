@@ -358,6 +358,7 @@ defmodule KilnCMS.MixProject do
       "docs/two-factor-auth.md": [],
       "docs/sso.md": [],
       "docs/threat-model.md": [],
+      "docs/ip-blocking.md": [title: "Blocking addresses"],
       "docs/secrets-rotation.md": [],
       # Design notes & decision records
       "docs/advanced-analytics-plan.md": [],
@@ -531,6 +532,7 @@ defmodule KilnCMS.MixProject do
         "docs/two-factor-auth.md",
         "docs/sso.md",
         "docs/threat-model.md",
+        "docs/ip-blocking.md",
         "docs/secrets-rotation.md"
       ],
       "Design notes & decision records": [

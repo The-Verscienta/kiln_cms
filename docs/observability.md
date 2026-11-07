@@ -64,6 +64,20 @@ not on this event: they read the stored analytics tables, not the telemetry
 stream. Referrer attribution is off by default (`KILN_ANALYTICS_REFERRERS`).
 See [`advanced-analytics-plan.md`](./advanced-analytics-plan.md).
 
+## Blocked addresses
+
+`kiln_cms.ip_block.refused.count` counts requests and socket connects refused by
+a site's IP block list ([ip-blocking.md](ip-blocking.md), #2242). It is tagged by
+`surface`: `http`, `live`, `gql`, `collab` or `bridge`. The address is deliberately
+not a tag, a metadata field or a log line, so the counter says that blocking is
+happening and where, not who. The underlying telemetry event is
+`[:kiln_cms, :ip_block, :refused]` (measurement `count`, metadata `surface`).
+
+Useful Grafana panel: `sum(rate(kiln_cms_ip_block_refused_count[5m])) by (surface)`.
+A rise right after you add a rule is expected. A rise on `http` with no rule
+change, or a rule that suddenly matches everyone (a proxy not declared in
+`TRUSTED_PROXIES`), is worth a look.
+
 ## Breached-password checks
 
 Every lookup the breached-password check makes (#2240) emits one event,
