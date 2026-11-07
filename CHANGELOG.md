@@ -94,6 +94,12 @@ Every summary line below that was shortened links to its own entry there.
   Platform admins, at `/editor/backups`; no new settings.
   ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217) · [long form](docs/changelog/unreleased.md#backup-history))
 
+- **Custom fields can be shown or required only when another field has a given value (Conditions in `/editor/fields`).**
+  Hidden values are kept and still served by the API; new `visible_when` / `required_when` attributes; additive migration, nothing else to run.
+  ([long form](docs/changelog/unreleased.md#conditional-custom-fields))
+
+
+
 - **Admins choose what happens to a breached password at Organization → Password policy: off, warn (default) or block for administrators.**
   Checked on register, change, reset and first-run setup, by k-anonymity.
   ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-check))
