@@ -660,6 +660,12 @@ defmodule KilnCMSWeb.Router do
     get "/editor/analytics/export.json", AnalyticsExportController, :export
     get "/editor/analytics/export.csv", AnalyticsExportController, :export_csv
 
+    # The content list as a download (#2293): what `/editor` shows for the same
+    # filters, or a selection of its rows. Editor-gated in the controller, which
+    # also charges the `:export` budget and answers 413 over the row cap.
+    get "/editor/content/export.csv", ContentExportController, :export_csv
+    get "/editor/content/export.json", ContentExportController, :export_json
+
     # XLIFF export for translation vendors (#502) — a file download, so a
     # controller route; editor-gated in the controller for the same reason as
     # the analytics exports above (`TranslationsLive` is editor-visible).

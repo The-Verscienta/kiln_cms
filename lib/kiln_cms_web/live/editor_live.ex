@@ -21,11 +21,11 @@ defmodule KilnCMSWeb.EditorLive do
   alias KilnCMS.Compliance
   alias KilnCMS.Compliance.Settings
   alias KilnCMS.I18n
-  alias KilnCMSWeb.ContentEditor.NewDraft
   alias KilnCMSWeb.ContentEditor.Shared
   alias KilnCMSWeb.ContentTrash
   alias KilnCMSWeb.EditorLive.FieldCells
   alias KilnCMSWeb.EditorLive.Filters
+  alias KilnCMSWeb.EditorLive.ListScope
 
   import KilnCMSWeb.ComplianceComponents, only: [compliance_grade_badge: 1]
 
@@ -64,6 +64,11 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:statuses, Filters.statuses())
      |> assign(:selected, MapSet.new())
      |> assign(:confirming_bulk, nil)
+     # The Export disclosure (#2293): the matching count is read when it opens
+     # (`:unknown` until then), never with the list; the private-fields
+     # opt-in rewrites the download links.
+     |> assign(:export_count, :unknown)
+     |> assign(:export_private?, false)
      # Facet choices (#1593). Loaded once per mount: a category or tag created
      # in another tab shows up on the next visit, as the editor's pickers do.
      |> assign(:authors, Shared.assignable_users(org))
@@ -176,7 +181,8 @@ defmodule KilnCMSWeb.EditorLive do
 
   # (Re)load the first page under the active filter.
   defp load_items(socket) do
-    socket = assign_columns(socket)
+    # The export count describes the rows under the previous filter.
+    socket = socket |> assign_columns() |> assign(:export_count, :unknown)
 
     case guard_field_query(socket, fn -> {fetch_page(socket, %{}), count_items(socket)} end) do
       {:ok, {{items, cursors}, {total, capped?}}} ->
@@ -257,6 +263,51 @@ defmodule KilnCMSWeb.EditorLive do
       gettext("The field filter or sort could no longer be applied, so it was cleared.")
     )
     |> push_patch(to: list_path(filters), replace: true)
+  end
+
+  # Who the Export controller serves: editors and admins, like the list.
+  defp exporter?(socket), do: socket.assigns.tier in [:editor, :admin]
+
+  # What the Export disclosure and the bulk link need, worked out per render:
+  # the download links under the current filters (private columns only when
+  # the opt-in is offered and ticked), and the selected rows' ids.
+  defp assign_export(assigns) do
+    filters = assigns.filters
+    private_option? = Enum.any?(assigns.column_options, &(Map.get(&1, :private) == true))
+    private? = private_option? and assigns.export_private?
+
+    ids =
+      for key <- assigns.selected,
+          [_kind, id] <- [String.split(key, ":", parts: 2)],
+          do: id
+
+    ids = Enum.sort(ids)
+    too_many? = length(ids) > ListScope.max_ids()
+
+    assigns
+    |> assign(:export?, assigns.tier in [:editor, :admin])
+    |> assign(:export_private_option?, private_option?)
+    |> assign(:export_private_on?, private?)
+    |> assign(:export_csv_path, ListScope.export_path(:csv, filters, private?: private?))
+    |> assign(:export_json_path, ListScope.export_path(:json, filters, private?: private?))
+    |> assign(:export_ids_too_many?, too_many?)
+    |> assign(
+      :export_selected_path,
+      if(ids == [] or too_many?,
+        do: nil,
+        else: ListScope.export_path(:csv, filters, ids: ids, private?: private?)
+      )
+    )
+  end
+
+  defp export_cap_label, do: group_thousands(ListScope.export_cap())
+
+  defp group_thousands(n) do
+    n
+    |> Integer.to_string()
+    |> String.reverse()
+    |> String.replace(~r/(\d{3})(?=\d)/, "\\1,")
+    |> String.reverse()
   end
 
   # The rows the actor may move to the trash (#2137), as selection keys
@@ -490,37 +541,17 @@ defmodule KilnCMSWeb.EditorLive do
     Filters.query_filters(filters, actor.id) ++ [select: select, sort: Filters.sort(filters)]
   end
 
-  # The one content type whose fields the list can show as columns: the type
-  # the `type` filter names, or the only type the actor can author. `nil` for
-  # "all" on a site with several, where field names collide across types.
-  defp column_type(%{assigns: %{type: "all", content_types: [only]}}), do: only
-  defp column_type(%{assigns: %{type: "all"}}), do: nil
-
-  defp column_type(socket) do
-    case filtered_types(socket) do
-      [descriptor] -> descriptor
-      _none -> nil
-    end
-  end
+  # The one content type whose fields the list can show as columns (see
+  # `ListScope.column_type/2`).
+  defp column_type(%{assigns: %{type: type, content_types: types}}),
+    do: ListScope.column_type(types, type)
 
   # The custom fields of the content type `type` (a type value) that this
-  # actor may list, filter and sort by: what `ListFields` offers an editor,
-  # private fields included. Every field condition is validated against it.
+  # actor may list, filter and sort by, private ones included
+  # (`ListScope.field_definitions/4`).
   defp field_definitions(socket, type) do
     %{actor: actor, current_org: org, content_types: types} = socket.assigns
-
-    case Enum.find(types, &(type_value(&1) == type)) do
-      nil ->
-        []
-
-      descriptor ->
-        ListFields.readable_fields(
-          actor,
-          org,
-          FieldCells.definitions(descriptor, actor, org),
-          true
-        )
-    end
+    ListScope.field_definitions(types, type, actor, org)
   end
 
   # What the column picker offers and what the strip shows, for the current
@@ -557,12 +588,7 @@ defmodule KilnCMSWeb.EditorLive do
             _ -> field_definitions(socket, value)
           end
 
-        known = MapSet.new(options, & &1.name)
-
-        names =
-          user
-          |> ListFields.stored_columns(Accounts.org_id(org), type_value(descriptor))
-          |> Enum.filter(&MapSet.member?(known, &1))
+        names = ListScope.column_names(user, org, descriptor, options)
 
         socket
         |> assign(:column_type, descriptor)
@@ -594,20 +620,17 @@ defmodule KilnCMSWeb.EditorLive do
   # The same question the create policy asks, shared with the unsaved-editor
   # mount and the calendar's "new on this day" picker, so the button and the
   # page it opens cannot disagree.
-  defp editable_types(org_id, actor), do: NewDraft.authorable_types(actor, org_id)
+  defp editable_types(org_id, actor), do: ListScope.types(actor, org_id)
 
   # The types this page pulls rows from: every editable type, or just the one
   # the `type` filter names. Filtering here rather than after the merge keeps
   # the DB from reading rows we'd only throw away, and keeps the per-type
   # `@page_size` window (so "Load more" still reaches every match).
-  defp filtered_types(%{assigns: %{type: "all", content_types: types}}), do: types
-
   defp filtered_types(%{assigns: %{type: type, content_types: types}}),
-    do: Enum.filter(types, &(type_value(&1) == type))
+    do: ListScope.filtered_types(types, type)
 
-  # A descriptor's filter/URL value. Compiled types carry an atom `type`,
-  # dynamic ones (D17) a name string — the URL only ever speaks strings.
-  defp type_value(%{type: type}), do: to_string(type)
+  # A descriptor's filter/URL value (see `ListScope.type_value/1`).
+  defp type_value(descriptor), do: ListScope.type_value(descriptor)
 
   @impl true
   # Opens the editor on an UNSAVED document; no row is written here. The first
@@ -809,6 +832,40 @@ defmodule KilnCMSWeb.EditorLive do
       nil -> {:noreply, assign(socket, :confirming_view_delete, nil)}
       {:error, error} -> {:noreply, put_flash(socket, :error, view_error(error))}
     end
+  end
+
+  # Opening the Export disclosure reads the bounded count of matching rows
+  # (`ListScope.export_count/6`) once per filter state; closing it, or opening
+  # it again, costs nothing. The download itself is re-checked by the
+  # controller, which is the gate; this only labels the links.
+  def handle_event("export_count", params, socket) when is_map(params) do
+    if exporter?(socket) and socket.assigns.export_count == :unknown do
+      %{filters: filters, actor: actor, current_org: org} = socket.assigns
+
+      counted =
+        guard_field_query(socket, fn ->
+          ListScope.export_count(
+            filtered_types(socket),
+            filters,
+            actor,
+            org,
+            socket.assigns.column_options
+          )
+        end)
+
+      case counted do
+        {:ok, result} -> {:noreply, assign(socket, :export_count, result)}
+        :field_query_failed -> {:noreply, socket}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("toggle_export_private", params, socket) when is_map(params) do
+    if exporter?(socket),
+      do: {:noreply, update(socket, :export_private?, &(not &1))},
+      else: {:noreply, socket}
   end
 
   def handle_event("toggle_select", %{"key" => key}, socket) when is_binary(key) do
@@ -1166,11 +1223,12 @@ defmodule KilnCMSWeb.EditorLive do
   # `:fields` reads a type's field definitions only when a `cf` or field sort
   # asks (`Filters.parse/2`), so a plain list costs no extra read.
   defp filter_ctx(socket) do
-    %{
-      types: Enum.map(socket.assigns.content_types, &type_value/1),
-      locales: socket.assigns.locales,
-      fields: &field_definitions(socket, &1)
-    }
+    ListScope.filter_ctx(
+      socket.assigns.content_types,
+      socket.assigns.locales,
+      socket.assigns.actor,
+      socket.assigns.current_org
+    )
   end
 
   # The add-a-condition form as drawn: the draft clamped to today's fields
@@ -1497,6 +1555,7 @@ defmodule KilnCMSWeb.EditorLive do
       |> assign(:filtering?, Filters.active?(assigns.filters))
       |> assign_views()
       |> assign(:selected_count, MapSet.size(assigns.selected))
+      |> assign_export()
       |> assign(:compiled_types, Enum.filter(assigns.content_types, &(&1.source == :compiled)))
       |> assign(:dynamic_types, Enum.filter(assigns.content_types, &(&1.source == :dynamic)))
       |> assign(:type_labels, Map.new(assigns.content_types, &{type_value(&1), &1.label}))
@@ -2273,6 +2332,36 @@ defmodule KilnCMSWeb.EditorLive do
               >
                 {gettext("Delete")}
               </button>
+              <%!-- Export selected (#2293): a plain download link to the rows
+                    ticked here (ids, at most `ListScope.max_ids/0`: the URL
+                    is a GET). Above the cap it is off, with the reason. --%>
+              <a
+                :if={@export? and @export_selected_path}
+                id="bulk-export-selected"
+                href={@export_selected_path}
+                class="btn btn-sm btn-default"
+              >
+                <.icon name="hero-arrow-down-tray" class="size-4" />
+                {gettext("Export selected")}
+              </a>
+              <button
+                :if={@export? and @export_ids_too_many?}
+                id="bulk-export-selected"
+                type="button"
+                disabled
+                aria-describedby="bulk-export-limit"
+                class="btn btn-sm btn-default"
+              >
+                <.icon name="hero-arrow-down-tray" class="size-4" />
+                {gettext("Export selected")}
+              </button>
+              <span
+                :if={@export? and @export_ids_too_many?}
+                id="bulk-export-limit"
+                class="self-center text-xs text-base-content/60"
+              >
+                {gettext("Select at most %{max} rows to export.", max: ListScope.max_ids())}
+              </span>
             </div>
             <%!-- Which custom fields each row shows (this person's choice, per
                   site and type). Offered for one type at a time — field names
@@ -2350,6 +2439,85 @@ defmodule KilnCMSWeb.EditorLive do
             >
               {gettext("Choose a content type to show its fields as columns.")}
             </span>
+            <%!-- Export (#2293): the same disclosure shape as Columns and the New
+                  menu, so all three close each other and on outside clicks.
+                  Opening it asks the server for the matching count once per
+                  filter state; the links are plain downloads, so they work
+                  without the socket. --%>
+            <div
+              :if={@export?}
+              id="content-export"
+              class={[
+                "relative",
+                (@selected_count == 0 and @column_options == [] and not is_nil(@column_type)) &&
+                  "ml-auto"
+              ]}
+              data-autoclose
+            >
+              <button
+                type="button"
+                id="content-export-toggle"
+                class="btn btn-default btn-sm group"
+                aria-expanded="false"
+                aria-controls="content-export-panel"
+                phx-mounted={JS.ignore_attributes(["aria-expanded"])}
+                phx-click={
+                  JS.toggle_attribute({"aria-expanded", "true", "false"})
+                  |> JS.toggle_attribute({"hidden", "hidden"}, to: "#content-export-panel")
+                  |> JS.push("export_count")
+                }
+              >
+                <.icon name="hero-arrow-down-tray" class="size-4" />
+                {gettext("Export")}
+                <.icon
+                  name="hero-chevron-down"
+                  class="size-3.5 transition-transform group-aria-expanded:rotate-180"
+                />
+              </button>
+              <div
+                id="content-export-panel"
+                hidden
+                phx-mounted={JS.ignore_attributes(["hidden"])}
+                class="absolute right-0 z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] space-y-2 rounded-lg border border-base-content/10 bg-base-100 p-3 shadow-lg"
+              >
+                <p id="export-summary" class="text-sm font-medium">
+                  <%= case @export_count do %>
+                    <% :unknown -> %>
+                      {gettext("Export matching")}
+                    <% :over_cap -> %>
+                      {gettext("More than %{max} rows — narrow the list first",
+                        max: export_cap_label()
+                      )}
+                    <% {:ok, count} -> %>
+                      {gettext("Export %{count} matching", count: count)}
+                  <% end %>
+                </p>
+                <p class="text-xs text-base-content/60">
+                  {gettext("Exports the columns shown in the list.")}
+                </p>
+                <label
+                  :if={@export_private_option?}
+                  class="flex items-center gap-2 text-sm"
+                >
+                  <input
+                    id="export-private"
+                    type="checkbox"
+                    checked={@export_private_on?}
+                    phx-click="toggle_export_private"
+                    class="field-checkbox size-4"
+                  />
+                  {gettext("Include private fields")}
+                </label>
+                <div class="flex flex-wrap gap-2">
+                  <a id="export-csv" href={@export_csv_path} class="btn btn-sm btn-default">
+                    {gettext("Download CSV")}
+                  </a>
+                  <a id="export-json" href={@export_json_path} class="btn btn-sm btn-default">
+                    {gettext("Download JSON")}
+                  </a>
+                </div>
+              </div>
+            </div>
           </div>
 
           <form

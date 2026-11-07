@@ -193,7 +193,10 @@ config :kiln_cms, KilnCMSWeb.RateLimit,
     # for its own tests.
     gql_join: {1_000_000, :timer.minutes(1)},
     bridge_join: {1_000_000, :timer.minutes(1)},
-    collab_join: {1_000_000, :timer.minutes(1)}
+    collab_join: {1_000_000, :timer.minutes(1)},
+    # The export suite downloads many times as the same seeded actors
+    # (#2293); `ContentExportControllerTest` lowers it back for its 429 test.
+    export: {1_000_000, :timer.minutes(1)}
   }
 
 # Per-account auth budgets (#478). The whole suite signs in as seeded users and

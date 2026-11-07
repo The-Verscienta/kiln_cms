@@ -91,6 +91,28 @@ carries the reasoning.
 
 ## Added
 
+<a id="webhook-rotate-secret"></a>
+
+- **Admins can rotate a webhook endpoint's signing secret (#2347).** Each row
+  on `/editor/webhooks` has a **Rotate secret** button (admin only, with a
+  confirmation). It replaces the secret and reveals the new one so you can
+  copy it into the receiver. Before this, the only way to change a secret was
+  to delete the endpoint and add it again, which also lost its settings.
+  Rotation takes effect immediately and there is no dual-secret window: it is
+  the remedy for a leaked secret, so the old one must stop working. Queued and
+  retried deliveries sign at send time and use the new secret; one attempt
+  already in flight can fail and is retried. Health counters
+  (`consecutive_failures`, `auto_disabled_at`) are not touched, so an endpoint
+  near the auto-disable limit can tip over while the receiver still holds the
+  old secret. The old ciphertext is never decrypted, so an endpoint whose
+  secret is unreadable after `SECRET_KEY_BASE` was lost can be rotated back to
+  health; the unreadable-secret message now points at the button. Rotation
+  logs `webhook secret rotated endpoint_id=… org_id=… actor_id=…` at info
+  level (never the secret) and leaves no other audit trail. Over code it is
+  `KilnCMS.CMS.rotate_webhook_secret/2`. No migration, no env var, no upgrade
+  step; rolling the pin back is safe. See
+  [Rotate a webhook signing secret](../webhooks.md#rotate-a-webhook-signing-secret).
+
 <a id="graphql-custom-where"></a>
 
 - **GraphQL filters custom fields with typed operators (`customWhere`, #2290).**
@@ -233,6 +255,48 @@ carries the reasoning.
   - **Upgrade.** No migration, no config. `saved_views.params` is an existing
     map, now allowed a `cf` key; rolling the pin back leaves such a view with an
     unknown key an older list ignores.
+
+<a id="content-list-export"></a>
+
+- **The content list can be downloaded as CSV or JSON.** On `/editor`, editors
+  and admins get an **Export** menu in the list's header bar with **Download
+  CSV** and **Download JSON**, and the bulk bar gains **Export selected** (CSV,
+  the ticked rows). This is the third part of #2293, after the Columns picker
+  and field filter and sort.
+  - **What is exported.** The rows the list shows for the same type, status,
+    search, field conditions and field sort, as the person asking (a record
+    they cannot read is absent). Columns are `id,type,title,slug,status,locale,updated_at`
+    plus the person's saved list columns for the type, nothing else; the panel
+    says *Exports the columns shown in the list.* The scope is the types the
+    editor can author, as in the list. With "All types" the types come one
+    after another, not merged into the list's order. Export selected takes at
+    most 100 rows and ignores every filter but the type.
+  - **Private fields.** Left out unless **Include private fields** is ticked
+    (shown when the type has any); every user field counts as private. A `cf`
+    condition on a private field is accepted even when the column is not
+    exported, as in the list.
+  - **Values.** The file is data, not the screen: booleans are `true` / `false`
+    (not Yes / No), media is the file name (not the alt text), select is the
+    stored value, long values are not cut. A reference is its readable title
+    (JSON `{id, label}`); an unreadable or deleted target is `Unavailable`
+    (JSON `{id: null, label: "Unavailable"}`), never the title stored in the
+    field. CSV starts with a UTF-8 byte order mark for Excel.
+  - **Limits.** More than 10,000 rows is HTTP 413 with a message, never a
+    truncated file; a download is stopped after 60 seconds; 10 downloads a
+    minute per account, 429 with `Retry-After`. The rate limit is counted per
+    node, and a refused request also spends it. A download stopped part-way
+    drops the connection unfinished: a CSV ends mid-file and a JSON array is
+    never closed, so a file that parses is complete.
+  - **Operators and developers.** Optional
+    `config :kiln_cms, :content_export, max_rows: 10_000, time_limit_ms: 60_000`.
+    Each download logs `content export` and emits
+    `[:kiln_cms, :content_export, :stop]` (`%{rows: n}`; metadata `user_id`,
+    `org_id`, `type`, `format`, `rows`, `columns`, `include_private`), never a
+    value or filter text. There is no audit trail of exports yet. Routes:
+    `GET /editor/content/export.csv` and `.json`, editor-only, session auth.
+    Guide: [Export the content list as CSV or JSON](../extending-content.md#export-the-content-list-as-csv-or-json).
+  - **Upgrade.** No migration, no required config; rolling the pin back
+    removes the menu and the routes.
 
 <a id="custom-field-native-filter-sort"></a>
 
@@ -535,6 +599,19 @@ carries the reasoning.
   linked from an enabled menu item is set to noindex.
 
 ## Changed
+
+<a id="csv-numbers-unguarded"></a>
+
+- **A real number in a CSV export is written as itself.** The CSV writer
+  prefixed any value starting with `-` with `'` to stop a spreadsheet running
+  it as a formula, which turned the number -5 into the text `'-5`. A value that
+  is a number (integer, float, decimal) now skips the guard; text is
+  unchanged, so the string `-5` and `=1+1` are still prefixed, even in an
+  integer field. Chosen as Changed rather than Fixed because it alters the
+  bytes a CSV writes for a negative number, wherever `KilnCMSWeb.CSV.line/1`
+  is given one (core exports mostly write counts, which are not negative; an
+  overlay's may). `parse/1` reads
+  both forms back to `-5`.
 
 <a id="access-denied-page"></a>
 

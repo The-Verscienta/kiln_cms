@@ -78,6 +78,8 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Admins can replace a webhook's signing secret with Rotate secret on `/editor/webhooks`; it works even when the old secret is unreadable.**
+  ([#2347](https://github.com/The-Verscienta/kiln_cms/issues/2347) · [long form](docs/changelog/unreleased.md#webhook-rotate-secret))
 - **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
   A wrong operand type is a schema error; `contains` and `startsWith` (case-insensitive, literal) also work in `customFilter`.
   ([#2290](https://github.com/The-Verscienta/kiln_cms/issues/2290) · [long form](docs/changelog/unreleased.md#graphql-custom-where))
@@ -93,6 +95,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The content list can be filtered by up to four custom-field conditions and sorted by one field once one content type is listed; the count reads "1000+" past 1000.**
   Saved views keep them and flag a field that no longer applies; no migration.
   ([long form](docs/changelog/unreleased.md#content-list-field-filter-sort))
+
+- **Editors can download the content list as CSV or JSON from a new Export menu, or only the ticked rows with Export selected.**
+  Up to 10,000 rows, the saved list columns, private fields only if ticked; no migration.
+  ([long form](docs/changelog/unreleased.md#content-list-export))
 
 - **`custom_filter` equality, `in` and list membership use a new GIN index on `custom_fields`: a selective filter on 100,000 rows drops from about 40 ms to about 3 ms.**
   Range, `not_eq`, `ilike`, `null` and `custom_sort` are unchanged.
@@ -138,6 +144,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2256](https://github.com/The-Verscienta/kiln_cms/issues/2256) · [long form](docs/changelog/unreleased.md#robots-flags))
 
 ### Changed
+
+- **CSV exports write a negative number as `-5`, not `'-5`; text starting with `=`, `+`, `-` or `@` is still prefixed.**
+  Affects any CSV that passes a negative number to `KilnCMSWeb.CSV`; text is unchanged.
+  ([long form](docs/changelog/unreleased.md#csv-numbers-unguarded))
 
 - **A console page you lack the role for now lands on a 403 `/access-denied` page naming the role it needs, instead of home with a toast; `access-denied` is now a reserved root slug.**
   ([#2143](https://github.com/The-Verscienta/kiln_cms/issues/2143) · [long form](docs/changelog/unreleased.md#access-denied-page))
