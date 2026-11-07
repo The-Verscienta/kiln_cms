@@ -86,12 +86,11 @@ defmodule KilnCMSWeb.Router do
     plug :load_from_bearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
-    plug KilnCMSWeb.Plugs.ApiKeyAuth
-    # Opt-in (`KILN_API_REJECT_INVALID_BEARER`): a bearer token that did not
-    # authenticate is a 401, not an anonymous read (#2161).
-    plug KilnCMSWeb.Plugs.RejectInvalidBearer, :graphql
+    plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
     # A mutation is a `POST` like any other — see the JSON:API pipeline.
     plug KilnCMSWeb.Plugs.Idempotency
+    # `X-Kiln-On-Behalf-Of` on a mutation: provenance for a draft-write key (#2273).
+    plug KilnCMSWeb.Plugs.OnBehalfOf
     plug AshGraphql.Plug
   end
 
@@ -133,10 +132,7 @@ defmodule KilnCMSWeb.Router do
     plug :load_from_bearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
-    plug KilnCMSWeb.Plugs.ApiKeyAuth
-    # Opt-in (`KILN_API_REJECT_INVALID_BEARER`): a bearer token that did not
-    # authenticate is a 401, not an anonymous read (#2161).
-    plug KilnCMSWeb.Plugs.RejectInvalidBearer, :api
+    plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
     # The OpenAPI document is served from inside the `KilnCMSWeb.AshJsonApiRouter`
     # forward below, so there is no route here to gate. This plug knows the two
     # documentation paths and passes every other `/api` request through (#567).
@@ -154,6 +150,8 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.PreviewGrant
     # `If-Match` on a single-record write → the action's version check (412).
     plug KilnCMSWeb.Plugs.IfMatch
+    # `X-Kiln-On-Behalf-Of` on a create: provenance for a draft-write key (#2273).
+    plug KilnCMSWeb.Plugs.OnBehalfOf
     # `Idempotency-Key` on a write: claim it, or replay what the first attempt
     # answered. Runs after the auth plugs above — the key is scoped to the actor.
     plug KilnCMSWeb.Plugs.Idempotency
@@ -734,6 +732,16 @@ defmodule KilnCMSWeb.Router do
 
     post "/sign_in", ApiAuthController, :sign_in
     post "/sign_in/verify", ApiAuthController, :verify
+  end
+
+  # A drafts-only key exchanging itself for a fresh one (ADR 0012). On the
+  # `:auth` bucket, not `:api`'s: it issues a credential. No bearer/actor plugs —
+  # the controller authenticates the key itself, so a refused key can be checked
+  # for reuse after rotation (`KilnCMS.Accounts.ApiKeyReuse`).
+  scope "/api/keys", KilnCMSWeb do
+    pipe_through :api_auth
+
+    post "/rotate", ApiKeyRotationController, :rotate
   end
 
   # MCP server for LLM authoring clients (docs/mcp.md). The tool list comes

@@ -133,13 +133,6 @@ with {:ok, introspection?} <- Env.fetch("GRAPHQL_INTROSPECTION_ENABLED") do
   config :kiln_cms, :graphql_introspection, introspection?
 end
 
-# 401 for a bearer token that does not authenticate, instead of an anonymous
-# answer (#2161). Off by default. `fetch/1`, as above: an unset variable must
-# not rewrite a project overlay's own setting.
-with {:ok, reject?} <- Env.fetch("KILN_API_REJECT_INVALID_BEARER") do
-  config :kiln_cms, :reject_invalid_bearer, reject?
-end
-
 # White-label branding (#48, see `KilnCMS.Branding`) — the instance-wide layer
 # beneath each site's own editor-managed row. Unset vars fall through to the
 # stock KilnCMS defaults. Off-origin BRAND_LOGO_URL hosts must also be in

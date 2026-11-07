@@ -22,6 +22,22 @@ carries the reasoning.
 
 ## Added
 
+<a id="reject-invalid-bearer"></a>
+
+- **`KILN_API_REJECT_INVALID_BEARER` (#2161).** With it on, an `Authorization: Bearer` token that
+  fails verification gets a 401 `invalid_token` envelope instead of silently reading as anonymous.
+  Off by default for this release, because a consumer sending a stale token today gets 200;
+  the default flips next release, so announce it in that release's upgrade notes.
+  - **Measure and warn first** ([ADR 0013](../decisions/0013-the-invalid-bearer-default-flips-on-evidence-not-on-the-calendar-alone.md)).
+    Flag on or off, a request with such a bearer emits
+    `[:kiln_cms, :api, :invalid_bearer]` (`count: 1`; metadata `enforced`,
+    `surface`, `read?` and `reason: :expired | :malformed | :invalid`, read from
+    the unverified token and never sent to the client). With the flag off the
+    request is still served as anonymous, but the response carries
+    `x-kiln-token-status: invalid` (and `vary: authorization`) so a client can
+    notice it is signed out. Additive; no client has to change. The flip is made
+    on that evidence, not only the calendar.
+
 <a id="change-severity"></a>
 
 - **Change severity: how much a published edit matters, stored per edit.**
@@ -53,45 +69,39 @@ carries the reasoning.
     new settings table. Overlays run `mix ash.codegen` for their own content
     types. Until a site lists a field, nothing changes.
 
-<a id="reject-invalid-bearer"></a>
+<a id="draft-write-api-keys"></a>
 
-- **A bearer token that does not authenticate can now be answered with `401`
-  instead of an anonymous `200` (`KILN_API_REJECT_INVALID_BEARER`, off by
-  default).** When a JWT expired, was revoked, is malformed, or belongs to a
-  deleted user, Kiln drops the actor and serves the request as anonymous: a
-  `200` with the published subset. A client holding a stale token never learns
-  it has been signed out, and silently shows public content where it expected
-  drafts. With the variable on, a request whose `Authorization` scheme is
-  `Bearer` (any case; an empty value counts) and that resolves no user is
-  refused on `/api/*` and `/gql` with `401`, `www-authenticate: Bearer`,
-  `cache-control: private, no-store` and `vary: authorization`. The message is
-  generic and does not say why the token failed. JSON:API and the other REST
-  routes use Kiln's error envelope; `/gql` answers
-  `{"errors": [{"message": ..., "extensions": {"code": "unauthenticated"}}]}`.
-  No `Authorization` header, or another scheme such as `Basic`, is unaffected.
-  API keys (`Bearer kiln_...`) already answered `401` when invalid and still do.
-  - **Measure first.** With the variable off, each request that the flag
-    would refuse emits the telemetry event
-    `[:kiln_cms, :api, :invalid_bearer]` (measurement `count: 1`, metadata
-    `pipeline: :api | :graphql`, `enforced: boolean`, `surface`
-    (`:json_api | :graphql | :media | :other`), `read?` (a `GET`/`HEAD`, or
-    anything on `/gql`) and `reason` (`:expired | :malformed | :invalid`, read
-    from the unverified token and never sent to the client). Attach a handler
-    or watch your metrics to count the callers before enabling it.
-  - **Staleness header.** With the variable off, such a request is still
-    served as anonymous but the response carries `x-kiln-token-status: invalid`
-    (one fixed word, and `vary: authorization`), so a client can notice that
-    its token no longer authenticates. Additive; no client needs to change.
-    The decision on flipping the default is
-    [ADR 0013](../decisions/0013-an-unverifiable-bearer-token-is-refused-only-after-the-telemetry-says-it-is-safe.md).
-  - **Upgrade.** Nothing changes on upgrade: the default is off, there is no
-    migration, and rolling the pin back is safe. The default is planned to
-    become on in a later release, at which point a client that sends a stale
-    token to public routes will see `401`; have it drop the header or sign in
-    again. Set `KILN_API_REJECT_INVALID_BEARER=true` (see
-    [environment variables](../environment-variables.md)) to try it now.
-    Overlays can reuse the detection through
-    `KilnCMSWeb.Plugs.RejectInvalidBearer.invalid_bearer?/1`.
+- **Drafts-only API keys for headless services (#2273).** A new `draft_write` access
+  scope on API keys lets an app service (Verscienta's, for AI drafting) create drafts and edit
+  drafts it authored, and nothing else: no publishing, submitting for review, deleting, media,
+  tags or related links, and no edits to live or someone else's content. The bound is a policy
+  on `Content` that sits above the admin bypass and ignores the owner's role, so promoting the
+  owner later widens nothing. Keys are minted by an admin on a viewer-tier service account and
+  capped at 30 days (`draft_write_key_max_ttl_days`). Drafts created this way record the key
+  and an optional `X-Kiln-On-Behalf-Of` label (stored for display only, never used for
+  authorization); the fields appear in the editor (not in version history, which a second key
+  on the same owner can read) and, for editors, admins and the creating key only, on JSON:API, GraphQL and `/mcp` (never for anonymous, preview-link or
+  viewer-tier callers, webhook payloads or the preview endpoint). A GraphQL query that selects
+  those three fields as someone not allowed them gets `null` plus a `forbidden_field` entry in
+  `errors`, so a codegen'd query that selects every field should drop them. See [decision 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)
+  and the headless consumer guide.
+
+<a id="draft-write-key-rotation"></a>
+
+- **Self-rotating drafts-only keys.** A `draft_write` key's 30-day cap meant a person re-minted
+  the service's key every month. An admin can now give the key a rotation window at mint
+  (`rotatable_until`; "Self-rotation" at `/editor/api-keys`, at most
+  `draft_write_key_max_rotation_days`, default 365). Until then the service calls
+  `POST /api/keys/rotate` with the key and gets a fresh one: same account, scope and name,
+  expiring at the 30-day cap or the window's end, whichever is sooner. The old key is revoked in
+  the same transaction, under a row lock, so a chain has one live key and never outlives the date
+  the admin chose. The action takes no input; `read`/`read_write` keys, signed-in users and admins
+  are refused, and an owner promoted to editor since the mint stops the chain. Presenting a
+  rotated-away key to the endpoint again more than 120 seconds later revokes the whole chain and
+  mails the platform admins. Keys without a window behave as before. New nullable `api_keys`
+  columns `rotatable_until`, `lineage_id`, `rotated_from_id` (additive). See
+  [decision 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md#rotation)
+  and the headless consumer guide.
 
 ## Changed
 
