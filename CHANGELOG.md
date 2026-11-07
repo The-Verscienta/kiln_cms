@@ -56,11 +56,92 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **API consumers: a stale, expired or garbled `Authorization: Bearer` JWT is now a 401 (`invalid_token`), not anonymous
+  data. Fix the client; `KILN_API_REJECT_INVALID_BEARER=false` restores the old fallback for this release only.**
+  ([#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161) · [long form](docs/changelog/unreleased.md#reject-invalid-bearer-default-on))
+
 - **Overlays: run `mix ash.codegen`. Content tables gain a generated `name_lexemes`
   column, filled for every row by the migration (a table rewrite). Nothing else to run.**
   ([long form](docs/changelog/unreleased.md#search-name-lexemes-upgrade))
 
+- **Overlays: run `mix ash.codegen` and commit the migration. Existing content types gain the `kiln_reporting_v1` SQL views.**
+  Additive; re-run `mix kiln.reporting.sql` grants after upgrading.
+  ([long form](docs/changelog/unreleased.md#reporting-views-upgrade))
+
+- **Content tables gain a GIN index on `custom_fields`, built concurrently: slow on a large
+  `entries`; a failed build leaves an INVALID index to drop. Overlays run `mix ash.codegen`.**
+  ([#2321](https://github.com/The-Verscienta/kiln_cms/pull/2321) · [long form](docs/changelog/unreleased.md#custom-fields-gin-upgrade))
+
+- **Overlays: run `mix ash.codegen` again for the per-document `noindex` / `nofollow` columns
+  on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
+  ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
+
+### Added
+
+- **Admins can move one document to the trash from the content list's row menu or the editor's Settings tab.**
+  Same soft delete as bulk Delete; pending autosave edits are saved first. Guide: [docs/trash.md](docs/trash.md).
+  ([#2333](https://github.com/The-Verscienta/kiln_cms/pull/2333) · [long form](docs/changelog/unreleased.md#move-to-trash-in-editor))
+
+- **The content list can show up to four custom fields on each row; pick them under Columns once one content type is listed.**
+  Remembered per person, site and type; additive migration, nothing to run.
+  ([long form](docs/changelog/unreleased.md#content-list-field-columns))
+
+- **`custom_filter` equality, `in` and list membership use a new GIN index on `custom_fields`: a selective filter on 100,000 rows drops from about 40 ms to about 3 ms.**
+  Range, `not_eq`, `ilike`, `null` and `custom_sort` are unchanged.
+  ([#2321](https://github.com/The-Verscienta/kiln_cms/pull/2321) · [long form](docs/changelog/unreleased.md#custom-field-indexes))
+
+- **Custom fields can be filtered and sorted by bare name (`filter[price]`, `sort=title,price`), and `custom_sort` now works on search routes.**
+  ([long form](docs/changelog/unreleased.md#custom-field-native-filter-sort))
+
+- **Opt-in `KILN_API_REJECT_INVALID_BEARER=true` answers 401 for an unverifiable bearer token on the API
+  instead of serving anonymous data; the default flips on in the next release.**
+  ([#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161) · [long form](docs/changelog/unreleased.md#reject-invalid-bearer))
+
+- **Change severity: an edit to a safety-relevant field of published content is recorded as critical, notable or routine on its own version.**
+  The editor asks before publishing; API writes default to notable; read back as `latest_edit_severity` / `latest_edit_at`.
+  ([long form](docs/changelog/unreleased.md#change-severity))
+
+- **Read-only SQL views of published content for BI tools: the `kiln_reporting_v1` schema, with a read-only role from `mix kiln.reporting.sql`.**
+  Allowlisted custom fields, wide and one-row-per-field; no typed columns yet. Guide: [docs/reporting.md](docs/reporting.md).
+  ([long form](docs/changelog/unreleased.md#reporting-views))
+
+- **Plugins can mount plain-Plug endpoints (webhooks, JSON, feeds) with `plug_routes/0`, new in `kiln_plugin` 1.4.**
+  No session or CSRF check, raw body kept for HMACs, own 300/min rate limit; `mix kiln.plugins.doctor` checks paths.
+  ([#2272](https://github.com/The-Verscienta/kiln_cms/issues/2272) · [long form](docs/changelog/unreleased.md#plugin-plug-routes))
+
+- **GraphQL reads admin-defined custom fields typed by kind (`customFloat(name:)`, `fields(names:)`), and `GET /api/schema?format=typescript-graphql` exports ready fragments and types.**
+  ([long form](docs/changelog/unreleased.md#graphql-typed-custom-fields))
+
+- **Drafts-only API keys (`access: draft_write`): a headless service can create and edit its own drafts
+  and never publish, delete or touch live content. Drafts record the key and an optional `X-Kiln-On-Behalf-Of` label.**
+  ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-api-keys))
+
+- **Drafts-only keys can rotate themselves: an admin sets a window at mint, and until then `POST /api/keys/rotate`
+  swaps the key for an identical fresh one and revokes the old. Reusing a rotated-away key burns the chain.**
+  ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-key-rotation))
+
+- **`config :kiln_cms, :i18n, block_fields:` makes core image/video/audio block fields shared or
+  fallback across locales; the editor locks them on translations.**
+  ([long form](docs/changelog/unreleased.md#block-field-localization-config))
+
+- **Per-document `noindex` / `nofollow` (with per-type defaults for new documents): sent as
+  `<meta name="robots">` and `x-robots-tag`, carried in versions, copies and the API, left out
+  of sitemap, news sitemap, llms.txt and feeds, with an advisory for a menu-linked noindex page.**
+  ([#2256](https://github.com/The-Verscienta/kiln_cms/issues/2256) · [long form](docs/changelog/unreleased.md#robots-flags))
+
 ### Changed
+
+- **On `/editor/team`, a custom role's or member's content types and field grants are picked from the site's types
+  and fields instead of typed as a list and JSON; "No fields" stores `[]`, and unrecognized stored names are kept.**
+  ([#2352](https://github.com/The-Verscienta/kiln_cms/pull/2352) · [long form](docs/changelog/unreleased.md#team-scope-pickers))
+
+- **Webhook signing secrets on `/editor/webhooks` are masked to their last four characters until an admin clicks Reveal;
+  a revealed secret has Copy and Hide, and a new endpoint's secret starts revealed.**
+  ([#2349](https://github.com/The-Verscienta/kiln_cms/pull/2349) · [long form](docs/changelog/unreleased.md#webhook-secret-masked))
+
+- **Version compare, restore and the publish-conflict panel show custom fields one by one.**
+  Restore now previews before it writes; the conflict stays whole-map.
+  ([long form](docs/changelog/unreleased.md#custom-field-history))
 
 - **Global search on a large catalogue: the alias and compound legs prefilter on stored
   name lexemes, empty names skip the phrase match, and the tag leg runs once per sweep.**
@@ -70,13 +151,36 @@ Every summary line below that was shortened links to its own entry there.
   and with ~60 fewer from third-party deps.**
   ([long form](docs/changelog/unreleased.md#quiet-image-build))
 
+- **A publish hands its change-feed event to a per-site relay instead of sending to every local subscriber;
+  feed telemetry now fires at hand-off. 10k-subscriber publish p99 1.5 s → 143 ms; p95 still ~4× the 0 leg.**
+  ([#2327](https://github.com/The-Verscienta/kiln_cms/pull/2327) · [long form](docs/changelog/unreleased.md#feed-relay))
+
 ### Fixed
+
+- **Renaming a form field now saves on Enter or Save, keeps a refused name on screen with its error, and shows
+  machine names on the canvas; the Entries tab groups old keys under "From a renamed or removed field".**
+  ([#2346](https://github.com/The-Verscienta/kiln_cms/pull/2346) · [long form](docs/changelog/unreleased.md#form-field-rename))
+
+- **`/forms/<slug>`, the address the form builder shows, now serves the active form as a page in the
+  site's layout (it was a 404); the builder and forms list link it. Content at that address still wins.**
+  ([#2341](https://github.com/The-Verscienta/kiln_cms/pull/2341) · [long form](docs/changelog/unreleased.md#public-form-page))
+
+- **A webhook's Delete is now a labelled button on every endpoint's row (it was an easy-to-miss trash icon),
+  and the edit form has Delete webhook too.** The confirm says queued deliveries won't be sent and history is kept.
+  ([#2328](https://github.com/The-Verscienta/kiln_cms/pull/2328) · [long form](docs/changelog/unreleased.md#webhook-delete-labelled))
+
+- **Editing a nested column block on a freshly opened page no longer crashes the editor.**
+  Adding, removing, reordering or editing a column child before the first form change raised
+  in `AshPhoenix.Form`; the editor now builds the block list from the form's current values.
+  ([long form](docs/changelog/unreleased.md#columns-child-fresh-form))
 
 - **Global search's compound leg (a name written spaced or joined: `huang qi`, `xiao yao san`) is about
   3× cheaper per candidate name.** It rebuilt each rewrite's `to_tsvector` and each span's
   `phraseto_tsquery` for every candidate row × variant; they are now built once per statement, and a
   name's own tsvector and tsquery once per name. Same rows, same order. Verscienta reported 1.6–4.0 s
   for the leg on multi-word queries after #2205.
+  ([#2367](https://github.com/The-Verscienta/kiln_cms/pull/2367))
+
 - **Phoenix 1.8.16 with absinthe_phoenix 2.0.6: GraphQL subscription pushes still reach
   WebSocket clients after the bump, which silently dropped every push on absinthe_phoenix 2.0.5.**
   ([#2202](https://github.com/The-Verscienta/kiln_cms/pull/2202) · [long form](docs/changelog/unreleased.md#phoenix-1-8-16-subscription-pushes))

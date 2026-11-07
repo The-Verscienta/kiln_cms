@@ -31,6 +31,8 @@ defmodule KilnCMS.CMS.ContentTypes do
           alias_pattern: String.t() | nil,
           seo_title_pattern: String.t() | nil,
           seo_description_pattern: String.t() | nil,
+          noindex_default: boolean(),
+          nofollow_default: boolean(),
           published_feed?: boolean(),
           source: :compiled | :dynamic,
           definition: struct() | nil
@@ -364,6 +366,16 @@ defmodule KilnCMS.CMS.ContentTypes do
         if(function_exported?(resource, :__kiln_seo_description_pattern__, 0),
           do: resource.__kiln_seo_description_pattern__()
         ),
+      noindex_default:
+        if(function_exported?(resource, :__kiln_noindex_default__, 0),
+          do: resource.__kiln_noindex_default__(),
+          else: false
+        ),
+      nofollow_default:
+        if(function_exported?(resource, :__kiln_nofollow_default__, 0),
+          do: resource.__kiln_nofollow_default__(),
+          else: false
+        ),
       # Compiled types (Page/Post) all have a public index of published records;
       # a dynamic type says so per type (#486 reads this to decide syndication).
       published_feed?: true,
@@ -387,6 +399,8 @@ defmodule KilnCMS.CMS.ContentTypes do
       alias_pattern: definition.alias_pattern,
       seo_title_pattern: definition.seo_title_pattern,
       seo_description_pattern: definition.seo_description_pattern,
+      noindex_default: definition.noindex_default,
+      nofollow_default: definition.nofollow_default,
       published_feed?: definition.has_published_feed,
       source: :dynamic,
       definition: definition
@@ -744,7 +758,10 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   @doc "Run a workflow transition: publish, unpublish, submit, archive, or unarchive."
   def transition(type, verb, record, opts \\ []) do
-    call(type, transition_fun(atom(type, opts), verb), [record, %{}, opts], opts)
+    # `:params` carries an action argument (the editor's `change_severity`); it
+    # is not an option of the interface call itself.
+    {params, opts} = Keyword.pop(opts, :params, %{})
+    call(type, transition_fun(atom(type, opts), verb), [record, params, opts], opts)
   end
 
   def list_trashed!(type, opts \\ []) do
@@ -765,6 +782,15 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   def destroy(type, record, opts \\ []),
     do: call(type, "destroy_#{atom(type, opts)}", [record, opts], opts)
+
+  @doc """
+  Whether `actor` may move `record` to the trash — the generated
+  `can_destroy_<type>?` helper behind `destroy/3` (`can_destroy_entry?` for a
+  dynamic type), so a control that offers the trash asks the policy the
+  destroy itself will run. `opts` takes `:tenant`.
+  """
+  def can_destroy?(type, record, actor, opts \\ []),
+    do: call(type, "can_destroy_#{atom(type, opts)}?", [actor, record, %{}, opts], opts)
 
   # --- internals -------------------------------------------------------------
 

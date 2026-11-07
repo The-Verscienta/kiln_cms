@@ -1023,16 +1023,19 @@ public struct PageDocument: Codable, Hashable, Sendable {
     /// Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited.
     public let inheritedFields: [String: JSONValue]?
     public let locale: String?
+    /// The document's robots flags. Absent when neither is set; absent means both false.
+    public let robots: Robots?
     public let slug: String?
     public let title: String?
     public let type: String
 
-    public init(blocks: [Block], customFields: CustomFields, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, slug: String? = nil, title: String? = nil, type: String) {
+    public init(blocks: [Block], customFields: CustomFields, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, robots: Robots? = nil, slug: String? = nil, title: String? = nil, type: String) {
         self.blocks = blocks
         self.customFields = customFields
         self.id = id
         self.inheritedFields = inheritedFields
         self.locale = locale
+        self.robots = robots
         self.slug = slug
         self.title = title
         self.type = type
@@ -1044,6 +1047,7 @@ public struct PageDocument: Codable, Hashable, Sendable {
         case id
         case inheritedFields = "inherited_fields"
         case locale
+        case robots
         case slug
         case title
         case type
@@ -1051,6 +1055,16 @@ public struct PageDocument: Codable, Hashable, Sendable {
 
     public struct CustomFields: Codable, Hashable, Sendable {
         public init() {}
+    }
+
+    public struct Robots: Codable, Hashable, Sendable {
+        public let nofollow: Bool
+        public let noindex: Bool
+
+        public init(nofollow: Bool, noindex: Bool) {
+            self.nofollow = nofollow
+            self.noindex = noindex
+        }
     }
 }
 
@@ -1065,17 +1079,20 @@ public struct PostDocument: Codable, Hashable, Sendable {
     /// Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited.
     public let inheritedFields: [String: JSONValue]?
     public let locale: String?
+    /// The document's robots flags. Absent when neither is set; absent means both false.
+    public let robots: Robots?
     public let slug: String?
     public let title: String?
     public let type: String
 
-    public init(blocks: [Block], customFields: CustomFields, customFieldsPlain: CustomFieldsPlain? = nil, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, slug: String? = nil, title: String? = nil, type: String) {
+    public init(blocks: [Block], customFields: CustomFields, customFieldsPlain: CustomFieldsPlain? = nil, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, robots: Robots? = nil, slug: String? = nil, title: String? = nil, type: String) {
         self.blocks = blocks
         self.customFields = customFields
         self.customFieldsPlain = customFieldsPlain
         self.id = id
         self.inheritedFields = inheritedFields
         self.locale = locale
+        self.robots = robots
         self.slug = slug
         self.title = title
         self.type = type
@@ -1088,6 +1105,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
         case id
         case inheritedFields = "inherited_fields"
         case locale
+        case robots
         case slug
         case title
         case type
@@ -1230,6 +1248,16 @@ public struct PostDocument: Codable, Hashable, Sendable {
 
         public init(summary: String? = nil) {
             self.summary = summary
+        }
+    }
+
+    public struct Robots: Codable, Hashable, Sendable {
+        public let nofollow: Bool
+        public let noindex: Bool
+
+        public init(nofollow: Bool, noindex: Bool) {
+            self.nofollow = nofollow
+            self.noindex = noindex
         }
     }
 }

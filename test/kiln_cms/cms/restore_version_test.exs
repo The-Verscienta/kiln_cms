@@ -161,6 +161,8 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
         seo_keywords: "original, keywords",
         seo_image: "/uploads/original.png",
         canonical_url: "https://example.com/original",
+        noindex: true,
+        nofollow: true,
         custom_fields: %{"price" => "9"}
       }
 
@@ -181,6 +183,8 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
             seo_keywords: "edited, keywords",
             seo_image: "/uploads/edited.png",
             canonical_url: "https://example.com/edited",
+            noindex: false,
+            nofollow: false,
             custom_fields: %{"price" => "19"},
             blocks: block("Edited")
           },
@@ -223,7 +227,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       # belongs in history, while restoring text must not relocate the document.
       assert VersionDiff.diffable_fields(KilnCMS.CMS.Post) ==
                ~w(title working_title slug path_alias excerpt state audience locale
-                  seo_title seo_description seo_keywords seo_image canonical_url
+                  seo_title seo_description seo_keywords seo_image canonical_url noindex nofollow
                   published_at scheduled_at proposed_publish_at unpublish_at expiry_action
                   review_after_days last_reviewed_at
                   author_id category_id featured_image_id custom_fields
@@ -231,7 +235,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
 
       assert VersionFields.restorable_fields(KilnCMS.CMS.Post) ==
                ~w(title working_title slug path_alias excerpt audience locale
-                  seo_title seo_description seo_keywords seo_image canonical_url
+                  seo_title seo_description seo_keywords seo_image canonical_url noindex nofollow
                   category_id featured_image_id custom_fields blocks
                   working_base working_blocks working_copy_at working_fields)a
     end

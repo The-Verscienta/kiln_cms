@@ -38,7 +38,8 @@ defmodule KilnCMS.CMS.ContentCopy do
   # `slug`/`locale` (each caller decides — they're what identifies the copy),
   # `canonical_url` (points at the *source*'s canonical URL, never the copy's),
   # `path_alias` (re-derived from the type's alias pattern), and every workflow
-  # / scheduling column.
+  # / scheduling column. `noindex` / `nofollow` ARE copied (#2256): a copy of a
+  # document that asked not to be indexed is not meant to be indexed either.
   @content_attrs [
     :title,
     :excerpt,
@@ -46,6 +47,8 @@ defmodule KilnCMS.CMS.ContentCopy do
     :seo_description,
     :seo_keywords,
     :seo_image,
+    :noindex,
+    :nofollow,
     :audience,
     :custom_fields,
     :category_id,

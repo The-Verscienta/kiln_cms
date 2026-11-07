@@ -305,6 +305,8 @@ defmodule KilnCMS.Cache do
       Cachex.del(@cache, private_fields_key(org_id))
       Cachex.del(@cache, calendar_types_key(org_id))
       Cachex.del(@cache, delivery_schema_key(org_id))
+      Cachex.del(@cache, delivery_schema_key(org_id, "typescript"))
+      Cachex.del(@cache, delivery_schema_key(org_id, "typescript-graphql"))
       # `has_published_feed` is half of `KilnCMS.Feeds.syndicated?/2`, so a type
       # write changes which types syndicate as surely as a settings save does.
       Cachex.del(@cache, syndicated_types_key(org_id))
@@ -324,6 +326,14 @@ defmodule KilnCMS.Cache do
   """
   @spec delivery_schema_key(Ash.UUID.t()) :: String.t()
   def delivery_schema_key(org_id), do: "delivery_schema:#{org_id}"
+
+  @doc """
+  The same document rendered in another `GET /api/schema` format (`typescript`,
+  `typescript-graphql`). Its own key per format, busted with the JSON one by
+  `bust_type_registry/1`; the JSON key is unchanged.
+  """
+  @spec delivery_schema_key(Ash.UUID.t(), String.t()) :: String.t()
+  def delivery_schema_key(org_id, format), do: "delivery_schema:#{org_id}:#{format}"
 
   @doc """
   Cache key for which of a site's content types are event-shaped (#480).
@@ -355,6 +365,23 @@ defmodule KilnCMS.Cache do
   @spec bust_branding(Ash.UUID.t()) :: :ok
   def bust_branding(org_id) do
     if enabled?(), do: ClusterBust.broadcast([branding_key(org_id)])
+    :ok
+  end
+
+  @doc """
+  Cache key for a site's resolved safety-field list (`KilnCMS.CMS.Severity`).
+  """
+  @spec safety_fields_key(Ash.UUID.t()) :: String.t()
+  def safety_fields_key(org_id), do: "safety_fields:#{org_id}"
+
+  @doc """
+  Drop a site's cached safety-field list after a `SiteSafetyFields` write.
+  Cluster-wide, like `bust_branding/1`: a node that kept the old list would
+  stop asking for a severity on a field the admin just listed.
+  """
+  @spec bust_safety_fields(Ash.UUID.t()) :: :ok
+  def bust_safety_fields(org_id) do
+    if enabled?(), do: ClusterBust.broadcast([safety_fields_key(org_id)])
     :ok
   end
 

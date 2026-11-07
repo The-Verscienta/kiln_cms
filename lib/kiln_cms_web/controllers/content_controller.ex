@@ -155,8 +155,57 @@ defmodule KilnCMSWeb.ContentController do
            end) do
       serve(conn, :show, to_string(ct.type), payload, ct, audiences)
     else
-      _ -> follow_redirect_or_404(conn, "/" <> type <> "/" <> slug, ct)
+      _ ->
+        follow_redirect_or_404(conn, "/" <> type <> "/" <> slug, ct, form_page(conn, type, slug))
     end
+  end
+
+  # The standalone page of an active form at `/forms/<slug>` (#2138), as the
+  # funnel's last resort before the 404 — the same slot the event index (#766)
+  # takes for single segments, for the same reason: it can only turn a 404 into
+  # a page, never take a URL from something that already answers there. A site
+  # with a content type of its own at `/forms` keeps its entries, and a path
+  # alias, redirect, lock page or teaser at the address still wins.
+  #
+  # Not a route of its own, and `forms` is not a reserved path segment: either
+  # would have taken `/forms/<slug>` away from such a type outright. Before
+  # this the only browser GET under `/forms/` was the iframe document
+  # (`/forms/:slug/embed`), and the address the editor shows 404ed.
+  #
+  # The form read goes through `KilnCMS.Forms.get_active/2` — the form's own
+  # policies, scoped to this site's org — so an inactive form, or another
+  # site's slug, falls through to the normal 404 and its missed-path tracking.
+  defp form_page(conn, "forms", slug) do
+    fn ->
+      case KilnCMS.Forms.get_active(slug, current_org_id(conn)) do
+        nil -> nil
+        form -> render_form_page(conn, form)
+      end
+    end
+  end
+
+  defp form_page(_conn, _type, _slug), do: fn -> nil end
+
+  defp render_form_page(conn, form) do
+    conn
+    # Same window as the event index's: the page changes only when an admin
+    # edits the form, and a form deactivated inside it refuses the POST anyway.
+    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> put_resp_header("vary", "Accept-Language")
+    # Matches the embed document's `<meta name="robots" content="noindex">`: a
+    # form is a destination for a link, not a page with content of its own, and
+    # it stays out of the sitemap for the same reason.
+    |> put_resp_header("x-robots-tag", "noindex")
+    |> put_view(KilnCMSWeb.FormHTML)
+    |> render(:show,
+      form: form,
+      # Under `/fr/forms/<slug>` the form posts to `/fr/forms/<slug>`, so the
+      # thank-you page and a refused re-render stay in the visitor's language.
+      action: I18n.localized_path(conn.assigns[:path_locale], "/forms/" <> form.slug),
+      current_org: conn.assigns[:current_org],
+      locale: locale(conn),
+      page_title: form.name
+    )
   end
 
   # Serve a payload at its canonical URL: a record with a `path_alias` (#485)
@@ -215,7 +264,7 @@ defmodule KilnCMSWeb.ContentController do
   # would have shown every member a paywall they had already paid past.
   #
   # `fallback` is one last thing to try before the 404 — the event index (#766)
-  # is the only caller that passes one. It sits at the very end deliberately:
+  # and the standalone form page (#2138) are the callers that pass one. It sits at the very end deliberately:
   # a generated listing must never outrank a record that actually resolves at
   # the same URL, and putting it here means the ordering is stated once, in the
   # funnel, rather than inferred from which branch called what.
@@ -367,6 +416,7 @@ defmodule KilnCMSWeb.ContentController do
     # being indexed in the document's place — the canonical below still points at
     # the document's own URL, so nothing about it moves in an index.
     |> put_resp_header("x-robots-tag", "noindex, nofollow")
+    |> assign(:robots, "noindex, nofollow")
     |> put_resp_header("content-language", teaser.locale)
     |> put_status(:unauthorized)
     |> assign(:locale, teaser.locale)
@@ -439,6 +489,7 @@ defmodule KilnCMSWeb.ContentController do
     # URL returns the full document for an entitled reader — a shared cache keyed
     # on URL alone would eventually cross the two.
     |> put_private_delivery_headers()
+    |> KilnCMSWeb.Robots.put(teaser)
     |> put_resp_header("content-language", teaser.locale)
     |> assign(:locale, teaser.locale)
     |> assign(:page_title, teaser.seo_title || teaser.title)
@@ -957,6 +1008,9 @@ defmodule KilnCMSWeb.ContentController do
     # follows `record.locale`; this is the same fact for HTTP.
     conn = put_resp_header(conn, "content-language", record.locale)
 
+    # Before the 304 branch below, so a conditional hit carries the same header.
+    conn = KilnCMSWeb.Robots.put(conn, record)
+
     start = System.monotonic_time()
 
     result =
@@ -1440,6 +1494,7 @@ defmodule KilnCMSWeb.ContentController do
     raw =
       "#{record.id}:#{record.locale}:#{record.updated_at}:#{record.published_version_id}" <>
         ":#{record.seo_title}:#{record.seo_description}" <>
+        ":#{KilnCMSWeb.Robots.directive(record)}" <>
         ":#{KilnCMS.Cache.head_generation(org_id)}"
 
     digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)

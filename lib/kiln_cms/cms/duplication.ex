@@ -58,7 +58,9 @@ defmodule KilnCMS.CMS.Duplication do
   because the copy needs one to exist and the editor could type any title into
   a new document anyway. `audience`, because dropping it would fall back to the
   attribute default (`:public`) — strictly *less* restrictive than the source,
-  which would quietly move a members-only body to the public tier.
+  which would quietly move a members-only body to the public tier. `noindex` and
+  `nofollow` (#2256), for the same reason: dropped, they fall back to `false`
+  and a copy of a page hidden from search engines would be indexable.
   """
 
   require Logger
@@ -79,8 +81,9 @@ defmodule KilnCMS.CMS.Duplication do
   # Carried whatever the acting editor's field grant says — see the module doc.
   # `title` is exempt for a different reason than `audience`: it is rewritten
   # rather than copied, so it is never withheld and must not be reported as
-  # such.
-  @grant_exempt_attrs [:title, :audience]
+  # such. `noindex` / `nofollow` are exempt like `audience`: dropping one is a
+  # less restrictive copy of a page that asked to be hidden.
+  @grant_exempt_attrs [:title, :audience, :noindex, :nofollow]
 
   @doc """
   Duplicate a record into a new draft of the same type and locale, raising on

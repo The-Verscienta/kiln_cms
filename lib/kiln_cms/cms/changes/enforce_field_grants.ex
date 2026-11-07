@@ -68,7 +68,6 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
   defp enforce(changeset, allowed) do
     changeset.action.accept
     |> Enum.filter(&violation?(changeset, &1, allowed))
-    |> Enum.map(&to_string/1)
     |> Enum.reduce(changeset, &add_violation(&2, &1))
     |> maybe_block_tree_violation(allowed)
   end
@@ -78,6 +77,45 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
       changing?(changeset, attr) and
       grant_name(attr) not in allowed
   end
+
+  # The editing verbs an editor reaches from the editor UI: `:autosave` inherits
+  # `:update`'s accept list, and every other update action that accepts content
+  # attributes is a system write (published-version bookkeeping, re-indexing,
+  # author reassignment) an editor-facing grant has no business listing.
+  @grantable_actions [:update, :move, :save_working_copy]
+
+  @doc """
+  The field names a `field_grants` entry for a content type can usefully list,
+  for the team UI's picker (#2141). Takes a `KilnCMS.CMS.ContentTypes`
+  descriptor; a dynamic type reads the shared `KilnCMS.CMS.Entry` actions.
+
+  Built from the same `accept` lists and the same `grant_name/1` mapping the
+  check above compares against, so a name offered here is one enforcement
+  recognizes: `working_title`/`working_blocks` collapse into `title`/`blocks`,
+  and `custom_fields` is a single name (there are no per-custom-field grants).
+  `type_definition_id` is left out (a dynamic entry never changes type through
+  the editor), and so is `excerpt` for a dynamic type without one. Ordered
+  title, blocks, then the rest in accept order.
+  """
+  @spec grantable_fields(KilnCMS.CMS.ContentTypes.t()) :: [String.t()]
+  def grantable_fields(%{} = descriptor) do
+    resource = descriptor.resource || KilnCMS.CMS.Entry
+
+    names =
+      @grantable_actions
+      |> Enum.map(&Ash.Resource.Info.action(resource, &1))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.flat_map(& &1.accept)
+      |> Enum.map(&grant_name/1)
+      |> Enum.uniq()
+      |> Enum.reject(&ungrantable?(&1, descriptor))
+
+    Enum.filter(["title", "blocks"], &(&1 in names)) ++ (names -- ["title", "blocks"])
+  end
+
+  defp ungrantable?("type_definition_id", _descriptor), do: true
+  defp ungrantable?("excerpt", %{source: :dynamic, excerpt?: excerpt?}), do: not excerpt?
+  defp ungrantable?(_name, _descriptor), do: false
 
   # The working copy of a live document (docs/working-copy.md) is the title and
   # body under another column name: an editor granted `title` and `blocks` may
@@ -116,12 +154,14 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
         Ash.Changeset.get_argument(changeset, :body_markdown) != nil
 
     if body_arg? and "blocks" not in allowed do
-      add_violation(changeset, "blocks")
+      add_violation(changeset, :blocks)
     else
       changeset
     end
   end
 
+  # The error carries the attribute as an ATOM: a form field's `.errors` only
+  # matches atom keys, so a string field name was shown nowhere in the editor.
   defp add_violation(changeset, field) do
     Ash.Changeset.add_error(changeset,
       field: field,

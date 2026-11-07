@@ -81,3 +81,13 @@ if purge_url != "" do
       ),
     purge_token_header: System.get_env("KILN_CDN_PURGE_TOKEN_HEADER", "authorization")
 end
+
+# ## Reject unverifiable bearer tokens (KilnCMSWeb.Plugs.ApiKeyAuth, #2161)
+#
+# On by default: a JWT that fails verification is answered 401 instead of being
+# served anonymously. KILN_API_REJECT_INVALID_BEARER=false restores the anonymous
+# fallback; that escape hatch is removed in the release after this one (ADR 0012).
+# Unset writes no config, so the plug's default (on) applies.
+with {:ok, reject?} <- Env.fetch("KILN_API_REJECT_INVALID_BEARER") do
+  config :kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth, reject_invalid_bearer: reject?
+end

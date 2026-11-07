@@ -1187,6 +1187,23 @@
             "null"
           ]
         },
+        "robots": {
+          "additionalProperties": false,
+          "description": "The document's robots flags. Absent when neither is set; absent means both false.",
+          "properties": {
+            "nofollow": {
+              "type": "boolean"
+            },
+            "noindex": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "noindex",
+            "nofollow"
+          ],
+          "type": "object"
+        },
         "slug": {
           "type": [
             "string",
@@ -1503,6 +1520,23 @@
             "string",
             "null"
           ]
+        },
+        "robots": {
+          "additionalProperties": false,
+          "description": "The document's robots flags. Absent when neither is set; absent means both false.",
+          "properties": {
+            "nofollow": {
+              "type": "boolean"
+            },
+            "noindex": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "noindex",
+            "nofollow"
+          ],
+          "type": "object"
         },
         "slug": {
           "type": [

@@ -312,6 +312,21 @@ Treat "what can this credential see" as part of its blast radius: a leaked
 editor-keyed delivery config exposes drafts, and an admin-keyed one exposes
 every paying member's content as well — not just rate-limit headroom.
 
+### A bad bearer token is a `401`
+
+A malformed, expired or foreign JWT in `Authorization: Bearer …` is answered
+`401` with an `invalid_token` error envelope and
+`WWW-Authenticate: Bearer error="invalid_token"`, on `/api/json`, `/gql` and the
+other `/api` routes. It used to be served as anonymous, so a client with a
+stale token read public content and took it for success; treat this `401` as
+"re-authenticate", not as "forbidden". A request with no `Authorization` header
+is still anonymous, and a bad `kiln_` key was always a `401`.
+
+An operator who needs time to fix a client can set
+`KILN_API_REJECT_INVALID_BEARER=false` to restore the anonymous fallback. That
+escape hatch lasts one release and is then removed
+([ADR 0012](decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)).
+
 ## Mirroring: sync instead of re-reading everything
 
 A static build or search index that polls JSON:API with
@@ -339,6 +354,95 @@ left, or names one you were never sent.
 
 For an app on a phone, see [native-apps.md](native-apps.md#mirroring-with-sync)
 for where to keep the cursor and when (not) to start over.
+
+## Submitting drafts from your app: the `draft_write` key
+
+If your app needs to **send content to Kiln for a human to review** (a
+user-submitted article, an imported listing), give its service a
+`draft_write` API key rather than a `read_write` one. It can create content and
+edit **its own drafts** and nothing else, whatever the account behind it can do
+([ADR 0012](decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)).
+
+* **Minting is admin-only**, at `/editor/api-keys`. Pick the `draft_write`
+  access; the key must expire within `:draft_write_key_max_ttl_days` (default
+  30 days), and its owner must be a viewer-tier service account, not an editor
+  or admin. An admin can also give it a **self-rotation window** (below), so
+  the service renews it without a person re-minting it every month.
+* **It may:** `create` (JSON:API `POST`, GraphQL `create…`, `/mcp` `create_*`),
+  and `update`/autosave a document that is still a **draft** and that the key's
+  account **authored**. Nothing in review, archived or live.
+* **It may not:** publish, unpublish, schedule, archive, delete, submit for
+  review (a person moves a draft into the queue), restore a version, edit a
+  live document or someone else's draft, or touch media. Each is refused
+  (`403`; a row it may not read is a `404`).
+* **Drafts cannot set tags, a category or related links.** Those links are
+  separate writes the key is refused, so a human files the draft when they
+  review it. Custom fields, blocks, title and the like are fine.
+* **Media is refused** on every route: `/api/media*`, the media `PATCH` and
+  GraphQL `updateMediaItem`. Upload through a `read_write` key on an editor
+  account, or ask an editor to attach images.
+* **It reads as its account does:** published content (audience permitting)
+  plus the drafts it authored. It cannot read other authors' unpublished
+  content and has no revision history.
+
+### Keeping the key alive: self-rotation
+
+If the admin minted the key with a self-rotation window ("Self-rotation" at
+`/editor/api-keys`; up to a year), the service can exchange it for a fresh one
+before it expires:
+
+```bash
+curl -X POST https://kiln.example.com/api/keys/rotate \
+  -H "Authorization: Bearer $KILN_DRAFT_KEY"
+```
+
+```json
+{"data": {"id": "…", "api_key": "kiln_…", "expires_at": "2026-12-06T…",
+          "rotatable_until": "2027-05-05T…", "rotated_from_id": "…"}}
+```
+
+* The new key has the same account, scope and name. It expires 30 days out
+  (`:draft_write_key_max_ttl_days`), or at `rotatable_until` if that is sooner.
+  After `rotatable_until`, ask an admin for a new key.
+* **The old key is revoked the moment this answers.** Write the new key to
+  your secret store first, then switch to it. Workers still using the old key
+  get `401` until they reload; that is expected.
+* **Rotate from one place**, on a schedule (for example when fewer than 7 days
+  are left), not from every worker on a 401.
+* **Never present a rotated-away key to this endpoint again.** Kiln reads that
+  as a stolen key: more than 120 seconds after the rotation it revokes the
+  whole chain, including your current key, and alerts the admins. If you lose
+  the `201` (a network failure mid-request), do not retry with the old key;
+  ask an admin to mint a new one.
+* `401` (`invalid_api_key`): no key, or it is revoked/expired. `403`
+  (`forbidden`): not a drafts-only key, or it has no rotation window or the
+  window has closed. `409` (`not_rotatable`): it was rotated by a concurrent
+  request, or its account was given an editor or admin role. `500`: a server
+  failure; the old key still works, so retry later. This endpoint
+  never treats a request as anonymous, with or without
+  `KILN_API_REJECT_INVALID_BEARER`.
+
+### Telling reviewers who it was for: `X-Kiln-On-Behalf-Of`
+
+Send `X-Kiln-On-Behalf-Of: <your user id>` on the **create** (`POST`) and Kiln
+stores it on the draft, with the key's id and name, so a reviewer can see
+"submitted by Verscienta for user 42". It is an opaque label of your choosing,
+trimmed of control characters and capped in length. It is **stored only, never
+authorization**: Kiln does not check it, trust it or act on it, and sending it
+with any other key is ignored. These **provenance fields**
+(`created_via_key_id`, `created_via_key_name`, `on_behalf_of`) are readable on
+JSON:API, GraphQL and `/mcp` by **authenticated callers only**: an editor or
+admin, and your own `draft_write` key for the drafts *it* created (not another
+key's). Anonymous callers, preview-link holders and viewer-tier accounts never
+get them, on a published row or a draft: the label may identify an end user
+and a published document is world-readable. For them the field is **absent**
+from a JSON:API `attributes` object (also with `?fields[post]=on_behalf_of`),
+and `null` in GraphQL, where a query that selects the field also receives a
+`forbidden_field` entry in `errors` beside the data. They are deliberately not
+in webhook payloads, the preview endpoint or `/api/sync`. They show in the
+editor, read from the draft itself; they are **not** recorded in version
+history, whose read scope (every draft of the key's owner) is wider than theirs
+(the drafts this key created).
 
 ## Editorial tooling: version history and releases
 

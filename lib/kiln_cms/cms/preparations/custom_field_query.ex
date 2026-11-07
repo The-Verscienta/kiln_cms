@@ -10,7 +10,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
     * `custom_filter` — `%{"price" => %{"gt" => "10"}, "color" => "red"}`;
       a bare value means equality, a map holds operators (`eq`, `not_eq`,
-      `gt`, `gte`, `lt`, `lte`, `in`, `ilike`, `null`). Conditions are ANDed.
+      `gt`, `gte`, `lt`, `lte`, `in`, `ilike`, `null`; `is_nil` is a
+      synonym of `null`). Conditions are ANDed.
     * `custom_sort` — comma-separated field names, `-` prefix for descending
       (`"-price,title"`), appended to any explicit `sort` so it wins over an
       action's *default* order but not over a caller's.
@@ -62,7 +63,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   alias Ash.Error.Query.InvalidArgument
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Relations
 
-  @operators ~w(eq not_eq gt gte lt lte in ilike null)
+  @operators ~w(eq not_eq gt gte lt lte in ilike null is_nil)
 
   @impl true
   def prepare(query, _opts, context) do
@@ -304,13 +305,20 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
        "is not a reference"}
   end
 
-  defp relation_or_condition(definition, op, raw, _ctx), do: condition(definition, op, raw)
+  defp relation_or_condition(definition, op, raw, _ctx),
+    do: condition(definition, normalize_op(op), raw)
+
+  # `is_nil` is the native `filter[x][is_nil]` spelling of `null`, accepted so
+  # the same predicate reads the same on a custom field (#2292). Resolved
+  # before the operator guards, so every clause below sees `null` only.
+  defp normalize_op("is_nil"), do: "null"
+  defp normalize_op(op), do: op
 
   defp link_conditions(parent, link, condition, ctx, targets) do
     label = "#{parent.name}.link.#{link.name}"
 
     Enum.reduce_while(condition, {:ok, []}, fn {op, raw}, {:ok, acc} ->
-      case link_condition(link, op, raw, label) do
+      case link_condition(link, normalize_op(op), raw, label) do
         {:ok, condition} ->
           {:cont, {:ok, [Relations.link(parent, condition, ctx, targets) | acc]}}
 
@@ -400,17 +408,15 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # Postgrex would encode the JSON string as a JSON string.
   defp condition(%{field_type: type, multiple: true, name: name}, op, raw)
        when type in [:media, :reference] do
-    contains = fn id ->
-      probe = Jason.encode!([%{"id" => to_string(id)}])
-      expr(fragment("(? -> ?::text) @> ?::text::jsonb", ^ref(:custom_fields), ^name, ^probe))
-    end
+    probe = fn id -> Jason.encode!([%{"id" => to_string(id)}]) end
+    contains = fn id -> list_contains(name, probe.(id)) end
 
     case op do
       "eq" ->
         {:ok, contains.(raw)}
 
       "not_eq" ->
-        {:ok, expr(not (^contains.(raw)))}
+        {:ok, expr(not (^absent_safe_contains(name, probe.(raw))))}
 
       "in" ->
         cast_list(raw, nil, name, fn
@@ -431,17 +437,15 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # in SQL for the same reason.
   defp condition(%{field_type: type, multiple: true, name: name}, op, raw)
        when type in [:select, :string] do
-    contains = fn term ->
-      probe = Jason.encode!([to_string(term)])
-      expr(fragment("(? -> ?::text) @> ?::text::jsonb", ^ref(:custom_fields), ^name, ^probe))
-    end
+    probe = fn term -> Jason.encode!([to_string(term)]) end
+    contains = fn term -> list_contains(name, probe.(term)) end
 
     case op do
       "eq" ->
         {:ok, contains.(raw)}
 
       "not_eq" ->
-        {:ok, expr(not (^contains.(raw)))}
+        {:ok, expr(not (^absent_safe_contains(name, probe.(raw))))}
 
       "in" ->
         cast_list(raw, nil, name, fn
@@ -459,10 +463,20 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     field = expr(get_path(custom_fields, [^name, "id"]))
 
     case op do
-      "eq" -> {:ok, expr(^field == ^to_string(raw))}
-      "not_eq" -> {:ok, expr(^field != ^to_string(raw))}
-      "in" -> cast_list(raw, nil, name, fn values -> expr(^field in ^values) end)
-      _ -> {:error, "custom field #{inspect(name)} (#{type}) only supports eq/not_eq/in/null"}
+      "eq" ->
+        {:ok, snapshot_id(name, raw)}
+
+      "not_eq" ->
+        {:ok, expr(^field != ^to_string(raw))}
+
+      "in" ->
+        cast_list(raw, nil, name, fn
+          [] -> expr(false)
+          values -> values |> Enum.map(&snapshot_id(name, &1)) |> Enum.reduce(&expr(^&2 or ^&1))
+        end)
+
+      _ ->
+        {:error, "custom field #{inspect(name)} (#{type}) only supports eq/not_eq/in/null"}
     end
   end
 
@@ -510,6 +524,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     value = expr(fragment("?::jsonb", ^raw_value))
 
     case op do
+      "eq" when column == :custom_fields -> contains(column, name, raw_value)
       "eq" -> expr(^field == ^value)
       "not_eq" -> expr(^field != ^value)
       "gt" -> expr(^field > ^value)
@@ -517,6 +532,92 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       "lt" -> expr(^field < ^value)
       "lte" -> expr(^field <= ^value)
     end
+  end
+
+  # --- containment (index-matchable equality) ---------------------------------
+
+  @doc """
+  Equality on one custom field as **containment**: `custom_fields @>
+  jsonb_build_object(name, value)`, an `Ash.Expr` over the `column` (an atom).
+
+  Unlike `(custom_fields -> name) = value`, a `@>` against a bound `jsonb`
+  parameter can use a GIN index on the column under any plan (#2291), and one
+  index covers every field name because the name sits inside the indexed
+  value. `value` is the already-cast Elixir term (see `ash_type/1`); it is
+  JSON-encoded by the `::jsonb` bind, so `10` matches a JSON number and `"10"`
+  a JSON string.
+
+  It selects the same rows as `(column -> name) = value::jsonb` for a scalar
+  `value`: containment's "an array contains a scalar" shortcut applies only
+  at the top level, never to a value nested under `name`. Only the positive
+  match is rewritten. A negation (`not_eq`) must keep the old `->` form: an
+  absent key is `NULL` there and is excluded, where `NOT (column @> ...)`
+  would include it.
+  """
+  def contains(column, name, value) when is_atom(column) and is_binary(name) do
+    expr(
+      fragment(
+        "? @> jsonb_build_object(?::text, ?::jsonb)",
+        ^ref(column),
+        ^name,
+        ^value
+      )
+    )
+  end
+
+  @doc """
+  The Ash type a custom field's *input* is cast with before being JSON-encoded
+  into a predicate, by `FieldDefinition` field type: `:integer`, `:float`,
+  `:boolean`, `:date`, `:naive_datetime` (datetimes are stored offset-less
+  ISO-8601, see `ApplyCustomFields`), `:dynamic` for a `:computed` field (the
+  formula decides, so the supplied value's own JSON type is kept), and `nil`
+  for text-like and plugin-contributed types ("treat as text").
+  """
+  def ash_type(%{field_type: :integer}), do: :integer
+  def ash_type(%{field_type: :float}), do: :float
+  def ash_type(%{field_type: :boolean}), do: :boolean
+  def ash_type(%{field_type: :date}), do: :date
+  def ash_type(%{field_type: :datetime}), do: :naive_datetime
+  # A `:computed` field (#429) has no static type — its formula decides, so
+  # `{{ word_count(body) }}` stores a JSON number while `{{ slugify(title) }}`
+  # stores a JSON string. Infer from the supplied predicate instead: text-casting
+  # a number would compare a JSON string against a JSON number, which doesn't
+  # merely miss — jsonb orders Number below String, so a range predicate
+  # silently matches every row or none.
+  def ash_type(%{field_type: :computed}), do: :dynamic
+  def ash_type(_definition), do: nil
+
+  # A list-valued field (`multiple` select/string/media/reference) holds the
+  # probe: `custom_fields @> {name: [probe...]}`. Bound as text and cast in
+  # SQL — bound as `::jsonb` directly, Postgrex would encode the JSON string
+  # as a JSON string.
+  defp list_contains(name, probe) do
+    expr(
+      fragment(
+        "? @> jsonb_build_object(?::text, ?::text::jsonb)",
+        ^ref(:custom_fields),
+        ^name,
+        ^probe
+      )
+    )
+  end
+
+  # The old `->` form, kept for negation: an absent key is NULL and drops out
+  # of `NOT (...)` instead of matching it.
+  defp absent_safe_contains(name, probe) do
+    expr(fragment("(? -> ?::text) @> ?::text::jsonb", ^ref(:custom_fields), ^name, ^probe))
+  end
+
+  # A single media/reference field matched by its snapshot's stable id.
+  defp snapshot_id(name, id) do
+    expr(
+      fragment(
+        "? @> jsonb_build_object(?::text, jsonb_build_object('id', ?::text))",
+        ^ref(:custom_fields),
+        ^name,
+        ^to_string(id)
+      )
+    )
   end
 
   # --- sorting -----------------------------------------------------------------
@@ -563,24 +664,6 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp sort_expr(%{name: name}) do
     Ash.Sort.expr_sort(fragment("(? -> ?::text)", ^ref(:custom_fields), ^name))
   end
-
-  # The Ash type the *input* value is cast with before being JSON-encoded into
-  # the predicate. `datetime` values are stored as offset-less ISO-8601 (see
-  # ApplyCustomFields), hence :naive_datetime. nil means "treat as text" —
-  # right for strings and the safe default for plugin-contributed types.
-  defp ash_type(%{field_type: :integer}), do: :integer
-  defp ash_type(%{field_type: :float}), do: :float
-  defp ash_type(%{field_type: :boolean}), do: :boolean
-  defp ash_type(%{field_type: :date}), do: :date
-  defp ash_type(%{field_type: :datetime}), do: :naive_datetime
-  # A `:computed` field (#429) has no static type — its formula decides, so
-  # `{{ word_count(body) }}` stores a JSON number while `{{ slugify(title) }}`
-  # stores a JSON string. Infer from the supplied predicate instead: text-casting
-  # a number would compare a JSON string against a JSON number, which doesn't
-  # merely miss — jsonb orders Number below String, so a range predicate
-  # silently matches every row or none.
-  defp ash_type(%{field_type: :computed}), do: :dynamic
-  defp ash_type(_definition), do: nil
 
   # --- value casting -------------------------------------------------------------
 

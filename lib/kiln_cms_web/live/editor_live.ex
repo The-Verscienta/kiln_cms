@@ -14,13 +14,17 @@ defmodule KilnCMSWeb.EditorLive do
 
   import Ash.Expr, only: [expr: 1]
 
+  alias KilnCMS.Accounts
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.ListFields
   alias KilnCMS.Compliance
   alias KilnCMS.Compliance.Settings
   alias KilnCMS.I18n
   alias KilnCMSWeb.ContentEditor.NewDraft
   alias KilnCMSWeb.ContentEditor.Shared
+  alias KilnCMSWeb.ContentTrash
+  alias KilnCMSWeb.EditorLive.FieldCells
   alias KilnCMSWeb.EditorLive.Filters
 
   import KilnCMSWeb.ComplianceComponents, only: [compliance_grade_badge: 1]
@@ -73,6 +77,12 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:saving_view?, false)
      |> assign(:renaming_view, nil)
      |> assign(:confirming_view_delete, nil)
+     # The custom-field columns of the one type being listed (`assign_columns/1`).
+     |> assign(:column_type, nil)
+     |> assign(:column_options, [])
+     |> assign(:column_names, [])
+     |> assign(:columns, [])
+     |> assign(:column_labels, FieldCells.empty())
      |> load_saved_views()}
   end
 
@@ -123,15 +133,31 @@ defmodule KilnCMSWeb.EditorLive do
 
   # (Re)load the first page under the active filter.
   defp load_items(socket) do
+    socket = assign_columns(socket)
     {items, cursors} = fetch_page(socket, %{})
 
     socket
     |> assign(:items, items)
+    |> assign(:trashable, trashable(socket, items))
+    |> assign_column_labels(items, FieldCells.empty())
     |> assign(:cursors, cursors)
     |> assign(:more?, more?(cursors))
     |> assign(:total, count_items(socket))
     |> assign(:compliance_settings, compliance_settings(socket, items))
     |> assign_translated()
+  end
+
+  # The rows the actor may move to the trash (#2137), as selection keys
+  # ("kind:id"): the destroy policy asked once per row per load, not per
+  # render. Only decides whether the row menu OFFERS the item; the
+  # `move_to_trash` handler asks again.
+  defp trashable(socket, items) do
+    %{actor: actor, current_org: org} = socket.assigns
+
+    for {kind, record} <- items,
+        ContentTypes.can_destroy?(kind, record, actor, tenant: org),
+        into: MapSet.new(),
+        do: "#{kind}:#{record.id}"
   end
 
   # The overview strip's counts: how much of the site's content sits in each
@@ -240,8 +266,8 @@ defmodule KilnCMSWeb.EditorLive do
   # nothing is skipped or repeated whatever the sort, and a type that ran out
   # is not queried again.
   defp fetch_page(socket, cursors) do
-    %{actor: actor, current_org: org, filters: filters} = socket.assigns
-    query = page_query(filters, actor)
+    %{actor: actor, current_org: org, filters: filters, columns: columns} = socket.assigns
+    query = page_query(filters, actor, columns)
 
     streams =
       for ct <- filtered_types(socket), Map.get(cursors, type_value(ct)) != :done do
@@ -307,16 +333,78 @@ defmodule KilnCMSWeb.EditorLive do
     |> Enum.sum()
   end
 
-  defp page_query(filters, actor) do
-    # Widened only for `in_review` (#856): the other filters never render the
+  defp page_query(filters, actor, columns) do
+    # Widened for `in_review` (#856): the other filters never render the
     # compliance badge, so they keep the narrower select the comment on
-    # `@list_fields` explains the cost of.
+    # `@list_fields` explains the cost of. Independently, `:custom_fields` is
+    # pulled only when the list shows field columns, which cost the same.
     select =
-      if filters["status"] == "in_review",
+      if(filters["status"] == "in_review",
         do: @list_fields ++ @compliance_fields,
         else: @list_fields
+      )
+
+    select = if columns == [], do: select, else: select ++ [:custom_fields]
 
     Filters.query_filters(filters, actor.id) ++ [select: select, sort: Filters.sort(filters)]
+  end
+
+  # The one content type whose fields the list can show as columns: the type
+  # the `type` filter names, or the only type the actor can author. `nil` for
+  # "all" on a site with several, where field names collide across types.
+  defp column_type(%{assigns: %{type: "all", content_types: [only]}}), do: only
+  defp column_type(%{assigns: %{type: "all"}}), do: nil
+
+  defp column_type(socket) do
+    case filtered_types(socket) do
+      [descriptor] -> descriptor
+      _none -> nil
+    end
+  end
+
+  # What the column picker offers and what the strip shows, for the current
+  # type. The remembered names are re-read against today's field definitions,
+  # so a deleted or since-private field simply drops out.
+  defp assign_columns(socket) do
+    %{actor: actor, current_org: org, current_user: user} = socket.assigns
+
+    case column_type(socket) do
+      nil ->
+        socket
+        |> assign(:column_type, nil)
+        |> assign(:column_options, [])
+        |> assign(:column_names, [])
+        |> assign(:columns, [])
+
+      descriptor ->
+        options =
+          ListFields.readable_fields(
+            actor,
+            org,
+            FieldCells.definitions(descriptor, actor, org),
+            true
+          )
+
+        known = MapSet.new(options, & &1.name)
+
+        names =
+          user
+          |> ListFields.stored_columns(Accounts.org_id(org), type_value(descriptor))
+          |> Enum.filter(&MapSet.member?(known, &1))
+
+        socket
+        |> assign(:column_type, descriptor)
+        |> assign(:column_options, options)
+        |> assign(:column_names, names)
+        |> assign(:columns, ListFields.resolve_columns(names, options))
+    end
+  end
+
+  # The labels the strip's cells need for `items`, one lookup per page of rows
+  # (see `FieldCells`). Recomputed wherever rows are fetched.
+  defp assign_column_labels(socket, items, prior) do
+    %{actor: actor, current_org: org, columns: columns} = socket.assigns
+    assign(socket, :column_labels, FieldCells.labels(prior, items, columns, actor, org))
   end
 
   # Everything editable here: compiled content types plus admin-defined dynamic
@@ -384,6 +472,25 @@ defmodule KilnCMSWeb.EditorLive do
   # A chip's remove button: back to that facet's default.
   def handle_event("remove_filter", %{"key" => key}, socket) when is_binary(key) do
     {:noreply, patch_filters(socket, %{key => Map.get(Filters.defaults(), key)})}
+  end
+
+  # The Columns picker (the form's whole checked set arrives each time). Only
+  # the type being listed is accepted, and every name is checked against what
+  # the picker offers: a forged event names nothing it could not click. The
+  # write re-validates (`Accounts.set_content_list_columns/5`) and is the
+  # user's own preference, keyed by the current site, never by a param.
+  def handle_event("set_columns", %{"type" => type} = params, socket) when is_binary(type) do
+    names = Map.get(params, "columns", [])
+
+    with true <- is_list(names) and Enum.all?(names, &is_binary/1),
+         %{} = descriptor <- column_type(socket),
+         true <- type_value(descriptor) == type,
+         names = names |> Enum.reject(&(&1 == "")) |> Enum.uniq(),
+         true <- valid_columns?(socket, names) do
+      {:noreply, save_columns(socket, type, names)}
+    else
+      _ -> {:noreply, socket}
+    end
   end
 
   def handle_event("toggle_filters", _params, socket),
@@ -576,8 +683,8 @@ defmodule KilnCMSWeb.EditorLive do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
-    {ok, skipped} =
-      Enum.reduce(socket.assigns.selected, {0, 0}, fn key, {ok, skipped} ->
+    {ok, skipped, needs_severity} =
+      Enum.reduce(socket.assigns.selected, {0, 0, 0}, fn key, counts ->
         [kind, id] = String.split(key, ":", parts: 2)
 
         result =
@@ -585,19 +692,28 @@ defmodule KilnCMSWeb.EditorLive do
             do: destroy(kind, id, actor, org),
             else: do_transition(kind, verb, get!(kind, id, actor, org), actor, org)
 
-        case result do
-          :ok -> {ok + 1, skipped}
-          {:ok, _} -> {ok + 1, skipped}
-          _ -> {ok, skipped + 1}
-        end
+        tally_bulk(result, counts)
       end)
+
+    flash = bulk_flash(verb, ok, skipped + needs_severity)
+
+    flash =
+      if needs_severity > 0,
+        do:
+          flash <>
+            " " <>
+            gettext(
+              "%{count} of them touch a safety field — open each in the editor to publish and say how much the change matters.",
+              count: needs_severity
+            ),
+        else: flash
 
     {:noreply,
      socket
      |> refresh()
      |> assign(:selected, MapSet.new())
      |> assign(:confirming_bulk, nil)
-     |> put_flash(:info, bulk_flash(verb, ok, skipped))}
+     |> put_flash(:info, flash)}
   end
 
   def handle_event("publish", params, socket),
@@ -685,6 +801,25 @@ defmodule KilnCMSWeb.EditorLive do
     end
   end
 
+  # "Move to trash" on one row (#2137). `kind`/`id` come off the clicked row,
+  # so they are client input: the type is resolved without raising, the record
+  # is read under this site's org (another org's id is simply not found), and
+  # the destroy policy is asked again before the write — the menu item is drawn
+  # only for rows it allows, and a forged event gets the same answer.
+  def handle_event("move_to_trash", %{"kind" => kind, "id" => id}, socket)
+      when is_binary(kind) and is_binary(id) do
+    %{actor: actor, current_org: org} = socket.assigns
+
+    with %{} <- ContentTypes.get(kind, org),
+         {:ok, record} <- ContentTypes.get_record(kind, id, actor: actor, tenant: org) do
+      {:noreply, move_to_trash(socket, kind, record)}
+    else
+      _missing -> {:noreply, put_flash(socket, :error, ContentTrash.not_found())}
+    end
+  end
+
+  def handle_event("move_to_trash", _params, socket), do: {:noreply, socket}
+
   def handle_event("load_more", _params, socket) do
     case List.last(socket.assigns.items) do
       nil ->
@@ -696,8 +831,10 @@ defmodule KilnCMSWeb.EditorLive do
         {:noreply,
          socket
          |> assign(:items, socket.assigns.items ++ page)
+         |> assign(:trashable, MapSet.union(socket.assigns.trashable, trashable(socket, page)))
          |> assign(:cursors, cursors)
          |> assign(:more?, more?(cursors))
+         |> assign_column_labels(page, socket.assigns.column_labels)
          |> assign_translated()}
     end
   end
@@ -796,6 +933,25 @@ defmodule KilnCMSWeb.EditorLive do
     socket |> assign(:releases, releases) |> assign(:adding_to_release?, false)
   end
 
+  defp valid_columns?(socket, names) do
+    known = MapSet.new(socket.assigns.column_options, & &1.name)
+    length(names) <= ListFields.max_stored() and Enum.all?(names, &MapSet.member?(known, &1))
+  end
+
+  defp save_columns(socket, type, names) do
+    %{current_user: user, current_org: org} = socket.assigns
+
+    case Accounts.set_content_list_columns(user, Accounts.org_id(org), type, names, actor: user) do
+      {:ok, updated} ->
+        socket
+        |> assign(:current_user, %{user | content_list_columns: updated.content_list_columns})
+        |> load_items()
+
+      {:error, _error} ->
+        put_flash(socket, :error, gettext("Your choice could not be saved."))
+    end
+  end
+
   defp list_path(filters), do: params_path(Filters.to_params(filters))
 
   defp params_path(params) when params == %{}, do: ~p"/editor"
@@ -837,7 +993,17 @@ defmodule KilnCMSWeb.EditorLive do
         |> put_flash(:info, KilnCMSWeb.WorkflowMessages.success(verb, record.state))
 
       {:error, error} ->
-        put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error(verb, error))
+        if severity_required?(error) do
+          put_flash(
+            socket,
+            :error,
+            gettext(
+              "This change touches a safety field. Open it in the editor to publish and say how much it matters."
+            )
+          )
+        else
+          put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error(verb, error))
+        end
     end
   end
 
@@ -848,13 +1014,52 @@ defmodule KilnCMSWeb.EditorLive do
   defp get!(kind, id, actor, org),
     do: ContentTypes.get_record!(kind, id, actor: actor, tenant: org)
 
+  # A publish from the list has no severity picker, so the action is told to
+  # refuse (rather than default to :notable) a publish that touches a site
+  # safety field; the editor has the panel that asks.
+  defp do_transition(kind, "publish", record, actor, org) do
+    ContentTypes.transition(kind, "publish", record,
+      actor: actor,
+      tenant: org,
+      context: %{require_change_severity: true}
+    )
+  end
+
   defp do_transition(kind, verb, record, actor, org),
     do: ContentTypes.transition(kind, verb, record, actor: actor, tenant: org)
+
+  defp severity_required?(error) when is_exception(error) do
+    error
+    |> Ash.Error.to_error_class()
+    |> Map.get(:errors, [])
+    |> Enum.any?(&(Map.get(&1, :field) == :change_severity))
+  end
+
+  defp severity_required?(_error), do: false
 
   # Hard delete (soft via archival). Admin-only; the policy rejects others, in
   # which case the item is counted as skipped.
   defp destroy(kind, id, actor, org),
     do: ContentTypes.destroy(kind, get!(kind, id, actor, org), actor: actor, tenant: org)
+
+  defp move_to_trash(socket, kind, record) do
+    %{actor: actor, current_org: org} = socket.assigns
+
+    if ContentTypes.can_destroy?(kind, record, actor, tenant: org) do
+      case ContentTrash.trash(kind, record, actor, org) do
+        :ok ->
+          socket
+          |> refresh()
+          |> assign(:selected, MapSet.delete(socket.assigns.selected, "#{kind}:#{record.id}"))
+          |> put_flash(:info, ContentTrash.moved(record))
+
+        {:error, error} ->
+          put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("trash", error))
+      end
+    else
+      put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.forbidden("trash"))
+    end
+  end
 
   # The set of selection keys ("kind:id") for the currently loaded items (the
   # status/search filter already ran server-side).
@@ -1582,11 +1787,11 @@ defmodule KilnCMSWeb.EditorLive do
           </:action>
         </.empty_state>
 
-        <div :if={@items != []} id="content-list" class="card overflow-hidden">
+        <div :if={@items != []} id="content-list" class="card">
           <%!-- The list's head: select-all and the count, and — only once
                 something is ticked — what can be done to the selection. --%>
           <div class={[
-            "flex min-h-12 flex-wrap items-center gap-x-4 gap-y-2 border-b px-3 py-2 transition-colors",
+            "flex min-h-12 flex-wrap items-center gap-x-4 gap-y-2 rounded-t-[inherit] border-b px-3 py-2 transition-colors",
             if(@selected_count > 0,
               do: "border-primary/25 bg-primary/8",
               else: "border-base-content/10 bg-base-200/40"
@@ -1642,6 +1847,82 @@ defmodule KilnCMSWeb.EditorLive do
                 {gettext("Delete")}
               </button>
             </div>
+            <%!-- Which custom fields each row shows (this person's choice, per
+                  site and type). Offered for one type at a time — field names
+                  collide across types — so "all" gets a hint. Same disclosure
+                  as the New menu: `data-autoclose` closes it on an outside
+                  click (which is also what closes the New menu when this one
+                  opens, and the reverse), and both sides write `hidden` and
+                  `aria-expanded` so a list patch leaves it open. --%>
+            <div
+              :if={@column_options != []}
+              id="content-columns"
+              class={["relative", @selected_count == 0 && "ml-auto"]}
+              data-autoclose
+            >
+              <button
+                type="button"
+                id="content-columns-toggle"
+                class="btn btn-default btn-sm group"
+                aria-expanded="false"
+                aria-controls="content-columns-panel"
+                phx-mounted={JS.ignore_attributes(["aria-expanded"])}
+                phx-click={
+                  JS.toggle_attribute({"aria-expanded", "true", "false"})
+                  |> JS.toggle_attribute({"hidden", "hidden"}, to: "#content-columns-panel")
+                }
+              >
+                <.icon name="hero-view-columns" class="size-4" />
+                {gettext("Columns")}
+                <.icon
+                  name="hero-chevron-down"
+                  class="size-3.5 transition-transform group-aria-expanded:rotate-180"
+                />
+              </button>
+              <div
+                id="content-columns-panel"
+                hidden
+                phx-mounted={JS.ignore_attributes(["hidden"])}
+                class="absolute right-0 z-30 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-lg border border-base-content/10 bg-base-100 p-3 shadow-lg"
+              >
+                <form id="content-columns-form" phx-change="set_columns" class="space-y-2">
+                  <input type="hidden" name="type" value={type_value(@column_type)} />
+                  <input type="hidden" name="columns[]" value="" />
+                  <p class="text-xs text-base-content/60">
+                    {gettext("Show fields on each row. Pick up to %{count}; the first %{shown} show.",
+                      count: ListFields.max_stored(),
+                      shown: ListFields.max_shown()
+                    )}
+                  </p>
+                  <div class="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
+                    <label
+                      :for={option <- @column_options}
+                      class="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-base-200"
+                    >
+                      <input
+                        type="checkbox"
+                        name="columns[]"
+                        value={option.name}
+                        checked={option.name in @column_names}
+                        disabled={
+                          option.name not in @column_names and
+                            length(@column_names) >= ListFields.max_stored()
+                        }
+                        class="field-checkbox size-4 shrink-0"
+                      />
+                      <span class="truncate">{option.label || option.name}</span>
+                    </label>
+                  </div>
+                </form>
+              </div>
+            </div>
+            <span
+              :if={is_nil(@column_type)}
+              id="content-columns-hint"
+              class={["text-xs text-base-content/60", @selected_count == 0 && "ml-auto"]}
+            >
+              {gettext("Choose a content type to show its fields as columns.")}
+            </span>
           </div>
 
           <form
@@ -1705,7 +1986,7 @@ defmodule KilnCMSWeb.EditorLive do
             </div>
           </div>
 
-          <ul class="divide-y divide-base-content/10">
+          <ul class="divide-y divide-base-content/10 overflow-hidden rounded-b-[inherit]">
             <li
               :for={{kind, record} <- @items}
               id={"#{kind}-#{record.id}"}
@@ -1813,6 +2094,21 @@ defmodule KilnCMSWeb.EditorLive do
                     >{Calendar.strftime(record.unpublish_at, "%Y-%m-%d %H:%M")} UTC</time>
                   </span>
                 </div>
+                <%!-- The chosen custom fields, a few label/value pairs. Only drawn
+                      when the columns were selected into this row (`custom_fields`
+                      is a loaded map, not the NotLoaded struct a narrower select
+                      leaves). --%>
+                <% fields = FieldCells.custom_fields(record) %>
+                <dl
+                  :if={@columns != [] and is_map(fields)}
+                  id={"row-fields-#{kind}-#{record.id}"}
+                  class="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs"
+                >
+                  <div :for={column <- @columns} class="flex min-w-0 max-w-full gap-1">
+                    <dt class="shrink-0 text-base-content/60">{column.label || column.name}</dt>
+                    <dd class="truncate">{FieldCells.cell(@column_labels, column, fields)}</dd>
+                  </div>
+                </dl>
               </div>
 
               <div class="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
@@ -1978,6 +2274,26 @@ defmodule KilnCMSWeb.EditorLive do
                     <.icon name="hero-pencil-square" class="size-4 text-base-content/60" />
                     {gettext("Edit")}
                   </.link>
+                  <%!-- Last and set apart: the one item that takes the row
+                        away (#2137). Drawn where the destroy policy allows it
+                        (`@trashable`); the handler asks again. --%>
+                  <% trashable? = MapSet.member?(@trashable, "#{kind}:#{record.id}") %>
+                  <hr :if={trashable?} class="my-1 border-base-content/10" aria-hidden="true" />
+                  <button
+                    :if={trashable?}
+                    type="button"
+                    id={"row-trash-#{kind}-#{record.id}"}
+                    popovertarget={"row-menu-#{kind}-#{record.id}"}
+                    popovertargetaction="hide"
+                    phx-click="move_to_trash"
+                    phx-value-kind={kind}
+                    phx-value-id={record.id}
+                    data-confirm={ContentTrash.confirm(record)}
+                    class="row-menu-item text-error"
+                  >
+                    <.icon name="hero-trash" class="size-4" />
+                    {gettext("Move to trash")}
+                  </button>
                 </div>
               </div>
             </li>
@@ -2137,4 +2453,13 @@ defmodule KilnCMSWeb.EditorLive do
 
   defp status_filter_label(other) when is_atom(other),
     do: other |> to_string() |> String.replace("_", " ") |> String.capitalize()
+
+  defp tally_bulk(:ok, {ok, skipped, sev}), do: {ok + 1, skipped, sev}
+  defp tally_bulk({:ok, _}, {ok, skipped, sev}), do: {ok + 1, skipped, sev}
+
+  defp tally_bulk({:error, error}, {ok, skipped, sev}) do
+    if severity_required?(error), do: {ok, skipped, sev + 1}, else: {ok, skipped + 1, sev}
+  end
+
+  defp tally_bulk(_other, {ok, skipped, sev}), do: {ok, skipped + 1, sev}
 end

@@ -180,7 +180,8 @@ defmodule KilnCMS.Accounts.User do
       :notify_on_return_to_draft,
       :notify_on_comment,
       :nav_preset,
-      :status_marks
+      :status_marks,
+      :content_list_columns
     ] do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
       authorize_if expr(id == ^actor(:id))
@@ -263,6 +264,19 @@ defmodule KilnCMS.Accounts.User do
     update :set_status_marks do
       description "Choose how the content list marks each item's status."
       accept [:status_marks]
+    end
+
+    # The custom-field columns the content list shows per site and type
+    # (`KilnCMS.CMS.ListFields`). Arguments rather than the whole map: the
+    # change merges one `org_id => type` entry into what is stored now, so a
+    # stale tab or another site's choice is never overwritten.
+    update :set_content_list_columns do
+      description "Choose which custom fields the content list shows as columns."
+      require_atomic? false
+      argument :org_id, :uuid, allow_nil?: false
+      argument :type, :string, allow_nil?: false
+      argument :names, {:array, :string}, allow_nil?: false
+      change KilnCMS.Accounts.Changes.SetContentListColumns
     end
 
     # Self-service workflow-notification preferences (issue #46). A user can
@@ -953,6 +967,10 @@ defmodule KilnCMS.Accounts.User do
       authorize_if expr(id == ^actor(:id))
     end
 
+    policy action(:set_content_list_columns) do
+      authorize_if expr(id == ^actor(:id))
+    end
+
     # 2FA is strictly self-service: a user manages the second factor on their own
     # account only (the admin bypass above still lets an operator intervene).
     # `:consume_totp_recovery_code` runs pre-auth as a system call
@@ -1200,6 +1218,15 @@ defmodule KilnCMS.Accounts.User do
       constraints one_of: [:words, :trigrams]
       default :words
       allow_nil? false
+      public? true
+    end
+
+    # The content list's custom-field columns (`KilnCMS.CMS.ListFields`):
+    # `%{org_id => %{content type => [field name]}}`. Written only by
+    # `:set_content_list_columns`; nil until someone picks a column, which reads
+    # as no columns. Nullable and without a default, so the migration is plainly
+    # additive for the release that does not know it.
+    attribute :content_list_columns, :map do
       public? true
     end
 

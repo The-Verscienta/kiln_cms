@@ -69,6 +69,26 @@ defmodule KilnCMS.Accounts.RoleTest do
       assert :ok = Accounts.destroy_role(role, actor: admin)
     end
 
+    # The team page's pickers (#2141) only shape what reaches `update_role`;
+    # who may send it is still the policy's call.
+    test "an editor cannot update a role" do
+      role = seed_role(%{field_grants: %{"post" => ["title"]}})
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Accounts.update_role(role, %{field_grants: %{}}, actor: user(:editor))
+    end
+
+    test "a site admin by membership only, not a platform admin, cannot update a role" do
+      role = seed_role(%{editable_types: ["post"]})
+      site_admin = user(:editor)
+      membership(site_admin, %{role: :admin})
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Accounts.update_role(role, %{editable_types: []}, actor: site_admin)
+
+      assert Accounts.get_role!(role.id, authorize?: false).editable_types == ["post"]
+    end
+
     test "a membership cannot be bound to another org's role" do
       admin = user(:admin)
 

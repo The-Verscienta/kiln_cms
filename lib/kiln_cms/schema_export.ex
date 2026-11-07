@@ -100,6 +100,7 @@ defmodule KilnCMS.SchemaExport do
           | {:types, [atom() | String.t()]}
           | {:base_url, String.t() | nil}
           | {:blocks_only, boolean()}
+          | {:graphql, boolean()}
 
   @doc """
   The full JSON Schema document.
@@ -108,13 +109,24 @@ defmodule KilnCMS.SchemaExport do
   validates against the document as-is; individual pieces are addressable under
   `$defs` (`#/$defs/block`, `#/$defs/content_post`) for a consumer that wants
   one of them.
+
+  With `graphql: true` each content definition also carries `x-kiln-graphql`
+  (the GraphQL object it is read through and, for a dynamic type, its
+  `typeName`) and each public custom field carries `x-kiln-graphql-kind` (its
+  `KilnCMS.CMS.FieldKind`, #2290). Both are annotations a validator ignores;
+  they are absent by default, so the plain document is unchanged. The
+  TypeScript GraphQL emitter reads them, which keeps the accessor it picks the
+  one `KilnCMS.CMS.FieldKind` decides rather than a second inference from the
+  JSON type.
   """
   @spec json_schema([option()]) :: map()
   def json_schema(opts \\ []) do
     model = model(opts)
 
     content_defs =
-      Map.new(model.content_types, fn ct -> {content_def_name(ct.type), content_schema(ct)} end)
+      Map.new(model.content_types, fn ct ->
+        {content_def_name(ct.type), content_schema(ct, opts)}
+      end)
 
     root_refs =
       Enum.map(model.content_types, &%{"$ref" => "#/$defs/#{content_def_name(&1.type)}"})
@@ -304,13 +316,50 @@ defmodule KilnCMS.SchemaExport do
   defp put_reverse(ct, org_id),
     do: Map.put(ct, :reverse_fields, ReverseFields.for_type(ct.type, org_id))
 
-  defp content_schema(ct) do
+  defp content_schema(ct, opts) do
+    graphql? = Keyword.get(opts, :graphql, false)
+
     ct
     |> base_content_schema()
+    |> put_graphql_kinds(ct, graphql?)
     |> put_inherited_fields(ct)
     |> put_plain_fields(ct)
     |> put_portable_fields(ct)
     |> put_reverse_fields(Map.get(ct, :reverse_fields, []))
+  end
+
+  # Annotations for the GraphQL emitter (#2290), only on request so the default
+  # document stays byte-identical. A private field is not in `properties`, so it
+  # cannot gain a kind here either.
+  defp put_graphql_kinds(schema, _ct, false), do: schema
+
+  defp put_graphql_kinds(schema, ct, true) do
+    kinds =
+      ct.field_definitions
+      |> Enum.reject(&(Map.get(&1, :private) == true))
+      |> Map.new(&{&1.name, &1})
+
+    schema
+    |> update_in(["properties", "custom_fields", "properties"], fn properties ->
+      Map.new(properties, fn {name, property} ->
+        {name,
+         Map.put(property, "x-kiln-graphql-kind", kinds |> Map.fetch!(name) |> graphql_kind())}
+      end)
+    end)
+    |> Map.put("x-kiln-graphql", graphql_target(ct))
+  end
+
+  defp graphql_kind(definition),
+    do: definition |> KilnCMS.CMS.FieldKind.kind_for() |> Atom.to_string()
+
+  defp graphql_target(%{source: :dynamic} = ct),
+    do: %{"type" => "Entry", "type_name" => to_string(ct.type)}
+
+  defp graphql_target(%{resource: resource}) do
+    %{
+      "type" =>
+        resource |> AshGraphql.Resource.Info.type() |> Atom.to_string() |> Macro.camelize()
+    }
   end
 
   # Reverse fields (R4) are not part of the fired document — the connection
@@ -433,7 +482,19 @@ defmodule KilnCMS.SchemaExport do
         "slug" => %{"type" => ["string", "null"]},
         "locale" => %{"type" => ["string", "null"]},
         "custom_fields" => custom_fields_schema(ct.field_definitions),
-        "blocks" => %{"type" => "array", "items" => JsonSchema.block_ref()}
+        "blocks" => %{"type" => "array", "items" => JsonSchema.block_ref()},
+        # Optional: present only when the document sets a robots flag (#2256).
+        "robots" => %{
+          "type" => "object",
+          "description" =>
+            "The document's robots flags. Absent when neither is set; absent means both false.",
+          "properties" => %{
+            "noindex" => %{"type" => "boolean"},
+            "nofollow" => %{"type" => "boolean"}
+          },
+          "required" => ["noindex", "nofollow"],
+          "additionalProperties" => false
+        }
       },
       "required" => ["blocks", "custom_fields", "id", "locale", "slug", "title", "type"],
       "additionalProperties" => false

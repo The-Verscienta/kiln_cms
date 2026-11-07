@@ -69,11 +69,20 @@ defmodule KilnCMS.CMS.Content do
     :alias_pattern,
     :seo_title_pattern,
     :seo_description_pattern,
+    :noindex_default,
+    :nofollow_default,
     :localization
   ]
 
   @doc false
   def use_options, do: @use_options
+
+  # A `noindex_default:` / `nofollow_default:` option: a boolean, or absent
+  # (false). Anything else fails the build at the caller's `use` line.
+  defp robots_default!(value, _key) when is_boolean(value), do: value
+
+  defp robots_default!(other, key),
+    do: raise(ArgumentError, "#{inspect(key)} must be true or false, got: #{inspect(other)}")
 
   # Days trashed content is retained before the nightly auto-purge.
   @trash_retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
@@ -577,6 +586,14 @@ defmodule KilnCMS.CMS.Content do
     seo_description_pattern =
       opts |> Keyword.get(:seo_description_pattern) |> KilnCMS.Seo.Pattern.validate!()
 
+    # Robots defaults for NEW documents of this type (#2256): what `noindex` /
+    # `nofollow` start as when the caller does not say. Not retroactive.
+    noindex_default =
+      opts |> Keyword.get(:noindex_default, false) |> robots_default!(:noindex_default)
+
+    nofollow_default =
+      opts |> Keyword.get(:nofollow_default, false) |> robots_default!(:nofollow_default)
+
     # Field-level localization of record attributes (#1327), e.g.
     # `[shared: [:seo_image], fallback: [:excerpt]]` — see
     # `KilnCMS.I18n.FieldLocalization`. Validated here, so a typo fails the
@@ -750,6 +767,8 @@ defmodule KilnCMS.CMS.Content do
           :seo_keywords,
           :seo_image,
           :canonical_url,
+          :noindex,
+          :nofollow,
           :locale,
           :audience,
           :custom_fields,
@@ -1242,6 +1261,8 @@ defmodule KilnCMS.CMS.Content do
         :seo_description,
         :seo_image,
         :canonical_url,
+        :noindex,
+        :nofollow,
         # `path_alias` so the canonical redirect still works on a teaser.
         :path_alias,
         :published_at,
@@ -1586,6 +1607,17 @@ defmodule KilnCMS.CMS.Content do
       |> Enum.reject(&is_nil/1)
     end
 
+    # `custom_sort` on the PUBLIC search actions only (`:search`, `:search_published`
+    # and the two semantic ones) — deliberately not in `facet_args`, which is
+    # also spliced into the internal legs (`:search_title`, `:search_alias`,
+    # `:search_han`, `:search_compound`, `:search_any*`): `read_named_ids/1`
+    # forwards a semantic request's arguments to those, so a custom sort there
+    # would change which rows count as "named". Order: explicit `sort` >
+    # `custom_sort` > relevance/distance > recency (the `CustomFieldQuery`
+    # prepare in `facet_args` runs before each action's own relevance sort,
+    # and `Ash.Query.sort/2` appends).
+    sort_arg = [quote(do: argument(:custom_sort, :string))]
+
     facet_clauses = fn published? ->
       [
         quote(do: is_nil(^arg(:category_id)) or ^ref(:category_id) == ^arg(:category_id)),
@@ -1711,6 +1743,7 @@ defmodule KilnCMS.CMS.Content do
           unquote(search_pagination)
 
           unquote_splicing(facet_args.(published?))
+          unquote_splicing(if(terms == :all, do: sort_arg, else: []))
 
           filter expr(unquote(filter_ast))
 
@@ -1751,6 +1784,7 @@ defmodule KilnCMS.CMS.Content do
           unquote(search_pagination)
 
           unquote_splicing(facet_args.(published?))
+          unquote_splicing(sort_arg)
 
           filter expr(unquote(filter_ast))
 
@@ -2108,6 +2142,12 @@ defmodule KilnCMS.CMS.Content do
           def __kiln_seo_title_pattern__, do: unquote(seo_title_pattern)
 
           def __kiln_seo_description_pattern__, do: unquote(seo_description_pattern)
+
+          # Robots defaults for new documents (#2256); dynamic entries carry
+          # theirs on the TypeDefinition row.
+          def __kiln_noindex_default__, do: unquote(noindex_default)
+
+          def __kiln_nofollow_default__, do: unquote(nofollow_default)
         end
       end
 
@@ -2239,7 +2279,19 @@ defmodule KilnCMS.CMS.Content do
         # carrying it would show a redundant field in every diff of an event —
         # and one that moves on its own, since the sweep advances it without any
         # editorial change at all.
+        #
+        # The draft-write provenance (#2273) is ignored because the version
+        # read scope is wider than its field policy: a `:draft_write` key reads
+        # the history of every draft its OWNER authored (`DraftWriteOwnDrafts`,
+        # which autosave coalescing needs), but may see provenance only on the
+        # drafts IT created (`DraftWriteOwnProvenance`). In `changes` a second
+        # key on the same owner would read the first key's `on_behalf_of`. The
+        # columns are stamped once at create and no action writes them, so the
+        # row already holds the only value history could: nothing is lost.
         ignore_attributes([
+          :created_via_key_id,
+          :created_via_key_name,
+          :on_behalf_of,
           :inserted_at,
           :updated_at,
           :embedding,
@@ -2272,6 +2324,16 @@ defmodule KilnCMS.CMS.Content do
           domain: KilnCMS.Accounts,
           on_delete: :nilify
         )
+
+        # How much a published edit matters (`KilnCMS.CMS.Severity`): stored on
+        # the version row of the edit itself, filled from
+        # `changeset.context[:paper_trail_metadata]` by `Changes.RecordChangeSeverity`.
+        # Nullable and without a default: `nil` means "no safety field changed
+        # on this version" (and is what every version written before this
+        # column existed reads as).
+        metadata :change_severity, :atom,
+          constraints: [one_of: [:critical, :notable, :routine]],
+          allow_nil?: true
 
         mixin({KilnCMS.CMS.VersionPolicies, :policies, []})
         version_extensions(authorizers: [Ash.Policy.Authorizer])
@@ -2471,6 +2533,29 @@ defmodule KilnCMS.CMS.Content do
 
             down unquote("ALTER TABLE #{table} DROP COLUMN IF EXISTS name_lexemes")
           end
+
+          # The read-only SQL reporting views (#2295, `KilnCMS.Reporting.ViewSql`):
+          # the schema, then this table's two views. They read the live
+          # `field_definitions` and `type_definitions`, hence `after_tables`.
+          statement :reporting_schema do
+            up unquote(KilnCMS.Reporting.ViewSql.create_schema())
+            down unquote(KilnCMS.Reporting.ViewSql.keep_schema())
+          end
+
+          statement :reporting_view do
+            up unquote(KilnCMS.Reporting.ViewSql.records_view(table, to_string(type), dynamic?))
+            down unquote(KilnCMS.Reporting.ViewSql.drop_records_view(table))
+            after_tables ["field_definitions", "type_definitions"]
+          end
+
+          statement :reporting_field_values_view do
+            up unquote(
+                 KilnCMS.Reporting.ViewSql.field_values_view(table, to_string(type), dynamic?)
+               )
+
+            down unquote(KilnCMS.Reporting.ViewSql.drop_field_values_view(table))
+            after_tables ["field_definitions", "type_definitions"]
+          end
         end
 
         custom_indexes do
@@ -2526,6 +2611,20 @@ defmodule KilnCMS.CMS.Content do
           # taking writes while it runs.
           index ["tsvector_to_array(to_tsvector(kiln_regconfig(locale), title))"],
             name: unquote("#{table}_title_lexemes_index"),
+            using: "gin",
+            all_tenants?: true,
+            concurrently: true
+
+          # Custom-field equality, `in` and list-has (#2291). The filter is
+          # `custom_fields @> jsonb_build_object(name, value)`, so ONE index
+          # covers every field name on every dynamic type: the name sits inside
+          # the indexed value. `jsonb_path_ops` is the smaller, faster opclass
+          # and supports exactly `@>`. It does NOT serve range, sort, `not_eq`,
+          # `ilike` or `null` (see `CustomFieldQuery.contains/3`). Built
+          # CONCURRENTLY: `entries` is large. A failed build leaves an INVALID
+          # index; drop it and retry.
+          index ["custom_fields jsonb_path_ops"],
+            name: unquote("#{table}_custom_fields_gin_index"),
             using: "gin",
             all_tenants?: true,
             concurrently: true
@@ -2674,8 +2773,13 @@ defmodule KilnCMS.CMS.Content do
           # stripped), so a title alone is enough to create content.
           change KilnCMS.CMS.Changes.DeriveSlug
           change KilnCMS.CMS.Changes.DeriveAlias
+          # The type's robots defaults, only where the caller left a flag out (#2256).
+          change KilnCMS.CMS.Changes.ApplyRobotsDefaults
           # Stamp the acting user as the author (system/seed creates leave nil).
           change relate_actor(:author, allow_nil?: true)
+          # A draft a `:draft_write` API key creates records which key (and the
+          # service's opaque `X-Kiln-On-Behalf-Of`) it came from (#2273).
+          change KilnCMS.CMS.Changes.StampDraftWriteProvenance
           # Set the many-to-many links from lists of ids (nil/omitted = no change).
           # No merge verbs here: a create has no existing links to merge against,
           # so `tag_ids` is unambiguously the whole set (#521).
@@ -2729,6 +2833,11 @@ defmodule KilnCMS.CMS.Content do
         update :update do
           primary? true
           require_atomic? false
+          # How much this edit matters, asked for only when it touches a field
+          # the site lists as safety-relevant (`KilnCMS.CMS.Severity`); stored on
+          # the edit's version row. Optional: omitted, a safety edit is recorded
+          # `:notable`. Ignored when no safety field changed.
+          argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           # `If-Match` / `expected_lock_version` (docs/json-api.md, "Concurrency"):
           # refused with a 412 unless the row is still the version the client
           # read. A no-op without either.
@@ -2982,6 +3091,11 @@ defmodule KilnCMS.CMS.Content do
         update :publish_changes do
           require_atomic? false
           accept []
+          # How much this edit matters, asked for only when it touches a field
+          # the site lists as safety-relevant (`KilnCMS.CMS.Severity`); stored on
+          # the edit's version row. Optional: omitted, a safety edit is recorded
+          # `:notable`. Ignored when no safety field changed.
+          argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           # The lost-update guard's decisions (#1815): `%{"seo_title" =>
           # "mine" | "theirs", ...}` or `%{"*" => ...}` for a key the live page
           # changed after the draft was saved. See `Changes.PromoteWorkingCopy`.
@@ -3101,6 +3215,11 @@ defmodule KilnCMS.CMS.Content do
 
         update :publish do
           require_atomic? false
+          # How much this edit matters, asked for only when it touches a field
+          # the site lists as safety-relevant (`KilnCMS.CMS.Severity`); stored on
+          # the edit's version row. Optional: omitted, a safety edit is recorded
+          # `:notable`. Ignored when no safety field changed.
+          argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           # FIRST, so its `before_action` hook registers before the two
           # block-reading validations below defer themselves to the same phase:
           # an open collab session's prose rides in on this write or is lost
@@ -3214,6 +3333,11 @@ defmodule KilnCMS.CMS.Content do
           # a new version itself). Workflow state is left unchanged.
           require_atomic? false
           accept []
+          # How much this edit matters, asked for only when it touches a field
+          # the site lists as safety-relevant (`KilnCMS.CMS.Severity`); stored on
+          # the edit's version row. Optional: omitted, a safety edit is recorded
+          # `:notable`. Ignored when no safety field changed.
+          argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           argument :version_id, :uuid, allow_nil?: false
           change KilnCMS.CMS.Changes.RestoreVersion
 
@@ -3871,6 +3995,13 @@ defmodule KilnCMS.CMS.Content do
         # the between-publish window. Off by default and skipped for publishes
         # (RecordPublishedVersion anchors those) — see the change module.
         change KilnCMS.CMS.Changes.AnchorVersion, on: [:create, :update, :destroy]
+
+        # Mandatory change severity: a published edit that touches a field the
+        # site lists as safety-relevant carries a severity on its version row
+        # (`KilnCMS.CMS.Severity`). LAST among the changes, so it sees what the
+        # others wrote — `PromoteWorkingCopy`'s promoted values included — and
+        # decides in a `before_action` hook, after `RestoreVersion`'s fold.
+        change KilnCMS.CMS.Changes.RecordChangeSeverity, on: [:update]
       end
 
       validations do
@@ -3912,6 +4043,16 @@ defmodule KilnCMS.CMS.Content do
         # aren't short-circuited. Defense-in-depth: the JSON:API/GraphQL
         # delivery surface exposes only reads regardless (D7).
         policy action_type([:create, :update]) do
+          # The `:draft_write` scope (#2273): the one key that is neither
+          # read-only nor `:read_write`. A SEPARATE policy, ABOVE the admin
+          # bypass, so it holds whatever role the key owner has at request time
+          # — promoting the owner after the key was minted widens nothing. It
+          # forbids everything but the allowlist in `Checks.DraftWriteKey`
+          # (create; update/autosave of the owner's own `:draft` rows), and
+          # `ApiKeyWithoutWriteAccess` below is left alone: it still matches
+          # this key, so the allowlisted case is authorized HERE and skips it.
+          forbid_if {KilnCMS.Accounts.Checks.DraftWriteKey, mode: :outside_allowlist}
+          authorize_if {KilnCMS.Accounts.Checks.DraftWriteKey, mode: :any}
           forbid_if KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess
           authorize_if always()
         end
@@ -3930,6 +4071,7 @@ defmodule KilnCMS.CMS.Content do
         # delete; a `:read_write` key falls through to the owning user's role
         # (admin-only, per the destroy policy below), same model as `/mcp`.
         policy action(:destroy) do
+          forbid_if {KilnCMS.Accounts.Checks.DraftWriteKey, mode: :any}
           forbid_if KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess
           authorize_if always()
         end
@@ -3968,6 +4110,10 @@ defmodule KilnCMS.CMS.Content do
           authorize_if expr(^ref(:state) == :published and ^ref(:audience) == :public)
           authorize_if KilnCMS.CMS.Checks.InAudience
           authorize_if KilnCMS.CMS.Checks.PreviewGrant
+
+          # A `:draft_write` key (#2273) also reads the drafts it authored, so a
+          # PATCH can load its row. Nothing else unpublished, no one else's.
+          authorize_if KilnCMS.Accounts.Checks.DraftWriteOwnDrafts
         end
 
         # Passphrase-locked content (#496) is invisible to every authorized
@@ -4005,6 +4151,12 @@ defmodule KilnCMS.CMS.Content do
         # unrestricted editors are unchanged.
         policy action_type([:create, :update]) do
           authorize_if KilnCMS.CMS.Checks.EditableContentType
+
+          # A `:draft_write` key (#2273) authors drafts regardless of its
+          # owner's tier (the owner is a viewer-tier service account). The
+          # allowlist and its row conditions live in `Checks.DraftWriteKey`;
+          # the forbid above, not this grant, is what bounds the key.
+          authorize_if {KilnCMS.Accounts.Checks.DraftWriteKey, mode: :within_allowlist}
 
           # The internal, system-only update actions (#1402). Admitted HERE
           # rather than through a `bypass action(...)` at the top of the stack,
@@ -4117,6 +4269,32 @@ defmodule KilnCMS.CMS.Content do
         end
       end
 
+      # Who may SEE the three provenance fields (#2273); see ADR 0012. The
+      # catch-all below is what keeps every other field exactly as the resource
+      # policies above decide it: Ash requires a field policy for ALL fields once
+      # one exists, and `authorize_if always()` on `:*` adds no restriction.
+      # A forbidden field is `%Ash.ForbiddenField{}` in an actor-scoped result:
+      # JSON:API omits it; GraphQL returns null plus a `forbidden_field` error
+      # entry for that field only, the rest of the read intact. A filter or sort
+      # on it sees `nil`, so it is no oracle. Reads with `authorize?: false`
+      # (webhooks, the preview endpoint, sync, fired artifacts, search indexing)
+      # are not subject to field policies and never serialize these fields:
+      # their serializers name their fields.
+      field_policies do
+        field_policy [:created_via_key_id, :created_via_key_name, :on_behalf_of] do
+          # Editor and admin tiers, by the same editorial-read notion that lets
+          # them see unpublished content (an out-of-scope editor does not).
+          authorize_if KilnCMS.CMS.Checks.ReadableContentType
+          # A `:draft_write` key sees the provenance of its own drafts, not of
+          # another key's (even one on the same owner).
+          authorize_if KilnCMS.Accounts.Checks.DraftWriteOwnProvenance
+        end
+
+        field_policy :* do
+          authorize_if always()
+        end
+      end
+
       attributes do
         uuid_primary_key :id
 
@@ -4191,6 +4369,28 @@ defmodule KilnCMS.CMS.Content do
         # `Changes.TrackAliasDerivation`; no action accepts it.
         attribute :path_alias_derived, :boolean
 
+        # Provenance of a draft a headless service created with a
+        # `:draft_write` API key (#2273). Plain values, deliberately NOT a
+        # foreign key to `api_keys`: the record of how a draft arrived outlives
+        # the key being revoked, expired or deleted. Stamped only by
+        # `Changes.StampDraftWriteProvenance` (no action accepts them). Never
+        # read by a policy.
+        #
+        # Public so JSON:API and GraphQL can carry them, but ONLY through the
+        # field policies below: `on_behalf_of` is whatever opaque string the
+        # service sent, possibly an end-user identifier, and a published
+        # document is world-readable. An actor the policy refuses gets the field
+        # omitted (JSON:API) or null (GraphQL), never an error.
+        attribute :created_via_key_id, :uuid, public?: true
+
+        attribute :created_via_key_name, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.line()]
+
+        attribute :on_behalf_of, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.CMS.Changes.StampDraftWriteProvenance.max_length()]
+
         # og:image URL and rel=canonical for SEO/social.
         attribute :seo_image, :string,
           public?: true,
@@ -4199,6 +4399,20 @@ defmodule KilnCMS.CMS.Content do
         attribute :canonical_url, :string,
           public?: true,
           constraints: [max_length: KilnCMS.Limits.url()]
+
+        # Robots directives for this document (#2256). Document-level and shared
+        # across locales; a copy and a translation inherit them from the source.
+        # Rendered as `<meta name="robots">` / `x-robots-tag` and used to leave the
+        # document out of discovery surfaces — delivery (APIs, sync) is unaffected.
+        attribute :noindex, :boolean,
+          default: false,
+          allow_nil?: false,
+          public?: true
+
+        attribute :nofollow, :boolean,
+          default: false,
+          allow_nil?: false,
+          public?: true
 
         attribute :locale, :string,
           default: "en",
@@ -4761,6 +4975,33 @@ defmodule KilnCMS.CMS.Content do
           # No `expression/2`, so a filter or sort would raise out of AshSql as
           # a 500; declaring them unusable rejects at the query layer instead —
           # same reason `word_count` does.
+          filterable? false
+          sortable? false
+        end
+
+        # How much the document's latest safety edit mattered, and when it was
+        # made (`KilnCMS.CMS.LatestEdit`): read back from the version rows,
+        # `nil` unless the document is published. Public so a viewer-level key
+        # sees them on JSON:API and GraphQL, as on `/api/sync`.
+        calculate :latest_edit, :map, KilnCMS.CMS.Calculations.LatestEditLookup do
+          public? false
+          filterable? false
+          sortable? false
+        end
+
+        calculate :latest_edit_severity,
+                  :atom,
+                  KilnCMS.CMS.Calculations.LatestEditSeverity do
+          public? true
+          constraints one_of: [:critical, :notable, :routine]
+          filterable? false
+          sortable? false
+        end
+
+        calculate :latest_edit_at,
+                  :utc_datetime_usec,
+                  KilnCMS.CMS.Calculations.LatestEditAt do
+          public? true
           filterable? false
           sortable? false
         end

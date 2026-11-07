@@ -129,4 +129,27 @@ defmodule KilnCMSWeb.SitemapControllerTest do
       assert body =~ "<loc>http://localhost:4000/default-#{n}</loc>"
     end
   end
+
+  test "noindex documents are left out; nofollow-only ones stay (#2256)", %{conn: conn} do
+    n = System.unique_integer([:positive])
+    Ash.Seed.seed!(Page, %{title: "P", slug: "hidden-#{n}", state: :published, noindex: true})
+
+    Ash.Seed.seed!(Page, %{
+      title: "P",
+      slug: "both-#{n}",
+      state: :published,
+      noindex: true,
+      nofollow: true
+    })
+
+    Ash.Seed.seed!(Post, %{title: "Q", slug: "nf-#{n}", state: :published, nofollow: true})
+    published_page("plain-#{n}")
+
+    body = conn |> get(~p"/sitemap.xml") |> response(200)
+
+    refute body =~ "hidden-#{n}"
+    refute body =~ "both-#{n}"
+    assert body =~ "<loc>http://localhost:4000/blog/nf-#{n}</loc>"
+    assert body =~ "<loc>http://localhost:4000/plain-#{n}</loc>"
+  end
 end

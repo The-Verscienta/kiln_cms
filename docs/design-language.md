@@ -107,6 +107,10 @@ written as a function component or a raw `class="…"` in a template.
   `popovertarget` (Escape and click-outside close it, no JS), anchored under
   the button where CSS anchor positioning exists. An item that fires a
   `phx-click` also carries `popovertargetaction="hide"` so the menu closes.
+  An item that takes the row away goes last, after an `<hr>` divider, as a
+  labelled `row-menu-item text-error` with its icon and a `data-confirm`: the
+  content list's **Move to trash**, drawn only where the destroy policy allows
+  it ([#2137](https://github.com/The-Verscienta/kiln_cms/issues/2137)).
 - **Fields** — `.field-input`, `.field-select` (full-width, token border, focus
   ring), and `.field-label` for the label above one. The `<.input>` component is the richer, label+error-aware form control;
   these bare classes are for inline filters/toolbars and for markup Kiln does
@@ -231,6 +235,15 @@ written as a function component or a raw `class="…"` in a template.
 - **Destructive actions confirm** — a `phx-click` that deletes, removes, revokes
   or purges carries `data-confirm={gettext("…?")}`; name the thing and the
   consequence ("Stop sending notifications to this device?").
+- **Label the destructive action beside text actions** — when a delete sits
+  in a row with two or more text buttons, it is a labelled `btn btn-sm
+  btn-danger` with its icon and a word ("Delete"), not an icon on its own. An
+  unlabelled trash icon among "Ping", "Disable" and "Edit" is easy to miss: the
+  webhooks row had one, and an admin looking for Delete didn't find it
+  ([#2136](https://github.com/The-Verscienta/kiln_cms/issues/2136)). An
+  icon-only `btn-ghost` + `hover:text-error` delete is still fine where it is
+  the row's only action, or where every action in the row is an icon. Either
+  way it carries an `aria-label` and a confirm.
 
 ## Layout
 
@@ -342,7 +355,10 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
    `.table`. Defining `.table` also revived the previously dead `<.table>` /
    `.table-zebra` references (leftover DaisyUI class names).
    Still deliberately bespoke: **icon-only / subtle destructive** buttons (kept
-   as `btn-ghost` + `hover:text-error` rather than a solid `btn-danger`) and the
+   as `btn-ghost` + `hover:text-error` rather than `btn-danger`, where the
+   delete is the row's only action or the row is all icons; beside text
+   actions it is labelled, see
+   [Label the destructive action](#ux-patterns)) and the
    translation locale **chips** (a matched link/button pair, not tabs).
 4. **Done:** the `/` marketing landing (`page_html/home.html.heex`) moved to
    `Layouts.public`. It is a public-facing page, not an authoring tool, and

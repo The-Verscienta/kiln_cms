@@ -219,6 +219,7 @@ everyone, the anonymous visitor included (published `:public` content, a
 | `CMS.ContentRelease` | `read`, `abandon`, `mark_published`, `mark_failed`, `mark_rolled_back`, `mark_rollback_failed` **only** | `read`, `mark_published`, `mark_failed`, `abandon`, `mark_rolled_back`, `mark_rollback_failed`: `:releases` | The release go-live and rollback worker (`CMS.Releases`, `CMS.Workers.ReleaseWorker`, #1659) re-reads the release it was enqueued for, records the outcome, and abandons its own claim when a run crashes. The four `mark_*` writes carry no other policy, so no person, admin included, may stamp a release `:published` that never published. `read` is narrowed to the plain action (not `editable`, `by_state`, `in_window`), and `abandon` sits inside the admin policy with `forbid_unless action(:abandon)`: scheduling, starting and shipping a release stay an admin's decision. |
 | `CMS.ReleaseItem` | `for_release_with_status`, `mark_applied`, `mark_skipped`, `mark_rolled_back` **only** | `mark_applied`, `mark_skipped`, `mark_rolled_back`, `for_release_with_status`: `:releases` | The same worker lists a release's pending (or applied) items and records what it did to each, including the `prior_state` / `prior_version_id` rollback restores from; no person may write those. The item read fails closed (`authorize_with: :error`): a refused read would otherwise be an empty release, marked `:published` having published nothing. Composing a release (`add`, `set_action`, `cancel`) stays editor work. The *content* steps of a claimed release still run `authorize?: false`, since the system actor holds no content grant. |
 | `CMS.SiteEditorialSettings` | `read` **only** | `read`: `:cms_settings` | `Checks.EditorMayPublish` asks whether editors may publish from inside the publish (whose caller may be the scheduler), and `TaskSettings.site_default/1` asks whether publishing completes tasks from a release's go-live. Both fail closed: a refusal answers "editors may not publish", and raises rather than applying the shipped task default. `save` is not admitted. Granted through `OrgSettings`' `system_actions:` option. |
+| `CMS.SiteSafetyFields` | `read` **only** | `read`: `:cms_settings` | `Changes.RecordChangeSeverity` reads which fields of a content type are safety-relevant on every live edit, publish and restore, whose caller may be the scheduler, an API key or an importer. With `authorize_with: :error`; a failed or refused read lists every field (a severity recorded that was not strictly needed), never none. `save` is not admitted: what counts as safety-relevant stays an admin act. Editors read it. Granted through `OrgSettings`' `system_actions:` option. |
 | `Billing.Settings` | `read`, `init` **only** | `read`, `init`: `:billing` | The checkout path and the webhook receiver resolve provider credentials with no actor of their own, and `ensure_settings!/0` inserts the empty singleton on first use. Narrowed inside the existing platform-admin policy; the write path to payment credentials stays platform-admin, and every secret column is vault-encrypted and `sensitive?`. |
 | `Billing.Membership` | every read, `apply_provider_state`, `anonymize` | `read`, `for_user`, `entitling_for_user`, `all_for_user`, `by_subscription`, `by_customer`, `stale`: `:accounts`, `:billing`, `:newsletter` · `apply_provider_state`, `anonymize`: `:billing` | A paid membership is what grants an audience and a newsletter tier segment, so the tier sync must see the ones it is syncing. The two writes are `forbid_if always()` for every person — this resource has no admin bypass — and are taken only by the verified webhook worker, the reconcile sweep and GDPR erasure. |
 | `Billing.WebhookEvent` | `read` (by id), `claim`, `mark_processed`, `mark_ignored`, `mark_failed` **only** | `read`, `claim`, `mark_processed`, `mark_ignored`, `mark_failed`: `:billing` | The webhook worker re-reads its recorded event, claims it and settles it (#1659). Every write is closed to every person. `receive` stays the receiver's `authorize?: false` (a webhook has no actor; the provider's HMAC is the grant), and `destroy`, `recent`, `by_event_id` and `purgeable` are not admitted: a system actor cannot insert, list or erase a payment event. The worker's read fails closed, since `nil` would mean "event gone" and cancel the job. |
@@ -1059,12 +1060,14 @@ under the `AshObanInteraction` bypass.
 ## The API-key axis
 
 Role and audience are not the only axes. An actor authenticated by a `kiln_…`
-API key carries an immutable **access scope**, and two checks gate on it:
+API key carries an immutable **access scope** (`:read`, `:read_write` or
+`:draft_write`), and three checks gate on it:
 
 | Check | Matches |
 |---|---|
 | `KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess` | an API-key actor whose key is *not* `:read_write` — i.e. a `:read` key, or any key whose record cannot be inspected (**fails closed to read-only**) |
 | `AshAuthentication.Checks.UsingApiKey` | *any* API-key actor, regardless of scope |
+| `KilnCMS.Accounts.Checks.DraftWriteKey` | an actor whose key is `:draft_write`, in three modes: `:any`, `:outside_allowlist` (the `forbid_if` on `Content`), `:within_allowlist` (the grant inside `EditableContentType`'s policy) |
 
 Applied as `forbid_if` clauses placed **before** the `OrgAdmin` bypass, so a key
 minted on an admin account cannot skip them:
@@ -1075,8 +1078,24 @@ minted on an admin account cannot skip them:
 | `MediaItem`, `Tag`, `TagGroup`, `Category` | forbid `ApiKeyWithoutWriteAccess` | forbid **any** API key | — |
 | `Tagging`, `ContentLink`, `RelatedLink` | forbid `ApiKeyWithoutWriteAccess` (all write types) | — | — |
 
+`ApiKeyWithoutWriteAccess` is untouched and still matches a `:draft_write` key,
+so **every resource above refuses it** — media, taxonomy, menus, links — except
+`Page`/`Post`/`Entry`, which carve it back in through `DraftWriteKey` (#2273):
+
+| `:draft_write` on content | |
+|---|---|
+| Allowed | `create`; `update` and `autosave` of a row that is `state == :draft` AND `author_id ==` the key owner |
+| Refused | everything else, by allowlist: every other update action (`submit_for_review` included: a human moves work into review), publish/unpublish/schedule/archive, `destroy`, `purge`, a published row (also "Live · draft"), an in-review or archived row, another author's draft, any `scheduled_at` change |
+| Ordering | the `forbid_if ... mode: :outside_allowlist` sits ABOVE the `OrgAdmin` bypass, so promoting the key's owner after mint widens nothing |
+| Mint | admin-only; lifetime capped by `:draft_write_key_max_ttl_days` (default 30); owner must have no editor/admin tier (defense in depth, `Validations.DraftWriteKey`) |
+| Rotate | `ApiKey :rotate` (`POST /api/keys/rotate`): only the `:draft_write` key itself, unrevoked, unexpired, inside the admin-set `rotatable_until` (`RotatableDraftWriteKey`; admins and every other actor refused). No input; the successor copies owner, scope, name and window, expires at `min(now + TTL cap, rotatable_until)`, and the presenting key is revoked under a row lock in the same transaction. Reuse of a rotated-away key on that endpoint (after 120 s) revokes the lineage and mails platform admins (`ApiKeyReuse`) |
+| Reads | published, audience-permitted content plus the key owner's **own drafts** (`DraftWriteOwnDrafts`, so a PATCH can load its row). Version history: only versions of such drafts, nothing for a viewer-tier owner via the revisions API. That scope is per owner, so a second key on the same owner reads the first key's draft history (and coalesces its autosaves over it); the per-key provenance fields are therefore never written to version `changes` (`ignore_attributes`). A promoted owner reads as that role |
+| Preview links | `POST …/preview-token` is bounded to drafts the key's owner authored, on top of the editor-tier gate (`PreviewToken.mint/3`); a viewer-tier owner mints none |
+| Links | a draft cannot set tags, category or related links (those writes are refused to the key) |
+| Provenance fields | `created_via_key_id`, `created_via_key_name`, `on_behalf_of` on `Content` are public attributes behind **field policies**: visible to `ReadableContentType` (editor/admin tier) and to a `:draft_write` key for drafts it created (`DraftWriteOwnProvenance`); everyone else (anonymous, preview-link, viewer tier, another key) gets them omitted (JSON:API) or null (GraphQL). `field_policy :*` is `authorize_if always()`, so no other field changes |
+
 The net rule: a `:read` key may read whatever its owner may read and write
-nothing; a `:read_write` key may author as its owner; **no** key may hard-delete
+nothing; a `:read_write` key may author as its owner; a `:draft_write` key may only create and edit its own drafts; **no** key may hard-delete
 anything, whoever owns it.
 
 ## Block field policies — `editable_by`
