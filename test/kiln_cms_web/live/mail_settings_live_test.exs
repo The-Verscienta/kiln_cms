@@ -59,9 +59,7 @@ defmodule KilnCMSWeb.MailSettingsLiveTest do
     test "editors are redirected away", %{conn: conn} do
       conn = log_in(conn, authed_user(:editor))
 
-      assert {:error,
-              {:redirect,
-               %{to: "/", flash: %{"error" => "You need admin access to view that page."}}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
                live(conn, ~p"/editor/mail")
     end
 

@@ -65,7 +65,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     admin = authed_user(:admin)
     form = CMS.create_form!(%{name: "Contact", slug: "fb-tier"}, actor: admin)
 
-    assert {:error, {:redirect, %{to: "/"}}} =
+    assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
              conn |> log_in(authed_user(:editor)) |> live(~p"/editor/forms/#{form.id}")
   end
 

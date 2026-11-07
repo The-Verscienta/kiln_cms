@@ -27,27 +27,17 @@ defmodule KilnCMSWeb.WebhookLive do
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
 
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
-      {:ok,
-       socket
-       |> assign(:actor, actor)
-       |> assign(:page_title, gettext("Webhooks"))
-       |> assign(:available_events, WebhookEndpoint.events(socket.assigns.current_org.id))
-       |> assign(:default_events, WebhookEndpoint.default_events(socket.assigns.current_org))
-       |> assign(:edit, nil)
-       |> assign(:revealed, MapSet.new())
-       |> assign(:form, create_form(actor, socket.assigns.current_org))
-       |> load_endpoints()
-       |> load_deliveries()}
-    else
-      # Defense-in-depth: the `:live_admin_required` on_mount guard already
-      # redirects non-admins with this flash before mount runs; mirror it here so
-      # this fallback stays consistent rather than silently bouncing to /editor.
-      {:ok,
-       socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
-    end
+    {:ok,
+     socket
+     |> assign(:actor, actor)
+     |> assign(:page_title, gettext("Webhooks"))
+     |> assign(:available_events, WebhookEndpoint.events(socket.assigns.current_org.id))
+     |> assign(:default_events, WebhookEndpoint.default_events(socket.assigns.current_org))
+     |> assign(:edit, nil)
+     |> assign(:revealed, MapSet.new())
+     |> assign(:form, create_form(actor, socket.assigns.current_org))
+     |> load_endpoints()
+     |> load_deliveries()}
   end
 
   # --- create ----------------------------------------------------------------

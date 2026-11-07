@@ -27,10 +27,8 @@ defmodule KilnCMSWeb.SafetyFieldsLiveTest do
     end
 
     test "turns away an editor", %{conn: conn} do
-      assert {:error, {:redirect, %{to: "/", flash: flash}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
                conn |> log_in(authed_user(:editor)) |> live(~p"/editor/safety-fields")
-
-      assert flash["error"] =~ "admin access"
     end
 
     test "loads for an admin, listing the types", %{conn: conn} do

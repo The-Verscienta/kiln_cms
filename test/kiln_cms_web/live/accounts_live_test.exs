@@ -128,7 +128,9 @@ defmodule KilnCMSWeb.AccountsLiveTest do
 
     test "editors are turned away", %{conn: conn} do
       conn = log_in(conn, authed_user(:editor))
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/accounts")
+
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+               live(conn, ~p"/editor/accounts")
     end
   end
 
@@ -505,7 +507,9 @@ defmodule KilnCMSWeb.AccountsLiveTest do
       member_of(editor, Accounts.default_org_id(), :editor)
 
       conn = log_in(Phoenix.ConnTest.build_conn(), editor)
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/accounts")
+
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+               live(conn, ~p"/editor/accounts")
     end
 
     test "an admin of another site cannot reach this site's page" do
@@ -513,7 +517,9 @@ defmodule KilnCMSWeb.AccountsLiveTest do
       member_of(other_admin, seed_org().id, :admin)
 
       conn = log_in(Phoenix.ConnTest.build_conn(), other_admin)
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/accounts")
+
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+               live(conn, ~p"/editor/accounts")
     end
   end
 

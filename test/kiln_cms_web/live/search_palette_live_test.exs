@@ -61,7 +61,9 @@ defmodule KilnCMSWeb.SearchPaletteLiveTest do
 
   test "viewers are redirected away", %{conn: conn} do
     conn = log_in(conn, authed_user(:viewer))
-    assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/search")
+
+    assert {:error, {:redirect, %{to: "/access-denied?needs=editor"}}} =
+             live(conn, ~p"/editor/search")
   end
 
   test "searching surfaces content with an edit link and records the query", %{conn: conn} do

@@ -246,7 +246,7 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
       page = elem(page_with_blocks(authed_user(:editor)), 0)
 
       # The editor live_session gate bounces a non-editor to the site root.
-      assert {:error, {:redirect, %{to: "/"}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=editor"}}} =
                conn |> log_in(viewer) |> live(~p"/editor/site/page/#{page.slug}")
     end
   end
@@ -612,7 +612,7 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
       viewer = authed_user(:viewer)
       page = elem(page_with_blocks(authed_user(:editor)), 0)
 
-      assert {:error, {:redirect, %{to: "/"}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=editor"}}} =
                conn |> log_in(viewer) |> live(~p"/editor/site/page/#{page.slug}")
     end
 

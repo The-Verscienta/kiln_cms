@@ -51,7 +51,9 @@ defmodule KilnCMSWeb.TeamLiveTest do
 
     test "editors are turned away", %{conn: conn} do
       conn = log_in(conn, authed_user(:editor))
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/team")
+
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+               live(conn, ~p"/editor/team")
     end
   end
 

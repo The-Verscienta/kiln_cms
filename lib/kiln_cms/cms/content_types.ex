@@ -50,7 +50,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   # its own type's feed — the silent-shadowing failure `Validations.SlugAvailable`
   # exists to prevent. `calendar.ics` (#480) and `index.json` (#766) are the same
   # shape: two-segment delivery routes declared ahead of `/:type/:slug`.
-  @reserved_path_segments ~w(account admin api auth billing blog calendar.ics
+  @reserved_path_segments ~w(access-denied account admin api auth billing blog calendar.ics
                              content dev editor feed.json feed.xml gql index.json
                              locale mailbox media membership playground preview
                              register reset search sign_in swaggerui up)

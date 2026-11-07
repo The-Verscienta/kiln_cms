@@ -135,6 +135,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **A console page you lack the role for now lands on a 403 `/access-denied` page naming the role it needs, instead of home with a toast; `access-denied` is now a reserved root slug.**
+  ([#2143](https://github.com/The-Verscienta/kiln_cms/issues/2143) · [long form](docs/changelog/unreleased.md#access-denied-page))
+
 - **Roles on accounts, team and settings lead with the tier that applies now ("Platform:" / "On this site:"), with
   a line saying when a temporary one ends and what follows; "unconfirmed" is now "Email not confirmed", apart from it.**
   ([#2366](https://github.com/The-Verscienta/kiln_cms/pull/2366) · [long form](docs/changelog/unreleased.md#effective-role-display))

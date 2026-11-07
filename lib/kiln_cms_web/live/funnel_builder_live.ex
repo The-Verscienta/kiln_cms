@@ -22,33 +22,26 @@ defmodule KilnCMSWeb.FunnelBuilderLive do
   def mount(%{"id" => id}, _session, socket) do
     actor = socket.assigns.current_user
 
-    with :admin <- KilnCMSWeb.LiveUserAuth.effective_tier(socket),
-         {:ok, funnel} <-
-           Analytics.get_funnel(id, actor: actor, tenant: socket.assigns.current_org) do
-      type_options = ContentTypes.options(socket.assigns.current_org)
-      first_type = type_options |> List.first() |> then(&(&1 && elem(&1, 1)))
+    case Analytics.get_funnel(id, actor: actor, tenant: socket.assigns.current_org) do
+      {:ok, funnel} ->
+        type_options = ContentTypes.options(socket.assigns.current_org)
+        first_type = type_options |> List.first() |> then(&(&1 && elem(&1, 1)))
 
-      {:ok,
-       socket
-       |> assign(:actor, actor)
-       |> assign(:funnel, funnel)
-       |> assign(:page_title, funnel.name)
-       |> assign(:type_options, type_options)
-       |> assign(:step_type, first_type)
-       |> assign(:step_content_options, content_options(first_type, socket, actor))
-       |> reload_steps()}
-    else
+        {:ok,
+         socket
+         |> assign(:actor, actor)
+         |> assign(:funnel, funnel)
+         |> assign(:page_title, funnel.name)
+         |> assign(:type_options, type_options)
+         |> assign(:step_type, first_type)
+         |> assign(:step_content_options, content_options(first_type, socket, actor))
+         |> reload_steps()}
+
       {:error, _error} ->
         {:ok,
          socket
          |> put_flash(:error, gettext("That funnel doesn't exist."))
          |> push_navigate(to: ~p"/editor/funnels")}
-
-      _tier ->
-        {:ok,
-         socket
-         |> put_flash(:error, gettext("You need admin access to view that page."))
-         |> push_navigate(to: ~p"/")}
     end
   end
 

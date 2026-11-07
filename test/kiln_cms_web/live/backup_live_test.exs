@@ -130,7 +130,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       # refuses with `push_navigate/2`. Matching the loose `{:redirect, _}` here
       # would pass even if the mount guard were deleted and the route had
       # somehow turned them away instead.
-      assert {:error, {:live_redirect, %{to: "/"}}} =
+      assert {:error, {:live_redirect, %{to: "/access-denied?needs=platform"}}} =
                conn |> log_in(user) |> live(~p"/editor/backups")
     end
 

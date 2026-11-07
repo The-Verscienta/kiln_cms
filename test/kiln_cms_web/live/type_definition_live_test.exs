@@ -216,7 +216,9 @@ defmodule KilnCMSWeb.TypeDefinitionLiveTest do
 
   test "non-admins are redirected away", %{conn: conn} do
     editor = authed_user(:editor)
-    assert {:error, {:redirect, %{to: "/"}}} = conn |> log_in(editor) |> live(~p"/editor/types")
+
+    assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+             conn |> log_in(editor) |> live(~p"/editor/types")
   end
 
   test "a dynamic type is offered as a scope on the custom-fields page", %{conn: conn} do

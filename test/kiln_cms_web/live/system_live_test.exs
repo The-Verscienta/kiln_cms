@@ -118,7 +118,7 @@ defmodule KilnCMSWeb.SystemLiveTest do
     test "editors are redirected away", %{conn: conn} do
       conn = log_in(conn, authed_user(:editor))
 
-      assert {:error, {:redirect, %{to: "/", flash: %{"error" => _}}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
                live(conn, ~p"/editor/system")
     end
   end
