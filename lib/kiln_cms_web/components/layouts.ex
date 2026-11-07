@@ -929,6 +929,7 @@ defmodule KilnCMSWeb.Layouts do
       assigns
       |> assign(:author, nav.author)
       |> assign(:hub, nav.hub)
+      |> assign(:hidden_screens, nav.hidden_screens)
       |> assign(:pinned, nav.pinned)
       |> assign(:configure_groups, nav.configure_groups)
       |> assign(:plugin, nav.plugin)
@@ -941,6 +942,20 @@ defmodule KilnCMSWeb.Layouts do
           a hidden current page) rides in the same block. --%>
     <div :if={@hub || @pinned != []} class="mt-5" data-nav-pinned>
       <.side_link :if={@hub} item={@hub} active={@active} user={@current_user} org={@current_org} />
+      <%!-- Essentials hides the screens an admin reaches only through Configure
+          (Forms, Webhooks, API keys, Trash…). Say so, and say how to get them
+          all in the sidebar (#2144). Drawn as `.side-text` so the collapsed
+          rail hides it like every other label. --%>
+      <p
+        :if={@hub && @hidden_screens != []}
+        id="nav-essentials-hint"
+        class="side-text mt-1 px-3 text-xs leading-5 text-base-content/70"
+      >
+        {gettext(
+          "%{screens} are under Configure. Use Show all tools to list every screen here.",
+          screens: Enum.join(@hidden_screens, ", ")
+        )}
+      </p>
       <.side_link
         :for={i <- @pinned}
         item={i}

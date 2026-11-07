@@ -282,7 +282,10 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
   (`User.nav_preset`, saved server-side so it follows them across devices and
   the first paint is already right). Essentials draws Home, Content, Media,
   Calendar, Tasks and Inbox, then the Configure hub (admins) and Your settings;
-  Everything is the full map above. Only the sidebar filters
+  Everything is the full map above. Under the Configure hub, Essentials adds a
+  one-line hint (`#nav-essentials-hint`) naming Forms, Webhooks, API keys and
+  Trash, whichever of those this admin can open, and pointing at Show all
+  tools; Everything and non-admins get none. Only the sidebar filters
   (`ConsoleNav.sidebar/3`) — the hub and ⌘K read `nav/2`, so a preset hides a
   link, never a screen — and the page you are on is drawn even when the preset
   would hide it, marked current. The switch sits at the foot of the sidebar
