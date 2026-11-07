@@ -324,6 +324,10 @@ surfaces — see [headless-consumer-guide.md](headless-consumer-guide.md) →
 ## Core content endpoints
 
 Full filtering / sorting / pagination reference: **[json-api.md](json-api.md)**.
+Admin-defined custom fields filter and sort on the index routes either as
+`custom_filter[price][gt]=10` / `custom_sort=price` (the stable form) or, when
+no built-in has that name, as `filter[price][gt]=10` / `sort=title,price`; see
+[json-api.md](json-api.md#naming-a-custom-field-like-a-column).
 A quick map:
 
 | Resource  | Collection                  | Single record                   | Extra reads                                   |

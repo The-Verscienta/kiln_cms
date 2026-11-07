@@ -72,7 +72,7 @@ defmodule Kiln.PluginsTest do
   test "manifests/0 counts a dependency plugin's plug routes (#2272)" do
     manifest = Enum.find(Kiln.Plugins.manifests(), &(&1.module == KilnDepFixture.Plugin))
 
-    assert manifest.plug_routes == 5
+    assert manifest.plug_routes == 6
 
     assert {:forward, "/fixture-forward", KilnDepFixture.FeedRouter, []} in Kiln.Plugins.plug_routes()
   end
@@ -120,7 +120,7 @@ defmodule Kiln.PluginsTest do
       assert output =~ "https://example.com/fixture-plugin"
       # Contribution summary is pluralized and omits zero-count kinds.
       assert output =~ "5 blocks, 4 field types, 1 image backend, 1 nav item, 1 admin route"
-      assert output =~ "5 plug routes"
+      assert output =~ "6 plug routes"
     end
 
     test "the contribution summary counts every route kind" do
