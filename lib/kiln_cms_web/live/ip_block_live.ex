@@ -226,11 +226,42 @@ defmodule KilnCMSWeb.IpBlockLive do
   defp forbidden_message,
     do: gettext("You don't have permission to change this site's blocked addresses.")
 
+  # Ash's validation messages are English strings fixed in the resource, so they
+  # are mapped here, keyed on field + message, to gettext sentences. A message
+  # that is not one of ours (a new validation, a framework error) falls back to
+  # Ash's own text.
+  defp error_message(%Ash.Error.Forbidden{} = error),
+    do: ash_error_message(error, forbidden: forbidden_message())
+
   defp error_message(error) do
-    ash_error_message(error,
-      forbidden: forbidden_message(),
-      fallback: gettext("The block could not be saved.")
-    )
+    errors = error |> Ash.Error.to_error_class() |> Map.get(:errors, [])
+
+    case Enum.map(errors, &localised_error/1) do
+      [] -> ash_error_message(error, fallback: gettext("The block could not be saved."))
+      messages -> Enum.join(messages, " ")
+    end
+  end
+
+  defp localised_error(error) do
+    case {Map.get(error, :field), Map.get(error, :message)} do
+      {:cidr, "must be an IP address or a range like 203.0.113.0/24"} ->
+        gettext("Enter an IP address or a range like 203.0.113.0/24.")
+
+      {:cidr, "is too broad: use at least /8 for IPv4 or /16 for IPv6"} ->
+        gettext("That range is too broad: use at least /8 for IPv4 or /16 for IPv6.")
+
+      {:cidr, "must not include loopback (127.0.0.0/8 or ::1)"} ->
+        gettext("A range must not include loopback (127.0.0.0/8 or ::1).")
+
+      {:cidr, "is already blocked"} ->
+        gettext("That range is already blocked.")
+
+      {:expires_at, "must be in the future"} ->
+        gettext("The expiry must be in the future.")
+
+      _other ->
+        Exception.message(error)
+    end
   end
 
   defp format_time(%DateTime{} = at), do: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")
