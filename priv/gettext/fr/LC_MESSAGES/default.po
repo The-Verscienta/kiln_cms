@@ -1029,6 +1029,7 @@ msgstr "(sans lien)"
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
@@ -11275,6 +11276,11 @@ msgstr "Hors des flux"
 #, elixir-autogen, elixir-format
 msgid "Not installed"
 msgstr "Non installé"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not public while inactive."
+msgstr "Non public tant qu'il est inactif."
 
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format

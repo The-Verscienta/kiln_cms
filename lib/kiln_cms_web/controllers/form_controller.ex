@@ -5,9 +5,15 @@ defmodule KilnCMSWeb.FormController do
     * `GET /api/forms/:slug` — the form's schema as JSON (fields, labels,
       types, options), so headless frontends can render `data-kiln-form`
       placeholders themselves;
+    * `GET /forms/:slug/embed` — the iframe document `/embed.js` frames;
     * `POST /forms/:slug` — the on-site browser submission (form-encoded),
       rendering a thank-you page;
     * `POST /api/forms/:slug` — the same pipeline for JSON submissions.
+
+  The form's own public page, `GET /forms/:slug` (#2138), is not served here:
+  it is the last fallback of `KilnCMSWeb.ContentController`'s miss funnel, so
+  a content type that owns the `forms` segment, a path alias or a redirect at
+  the same URL keeps precedence. It renders `KilnCMSWeb.FormHTML.show/1`.
 
   No CSRF (the endpoints are anonymous and fired artifacts couldn't carry a
   token); abuse is bounded by the honeypot (`KilnCMS.Forms`) and the tight
@@ -218,7 +224,11 @@ defmodule KilnCMSWeb.FormController do
           [
             current_org: conn.assigns[:current_org],
             locale: Gettext.get_locale(KilnCMSWeb.Gettext),
-            page_title: form.name
+            page_title: form.name,
+            # Posted from `/fr/forms/<slug>` (#2138), the corrected re-submit
+            # keeps the `/fr` prefix and so the visitor's language.
+            action:
+              KilnCMS.I18n.localized_path(conn.assigns[:path_locale], "/forms/" <> form.slug)
           ]
       )
     end

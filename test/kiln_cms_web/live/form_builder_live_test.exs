@@ -301,6 +301,29 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert updated.autoresponder_enabled == false
   end
 
+  describe "the public address in the header (#2138)" do
+    test "an active form links its public page, and Preview opens it", %{conn: conn} do
+      {form, [], lv, _html} = builder(conn, authed_user(:admin))
+      url = KilnCMSWeb.Tenant.base_url(nil) <> "/forms/#{form.slug}"
+
+      assert has_element?(lv, ~s(a#form-public-url[href="#{url}"][target="_blank"]), url)
+      assert has_element?(lv, ~s(a.btn[href="#{url}"]), "Preview")
+      refute render(lv) =~ "/forms/#{form.slug}/embed"
+
+      # The address it shows is one that answers.
+      assert build_conn() |> get(URI.parse(url).path) |> html_response(200) =~ "Contact"
+    end
+
+    test "an inactive form shows no address and says why", %{conn: conn} do
+      {form, [], lv, _html} = builder(conn, authed_user(:admin), %{active: false})
+
+      assert has_element?(lv, "p#form-public-url", "Not public while inactive.")
+      refute has_element?(lv, "a#form-public-url")
+      refute has_element?(lv, "a.btn", "Preview")
+      refute render(lv) =~ "/forms/#{form.slug}"
+    end
+  end
+
   test "the embed tab shows a copyable snippet", %{conn: conn} do
     {form, [], lv, _html} = builder(conn, authed_user(:admin))
 
