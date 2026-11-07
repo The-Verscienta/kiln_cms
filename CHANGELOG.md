@@ -134,7 +134,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A webhook's Delete is now a labelled button on every endpoint's row (it was an easy-to-miss trash icon),
   and the edit form has Delete webhook too.** The confirm says queued deliveries won't be sent and history is kept.
-  ([long form](docs/changelog/unreleased.md#webhook-delete-labelled))
+  ([#2328](https://github.com/The-Verscienta/kiln_cms/pull/2328) · [long form](docs/changelog/unreleased.md#webhook-delete-labelled))
 
 - **Editing a nested column block on a freshly opened page no longer crashes the editor.**
   Adding, removing, reordering or editing a column child before the first form change raised
