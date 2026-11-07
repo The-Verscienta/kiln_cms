@@ -486,8 +486,14 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
   # is the usual indexed map or a list.
   def inject_children(params, block_children) when map_size(block_children) == 0, do: params
 
+  def inject_children(%{"blocks" => blocks} = params, _block_children) when is_nil(blocks),
+    do: params
+
+  def inject_children(params, _block_children) when not is_map_key(params, "blocks"),
+    do: params
+
   def inject_children(params, block_children) do
-    Map.update(params, "blocks", params["blocks"], fn
+    Map.update!(params, "blocks", fn
       blocks when is_map(blocks) ->
         Map.new(blocks, fn {k, v} -> {k, inject_block(v, block_children)} end)
 

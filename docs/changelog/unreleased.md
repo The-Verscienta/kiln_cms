@@ -405,6 +405,16 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="columns-child-fresh-form"></a>
+
+- **Nested column events work on a freshly opened page.** `AshPhoenix.Form.params/1`
+  carries only touched nested forms, so before the first `phx-change` it had no
+  `"blocks"` key. `inject_children/2` then inserted `"blocks" => nil` and the next
+  `Form.validate/2` crashed in `condense/2` (`Enumerable` not implemented for `nil`).
+  Every `apply_children/2` caller (`col_add_child`, `col_remove_child`, `col_reorder`,
+  `col_update_child`, …) now starts from `Preview.form_params_with_blocks/1`, which fills
+  the list from the form's values, and `inject_children/2` no longer creates a nil key.
+
 <a id="phoenix-1-8-16-subscription-pushes"></a>
 
 - **The Phoenix stack moves to 1.8.16 (phoenix_pubsub 2.4.1, phoenix_live_view
