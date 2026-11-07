@@ -184,6 +184,38 @@ defmodule KilnCMSWeb.SchemaControllerTest do
       refute body =~ "gql_secret_a"
     end
 
+    test "swift-graphql and kotlin-graphql serve the models with fragments", %{conn: conn} do
+      private_and_public_fields("n")
+
+      swift = conn |> get(~p"/api/schema?format=swift-graphql")
+      assert ["text/x-swift" <> _] = get_resp_header(swift, "content-type")
+      body = response(swift, 200)
+      assert body =~ "public indirect enum Block"
+      assert body =~ ~s|gqlPriceN: customFloat(name: "gql_price_n")|
+      assert body =~ "public struct PageCustomFields: Codable, Hashable, Sendable {"
+      refute body =~ "gql_secret_n"
+
+      kotlin = build_conn() |> unique_ip() |> get(~p"/api/schema?format=kotlin-graphql")
+      assert ["text/x-kotlin" <> _] = get_resp_header(kotlin, "content-type")
+      body = response(kotlin, 200)
+      assert body =~ "package kiln"
+      assert body =~ ~s|gqlPriceN: customFloat(name: "gql_price_n")|
+      assert body =~ "public data class PageCustomFields("
+      refute body =~ "gql_secret_n"
+    end
+
+    test "a cached swift-graphql document is evicted by a registry write", %{conn: conn} do
+      warm = conn |> get(~p"/api/schema?format=swift-graphql") |> response(200)
+      refute warm =~ "gql_price_m"
+
+      private_and_public_fields("m")
+
+      fresh =
+        build_conn() |> unique_ip() |> get(~p"/api/schema?format=swift-graphql") |> response(200)
+
+      assert fresh =~ "gql_price_m"
+    end
+
     test "each format is cached under its own key", %{conn: conn} do
       private_and_public_fields("c")
       json = conn |> get(~p"/api/schema") |> response(200)
@@ -222,10 +254,12 @@ defmodule KilnCMSWeb.SchemaControllerTest do
     end
 
     test "an unknown format is a 400, not a silent JSON", %{conn: conn} do
-      body = conn |> get(~p"/api/schema?format=swift") |> json_response(400)
+      body = conn |> get(~p"/api/schema?format=yaml") |> json_response(400)
 
       assert body["errors"] |> List.first() |> Map.get("code") == "invalid_format"
       assert inspect(body) =~ "typescript-graphql"
+      assert inspect(body) =~ "swift-graphql"
+      assert inspect(body) =~ "kotlin-graphql"
     end
 
     test "format combines with ?type= and 400s on an unknown type", %{conn: conn} do

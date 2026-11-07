@@ -307,6 +307,8 @@ defmodule KilnCMS.Cache do
       Cachex.del(@cache, delivery_schema_key(org_id))
       Cachex.del(@cache, delivery_schema_key(org_id, "typescript"))
       Cachex.del(@cache, delivery_schema_key(org_id, "typescript-graphql"))
+      Cachex.del(@cache, delivery_schema_key(org_id, "swift-graphql"))
+      Cachex.del(@cache, delivery_schema_key(org_id, "kotlin-graphql"))
       # `has_published_feed` is half of `KilnCMS.Feeds.syndicated?/2`, so a type
       # write changes which types syndicate as surely as a settings save does.
       Cachex.del(@cache, syndicated_types_key(org_id))
@@ -329,7 +331,7 @@ defmodule KilnCMS.Cache do
 
   @doc """
   The same document rendered in another `GET /api/schema` format (`typescript`,
-  `typescript-graphql`). Its own key per format, busted with the JSON one by
+  `typescript-graphql`, `swift-graphql`, `kotlin-graphql`). Its own key per format, busted with the JSON one by
   `bust_type_registry/1`; the JSON key is unchanged.
   """
   @spec delivery_schema_key(Ash.UUID.t(), String.t()) :: String.t()

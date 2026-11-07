@@ -17,12 +17,17 @@ defmodule KilnCMSWeb.SchemaController do
       GET /api/schema?blocks=only     # the block union alone, no DB read
       GET /api/schema?format=typescript          # the same types as a .d.ts
       GET /api/schema?format=typescript-graphql  # + GraphQL custom-field fragments
+      GET /api/schema?format=swift-graphql       # Swift models + the same fragments
+      GET /api/schema?format=kotlin-graphql      # Kotlin models + the same fragments
 
   `format` is a closed set: `json` (the default, and what every request without
   it gets), `typescript` (`KilnCMS.SchemaExport.TypeScript.emit/1`) and
   `typescript-graphql` (`emit_graphql/1`, a `.ts` module: per content type a
   `Fields` type and a ready GraphQL fragment for the typed custom-field readers,
-  #2290). Anything else is a 400. Each format is cached under its own key.
+  #2290), and `swift-graphql` / `kotlin-graphql` (`KilnCMS.SchemaExport.Swift` /
+  `Kotlin` `emit_graphql/1`: the native-app models of the `json` artifact plus
+  the same per-type result type and fragment, in package `kiln` for Kotlin).
+  Anything else is a 400. Each format is cached under its own key.
 
   ## What this discloses, and what it withholds
 
@@ -60,7 +65,7 @@ defmodule KilnCMSWeb.SchemaController do
   # TTL is a backstop, not the freshness signal.
   @cache_ttl :timer.minutes(5)
   @max_age_seconds 300
-  @text_formats ["typescript", "typescript-graphql"]
+  @text_formats ["typescript", "typescript-graphql", "swift-graphql", "kotlin-graphql"]
 
   # Rebuilding costs a registry scan plus one `field_definitions` read per
   # content type, so only the unparameterized document — the one a build step
@@ -82,7 +87,7 @@ defmodule KilnCMSWeb.SchemaController do
       [org_id: org.id, base_url: Tenant.base_url(org)]
       |> put_unless_empty(:types, types)
       |> put_if(:blocks_only, blocks_only?)
-      |> put_if(:graphql, format == "typescript-graphql")
+      |> put_if(:graphql, String.ends_with?(format, "-graphql"))
 
     case build(opts, types, blocks_only?, org.id, format) do
       {:ok, body} ->
@@ -96,10 +101,18 @@ defmodule KilnCMSWeb.SchemaController do
 
   defp send_body(conn, "json", document), do: json(conn, document)
 
-  defp send_body(conn, _text_format, body) do
-    conn
-    |> put_resp_content_type("application/typescript")
-    |> send_resp(200, body)
+  # A literal content type per clause: a variable one reads to Sobelow as a
+  # response whose type a request could choose.
+  defp send_body(conn, "swift-graphql", body) do
+    conn |> put_resp_content_type("text/x-swift") |> send_resp(200, body)
+  end
+
+  defp send_body(conn, "kotlin-graphql", body) do
+    conn |> put_resp_content_type("text/x-kotlin") |> send_resp(200, body)
+  end
+
+  defp send_body(conn, _typescript, body) do
+    conn |> put_resp_content_type("application/typescript") |> send_resp(200, body)
   end
 
   # Absent or empty is JSON, so the unparameterized request is unchanged.
@@ -139,6 +152,9 @@ defmodule KilnCMSWeb.SchemaController do
 
   defp format_document(document, "typescript-graphql"),
     do: SchemaExport.TypeScript.emit_graphql(document)
+
+  defp format_document(document, "swift-graphql"), do: SchemaExport.Swift.emit_graphql(document)
+  defp format_document(document, "kotlin-graphql"), do: SchemaExport.Kotlin.emit_graphql(document)
 
   # The rescue is around this call alone, not the action body. `Tenant.current_org/1`
   # raises `ArgumentError` **by design** (#563) when the tenant did not resolve,
