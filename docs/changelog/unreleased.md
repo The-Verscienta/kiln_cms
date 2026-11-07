@@ -75,6 +75,12 @@ carries the reasoning.
     to buy time while you fix the client.
   - Unset now means on. Nothing to migrate and no config to change if your
     clients send valid tokens or none.
+  - **Counting them.** Each such request, refused or not, emits
+    `[:kiln_cms, :api, :invalid_bearer]` (`count: 1`; metadata `enforced`,
+    `surface`, `read?` and `reason: :expired | :malformed | :invalid`, read from
+    the unverified token and never sent to the client). Attach a handler to see
+    which clients still send a stale token before the escape hatch goes. See
+    [ADR 0017](../decisions/0017-an-unverifiable-bearer-flips-on-a-minor-with-a-breaking-note-and-is-counted-first.md).
 
 <a id="search-name-lexemes-upgrade"></a>
 
