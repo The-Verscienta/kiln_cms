@@ -11,6 +11,10 @@ defmodule KilnCMSWeb.Plugs.RawBodyReader do
   covers the exact bytes, and verifying a signature over a digest of *different*
   bytes than the ones acted on is how this gets implemented wrong.
 
+  A body type `Plug.Parsers` has no parser for is read on a plugin path by
+  `KilnCMSWeb.Plugs.PluginRawBody` through this same reader, so the stash and the
+  cap do not depend on the content type.
+
   ## Scoped by path on purpose
 
   Buffering unconditionally would hold a second copy of every request body — up to
@@ -78,7 +82,10 @@ defmodule KilnCMSWeb.Plugs.RawBodyReader do
 
   # A plugin path matches on whole segments (`/hooks` is not `/hooks-extra`),
   # with or without the locale prefix `SetLocale` has not stripped yet.
-  defp plugin_path?(request_path) do
+  @doc false
+  def plugin_path?(%Plug.Conn{request_path: path}), do: plugin_path?(path)
+
+  def plugin_path?(request_path) when is_binary(request_path) do
     case Kiln.Plugins.PlugRoute.segments(request_path) do
       [locale | rest] = segments when rest != [] ->
         plugin_segments?(segments) or

@@ -20,6 +20,21 @@ carries the reasoning.
   before deploying. No re-fire is needed: a row written before 1.8, with no
   `search_weighted`, still takes the full match.
 
+<a id="reporting-views-upgrade"></a>
+
+- **Overlays: run `mix ash.codegen` and commit the migration; existing content
+  types gain the reporting views.** The reporting views (below) are created
+  by `use KilnCMS.CMS.Content`, so a project's own `mix kiln.gen.content` types
+  show codegen drift on the first release that has them. Run `mix ash.codegen`,
+  review and commit the migration it writes, and deploy it with the update.
+  Until then those types have no views; nothing else is affected. The
+  migration is additive (a schema, and two views per content table) and
+  rolling the pin back leaves them in place, unused. Core's own views arrive
+  by core's migration with nothing to do. A BI role made earlier does not exist
+  yet; when you create one (`mix kiln.reporting.sql`), re-run its `GRANT` lines
+  after every upgrade that adds views, and after a demo reset.
+
+
 <a id="custom-fields-gin-upgrade"></a>
 
 - **Content tables gain a GIN index on `custom_fields`, built concurrently;
@@ -39,6 +54,44 @@ carries the reasoning.
   drops them. See [Custom fields](../json-api.md#which-custom-filters-use-an-index).
 
 ## Added
+
+<a id="content-list-field-columns"></a>
+
+- **The content list can show custom fields on each row.** Pick one content
+  type in the list's type filter and a **Columns** button appears in the list's
+  header bar. Tick the fields to show; each row then carries a small strip of
+  `label value` pairs under its meta line. The choice is the person's own, kept
+  per site and per content type, and is not part of the URL or of saved views.
+  - **What it offers.** Fields of type string, text, integer, float, boolean,
+    date, datetime, url, select, reference, user and media, single-valued only.
+    Groups, geolocation, date ranges, recurrence, computed and multi-valued
+    fields are not offered. Up to 6 are remembered per type and the first 4
+    (in field order) are shown. Private fields are offered, because editors
+    already see them in the content editor; the list is editor-only.
+    With "All types" selected on a site with several types, no picker is
+    shown (field names collide across types) and a hint says to choose a type.
+  - **What a cell shows.** A reference shows the target's current title, read
+    afresh as the viewer, or "Unavailable" when it cannot be read or no longer
+    exists; the title stored in the field is never shown. A user field shows
+    the person's name only ("Unnamed user" without one, never the email). A
+    select shows the option's label, a boolean Yes or No, a media field its
+    alt text or file name, and an empty value shows a dash. Long values are cut
+    at 80 characters. References are looked up once per page of rows, not per
+    row.
+  - **Developers.** Choices live in a new nullable `users.content_list_columns`
+    map (`%{org_id => %{type => [field name]}}`), written only by the new
+    `:set_content_list_columns` action (`Accounts.set_content_list_columns/5`,
+    self only). It merges one site/type entry into the stored map under a row
+    lock, so a stale tab cannot overwrite another site's choice, and checks the
+    names against the site's field definitions; a field deleted later drops out
+    silently. Which fields may be offered is decided in one place,
+    `KilnCMS.CMS.ListFields.readable_fields/4`. The attribute sits behind the same field policy as
+    `status_marks`: only the user and platform admins can read it, so it
+    reaches no API caller as a byline field.
+  - **Upgrade.** Additive: one nullable `users` column with no default, added
+    by the migration that runs on deploy. No upgrade step, no environment
+    variable, and rolling the pin back leaves an unread column. Filtering,
+    sorting and exporting by field are not part of this change.
 
 <a id="custom-field-native-filter-sort"></a>
 
@@ -118,6 +171,36 @@ carries the reasoning.
     new settings table. Overlays run `mix ash.codegen` for their own content
     types. Until a site lists a field, nothing changes.
 
+<a id="reporting-views"></a>
+
+- **Read-only SQL views of published content, for BI tools.** Custom fields
+  live in one JSONB map, so Metabase or Superset could not select a field as
+  a column. The new `kiln_reporting_v1` schema has, per content table, a wide
+  view (core columns plus an allowlisted `custom_fields`) and a
+  `<table>_field_values` view with one row per record and field
+  (`value_text`, `value_json`). `mix kiln.reporting.sql` prints a script that
+  creates a read-only role with `SELECT` on those views only. Guide:
+  [docs/reporting.md](../reporting.md); the reasoning is
+  [decision 0015](../decisions/0015-reporting-views-are-a-versioned-additive-only-sql-contract.md).
+  - **What is exposed.** Published, unarchived, public-audience rows without an
+    access password. A field appears only while a live definition names it and
+    it is not private or a `user` field; the list is read live, so a flip to
+    private applies on the next query. Reference values are `{id, type}` only.
+    Media snapshots pass through as stored.
+  - **Limits.** No typed columns (cast `value_text` / `value_json`; the guide
+    has a recipe). Every site's rows are visible to the role, so it must not
+    go to a tenant. Role settings (read-only, 60s timeout) are advisory; use a
+    read replica to enforce.
+  - **Developers.** The views are a versioned, additive-only contract; a
+    breaking change would be `kiln_reporting_v2`. They pin the columns they
+    read, so `mix kiln.migrations.check` now fails a migration that removes,
+    renames or retypes one without dropping both views of the pair first
+    (`kiln:contract-ok` does not excuse it); see `docs/releasing.md`. The
+    demo reset now drops the schema before restoring, and
+    the promotion column lookup filters on the current schema, so a view of the same name cannot add columns.
+  - **Upgrade.** Additive, no environment variable. Overlays: see the upgrade
+    note above.
+
 <a id="custom-field-indexes"></a>
 
 - **`custom_filter` equality, `in` and list membership on custom fields use an
@@ -163,8 +246,9 @@ carries the reasoning.
     (`current_user` is never set; the plugin authenticates its own caller).
     `conn.assigns.current_org` is set, but the plugin passes `tenant:` to Ash
     itself. Requests are limited to 300 a minute per client address in their
-    own `:plugin_endpoint` bucket. A JSON or form body is also kept in
-    `conn.private[:raw_body]`, capped at 1 MB, so an HMAC can be verified.
+    own `:plugin_endpoint` bucket. The body, of any content type
+    except `multipart/*`, is also kept byte for byte in `conn.private[:raw_body]`,
+    capped at 1 MB (over it, `413`), so an HMAC can be verified.
   - **Checks.** A malformed route stops the build, naming the plugin.
     `mix kiln.plugins.doctor` also reports a path under a root core routes own
     (`/editor`, `/api`, `/gql`, `/mcp`, …) and overlap with another plugin's
@@ -261,6 +345,26 @@ carries the reasoning.
   [decision 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md#rotation)
   and the headless consumer guide.
 
+<a id="block-field-localization-config"></a>
+
+- **A site can make core block fields per-locale from config.**
+  `config :kiln_cms, :i18n, block_fields: %{"image" => [shared: [:media_id, :url], fallback: [:alt, :caption]]}`
+  gives the core `image`, `video` and `audio` blocks (or any registered block
+  except `gallery`, `fragment`, `rich_text`, `columns` and `file`) the same
+  `shared:` / `fallback:` modes a block module declares with `localized:`. A
+  site cannot edit a core block, so until now it could not share an image
+  across locales. On a translation the editor now locks a shared field, with
+  the *Shared: edited in the EN version* note and its library buttons
+  disabled, and shows a fallback field's inherited value as a placeholder; the
+  server refuses a pick into a locked field. Invalid entries are ignored with
+  one warning per distinct config. With no `block_fields:` key nothing changes.
+  Before enabling `:shared`: the next publish of the source variant overwrites
+  each translation's own value of those fields, and edits to them are refused
+  afterwards. Share `media_id` with `url`; a `:fallback` `alt` beside an
+  unshared `url` can describe the wrong image; an image nested in a `columns`
+  block exposes only `url` and `alt`. Removing the key is safe. No migration.
+  See [Field-level localization](../field-level-localization.md#making-core-block-fields-per-locale-2270).
+
 ## Changed
 
 <a id="custom-field-history"></a>
@@ -349,6 +453,16 @@ carries the reasoning.
   carry them. Fixing those needs upstream releases.
 
 ## Fixed
+
+<a id="columns-child-fresh-form"></a>
+
+- **Nested column events work on a freshly opened page.** `AshPhoenix.Form.params/1`
+  carries only touched nested forms, so before the first `phx-change` it had no
+  `"blocks"` key. `inject_children/2` then inserted `"blocks" => nil` and the next
+  `Form.validate/2` crashed in `condense/2` (`Enumerable` not implemented for `nil`).
+  Every `apply_children/2` caller (`col_add_child`, `col_remove_child`, `col_reorder`,
+  `col_update_child`, …) now starts from `Preview.form_params_with_blocks/1`, which fills
+  the list from the form's values, and `inject_children/2` no longer creates a nil key.
 
 <a id="phoenix-1-8-16-subscription-pushes"></a>
 

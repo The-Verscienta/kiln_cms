@@ -61,12 +61,19 @@ defmodule KilnCMS.Demo.Restore do
   # user-defined types. `IF EXISTS` because a CASCADE can already have removed a
   # later row of the same loop.
   #
+  # The reporting schema (#2295) is not in `public`, but a golden dump taken
+  # after its migration lists `SCHEMA kiln_reporting_v1`, and the restore's plain
+  # `CREATE SCHEMA` would abort on an existing one. It holds only views over the
+  # `public` tables, so it goes first and the restore re-creates it.
+  #
   # `lock_timeout` so a reset queued behind a long-running query fails — and
   # rolls back — instead of holding its half-acquired locks indefinitely. The
   # restore script resets it to 0 after this, by which point every lock is held.
   @wipe_sql """
   SET LOCAL lock_timeout = '30s';
   SET LOCAL search_path = public, pg_catalog;
+
+  DROP SCHEMA IF EXISTS #{KilnCMS.Reporting.ViewSql.schema()} CASCADE;
 
   DO $kiln_demo_wipe$
   DECLARE

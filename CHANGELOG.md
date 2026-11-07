@@ -60,11 +60,19 @@ Every summary line below that was shortened links to its own entry there.
   column, filled for every row by the migration (a table rewrite). Nothing else to run.**
   ([long form](docs/changelog/unreleased.md#search-name-lexemes-upgrade))
 
+- **Overlays: run `mix ash.codegen` and commit the migration. Existing content types gain the `kiln_reporting_v1` SQL views.**
+  Additive; re-run `mix kiln.reporting.sql` grants after upgrading.
+  ([long form](docs/changelog/unreleased.md#reporting-views-upgrade))
+
 - **Content tables gain a GIN index on `custom_fields`, built concurrently: slow on a large
   `entries`; a failed build leaves an INVALID index to drop. Overlays run `mix ash.codegen`.**
   ([#2321](https://github.com/The-Verscienta/kiln_cms/pull/2321) · [long form](docs/changelog/unreleased.md#custom-fields-gin-upgrade))
 
 ### Added
+
+- **The content list can show up to four custom fields on each row; pick them under Columns once one content type is listed.**
+  Remembered per person, site and type; additive migration, nothing to run.
+  ([long form](docs/changelog/unreleased.md#content-list-field-columns))
 
 - **`custom_filter` equality, `in` and list membership use a new GIN index on `custom_fields`: a selective filter on 100,000 rows drops from about 40 ms to about 3 ms.**
   Range, `not_eq`, `ilike`, `null` and `custom_sort` are unchanged.
@@ -81,6 +89,10 @@ Every summary line below that was shortened links to its own entry there.
   The editor asks before publishing; API writes default to notable; read back as `latest_edit_severity` / `latest_edit_at`.
   ([long form](docs/changelog/unreleased.md#change-severity))
 
+- **Read-only SQL views of published content for BI tools: the `kiln_reporting_v1` schema, with a read-only role from `mix kiln.reporting.sql`.**
+  Allowlisted custom fields, wide and one-row-per-field; no typed columns yet. Guide: [docs/reporting.md](docs/reporting.md).
+  ([long form](docs/changelog/unreleased.md#reporting-views))
+
 - **Plugins can mount plain-Plug endpoints (webhooks, JSON, feeds) with `plug_routes/0`, new in `kiln_plugin` 1.4.**
   No session or CSRF check, raw body kept for HMACs, own 300/min rate limit; `mix kiln.plugins.doctor` checks paths.
   ([#2272](https://github.com/The-Verscienta/kiln_cms/issues/2272) · [long form](docs/changelog/unreleased.md#plugin-plug-routes))
@@ -95,6 +107,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Drafts-only keys can rotate themselves: an admin sets a window at mint, and until then `POST /api/keys/rotate`
   swaps the key for an identical fresh one and revokes the old. Reusing a rotated-away key burns the chain.**
   ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-key-rotation))
+
+- **`config :kiln_cms, :i18n, block_fields:` makes core image/video/audio block fields shared or
+  fallback across locales; the editor locks them on translations.**
+  ([long form](docs/changelog/unreleased.md#block-field-localization-config))
 
 ### Changed
 
@@ -111,6 +127,11 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#quiet-image-build))
 
 ### Fixed
+
+- **Editing a nested column block on a freshly opened page no longer crashes the editor.**
+  Adding, removing, reordering or editing a column child before the first form change raised
+  in `AshPhoenix.Form`; the editor now builds the block list from the form's current values.
+  ([long form](docs/changelog/unreleased.md#columns-child-fresh-form))
 
 - **Phoenix 1.8.16 with absinthe_phoenix 2.0.6: GraphQL subscription pushes still reach
   WebSocket clients after the bump, which silently dropped every push on absinthe_phoenix 2.0.5.**
