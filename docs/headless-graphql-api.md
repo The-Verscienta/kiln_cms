@@ -270,7 +270,7 @@ code `invalid_format`):
 | `json` (default) | JSON Schema, as before ([api.md](api.md#schema-discovery-typed-clients)) |
 | `typescript` | The same types as a `.d.ts` declaration file |
 | `typescript-graphql` | A `.ts` **module** (the fragments are values): the declarations above plus, per content type, a `<Type>CustomFields` interface and a `<Type>CustomFieldsFragment` string |
-| `swift-graphql` | The Swift models of the `json` artifact plus, per content type, a `<Type>CustomFields` struct with a `fragment` string ([native-apps.md](native-apps.md#typed-models-from-get-apischema)) |
+| `swift-graphql` | The Swift models of the `json` artifact plus, per content type, a `<Type>CustomFields` struct with a `fragment` string (*Typed models from GET /api/schema* in [native-apps.md](native-apps.md)) |
 | `kotlin-graphql` | The Kotlin models (package `kiln`) plus, per content type, a `<Type>CustomFields` data class with a `FRAGMENT` string |
 
 Fetch it at build time and commit the file. A recipe for a front end that
