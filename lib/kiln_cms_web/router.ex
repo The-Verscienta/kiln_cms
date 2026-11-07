@@ -565,6 +565,10 @@ defmodule KilnCMSWeb.Router do
       # The site's `/.well-known/security.txt` (RFC 9116, #1873). Org-scoped and
       # admin-only: a security contact is a statement on the whole site's behalf.
       live "/editor/security-txt", SecurityTxtLive, :index
+      # What happens when a new password is in a known breach (#2240). Org-scoped
+      # and admin-only: it decides whether the site's administrators can be
+      # refused a password.
+      live "/editor/password-policy", PasswordPolicyLive, :index
       # Per-site custom head/footer HTML for the DELIVERY site (#490). Admin-only
       # by the live session's tier gate AND the resource policy; the snippet is
       # rendered only by the `:delivery` pipeline, never here.

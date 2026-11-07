@@ -93,6 +93,12 @@ defmodule KilnCMS.Application do
       Supervisor.child_spec({Cachex, [name: KilnCMS.Accounts.WebAuthn.challenge_cache()]},
         id: KilnCMS.Accounts.WebAuthn.challenge_cache()
       ),
+      # One-shot "breached password" notes between setting a password and the
+      # sign-in that follows it (#2240) — TTL-only, node-local, best-effort, and
+      # apart from the content cache so eviction pressure cannot drop one.
+      Supervisor.child_spec({Cachex, [name: KilnCMS.Accounts.PasswordNotice.cache()]},
+        id: KilnCMS.Accounts.PasswordNotice.cache()
+      ),
       # Bounded LRW cache of remote ActivityPub actor documents (#966), so an
       # inbound activity that needs one does not re-fetch it per request. Its
       # own instance: the keys are URLs from unauthenticated callers, and a

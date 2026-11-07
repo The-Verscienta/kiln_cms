@@ -271,6 +271,58 @@ means the mail reached the queue; an enqueue failure is reported, not crashed on
 Erased accounts are refused: their password hash has no matching plaintext and
 their address is a `@deleted.invalid` tombstone.
 
+## Breached passwords
+
+Whenever someone sets a password on your site (registers, changes it, resets
+it, or you create the first admin in `/setup`) Kiln checks whether it appears in
+a public data breach. The check sends only a short fragment of a hash of the
+password to the [Have I Been Pwned](https://haveibeenpwned.com/Passwords) range
+API; the password never leaves your server. Signing in is not checked.
+
+### Choose what happens
+
+Requires the admin role.
+
+1. Open **Password policy** under **Organization** in the console sidebar (or go to
+   `/editor/password-policy`).
+2. In **When a new password is in a known breach**, pick one of the three options:
+   - **Off - don't warn.** The check result is ignored.
+   - **Warn - allow it, with a warning.** The default. The password is
+     accepted; the person sees a notice asking them to consider another.
+   - **Block - refuse it for administrators.** An administrator's new password
+     that is in a breach is refused with "This password has appeared in a known
+     data breach. Choose a different one." Editors and viewers are only warned.
+3. Click **Save**. You see "Password policy saved." and the new choice applies to the next
+   password set; nothing is re-checked retroactively.
+
+**Use the default** (shown once the site has its own choice; it asks to confirm) removes the site's choice, so the
+operator's default (`BREACHED_PASSWORD_POLICY`, `warn` if unset) applies again.
+
+"Administrator" means the stricter of the account's role (a temporary role
+counts) and its membership tier on this site.
+
+### What people see
+
+- **Blocked:** an error under the password field; they pick another.
+- **After changing a password, or first-run setup:** the notice appears
+  with the redirect to sign-in.
+- **After registering or resetting:** the notice appears after their next
+  password sign-in. It is a one-time, best-effort note kept for ten minutes, and
+  it can be missed on a multi-node deployment.
+
+### When the check does nothing
+
+- The operator set `BREACHED_PASSWORD_CHECK=false` (the page says so).
+- The lookup service is slow or unreachable: the password is accepted. Operators
+  can watch for this in [observability](observability.md#breached-password-checks).
+- Passwords an admin does not type: the admin-sent reset *mail* is checked when
+  the owner uses the link, but magic links, SSO and passkeys set no password,
+  and seeds and operator scripts are not checked.
+
+See the [threat model](threat-model.md#breached-passwords) for the limits and
+[environment variables](environment-variables.md#breached-password-check-2240)
+for the two operator settings.
+
 ## Signing an account out
 
 "Sign out everywhere" does both halves:
