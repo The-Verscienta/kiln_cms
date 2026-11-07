@@ -137,8 +137,8 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   require Logger
 
   alias Ash.Error.Changes.InvalidAttribute
-  alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.Conditions
+  alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.PrivateFields
   alias KilnCMS.CMS.UniqueValues
