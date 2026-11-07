@@ -91,6 +91,28 @@ carries the reasoning.
 
 ## Added
 
+<a id="webhook-rotate-secret"></a>
+
+- **Admins can rotate a webhook endpoint's signing secret (#2347).** Each row
+  on `/editor/webhooks` has a **Rotate secret** button (admin only, with a
+  confirmation). It replaces the secret and reveals the new one so you can
+  copy it into the receiver. Before this, the only way to change a secret was
+  to delete the endpoint and add it again, which also lost its settings.
+  Rotation takes effect immediately and there is no dual-secret window: it is
+  the remedy for a leaked secret, so the old one must stop working. Queued and
+  retried deliveries sign at send time and use the new secret; one attempt
+  already in flight can fail and is retried. Health counters
+  (`consecutive_failures`, `auto_disabled_at`) are not touched, so an endpoint
+  near the auto-disable limit can tip over while the receiver still holds the
+  old secret. The old ciphertext is never decrypted, so an endpoint whose
+  secret is unreadable after `SECRET_KEY_BASE` was lost can be rotated back to
+  health; the unreadable-secret message now points at the button. Rotation
+  logs `webhook secret rotated endpoint_id=… org_id=… actor_id=…` at info
+  level (never the secret) and leaves no other audit trail. Over code it is
+  `KilnCMS.CMS.rotate_webhook_secret/2`. No migration, no env var, no upgrade
+  step; rolling the pin back is safe. See
+  [Rotate a webhook signing secret](../webhooks.md#rotate-a-webhook-signing-secret).
+
 <a id="graphql-custom-where"></a>
 
 - **GraphQL filters custom fields with typed operators (`customWhere`, #2290).**
