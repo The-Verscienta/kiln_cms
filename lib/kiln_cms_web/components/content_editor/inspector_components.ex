@@ -1043,7 +1043,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
         aria-describedby={@errors != [] && cf_errors_id(@definition)}
         class="field-input font-mono text-xs"
       >{@json_text}</textarea>
-      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/70">
         {@definition.help_text}
       </p>
       <.custom_field_errors_list definition={@definition} errors={@errors} />
