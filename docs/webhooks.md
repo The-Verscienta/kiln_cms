@@ -11,8 +11,11 @@ as [#570](https://github.com/The-Verscienta/kiln_cms/issues/570) — the feature
 ## Registering an endpoint
 
 Admins manage endpoints at **`/editor/webhooks`**. Adding one takes a URL and a
-set of events to subscribe to; Kiln generates a signing secret at creation time
-(shown on the endpoint's row — it never changes, even across edits). The secret
+set of events to subscribe to; Kiln generates a signing secret at creation time.
+It never changes, even across edits, and there is no way to rotate it short of
+deleting the endpoint and adding it again. Each row shows the secret masked
+until an admin reveals it ([Copy a webhook signing secret](#copy-a-webhook-signing-secret)
+below). The secret
 is stored encrypted with the app's vault key, which is derived from
 `SECRET_KEY_BASE`. Rotating that key leaves every endpoint's secret unreadable:
 the row says so, and deliveries are refused rather than sent unsigned.
@@ -32,6 +35,48 @@ defaults** act on the whole list, and each group (one per content type, plus
 tasks, releases, experiments, memberships, and the tag, tag group and category
 taxonomy) has its own toggle. An endpoint
 that receives unpublished content says so on its row.
+
+## Copy a webhook signing secret
+
+Your receiver needs the endpoint's signing secret to
+[verify each delivery](#verifying-the-signature). The list keeps it masked so
+that it isn't on screen, or in the page, for anyone looking over your shoulder
+or watching a screen share. You need the admin role; `/editor/webhooks` is
+admin-only.
+
+1. Open **Webhooks** in the console navigation (`/editor/webhooks`). Each
+   endpoint's row says **Signing secret:** followed by `••••` and the
+   secret's last four characters, and a **Reveal** button. A secret shorter
+   than 16 characters shows the dots alone, since its last four would give
+   away too much of it.
+2. Click **Reveal**. The full secret replaces the dots, with **Copy** and
+   **Hide** buttons beside it.
+3. Click **Copy**. The secret goes to your clipboard and the page says
+   "Signing secret copied." Paste it into your receiver's configuration.
+4. Click **Hide** to mask it again. Reloading the page or leaving it masks
+   every secret too: a reveal lasts only while the page stays open.
+
+A newly added endpoint skips step 2. After **Add webhook** the page says
+"Webhook added. Copy its signing secret into your receiver." and the new row's
+secret is already revealed, with **Copy** beside it.
+
+The masked row carries only the last four characters. The full secret is sent
+to the browser when you click **Reveal** (or add the endpoint), after the
+server reads the endpoint again as you, on the current site.
+
+What can go wrong:
+
+- **"Couldn't reveal that signing secret."**: the endpoint was not found,
+  usually because another admin deleted it after your page loaded. Reload the
+  page to see the current list.
+- **The row says the secret is "unreadable"** and has no **Reveal** or
+  **Copy**: it was encrypted under a `SECRET_KEY_BASE` this server no longer
+  has. Delete the endpoint, add it again, and give the receiver the new
+  secret ([secrets rotation](secrets-rotation.md)).
+- **Copy does nothing and no "copied" message appears**: the browser refused
+  the clipboard write, which it does on a page not served over HTTPS (other
+  than `localhost`) or when clipboard access is blocked. Select the revealed
+  secret and copy it by hand.
 
 ## Delete an endpoint
 

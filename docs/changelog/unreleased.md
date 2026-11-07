@@ -404,6 +404,30 @@ carries the reasoning.
 
 ## Changed
 
+<a id="webhook-secret-masked"></a>
+
+- **A webhook's signing secret is masked on `/editor/webhooks` until an admin
+  reveals it, and a revealed secret has a Copy button.** The list printed
+  every endpoint's secret in plain text, so a screen share, a screenshot or a
+  saved copy of the page carried all of them (#2140). Each row now shows
+  `••••` and the secret's last four characters (the dots alone for a secret
+  under 16 characters), and the page holds nothing more until **Reveal** is
+  clicked. Reveal reads the endpoint again as that admin on the current site
+  before sending the secret, so an id from another site, or one deleted in the
+  meantime, reveals nothing and says "Couldn't reveal that signing secret."
+  A revealed secret has **Copy**, which puts it on the clipboard and says
+  "Signing secret copied.", and **Hide**. A reveal lasts until **Hide** or a
+  reload. A newly added endpoint's secret starts revealed, and the notice now
+  reads "Webhook added. Copy its signing secret into your receiver." An
+  unreadable secret (after a `SECRET_KEY_BASE` rotation) keeps its message,
+  with no Reveal or Copy.
+
+  Who can see a secret is unchanged: `/editor/webhooks` and the endpoint
+  itself stay admin-only, and the API exposes no secret. Secrets still can't
+  be rotated without deleting the endpoint (#2347). No migration, config or
+  API change; rolling back the pin is safe. See
+  [Copy a webhook signing secret](../webhooks.md#copy-a-webhook-signing-secret).
+
 <a id="custom-field-history"></a>
 
 - **Custom fields are individual fields in version compare, restore and the publish-conflict panel.**

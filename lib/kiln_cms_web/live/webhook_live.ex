@@ -1,8 +1,16 @@
 defmodule KilnCMSWeb.WebhookLive do
   @moduledoc """
   Webhooks (`/editor/webhooks`) — register outbound endpoints and choose which
-  events each one receives. Admin-only, mirroring the `WebhookEndpoint` policy;
-  the per-endpoint signing secret is shown so receivers can verify deliveries.
+  events each one receives. Admin-only, mirroring the `WebhookEndpoint` policy.
+
+  Each endpoint's signing secret is masked in the list (`•••• ` and its last
+  four characters, or dots alone for a secret under 16 characters) and is not
+  sent to the browser until an admin reveals it (#2140). Reveal re-reads the
+  endpoint with the admin as actor and the site as tenant, so a forged id from
+  another site reveals nothing. A revealed secret gets a Copy button; Hide
+  masks it again. Revealed state lasts for this LiveView session only. A newly
+  added endpoint's secret starts revealed, so it can be copied into the
+  receiver straight away.
 
   A new endpoint starts with `WebhookEndpoint.default_events/1` ticked, which
   leaves out the events that carry unpublished content; those are marked in
@@ -27,6 +35,7 @@ defmodule KilnCMSWeb.WebhookLive do
        |> assign(:available_events, WebhookEndpoint.events(socket.assigns.current_org.id))
        |> assign(:default_events, WebhookEndpoint.default_events(socket.assigns.current_org))
        |> assign(:edit, nil)
+       |> assign(:revealed, MapSet.new())
        |> assign(:form, create_form(actor, socket.assigns.current_org))
        |> load_endpoints()
        |> load_deliveries()}
@@ -51,12 +60,16 @@ defmodule KilnCMSWeb.WebhookLive do
 
   def handle_event("create", %{"webhook" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: normalize(params)) do
-      {:ok, _endpoint} ->
+      {:ok, endpoint} ->
         {:noreply,
          socket
          |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
          |> load_endpoints()
-         |> put_flash(:info, gettext("Webhook added."))}
+         |> update(:revealed, &MapSet.put(&1, endpoint.id))
+         |> put_flash(
+           :info,
+           gettext("Webhook added. Copy its signing secret into your receiver.")
+         )}
 
       {:error, form} ->
         {:noreply, assign(socket, :form, form)}
@@ -121,6 +134,33 @@ defmodule KilnCMSWeb.WebhookLive do
         {:noreply, assign(socket, :edit, %{socket.assigns.edit | form: form})}
     end
   end
+
+  # --- signing secret (#2140) ----------------------------------------------------
+
+  # The id comes from the client, so re-read the endpoint as this admin on this
+  # site before revealing: an id from another site, or one already deleted,
+  # reveals nothing.
+  def handle_event("reveal_secret", %{"id" => id}, socket) when is_binary(id) do
+    actor = socket.assigns.actor
+
+    socket =
+      with {:ok, endpoint} <-
+             CMS.get_webhook_endpoint(id, actor: actor, tenant: socket.assigns.current_org),
+           secret when is_binary(secret) <- WebhookEndpoint.secret(endpoint) do
+        update(socket, :revealed, &MapSet.put(&1, endpoint.id))
+      else
+        _ -> put_flash(socket, :error, gettext("Couldn't reveal that signing secret."))
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("hide_secret", %{"id" => id}, socket) when is_binary(id),
+    do: {:noreply, update(socket, :revealed, &MapSet.delete(&1, id))}
+
+  # Pushed by the `Clipboard` hook on a revealed secret's Copy button.
+  def handle_event("copied", _params, socket),
+    do: {:noreply, put_flash(socket, :info, gettext("Signing secret copied."))}
 
   # --- quick actions ---------------------------------------------------------
 
@@ -204,16 +244,21 @@ defmodule KilnCMSWeb.WebhookLive do
 
   # --- data ------------------------------------------------------------------
 
+  # A revealed secret stays revealed across a refresh only while its endpoint
+  # is still listed.
   defp load_endpoints(socket) do
-    assign(
-      socket,
-      :endpoints,
+    endpoints =
       CMS.list_webhook_endpoints!(
         actor: socket.assigns.actor,
         tenant: socket.assigns.current_org,
         query: [sort: [inserted_at: :asc]]
       )
-    )
+
+    listed = MapSet.new(endpoints, & &1.id)
+
+    socket
+    |> assign(:endpoints, endpoints)
+    |> update(:revealed, &MapSet.intersection(&1, listed))
   end
 
   defp load_deliveries(socket) do
@@ -425,18 +470,10 @@ defmodule KilnCMSWeb.WebhookLive do
                       {event}
                     </span>
                   </div>
-                  <p class="text-xs text-base-content/70">
-                    {gettext("Signing secret")}:
-                    <%= if secret = WebhookEndpoint.secret(endpoint) do %>
-                      <code>{secret}</code>
-                    <% else %>
-                      <span class="text-error">
-                        {gettext(
-                          "unreadable — it was encrypted under a SECRET_KEY_BASE this server no longer has. Delete and re-create the endpoint."
-                        )}
-                      </span>
-                    <% end %>
-                  </p>
+                  <.signing_secret
+                    endpoint={endpoint}
+                    revealed={MapSet.member?(@revealed, endpoint.id)}
+                  />
                 </div>
                 <div class="flex shrink-0 flex-wrap items-center gap-1">
                   <button
@@ -607,6 +644,75 @@ defmodule KilnCMSWeb.WebhookLive do
       </div>
     </Layouts.console>
     """
+  end
+
+  attr :endpoint, :map, required: true
+  attr :revealed, :boolean, required: true
+
+  # The plaintext secret is rendered only while revealed; masked, the page
+  # carries at most its last four characters (#2140).
+  defp signing_secret(assigns) do
+    assigns = assign(assigns, :secret, WebhookEndpoint.secret(assigns.endpoint))
+
+    ~H"""
+    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-base-content/70">
+      <span>{gettext("Signing secret")}:</span>
+      <%= cond do %>
+        <% is_nil(@secret) -> %>
+          <span class="text-error">
+            {gettext(
+              "unreadable — it was encrypted under a SECRET_KEY_BASE this server no longer has. Delete and re-create the endpoint."
+            )}
+          </span>
+        <% @revealed -> %>
+          <code id={"webhook-#{@endpoint.id}-secret"} class="break-all">{@secret}</code>
+          <button
+            type="button"
+            id={"copy-secret-#{@endpoint.id}"}
+            phx-hook="Clipboard"
+            data-clipboard-text={@secret}
+            aria-label={gettext("Copy signing secret for %{url}", url: @endpoint.url)}
+            class="btn btn-sm btn-default px-2 py-0.5 text-xs"
+          >
+            <.icon name="hero-clipboard-document" class="size-3.5" />
+            {gettext("Copy")}
+          </button>
+          <button
+            type="button"
+            id={"reveal-secret-#{@endpoint.id}"}
+            phx-click="hide_secret"
+            phx-value-id={@endpoint.id}
+            aria-label={gettext("Hide signing secret for %{url}", url: @endpoint.url)}
+            class="btn btn-sm btn-default px-2 py-0.5 text-xs"
+          >
+            <.icon name="hero-eye-slash" class="size-3.5" />
+            {gettext("Hide")}
+          </button>
+        <% true -> %>
+          <span id={"webhook-#{@endpoint.id}-secret-masked"} class="font-mono">
+            {mask_secret(@secret)}
+          </span>
+          <button
+            type="button"
+            id={"reveal-secret-#{@endpoint.id}"}
+            phx-click="reveal_secret"
+            phx-value-id={@endpoint.id}
+            aria-label={gettext("Reveal signing secret for %{url}", url: @endpoint.url)}
+            class="btn btn-sm btn-default px-2 py-0.5 text-xs"
+          >
+            <.icon name="hero-eye" class="size-3.5" />
+            {gettext("Reveal")}
+          </button>
+      <% end %>
+    </div>
+    """
+  end
+
+  # A short secret's last four characters would be most of it, so it shows
+  # dots alone.
+  @mask "••••"
+  defp mask_secret(secret) do
+    if String.length(secret) >= 16, do: @mask <> " " <> String.slice(secret, -4, 4), else: @mask
   end
 
   defp delivery_status_label(:succeeded), do: gettext("Delivered")
