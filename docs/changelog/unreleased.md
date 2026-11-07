@@ -532,6 +532,35 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="form-field-rename"></a>
+
+- **Renaming a form field's machine name saves on Enter, shows on the canvas,
+  and the Entries tab no longer passes old keys off as current fields.** The
+  field settings panel had no submit button, so Enter in **Machine name** did
+  nothing and a reload showed the old name; a refused name snapped back with
+  only a flash; the canvas never showed machine names; and the Entries tab
+  printed each submission's raw keys, so entries received before a rename
+  kept showing the old key (such as `string`) and looked as if the rename had
+  not saved (#2139).
+
+  The panel now has a **Save** button, and Enter in any input saves too. As
+  you type, each change saves only the input it came from, so one refused
+  value no longer blocks edits to the others. A refused value stays in its
+  input, marked invalid, with the reason underneath; the panel says
+  **Saved.** after a save that changed something. Each field on the canvas
+  shows its machine name. Renaming a field on a form that has entries adds
+  "Entries already received keep the old key “old”." to the panel, and the
+  Machine name hint now says that entries keep the old key while exports and
+  API clients use the new one. The Entries tab lists each value under its
+  current field's label and machine name, and groups keys no current field
+  has under **From a renamed or removed field**.
+
+  Stored submissions are not rewritten. Still open: the CSV export drops an
+  old key's values (#2342), an autoresponder `[field:old]` token renders
+  empty after a rename (#2343), and there is no option to rewrite old keys
+  (#2344). Nothing to configure or migrate. See
+  [Edit and rename form fields](../forms.md#edit-and-rename-form-fields).
+
 <a id="public-form-page"></a>
 
 - **`/forms/<slug>` is the form's own page: an active form, inside the site's

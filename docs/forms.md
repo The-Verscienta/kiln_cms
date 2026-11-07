@@ -45,6 +45,95 @@ The `:form` content block references a form by slug:
   form with no content around it: its name, description and fields inside the
   site's layout. See [below](#share-a-form-at-its-own-address).
 
+## Edit and rename form fields
+
+Each field has a **label**, which visitors see, and a **machine name**, the
+key its value is stored under in every submission. The machine name is also
+what the CSV export's columns, the `form.submitted` webhook's `data`, the
+`GET /api/forms/<slug>` schema and the autoresponder's `[field:<name>]` tokens
+use. You can change it at any time, but a submission keeps the keys it was
+received with, so read step 5 before renaming a field on a form that already
+has entries.
+
+You need the **admin** role: the Forms pages are admin-only.
+
+1. Open **Forms** (`/editor/forms`) and click the form's name. The builder
+   opens on its **Fields** tab, with the palette (**Add a field**), a preview
+   of the form, and **Field settings** side by side on a wide screen. Each
+   field on the preview shows its machine name in small monospace text under
+   it.
+2. Click a field on the preview. **Field settings** shows its **Label**,
+   **Machine name**, **Type**, **Width**, **Required**, **Default value** and
+   **Help text**, plus **Placeholder** for every type but a checkbox or
+   dropdown, and **Options — one per line** for a dropdown.
+3. Edit a value. Most inputs save as you type or choose; **Machine name**
+   saves when you leave the input. To save straight away, press Enter in any
+   input or click **Save** at the bottom of the panel. After a save that
+   changed something, the panel says **Saved.**, and a new machine name
+   appears under the field on the preview.
+4. If a value is refused, it stays in the input as you typed it, marked as
+   invalid, with the reason underneath. Fix it and save again. A refused value
+   does not hold up the other inputs: a label you change meanwhile still
+   saves. Selecting another field or closing the panel discards the refused
+   value and shows what is stored.
+5. If you renamed a field on a form that has received entries, the panel also
+   says *Entries already received keep the old key “email”.* (with the old
+   name). Kiln does not rewrite stored submissions: entries received before
+   the rename are keyed by the old name, and entries from now on by the new
+   one.
+
+For example, renaming `string` to `full_name` on a contact form that has two
+entries: the preview shows `full_name` under the field, the panel says
+*Saved.* and *Entries already received keep the old key “string”.*, and the
+next submission is stored as `{"full_name": "…"}` while the two earlier ones
+stay `{"string": "…"}`.
+
+### Read entries after a rename
+
+The **Entries** tab lists each submission's values under the current field's
+label, with its machine name beside it, in the order the fields appear on the
+form. A key that no current field has (left by a field that was renamed or
+deleted) is not hidden: it appears in a dashed box headed **From a renamed or
+removed field**, under its raw key.
+
+So after the rename above, the two earlier entries show their value in that
+box under `string`, and new entries show it under the field's label, with
+`full_name` beside it.
+
+### What a rename does not carry over
+
+- **CSV export.** **Export CSV** has one column per current machine name, so
+  an old key's values are not in the file
+  ([#2342](https://github.com/The-Verscienta/kiln_cms/issues/2342)). Export
+  before renaming if you need them in one sheet.
+- **Autoresponder.** A `[field:<old name>]` token in the **Confirmations**
+  subject or body renders empty once no field has that name
+  ([#2343](https://github.com/The-Verscienta/kiln_cms/issues/2343)), and
+  nothing warns you. Update the template to the new name after renaming: while
+  the autoresponder is on, the tab refuses to save a template whose tokens
+  name no current field, so its next save fails until the token is fixed.
+- **Headless clients and webhook consumers.** `GET /api/forms/<slug>` and
+  new `form.submitted` payloads carry the new name straight away; a frontend
+  or integration that reads the old key needs changing at the same time.
+- **Reusing an old name.** If you rename `email` to `work_email` and later
+  give another field the machine name `email`, the old entries' `email`
+  values show under that new field on the Entries tab, because the key
+  matches it.
+
+Kiln has no option to rewrite the keys in existing entries
+([#2344](https://github.com/The-Verscienta/kiln_cms/issues/2344)).
+
+### Errors you can see
+
+| Message | Meaning |
+| --- | --- |
+| must be lowercase letters, digits and underscores, starting with a letter | The machine name has a capital, a space, a hyphen or another character outside `a-z`, `0-9` and `_`, or starts with a digit or underscore. |
+| has already been taken | Another field on this form already has that machine name. Machine names are unique per form. |
+| a select field must list at least one option | A dropdown's **Options** box is empty. Enter at least one option, one per line. |
+
+An error that belongs to no input in the panel, such as a permission error,
+shows as a message at the corner of the screen instead.
+
 ## Share a form at its own address
 
 Every active form has a page of its own at `/forms/<slug>` on the site's

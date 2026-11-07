@@ -6998,6 +6998,11 @@ msgstr "Envíos"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
+msgid "Entries already received keep the old key “%{old}”."
+msgstr "Las entradas ya recibidas conservan la clave anterior «%{old}»."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
 msgid "Entries appear here as soon as someone submits this form."
 msgstr "Las entradas aparecen aquí en cuanto alguien envía este formulario."
 
@@ -7880,6 +7885,11 @@ msgstr "Origen"
 #, elixir-autogen, elixir-format
 msgid "From a release, such as Kiln's Docker image (in /app):"
 msgstr "Desde una release, como la imagen Docker de Kiln (en /app):"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "From a renamed or removed field"
+msgstr "De un campo renombrado o eliminado"
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
@@ -9112,8 +9122,8 @@ msgstr "Claves"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
-msgid "Keys this field's value in submissions — renaming orphans old entries."
-msgstr "Identifica el valor de este campo en los envíos: renombrarlo deja huérfanas las entradas antiguas."
+msgid "Keys this field's value in submissions. Entries already received keep the old key; exports and API clients use the new one from now on."
+msgstr "Identifica el valor de este campo en los envíos. Las entradas ya recibidas conservan la clave anterior; las exportaciones y los clientes de la API usan la nueva a partir de ahora."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
