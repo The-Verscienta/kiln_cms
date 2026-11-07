@@ -572,6 +572,27 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           />
           <.field_cursors field="canonical_url" cursors={@cursors} />
         </div>
+        <div class="space-y-1">
+          <div
+            :for={{field, name, label} <- robots_fields()}
+            class={["relative", lock_ring(@locked_fields, field)]}
+            {takeover_attrs(@locked_fields, field)}
+          >
+            <.input
+              field={@form[name]}
+              type="checkbox"
+              label={label}
+              disabled={field_locked?(@locked_fields, field)}
+              {field_attrs(field)}
+            />
+            <.field_cursors field={field} cursors={@cursors} />
+          </div>
+          <p class="text-xs text-base-content/60">
+            {gettext(
+              "Tells search engines not to list this page, or not to follow its links. If the page is already published, the change goes live when you publish."
+            )}
+          </p>
+        </div>
         <.input field={@form[:locale]} label={gettext("Locale")} />
         <%!-- The visible input edits local wall-clock time; the hidden
                 input carries the UTC instant (UtcDatetimeInput hook).
@@ -894,6 +915,15 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
       </.inspector_section>
     </div>
     """
+  end
+
+  # The two robots flags (#2256): form field, attribute, label. Literal atoms
+  # so nothing is minted from a string.
+  defp robots_fields do
+    [
+      {"noindex", :noindex, gettext("Hide from search engines")},
+      {"nofollow", :nofollow, gettext("Do not follow links")}
+    ]
   end
 
   # The slug-scoped slice of the SEO report (#456 is the inline slice of #476) —

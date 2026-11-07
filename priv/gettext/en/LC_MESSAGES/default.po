@@ -6202,6 +6202,13 @@ msgstr ""
 msgid "Display name (optional)"
 msgstr ""
 
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Do not follow links"
+msgstr ""
+
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #, elixir-autogen, elixir-format
 msgid "Do not list computed fields. The daily refresh rewrites them, and each new value would be recorded as a notable edit."
@@ -8415,6 +8422,13 @@ msgstr ""
 msgid "Hide"
 msgstr ""
 
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Hide from search engines"
+msgstr ""
+
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "Hide password"
@@ -10506,6 +10520,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
 msgid "New devices on this site subscribe with this site's own key."
+msgstr ""
+
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "New entries are hidden from search engines (noindex)"
+msgstr ""
+
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "New entries tell search engines not to follow links (nofollow)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/experiments_live.ex
@@ -16834,6 +16858,11 @@ msgstr ""
 msgid "Team workload"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Tells search engines not to list this page, or not to follow its links. If the page is already published, the change goes live when you publish."
+msgstr ""
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Temporary role"
@@ -18346,6 +18375,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
 msgid "This page has no blocks yet. Add one below."
+msgstr ""
+
+#: lib/kiln_cms_web/components/seo_components.ex
+#, elixir-autogen, elixir-format
+msgid "This page is hidden from search engines but a menu links to it. Turn off “Hide from search engines” if that is not intended."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/offline_controller.ex

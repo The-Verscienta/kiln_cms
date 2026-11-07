@@ -81,6 +81,14 @@ carries the reasoning.
   back: the previous release ignores the indexes, and the migration's `down`
   drops them. See [Custom fields](../json-api.md#which-custom-filters-use-an-index).
 
+<a id="robots-flags-upgrade"></a>
+
+- **Content tables gain `noindex` and `nofollow`; `type_definitions` gains
+  `noindex_default` and `nofollow_default`. Overlays run `mix ash.codegen` for
+  their own content types.** All four are `boolean NOT NULL DEFAULT false`, so
+  the migrations are expand-only: the previous release ignores the columns and
+  gets `false` on insert. No re-fire is needed.
+
 ## Added
 
 <a id="move-to-trash-in-editor"></a>
@@ -429,6 +437,24 @@ carries the reasoning.
   unshared `url` can describe the wrong image; an image nested in a `columns`
   block exposes only `url` and `alt`. Removing the key is safe. No migration.
   See [Field-level localization](../field-level-localization.md#making-core-block-fields-per-locale-2270).
+
+<a id="robots-flags"></a>
+
+- **Editors can keep a document out of search engines.** Pages, posts and
+  entries gain `noindex` and `nofollow` flags, edited under the canonical URL
+  in the SEO panel (and subject to field grants). They render as
+  `<meta name="robots">` and an `x-robots-tag` header, both built by one
+  helper so they cannot disagree; the password-lock page keeps its
+  unconditional `noindex, nofollow`. Noindex documents are left out of
+  `sitemap.xml`, the news sitemap, `llms.txt` and every feed. Delivery is
+  unaffected: the JSON:API, GraphQL, change feed and fired artifacts still
+  carry them, and the `:json` artifact gains an optional `robots` object only
+  when a flag is set (no `format_version` bump). Versions, working copies,
+  duplicates, translations and export/import carry the flags; restoring a
+  version written before the flags existed leaves the current values alone. A type can set
+  `noindex_default` / `nofollow_default` (compiled option or Content-type
+  setting) for new documents only. An advisory warns when a published page
+  linked from an enabled menu item is set to noindex.
 
 ## Changed
 

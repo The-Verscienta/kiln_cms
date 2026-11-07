@@ -72,6 +72,10 @@ Every summary line below that was shortened links to its own entry there.
   `entries`; a failed build leaves an INVALID index to drop. Overlays run `mix ash.codegen`.**
   ([#2321](https://github.com/The-Verscienta/kiln_cms/pull/2321) · [long form](docs/changelog/unreleased.md#custom-fields-gin-upgrade))
 
+- **Overlays: run `mix ash.codegen` again for the per-document `noindex` / `nofollow` columns
+  on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
+  ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
+
 ### Added
 
 - **Admins can move one document to the trash from the content list's row menu or the editor's Settings tab.**
@@ -119,6 +123,11 @@ Every summary line below that was shortened links to its own entry there.
 - **`config :kiln_cms, :i18n, block_fields:` makes core image/video/audio block fields shared or
   fallback across locales; the editor locks them on translations.**
   ([long form](docs/changelog/unreleased.md#block-field-localization-config))
+
+- **Per-document `noindex` / `nofollow` (with per-type defaults for new documents): sent as
+  `<meta name="robots">` and `x-robots-tag`, carried in versions, copies and the API, left out
+  of sitemap, news sitemap, llms.txt and feeds, with an advisory for a menu-linked noindex page.**
+  ([#2256](https://github.com/The-Verscienta/kiln_cms/issues/2256) · [long form](docs/changelog/unreleased.md#robots-flags))
 
 ### Changed
 

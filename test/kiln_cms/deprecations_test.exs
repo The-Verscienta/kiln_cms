@@ -130,7 +130,7 @@ defmodule KilnCMS.DeprecationsTest do
       source = File.read!("lib/kiln_cms/cms/content.ex")
 
       read =
-        ~r/Keyword\.(?:get|fetch!|has_key\?)\(opts, :(\w+\??)|opts \|> Keyword\.get\(:(\w+\??)\)/
+        ~r/Keyword\.(?:get|fetch!|has_key\?)\(opts, :(\w+\??)|opts \|> Keyword\.get\(:(\w+\??)[,)]/
         |> Regex.scan(source, capture: :all_but_first)
         |> List.flatten()
         |> Enum.reject(&(&1 == ""))
