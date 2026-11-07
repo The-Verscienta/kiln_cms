@@ -76,6 +76,14 @@ defmodule Kiln.Plugins do
   @spec public_routes() :: [Kiln.Plugin.admin_route()]
   def public_routes, do: Enum.flat_map(all(), & &1.public_routes())
 
+  @doc """
+  Every plugin-declared plug route (`c:Kiln.Plugin.plug_routes/0`, #2272). A
+  plugin compiled against a `kiln_plugin` older than 1.4 has no such callback
+  and contributes none.
+  """
+  @spec plug_routes() :: [Kiln.Plugin.plug_route()]
+  def plug_routes, do: Enum.flat_map(all(), &Kiln.Plugins.PlugRoute.of/1)
+
   @doc "Every plugin supervision child, appended to the app tree at boot."
   @spec children() :: [Supervisor.child_spec() | {module(), term()} | module()]
   def children, do: Enum.flat_map(all(), & &1.children())
@@ -109,6 +117,7 @@ defmodule Kiln.Plugins do
           admin_routes: non_neg_integer(),
           editor_routes: non_neg_integer(),
           public_routes: non_neg_integer(),
+          plug_routes: non_neg_integer(),
           oban_queues: keyword(pos_integer()),
           children: non_neg_integer()
         }
@@ -140,6 +149,7 @@ defmodule Kiln.Plugins do
       admin_routes: length(plugin.admin_routes()),
       editor_routes: length(plugin.editor_routes()),
       public_routes: length(plugin.public_routes()),
+      plug_routes: length(Kiln.Plugins.PlugRoute.of(plugin)),
       oban_queues: plugin.oban_queues(),
       children: length(plugin.children())
     }

@@ -401,4 +401,35 @@ defmodule KilnCMSWeb.RevisionControllerTest do
       assert CMS.get_page!(page.id, actor: admin).title == "Three"
     end
   end
+
+  describe "custom fields in a revision" do
+    test "changes[\"custom_fields\"] is the whole new map, not the edited key",
+         %{admin: admin} do
+      for name <- ~w(price sku) do
+        CMS.create_field_definition!(
+          %{content_type: :page, name: name, label: String.capitalize(name)},
+          actor: admin
+        )
+      end
+
+      page =
+        CMS.create_page!(
+          %{title: "CF", slug: slug(), custom_fields: %{"price" => "9", "sku" => "a"}},
+          actor: admin
+        )
+
+      CMS.update_page!(page, %{custom_fields: %{"price" => "12", "sku" => "a"}}, actor: admin)
+
+      [_create, update] = versions(page, admin)
+      key = mint(user(:editor), :read)
+
+      assert {200, %{"data" => data}, _} =
+               req(:get, "#{rev_path(:page, page.id)}/#{update.id}", key: key)
+
+      # Only `price` was edited; the version still carries the untouched `sku`.
+      assert data["changes"]["custom_fields"] == %{"price" => "12", "sku" => "a"}
+      assert data["changed_fields"] == ["custom_fields"]
+      assert data["snapshot"]["custom_fields"] == %{"price" => "12", "sku" => "a"}
+    end
+  end
 end
