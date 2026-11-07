@@ -10,7 +10,8 @@ defmodule KilnCMSWeb.WebhookLive do
   another site reveals nothing. A revealed secret gets a Copy button; Hide
   masks it again. Revealed state lasts for this LiveView session only. A newly
   added endpoint's secret starts revealed, so it can be copied into the
-  receiver straight away.
+  receiver straight away. Rotate secret (#2347) replaces it and reveals the
+  new one the same way.
 
   A new endpoint starts with `WebhookEndpoint.default_events/1` ticked, which
   leaves out the events that carry unpublished content; those are marked in
@@ -140,6 +141,32 @@ defmodule KilnCMSWeb.WebhookLive do
         update(socket, :revealed, &MapSet.put(&1, endpoint.id))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't reveal that signing secret."))
+      end
+
+    {:noreply, socket}
+  end
+
+  # Replace the signing secret (#2347). The old one stops working at once. The
+  # id comes from the client, so the endpoint is re-read inside this site
+  # first: the tenant is what stops another site's id from being rotated.
+  def handle_event("rotate_secret", %{"id" => id}, socket) when is_binary(id) do
+    actor = socket.assigns.actor
+    org = socket.assigns.current_org
+
+    socket =
+      with {:ok, endpoint} <- CMS.get_webhook_endpoint(id, actor: actor, tenant: org),
+           {:ok, rotated} <- CMS.rotate_webhook_secret(endpoint, actor: actor, tenant: org) do
+        socket
+        |> load_endpoints()
+        |> update(:revealed, &MapSet.put(&1, rotated.id))
+        |> put_flash(
+          :info,
+          gettext(
+            "Signing secret replaced. Copy the new secret into your receiver; the old one no longer works."
+          )
+        )
+      else
+        _ -> put_flash(socket, :error, gettext("Couldn't rotate that signing secret."))
       end
 
     {:noreply, socket}
@@ -490,6 +517,18 @@ defmodule KilnCMSWeb.WebhookLive do
                   >
                     {gettext("Edit")}
                   </button>
+                  <button
+                    :if={CMS.can_rotate_webhook_secret?(@actor, endpoint, tenant: @current_org)}
+                    type="button"
+                    id={"rotate-secret-#{endpoint.id}"}
+                    phx-click="rotate_secret"
+                    phx-value-id={endpoint.id}
+                    phx-disable-with={gettext("Rotating…")}
+                    data-confirm={rotate_confirmation()}
+                    class="btn btn-sm btn-default"
+                  >
+                    {gettext("Rotate secret")}
+                  </button>
                   <%!-- Labelled, not icon-only (#2136): beside three text
                        buttons an unlabelled trash icon went unseen. This and
                        the edit form's Delete share a selector; the row and
@@ -651,7 +690,7 @@ defmodule KilnCMSWeb.WebhookLive do
         <% is_nil(@secret) -> %>
           <span class="text-error">
             {gettext(
-              "unreadable — it was encrypted under a SECRET_KEY_BASE this server no longer has. Delete and re-create the endpoint."
+              "unreadable — it was encrypted under a SECRET_KEY_BASE this server no longer has. Rotate the secret, or delete and re-create the endpoint."
             )}
           </span>
         <% @revealed -> %>
@@ -800,6 +839,12 @@ defmodule KilnCMSWeb.WebhookLive do
       </div>
     </div>
     """
+  end
+
+  defp rotate_confirmation do
+    gettext(
+      "Rotate this signing secret? Deliveries start using the new secret now, and the old one stops working, so update the receiver with the new secret."
+    )
   end
 
   # Deleting nilifies the deliveries' endpoint (history stays, under the usual
