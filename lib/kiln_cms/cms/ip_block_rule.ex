@@ -70,12 +70,14 @@ defmodule KilnCMS.CMS.IpBlockRule do
     # viewers included — and there is no anonymous clause.
     #
     # The request path reads the list as the `:ip_block` system actor, the one
-    # action named below (`:list`); the grant is not a bypass and admits neither
-    # `create` nor `destroy`.
+    # action it is granted (`:list`). An operator at a shell on the host
+    # (`KilnCMS.Release.ip_blocks/1`, the way back in after a lock-out) is
+    # `:operator`: `list` and `destroy`, never `create`. Neither grant is a bypass.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
-      forbid_unless action(:list)
-      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :ip_block}
+      forbid_unless action([:list, :destroy])
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :operator}
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :ip_block, action: :list}
     end
   end
 
