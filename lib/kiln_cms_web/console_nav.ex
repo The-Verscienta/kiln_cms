@@ -694,6 +694,16 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("Refuse requests from an IP address or range."),
             keywords: ["ip", "block", "ban", "cidr", "firewall", "deny", "abuse"]
           },
+          # Beside the security contact: both are how the site answers for its
+          # security (#2240).
+          %{
+            key: :password_policy,
+            label: gettext("Password policy"),
+            path: ~p"/editor/password-policy",
+            icon: "hero-key",
+            description: gettext("What happens when a new password is in a known breach."),
+            keywords: ["password", "breach", "pwned", "hibp", "leaked", "compromised", "security"]
+          },
           %{
             key: :trash,
             label: gettext("Trash"),

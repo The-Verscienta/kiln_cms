@@ -78,6 +78,33 @@ A rise right after you add a rule is expected. A rise on `http` with no rule
 change, or a rule that suddenly matches everyone (a proxy not declared in
 `TRUSTED_PROXIES`), is worth a look.
 
+## Breached-password checks
+
+Every lookup the breached-password check makes (#2240) emits one event,
+`[:kiln_cms, :password, :breach_check]`, from
+`KilnCMS.Accounts.Changes.CheckBreachedPassword`. Nothing is emitted when the
+policy resolves to off (including `BREACHED_PASSWORD_CHECK=false`), and nothing
+identifying the password, its hash, the account or the org is ever in the event.
+
+| Event | Fired by | Metadata |
+|-------|----------|----------|
+| `[:kiln_cms, :password, :breach_check]` | a register, change-password, reset or first-run-setup action, once per lookup | `result`, `action`, `policy`, `enforcement`, `reason` |
+
+- **Measurements:** `:duration` (native units) and `:count` (always `1`).
+- `:result` -- `:clean`, `:breached`, or `:error` (could not tell).
+- `:action` -- `:register`, `:change`, `:reset` or `:bootstrap`.
+- `:policy` -- the policy applied to this account: `:warn` or `:block`.
+- `:enforcement` -- `:blocked`, `:warned`, or `:allowed` (clean, or an error: the check fails open).
+- `:reason` -- on `:error` only: `:timeout`, `:http_status`, `:transport`,
+  `:blocked` or `:malformed`; otherwise `nil`.
+
+A rising share of `result: :error` means the node cannot reach
+`api.pwnedpasswords.com` (egress firewall, outage) and passwords are being
+accepted unchecked. The counter `kiln_cms.password.breach_check.count`
+(tags `result`, `action`, `enforcement`) is defined in
+[`KilnCMSWeb.Telemetry.metrics/0`](../lib/kiln_cms_web/telemetry.ex); alert on
+the `result="error"` share.
+
 ## Where the metrics go
 
 The matching `Telemetry.Metrics` definitions live in

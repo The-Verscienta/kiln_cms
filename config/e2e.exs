@@ -135,3 +135,7 @@ config :kiln_cms, :collab_prototype, false
 # localized as before. The block cases of the same spec mark `image` fields
 # shared / fallback through `/dev/e2e-block-fields` (KilnCMSWeb.Plugs.E2EBlockFields,
 # #2270) and clear them after.
+
+# The breached-password check (#2240) calls a third party on every password
+# set; the browser suite must never depend on it.
+config :kiln_cms, KilnCMS.Accounts.BreachedPassword, enabled: false
