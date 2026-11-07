@@ -35,10 +35,18 @@ defmodule KilnCMS.CMS.SavedView do
 
   # The query parameters the content list understands — the only keys a view
   # can store. `KilnCMSWeb.EditorLive.Filters` reads the same list.
-  @param_keys ~w(status type q author category tag locale from to health scheduled reviewed consent_missing sort)
+  @param_keys ~w(status type q author category tag locale from to health scheduled reviewed consent_missing cf sort)
 
   # Each value is a short token, an id or a search string; none needs more.
   @max_param_length 200
+
+  # `cf` (custom-field conditions) holds up to four `field:op:value`
+  # segments, URL-encoded: the one value that outgrows a token.
+  @max_cf_length 600
+
+  @doc "The longest `cf` (custom-field conditions) string a view stores."
+  @spec max_cf_length() :: pos_integer()
+  def max_cf_length, do: @max_cf_length
 
   @doc "The query-parameter keys a saved view may store."
   @spec param_keys() :: [String.t()]
@@ -56,12 +64,15 @@ defmodule KilnCMS.CMS.SavedView do
         is_binary(value),
         value = String.trim(value),
         value != "",
-        String.length(value) <= @max_param_length,
+        String.length(value) <= max_length(key),
         into: %{},
         do: {key, value}
   end
 
   def clean_params(_params), do: %{}
+
+  defp max_length("cf"), do: @max_cf_length
+  defp max_length(_key), do: @max_param_length
 
   postgres do
     table "saved_views"

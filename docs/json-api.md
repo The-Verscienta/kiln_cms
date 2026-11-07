@@ -370,7 +370,8 @@ In the response a reference's snapshot carries its link values as an added
 `metadata`. A connection with no link value has no `"link"` key.
 
 **Sorting** — `custom_sort=<name>` (ascending) or `custom_sort=-<name>`,
-comma-separated for multi-key. Records lacking the field always sort last.
+comma-separated for multi-key. Records lacking the field always sort last, as do those storing a JSON
+`null`, array or object under it (read as no value).
 `custom_sort` composes with `sort=`: explicit `sort` keys take precedence, but
 `custom_sort` outranks an action's *default* order (e.g. `/posts/published`'s
 `-published_at`). `media`/`reference` fields are not sortable (a follow-up may

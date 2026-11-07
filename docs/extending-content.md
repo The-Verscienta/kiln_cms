@@ -439,6 +439,113 @@ per type, and merged into the stored map under a row lock. Which definitions
 may be offered is decided by `KilnCMS.CMS.ListFields.readable_fields/4`; cell
 text comes from `KilnCMSWeb.EditorLive.FieldCells`.
 
+### Filter and sort the content list by custom fields
+
+With one content type listed, editors and admins can narrow the content list
+(`/editor`) by that type's custom fields ("price at least 10", "colour is red")
+and order it by one of them. Both live in the URL, so a link or a saved view
+carries them, and "Load more" keeps them.
+
+1. Open **Content** (`/editor`) and choose one content type in "Filter by
+   type". With "All types" on a site with several types, the filter panel says
+   *Choose a content type to filter by its fields.* instead, because field
+   names can repeat across types. A site with one authorable type needs no
+   choice.
+2. Click **More filters**. Under **Field conditions** pick a **Field**, a
+   **Condition** and a **Value**, then click **Add condition**. The list
+   narrows at once, a chip such as `Price ≥ 10` joins the others above the
+   list, and the count updates.
+3. Add up to four conditions. Adding the same field and condition again
+   replaces the earlier one; two conditions on one field with different
+   operators (a range: "At least" and "At most") both count.
+4. Click a chip to remove its condition.
+5. To order by a field, open **Sort by** and pick an entry from the **Field**
+   group, such as *Field: Price (↑)* or *Field: Price (↓)*. Rows with no value
+   in that field come last in both directions.
+6. To keep the result, use **Save view**; opening the view restores the
+   conditions and the sort.
+
+Changing the content type clears the conditions and the field sort: a field
+of the same name on another type is a different field.
+
+What each field type offers (the **Condition** menu):
+
+| Field | Conditions |
+| --- | --- |
+| string, url | Is, Contains, Empty or not |
+| text | Contains, Empty or not |
+| integer, float | Is, Greater than, At least, Less than, At most, Empty or not |
+| boolean | Is (Yes / No), Empty or not |
+| date | Is, From, Until, Empty or not |
+| datetime | From, Until, Empty or not (whole days, both ends included) |
+| select | Is (one of its options), Empty or not |
+| reference, user, media | Is (the target's id, a UUID), Empty or not |
+
+"Contains" is a case-insensitive substring match; `%` and `_` in the value
+mean themselves. "Empty or not" asks *Empty* or *Has a value*. A value is at most
+100 characters; longer is refused.
+
+Only single-valued string, text, integer, float, boolean, date, datetime, url
+and select fields can be sorted by; the **Field** group lists just those. Fields
+the Columns picker does not offer (groups, geolocation, date ranges,
+recurrence, computed and multi-valued fields) cannot be filtered either.
+Private fields are offered, because editors already see them in the content
+editor; the list is editor-only, and a person without read access to a field
+cannot filter or sort by it (a link naming it simply ignores that condition).
+
+**The count.** With field conditions, the header reads *1000+ items* once more
+than 1000 records match, rather than an exact figure: a field condition scans
+the site's records of that type, and the count stops early. Without conditions
+the count is exact, and a field sort alone does not change it.
+
+**Saved views.** A view stores its conditions. If a field in a view has since
+deleted, made private to you, or retyped so a stored value no longer fits (or
+its sort field is gone), the view shows a warning icon (*This view names a field that
+no longer applies.*) and opening it says *The view "…" named a field that no
+longer applies, so that condition was left out.* The remaining conditions still
+apply.
+
+**What can go wrong.**
+
+- *That field filter is not valid here.* The field, condition or value is not
+  one the type offers (for example text typed into a number, or a select value
+  that is not an option).
+- *A list holds at most 4 field filters, and they must fit a saved view.* Remove
+  a chip first, or shorten a long value.
+- *The field filter or sort could no longer be applied, so it was cleared.* The
+  field was deleted or changed while the list was open; the list reloads
+  without field conditions.
+
+For code and links: two URL parameters carry the state.
+
+| Parameter | Value |
+| --- | --- |
+| `cf` | up to four conditions, `field:op:value` joined by `;`, field and value URL-encoded, in order by field then op |
+| `sort` | `field:<name>` (ascending) or `-field:<name>` (descending) |
+
+```
+type=product&cf=color:eq:red;price:gte:10&sort=-field:price
+```
+
+(Shown decoded; in the address bar the browser percent-encodes `:` and `;`.
+Inside a field name or value a `:` or `;` is itself percent-encoded, so the
+separators are unambiguous.) The ops are `eq`, `contains`,
+`gt`, `gte`, `lt`, `lte` and `null` (value `true` for empty, `false` for has a
+value); `datetime` takes a date (`2026-11-01`). `cf` is stored in saved views
+too, with a 600-character limit instead of 200. **This format is a URL and
+saved-view contract**: stored views hold it, so changing it later has to keep
+reading the old form. Anything that is not valid for the single
+type in play (unknown or private field, an op the type does not offer, a value
+that does not cast, more than four conditions) reads as absent, never an error.
+
+Parsing and encoding are in `KilnCMSWeb.EditorLive.Filters`
+(`conditions/1`, `field_sort/1`, `add_condition/5`, `dropped_conditions/2`).
+`KilnCMS.CMS.ListFieldQuery.arguments/3` is the only place that turns the list's
+conditions into the read arguments `custom_filter` / `custom_sort` of
+`CustomFieldQuery` (see [JSON:API](json-api.md)); `ContentTypes.list!/2` and
+`count!/2` pass them through the `arguments:` option, and `count!/2` accepts a
+`limit` in `query:` to bound a count.
+
 ### Geolocation fields
 
 A `:geolocation` field stores a structured coordinate — `lat` and `lng`, plus

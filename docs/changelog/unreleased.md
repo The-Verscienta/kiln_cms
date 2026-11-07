@@ -158,6 +158,46 @@ carries the reasoning.
     variable, and rolling the pin back leaves an unread column. Filtering,
     sorting and exporting by field are not part of this change.
 
+<a id="content-list-field-filter-sort"></a>
+
+- **The content list can be filtered by custom fields and sorted by one.** Pick
+  one content type, open **More filters**, and add up to four conditions under
+  **Field conditions** (a field, a condition, a value); each becomes a chip you
+  can remove. **Sort by** gains a **Field** group (*Field: Price (↑)* / *(↓)*).
+  Both are in the URL and in saved views, and "Load more" keeps them. This is
+  the second half of #2293; the first was the Columns picker.
+  - **What it offers.** Per field type: string and url (is, contains, empty or
+    not), text (contains, empty or not), integer and float (is, greater than,
+    at least, less than, at most, empty or not), boolean, date and datetime
+    (from, until, by whole days), select, and reference, user and media by id.
+    Only single-valued string, text, integer, float, boolean, date, datetime,
+    url and select fields can be sorted by; records with no value sort last in
+    either direction. Private fields are offered (the list is editor-only); a
+    person who cannot read a field cannot filter or sort by it. With "All
+    types" the panel says to choose a type, since names repeat across types,
+    and changing the type clears the conditions and the field sort.
+  - **The count.** With field conditions the count stops past 1000 and the
+    header reads "1000+ items", because a field condition scans the site's
+    records of that type. Without conditions it is exact.
+  - **Saved views.** A view whose field was deleted, made private or retyped
+    shows a warning icon, and opening it says the condition was left out; the
+    other conditions still apply. If a field changes while the list is open and
+    the read can no longer run, the field query is cleared with a notice, not
+    left as an error.
+  - **Developers: a URL contract.** State travels in two parameters:
+    `cf=field:op:value;...` (up to four, field and value URL-encoded, canonical
+    order by field then op, at most 600 characters; a saved view allows 600 for
+    `cf` and keeps 200 for every other value) and `sort=field:<name>` /
+    `-field:<name>`. Saved views store this, so treat the format as a contract.
+    Anything invalid for the single type in play reads as absent.
+    `KilnCMS.CMS.ListFieldQuery.arguments/3` is the only place that names the
+    `custom_filter` / `custom_sort` read arguments; `ContentTypes.list!/2` and
+    `count!/2` take an `arguments:` option, and `count!/2` honours a `limit` in
+    `query:`. Guide: [Filter and sort the content list by custom fields](../extending-content.md#filter-and-sort-the-content-list-by-custom-fields).
+  - **Upgrade.** No migration, no config. `saved_views.params` is an existing
+    map, now allowed a `cf` key; rolling the pin back leaves such a view with an
+    unknown key an older list ignores.
+
 <a id="custom-field-native-filter-sort"></a>
 
 - **A custom field can be named like a column in `filter[...]` and `sort=`, and
@@ -611,6 +651,22 @@ carries the reasoning.
     topic, `subscribe/1` or the event shape. Rolling back the pin is safe.
 
 ## Fixed
+
+<a id="custom-sort-json-null-last"></a>
+
+- **`custom_sort` treats a stored JSON `null`, array or object as no value, and
+  page 2 of a keyset-paged `custom_sort` no longer fails on one.** On the
+  JSON:API and GraphQL reads, a record whose custom field was stored as a JSON
+  `null` used to sort first (Postgres orders a jsonb `null` below everything),
+  and one holding an array or object sorted by jsonb order; if such a value
+  was the last row of a page, the keyset read for the next page failed because
+  the cursor could not be bound back into the filter. Now all three sort
+  together with records that lack the key, last in ascending and descending
+  order alike, and the next page reads. Callers sorting on a sortable scalar
+  field see a change only if some record holds one of those values (for
+  example after a field was retyped); everything else is unchanged. Not a
+  breaking change, since the documented rule is "records without the field sort
+  last".
 
 <a id="form-field-rename"></a>
 
