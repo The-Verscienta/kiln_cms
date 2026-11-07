@@ -1023,16 +1023,19 @@ public struct PageDocument: Codable, Hashable, Sendable {
     /// Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited.
     public let inheritedFields: [String: JSONValue]?
     public let locale: String?
+    /// The document's robots flags. Absent when neither is set; absent means both false.
+    public let robots: Robots?
     public let slug: String?
     public let title: String?
     public let type: String
 
-    public init(blocks: [Block], customFields: CustomFields, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, slug: String? = nil, title: String? = nil, type: String) {
+    public init(blocks: [Block], customFields: CustomFields, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, robots: Robots? = nil, slug: String? = nil, title: String? = nil, type: String) {
         self.blocks = blocks
         self.customFields = customFields
         self.id = id
         self.inheritedFields = inheritedFields
         self.locale = locale
+        self.robots = robots
         self.slug = slug
         self.title = title
         self.type = type
@@ -1044,6 +1047,7 @@ public struct PageDocument: Codable, Hashable, Sendable {
         case id
         case inheritedFields = "inherited_fields"
         case locale
+        case robots
         case slug
         case title
         case type
@@ -1051,6 +1055,16 @@ public struct PageDocument: Codable, Hashable, Sendable {
 
     public struct CustomFields: Codable, Hashable, Sendable {
         public init() {}
+    }
+
+    public struct Robots: Codable, Hashable, Sendable {
+        public let nofollow: Bool
+        public let noindex: Bool
+
+        public init(nofollow: Bool, noindex: Bool) {
+            self.nofollow = nofollow
+            self.noindex = noindex
+        }
     }
 }
 
@@ -1065,17 +1079,20 @@ public struct PostDocument: Codable, Hashable, Sendable {
     /// Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited.
     public let inheritedFields: [String: JSONValue]?
     public let locale: String?
+    /// The document's robots flags. Absent when neither is set; absent means both false.
+    public let robots: Robots?
     public let slug: String?
     public let title: String?
     public let type: String
 
-    public init(blocks: [Block], customFields: CustomFields, customFieldsPlain: CustomFieldsPlain? = nil, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, slug: String? = nil, title: String? = nil, type: String) {
+    public init(blocks: [Block], customFields: CustomFields, customFieldsPlain: CustomFieldsPlain? = nil, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, robots: Robots? = nil, slug: String? = nil, title: String? = nil, type: String) {
         self.blocks = blocks
         self.customFields = customFields
         self.customFieldsPlain = customFieldsPlain
         self.id = id
         self.inheritedFields = inheritedFields
         self.locale = locale
+        self.robots = robots
         self.slug = slug
         self.title = title
         self.type = type
@@ -1088,26 +1105,33 @@ public struct PostDocument: Codable, Hashable, Sendable {
         case id
         case inheritedFields = "inherited_fields"
         case locale
+        case robots
         case slug
         case title
         case type
     }
 
     public struct CustomFields: Codable, Hashable, Sendable {
+        public let accent: String?
         public let codeSample: String?
+        public let contactEmail: String?
         /// Rows of this group, in the order the editor arranged them.
         public let dosages: [DosagesItem]?
+        public let extra: JSONValue?
         public let featured: Bool?
         /// Snapshots of the picked media items, in gallery order.
         public let gallery: [MediaSnapshot]?
+        public let handle: String?
         /// Snapshot of the picked media item.
         public let hero: MediaSnapshot?
         public let homepage: String?
         public let launchDate: String?
+        public let opensAt: String?
         /// Write-time snapshot of a referenced record.
         ///
         /// Links to: `post`.
         public let parent: [String: JSONValue]?
+        public let phone: String?
         /// The chosen terms, in the order the editor arranged them.
         public let properties: [String]?
         public let publishedAt: String?
@@ -1125,15 +1149,21 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public let tier: String?
         public let `where`: Where?
 
-        public init(codeSample: String? = nil, dosages: [DosagesItem]? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, parent: [String: JSONValue]? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, seo: Seo? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
+        public init(accent: String? = nil, codeSample: String? = nil, contactEmail: String? = nil, dosages: [DosagesItem]? = nil, extra: JSONValue? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, handle: String? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, opensAt: String? = nil, parent: [String: JSONValue]? = nil, phone: String? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, seo: Seo? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
+            self.accent = accent
             self.codeSample = codeSample
+            self.contactEmail = contactEmail
             self.dosages = dosages
+            self.extra = extra
             self.featured = featured
             self.gallery = gallery
+            self.handle = handle
             self.hero = hero
             self.homepage = homepage
             self.launchDate = launchDate
+            self.opensAt = opensAt
             self.parent = parent
+            self.phone = phone
             self.properties = properties
             self.publishedAt = publishedAt
             self.rating = rating
@@ -1148,14 +1178,20 @@ public struct PostDocument: Codable, Hashable, Sendable {
         }
 
         enum CodingKeys: String, CodingKey {
+            case accent
             case codeSample = "code_sample"
+            case contactEmail = "contact_email"
             case dosages
+            case extra
             case featured
             case gallery
+            case handle
             case hero
             case homepage
             case launchDate = "launch_date"
+            case opensAt = "opens_at"
             case parent
+            case phone
             case properties
             case publishedAt = "published_at"
             case rating
@@ -1230,6 +1266,16 @@ public struct PostDocument: Codable, Hashable, Sendable {
 
         public init(summary: String? = nil) {
             self.summary = summary
+        }
+    }
+
+    public struct Robots: Codable, Hashable, Sendable {
+        public let nofollow: Bool
+        public let noindex: Bool
+
+        public init(nofollow: Bool, noindex: Bool) {
+            self.nofollow = nofollow
+            self.noindex = noindex
         }
     }
 }
@@ -1516,10 +1562,15 @@ public struct KilnMediaValue: Codable, Hashable, Sendable {
 
 /// The result of `PostCustomFields.fragment` — the site's custom fields. On `Post`.
 public struct PostCustomFields: Codable, Hashable, Sendable {
+    public let accent: String?
     public let codeSample: String?
+    public let contactEmail: String?
     public let featured: Bool?
+    public let handle: String?
     public let homepage: String?
     public let launchDate: String?
+    public let opensAt: String?
+    public let phone: String?
     public let customPublishedAt: String?
     public let rating: Double?
     public let readTime: Int?
@@ -1528,11 +1579,16 @@ public struct PostCustomFields: Codable, Hashable, Sendable {
     public let tier: String?
     public let fields: [KilnCustomFieldValue]
 
-    public init(codeSample: String? = nil, featured: Bool? = nil, homepage: String? = nil, launchDate: String? = nil, customPublishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, subtitle: String? = nil, summary: String? = nil, tier: String? = nil, fields: [KilnCustomFieldValue]) {
+    public init(accent: String? = nil, codeSample: String? = nil, contactEmail: String? = nil, featured: Bool? = nil, handle: String? = nil, homepage: String? = nil, launchDate: String? = nil, opensAt: String? = nil, phone: String? = nil, customPublishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, subtitle: String? = nil, summary: String? = nil, tier: String? = nil, fields: [KilnCustomFieldValue]) {
+        self.accent = accent
         self.codeSample = codeSample
+        self.contactEmail = contactEmail
         self.featured = featured
+        self.handle = handle
         self.homepage = homepage
         self.launchDate = launchDate
+        self.opensAt = opensAt
+        self.phone = phone
         self.customPublishedAt = customPublishedAt
         self.rating = rating
         self.readTime = readTime
@@ -1545,17 +1601,22 @@ public struct PostCustomFields: Codable, Hashable, Sendable {
     /// The GraphQL fragment to spread into a query; it decodes into this type.
     public static let fragment = """
         fragment PostCustomFields on Post {
+          accent: customString(name: "accent")
           codeSample: customString(name: "code_sample")
+          contactEmail: customString(name: "contact_email")
           featured: customBoolean(name: "featured")
+          handle: customString(name: "handle")
           homepage: customString(name: "homepage")
           launchDate: customDate(name: "launch_date")
+          opensAt: customString(name: "opens_at")
+          phone: customString(name: "phone")
           customPublishedAt: customDateTime(name: "published_at")
           rating: customFloat(name: "rating")
           readTime: customInt(name: "read_time")
           subtitle: customString(name: "subtitle")
           summary: customString(name: "summary")
           tier: customString(name: "tier")
-          fields(names: ["dosages", "gallery", "parent", "properties", "related", "seo", "synonyms", "where"]) {
+          fields(names: ["dosages", "extra", "gallery", "parent", "properties", "related", "seo", "synonyms", "where"]) {
             __typename
             name
             ... on StringValue { asString: value }

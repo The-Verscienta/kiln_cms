@@ -63,7 +63,15 @@ defmodule KilnCMS.CMS.FieldTypes do
     # content type carrying a `datetime_range` *is* the event, which is what
     # keeps Event a thing an operator composes rather than one Kiln hardcodes.
     KilnCMS.CMS.FieldTypes.DatetimeRange,
-    KilnCMS.CMS.FieldTypes.Recurrence
+    KilnCMS.CMS.FieldTypes.Recurrence,
+    # Scalar formats (#2278): a string (or JSON structure) the type validates
+    # and normalises, so an editor cannot save a malformed address or colour.
+    KilnCMS.CMS.FieldTypes.Email,
+    KilnCMS.CMS.FieldTypes.Telephone,
+    KilnCMS.CMS.FieldTypes.Color,
+    KilnCMS.CMS.FieldTypes.Slug,
+    KilnCMS.CMS.FieldTypes.TimeField,
+    KilnCMS.CMS.FieldTypes.Json
   ]
 
   # name → module, baked at compile time (plugins are compile-time code, D4).

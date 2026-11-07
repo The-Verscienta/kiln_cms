@@ -1112,20 +1112,26 @@ public struct PostDocument: Codable, Hashable, Sendable {
     }
 
     public struct CustomFields: Codable, Hashable, Sendable {
+        public let accent: String?
         public let codeSample: String?
+        public let contactEmail: String?
         /// Rows of this group, in the order the editor arranged them.
         public let dosages: [DosagesItem]?
+        public let extra: JSONValue?
         public let featured: Bool?
         /// Snapshots of the picked media items, in gallery order.
         public let gallery: [MediaSnapshot]?
+        public let handle: String?
         /// Snapshot of the picked media item.
         public let hero: MediaSnapshot?
         public let homepage: String?
         public let launchDate: String?
+        public let opensAt: String?
         /// Write-time snapshot of a referenced record.
         ///
         /// Links to: `post`.
         public let parent: [String: JSONValue]?
+        public let phone: String?
         /// The chosen terms, in the order the editor arranged them.
         public let properties: [String]?
         public let publishedAt: String?
@@ -1143,15 +1149,21 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public let tier: String?
         public let `where`: Where?
 
-        public init(codeSample: String? = nil, dosages: [DosagesItem]? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, parent: [String: JSONValue]? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, seo: Seo? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
+        public init(accent: String? = nil, codeSample: String? = nil, contactEmail: String? = nil, dosages: [DosagesItem]? = nil, extra: JSONValue? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, handle: String? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, opensAt: String? = nil, parent: [String: JSONValue]? = nil, phone: String? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, seo: Seo? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
+            self.accent = accent
             self.codeSample = codeSample
+            self.contactEmail = contactEmail
             self.dosages = dosages
+            self.extra = extra
             self.featured = featured
             self.gallery = gallery
+            self.handle = handle
             self.hero = hero
             self.homepage = homepage
             self.launchDate = launchDate
+            self.opensAt = opensAt
             self.parent = parent
+            self.phone = phone
             self.properties = properties
             self.publishedAt = publishedAt
             self.rating = rating
@@ -1166,14 +1178,20 @@ public struct PostDocument: Codable, Hashable, Sendable {
         }
 
         enum CodingKeys: String, CodingKey {
+            case accent
             case codeSample = "code_sample"
+            case contactEmail = "contact_email"
             case dosages
+            case extra
             case featured
             case gallery
+            case handle
             case hero
             case homepage
             case launchDate = "launch_date"
+            case opensAt = "opens_at"
             case parent
+            case phone
             case properties
             case publishedAt = "published_at"
             case rating

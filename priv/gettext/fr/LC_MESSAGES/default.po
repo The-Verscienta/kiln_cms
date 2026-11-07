@@ -1233,6 +1233,11 @@ msgstr "90 jours"
 msgid "A CMS for content that has to be right"
 msgstr "Un CMS pour les contenus qui doivent être justes"
 
+#: lib/kiln_cms/cms/field_types/json.ex
+#, elixir-autogen, elixir-format
+msgid "A JSON object or list, up to 64 KB. For structured data from another system that has no field of its own. Cannot be filtered or sorted."
+msgstr "Un objet ou une liste JSON, jusqu'à 64 Ko. Pour des données structurées d'un autre système qui n'ont pas de champ propre. Ne peut être ni filtré ni trié."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup can't run on this deployment."
@@ -1332,6 +1337,11 @@ msgstr "Un entonnoir est complété"
 #, elixir-autogen, elixir-format
 msgid "A gallery"
 msgstr "Une galerie"
+
+#: lib/kiln_cms/cms/field_types/color.ex
+#, elixir-autogen, elixir-format
+msgid "A hex colour such as #ff8800. For a brand accent or a category's badge colour."
+msgstr "Une couleur hexadécimale comme #ff8800. Pour une couleur d'accent de marque ou le badge d'une catégorie."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -1441,6 +1451,11 @@ msgstr "Un champ de personne est toujours privé : seuls les éditeurs et les ad
 #, elixir-autogen, elixir-format
 msgid "A person with an account on this site — an admin, editor or viewer. Always private: only editors and admins see it."
 msgstr "Une personne ayant un compte sur ce site : administrateur, éditeur ou lecteur. Toujours privé : seuls les éditeurs et les administrateurs le voient."
+
+#: lib/kiln_cms/cms/field_types/telephone.ex
+#, elixir-autogen, elixir-format
+msgid "A phone number with its country code, stored as +15551234567. For a switchboard, a clinic or an emergency line."
+msgstr "Un numéro de téléphone avec son indicatif pays, enregistré sous la forme +15551234567. Pour un standard, une clinique ou une ligne d'urgence."
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -1571,6 +1586,11 @@ msgstr "Une tâche pour %{person}, à rendre le %{date}"
 #, elixir-autogen, elixir-format
 msgid "A tier's audience can't change — existing members would keep an entitlement nothing would revoke. Retire this tier and create a new one instead."
 msgstr "L'audience d'un niveau ne peut pas changer — les membres existants conserveraient un droit d'accès que rien ne révoquerait. Retirez ce niveau et créez-en un nouveau à la place."
+
+#: lib/kiln_cms/cms/field_types/time_field.ex
+#, elixir-autogen, elixir-format
+msgid "A time of day such as 09:30, with no date or time zone. For opening hours or when a recurring session starts."
+msgstr "Une heure de la journée comme 09:30, sans date ni fuseau horaire. Pour des horaires d'ouverture ou le début d'une séance récurrente."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -12107,6 +12127,11 @@ msgstr "Un choix par ligne. Les éditeurs en choisissent autant qu’ils veulent
 msgid "One choice per line. Editors pick one of these."
 msgstr "Un choix par ligne. Les rédacteurs en choisissent un."
 
+#: lib/kiln_cms/cms/field_types/email.ex
+#, elixir-autogen, elixir-format
+msgid "One email address, checked for shape. For a contact, an author or a booking address."
+msgstr "Une adresse e-mail, dont le format est vérifié. Pour un contact, un auteur ou une adresse de réservation."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "One image — a hero, a logo, a portrait."
@@ -19429,6 +19454,11 @@ msgstr "Segment d'URL"
 #, elixir-autogen, elixir-format
 msgid "URL slug"
 msgstr "Slug d’URL"
+
+#: lib/kiln_cms/cms/field_types/slug.ex
+#, elixir-autogen, elixir-format
+msgid "URL-safe words joined by hyphens; what you type is tidied up. For a short code or a path segment. Not checked for uniqueness."
+msgstr "Des mots sûrs pour une URL, reliés par des tirets ; ce que vous saisissez est nettoyé. Pour un code court ou un segment de chemin. Unicité non vérifiée."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex

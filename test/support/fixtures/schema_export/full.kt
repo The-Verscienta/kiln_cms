@@ -533,22 +533,28 @@ public data class PostDocument(
 ) : Document {
     @Serializable
     public data class CustomFields(
+        public val accent: String? = null,
         @SerialName("code_sample") public val codeSample: String? = null,
+        @SerialName("contact_email") public val contactEmail: String? = null,
         /** Rows of this group, in the order the editor arranged them. */
         public val dosages: List<DosagesItem>? = null,
+        public val extra: JsonElement? = null,
         public val featured: Boolean? = null,
         /** Snapshots of the picked media items, in gallery order. */
         public val gallery: List<MediaSnapshot>? = null,
+        public val handle: String? = null,
         /** Snapshot of the picked media item. */
         public val hero: MediaSnapshot? = null,
         public val homepage: String? = null,
         @SerialName("launch_date") public val launchDate: String? = null,
+        @SerialName("opens_at") public val opensAt: String? = null,
         /**
          * Write-time snapshot of a referenced record.
          *
          * Links to: `post`.
          */
         public val parent: JsonObject? = null,
+        public val phone: String? = null,
         /** The chosen terms, in the order the editor arranged them. */
         public val properties: List<String>? = null,
         @SerialName("published_at") public val publishedAt: String? = null,

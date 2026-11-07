@@ -76,7 +76,14 @@ Every summary line below that was shortened links to its own entry there.
   on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
   ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
 
+- **Overlays and plugins: the field type names `email`, `telephone`, `color`, `slug`, `time` and `json` are now built in. Rename a type that uses one; stored definitions with that name get the new strict check.**
+  ([long form](docs/changelog/unreleased.md#builtin-field-type-names-upgrade))
+
 ### Added
+
+- **Six built-in custom field types check and tidy a value: `:email`, `:telephone` (E.164), `:color`, `:slug`, `:time` and `:json`.**
+  Those six names are now reserved: rename an overlay or plugin type that uses one (`mix kiln.plugins.doctor` fails).
+  ([long form](docs/changelog/unreleased.md#builtin-format-field-types))
 
 - **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
   A wrong operand type is a schema error; `contains` and `startsWith` (case-insensitive, literal) also work in `customFilter`.

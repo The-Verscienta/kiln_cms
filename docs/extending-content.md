@@ -25,7 +25,9 @@ UI" workflow, scoped to fields.
   `private`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
   `:select`, `:media`, `:reference`, `:group`, `:user`, `:geolocation`,
-  `:datetime_range`, `:recurrence`, `:computed` — plus
+  `:datetime_range`, `:recurrence`, `:computed`, and the six format types
+  `:email`, `:telephone`, `:color`, `:slug`, `:time` and `:json` (see
+  "Built-in format types" below) — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
 - **Private fields (`private: true`)**: a value for the site's editors and
@@ -408,9 +410,9 @@ type), not the order you ticked them in. Ticks beyond four are kept but not
 shown.
 
 Fields offered: string, text, integer, float, boolean, date, datetime, url,
-select, reference, user and media, if they hold one value. Groups,
-geolocation, date ranges, recurrence, computed fields and multi-valued fields
-are not offered. Private fields are offered, as editors already see them in
+select, reference, user, media, email, telephone, color, slug and time, if
+they hold one value. Groups, geolocation, JSON, date ranges, recurrence,
+computed fields and multi-valued fields are not offered. Private fields are offered, as editors already see them in
 the content editor.
 
 What a cell shows:
@@ -438,6 +440,45 @@ For code: the choice is `User.content_list_columns`, a nullable map
 per type, and merged into the stored map under a row lock. Which definitions
 may be offered is decided by `KilnCMS.CMS.ListFields.readable_fields/4`; cell
 text comes from `KilnCMSWeb.EditorLive.FieldCells`.
+
+### Built-in format types
+
+Six field types check and tidy a value so a malformed one cannot be saved.
+Pick them in the fields admin like any other type; the editor, the API and an
+import all run the same check, and the stored value is the tidied one.
+
+| Type | Editor input | Stored as | Notes |
+| --- | --- | --- | --- |
+| `:email` | email input | `Ada@example.com` (domain lowercased, local part keeps its case) | Shape check only: one `@`, a dotted domain, at most 254 characters. It cannot tell whether the mailbox exists. |
+| `:telephone` | telephone input | E.164, `+442079460958` | A format check only: spaces, dashes, dots and brackets are stripped and a leading `00` becomes `+`; what is left must be `+`, a non-zero digit and 6 to 14 more digits. Kiln has no numbering-plan data, so a real number cannot be told from a plausible one. A domestic number (`020 7946 0958`) or one with an extension is refused: include the country code. |
+| `:color` | text input with a pattern | lowercase `#rrggbb` (`#F80` becomes `#ff8800`) | Named colours, `rgb()` and alpha are refused. It is a text input, not `type="color"`, because a colour picker cannot be empty and would fill every optional colour field with `#000000` on save. |
+| `:slug` | text input with a pattern | `cafe-menu` | Typed text is slugified (`Café Menu!` becomes `cafe-menu`), at most 128 characters; input with nothing left is refused. Not unique, and not filled from another field: to derive a slug, use a `:computed` field. Uniqueness is waiting on [#2276](https://github.com/The-Verscienta/kiln_cms/issues/2276). |
+| `:time` | time input | `"09:30"` (24-hour, zero-padded, no date or zone) | Accepts `H:MM`, `HH:MM`, `HH:MM:SS`; seconds are dropped. |
+| `:json` | monospace textarea, pretty-printed | the object or array itself | See below. |
+
+In the API, `:email`, `:telephone`, `:color`, `:slug` and `:time` are strings;
+`:json` is the generic JSON value. The schema export describes the formats
+(`format: "email"` or a `pattern`).
+
+**JSON fields.** The value must be an object or an array (a bare number or
+string is refused). Limits: 256 KB of input text, 64 KB once re-encoded, 32
+levels deep and 5,000 values; a string or key containing a NUL character is
+refused (Postgres `jsonb` cannot store it). Filtering answers only "Empty or
+not" (`custom_filter` with `null`; any other operator is refused with *custom
+field "x" (json) only supports null*), a JSON field cannot be sorted (the
+refusal reads *is not sortable*), and it is not in the Columns picker. If an
+admin flags it **searchable**, the strings and numbers nested in the value are
+indexed (not the keys), so flag only a field whose contents are prose worth
+finding.
+
+**Names are reserved.** `email`, `telephone`, `color`, `slug`, `time` and
+`json` can no longer be used for a type an overlay or plugin registers; rename
+it (`mix kiln.plugins.doctor` fails otherwise). A stored field definition
+that already used one of these names as its `field_type` is now cast by the
+built-in type: values that do not pass its check are refused on the next save.
+
+**Not yet:** a key/value or link type, number options (step, prefix, suffix,
+range), a colour palette, and JSON Schema validation of a `:json` value.
 
 ### Filter and sort the content list by custom fields
 
@@ -480,15 +521,22 @@ What each field type offers (the **Condition** menu):
 | datetime | From, Until, Empty or not (whole days, both ends included) |
 | select | Is (one of its options), Empty or not |
 | reference, user, media | Is (the target's id, a UUID), Empty or not |
+| email, telephone, slug | Is, Contains, Empty or not |
+| color | Is, Empty or not |
+| time | Is, From, Until, Empty or not |
 
 "Contains" is a case-insensitive substring match; `%` and `_` in the value
 mean themselves. "Empty or not" asks *Empty* or *Has a value*. A value is at most
 100 characters; longer is refused.
 
-Only single-valued string, text, integer, float, boolean, date, datetime, url
-and select fields can be sorted by; the **Field** group lists just those. Fields
-the Columns picker does not offer (groups, geolocation, date ranges,
-recurrence, computed and multi-valued fields) cannot be filtered either.
+Only single-valued string, text, integer, float, boolean, date, datetime, url,
+select, email, telephone, color, slug and time fields can be sorted by; the
+**Field** group lists just those. Fields the Columns picker does not offer
+(groups, geolocation, JSON, date ranges, recurrence, computed and multi-valued
+fields) cannot be filtered either. A value typed into a condition on an email,
+telephone, color, slug or time field is cleaned the way the field cleans what
+an editor saves (a colour's case, a time's padding), so `#FF8800` finds
+`#ff8800`; "Contains" is matched as typed.
 Private fields are offered, because editors already see them in the content
 editor; the list is editor-only, and a person without read access to a field
 cannot filter or sort by it (a link naming it simply ignores that condition).

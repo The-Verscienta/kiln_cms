@@ -281,6 +281,7 @@ export interface PageDocument {
   id: string;
   inherited_fields?: Record<string, unknown>;
   locale: string | null;
+  robots?: { nofollow: boolean; noindex: boolean };
   slug: string | null;
   title: string | null;
   type: "page";
@@ -289,11 +290,12 @@ export interface PageDocument {
 /** A published `Post` as fired to the `:json` surface. */
 export interface PostDocument {
   blocks: Array<KilnBlock>;
-  custom_fields: { code_sample?: string | null; dosages?: Array<{ amount?: number | null; form?: string | null; unit?: string | null }> | null; featured?: boolean | null; gallery?: Array<MediaSnapshot> | null; hero?: MediaSnapshot | null; homepage?: string | null; launch_date?: string | null; parent?: /* links to: "post" */ Record<string, unknown> | null; properties?: Array<string> | null; published_at?: string | null; rating?: number | null; read_time?: number | null; related?: /* links to: "post" */ Array<{ id: string; slug?: string | null; title?: string | null; type: string }> | null; seo?: { no_index?: boolean | null; title?: string | null } | null; subtitle?: string | null; summary?: string | null; synonyms?: Array<string> | null; tier?: string | null; where?: { label?: string; lat?: number; lng?: number; zoom?: number } | null };
+  custom_fields: { accent?: string | null; code_sample?: string | null; contact_email?: string | null; dosages?: Array<{ amount?: number | null; form?: string | null; unit?: string | null }> | null; extra?: Record<string, unknown> | Array<unknown> | null; featured?: boolean | null; gallery?: Array<MediaSnapshot> | null; handle?: string | null; hero?: MediaSnapshot | null; homepage?: string | null; launch_date?: string | null; opens_at?: string | null; parent?: /* links to: "post" */ Record<string, unknown> | null; phone?: string | null; properties?: Array<string> | null; published_at?: string | null; rating?: number | null; read_time?: number | null; related?: /* links to: "post" */ Array<{ id: string; slug?: string | null; title?: string | null; type: string }> | null; seo?: { no_index?: boolean | null; title?: string | null } | null; subtitle?: string | null; summary?: string | null; synonyms?: Array<string> | null; tier?: string | null; where?: { label?: string; lat?: number; lng?: number; zoom?: number } | null };
   custom_fields_plain?: { summary?: string | null };
   id: string;
   inherited_fields?: Record<string, unknown>;
   locale: string | null;
+  robots?: { nofollow: boolean; noindex: boolean };
   slug: string | null;
   title: string | null;
   type: "post";
@@ -374,10 +376,15 @@ export type KilnCustomFieldValue =
 
 /** On `Post`. */
 export interface PostCustomFields {
+  accent: string | null;
   codeSample: string | null;
+  contactEmail: string | null;
   featured: boolean | null;
+  handle: string | null;
   homepage: string | null;
   launchDate: string | null;
+  opensAt: string | null;
+  phone: string | null;
   customPublishedAt: string | null;
   rating: number | null;
   readTime: number | null;
@@ -389,17 +396,22 @@ export interface PostCustomFields {
 
 export const PostCustomFieldsFragment = `
 fragment PostCustomFields on Post {
+  accent: customString(name: "accent")
   codeSample: customString(name: "code_sample")
+  contactEmail: customString(name: "contact_email")
   featured: customBoolean(name: "featured")
+  handle: customString(name: "handle")
   homepage: customString(name: "homepage")
   launchDate: customDate(name: "launch_date")
+  opensAt: customString(name: "opens_at")
+  phone: customString(name: "phone")
   customPublishedAt: customDateTime(name: "published_at")
   rating: customFloat(name: "rating")
   readTime: customInt(name: "read_time")
   subtitle: customString(name: "subtitle")
   summary: customString(name: "summary")
   tier: customString(name: "tier")
-  fields(names: ["dosages", "gallery", "parent", "properties", "related", "seo", "synonyms", "where"]) {
+  fields(names: ["dosages", "extra", "gallery", "parent", "properties", "related", "seo", "synonyms", "where"]) {
     __typename
     name
     ... on StringValue { asString: value }

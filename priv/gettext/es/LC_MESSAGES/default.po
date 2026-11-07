@@ -1233,6 +1233,11 @@ msgstr "90 días"
 msgid "A CMS for content that has to be right"
 msgstr "Un CMS para contenido que tiene que ser correcto"
 
+#: lib/kiln_cms/cms/field_types/json.ex
+#, elixir-autogen, elixir-format
+msgid "A JSON object or list, up to 64 KB. For structured data from another system that has no field of its own. Cannot be filtered or sorted."
+msgstr "Un objeto o lista JSON, de hasta 64 KB. Para datos estructurados de otro sistema que no tienen campo propio. No se puede filtrar ni ordenar."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup can't run on this deployment."
@@ -1332,6 +1337,11 @@ msgstr "Se completa un embudo"
 #, elixir-autogen, elixir-format
 msgid "A gallery"
 msgstr "Una galería"
+
+#: lib/kiln_cms/cms/field_types/color.ex
+#, elixir-autogen, elixir-format
+msgid "A hex colour such as #ff8800. For a brand accent or a category's badge colour."
+msgstr "Un color hexadecimal como #ff8800. Para un acento de marca o el color de la insignia de una categoría."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -1441,6 +1451,11 @@ msgstr "Un campo de persona siempre es privado: solo lo ven los editores y admin
 #, elixir-autogen, elixir-format
 msgid "A person with an account on this site — an admin, editor or viewer. Always private: only editors and admins see it."
 msgstr "Una persona con una cuenta en este sitio: administrador, editor o lector. Siempre privado: solo lo ven los editores y administradores."
+
+#: lib/kiln_cms/cms/field_types/telephone.ex
+#, elixir-autogen, elixir-format
+msgid "A phone number with its country code, stored as +15551234567. For a switchboard, a clinic or an emergency line."
+msgstr "Un número de teléfono con su prefijo de país, guardado como +15551234567. Para una centralita, una clínica o una línea de emergencias."
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -1571,6 +1586,11 @@ msgstr "Una tarea para %{person}, con vencimiento el %{date}"
 #, elixir-autogen, elixir-format
 msgid "A tier's audience can't change — existing members would keep an entitlement nothing would revoke. Retire this tier and create a new one instead."
 msgstr "La audiencia de un nivel no puede cambiar: los miembros existentes conservarían un permiso que nada revocaría. Retire este nivel y cree uno nuevo en su lugar."
+
+#: lib/kiln_cms/cms/field_types/time_field.ex
+#, elixir-autogen, elixir-format
+msgid "A time of day such as 09:30, with no date or time zone. For opening hours or when a recurring session starts."
+msgstr "Una hora del día como 09:30, sin fecha ni zona horaria. Para horarios de apertura o el comienzo de una sesión recurrente."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -12107,6 +12127,11 @@ msgstr "Una opción por línea. Los editores eligen cuantas quieran."
 msgid "One choice per line. Editors pick one of these."
 msgstr "Una opción por línea. Los editores eligen una de ellas."
 
+#: lib/kiln_cms/cms/field_types/email.ex
+#, elixir-autogen, elixir-format
+msgid "One email address, checked for shape. For a contact, an author or a booking address."
+msgstr "Una dirección de correo electrónico, con el formato comprobado. Para un contacto, un autor o una dirección de reservas."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "One image — a hero, a logo, a portrait."
@@ -19429,6 +19454,11 @@ msgstr "Segmento de URL"
 #, elixir-autogen, elixir-format
 msgid "URL slug"
 msgstr "Slug de URL"
+
+#: lib/kiln_cms/cms/field_types/slug.ex
+#, elixir-autogen, elixir-format
+msgid "URL-safe words joined by hyphens; what you type is tidied up. For a short code or a path segment. Not checked for uniqueness."
+msgstr "Palabras seguras para URL unidas por guiones; lo que escribes se normaliza. Para un código corto o un segmento de ruta. No se comprueba que sea único."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
