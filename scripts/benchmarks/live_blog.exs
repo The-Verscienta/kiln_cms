@@ -38,9 +38,10 @@
 #     the `pg_stat_database` counters for the benchmark database;
 #   * publish-to-feed-event: publish start → the update's `published` event on
 #     the change feed (`KilnCMS.Delivery.Feed`, #2050), timed by its
-#     `[:kiln_cms, :delivery, :feed, :event]` telemetry, emitted once the
-#     PubSub broadcast has been sent; and how many feed events each update and
-#     the story edit produce;
+#     `[:kiln_cms, :delivery, :feed, :event]` telemetry, emitted in the
+#     publisher once the event is handed to the site's relay (#2083), before
+#     any subscriber has it; and how many feed events each update and the
+#     story edit produce;
 #   * with N subscribers: N processes subscribed to the site's feed topic, and
 #     the time from publish start to the LAST of them receiving the update's
 #     event. In-BEAM subscribers: no transport, socket or network (those are

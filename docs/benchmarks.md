@@ -141,9 +141,11 @@ Measured on 2026-10-24 against `main` at `c4946b059` (the feed's server side,
   with up to 1,000 feed subscribers. The firing queue never held more than
   one job.
 - **10,000 feed subscribers slow the publish itself**: publish p95
-  went from 36 ms to 357 ms, and p99 from 81 ms to 1.5 s. The feed broadcasts
-  from the publisher's own process, so the editor's request pays for the
-  fan-out. Filed as #2083, for 2.2.
+  went from 36 ms to 357 ms, and p99 from 81 ms to 1.5 s. The feed broadcast
+  from the publisher's own process, so the editor's request paid for the
+  fan-out. #2083 moved the local fan-out to a relay: p99 is now 143 ms, but
+  p95 is still about four times the 0-subscriber leg (see
+  [With the feed relay](#with-the-feed-relay)).
 - **The fan-out goes the other way.** One live edit of the story re-fires
   every update that references it: 486–513 re-fires, drained in 1.4–1.7 s,
   at about 30 queries and 20 commits each. Its single feed event lists all
@@ -169,7 +171,7 @@ Measured on 2026-10-24 against `main` at `c4946b059` (the feed's server side,
 Milliseconds. "Fire" runs from publish start to the update's `{:fired, …}`
 broadcast, which is sent once its artifacts are persisted. "Feed event" runs
 from publish start to the feed's `published` event (its telemetry, which
-fires once the broadcast has been sent). "Last subscriber" is when the last
+fires once the broadcast had been sent, before #2083). "Last subscriber" is when the last
 of the N subscribers received that event. Query and commit figures are per
 update, net of an idle baseline taken over 300 s after the legs (13.1
 queries/s, 9.7 commits/s).
@@ -234,10 +236,52 @@ update.
   content.
 - **Fan-out to many subscribers belongs off the publish path** (#2083).
   With 1,000 in-BEAM subscribers the cost is lost in the noise. With
-  10,000 it multiplies publish latency by ten. A bare `Phoenix.PubSub`
+  10,000 it multiplied publish latency by ten. A bare `Phoenix.PubSub`
   broadcast to 10,000 idle processes takes about 20 ms, and about 90 ms when
   each does a little work per event. Real transports do more per event than
-  these subscribers do.
+  these subscribers do. Moving the sends to a relay removed the tail but not
+  the whole cost; see below.
+
+### With the feed relay
+
+`KilnCMS.Delivery.Feed.publish/4` no longer delivers to this node's
+subscribers itself: it hands the event to the site's relay
+(`KilnCMS.Delivery.Feed.Relay`) in one cast, and the relay broadcasts it
+locally. Remote nodes still get one send each from the publisher.
+
+Measured on 2026-11-06/07 on the `feat/2083-feed-relay` branch, same machine,
+with `BENCH_DURATION=600 BENCH_SUBSCRIBERS=0,10000
+scripts/benchmarks/live_blog.sh`. Both legs ran in the same session.
+**These are 10-minute legs**, against 30 minutes for the table above, so
+compare them with each other first and with the `main` figures only roughly.
+
+Milliseconds. "Feed event" now runs from publish start to the hand-off to
+the relay, not to the broadcast.
+
+| Feed subscribers | Updates | Publish p50 / p95 / p99 | Fire p95 | Feed event p95 | Last subscriber p50 / p95 |
+|---|---|---|---|---|---|
+| 0 | 171 | 24.8 / 32.9 / 36.9 | 60.8 | 52.9 | – |
+| 10,000 | 170 | 108.6 / 123.5 / 143.1 | 152.7 | 49.5 | 138.3 / 149.2 |
+
+On `main` (the table above) the 10,000-subscriber leg had publish p95
+356.8 ms and p99 1,473.8 ms, and the 0-subscriber leg p95 35.9 ms.
+
+- **The send loop is off the publisher.** The hand-off happens about the
+  same time into the publish at both sizes (feed event p95 52.9 and 49.5 ms),
+  so the publisher no longer pays per subscriber to deliver.
+- **The tail is gone.** 10,000-subscriber publish p99 fell from 1,473.8 ms
+  to 143.1 ms.
+- **The goal of #2083 is not met.** It asked for 10,000-subscriber publish
+  p95 within noise of the 0-subscriber leg; it is 123.5 ms against 32.9 ms.
+  After the hand-off, the rest of the publish (the other `after_transaction`
+  hooks, the reply) waits in the scheduler run queues behind 10,000
+  subscribers made runnable at once, each of which updates one shared ETS
+  counter. Fire p50 rises the same way, from 47 to 141 ms: the whole node
+  is busy for about 140 ms per event, not just the publisher.
+- **What could close the gap.** Pacing the relay's local fan-out in chunks
+  (which needs `Registry.dispatch` on PubSub's internals, or its deprecated
+  custom dispatcher API), or having the 2.2 transports pace or batch
+  delivery. Neither is done.
 
 ### Rerunning
 

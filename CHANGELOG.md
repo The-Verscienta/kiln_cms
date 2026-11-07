@@ -99,6 +99,10 @@ Every summary line below that was shortened links to its own entry there.
   and with ~60 fewer from third-party deps.**
   ([long form](docs/changelog/unreleased.md#quiet-image-build))
 
+- **A publish hands its change-feed event to a per-site relay instead of sending to every local subscriber;
+  feed telemetry now fires at hand-off. 10k-subscriber publish p99 1.5 s → 143 ms; p95 still ~4× the 0 leg.**
+  ([long form](docs/changelog/unreleased.md#feed-relay))
+
 ### Fixed
 
 - **Phoenix 1.8.16 with absinthe_phoenix 2.0.6: GraphQL subscription pushes still reach

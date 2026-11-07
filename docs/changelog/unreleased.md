@@ -259,6 +259,47 @@ carries the reasoning.
   1.20 warnings inside third-party packages whose latest releases still
   carry them. Fixing those needs upstream releases.
 
+<a id="feed-relay"></a>
+
+- **The change feed's local fan-out no longer runs in the publisher's
+  process (#2083).** `KilnCMS.Delivery.Feed.publish/4` used
+  `Phoenix.PubSub.broadcast/3`, which sends to every subscriber on the
+  calling node before it returns, so the editor's request (or the API call,
+  or the Oban job) that published paid for every feed subscriber. It now
+  hands this node's half of the event to a relay,
+  `KilnCMS.Delivery.Feed.Relay`, with one cast. The relays run one per
+  scheduler under a `PartitionSupervisor` (`KilnCMS.Delivery.Feed.Relays`,
+  started after PubSub and before the endpoint), keyed by org id, so one
+  site's events pass through one relay in the order they reach it. Remote
+  nodes still get one `direct_broadcast` each from the publisher, as before.
+  - **What improved, and what didn't.** In the live-blog benchmark with
+    10,000 in-BEAM feed subscribers, publish p99 went from 1,474 ms to
+    143 ms and p95 from 357 ms to 124 ms. The goal in #2083, a 10,000
+    subscriber publish p95 within noise of the 0 subscriber one, is **not**
+    met: on this branch the two were 124 ms and 33 ms. The publisher no
+    longer sends to the subscribers, but once 10,000 of them become runnable
+    at once, the rest of the publish waits for a scheduler behind them. The
+    branch numbers come from 10-minute legs, against 30 minutes for the
+    `main` figures, so treat the comparison as indicative. See
+    [Live blog](../benchmarks.md#live-blog-an-update-every-few-seconds).
+  - **Delivery is asynchronous.** When `publish/4` returns, local
+    subscribers may not have the event yet. The new
+    `KilnCMS.Delivery.Feed.sync/1` waits until every event the calling
+    process published to a site has reached this node's subscribers. It is
+    for tests and benchmarks: a test that asserts a feed event, or its
+    absence, right after a publish calls `Feed.sync(org)` first.
+  - **Telemetry moved earlier.** `[:kiln_cms, :delivery, :feed, :event]`
+    still fires once per event in the publisher, but now at hand-off, before
+    any local subscriber has it. A dashboard that read it as "delivered" now
+    reads "handed off".
+  - **Delivery is at most once, as PubSub's always was.** Events waiting in
+    a relay are lost if it crashes or the node shuts down, and an event cast
+    to a relay that crashed just then is lost too. If no relay is running,
+    the publisher broadcasts locally itself, as before. `publish/4` never
+    raises or exits into the caller.
+  - **Upgrade.** Nothing to do: no migration, no config, no change to the
+    topic, `subscribe/1` or the event shape. Rolling back the pin is safe.
+
 ## Fixed
 
 <a id="phoenix-1-8-16-subscription-pushes"></a>
