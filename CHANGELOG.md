@@ -72,7 +72,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Admins can move one document to the trash from the content list's row menu or the editor's Settings tab.**
   Same soft delete as bulk Delete; pending autosave edits are saved first. Guide: [docs/trash.md](docs/trash.md).
-  ([long form](docs/changelog/unreleased.md#move-to-trash-in-editor))
+  ([#2333](https://github.com/The-Verscienta/kiln_cms/pull/2333) · [long form](docs/changelog/unreleased.md#move-to-trash-in-editor))
 
 - **The content list can show up to four custom fields on each row; pick them under Columns once one content type is listed.**
   Remembered per person, site and type; additive migration, nothing to run.
