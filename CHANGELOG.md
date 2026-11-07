@@ -62,13 +62,13 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Content tables gain a GIN index on `custom_fields`, built concurrently: slow on a large
   `entries`; a failed build leaves an INVALID index to drop. Overlays run `mix ash.codegen`.**
-  ([long form](docs/changelog/unreleased.md#custom-fields-gin-upgrade))
+  ([#2321](https://github.com/The-Verscienta/kiln_cms/pull/2321) · [long form](docs/changelog/unreleased.md#custom-fields-gin-upgrade))
 
 ### Added
 
 - **`custom_filter` equality, `in` and list membership use a new GIN index on `custom_fields`: a selective filter on 100,000 rows drops from about 40 ms to about 3 ms.**
   Range, `not_eq`, `ilike`, `null` and `custom_sort` are unchanged.
-  ([long form](docs/changelog/unreleased.md#custom-field-indexes))
+  ([#2321](https://github.com/The-Verscienta/kiln_cms/pull/2321) · [long form](docs/changelog/unreleased.md#custom-field-indexes))
 
 - **Change severity: an edit to a safety-relevant field of published content is recorded as critical, notable or routine on its own version.**
   The editor asks before publishing; API writes default to notable; read back as `latest_edit_severity` / `latest_edit_at`.
