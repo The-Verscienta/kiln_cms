@@ -1,7 +1,8 @@
 defmodule KilnCMSWeb.SettingsLive do
   @moduledoc """
   Per-user account settings (`/editor/settings`): the sidebar preset, the
-  content list's status marks (#1323), display-name profile, password change
+  content list's status marks (#1323), display-name profile and your access on
+  this site (#2142), password change
   (#141), two-factor and passkeys, the account's active sessions (#1823),
   workflow notification preferences (#46), and a data export.
   Each signed-in user manages only their own account. Editor/admin only
@@ -16,6 +17,9 @@ defmodule KilnCMSWeb.SettingsLive do
   alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.WebAuthn
   alias KilnCMS.Push
+  alias KilnCMSWeb.RoleDisplay
+
+  import KilnCMSWeb.RoleDisplay, only: [role_summary: 1]
 
   @status_marks %{"words" => :words, "trigrams" => :trigrams}
 
@@ -34,6 +38,7 @@ defmodule KilnCMSWeb.SettingsLive do
      # A "Saved" line beside the button (#1828), cleared by the next edit: the
      # flash alone was easy to miss on a long page.
      |> assign(:profile_saved?, false)
+     |> assign_access(user)
      |> assign(:password_form, password_form(user))
      # Demo mode (docs/demo-mode.md): the shared account's password, 2FA and
      # passkeys are fixed, so their forms give way to a note saying why. The
@@ -70,6 +75,12 @@ defmodule KilnCMSWeb.SettingsLive do
   end
 
   defp push_devices(user), do: Push.list(user)
+
+  # "Your access" (#2142): the tier this page was reached with, as the policies
+  # resolve it on this site, and when a temporary one changes. Read-only, and
+  # only ever about the signed-in user.
+  defp assign_access(socket, user),
+    do: assign(socket, :access, RoleDisplay.site_access(user, socket.assigns.current_org))
 
   # The key the toggle hands the browser, and the one `Push.subscribe/4` is
   # told the browser used — one assign, so the two cannot differ.
@@ -717,6 +728,25 @@ defmodule KilnCMSWeb.SettingsLive do
               <p class="mb-4 text-sm text-base-content/60">
                 {gettext("How your name appears to readers and to the people you work with.")}
               </p>
+
+              <div id="settings-access" class="mb-4 space-y-1 rounded-md bg-base-200/60 p-3">
+                <p class="text-sm font-medium">{gettext("Your access")}</p>
+                <.role_summary
+                  id="settings-access-role"
+                  label={gettext("On this site:")}
+                  access={@access}
+                >
+                  <:note :if={@access.source == :platform}>{gettext("platform admin")}</:note>
+                </.role_summary>
+                <p
+                  :if={RoleDisplay.console_access_ends_at(@access)}
+                  class="text-xs text-base-content/60"
+                >
+                  {gettext("Your access to this console ends at %{when}.",
+                    when: KilnCMSWeb.RoleGrantForm.format(RoleDisplay.console_access_ends_at(@access))
+                  )}
+                </p>
+              </div>
 
               <.form
                 for={@profile_form}

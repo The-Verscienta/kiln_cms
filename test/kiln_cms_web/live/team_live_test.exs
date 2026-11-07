@@ -254,7 +254,7 @@ defmodule KilnCMSWeb.TeamLiveTest do
         |> form("#grant-member-#{membership.id}", %{"role" => "editor", "hours" => "24"})
         |> render_submit()
 
-      assert html =~ "editor on this site until"
+      assert html =~ "Editor on this site until"
 
       granted = reread_membership(membership)
       assert granted.granted_role == :editor
@@ -798,11 +798,127 @@ defmodule KilnCMSWeb.TeamLiveTest do
   defp grant_types(html, form),
     do: values(html, ~s(#{form} input[type="hidden"][name*="[grant_type]"]))
 
+  # #2142: each row leads with the tier that applies on this site now, as the
+  # policies resolve it, and explains the grant that governs it.
+  describe "role display" do
+    setup %{conn: conn} do
+      %{conn: log_in(conn, authed_user(:admin))}
+    end
+
+    test "a member with a live grant reads as the granted tier, then what it returns to",
+         %{conn: conn} do
+      colleague = authed_user(:viewer)
+
+      membership =
+        Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+          user_id: colleague.id,
+          organization_id: Accounts.default_org_id(),
+          role: :viewer,
+          granted_role: :editor,
+          granted_role_expires_at: in_hours(5)
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      row = "#member-#{membership.id}-role"
+
+      assert badge_text(view, row) == "Editor"
+      assert has_element?(view, row, "On this site:")
+      assert has_element?(view, "#{row}-grant", "Editor is temporary: until")
+      assert has_element?(view, "#{row}-grant", "then Viewer.")
+    end
+
+    test "ending a grant redraws the row with the standing tier", %{conn: conn} do
+      colleague = authed_user(:viewer)
+
+      membership =
+        Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+          user_id: colleague.id,
+          organization_id: Accounts.default_org_id(),
+          role: :viewer,
+          granted_role: :editor,
+          granted_role_expires_at: in_hours(5)
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      row = "#member-#{membership.id}-role"
+      assert badge_text(view, row) == "Editor"
+
+      render_click(view, "revoke_member_role", %{"id" => membership.id})
+
+      assert badge_text(view, row) == "Viewer"
+      refute has_element?(view, "#{row}-grant")
+    end
+
+    test "an expired grant leaves the standing tier and no explanation", %{conn: conn} do
+      colleague = authed_user(:viewer)
+
+      membership =
+        Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+          user_id: colleague.id,
+          organization_id: Accounts.default_org_id(),
+          role: :viewer,
+          granted_role: :editor,
+          granted_role_expires_at: in_hours(-1)
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      row = "#member-#{membership.id}-role"
+
+      assert badge_text(view, row) == "Viewer"
+      refute has_element?(view, "#{row}-grant")
+    end
+
+    test "a platform admin's membership row shows admin and the tier it overrides",
+         %{conn: conn} do
+      other_admin = authed_user(:admin)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{user_id: other_admin.id, organization_id: Accounts.default_org_id(), role: :viewer},
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      row = "#member-#{membership.id}-role"
+
+      assert badge_text(view, row) == "Admin"
+      assert has_element?(view, row, "Site tier Viewer, overridden by the platform admin role.")
+      assert has_element?(view, "#member-#{membership.id}", "Site admin")
+    end
+
+    # A temporary platform admin with no membership here reaches this site only
+    # through the grant, so the row says the access ends with it.
+    test "a temporary platform admin without a membership is explained", %{conn: conn} do
+      temp = authed_user(:viewer)
+
+      Ash.Seed.update!(temp, %{granted_role: :admin, granted_role_expires_at: in_hours(5)})
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      row = "#site-admin-#{temp.id}-role"
+
+      assert badge_text(view, row) == "Admin"
+      assert has_element?(view, "#{row}-grant", "Admin is temporary: until")
+      # No membership anywhere and this is the default org: the account role.
+      assert has_element?(view, "#{row}-grant", "then Viewer.")
+    end
+  end
+
   defp values(html, selector) do
     html
     |> LazyHTML.from_document()
     |> LazyHTML.query(selector)
     |> LazyHTML.attribute("value")
+  end
+
+  defp in_hours(hours), do: DateTime.add(DateTime.utc_now(), hours, :hour)
+
+  defp badge_text(view, selector) do
+    view
+    |> element("#{selector}-tier")
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.text()
+    |> String.trim()
   end
 
   defp reread_membership(membership) do

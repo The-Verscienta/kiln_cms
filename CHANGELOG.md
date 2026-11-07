@@ -118,6 +118,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Roles on accounts, team and settings lead with the tier that applies now ("Platform:" / "On this site:"), with
+  a line saying when a temporary one ends and what follows; "unconfirmed" is now "Email not confirmed", apart from it.**
+  ([long form](docs/changelog/unreleased.md#effective-role-display))
+
 - **On `/editor/team`, a custom role's or member's content types and field grants are picked from the site's types
   and fields instead of typed as a list and JSON; "No fields" stores `[]`, and unrecognized stored names are kept.**
   ([#2352](https://github.com/The-Verscienta/kiln_cms/pull/2352) · [long form](docs/changelog/unreleased.md#team-scope-pickers))

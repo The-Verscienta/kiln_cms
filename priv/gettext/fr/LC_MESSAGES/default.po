@@ -835,12 +835,21 @@ msgstr "%{published} publiés · %{in_review} en révision · %{draft} brouillon
 msgid "%{publishing} going live, %{removing} coming down."
 msgstr "%{publishing} à publier, %{removing} à retirer."
 
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgid "%{role} is temporary: until %{when} (%{left}), then %{after}."
+msgstr "%{role} est temporaire : jusqu'au %{when} (%{left}), puis %{after}."
+
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgid "%{role} is temporary: until %{when} (%{left}), then %{next} until %{next_when}, then %{after}."
+msgstr "%{role} est temporaire : jusqu'au %{when} (%{left}), puis %{next} jusqu'au %{next_when}, puis %{after}."
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{role} on this site until %{when}."
 msgstr "%{role} sur ce site jusqu'au %{when}."
 
-#: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{role} until %{when}"
@@ -855,11 +864,6 @@ msgstr "%{role} jusqu'au %{when} — %{remaining}."
 #, elixir-autogen, elixir-format
 msgid "%{role} until %{when}."
 msgstr "%{role} jusqu'au %{when}."
-
-#: lib/kiln_cms_web/live/accounts_live.ex
-#, elixir-autogen, elixir-format
-msgid "%{role} · %{remaining}"
-msgstr "%{role} · %{remaining}"
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -1778,6 +1782,11 @@ msgstr "Menu du compte"
 msgid "Account removed."
 msgstr "Compte supprimé."
 
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Account status"
+msgstr "État du compte"
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -2251,6 +2260,12 @@ msgstr "Ajoute des détails tirés de ce bloc et du reste de la page."
 msgid "Admin"
 msgstr "Administrateur"
 
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgctxt "role"
+msgid "Admin"
+msgstr "Administrateur"
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Admin on every site through their account role, so there is no site tier to set here."
@@ -2694,8 +2709,8 @@ msgstr "Un nombre quelconque de lignes."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Any role"
-msgstr "Tous les rôles"
+msgid "Any standing role"
+msgstr "Tout rôle permanent"
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
@@ -5517,6 +5532,12 @@ msgstr "Les champs personnalisés sont accordés tous ensemble : il n'existe pas
 msgid "Custom role"
 msgstr "Rôle personnalisé"
 
+#: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Custom role:"
+msgstr "Rôle personnalisé :"
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Custom roles"
@@ -6669,6 +6690,12 @@ msgstr "Édition, relecture et diffusion dans une seule application que vous hé
 msgid "Editor"
 msgstr "Éditeur"
 
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgctxt "role"
+msgid "Editor"
+msgstr "Éditeur"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editor checks"
@@ -6810,6 +6837,16 @@ msgstr "Domaines de messagerie"
 #, elixir-autogen, elixir-format
 msgid "Email me when something is published"
 msgstr "M’envoyer un e-mail quand quelque chose est publié"
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Email not confirmed"
+msgstr "E-mail non confirmé"
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Email not confirmed doesn't affect the role or password sign-in. A site's own single sign-on won't sign in to this account until the email is confirmed."
+msgstr "Un e-mail non confirmé n'affecte ni le rôle ni la connexion par mot de passe. L'authentification unique propre à un site ne se connectera pas à ce compte tant que l'e-mail n'est pas confirmé."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -10665,6 +10702,12 @@ msgstr "Aucune méta-description — les moteurs de recherche en inventeront une
 msgid "No SEO title — the page title will be used instead."
 msgstr "Aucun titre SEO — le titre de la page sera utilisé à la place."
 
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgctxt "role"
+msgid "No access"
+msgstr "Aucun accès"
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "No accessibility issues found in %{count} applicable check."
@@ -11795,6 +11838,13 @@ msgstr "À la publication : la laisser ouverte (réglage du site)"
 msgid "On this page"
 msgstr "Sur cette page"
 
+#: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "On this site:"
+msgstr "Sur ce site :"
+
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
 msgid "On-site searches that returned nothing. Each is a reader who looked for something this site doesn't cover."
@@ -12707,6 +12757,11 @@ msgstr "Accès à la plateforme"
 #, elixir-autogen, elixir-format
 msgid "Platform role"
 msgstr "Rôle de plateforme"
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Platform:"
+msgstr "Plateforme :"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -14452,11 +14507,6 @@ msgstr "Éditeur de texte enrichi"
 msgid "Right now editors submit their work for review and only an admin can publish. Pick what fits this site."
 msgstr "Actuellement, les éditeurs soumettent leur travail à relecture et seul un administrateur peut publier. Choisissez ce qui convient à ce site."
 
-#: lib/kiln_cms_web/live/accounts_live.ex
-#, elixir-autogen, elixir-format
-msgid "Role"
-msgstr "Rôle"
-
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Role added."
@@ -16013,6 +16063,12 @@ msgid "Site tier"
 msgstr "Niveau du site"
 
 #: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Site tier %{tier}, overridden by the platform admin role."
+msgstr "Niveau sur le site : %{tier}, remplacé par le rôle d'administrateur de la plateforme."
+
+#: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sites"
 msgstr "Sites"
@@ -16267,6 +16323,11 @@ msgstr "Campagne de printemps"
 #, elixir-autogen, elixir-format
 msgid "Standard — the stock look"
 msgstr "Standard — l'apparence d'origine"
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Standing role"
+msgstr "Rôle permanent"
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
@@ -19128,11 +19189,6 @@ msgstr "Débloqué."
 msgid "Unchanged"
 msgstr "Inchangé"
 
-#: lib/kiln_cms_web/live/accounts_live.ex
-#, elixir-autogen, elixir-format
-msgid "Unconfirmed"
-msgstr "Non confirmé"
-
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Under-organized"
@@ -19742,6 +19798,12 @@ msgstr "Voir le site (s'ouvre dans un nouvel onglet)"
 #, elixir-autogen, elixir-format
 msgid "View your site"
 msgstr "Voir votre site"
+
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgctxt "role"
+msgid "Viewer"
+msgstr "Lecteur"
 
 #: lib/kiln_cms_web/components/chart_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -20694,6 +20756,16 @@ msgstr "Votre contenu %{kind} est maintenant en ligne."
 #, elixir-autogen, elixir-format
 msgid "Your %{kind} was returned to draft."
 msgstr "Votre contenu %{kind} est repassé en brouillon."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your access"
+msgstr "Votre accès"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your access to this console ends at %{when}."
+msgstr "Votre accès à cette console prend fin le %{when}."
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
@@ -21881,6 +21953,11 @@ msgstr "orphelin"
 msgid "plain"
 msgstr "texte brut"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "platform admin"
+msgstr "administrateur de la plateforme"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "portable"
@@ -22300,11 +22377,6 @@ msgstr "traduit"
 #, elixir-autogen, elixir-format
 msgid "translation gaps"
 msgstr "lacunes de traduction"
-
-#: lib/kiln_cms_web/live/accounts_live.ex
-#, elixir-autogen, elixir-format
-msgid "unconfirmed"
-msgstr "non confirmé"
 
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format

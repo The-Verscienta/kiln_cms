@@ -215,21 +215,155 @@ defmodule KilnCMS.Accounts.Scoping do
           map() | nil,
           Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil
         ) :: :admin | :editor | :viewer | :none
-  def effective_tier(%{} = actor, subject) do
-    if RoleGrant.effective_role(actor) == :admin,
-      do: :admin,
-      else: member_tier(actor, subject)
+  def effective_tier(actor, subject), do: elem(tier_source(actor, subject), 0)
+
+  @typedoc "Which branch of `effective_tier/2` decided a tier."
+  @type tier_source :: :platform | :member | :legacy | :none
+
+  @typedoc "A tier and the row whose grant columns govern it — see `tier_source/2`."
+  @type sourced_tier :: {:admin | :editor | :viewer | :none, tier_source(), map() | nil}
+
+  @typedoc "One change ahead: at `at`, the tier becomes `tier`."
+  @type tier_change :: {DateTime.t(), :admin | :editor | :viewer | :none}
+
+  @doc """
+  `effective_tier/2` together with **where it came from** — for a page that has
+  to explain a tier, not only act on it (#2142).
+
+  Returns `{tier, source, record}`:
+
+    * `{:admin, :platform, user}` — a platform admin, standing or by a live
+      grant on the user;
+    * `{tier, :member, membership}` — the membership's tier on this org;
+    * `{tier, :legacy, user}` — a membership-less account on the default org,
+      from `User.role`;
+    * `{:none, :none, nil}` — no tier here (foreign org, a membership-less
+      account off the default org, no actor).
+
+  `record` is the row whose grant columns govern the tier. `effective_tier/2`
+  IS `elem(tier_source(actor, subject), 0)`, so a page rendering from this
+  cannot disagree with the decision it describes.
+  """
+  @spec tier_source(
+          map() | nil,
+          Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil
+        ) :: sourced_tier()
+  def tier_source(%{} = actor, subject) do
+    decide(actor, fn ->
+      org = subject_org_id(subject)
+      {org, affiliation(actor, org)}
+    end)
   end
 
-  def effective_tier(_actor, _subject), do: :none
+  def tier_source(_actor, _subject), do: {:none, :none, nil}
 
-  defp member_tier(actor, subject) do
+  @doc """
+  `tier_source/2` for a page that has just read the user's membership on
+  `org_id` itself (`nil`: none there) — the team page, an account's sites.
+
+  The same decision, fed the given row instead of the memoized lookup the
+  policy checks share, so a page that re-reads after a write shows the tier the
+  write left rather than one remembered from a few seconds before. Display only:
+  no policy check calls it.
+  """
+  @spec tier_source_for_membership(map(), struct() | String.t() | nil, map() | nil) ::
+          sourced_tier()
+  def tier_source_for_membership(%{} = user, org, membership),
+    do: decide(user, fn -> {subject_org_id(org), loaded_affiliation(user, membership)} end)
+
+  @doc """
+  The changes ahead in `effective_tier/2` as the live grants behind it expire —
+  the "until Friday, then viewer" of a temporary tier (#2142). `[]` when nothing
+  is due to change.
+
+  Each grant that is live now (the user's, and the membership's on this org)
+  expires at its own time; at each expiry the tier is decided again with every
+  grant expired by then removed, and a change is listed only when the tier
+  actually differs from the one before it. So a temporary platform admin whose
+  membership here is standing admin has no change ahead, and one whose live
+  membership grant outlasts the platform grant steps down through it.
+  Display only — no decision consults it.
+  """
+  @spec tier_changes(
+          map() | nil,
+          Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil
+        ) :: [tier_change()]
+  def tier_changes(%{} = actor, subject) do
     org = subject_org_id(subject)
+    changes(actor, org, affiliation(actor, org))
+  end
 
-    case affiliation(actor, org) do
-      {:member, membership} -> RoleGrant.effective_role(membership)
+  def tier_changes(_actor, _subject), do: []
+
+  @doc "`tier_changes/2` from an already-read membership, as `tier_source_for_membership/3`."
+  @spec tier_changes_for_membership(map(), struct() | String.t() | nil, map() | nil) ::
+          [tier_change()]
+  def tier_changes_for_membership(%{} = user, org, membership),
+    do: changes(user, subject_org_id(org), loaded_affiliation(user, membership))
+
+  # The one decision every entry point shares. `resolve` returns `{org_id,
+  # affiliation}` and is a thunk so the platform branch — most policy checks'
+  # hot path — pays neither the org resolution nor the membership lookup.
+  defp decide(actor, resolve) do
+    if RoleGrant.effective_role(actor) == :admin,
+      do: {:admin, :platform, actor},
+      else: member_tier(actor, resolve.())
+  end
+
+  defp member_tier(actor, {org, affiliation}) do
+    case affiliation do
+      {:member, membership} -> {RoleGrant.effective_role(membership), :member, membership}
       :unaffiliated -> legacy_tier(actor, org)
-      :foreign_org -> :none
+      :foreign_org -> {:none, :none, nil}
+    end
+  end
+
+  defp loaded_affiliation(_user, %{} = membership), do: {:member, membership}
+
+  # No membership on this org: whether the user holds one elsewhere decides
+  # foreign-org vs legacy — asked now, not from the memo.
+  defp loaded_affiliation(%{id: user_id}, nil) when is_binary(user_id),
+    do: if(any_membership?(user_id), do: :foreign_org, else: :unaffiliated)
+
+  defp loaded_affiliation(_user, nil), do: :unaffiliated
+
+  defp changes(actor, org, affiliation) do
+    membership =
+      case affiliation do
+        {:member, membership} -> membership
+        _other -> nil
+      end
+
+    {current, _source, _record} = decide(actor, fn -> {org, affiliation} end)
+
+    [actor, membership]
+    |> Enum.filter(&(is_map(&1) and RoleGrant.live?(&1)))
+    |> Enum.map(& &1.granted_role_expires_at)
+    |> Enum.sort(DateTime)
+    |> Enum.dedup_by(&DateTime.to_unix(&1, :microsecond))
+    |> Enum.map_reduce(current, fn at, previous ->
+      actor_then = expire_by(actor, at)
+
+      affiliation_then =
+        if membership, do: {:member, expire_by(membership, at)}, else: affiliation
+
+      {tier, _source, _record} = decide(actor_then, fn -> {org, affiliation_then} end)
+      {if(tier != previous, do: {at, tier}), tier}
+    end)
+    |> elem(0)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  # `record` as it will be at `at`: a grant expiring by then is gone.
+  defp expire_by(record, at) do
+    case Map.get(record, :granted_role_expires_at) do
+      %DateTime{} = expires_at ->
+        if DateTime.compare(expires_at, at) == :gt,
+          do: record,
+          else: Map.merge(record, %{granted_role: nil, granted_role_expires_at: nil})
+
+      _none ->
+        record
     end
   end
 
@@ -284,8 +418,8 @@ defmodule KilnCMS.Accounts.Scoping do
   # A membership-less account's global role applies only on the default org.
   defp legacy_tier(actor, org) do
     if org == Accounts.default_org_id(),
-      do: RoleGrant.effective_role(actor) || :none,
-      else: :none
+      do: {RoleGrant.effective_role(actor) || :none, :legacy, actor},
+      else: {:none, :none, nil}
   end
 
   @doc """
