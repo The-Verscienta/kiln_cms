@@ -31,8 +31,15 @@ defmodule KilnCMSWeb.PluginRouter do
   route stops the build, naming the plugin that declared it.
   """
   defmacro plugin_plug_routes do
+    plug_routes_ast(Kiln.Plugins.all())
+  end
+
+  @doc false
+  # The expansion proper, taking the plugin list so a test can build a throwaway
+  # router from test-only plugins without touching `config :kiln_cms, :plugins`.
+  def plug_routes_ast(plugins) do
     routes =
-      for plugin <- Kiln.Plugins.all(),
+      for plugin <- plugins,
           route <- Kiln.Plugins.PlugRoute.of(plugin) do
         case Kiln.Plugins.PlugRoute.validate(route) do
           :ok ->

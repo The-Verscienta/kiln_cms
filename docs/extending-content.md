@@ -348,6 +348,13 @@ UI" workflow, scoped to fields.
   readable. See `KilnCMS.CMS.ReferenceSnapshots`.
 - **Edit**: the content editor renders one input per definition automatically,
   in a *Custom fields* panel under the blocks.
+- **History**: the editor's version compare shows each custom key on its own
+  with its label, a typed value (`KilnCMS.CMS.FieldDisplay`) and an
+  added / removed / changed pill, and a restore previews itself first, listing
+  stored keys whose definition is gone as discarded. The stored history is
+  unchanged: a version's `changes` still carry `custom_fields` as one whole map
+  (the revisions API deliberately has no per-key `changed_custom_fields` yet).
+  See [Comparing and restoring versions](working-copy.md#comparing-and-restoring-versions).
 - **Deliver**: `custom_fields` is public, so headless clients get the values.
 - **Read typed over GraphQL**: `customFloat(name: "price")`,
   `customString`, `customInt`, `customBoolean`, `customDate`,
