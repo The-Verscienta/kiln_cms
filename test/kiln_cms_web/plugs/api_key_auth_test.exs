@@ -55,11 +55,13 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuthTest do
     assert conn.status == 401
   end
 
-  test "a non-kiln bearer value falls through to JWT handling (no 401 here)", %{conn: conn} do
+  test "a non-kiln bearer value falls through to JWT handling", %{conn: conn} do
     # A malformed/non-API-key bearer isn't treated as an invalid API key — it's
-    # left for :load_from_bearer, which simply resolves no actor (anonymous).
+    # left for :load_from_bearer, which resolves no actor. Since #2161's default
+    # flip that is an `invalid_token` 401 (a bad JWT), not an API-key rejection;
+    # `KilnCMSWeb.RejectInvalidBearerTest` covers the opt-out.
     conn = conn |> with_key("not-a-kiln-key") |> get(~p"/api/locales")
-    assert json_response(conn, 200)
+    assert [%{"code" => "invalid_token"}] = json_response(conn, 401)["errors"]
     refute conn.assigns[:current_user]
   end
 

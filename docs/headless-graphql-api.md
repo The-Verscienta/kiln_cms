@@ -28,7 +28,10 @@ and reads an optional bearer token (`load_from_bearer`). Anonymous requests are 
 supported — they simply run through the resource read policies, which already
 make **published content world-readable and everything else editor-only**. So an
 unauthenticated query can only ever see published content and world-readable
-taxonomy; there is nothing to leak.
+taxonomy; there is nothing to leak. Anonymous means *no* `Authorization` header:
+a bearer token that does not verify (garbled, expired, another instance's) is a
+`401` `invalid_token`, not an anonymous read (#2161; see
+[`KILN_API_REJECT_INVALID_BEARER`](environment-variables.md)).
 
 ## Design: delivery reads, authenticated writes
 
@@ -310,6 +313,10 @@ For a dynamic type the fragment is on `Entry`; use it with
 `publishedEntries(filter: {typeName: {eq: "recipe"}})`. The comment above each
 generated type says which. The fragment goes one level into lists and groups.
 Private custom fields are not in the export.
+
+Why the schema types the accessor and the export types the names, and the
+alternatives that were rejected, is in
+[ADR 0016](decisions/0016-the-graphql-schema-types-the-custom-field-accessor-and-a-per-org-export-types-the-names.md).
 
 Not available yet: Swift and Kotlin emitters for the GraphQL section, typed
 filter operators, a per-site schema with a regenerate step, and typed writes.
