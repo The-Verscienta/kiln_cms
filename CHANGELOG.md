@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (new table `site_password_policy`, no data change). Password changes now call the Have I Been Pwned range API by
+  default; air-gapped deployments set `BREACHED_PASSWORD_CHECK=false`.** Rolling the pin back is safe.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-upgrade))
+
 - **API consumers: a stale, expired or garbled `Authorization: Bearer` JWT is now a 401 (`invalid_token`), not anonymous
   data. Fix the client; `KILN_API_REJECT_INVALID_BEARER=false` restores the old fallback for this release only.**
   ([#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161) · [long form](docs/changelog/unreleased.md#reject-invalid-bearer-default-on))
@@ -76,8 +80,16 @@ Every summary line below that was shortened links to its own entry there.
   on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
   ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
 
+### Breaking
+
+- **Overlays: `Accounts.Bootstrap.create_first_admin/1` returns `{:ok, user, notices}`, not `{:ok, user}`.**
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-bootstrap-return))
+
 ### Added
 
+- **Admins choose what happens to a breached password at Organization → Password policy: off, warn (default) or block for administrators.**
+  Checked on register, change, reset and first-run setup, by k-anonymity.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-check))
 - **Admins can replace a webhook's signing secret with Rotate secret on `/editor/webhooks`; it works even when the old secret is unreadable.**
   ([#2347](https://github.com/The-Verscienta/kiln_cms/issues/2347) · [long form](docs/changelog/unreleased.md#webhook-rotate-secret))
 - **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**

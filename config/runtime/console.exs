@@ -44,3 +44,25 @@ if config_env() != :test do
       tone: System.get_env("KILN_ENV_COLOR")
   end
 end
+
+# Breached-password check (#2240) — passwords are looked up against the Have I
+# Been Pwned range API by k-anonymity (`KilnCMS.Accounts.BreachedPassword`).
+#
+# BREACHED_PASSWORD_CHECK=false is the air-gapped kill switch: no outbound call
+# is ever made, whatever any site's setting says. Only an explicit "off" writes
+# anything, so an unset or unreadable value leaves the check on, and — unlike
+# `Env.flag/2` with a `true` default — the suite's own `enabled: false` is never
+# overridden by an exported variable.
+if KilnCMS.Config.Env.fetch("BREACHED_PASSWORD_CHECK") == {:ok, false} do
+  config :kiln_cms, KilnCMS.Accounts.BreachedPassword, enabled: false
+end
+
+# BREACHED_PASSWORD_POLICY — the operator default (off | warn | block) that a
+# site's own setting (/editor/password-policy) overrides. Skipped in :test so an
+# exported value cannot change what the suite asserts.
+if config_env() != :test do
+  with {:ok, policy} <- KilnCMS.Config.Env.one_of("BREACHED_PASSWORD_POLICY", ~w(off warn block)) do
+    config :kiln_cms, KilnCMS.Accounts.BreachedPassword,
+      default_policy: %{"off" => :off, "warn" => :warn, "block" => :block}[policy]
+  end
+end

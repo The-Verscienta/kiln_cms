@@ -2318,6 +2318,11 @@ msgstr ""
 msgid "Admin routes"
 msgstr ""
 
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Administrator accounts cannot use a breached password. Block applies to administrators; editors and everyone else are warned instead, so a visitor is never locked out of signing up."
+msgstr ""
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Admins can always publish. You can change this later under Team."
@@ -3303,8 +3308,14 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/federation_live.ex
+#: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Block"
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block - refuse it for administrators"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -8316,6 +8327,11 @@ msgstr ""
 msgid "Give the view a name, up to 255 characters."
 msgstr ""
 
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Go back to the default policy for this site?"
+msgstr ""
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Go live at"
@@ -8852,6 +8868,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "If the account has two-factor authentication enabled, sign-in answers 200 with a pending token rather than 201 with a bearer token — branch on the status code, not on whether a token is present. Unattended clients should use an API key instead."
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "If the breach service can't be reached the password is accepted, so an outage never stops anyone setting one. Signing in is never checked. This applies to registering, changing or resetting a password, and the first-run setup."
 msgstr ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex
@@ -11350,6 +11371,11 @@ msgstr ""
 msgid "No plugins are installed on this instance."
 msgstr ""
 
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "No policy has been set for this site, so the default applies: %{policy}."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex
 #, elixir-autogen, elixir-format
 msgid "No posts yet."
@@ -11989,9 +12015,15 @@ msgid "October"
 msgstr ""
 
 #: lib/kiln_cms_web/live/api_key_live.ex
+#: lib/kiln_cms_web/live/password_policy_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
 msgid "Off"
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Off - don't warn"
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
@@ -12739,6 +12771,27 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Password changed. Sign in again with your new password."
+msgstr ""
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Password policy"
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Password policy reset to the default."
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Password policy saved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Passwords are not looked up at all."
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
@@ -15030,6 +15083,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
+#: lib/kiln_cms_web/live/password_policy_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #: lib/kiln_cms_web/live/security_txt_live.ex
@@ -15255,6 +15309,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/locale_settings_live.ex
+#: lib/kiln_cms_web/live/password_policy_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #: lib/kiln_cms_web/live/security_txt_live.ex
@@ -17487,6 +17542,11 @@ msgstr ""
 msgid "That passphrase didn't work. Try again."
 msgstr ""
 
+#: lib/kiln_cms/accounts/password_notice.ex
+#, elixir-autogen, elixir-format
+msgid "That password appears in a public data breach. It was accepted, but consider choosing a different one."
+msgstr ""
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "That path is already the target's own URL."
@@ -17672,6 +17732,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "The block this task was anchored to has been removed."
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "The breached-password check is switched off."
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -18018,9 +18083,19 @@ msgstr ""
 msgid "The opposite of the condition."
 msgstr ""
 
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "The password is accepted and the person is told it appears in a breach and that they should consider another. This is the default."
+msgstr ""
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "The password needs at least 8 characters."
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "The password policy could not be saved."
 msgstr ""
 
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -18127,6 +18202,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/content_export_controller.ex
 #, elixir-autogen, elixir-format
 msgid "The selection is not a list of content ids."
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "The server's operator has turned it off for the whole deployment (BREACHED_PASSWORD_CHECK=false). No password is looked up, and this setting has no effect until they turn it back on."
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -18723,6 +18803,11 @@ msgstr ""
 msgid "This panel has validation errors"
 msgstr ""
 
+#: lib/kiln_cms/accounts/changes/check_breached_password.ex
+#, elixir-autogen, elixir-format
+msgid "This password has appeared in a known data breach. Choose a different one."
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "This plugin doesn't describe itself. Its author can add a one-line %{callback} — the list below says what it adds in the meantime."
@@ -18860,6 +18945,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "This site publishes its content over two headless API surfaces — GraphQL and JSON:API — plus a rendered-artifact endpoint for full page bodies. Anonymous requests read published content; a bearer token unlocks drafts."
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site sets its own policy. Without it the default would be: %{policy}."
 msgstr ""
 
 #: lib/kiln_cms_web/live/site_push_live.ex
@@ -19868,6 +19958,11 @@ msgstr ""
 msgid "Use system theme"
 msgstr ""
 
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Use the default"
+msgstr ""
+
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Use the default locale (%{locale})"
@@ -20178,6 +20273,16 @@ msgstr ""
 msgid "Waiting for your device… Follow your browser's prompt to finish."
 msgstr ""
 
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Warn"
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Warn - allow it, with a warning"
+msgstr ""
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Warning"
@@ -20291,6 +20396,16 @@ msgstr ""
 msgid "What each side calls it"
 msgstr ""
 
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "What happens when a new password is found in a public data breach. Only a short fragment of the password's fingerprint is ever sent to check it; the password itself never leaves this server."
+msgstr ""
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "What happens when a new password is in a known breach."
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "What it adds"
@@ -20363,6 +20478,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "When a linked record is deleted for good…"
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "When a new password is in a known breach"
 msgstr ""
 
 #: lib/kiln_cms_web/live/search_synonym_live.ex
@@ -20884,6 +21004,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's outgoing mail."
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's password policy."
 msgstr ""
 
 #: lib/kiln_cms_web/live/site_push_live.ex

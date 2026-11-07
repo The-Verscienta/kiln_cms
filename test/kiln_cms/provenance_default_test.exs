@@ -77,7 +77,7 @@ defmodule KilnCMS.ProvenanceDefaultTest do
 
   describe "the generated key" do
     test "/setup generates one for the admin it creates" do
-      assert {:ok, admin} =
+      assert {:ok, admin, []} =
                Bootstrap.create_first_admin(%{
                  email: "first-#{System.unique_integer([:positive])}@example.com",
                  password: "password123456",
