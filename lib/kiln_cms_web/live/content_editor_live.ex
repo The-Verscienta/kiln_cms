@@ -2085,16 +2085,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     body = KilnCMS.Blocks.PortableText.from_tiptap(doc)
     rich_bodies = Map.put(socket.assigns.rich_bodies, key, body)
 
-    # A pristine form has no "blocks" params yet — synthesize them from the
-    # form's current values (full typed maps) so the injected body has a block
-    # list to land in.
-    base = AshPhoenix.Form.params(socket.assigns.form)
-
-    base =
-      case base["blocks"] do
-        nil -> Map.put(base, "blocks", preview_block_maps(socket.assigns.form))
-        _ -> base
-      end
+    base = form_params_with_blocks(socket.assigns.form)
 
     params =
       base

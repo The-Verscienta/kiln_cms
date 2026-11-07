@@ -82,6 +82,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Editing a nested column block on a freshly opened page no longer crashes the editor.**
+  Adding, removing, reordering or editing a column child before the first form change raised
+  in `AshPhoenix.Form`; the editor now builds the block list from the form's current values.
+  ([long form](docs/changelog/unreleased.md#columns-child-fresh-form))
+
 - **Phoenix 1.8.16 with absinthe_phoenix 2.0.6: GraphQL subscription pushes still reach
   WebSocket clients after the bump, which silently dropped every push on absinthe_phoenix 2.0.5.**
   ([#2202](https://github.com/The-Verscienta/kiln_cms/pull/2202) · [long form](docs/changelog/unreleased.md#phoenix-1-8-16-subscription-pushes))
