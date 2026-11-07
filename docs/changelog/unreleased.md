@@ -91,6 +91,34 @@ carries the reasoning.
 
 ## Added
 
+<a id="graphql-custom-where"></a>
+
+- **GraphQL filters custom fields with typed operators (`customWhere`, #2290).**
+  Every GraphQL list that takes `customFilter` (published, keyword and semantic
+  search, their `…Published` twins, for compiled types and `Entry`) also takes
+  `customWhere: [CustomFieldCondition!]`. A condition is `name` plus exactly one
+  kind key (`string`, `int`, `float`, `boolean`, `date`, `dateTime`) holding that
+  kind's operators, so a wrong operand (`float: {gt: "abc"}`) fails GraphQL
+  validation. Conditions are ANDed. `customFilter` and `customSort` are unchanged.
+  - **One authority.** The conditions are translated into `customFilter`'s own
+    conditions inside `CustomFieldQuery`, so casting, jsonb comparison, tenant and
+    Entry scoping, and privacy are the same code. The kind given must be the
+    field's (`FieldKind`); a mismatch names the field's actual kind. A private
+    field is the same `unknown custom field` error as a missing one below editor.
+  - **Not typed in v1.** A `multiple` field takes only `string: {eq | in}` (list
+    contains, as before); reference, media, group, geolocation, link fields and the
+    relationship operators stay on `customFilter`.
+  - **New operators.** `contains` and `startsWith` match text case-insensitively
+    and take `%`, `_` and `\` literally. `customFilter` accepts them as
+    `contains` / `starts_with` (additive; text-like fields only).
+  - **Limits.** At most 10 conditions per query, 50 values in an `in`; each
+    condition adds 5 to the query's complexity. Nothing indexes these predicates
+    beyond the equality index of #2321.
+  - **API surface.** Additive. `docs/api/schema.graphql` and
+    `docs/api/openapi.json` gain the argument (the JSON:API routes list
+    `custom_where` as an array of objects; the GraphQL mutations that load a
+    record list it beside `customFilter`).
+
 <a id="move-to-trash-in-editor"></a>
 
 - **Admins can move one document to the trash from its row menu in the
