@@ -213,6 +213,26 @@ carries the reasoning.
   [decision 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md#rotation)
   and the headless consumer guide.
 
+<a id="block-field-localization-config"></a>
+
+- **A site can make core block fields per-locale from config.**
+  `config :kiln_cms, :i18n, block_fields: %{"image" => [shared: [:media_id, :url], fallback: [:alt, :caption]]}`
+  gives the core `image`, `video` and `audio` blocks (or any registered block
+  except `gallery`, `fragment`, `rich_text`, `columns` and `file`) the same
+  `shared:` / `fallback:` modes a block module declares with `localized:`. A
+  site cannot edit a core block, so until now it could not share an image
+  across locales. On a translation the editor now locks a shared field, with
+  the *Shared: edited in the EN version* note and its library buttons
+  disabled, and shows a fallback field's inherited value as a placeholder; the
+  server refuses a pick into a locked field. Invalid entries are ignored with
+  one warning per distinct config. With no `block_fields:` key nothing changes.
+  Before enabling `:shared`: the next publish of the source variant overwrites
+  each translation's own value of those fields, and edits to them are refused
+  afterwards. Share `media_id` with `url`; a `:fallback` `alt` beside an
+  unshared `url` can describe the wrong image; an image nested in a `columns`
+  block exposes only `url` and `alt`. Removing the key is safe. No migration.
+  See [Field-level localization](../field-level-localization.md#making-core-block-fields-per-locale-2270).
+
 ## Changed
 
 <a id="custom-field-history"></a>
