@@ -1425,7 +1425,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         >
           <legend class="px-1 text-sm font-medium">
             {bounds_legend(@type, @target)}
-            <span class="font-normal text-base-content/60">{gettext("(optional)")}</span>
+            <span class="font-normal text-base-content/70">{gettext("(optional)")}</span>
           </legend>
           <div class="grid gap-3 sm:grid-cols-2">
             <.input
@@ -1469,7 +1469,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           />
           <span>
             {gettext("Editors can add new terms")}
-            <span class="block text-xs text-base-content/60">
+            <span class="block text-xs text-base-content/70">
               {gettext(
                 "For a vocabulary that grows, like properties or keywords. The options become suggestions, and terms already used on this type are suggested too. A new term does not join the options."
               )}
@@ -3233,14 +3233,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     </p>
                     <p
                       :if={definition.field_type == :select and definition.options != []}
-                      class="text-xs text-base-content/60"
+                      class="text-xs text-base-content/70"
                     >
                       {gettext("Options")}: {options_summary(definition)}
                     </p>
                     <p
                       :if={definition.field_type == :reference}
                       id={"field-#{definition.id}-links"}
-                      class="text-xs text-base-content/60"
+                      class="text-xs text-base-content/70"
                     >
                       {reference_summary(definition, @target_types, @dynamic_types)}
                     </p>
