@@ -246,6 +246,12 @@ green "No vulnerabilities found" — a pass that verified nothing.
   concurrent-test deadlocks.
 - Seed fixtures with `Ash.Seed.seed!` when you want to bypass the very
   policies/actions under test.
+- Muted text must be `text-base-content/70` or darker; a lexical guard
+  (`test/kiln_cms_web/muted_text_contrast_test.exs`) fails on lower values in
+  public paths and ratchets the console. After lowering a console count,
+  regenerate its baseline with
+  `KILN_UPDATE_CONTRAST_BASELINE=1 mix test test/kiln_cms_web/muted_text_contrast_test.exs`.
+  See [Muted text](docs/design-language.md#muted-text).
 
 ### Coverage
 
