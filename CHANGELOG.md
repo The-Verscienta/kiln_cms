@@ -83,6 +83,8 @@ Every summary line below that was shortened links to its own entry there.
   If an admin blocks their own network, `bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(remove: true)'` lifts the blocks.**
   ([#2242](https://github.com/The-Verscienta/kiln_cms/issues/2242) · [long form](docs/changelog/unreleased.md#ip-block-rules))
 
+- **Admins can replace a webhook's signing secret with Rotate secret on `/editor/webhooks`; it works even when the old secret is unreadable.**
+  ([#2347](https://github.com/The-Verscienta/kiln_cms/issues/2347) · [long form](docs/changelog/unreleased.md#webhook-rotate-secret))
 - **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
   A wrong operand type is a schema error; `contains` and `startsWith` (case-insensitive, literal) also work in `customFilter`.
   ([#2290](https://github.com/The-Verscienta/kiln_cms/issues/2290) · [long form](docs/changelog/unreleased.md#graphql-custom-where))
@@ -98,6 +100,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The content list can be filtered by up to four custom-field conditions and sorted by one field once one content type is listed; the count reads "1000+" past 1000.**
   Saved views keep them and flag a field that no longer applies; no migration.
   ([long form](docs/changelog/unreleased.md#content-list-field-filter-sort))
+
+- **Editors can download the content list as CSV or JSON from a new Export menu, or only the ticked rows with Export selected.**
+  Up to 10,000 rows, the saved list columns, private fields only if ticked; no migration.
+  ([long form](docs/changelog/unreleased.md#content-list-export))
 
 - **`custom_filter` equality, `in` and list membership use a new GIN index on `custom_fields`: a selective filter on 100,000 rows drops from about 40 ms to about 3 ms.**
   Range, `not_eq`, `ilike`, `null` and `custom_sort` are unchanged.
@@ -144,6 +150,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **CSV exports write a negative number as `-5`, not `'-5`; text starting with `=`, `+`, `-` or `@` is still prefixed.**
+  Affects any CSV that passes a negative number to `KilnCMSWeb.CSV`; text is unchanged.
+  ([long form](docs/changelog/unreleased.md#csv-numbers-unguarded))
+
 - **A console page you lack the role for now lands on a 403 `/access-denied` page naming the role it needs, instead of home with a toast; `access-denied` is now a reserved root slug.**
   ([#2143](https://github.com/The-Verscienta/kiln_cms/issues/2143) · [long form](docs/changelog/unreleased.md#access-denied-page))
 
@@ -179,6 +189,11 @@ Every summary line below that was shortened links to its own entry there.
   ([#2144](https://github.com/The-Verscienta/kiln_cms/issues/2144) · [long form](docs/changelog/unreleased.md#essentials-hidden-screens-hint))
 
 ### Fixed
+
+- **Three dead links in the docs now resolve (the `KilnCMS.Keys` link in Memberships and Ghost's schema in both comparison pages), and a docs test refuses relative `.html` links.** ([#2167](https://github.com/The-Verscienta/kiln_cms/issues/2167))
+
+- **The sign-in, register and reset pages now have a header landmark, one `h1`, and `autocomplete` on their email and password boxes.**
+  ([#2162](https://github.com/The-Verscienta/kiln_cms/issues/2162) · [long form](docs/changelog/unreleased.md#auth-pages-landmarks-autocomplete))
 
 - **`custom_sort` ranks a stored JSON `null`, array or object as no value (last in either direction), and page 2 of a keyset-paged sort no longer fails on one.**
   ([long form](docs/changelog/unreleased.md#custom-sort-json-null-last))
@@ -220,6 +235,9 @@ Every summary line below that was shortened links to its own entry there.
   (`內`, many other CJK characters) saves again: line splitting reads Unicode, not bytes, so
   the character is no longer cut in two and refused.**
   ([#2214](https://github.com/The-Verscienta/kiln_cms/pull/2214))
+
+- **Muted text on public pages and shared form components is now readable: `text-base-content/70`, 4.5:1 or better on every surface.**
+  ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163) · [long form](docs/changelog/unreleased.md#public-muted-text-contrast))
 
 ### Security
 

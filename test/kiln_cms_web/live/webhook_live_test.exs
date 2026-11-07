@@ -279,6 +279,79 @@ defmodule KilnCMSWeb.WebhookLiveTest do
     end
   end
 
+  # #2347: replace an endpoint's signing secret without deleting it.
+  describe "rotate secret (#2347)" do
+    defp secret_of(id), do: id |> fetch_endpoint() |> WebhookEndpoint.secret()
+    defp fetch_endpoint(id), do: CMS.get_webhook_endpoint!(id, authorize?: false, tenant: nil)
+
+    test "shows the new secret and not the old one", %{conn: conn} do
+      endpoint = seed_endpoint(@long_secret)
+      {lv, _html} = admin_live(conn)
+
+      html = lv |> element("#rotate-secret-#{endpoint.id}") |> render_click()
+
+      new_secret = secret_of(endpoint.id)
+      assert new_secret != @long_secret
+      refute html =~ @long_secret
+      assert lv |> element("#webhook-#{endpoint.id}-secret") |> render() =~ new_secret
+      assert html =~ "Signing secret replaced."
+      assert has_element?(lv, "#copy-secret-#{endpoint.id}")
+    end
+
+    test "the button confirms and disables itself", %{conn: conn} do
+      endpoint = seed_endpoint()
+      {lv, _html} = admin_live(conn)
+
+      assert has_element?(
+               lv,
+               ~s(#rotate-secret-#{endpoint.id}[data-confirm*="update the receiver"][phx-disable-with])
+             )
+    end
+
+    test "an endpoint with an unreadable secret can be rotated", %{conn: conn} do
+      endpoint = seed_endpoint()
+      Ash.Seed.update!(endpoint, %{secret_encrypted: :crypto.strong_rand_bytes(60)})
+      {lv, html} = admin_live(conn)
+
+      assert html =~ "unreadable"
+      assert has_element?(lv, "#rotate-secret-#{endpoint.id}")
+
+      lv |> element("#rotate-secret-#{endpoint.id}") |> render_click()
+
+      assert is_binary(secret_of(endpoint.id))
+      refute render(lv) =~ "unreadable"
+      assert has_element?(lv, "#webhook-#{endpoint.id}-secret")
+    end
+
+    test "an editor never reaches the page, so cannot rotate", %{conn: conn} do
+      endpoint = seed_endpoint(@long_secret)
+      conn = log_in(conn, authed_user(:editor))
+
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+               live(conn, ~p"/editor/webhooks")
+
+      assert secret_of(endpoint.id) == @long_secret
+    end
+
+    test "a forged id from another site rotates nothing", %{conn: conn} do
+      other = KilnCMS.OrgFixtures.org("wh-rotate-other")
+      theirs = seed_endpoint(@long_secret, other.id)
+      {lv, _html} = admin_live(conn)
+
+      html = render_hook(lv, "rotate_secret", %{"id" => theirs.id})
+
+      assert html =~ "Couldn&#39;t rotate that signing secret."
+      assert secret_of(theirs.id) == @long_secret
+    end
+
+    test "an unknown id is refused without crashing", %{conn: conn} do
+      {lv, _html} = admin_live(conn)
+
+      assert render_hook(lv, "rotate_secret", %{"id" => Ash.UUID.generate()}) =~
+               "Couldn&#39;t rotate that signing secret."
+    end
+  end
+
   # #1776: the new-endpoint form used to tick every event, so an endpoint added
   # without reviewing the list was POSTed unpublished draft bodies.
   describe "default selection and bulk controls (#1776)" do

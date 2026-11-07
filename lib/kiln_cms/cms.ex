@@ -392,6 +392,7 @@ defmodule KilnCMS.CMS do
       define :create_webhook_endpoint, action: :create
       define :update_webhook_endpoint, action: :update
       define :destroy_webhook_endpoint, action: :destroy
+      define :rotate_webhook_secret, action: :rotate_secret
       define :record_webhook_success, action: :record_delivery_success
       define :record_webhook_failure, action: :record_delivery_failure
     end

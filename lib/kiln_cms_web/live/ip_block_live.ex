@@ -375,7 +375,7 @@ defmodule KilnCMSWeb.IpBlockLive do
               <p :if={rule.note} class="mt-0.5 truncate text-sm text-base-content/70">
                 {rule.note}
               </p>
-              <p :if={rule.expires_at} class="mt-0.5 text-xs text-base-content/60">
+              <p :if={rule.expires_at} class="mt-0.5 text-xs text-base-content/70">
                 {gettext("Expires %{at}", at: format_time(rule.expires_at))}
               </p>
             </div>

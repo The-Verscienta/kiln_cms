@@ -53,6 +53,44 @@ defmodule KilnCMSWeb.CSVTest do
     end
   end
 
+  describe "field/1 with numbers (#2293)" do
+    test "a real number is never formula-guarded, whatever its sign" do
+      assert CSV.field(-5) == "-5"
+      assert CSV.field(-1.5) == "-1.5"
+      assert CSV.field(0) == "0"
+      assert CSV.field(Decimal.new("-2.50")) == "-2.50"
+    end
+
+    test "a string that looks like a number is still text, so it stays guarded" do
+      assert CSV.field("-5") == "'-5"
+      assert CSV.field("+1") == "'+1"
+    end
+
+    test "text in a field the schema calls an integer stays guarded" do
+      assert CSV.field("=1+1") == "'=1+1"
+    end
+
+    test "a header goes through the same guarded path as a value" do
+      assert CSV.line(["=header", "ok"]) == "'=header,ok\r\n"
+    end
+
+    test "booleans are not numbers" do
+      assert CSV.field(true) == "true"
+      assert CSV.field(false) == "false"
+    end
+
+    test "a negative number round-trips through parse/1" do
+      assert [["-5", "-1.5", "-5"]] = CSV.parse(CSV.line([-5, -1.5, "-5"]))
+    end
+  end
+
+  describe "bom/0" do
+    test "is the UTF-8 byte order mark, which parse/1 strips" do
+      assert CSV.bom() == <<0xEF, 0xBB, 0xBF>>
+      assert [["id", "title"]] = CSV.parse(CSV.bom() <> CSV.line(["id", "title"]))
+    end
+  end
+
   describe "line/1" do
     test "joins fields with commas and terminates with CRLF" do
       assert CSV.line(["a", "b", "c"]) == "a,b,c\r\n"

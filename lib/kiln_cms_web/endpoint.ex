@@ -191,6 +191,10 @@ defmodule KilnCMSWeb.Endpoint do
     json_decoder: Phoenix.json_library()
 
   plug Plug.MethodOverride
+  # `Plug.Head` below rewrites HEAD into GET, so a controller could not tell the
+  # two apart. A download that must not do its work for a HEAD (the content
+  # export bills a rate limit and streams) reads `conn.private[:kiln_head?]`.
+  plug :remember_head
   plug Plug.Head
   plug Plug.Session, @session_options
   # Strip a `/<locale>/…` prefix and set the locale before routing.
@@ -249,4 +253,7 @@ defmodule KilnCMSWeb.Endpoint do
   end
 
   defp secure_upload_headers(conn, _opts), do: conn
+
+  defp remember_head(conn, _opts),
+    do: Plug.Conn.put_private(conn, :kiln_head?, conn.method == "HEAD")
 end
