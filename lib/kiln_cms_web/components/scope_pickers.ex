@@ -190,7 +190,7 @@ defmodule KilnCMSWeb.ScopePickers do
         </p>
         <div :if={@stale != []} class="space-y-1">
           <p class="text-xs font-medium text-base-content/70">{gettext("Not found on this site")}</p>
-          <p class="text-xs text-base-content/60">
+          <p class="text-xs text-base-content/70">
             {gettext(
               "These stored names match no content type here, so they allow nothing. A custom type's own name never matches on this list — use Custom content types (all of them). Untick a name to remove it."
             )}
@@ -454,7 +454,7 @@ defmodule KilnCMSWeb.ScopePickers do
             <p class="text-xs font-medium text-base-content/70">
               {gettext("Individual custom fields")}
             </p>
-            <p class="text-xs text-base-content/60">
+            <p class="text-xs text-base-content/70">
               {gettext(
                 "Tick Custom fields (all of them) above for every custom field, or pick individual ones here. A group's own box lets them add, remove and reorder its rows; a field under it lets them change just that field in every row. With any of these ticked, creating a document is held to them too."
               )}
@@ -477,7 +477,7 @@ defmodule KilnCMSWeb.ScopePickers do
                     class="field-checkbox size-4"
                   />
                   {entry.label}
-                  <code class="font-mono text-xs text-base-content/50">{entry.key}</code>
+                  <code class="font-mono text-xs text-base-content/70">{entry.key}</code>
                 </label>
               </li>
             </ul>

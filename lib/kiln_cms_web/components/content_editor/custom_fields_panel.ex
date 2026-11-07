@@ -236,7 +236,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
         <p
           :if={@definition.name in @read_only}
           id={"cf-read-only-#{@definition.name}"}
-          class="-mt-2 flex items-center gap-1 text-xs text-base-content/60"
+          class="-mt-2 flex items-center gap-1 text-xs text-base-content/70"
         >
           <.icon name="hero-lock-closed" class="size-3.5" />
           {gettext("Your role can see this field but not change it.")}
