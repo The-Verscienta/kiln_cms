@@ -148,8 +148,21 @@ defmodule KilnCMS.CMS.CustomFieldIndexTest do
       # Statistics for the rows just written, so the planner costs the table it
       # has rather than the near-empty one it last sampled. Its `pg_statistic`
       # rows roll back with the sandbox.
+      #
+      # A GIN index takes new rows into a pending list first (`fastupdate`),
+      # and the planner costs every scan of it by that list's size. Rows that
+      # earlier tests inserted and rolled back stay in the list until a vacuum
+      # merges it, so its size, and with it the `in` plan, depended on what
+      # ran before this module (#2333 CI: a Bitmap Index Scan on
+      # entries_unique_slug_index won). Merge it now so the plan is costed on
+      # this table alone. `type_definitions` is the other side of the entries
+      # join; analyze it too rather than plan against whatever autovacuum
+      # last sampled.
+      Repo.query!("SELECT gin_clean_pending_list('pages_custom_fields_gin_index')")
+      Repo.query!("SELECT gin_clean_pending_list('entries_custom_fields_gin_index')")
       Repo.query!("ANALYZE pages")
       Repo.query!("ANALYZE entries")
+      Repo.query!("ANALYZE type_definitions")
 
       %{admin: admin, org_id: org_id, type: type}
     end

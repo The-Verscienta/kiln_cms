@@ -379,7 +379,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> element("button[phx-value-action='delete']") |> render_click()
       cancelled = lv |> element("button[phx-click='cancel_bulk']") |> render_click()
 
-      refute cancelled =~ "to trash?"
+      # The bulk guard's own copy, not a bare "to trash?": every row's Move to
+      # trash menu item (#2137) carries a "… to trash?" confirm of its own.
+      refute cancelled =~ "selected item(s) to trash?"
+      refute has_element?(lv, "button[phx-click='confirm_bulk']")
       assert Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
     end
 

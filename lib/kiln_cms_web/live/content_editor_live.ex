@@ -58,6 +58,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMSWeb.ContentEditor.InlineTerms
   alias KilnCMSWeb.ContentEditor.NewDraft
   alias KilnCMSWeb.ContentEditor.ReferenceValues
+  alias KilnCMSWeb.ContentTrash
   alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
   alias KilnCMSWeb.VersionDiffComponents
@@ -903,6 +904,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:slug_customized?, slug_customized?(socket))
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
     |> assign_restore_refusal()
+    # Only OFFERS the Settings tab's Move to trash (#2137); `move_to_trash`
+    # asks again. Computed when a record is assigned (mount, reload), not on
+    # every save: the destroy policy doesn't depend on the record's state, and
+    # the handler's own check is the one that counts.
+    |> assign(
+      :may_trash?,
+      ContentTypes.can_destroy?(socket.assigns.kind, record, socket.assigns.actor,
+        tenant: record.org_id
+      )
+    )
     # Only OFFERS the Copy preview link action; `share_preview` asks again.
     |> assign(:may_share_preview?, PreviewToken.mintable?(record, socket.assigns.actor))
     # Recomputed alongside `may_write?` and for the same reason: a reload that
@@ -3723,6 +3734,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # "Move to trash" from the Settings tab (#2137). The section is drawn only
+  # for `@may_trash?`, and the policy is asked again here, so a forged event
+  # from someone the section was never offered to is refused before any
+  # write. Edits still waiting for the autosave debounce are saved first, the
+  # way a workflow transition settles them (`settle_before_workflow/1`): the
+  # trash is restorable, and what comes back should be what was on screen. A
+  # save that fails stops the trash and says why.
+  def handle_event("move_to_trash", _params, socket) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+
+    if socket.assigns.may_trash? and
+         ContentTypes.can_destroy?(kind, record, actor, tenant: record.org_id) do
+      case settle_before_workflow(socket) do
+        {:ok, socket} -> {:noreply, move_to_trash(socket)}
+        {:error, socket} -> {:noreply, socket}
+      end
+    else
+      {:noreply, put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.forbidden("trash"))}
+    end
+  end
+
   # ── Version compare (#467) ─────────────────────────────────────────────────
 
   def handle_event("toggle_compare", %{"version_id" => version_id}, socket)
@@ -5153,6 +5185,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       true ->
         key
+    end
+  end
+
+  # The record as settled (a flush reloads it), so the destroy sees the lock
+  # version the last save left behind.
+  defp move_to_trash(socket) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+    socket = cancel_autosave_timer(socket)
+
+    case ContentTrash.trash(kind, record, actor, record.org_id) do
+      :ok ->
+        socket
+        |> put_flash(:info, ContentTrash.moved(record))
+        |> push_navigate(to: ~p"/editor")
+
+      {:error, error} ->
+        put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("trash", error))
     end
   end
 
@@ -7895,6 +7944,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               locked_fields={@locked_fields}
               cursors={@cursors}
               may_write?={@may_write?}
+              may_trash?={@may_trash?}
               may_suggest_seo?={@may_suggest_seo?}
               conflict={@conflict}
               editor_version={@editor_version}

@@ -55,6 +55,43 @@ carries the reasoning.
 
 ## Added
 
+<a id="move-to-trash-in-editor"></a>
+
+- **Admins can move one document to the trash from its row menu in the
+  content list, or from the content editor's Settings tab.** Until now the
+  only way to trash content in the UI was to tick it and use the bulk bar's
+  Delete, which nobody found from inside a document
+  ([#2137](https://github.com/The-Verscienta/kiln_cms/issues/2137)).
+  - **Where.** The row's **⋯** menu ends with **Move to trash**, set apart by
+    a divider and in red. The editor's Settings tab ends with a **Trash**
+    section: a note on what trashing does, and a **Move to trash** button.
+    There is no header button. The bulk bar is unchanged.
+  - **Who.** Admins only, whatever the document's state, because it is the
+    same `:destroy` policy as the bulk Delete and the API's `DELETE`. Editors
+    are not shown either control, and a forged event is refused before the
+    write.
+  - **What it does.** The same soft delete as before: the document leaves the
+    list, the API and the live site, and an admin restores it from Trash
+    (`/editor/trash`) within the retention period (30 days by default). The
+    confirm prompt names the document and the period; for a published
+    document it adds that it comes off the site now and that restoring it puts
+    it back.
+  - **Unsaved edits.** In the editor, an edit still waiting for autosave is
+    saved first, so a restore brings back what was on screen; if that save
+    fails, nothing is trashed and the error says why. On a published
+    document, Settings-tab changes held for **Save** are not saved first, as
+    with the other workflow buttons.
+  - **Known limitation.** Another session still open on the document (another
+    editor tab, the in-context editor, the API or MCP) can keep writing into
+    the trashed row, and **Publish changes** on a held live page can publish
+    it again. Tracked in
+    [#2332](https://github.com/The-Verscienta/kiln_cms/issues/2332).
+  - **Developers.** New `KilnCMS.CMS.ContentTypes.can_destroy?/4` asks the
+    destroy policy for one record (`tenant:` in the options), and
+    `KilnCMSWeb.ContentTrash` holds the write and the copy both screens share.
+    No migration, no config, nothing to run. Guide:
+    [Trash and restore](../trash.md).
+
 <a id="content-list-field-columns"></a>
 
 - **The content list can show custom fields on each row.** Pick one content

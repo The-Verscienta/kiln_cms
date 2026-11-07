@@ -23,6 +23,7 @@ defmodule KilnCMSWeb.EditorLive do
   alias KilnCMS.I18n
   alias KilnCMSWeb.ContentEditor.NewDraft
   alias KilnCMSWeb.ContentEditor.Shared
+  alias KilnCMSWeb.ContentTrash
   alias KilnCMSWeb.EditorLive.FieldCells
   alias KilnCMSWeb.EditorLive.Filters
 
@@ -137,12 +138,26 @@ defmodule KilnCMSWeb.EditorLive do
 
     socket
     |> assign(:items, items)
+    |> assign(:trashable, trashable(socket, items))
     |> assign_column_labels(items, FieldCells.empty())
     |> assign(:cursors, cursors)
     |> assign(:more?, more?(cursors))
     |> assign(:total, count_items(socket))
     |> assign(:compliance_settings, compliance_settings(socket, items))
     |> assign_translated()
+  end
+
+  # The rows the actor may move to the trash (#2137), as selection keys
+  # ("kind:id"): the destroy policy asked once per row per load, not per
+  # render. Only decides whether the row menu OFFERS the item; the
+  # `move_to_trash` handler asks again.
+  defp trashable(socket, items) do
+    %{actor: actor, current_org: org} = socket.assigns
+
+    for {kind, record} <- items,
+        ContentTypes.can_destroy?(kind, record, actor, tenant: org),
+        into: MapSet.new(),
+        do: "#{kind}:#{record.id}"
   end
 
   # The overview strip's counts: how much of the site's content sits in each
@@ -786,6 +801,25 @@ defmodule KilnCMSWeb.EditorLive do
     end
   end
 
+  # "Move to trash" on one row (#2137). `kind`/`id` come off the clicked row,
+  # so they are client input: the type is resolved without raising, the record
+  # is read under this site's org (another org's id is simply not found), and
+  # the destroy policy is asked again before the write — the menu item is drawn
+  # only for rows it allows, and a forged event gets the same answer.
+  def handle_event("move_to_trash", %{"kind" => kind, "id" => id}, socket)
+      when is_binary(kind) and is_binary(id) do
+    %{actor: actor, current_org: org} = socket.assigns
+
+    with %{} <- ContentTypes.get(kind, org),
+         {:ok, record} <- ContentTypes.get_record(kind, id, actor: actor, tenant: org) do
+      {:noreply, move_to_trash(socket, kind, record)}
+    else
+      _missing -> {:noreply, put_flash(socket, :error, ContentTrash.not_found())}
+    end
+  end
+
+  def handle_event("move_to_trash", _params, socket), do: {:noreply, socket}
+
   def handle_event("load_more", _params, socket) do
     case List.last(socket.assigns.items) do
       nil ->
@@ -797,6 +831,7 @@ defmodule KilnCMSWeb.EditorLive do
         {:noreply,
          socket
          |> assign(:items, socket.assigns.items ++ page)
+         |> assign(:trashable, MapSet.union(socket.assigns.trashable, trashable(socket, page)))
          |> assign(:cursors, cursors)
          |> assign(:more?, more?(cursors))
          |> assign_column_labels(page, socket.assigns.column_labels)
@@ -1006,6 +1041,25 @@ defmodule KilnCMSWeb.EditorLive do
   # which case the item is counted as skipped.
   defp destroy(kind, id, actor, org),
     do: ContentTypes.destroy(kind, get!(kind, id, actor, org), actor: actor, tenant: org)
+
+  defp move_to_trash(socket, kind, record) do
+    %{actor: actor, current_org: org} = socket.assigns
+
+    if ContentTypes.can_destroy?(kind, record, actor, tenant: org) do
+      case ContentTrash.trash(kind, record, actor, org) do
+        :ok ->
+          socket
+          |> refresh()
+          |> assign(:selected, MapSet.delete(socket.assigns.selected, "#{kind}:#{record.id}"))
+          |> put_flash(:info, ContentTrash.moved(record))
+
+        {:error, error} ->
+          put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("trash", error))
+      end
+    else
+      put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.forbidden("trash"))
+    end
+  end
 
   # The set of selection keys ("kind:id") for the currently loaded items (the
   # status/search filter already ran server-side).
@@ -2220,6 +2274,26 @@ defmodule KilnCMSWeb.EditorLive do
                     <.icon name="hero-pencil-square" class="size-4 text-base-content/60" />
                     {gettext("Edit")}
                   </.link>
+                  <%!-- Last and set apart: the one item that takes the row
+                        away (#2137). Drawn where the destroy policy allows it
+                        (`@trashable`); the handler asks again. --%>
+                  <% trashable? = MapSet.member?(@trashable, "#{kind}:#{record.id}") %>
+                  <hr :if={trashable?} class="my-1 border-base-content/10" aria-hidden="true" />
+                  <button
+                    :if={trashable?}
+                    type="button"
+                    id={"row-trash-#{kind}-#{record.id}"}
+                    popovertarget={"row-menu-#{kind}-#{record.id}"}
+                    popovertargetaction="hide"
+                    phx-click="move_to_trash"
+                    phx-value-kind={kind}
+                    phx-value-id={record.id}
+                    data-confirm={ContentTrash.confirm(record)}
+                    class="row-menu-item text-error"
+                  >
+                    <.icon name="hero-trash" class="size-4" />
+                    {gettext("Move to trash")}
+                  </button>
                 </div>
               </div>
             </li>
