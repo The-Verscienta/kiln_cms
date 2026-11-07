@@ -143,7 +143,14 @@ defmodule KilnCMSWeb.AuthOverridesTest do
 
   # Whitespace between tags is template layout, not markup: the copied field
   # branches on the eye button, so its indentation cannot match upstream's.
-  defp squash(html), do: String.replace(html, ~r/>\s+</, "><")
+  #
+  # `autocomplete` is the one attribute Kiln adds on purpose (#2162), so it is
+  # dropped here and pinned by `KilnCMSWeb.AuthLandmarksTest` instead.
+  defp squash(html) do
+    html
+    |> String.replace(~r/>\s+</, "><")
+    |> String.replace(~r/ autocomplete="[^"]*"/, "")
+  end
 
   defp undeclared(overrides) do
     overrides

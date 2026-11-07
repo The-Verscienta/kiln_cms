@@ -124,7 +124,10 @@ written as a function component or a raw `class="…"` in a template.
   `Layouts.auth_brand/1`, over every sign-in page and the first-run wizard).
   The library's sign-in pages take these through `AuthOverrides`; Kiln's own
   `/sign-in/verify` template uses them directly, so the two steps of a sign-in
-  look like one flow.
+  look like one flow. `Layouts.auth/1` wraps the brand row in a `<header>`,
+  puts the page in `<main id="main">` and draws the page's one `h1`, visually
+  hidden (`sr-only`) and taken from the page title; every view's visible
+  heading is therefore an `h2`, including the `/sign-in/verify` template.
 - **Tabs** — `.tabs` (segmented-control container) + `.tab`; drive the active
   segment with `aria-selected="true"` (accessible, no extra class). Used for the
   media Library/Trash switch. When the tabs switch panels on the same page (the

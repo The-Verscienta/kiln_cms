@@ -879,6 +879,43 @@ carries the reasoning.
 
 <a id="custom-sort-json-null-last"></a>
 
+<a id="auth-pages-landmarks-autocomplete"></a>
+
+- **The sign-in, register and reset pages now have a header landmark, one `h1`,
+  and `autocomplete` on their email and password boxes (#2162).** An
+  accessibility audit found auth content outside any landmark, no `h1`, and
+  fields a password manager had to guess at.
+  - **Landmarks and heading.** The environment banner and logo row are a
+    `<header>`, and the flash toast sits inside `<main id="main">`. The page
+    carries one screen-reader-only `h1` holding the page title (the tab title
+    the page already had), so it follows sign-in, register and reset as the
+    view changes. Each view keeps its visible heading, which stays an `h2`.
+    The two-factor prompt at `/sign-in/verify` follows the same rule: its
+    visible "Two-factor authentication" heading is now an `h2`, under the
+    hidden `h1`. Nothing looks different.
+  - **`autocomplete`.** The email box on sign-in, register and the
+    reset-request form has `autocomplete="email"`. The password box has
+    `current-password` on sign-in and `new-password` on register and on the
+    reset-token form, as do the confirmation boxes, so a password manager
+    offers to save a new password and does not fill a saved one into a "choose
+    a password" box (WCAG 1.3.5).
+  - **Not covered.** The email box on the magic-link request form still has no
+    `autocomplete`: it is rendered inside the library's component, and
+    changing it would mean copying that whole component.
+  - **For overlay authors.** Two more library renders are now Kiln copies:
+    `KilnCMSWeb.AuthIdentityInput` (the email box) and
+    `KilnCMSWeb.AuthResetRequestForm` (the `/reset` request form), next to
+    `AuthSignInForm`, `AuthRegisterForm`, `AuthResetForm` and
+    `AuthPasswordInput`. `KilnCMSWeb.AuthOverridesTest` renders the sign-in,
+    register and reset-token forms against upstream's and fails if they differ
+    by more than the `autocomplete` attribute, so re-run it when bumping
+    `ash_authentication_phoenix`; the `/reset` request form is not in that
+    comparison, so re-read `AuthResetRequestForm` against upstream's
+    `Password.ResetForm` by hand.
+    `AuthPasswordInput.password_field/1` and `password_confirmation_field/1`
+    now require an `autocomplete` attribute; an overlay that calls them must
+    pass one. No configuration, migration or upgrade step.
+
 - **`custom_sort` treats a stored JSON `null`, array or object as no value, and
   page 2 of a keyset-paged `custom_sort` no longer fails on one.** On the
   JSON:API and GraphQL reads, a record whose custom field was stored as a JSON
