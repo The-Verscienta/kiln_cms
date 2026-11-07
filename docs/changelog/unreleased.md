@@ -22,6 +22,44 @@ carries the reasoning.
 
 ## Added
 
+<a id="content-list-field-columns"></a>
+
+- **The content list can show custom fields on each row.** Pick one content
+  type in the list's type filter and a **Columns** button appears in the list's
+  header bar. Tick the fields to show; each row then carries a small strip of
+  `label value` pairs under its meta line. The choice is the person's own, kept
+  per site and per content type, and is not part of the URL or of saved views.
+  - **What it offers.** Fields of type string, text, integer, float, boolean,
+    date, datetime, url, select, reference, user and media, single-valued only.
+    Groups, geolocation, date ranges, recurrence, computed and multi-valued
+    fields are not offered. Up to 6 are remembered per type and the first 4
+    (in field order) are shown. Private fields are offered, because editors
+    already see them in the content editor; the list is editor-only.
+    With "All types" selected on a site with several types, no picker is
+    shown (field names collide across types) and a hint says to choose a type.
+  - **What a cell shows.** A reference shows the target's current title, read
+    afresh as the viewer, or "Unavailable" when it cannot be read or no longer
+    exists; the title stored in the field is never shown. A user field shows
+    the person's name only ("Unnamed user" without one, never the email). A
+    select shows the option's label, a boolean Yes or No, a media field its
+    alt text or file name, and an empty value shows a dash. Long values are cut
+    at 80 characters. References are looked up once per page of rows, not per
+    row.
+  - **Developers.** Choices live in a new nullable `users.content_list_columns`
+    map (`%{org_id => %{type => [field name]}}`), written only by the new
+    `:set_content_list_columns` action (`Accounts.set_content_list_columns/5`,
+    self only). It merges one site/type entry into the stored map under a row
+    lock, so a stale tab cannot overwrite another site's choice, and checks the
+    names against the site's field definitions; a field deleted later drops out
+    silently. Which fields may be offered is decided in one place,
+    `KilnCMS.CMS.ListFields.readable_fields/4`. The attribute sits behind the same field policy as
+    `status_marks`: only the user and platform admins can read it, so it
+    reaches no API caller as a byline field.
+  - **Upgrade.** Additive: one nullable `users` column with no default, added
+    by the migration that runs on deploy. No upgrade step, no environment
+    variable, and rolling the pin back leaves an unread column. Filtering,
+    sorting and exporting by field are not part of this change.
+
 <a id="custom-field-native-filter-sort"></a>
 
 - **A custom field can be named like a column in `filter[...]` and `sort=`, and

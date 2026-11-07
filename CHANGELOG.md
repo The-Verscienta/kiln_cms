@@ -62,6 +62,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The content list can show up to four custom fields on each row; pick them under Columns once one content type is listed.**
+  Remembered per person, site and type; additive migration, nothing to run.
+  ([long form](docs/changelog/unreleased.md#content-list-field-columns))
+
 - **Custom fields can be filtered and sorted by bare name (`filter[price]`, `sort=title,price`), and `custom_sort` now works on search routes.**
   ([long form](docs/changelog/unreleased.md#custom-field-native-filter-sort))
 
