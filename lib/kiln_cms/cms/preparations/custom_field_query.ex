@@ -13,7 +13,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       `gt`, `gte`, `lt`, `lte`, `in`, `ilike`, `contains`, `starts_with`,
       `null`; `is_nil` is a synonym of `null`). `contains` / `starts_with`
       match text case-insensitively and take their operand literally (`%`,
-      `_` and `\` are escaped), unlike `ilike`. Conditions are ANDed.
+      `_` and `\\` are escaped), unlike `ilike`. Conditions are ANDed.
     * `custom_where` — the typed form of `custom_filter` (GraphQL
       `customWhere`, #2290): a list of `%{name: "price", float: %{gt: 10.0}}`,
       one kind key (`string`, `int`, `float`, `boolean`, `date`, `date_time`)
