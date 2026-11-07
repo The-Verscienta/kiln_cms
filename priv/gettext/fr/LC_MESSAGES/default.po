@@ -1153,6 +1153,16 @@ msgid_plural "%{count} published documents are in no menu."
 msgstr[0] "1 document publié n'est dans aucun menu."
 msgstr[1] "%{count} documents publiés ne sont dans aucun menu."
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 year"
+msgstr "1 an"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "180 days"
+msgstr "180 jours"
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "2FA on"
@@ -1172,6 +1182,11 @@ msgstr "404 (%{count})"
 #, elixir-autogen, elixir-format
 msgid "6-digit code"
 msgstr "Code à 6 chiffres"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "90 days"
+msgstr "90 jours"
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
@@ -2457,7 +2472,6 @@ msgstr "Utiliser aussi les règles fournies par ce déploiement"
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/live/content_editor/block_params.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Alt text"
@@ -3485,6 +3499,7 @@ msgstr "Impossible de reprogrammer dans le passé."
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -3525,7 +3540,6 @@ msgid "Canonical URL"
 msgstr "URL canonique"
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Caption"
@@ -3872,6 +3886,7 @@ msgstr "Choisir un audio"
 msgid "Choose files"
 msgstr "Choisir des fichiers"
 
+#: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -6286,6 +6301,11 @@ msgstr "Brouillons uniquement (service headless)"
 msgid "Drafts that have never been published are not listed."
 msgstr "Les brouillons jamais publiés ne sont pas listés."
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts-only keys only. Until this date the service can swap the key for a fresh one itself; after it, mint a new key. Other scopes ignore it."
+msgstr "Clés brouillons uniquement. Jusqu’à cette date, le service peut lui-même remplacer la clé par une nouvelle ; ensuite, créez une nouvelle clé. Les autres portées l’ignorent."
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -6893,6 +6913,7 @@ msgstr "Point de terminaison"
 msgid "Endpoint URL"
 msgstr "URL du point de terminaison"
 
+#: lib/kiln_cms_web/live/system_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Endpoints"
@@ -8505,8 +8526,8 @@ msgstr "Si le compte utilise l'authentification à deux facteurs, la connexion r
 msgid "If … then …"
 msgstr "Si … alors …"
 
+#: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/live/content_editor/block_params.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Image URL"
 msgstr "URL de l'image"
@@ -11525,6 +11546,7 @@ msgstr "Le stockage d'objets, l'e-mail sortant et la recherche se configurent pa
 msgid "October"
 msgstr "octobre"
 
+#: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
 msgid "Off"
@@ -12488,6 +12510,11 @@ msgstr "Rôle de plateforme"
 #, elixir-autogen, elixir-format
 msgid "Please fix the errors below."
 msgstr "Veuillez corriger les erreurs ci-dessous."
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Plug routes"
+msgstr "Routes Plug"
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
@@ -14015,10 +14042,14 @@ msgid "Restore"
 msgstr "Restaurer"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
-#: lib/kiln_cms_web/live/content_editor/inspector_history_component.ex
 #, elixir-autogen, elixir-format
-msgid "Restore content to this version?"
-msgstr "Restaurer le contenu à cette version ?"
+msgid "Restore this version"
+msgstr "Restaurer cette version"
+
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "Restore this version?"
+msgstr "Restaurer cette version ?"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -14035,6 +14066,11 @@ msgstr "Version restaurée."
 msgid "Restored."
 msgstr "Restauré."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Restoring a version requires full field access for this content type."
+msgstr "La restauration d'une version nécessite un accès complet aux champs de ce type de contenu."
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "Restoring a version reverts editorial content. Workflow state, schedule and author stay as they are."
@@ -14044,6 +14080,11 @@ msgstr "La restauration d'une version rétablit le contenu éditorial. L'état d
 #, elixir-autogen, elixir-format
 msgid "Restoring is a documented operations procedure, not a button here — see docs/backups.md. Secrets (SECRET_KEY_BASE above all) are not in these files and must be kept separately."
 msgstr "La restauration est une procédure d'exploitation documentée, pas un bouton ici — voir docs/backups.md. Les secrets (SECRET_KEY_BASE avant tout) ne sont pas dans ces fichiers et doivent être conservés séparément."
+
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "Restoring this version would not change anything."
+msgstr "La restauration de cette version ne changerait rien."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
@@ -14286,6 +14327,21 @@ msgstr[1] "Renouveler la clé push de ce site ? %{count} appareils ne recevront 
 #, elixir-autogen, elixir-format
 msgid "Rotate this site's push key? No devices use the current one, so nothing stops working."
 msgstr "Renouveler la clé push de ce site ? Aucun appareil n'utilise la clé actuelle, rien ne cessera donc de fonctionner."
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotated"
+msgstr "Renouvelée"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotated from %{id}"
+msgstr "Renouvelée depuis %{id}"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotates itself until %{date}"
+msgstr "Se renouvelle seule jusqu’au %{date}"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
@@ -15065,6 +15121,11 @@ msgstr "Sélectionnez-en deux pour voir ce qui a changé entre elles."
 msgid "Selected but not configured"
 msgstr "Sélectionné mais non configuré"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Selected version"
+msgstr "Version sélectionnée"
+
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "Selection"
@@ -15074,6 +15135,11 @@ msgstr "Sélection"
 #, elixir-autogen, elixir-format
 msgid "Select…"
 msgstr "Sélectionner…"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Self-rotation"
+msgstr "Renouvellement automatique"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
@@ -16929,6 +16995,16 @@ msgstr "Ce lien de connexion a expiré. Recommencez."
 msgid "That tier no longer exists."
 msgstr "Ce niveau n'existe plus."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "That version changed since the preview. Review it again."
+msgstr "Cette version a changé depuis l'aperçu. Vérifiez-la à nouveau."
+
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "That version stored a value for each of these, but no field definition declares it any more."
+msgstr "Cette version stockait une valeur pour chacun d'eux, mais aucune définition de champ ne les déclare plus."
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "That view couldn't be loaded. Try again in a moment."
@@ -17718,6 +17794,11 @@ msgstr "Il n’y a pas encore de contenu de ce type pour l’essayer."
 #, elixir-autogen, elixir-format
 msgid "These addresses hard-bounced and are skipped on future sends. Remove one to let it receive mail again."
 msgstr "Ces adresses ont renvoyé un rejet définitif et sont ignorées lors des prochains envois. Supprimez-en une pour qu'elle puisse de nouveau recevoir des e-mails."
+
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "These custom fields will be discarded"
+msgstr "Ces champs personnalisés seront supprimés"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -20045,6 +20126,11 @@ msgstr "Vous ne pouvez pas créer ce contenu."
 msgid "You can't create this here."
 msgstr "Vous ne pouvez pas créer ceci ici."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "You can't restore versions of this content."
+msgstr "Vous ne pouvez pas restaurer les versions de ce contenu."
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "You can't set the publish date of this content."
@@ -22159,7 +22245,7 @@ msgstr "« %{value} » n’est pas une valeur utilisable dans une formule."
 msgid "“Leading” means the highest rate so far over at least %{floor} impressions per arm — a comparison, not a significance test."
 msgstr "« En tête » signifie le taux le plus élevé à ce jour sur au moins %{floor} impressions par variante — une comparaison, pas un test de significativité."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "…or paste a URL"
 msgstr "…ou collez une URL"

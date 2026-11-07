@@ -306,6 +306,193 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
     """
   end
 
+  # ── Field-level localization for the media blocks (#2270) ───────────────────
+
+  # `image`, `video` and `audio` have bespoke editors rather than going through
+  # `dsl_block_fields/1`, so they ask the same `Localization` helpers it does:
+  # a `:shared` field is read-only on a translation (its pickers disabled), an
+  # empty `:fallback` one shows what it inherits. A core block declares nothing
+  # itself; a site opts in with `config :kiln_cms, :i18n, block_fields: ...`.
+  defp assign_block_localization(assigns) do
+    assigns
+    |> assign(:module, block_member(assigns.bf))
+    |> assign(:block_id, assigns.bf[:id].value)
+    |> assign(:localization, assigns.localization || Localization.inactive())
+  end
+
+  defp block_locked?(localization, module, name),
+    do: Localization.locked?(localization, {:block, module, name})
+
+  defp block_any_locked?(localization, module, names),
+    do: Enum.any?(names, &block_locked?(localization, module, &1))
+
+  # One note for a group of picker-written fields: the first one that is not
+  # per-locale, so a block that shares all of them says so once.
+  defp picker_note_field(localization, module, names),
+    do:
+      Enum.find(names, fn name ->
+        Localization.mode(localization, {:block, module, name}) != :localized
+      end)
+
+  attr :localization, :map, required: true
+  attr :module, :atom, required: true
+  attr :name, :atom, default: nil
+  attr :block_id, :any, required: true
+  attr :kind, :any, default: nil
+
+  defp block_field_note(assigns) do
+    ~H"""
+    <Localization.localization_note
+      :if={@name}
+      localization={@localization}
+      field={{:block, @module, @name}}
+      kind={@kind}
+      inherited={Localization.inherited(@localization, {:block, @module, @name, @block_id})}
+    />
+    """
+  end
+
+  # A text input of a media block, with its localization read-only state,
+  # inherited placeholder and note.
+  attr :bf, :any, required: true
+  attr :name, :atom, required: true
+  attr :label, :string, required: true
+  attr :placeholder, :string, default: nil
+  attr :localization, :map, required: true
+  attr :module, :atom, required: true
+  attr :block_id, :any, required: true
+  attr :kind, :any, default: nil
+
+  defp block_input(assigns) do
+    ~H"""
+    <.input
+      field={@bf[@name]}
+      label={@label}
+      readonly={block_locked?(@localization, @module, @name)}
+      placeholder={
+        Localization.placeholder(@localization, {:block, @module, @name, @block_id}) ||
+          @placeholder
+      }
+    />
+    <.block_field_note
+      localization={@localization}
+      module={@module}
+      name={@name}
+      block_id={@block_id}
+      kind={@kind}
+    />
+    """
+  end
+
+  # A checkbox ignores `readonly`, so a shared boolean on a translation is
+  # disabled instead (#1860); a disabled control is not submitted, so the
+  # stored value rides in a hidden input, as in `dsl_block_fields/1`.
+  attr :bf, :any, required: true
+  attr :name, :atom, required: true
+  attr :label, :string, required: true
+  attr :localization, :map, required: true
+  attr :module, :atom, required: true
+  attr :block_id, :any, required: true
+  attr :kind, :any, default: nil
+
+  defp block_checkbox(assigns) do
+    ~H"""
+    <div :if={not block_locked?(@localization, @module, @name)}>
+      <.input field={@bf[@name]} type="checkbox" label={@label} />
+      <.block_field_note
+        localization={@localization}
+        module={@module}
+        name={@name}
+        block_id={@block_id}
+        kind={@kind}
+      />
+    </div>
+    <div :if={block_locked?(@localization, @module, @name)}>
+      <input
+        type="hidden"
+        name={@bf[@name].name}
+        value={to_string(Phoenix.HTML.Form.normalize_value("checkbox", @bf[@name].value))}
+      />
+      <.input field={@bf[@name]} type="checkbox" label={@label} disabled />
+      <.block_field_note
+        localization={@localization}
+        module={@module}
+        name={@name}
+        block_id={@block_id}
+        kind={@kind}
+      />
+    </div>
+    """
+  end
+
+  # The image block's editor: a preview, the library picker, the URL, alt text
+  # and caption.
+  attr :bf, :any, required: true
+  attr :localization, :map, default: nil
+  attr :kind, :any, default: nil
+
+  def image_editor(assigns) do
+    assigns = assign_block_localization(assigns)
+
+    ~H"""
+    <div class="space-y-2">
+      <img
+        :if={safe_preview_src(@bf[:url].value)}
+        src={safe_preview_src(@bf[:url].value)}
+        alt=""
+        class="max-h-40 rounded border border-base-content/10"
+      />
+      <input type="hidden" name={@bf[:media_id].name} value={@bf[:media_id].value} />
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          phx-click="open_picker"
+          phx-value-bid={@bf[:id].value}
+          disabled={block_any_locked?(@localization, @module, [:media_id, :url])}
+          class="btn btn-sm btn-default"
+        >
+          <.icon name="hero-photo" class="size-4" />{gettext("Choose from library")}
+        </button>
+      </div>
+      <.block_field_note
+        localization={@localization}
+        module={@module}
+        name={picker_note_field(@localization, @module, [:media_id, :url])}
+        block_id={@block_id}
+        kind={@kind}
+      />
+      <.block_input
+        bf={@bf}
+        name={:url}
+        label={gettext("Image URL")}
+        placeholder={gettext("…or paste a URL")}
+        localization={@localization}
+        module={@module}
+        block_id={@block_id}
+        kind={@kind}
+      />
+      <.block_input
+        bf={@bf}
+        name={:alt}
+        label={gettext("Alt text")}
+        localization={@localization}
+        module={@module}
+        block_id={@block_id}
+        kind={@kind}
+      />
+      <.block_input
+        bf={@bf}
+        name={:caption}
+        label={gettext("Caption")}
+        localization={@localization}
+        module={@module}
+        block_id={@block_id}
+        kind={@kind}
+      />
+    </div>
+    """
+  end
+
   # ── Repeating two-field row editor (faq / how_to / accordion) ───────────────
 
   # Repeatable two-field rows bound straight into the union member's
@@ -506,9 +693,17 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
   # Every picked id is carried in a hidden input rather than re-derived on
   # save: the block's params round-trip through `AshPhoenix.Form`, and a field
   # with no input in the DOM is a field the next `validate` drops.
+  #
+  # Field-level localization (#2270): a video field a site marks `:shared` is
+  # read-only on a translation (and the pickers that write it are disabled),
+  # an empty `:fallback` one shows what it inherits. Inactive by default.
   attr :bf, :any, required: true
+  attr :localization, :map, default: nil
+  attr :kind, :any, default: nil
 
   def video_editor(assigns) do
+    assigns = assign_block_localization(assigns)
+
     ~H"""
     <div class="space-y-2">
       <input type="hidden" name={@bf[:media_id].name} value={@bf[:media_id].value} />
@@ -567,6 +762,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-click="open_av_picker"
           phx-value-bid={@bf[:id].value}
           phx-value-field="media"
+          disabled={block_any_locked?(@localization, @module, [:media_id, :url])}
           class="btn btn-sm btn-default"
         >
           <.icon name="hero-film" class="size-4" />{gettext("Choose video")}
@@ -576,6 +772,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-click="open_av_picker"
           phx-value-bid={@bf[:id].value}
           phx-value-field="poster"
+          disabled={block_any_locked?(@localization, @module, [:poster_media_id, :poster_url])}
           class="btn btn-sm btn-default"
         >
           <.icon name="hero-photo" class="size-4" />{if @bf[:poster_media_id].value in [
@@ -590,6 +787,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-click="open_av_picker"
           phx-value-bid={@bf[:id].value}
           phx-value-field="captions"
+          disabled={block_any_locked?(@localization, @module, [:captions_media_id])}
           class="btn btn-sm btn-default"
         >
           <.icon name="hero-language" class="size-4" />{if @bf[:captions_media_id].value in [
@@ -615,39 +813,105 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
         </span>
       </p>
 
-      <.input
-        field={@bf[:url]}
+      <.block_field_note
+        localization={@localization}
+        module={@module}
+        name={
+          picker_note_field(@localization, @module, [
+            :media_id,
+            :url,
+            :poster_media_id,
+            :poster_url,
+            :captions_media_id
+          ])
+        }
+        block_id={@block_id}
+        kind={@kind}
+      />
+
+      <.block_input
+        bf={@bf}
+        name={:url}
         label={gettext("Video URL")}
         placeholder={gettext("…or paste a URL to a video hosted elsewhere")}
+        localization={@localization}
+        module={@module}
+        block_id={@block_id}
+        kind={@kind}
       />
-      <.input field={@bf[:title]} label={gettext("Title")} />
-      <.input field={@bf[:caption]} label={gettext("Caption")} />
+      <.block_input
+        bf={@bf}
+        name={:title}
+        label={gettext("Title")}
+        localization={@localization}
+        module={@module}
+        block_id={@block_id}
+        kind={@kind}
+      />
+      <.block_input
+        bf={@bf}
+        name={:caption}
+        label={gettext("Caption")}
+        localization={@localization}
+        module={@module}
+        block_id={@block_id}
+        kind={@kind}
+      />
       <div :if={@bf[:captions_media_id].value not in [nil, ""]} class="grid grid-cols-2 gap-2">
-        <.input field={@bf[:captions_label]} label={gettext("Captions label")} />
-        <.input
-          field={@bf[:captions_lang]}
+        <.block_input
+          bf={@bf}
+          name={:captions_label}
+          label={gettext("Captions label")}
+          localization={@localization}
+          module={@module}
+          block_id={@block_id}
+          kind={@kind}
+        />
+        <.block_input
+          bf={@bf}
+          name={:captions_lang}
           label={gettext("Captions language")}
           placeholder="en"
+          localization={@localization}
+          module={@module}
+          block_id={@block_id}
+          kind={@kind}
         />
       </div>
       <div class="flex flex-wrap gap-4">
         <%!-- The label says "muted" because the rendered element always is:
               browsers refuse to autoplay a video with sound, so offering the
               two as separate choices would offer one that does nothing. --%>
-        <.input
-          field={@bf[:autoplay]}
-          type="checkbox"
+        <.block_checkbox
+          bf={@bf}
+          name={:autoplay}
           label={gettext("Autoplay (muted)")}
+          localization={@localization}
+          module={@module}
+          block_id={@block_id}
+          kind={@kind}
         />
-        <.input field={@bf[:loop]} type="checkbox" label={gettext("Loop")} />
+        <.block_checkbox
+          bf={@bf}
+          name={:loop}
+          label={gettext("Loop")}
+          localization={@localization}
+          module={@module}
+          block_id={@block_id}
+          kind={@kind}
+        />
       </div>
     </div>
     """
   end
 
   attr :bf, :any, required: true
+  attr :localization, :map, default: nil
+  attr :kind, :any, default: nil
 
   def audio_editor(assigns) do
+    assigns = assign_block_localization(assigns)
+
     ~H"""
     <div class="space-y-2">
       <input type="hidden" name={@bf[:media_id].name} value={@bf[:media_id].value} />
@@ -672,20 +936,58 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-click="open_av_picker"
           phx-value-bid={@bf[:id].value}
           phx-value-field="media"
+          disabled={block_any_locked?(@localization, @module, [:media_id, :url])}
           class="btn btn-sm btn-default"
         >
           <.icon name="hero-musical-note" class="size-4" />{gettext("Choose audio")}
         </button>
       </div>
 
-      <.input
-        field={@bf[:url]}
+      <.block_field_note
+        localization={@localization}
+        module={@module}
+        name={picker_note_field(@localization, @module, [:media_id, :url])}
+        block_id={@block_id}
+        kind={@kind}
+      />
+
+      <.block_input
+        bf={@bf}
+        name={:url}
         label={gettext("Audio URL")}
         placeholder={gettext("…or paste a URL to audio hosted elsewhere")}
+        localization={@localization}
+        module={@module}
+        block_id={@block_id}
+        kind={@kind}
       />
-      <.input field={@bf[:title]} label={gettext("Title")} />
-      <.input field={@bf[:caption]} label={gettext("Caption")} />
-      <.input field={@bf[:loop]} type="checkbox" label={gettext("Loop")} />
+      <.block_input
+        bf={@bf}
+        name={:title}
+        label={gettext("Title")}
+        localization={@localization}
+        module={@module}
+        block_id={@block_id}
+        kind={@kind}
+      />
+      <.block_input
+        bf={@bf}
+        name={:caption}
+        label={gettext("Caption")}
+        localization={@localization}
+        module={@module}
+        block_id={@block_id}
+        kind={@kind}
+      />
+      <.block_checkbox
+        bf={@bf}
+        name={:loop}
+        label={gettext("Loop")}
+        localization={@localization}
+        module={@module}
+        block_id={@block_id}
+        kind={@kind}
+      />
     </div>
     """
   end

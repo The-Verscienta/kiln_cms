@@ -22,6 +22,53 @@ carries the reasoning.
 
 ## Added
 
+<a id="custom-field-native-filter-sort"></a>
+
+- **A custom field can be named like a column in `filter[...]` and `sort=`, and
+  `custom_sort` works on the search routes.** `GET /api/json/posts?filter[price][gt]=10&sort=title,price`
+  now means what `custom_filter[price][gt]=10&custom_sort=title,price`
+  did, as long as no public attribute, calculation, aggregate or relationship
+  has that name (a built-in always wins). The built-in relations take their
+  set operators natively too: `filter[tags][has][]=<id>`,
+  `filter[related_posts][has_none]=<id>`. `custom_sort` (GraphQL
+  `customSort`) is a new argument on `search`, `search/published`,
+  `semantic-search` and `semantic-search/published`, with the precedence
+  explicit `sort` > `custom_sort` > relevance or distance > recency. A leading
+  custom sort on semantic search replaces distance ordering (the vector
+  index cannot serve it) and the rule that a name match comes first. The
+  null test `is_nil` is accepted as a synonym of `null` on custom fields. See
+  [Naming a custom field like a column](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/json-api.md#naming-a-custom-field-like-a-column).
+
+  What to know before relying on it:
+
+  - `custom_filter` / `custom_sort` remain the stable form. They always mean a
+    custom field, they are the only way to reach one named like a column,
+    and a later built-in with the same name would start shadowing `filter[x]`.
+    The official clients keep emitting `custom_*`; new `customSort` /
+    `:custom_sort` options on their search calls.
+  - A typo such as `filter[ttile]=x` used to get ash_json_api's "No such
+    field"; it is now `400` `invalid_argument` with detail
+    `unknown custom field "ttile"` and no `source` member. Code that matched
+    the old message needs updating. An anonymous typo costs one uncached
+    field-registry read before it is refused.
+  - Custom sorts must come last in `sort`: `sort=title,price` works,
+    `sort=price,title` is `invalid_sort`. Custom sorts are nulls-last; a native
+    `-x` is plain `desc`.
+  - The OpenAPI `sort` parameter's `format` lists built-in fields only, so a
+    client that validates it strictly rejects `sort=price`. Use `custom_sort`.
+  - `links.self` echoes the URL as sent.
+  - On `/entries` without `filter[type_name]`, a bare name declared with
+    different types by different dynamic types is refused ("has a different
+    type per content type"), as `custom_filter` already was.
+  - Sorting by `media` / `reference` custom fields is still unsupported.
+
+<a id="reject-invalid-bearer"></a>
+
+- **`KILN_API_REJECT_INVALID_BEARER` (#2161).** With it on, an `Authorization: Bearer` token that
+  fails verification gets a 401 `invalid_token` envelope instead of silently reading as anonymous.
+  Off by default for this release, because a consumer sending a stale token today gets 200;
+  the default flips next release, so announce it in that release's upgrade notes.
+
 <a id="change-severity"></a>
 
 - **Change severity: how much a published edit matters, stored per edit.**
@@ -53,6 +100,84 @@ carries the reasoning.
     new settings table. Overlays run `mix ash.codegen` for their own content
     types. Until a site lists a field, nothing changes.
 
+<a id="plugin-plug-routes"></a>
+
+- **A plugin can mount plain-Plug endpoints, such as a webhook receiver, a JSON
+  API or a feed variant, with the new `plug_routes/0` callback
+  (`kiln_plugin` 1.4.0).** Until now a plugin could only route to a LiveView
+  page (`public_routes/0`), so an endpoint with no page had to be an overlay.
+  A route is `{verb, path, plug_module, plug_opts}` (a Phoenix controller is a
+  Plug whose opts is the action atom) or `{:forward, path, plug_module,
+  plug_opts}`. The package needs only `plug`, so it works as a Mix dependency.
+  - **What the core does.** Mounts the routes before the content-delivery
+    catch-alls, in a scope with no session, no CSRF check and no `accepts`
+    (`current_user` is never set; the plugin authenticates its own caller).
+    `conn.assigns.current_org` is set, but the plugin passes `tenant:` to Ash
+    itself. Requests are limited to 300 a minute per client address in their
+    own `:plugin_endpoint` bucket. A JSON or form body is also kept in
+    `conn.private[:raw_body]`, capped at 1 MB, so an HMAC can be verified.
+  - **Checks.** A malformed route stops the build, naming the plugin.
+    `mix kiln.plugins.doctor` also reports a path under a root core routes own
+    (`/editor`, `/api`, `/gql`, `/mcp`, …) and overlap with another plugin's
+    plug or public routes. `mix kiln.plugins.list` and System → Plugins count
+    plug routes.
+  - **Upgrade.** Additive. A plugin that does not define `plug_routes/0`
+    (including one built against `kiln_plugin` older than 1.4) declares none. A
+    plugin using it requires `{:kiln_plugin, "~> 1.4"}`. See
+    [Plugin extensibility](../plugin-extensibility.md).
+
+<a id="graphql-typed-custom-fields"></a>
+
+- **GraphQL reads admin-defined custom fields typed by kind, with no deploy
+  and no schema change (#2290).** `customFields` stays a `JsonString`. Next to
+  it every content type (`Page`, `Post`, a project type, `Entry`) and the
+  `ContentRecord` interface gain `customString`, `customInt`, `customFloat`,
+  `customBoolean`, `customDate` and `customDateTime` (each `(name: String!)`,
+  nullable) and `fields(names: [String!]!): [CustomFieldValue!]!`. A field an
+  admin adds is readable at once; the GraphQL schema is compiled and the same
+  for every site, so what it types is the *accessor*, not the name.
+  - **What is and is not checked.** `customFloat(name: "price")` is a `Float`
+    or `null`. A typo, a rename, a deleted field, a field of another kind, a
+    legacy value that no longer fits, or a private field read below editor is
+    `null` (left out of `fields`), never an error. The server cannot catch the
+    typo; the exported contract below does.
+  - **`fields(names:)`.** `names` is required, at most 50. It returns the
+    `CustomFieldValue` interface (`name` plus the kind's members: `StringValue`,
+    `IntValue`, `FloatValue`, `BooleanValue`, `DateValue`, `DateTimeValue`,
+    `ListValue { items }`, `GroupValue { fields }`, `ReferenceValue { ids }`,
+    `MediaValue`, `GeolocationValue { lat lng label zoom }`,
+    `JsonValue { value }`). A `multiple` field is a `ListValue`; computed
+    fields, `datetime_range` and `recurrence` are `JsonValue`. Groups nest to depth 3. A reference field
+    returns ids only: read the records through `references(field:)`. Cost is
+    1 plus the selection once per name; an accessor costs 1; the 200 limit is
+    unchanged.
+  - **Visibility and locale.** Values come from the record as the caller reads
+    it, so private fields read as unknown below editor. A
+    `localization: :fallback` field does not inherit along the locale chain in
+    this layer; name the locale you want. A page of records does one
+    definitions read per type, not one per record.
+  - **Typed contract per site.** `GET /api/schema?format=typescript` is the
+    existing document as a `.d.ts`; `?format=typescript-graphql` is a `.ts`
+    module that adds, per content type (and per `typeName` for dynamic types,
+    selected on `publishedEntries(filter: {typeName: {eq: "…"}})`), a
+    `<Type>CustomFields` interface and a ready `<Type>CustomFieldsFragment`.
+    An unknown `format` is a `400` with code `invalid_format`; without
+    `format` the response is the same JSON as before. Regenerate after an
+    admin changes fields. `filter` and `sort` still use
+    `customFilter`/`customSort`, unchanged.
+  - **Plugins.** `Kiln.FieldType` gains an optional `graphql_kind/1`
+    (`:string`, `:int`, `:float`, `:boolean`, `:date`, `:datetime`, `:json`)
+    in `kiln_plugin` 1.4.0. A type without it, or compiled against an older
+    SDK, is served as `JsonValue`, so nothing breaks. Publish the SDK to Hex
+    before a plugin requires `~> 1.4`.
+  - **Not yet.** Swift and Kotlin emitters for the GraphQL section, typed
+    filter operators, a per-site SDL with a regenerate step, and typed writes.
+  - **Upgrade.** Additive and org-independent: no migration, no config, and
+    rolling the pin back removes the new fields only. The new fields
+    are added to every content type in the schema's `:content_domains`, so an
+    overlay's types get them without code changes.
+    See [headless-graphql-api.md](../headless-graphql-api.md#read-custom-fields-typed-by-kind).
+
 <a id="draft-write-api-keys"></a>
 
 - **Drafts-only API keys for headless services (#2273).** A new `draft_write` access
@@ -70,7 +195,48 @@ carries the reasoning.
   `errors`, so a codegen'd query that selects every field should drop them. See [decision 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)
   and the headless consumer guide.
 
+<a id="draft-write-key-rotation"></a>
+
+- **Self-rotating drafts-only keys.** A `draft_write` key's 30-day cap meant a person re-minted
+  the service's key every month. An admin can now give the key a rotation window at mint
+  (`rotatable_until`; "Self-rotation" at `/editor/api-keys`, at most
+  `draft_write_key_max_rotation_days`, default 365). Until then the service calls
+  `POST /api/keys/rotate` with the key and gets a fresh one: same account, scope and name,
+  expiring at the 30-day cap or the window's end, whichever is sooner. The old key is revoked in
+  the same transaction, under a row lock, so a chain has one live key and never outlives the date
+  the admin chose. The action takes no input; `read`/`read_write` keys, signed-in users and admins
+  are refused, and an owner promoted to editor since the mint stops the chain. Presenting a
+  rotated-away key to the endpoint again more than 120 seconds later revokes the whole chain and
+  mails the platform admins. Keys without a window behave as before. New nullable `api_keys`
+  columns `rotatable_until`, `lineage_id`, `rotated_from_id` (additive). See
+  [decision 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md#rotation)
+  and the headless consumer guide.
+
 ## Changed
+
+<a id="custom-field-history"></a>
+
+- **Custom fields are individual fields in version compare, restore and the publish-conflict panel.**
+  Until now a changed custom field read as one opaque "Custom fields" blob.
+  The compare modal now lists each key with its definition's label, a typed
+  value (select option labels, media filename, reference title, rich text
+  without tags, group `Label: value` pairs) and an Added / Removed / Changed
+  pill. Media and reference titles resolve as the signed-in reader, in one
+  batched read; an unreadable target shows its stored id. A retired
+  definition shows its raw key.
+  *Restore* (from the compare modal and the history list) now opens a
+  preview, **Restore this version?**, and writes only on *Restore this
+  version*; it replaces the browser confirm. The preview runs the same
+  `RestoreVersion.plan/3` as the action and lists stored custom keys no
+  definition declares any more as discarded. An editor with a field grant is
+  told restore needs full field access instead of being offered a confirm
+  that would fail. The publish-conflict panel still shows one *Custom fields*
+  row and still resolves the whole map with one choice (no per-key merge), but
+  now lists the per-key draft-versus-live difference beneath it.
+  No API, migration or config change; nothing to do on upgrade, and rolling
+  back the pin is safe. The revisions API still carries `custom_fields` as one
+  whole-map change; a per-key `changed_custom_fields` is deferred. See
+  [Comparing and restoring versions](../working-copy.md#comparing-and-restoring-versions).
 
 <a id="search-leg-performance"></a>
 

@@ -75,6 +75,19 @@ does not see no change. Where each kind of field opts in:
   end
   ```
 
+- **Fields of the core `image`, `video` and `audio` blocks** — a site cannot
+  edit those modules, so the operator config takes the block's type string
+  (#2270):
+
+  ```elixir
+  config :kiln_cms, :i18n,
+    block_fields: %{"image" => [shared: [:media_id, :url], fallback: [:alt, :caption]]}
+  ```
+
+  Enabling `:shared` overwrites translations' own values on the next source
+  publish; read
+  [Making core block fields per-locale](field-level-localization.md#making-core-block-fields-per-locale-2270)
+  first.
 - **Record attributes** of an overlay content type — the `localization:`
   option:
 

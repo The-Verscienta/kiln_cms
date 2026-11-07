@@ -401,6 +401,147 @@ defmodule KilnCMS.CMS.ChangeSeverityTest do
     end
   end
 
+  describe "custom fields on a built-in type" do
+    defp define_field!(admin, name, attrs \\ %{}) do
+      CMS.create_field_definition!(
+        Map.merge(%{content_type: :page, name: name, label: String.capitalize(name)}, attrs),
+        actor: admin
+      )
+    end
+
+    test "a listed custom field that changes records a severity", %{admin: admin} do
+      define_field!(admin, "price")
+      list_safety(admin, %{"page" => ["price"]})
+      page = live_page(admin, %{custom_fields: %{"price" => "9"}})
+
+      CMS.update_page!(page, %{custom_fields: %{"price" => "12"}}, actor: admin)
+
+      assert severity(page, :update) == :notable
+    end
+
+    test "an unlisted custom key changing alongside a listed one that did not stores none",
+         %{admin: admin} do
+      define_field!(admin, "price")
+      define_field!(admin, "sku")
+      list_safety(admin, %{"page" => ["price"]})
+      page = live_page(admin, %{custom_fields: %{"price" => "9", "sku" => "a"}})
+
+      CMS.update_page!(page, %{custom_fields: %{"price" => "9", "sku" => "b"}}, actor: admin)
+
+      assert severity(page, :update) == nil
+    end
+
+    test "several listed keys: any one changing is enough", %{admin: admin} do
+      define_field!(admin, "price")
+      define_field!(admin, "sku")
+      list_safety(admin, %{"page" => ["price", "sku"]})
+      page = live_page(admin, %{custom_fields: %{"price" => "9", "sku" => "a"}})
+
+      CMS.update_page!(page, %{custom_fields: %{"price" => "9", "sku" => "b"}}, actor: admin)
+
+      assert severity(page, :update) == :notable
+    end
+
+    test "several listed keys changing at once record one severity", %{admin: admin} do
+      define_field!(admin, "price")
+      define_field!(admin, "sku")
+      list_safety(admin, %{"page" => ["price", "sku"]})
+      page = live_page(admin, %{custom_fields: %{"price" => "9", "sku" => "a"}})
+
+      CMS.update_page!(
+        page,
+        %{custom_fields: %{"price" => "10", "sku" => "b"}, change_severity: :critical},
+        actor: admin
+      )
+
+      assert severity(page, :update) == :critical
+    end
+
+    # Surprise worth pinning: the raw attribute name is read as a custom KEY
+    # called "custom_fields" (`field_ref/2`), not as the whole map, so listing
+    # it never matches an edit. Only a named key or "*" does.
+    test "the raw name custom_fields is not a whole-map alias", %{admin: admin} do
+      define_field!(admin, "price")
+      list_safety(admin, %{"page" => ["custom_fields"]})
+      page = live_page(admin, %{custom_fields: %{"price" => "9"}})
+
+      CMS.update_page!(page, %{custom_fields: %{"price" => "12"}}, actor: admin)
+
+      assert severity(page, :update) == nil
+    end
+
+    test "\"*\" counts an edit to any one custom key", %{admin: admin} do
+      define_field!(admin, "price")
+      list_safety(admin, %{"page" => ["*"]})
+      page = live_page(admin, %{custom_fields: %{"price" => "9"}})
+
+      CMS.update_page!(page, %{custom_fields: %{"price" => "12"}}, actor: admin)
+
+      assert severity(page, :update) == :notable
+    end
+
+    test "a computed field listed by name records a severity when its value changes",
+         %{admin: admin} do
+      define_field!(admin, "echo", %{field_type: :computed, compute: "{{ title }}"})
+      list_safety(admin, %{"page" => ["echo"]})
+      page = live_page(admin)
+
+      CMS.update_page!(page, %{seo_title: "Unrelated"}, actor: admin)
+      assert severity(page, :update) == nil
+
+      CMS.update_page!(reload(page), %{title: "Renamed"}, actor: admin)
+      assert severity(page, :update) == :notable
+    end
+
+    test "the first publish with a listed custom value records a severity", %{admin: admin} do
+      define_field!(admin, "price")
+      list_safety(admin, %{"page" => ["price"]})
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Fresh",
+            slug: slug(),
+            blocks: [heading("Body")],
+            custom_fields: %{"price" => "9"}
+          },
+          actor: admin
+        )
+
+      CMS.publish_page!(page, %{}, actor: admin)
+
+      assert severity(page, :publish) == :notable
+    end
+
+    test "the first publish without a listed custom value records none", %{admin: admin} do
+      define_field!(admin, "price")
+      list_safety(admin, %{"page" => ["price"]})
+      page = CMS.create_page!(%{title: "Fresh", slug: slug()}, actor: admin)
+      CMS.publish_page!(page, %{}, actor: admin)
+
+      assert severity(page, :publish) == nil
+    end
+
+    test "a retired key cannot be edited, but clearing it still counts when listed",
+         %{admin: admin} do
+      definition = define_field!(admin, "price")
+      page = live_page(admin, %{custom_fields: %{"price" => "9"}})
+      CMS.destroy_field_definition!(definition, actor: admin)
+      list_safety(admin, %{"page" => ["price"]})
+
+      # The registry refuses a value for a key with no definition.
+      assert {:error, %Ash.Error.Invalid{}} =
+               CMS.update_page(page, %{custom_fields: %{"price" => "12"}}, actor: admin)
+
+      assert last_version(page, :update) == nil
+
+      # Dropping the stale key is a change to a listed key.
+      CMS.update_page!(page, %{custom_fields: %{}}, actor: admin)
+
+      assert severity(page, :update) == :notable
+    end
+  end
+
   describe "dynamic types (Entry)" do
     test "the list is keyed on the record's own type, custom fields included", %{admin: admin} do
       name = "recipe#{System.unique_integer([:positive])}"

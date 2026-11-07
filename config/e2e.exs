@@ -130,3 +130,8 @@ config :kiln_cms, :collab_prototype, false
 # `e2e/tests/status_marks.spec.js` assume. `e2e/tests/field_localization.spec.js`
 # adds `fr` for itself through `/dev/e2e-locales` (KilnCMSWeb.Plugs.E2ELocales)
 # and restores the list after, on the same `workers: 1` footing as the above.
+
+# No `block_fields:` is configured under `:i18n`, so every core block stays
+# localized as before. The block cases of the same spec mark `image` fields
+# shared / fallback through `/dev/e2e-block-fields` (KilnCMSWeb.Plugs.E2EBlockFields,
+# #2270) and clear them after.
