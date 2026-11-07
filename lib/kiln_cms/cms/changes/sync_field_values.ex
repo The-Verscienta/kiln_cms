@@ -66,9 +66,51 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   require Logger
 
   @impl true
-  def change(changeset, _opts, _context) do
-    Ash.Changeset.after_transaction(changeset, &sync(&1, &2))
+  def change(changeset, _opts, context) do
+    changeset
+    |> Ash.Changeset.after_action(&rewrite_conditions(&1, &2, context))
+    |> Ash.Changeset.after_transaction(&sync(&1, &2))
   end
+
+  # A rename moves the field every conditional rule (#2277) of its siblings
+  # reads, so those rules follow it — in the rename's own transaction, so no
+  # reader sees a rule naming a field that no longer exists.
+  defp rewrite_conditions(%{action_type: :update} = changeset, definition, context) do
+    from = changeset.data.name
+
+    if from == definition.name do
+      {:ok, definition}
+    else
+      # Inside the rename's own transaction, on purpose (see above).
+      opts =
+        context
+        |> Ash.Context.to_opts()
+        |> Keyword.put(:tenant, changeset.to_tenant)
+        |> Keyword.put(:context, %{warn_on_transaction_hooks?: false})
+
+      definition
+      |> Map.put(:name, from)
+      |> KilnCMS.CMS.Validations.FieldCondition.dependents(changeset.to_tenant)
+      |> Enum.reduce_while({:ok, definition}, &rewrite_dependent(&1, &2, from, opts))
+    end
+  end
+
+  defp rewrite_conditions(_changeset, definition, _context), do: {:ok, definition}
+
+  defp rewrite_dependent(dependent, {:ok, definition} = acc, from, opts) do
+    rewritten = %{
+      visible_when: rename_rule(dependent.visible_when, from, definition.name),
+      required_when: rename_rule(dependent.required_when, from, definition.name)
+    }
+
+    case KilnCMS.CMS.update_field_definition(dependent, rewritten, opts) do
+      {:ok, _dependent} -> {:cont, acc}
+      {:error, error} -> {:halt, {:error, error}}
+    end
+  end
+
+  defp rename_rule(nil, _from, _to), do: nil
+  defp rename_rule(rule, from, to), do: KilnCMS.CMS.Conditions.rename(rule, from, to)
 
   defp sync(changeset, {:ok, %{link_of_id: parent_id} = definition} = result)
        when not is_nil(parent_id) do

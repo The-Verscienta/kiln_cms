@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (new table `backup_runs`); overlays that restate `:ash_domains` must add `KilnCMS.Backups`.** Rolling the pin back is safe.
+  ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217) · [long form](docs/changelog/unreleased.md#backup-history-upgrade))
+
 - **Run `mix ash.migrate` (new table `site_password_policy`, no data change). Password changes now call the Have I Been Pwned range API by
   default; air-gapped deployments set `BREACHED_PASSWORD_CHECK=false`.** Rolling the pin back is safe.
   ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-upgrade))
@@ -83,6 +86,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Overlays and plugins: the field type names `email`, `telephone`, `color`, `slug`, `time` and `json` are now built in. Rename a type that uses one; stored definitions with that name get the new strict check.**
   ([long form](docs/changelog/unreleased.md#builtin-field-type-names-upgrade))
 
+- **Field definitions gain a `validation` column (`NOT NULL DEFAULT '{}'`, additive, safe to roll back). Overlays: run `mix ash.codegen`.
+  `unique` fields have no database backstop; audit with `mix kiln.fields.duplicates`.**
+  ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation-upgrade))
+
 ### Breaking
 
 - **Overlays: `Accounts.Bootstrap.create_first_admin/1` returns `{:ok, user, notices}`, not `{:ok, user}`.**
@@ -90,9 +97,23 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Backups gains a History of every attempt, app- and cron-made, with verified state and whether files are still on disk.**
+  Platform admins, at `/editor/backups`; no new settings.
+  ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217) · [long form](docs/changelog/unreleased.md#backup-history))
+
+
+- **Site admins can block an IP address or range at `/editor/ip-blocks` ("Blocked addresses"): an empty 403 on dynamic routes and sockets.
+  Static assets and `/uploads` are not covered; behind a proxy set `TRUSTED_PROXIES` first.**
+  ([#2242](https://github.com/The-Verscienta/kiln_cms/issues/2242) · [long form](docs/changelog/unreleased.md#ip-block-rules))
+- **Custom fields can be shown or required only when another field has a given value (Conditions in `/editor/fields`).**
+  Hidden values are kept and still served by the API; new `visible_when` / `required_when` attributes; additive migration, nothing else to run.
+  ([long form](docs/changelog/unreleased.md#conditional-custom-fields))
 - **Admins choose what happens to a breached password at Organization → Password policy: off, warn (default) or block for administrators.**
   Checked on register, change, reset and first-run setup, by k-anonymity.
   ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-check))
+- **Admins can constrain a custom field: `min`/`max`, length, a whole-value `pattern`, or `unique`, enforced on every write path.**
+  Set in `/editor/fields` or via the `validation` attribute; stored values are grandfathered. Audit with `mix kiln.fields.duplicates`.
+  ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation))
 - **Admins can replace a webhook's signing secret with Rotate secret on `/editor/webhooks`; it works even when the old secret is unreadable.**
   ([#2347](https://github.com/The-Verscienta/kiln_cms/issues/2347) · [long form](docs/changelog/unreleased.md#webhook-rotate-secret))
 

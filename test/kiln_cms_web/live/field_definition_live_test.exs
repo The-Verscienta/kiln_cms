@@ -1893,4 +1893,256 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
              )
     end
   end
+
+  describe "value constraints (#2276)" do
+    defp validation_input(name),
+      do: ~s|#new-field-validation [name="field_definition[validation][#{name}]"]|
+
+    test "the Validation fieldset offers the inputs the type takes", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      # String, the starting type.
+      for key <- ~w(min_length max_length pattern pattern_message unique) do
+        assert has_element?(lv, validation_input(key)), "#{key} missing on a string"
+      end
+
+      refute has_element?(lv, validation_input("min"))
+
+      type_change(lv, "integer")
+      for key <- ~w(min max unique), do: assert(has_element?(lv, validation_input(key)))
+      refute has_element?(lv, validation_input("pattern"))
+      assert has_element?(lv, ~s|#new-field-validation input[type=number][step="1"]|)
+
+      type_change(lv, "float")
+      assert has_element?(lv, ~s|#new-field-validation input[type=number][step=any]|)
+
+      type_change(lv, "date")
+      assert has_element?(lv, validation_input("unique"))
+      refute has_element?(lv, validation_input("min"))
+
+      type_change(lv, "boolean")
+      refute has_element?(lv, "#new-field-validation")
+
+      # Rich text is HTML: no length. Plain text takes the text constraints,
+      # but not unique.
+      type_change(lv, "text")
+      refute has_element?(lv, "#new-field-validation")
+
+      lv
+      |> element("#new-field-form")
+      |> render_change(%{"field_definition" => %{"field_type" => "text", "format" => "plain"}})
+
+      assert has_element?(lv, validation_input("max_length"))
+      refute has_element?(lv, validation_input("unique"))
+    end
+
+    test "an admin saves constraints and sees them in the list", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{
+          scopes: ["page"],
+          name: "sku",
+          label: "SKU",
+          field_type: "string",
+          validation: %{
+            min_length: "3",
+            max_length: "12",
+            pattern: "[A-Z]+-[0-9]+",
+            pattern_message: "Use LETTERS-123",
+            unique: "true"
+          }
+        }
+      )
+      |> render_submit()
+
+      field =
+        :page |> CMS.field_definitions_for!(authorize?: false) |> Enum.find(&(&1.name == "sku"))
+
+      assert field.validation == %{
+               "min_length" => 3,
+               "max_length" => 12,
+               "pattern" => "[A-Z]+-[0-9]+",
+               "pattern_message" => "Use LETTERS-123",
+               "unique" => true
+             }
+
+      summary = lv |> element("#field-#{field.id}-validation") |> render()
+      assert summary =~ "3 to 12 characters."
+      assert summary =~ "Must match a pattern."
+      assert summary =~ "Each value used once."
+
+      # Blank inputs clear a constraint.
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      lv
+      |> form("#edit-field-#{field.id}",
+        field_definition: %{validation: %{min_length: "", max_length: "", pattern: ""}}
+      )
+      |> render_submit()
+
+      field = CMS.get_field_definition!(field.id, authorize?: false)
+      assert field.validation == %{"unique" => true}
+    end
+
+    test "numeric bounds are stored as numbers", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+      type_change(lv, "integer")
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{
+          scopes: ["page"],
+          name: "rating",
+          label: "Rating",
+          field_type: "integer",
+          validation: %{min: "1", max: "5"}
+        }
+      )
+      |> render_submit()
+
+      field =
+        :page
+        |> CMS.field_definitions_for!(authorize?: false)
+        |> Enum.find(&(&1.name == "rating"))
+
+      assert field.validation == %{"min" => 1, "max" => 5}
+    end
+
+    test "changing the type drops the constraints it doesn't take", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      field =
+        CMS.create_field_definition!(
+          %{
+            content_type: :page,
+            name: "code",
+            label: "Code",
+            field_type: :string,
+            validation: %{"max_length" => 8, "pattern" => "[a-z]+", "unique" => true}
+          },
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      # The text constraints are posted by the string form; picking a number
+      # type must not send them on.
+      lv
+      |> form("#edit-field-#{field.id}",
+        field_definition: %{
+          field_type: "integer",
+          validation: %{max_length: "8", pattern: "[a-z]+", unique: "true"}
+        }
+      )
+      |> render_submit()
+
+      field = CMS.get_field_definition!(field.id, authorize?: false)
+      assert field.field_type == :integer
+      assert field.validation == %{"unique" => true}
+
+      # To a type with no constraints at all.
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{field_type: "boolean"})
+      |> render_submit()
+
+      assert CMS.get_field_definition!(field.id, authorize?: false).validation == %{}
+    end
+
+    test "a bad pattern is reported under the Pattern input", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      html =
+        lv
+        |> form("#new-field-form",
+          field_definition: %{
+            scopes: ["page"],
+            name: "broken",
+            label: "Broken",
+            field_type: "string",
+            validation: %{pattern: "([a-z"}
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "pattern is not a valid regular expression"
+
+      refute CMS.field_definitions_for!(:page, authorize?: false)
+             |> Enum.any?(&(&1.name == "broken"))
+
+      assert lv |> element("#new-field-validation") |> render() =~
+               "pattern is not a valid regular expression"
+
+      # The message sits with the pattern, not under the fieldset.
+      refute has_element?(lv, "#new-field-validation > p[role=alert]")
+    end
+
+    test "min above max is reported as a general validation error", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      type_change(lv, "integer")
+
+      html =
+        lv
+        |> form("#new-field-form",
+          field_definition: %{
+            scopes: ["page"],
+            name: "inverted",
+            label: "Inverted",
+            field_type: "integer",
+            validation: %{min: "9", max: "2"}
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "min can&#39;t be more than max"
+    end
+
+    test "a group's sub-field form takes constraints, but not unique", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      group =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "dosages", label: "Dosages", field_type: :group},
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{group.id}-sub-fields-add") |> render_click()
+
+      form_id = "#link-field-form-new-#{group.id}"
+      assert has_element?(lv, form_id)
+      assert has_element?(lv, ~s|#{form_id} [name="link_field[validation][max_length]"]|)
+      refute has_element?(lv, ~s|#{form_id} [name="link_field[validation][unique]"]|)
+
+      # A posted `unique` is dropped, as the form never offers it.
+      lv
+      |> element(form_id)
+      |> render_submit(%{
+        "link_field" => %{
+          "label" => "Unit",
+          "name" => "unit",
+          "field_type" => "string",
+          "validation" => %{"max_length" => "4", "unique" => "true"}
+        }
+      })
+
+      assert [sub_id] = link_ids(group)
+
+      assert CMS.get_field_definition!(sub_id, authorize?: false).validation == %{
+               "max_length" => 4
+             }
+    end
+  end
+
+  defp link_ids(group) do
+    group
+    |> Ash.load!(:group_fields, authorize?: false)
+    |> Map.fetch!(:group_fields)
+    |> Enum.map(& &1.id)
+  end
 end

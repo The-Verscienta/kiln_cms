@@ -12,8 +12,9 @@ defmodule KilnCMS.CMS.FieldConversion do
   resource's internal `:convert_custom_field` action, as the
   `:field_conversion` system actor. `Changes.ApplyCustomFields` coerces them
   exactly as an editor's save of the group would, so the rules are the
-  field's own: sub-field types, `required`, `:select` options and
-  `min_items`/`max_items`.
+  field's own: sub-field types, `required`, `:select` options,
+  `min_items`/`max_items` and the sub-fields' value constraints (`validation`,
+  #2276).
 
   A multiple `:select` target takes the same source shapes, but its rows are
   terms: `["adaptogen","tonic"]`, or that encoded again. Each term must be one

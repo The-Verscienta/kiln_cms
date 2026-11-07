@@ -40,7 +40,7 @@ defmodule KilnCMS.Backups.Worker do
     unique: [period: 300, states: Oban.Job.states() -- [:completed, :discarded, :cancelled]]
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.Manifest
+  alias KilnCMS.Backups.{Artifact, Importer, Manifest, Recorder, Redact}
 
   require Logger
 
@@ -60,22 +60,22 @@ defmodule KilnCMS.Backups.Worker do
   # re-run deliberately, not retried into a pile of half-finished dumps whose
   # only trace is three identical error lines.
   @impl Oban.Worker
-  def perform(%Oban.Job{args: args}) do
-    run(Map.get(args, "trigger", "manual"))
+  def perform(%Oban.Job{id: id, args: args}) do
+    run(Map.get(args, "trigger", "manual"), id)
   end
 
   @doc """
   Perform a backup synchronously. Public so a release console can take one
   (`KilnCMS.Backups.Worker.run("console")`) without going through Oban.
   """
-  @spec run(String.t()) :: :ok | {:error, term()}
-  def run(trigger) do
+  @spec run(String.t(), integer() | nil) :: :ok | {:error, term()}
+  def run(trigger, job_id \\ nil) do
     started_at = DateTime.utc_now()
     dir = Backups.dir()
 
     case Backups.availability() do
       :ok ->
-        execute(dir, trigger, started_at)
+        execute(dir, trigger, started_at, job_id)
 
       {:error, reason} ->
         # NOT recorded as a failed backup. "This image has no pg_dump" is a
@@ -86,39 +86,125 @@ defmodule KilnCMS.Backups.Worker do
         # show. `availability/0` already tells the console why the button is
         # disabled.
         Logger.warning("Backup refused (#{reason}) — leaving the existing manifest untouched")
+
+        # The ATTEMPT is history (a `skipped` run); the manifest still is not
+        # touched.
+        Recorder.skip(
+          Artifact.stamp(started_at),
+          trigger,
+          started_at,
+          planned_components(),
+          "Refused: #{reason}"
+        )
+
         {:error, reason}
     end
   end
 
-  defp execute(dir, trigger, started_at) do
-    stamp = stamp(started_at)
+  defp execute(dir, trigger, started_at, job_id) do
+    stamp = Artifact.stamp(started_at)
+    reconcile_stale_runs()
+
+    rec =
+      stamp
+      |> Recorder.open(trigger, started_at, planned_components(), job_id)
+      |> Recorder.log(:info, "start", "Backup started (#{trigger})")
+
     sweep_stale_partials(dir)
 
-    case artifacts(dir, stamp) do
-      {:ok, artifacts} ->
-        prune(dir)
+    result =
+      case artifacts(dir, stamp, rec) do
+        {:ok, artifacts, rec} ->
+          rec = prune_step(dir, rec)
+          {offsite, rec} = offsite_step(dir, artifacts, rec)
 
-        offsite = copy_offsite(dir, artifacts)
+          # The manifest FIRST: it has no database dependency, and cron-era
+          # consumers read it. The run is closed after.
+          write_manifest(dir, %Manifest{
+            started_at: started_at,
+            finished_at: DateTime.utc_now(),
+            trigger: trigger,
+            ok: true,
+            artifacts: artifacts,
+            offsite: offsite && Redact.text(offsite),
+            keep_days: Backups.keep_days()
+          })
 
-        write_manifest(dir, %Manifest{
-          started_at: started_at,
-          finished_at: DateTime.utc_now(),
-          trigger: trigger,
-          ok: true,
-          artifacts: artifacts,
-          offsite: offsite,
-          keep_days: Backups.keep_days()
-        })
+          rec
+          |> Recorder.log(:info, "done", "Backup complete: #{length(artifacts)} artifact(s)")
+          |> Recorder.finish()
 
-        Logger.info("Backup complete (#{trigger}): #{length(artifacts)} artifact(s) in #{dir}")
-        :ok
+          Logger.info("Backup complete (#{trigger}): #{length(artifacts)} artifact(s) in #{dir}")
+          :ok
 
-      {:error, reason, partial} ->
-        Logger.error("Backup FAILED (#{trigger}): #{inspect(reason)}")
-        record_failure(dir, trigger, started_at, describe(reason), partial)
-        {:error, reason}
+        {:error, reason, partial, rec} ->
+          Logger.error("Backup FAILED (#{trigger}): #{inspect(reason)}")
+          error = describe(reason)
+          record_failure(dir, trigger, started_at, error, partial)
+          Recorder.fail(rec, error)
+          {:error, reason}
+      end
+
+    # Last, so a cron-made backup sitting next to this one is picked up too.
+    # The importer is total; nothing it does changes the backup's outcome.
+    _ = Importer.run()
+    result
+  end
+
+  # Time-based, not Oban-state-based (`Worker.run/1` may come from a console).
+  # A revoked grant raises there; this is a job tail, so it is a warning.
+  defp reconcile_stale_runs do
+    Backups.reconcile_stale_runs()
+  rescue
+    error ->
+      Logger.warning("Couldn't sweep stale backup runs: #{Exception.message(error)}")
+      0
+  end
+
+  defp planned_components do
+    if Backups.media_dir(), do: [:db, :media], else: [:db]
+  end
+
+  defp prune_step(dir, rec) do
+    deleted = prune(dir)
+    Recorder.mark_pruned(deleted)
+
+    rec =
+      case deleted do
+        [] -> rec
+        names -> Recorder.log(rec, :info, "prune", "Removed #{length(names)} expired file(s)")
+      end
+
+    Recorder.progress(rec)
+  end
+
+  # Per-artifact outcomes land on the run; the manifest keeps its all-or-nothing
+  # `offsite` (the remote, or nil), exactly as before.
+  defp offsite_step(dir, artifacts, rec) do
+    case offsite_results(dir, artifacts) do
+      nil ->
+        {nil, rec}
+
+      {remote, results} ->
+        key = "rclone:" <> Redact.text(remote)
+        rec = Enum.reduce(results, rec, &record_offsite(&1, &2, key))
+        {offsite_remote(remote, results), Recorder.progress(rec)}
     end
   end
+
+  defp record_offsite({artifact, result}, rec, key) do
+    result = with {:error, reason} <- result, do: {:error, describe(reason)}
+    level = if result == :ok, do: :info, else: :warn
+
+    rec
+    |> Recorder.put_destination(Path.basename(artifact.path), key, result)
+    |> Recorder.log(level, "offsite", offsite_message(artifact, result))
+  end
+
+  defp offsite_message(artifact, :ok), do: "Copied #{Path.basename(artifact.path)} off-site"
+
+  defp offsite_message(artifact, {:error, error}),
+    do: "Off-site copy of #{Path.basename(artifact.path)} failed: #{error}"
 
   # The database always; the media archive only on a Local-adapter deployment.
   # On S3 the bucket is backed up provider-side, and tarring an empty or
@@ -128,17 +214,37 @@ defmodule KilnCMS.Backups.Worker do
   # database dump is renamed into place before the media archive is attempted.
   # Reporting `artifacts: []` on a media failure left a verified `.dump` on
   # disk that the panel never mentioned — a real backup, invisible.
-  defp artifacts(dir, stamp) do
+  defp artifacts(dir, stamp, rec) do
     case dump_database(dir, stamp) do
       {:ok, db} ->
-        case maybe_archive_media(dir, stamp) do
-          {:ok, media} -> {:ok, [db | media]}
-          {:error, reason} -> {:error, reason, [db]}
-        end
+        rec =
+          rec
+          |> Recorder.add_artifact(db)
+          |> Recorder.log(:info, "dump", "Database dump verified (#{db.bytes} bytes)")
+          |> Recorder.progress()
+
+        media_artifacts(dir, stamp, db, rec)
 
       {:error, reason} ->
-        {:error, reason, []}
+        {:error, reason, [], Recorder.log(rec, :error, "dump", describe(reason))}
     end
+  end
+
+  defp media_artifacts(dir, stamp, db, rec) do
+    case maybe_archive_media(dir, stamp) do
+      {:ok, media} ->
+        rec = media |> Enum.reduce(rec, &record_media/2) |> Recorder.progress()
+        {:ok, [db | media], rec}
+
+      {:error, reason} ->
+        {:error, reason, [db], Recorder.log(rec, :error, "media", describe(reason))}
+    end
+  end
+
+  defp record_media(media, rec) do
+    rec
+    |> Recorder.add_artifact(media)
+    |> Recorder.log(:info, "media", "Media archive verified (#{media.bytes} bytes)")
   end
 
   # A list rather than a nullable artifact, so the caller concatenates instead
@@ -233,21 +339,37 @@ defmodule KilnCMS.Backups.Worker do
   """
   @spec copy_offsite(Path.t(), [map()]) :: String.t() | nil
   def copy_offsite(dir, artifacts) do
+    case offsite_results(dir, artifacts) do
+      nil -> nil
+      {remote, results} -> offsite_remote(remote, results)
+    end
+  end
+
+  # All-or-nothing, as `copy_offsite/2` has always answered.
+  defp offsite_remote(remote, results) do
+    if Enum.all?(results, fn {_artifact, result} -> result == :ok end) do
+      remote
+    else
+      Logger.error("Off-site copy to #{Redact.text(remote)} FAILED — the local backup is fine")
+      nil
+    end
+  end
+
+  # The per-artifact truth behind `copy_offsite/2`: `nil` when no remote or no
+  # `rclone` is configured, else the remote and one `:ok | {:error, reason}`
+  # per artifact. An error's rclone output has been through `Redact` (see
+  # `cmd/3`), so it is safe to store and show.
+  defp offsite_results(dir, artifacts) do
     with remote when is_binary(remote) <- Backups.rclone_remote(),
          exe when is_binary(exe) <- System.find_executable("rclone") do
       results =
         for artifact <- artifacts do
           # Mirrors the script's `rclone copy <file> <remote>/<subdir>`.
           subdir = artifact.path |> Path.dirname() |> Path.basename()
-          cmd(exe, ["copy", Path.join(dir, artifact.path), "#{remote}/#{subdir}"])
+          {artifact, cmd(exe, ["copy", Path.join(dir, artifact.path), "#{remote}/#{subdir}"])}
         end
 
-      if Enum.all?(results, &(&1 == :ok)) do
-        remote
-      else
-        Logger.error("Off-site copy to #{remote} FAILED — the local backup is fine")
-        nil
-      end
+      {remote, results}
     else
       _ -> nil
     end
@@ -277,7 +399,8 @@ defmodule KilnCMS.Backups.Worker do
     :ok
   end
 
-  # Deletes artifacts older than `keep_days`, matching the script's `prune`.
+  # Deletes artifacts older than `keep_days`, matching the script's `prune`,
+  # and returns the file names it removed (so their runs can say `pruned`).
   # Best-effort and never fatal: failing a backup that succeeded because its
   # housekeeping didn't would be exactly backwards.
   # sobelow_skip ["Traversal.FileModule"]
@@ -292,15 +415,14 @@ defmodule KilnCMS.Backups.Worker do
     for sub <- ["db", "media"],
         path <- Path.wildcard(Path.join([dir, sub, "kiln-*"])),
         not String.ends_with?(path, ".partial"),
-        older_than?(path, cutoff) do
-      File.rm(path)
+        older_than?(path, cutoff),
+        File.rm(path) == :ok do
+      Path.basename(path)
     end
-
-    :ok
   rescue
     error ->
       Logger.warning("Backup prune failed (backup itself succeeded): #{inspect(error)}")
-      :ok
+      []
   end
 
   # sobelow_skip ["Traversal.FileModule"]
@@ -393,34 +515,10 @@ defmodule KilnCMS.Backups.Worker do
 
   # This string reaches the manifest, which the console renders.
   #
-  # Two passes, in order of reliability. First the KNOWN secret is removed
-  # literally — that catches `password=…` keyword conninfo, a `PGPASSWORD`
-  # echo, and a password containing characters the pattern below can't match.
-  # Then the generic userinfo pattern as a backstop.
-  #
-  # `\\1`, NOT `\\g{name}`: `Regex.replace/4` supports numbered groups only,
-  # and a named reference makes it RAISE — on exactly the input this exists to
-  # sanitize, which is how the previous version managed to be simultaneously
-  # dead code and the reason every failure recorded a `MatchError` instead of
-  # pg_dump's actual message.
-  # `@min_literal_secret`: a very short password appears as a substring of
-  # ordinary words, and blanking every occurrence turned "pg_dump: error…"
-  # into "***g_dum***: error…" — a redaction that destroys the diagnostic
-  # while protecting a secret the userinfo pattern below already covers in the
-  # only place it can plausibly appear. Long enough to be a real password,
-  # short enough that anything meaningful is still caught literally.
-  @min_literal_secret 6
-
-  defp redact(output, env) do
-    env
-    |> Enum.reduce(output, fn {_var, secret}, acc ->
-      if String.length(secret) >= @min_literal_secret,
-        do: String.replace(acc, secret, "***"),
-        else: acc
-    end)
-    |> String.replace(~r{([a-z][a-z0-9+.-]*://)[^@\s/]+@}i, "\\1***@")
-    |> String.slice(0, 500)
-  end
+  # The scrubbing itself (known secrets, URL userinfo, `key=value`) lives in
+  # `KilnCMS.Backups.Redact`, the single path every backup text goes through
+  # (#2217); this just bounds the diagnostic to 500 characters.
+  defp redact(output, env), do: Redact.text(output, env, 500)
 
   # 0700/0600 throughout. A `.dump` is a complete logical copy of the database
   # — password hashes, session and API tokens, every row of PII — and the
@@ -444,13 +542,4 @@ defmodule KilnCMS.Backups.Worker do
     do: "#{executable} exited #{status}: #{output}"
 
   defp describe(reason), do: inspect(reason)
-
-  # Byte-identical to `scripts/backup.sh`'s `date -u +%Y%m%d-%H%M%S`, so both
-  # paths sort together in a directory listing and `restore.sh`'s "newest
-  # matching glob" picks up whichever ran last regardless of which wrote it.
-  defp stamp(%DateTime{} = at) do
-    at
-    |> DateTime.truncate(:second)
-    |> Calendar.strftime("%Y%m%d-%H%M%S")
-  end
 end

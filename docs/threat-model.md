@@ -80,7 +80,7 @@ the router so preflights are answered before route matching).
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |
 | Media bytes | `/media/:id/download`, `/media/:id/stream` | session (a gated item needs its audience) | `:delivery` |
 | Image transforms | `/media/:id/t/:ops` | session (same read as the download); unsigned URLs allowlisted, signed ones HMAC-checked | `:media_transform` per request + `:media_render` per cache miss, plus a per-node render gate |
-| Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
+| Media blobs | `/uploads/*` (`Plug.Static`) | none | none (and not covered by the IP block list) |
 | Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / preview token (one document, re-verified until it expires) or API key + per-document read | `/live` root joins `:live_join` per address (#1183); every frame on a `/ws/collab` connection `:collab_event` per account (#1305); otherwise none (except the sign-in submit, above) |
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
 
@@ -606,6 +606,35 @@ build if a resource is ever registered without that authorizer.
   swap is not new here (the pre-fix `setup_totp`+`confirm_totp` pair could
   reach the same end state, just via a moment where 2FA visibly dropped) and is
   tracked separately rather than folded into this fix.
+
+### Blocked addresses
+
+An admin (#2242) can refuse an address or range per site from `/editor/ip-blocks`; see
+[ip-blocking.md](ip-blocking.md).
+
+- **What it stops.** Every dynamic route, via `KilnCMSWeb.Plugs.IpBlock` straight
+  after tenant resolution, and the sockets (`/live`, `/ws/gql`, `/ws/collab`,
+  `/ws/bridge`), which check the same list on connect. The answer is an empty
+  `403`; nothing says a list exists.
+- **What it does not.** `Plug.Static` assets and `/uploads/*` are served above the
+  tenant lookup and cannot be scoped to a site, so a block does not cover them
+  (see "Media" below): refuse those at a CDN or proxy. Loopback is never blocked,
+  and `/up` and `/ready` are exempt.
+- **The address is only as good as the proxy config.** The rule matches the
+  address `KilnCMSWeb.Plugs.ClientIp` resolves. Behind a proxy with
+  `TRUSTED_PROXIES` unset that is the proxy, so a rule would block every visitor.
+  The console page warns when it sees that state.
+- **It cannot lock the operator out silently or wholesale.** Ranges wider than
+  `/8` (IPv4) or `/16` (IPv6) and anything overlapping loopback are refused on
+  write; a rule containing the admin's own address needs confirmation.
+- **It fails open.** An unreadable list lets requests through rather than taking
+  the site down with the database. Nothing is cached from a failed read.
+- **Who can edit.** Organization admins only, every action including the read; no
+  API surface exposes it, so a leaked API key cannot lock a site out.
+- **No address in logs.** The refusal counter `kiln_cms.ip_block.refused.count`
+  carries the surface only.
+- **Limits.** Matching is per source address: it does not stop a distributed
+  source, and a visitor can change address. Expired rules are not swept.
 
 ### Public forms
 - **CSRF** — deliberately absent: forms are meant to be posted from third-party
