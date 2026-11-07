@@ -118,6 +118,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Webhook signing secrets on `/editor/webhooks` are masked to their last four characters until an admin clicks Reveal;
+  a revealed secret has Copy and Hide, and a new endpoint's secret starts revealed.**
+  ([long form](docs/changelog/unreleased.md#webhook-secret-masked))
+
 - **Version compare, restore and the publish-conflict panel show custom fields one by one.**
   Restore now previews before it writes; the conflict stays whole-map.
   ([long form](docs/changelog/unreleased.md#custom-field-history))

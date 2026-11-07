@@ -4626,6 +4626,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
+#: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Copy"
 msgstr ""
@@ -4648,6 +4649,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Copy preview link"
+msgstr ""
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Copy signing secret for %{url}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/api_key_live.ex
@@ -4997,6 +5003,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't restore that version."
+msgstr ""
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't reveal that signing secret."
 msgstr ""
 
 #: lib/kiln_cms_web/live/api_key_live.ex
@@ -8337,9 +8348,19 @@ msgstr ""
 msgid "Hidden"
 msgstr ""
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hide"
+msgstr ""
+
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "Hide password"
+msgstr ""
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hide signing secret for %{url}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -14190,6 +14211,16 @@ msgstr ""
 msgid "Reusable content kept in one place — edit it once, every page using it updates"
 msgstr ""
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reveal"
+msgstr ""
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reveal signing secret for %{url}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reverse DNS is set in your hosting provider's panel, not in your DNS zone."
@@ -15779,6 +15810,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Signing secret"
+msgstr ""
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signing secret copied."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -19660,7 +19696,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
-msgid "Webhook added."
+msgid "Webhook added. Copy its signing secret into your receiver."
 msgstr ""
 
 #: lib/kiln_cms_web/live/webhook_live.ex

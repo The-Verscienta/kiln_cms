@@ -662,6 +662,10 @@ build if a resource is ever registered without that authorizer.
   sign deliveries. The trade-off is the vault's: rotating `SECRET_KEY_BASE`
   orphans the secrets, and each endpoint must be re-created
   ([secrets-rotation.md](secrets-rotation.md)).
+  In the console (`/editor/webhooks`, admin-only) each secret is masked to its
+  last four characters, and the plaintext reaches the browser only when an
+  admin clicks **Reveal** or has just added the endpoint (#2140), so a screen
+  share or a saved page of the list doesn't carry it.
 
 ### oEmbed resolution (`OEMBED_ENABLED`, #489)
 - **Content choosing the destination** — prevented by design. Kiln does **not**

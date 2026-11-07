@@ -4626,6 +4626,7 @@ msgstr "Copiado al portapapeles."
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
+#: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Copy"
 msgstr "Copiar"
@@ -4649,6 +4650,11 @@ msgstr "Copiar el enlace a %{title}"
 #, elixir-autogen, elixir-format
 msgid "Copy preview link"
 msgstr "Copiar enlace de vista previa"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Copy signing secret for %{url}"
+msgstr "Copiar el secreto de firma de %{url}"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -4998,6 +5004,11 @@ msgstr "No se pudo restaurar ese elemento."
 #, elixir-autogen, elixir-format
 msgid "Couldn't restore that version."
 msgstr "No se pudo restaurar esa versión."
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't reveal that signing secret."
+msgstr "No se pudo mostrar ese secreto de firma."
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -8337,10 +8348,20 @@ msgstr "Texto de ayuda"
 msgid "Hidden"
 msgstr "Oculto"
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hide"
+msgstr "Ocultar"
+
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "Hide password"
 msgstr "Ocultar contraseña"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hide signing secret for %{url}"
+msgstr "Ocultar el secreto de firma de %{url}"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -14190,6 +14211,16 @@ msgstr "Devolver"
 msgid "Reusable content kept in one place — edit it once, every page using it updates"
 msgstr "Contenido reutilizable guardado en un solo lugar — edítalo una vez y se actualiza en todas las páginas que lo usan"
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reveal"
+msgstr "Mostrar"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reveal signing secret for %{url}"
+msgstr "Mostrar el secreto de firma de %{url}"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reverse DNS is set in your hosting provider's panel, not in your DNS zone."
@@ -15780,6 +15811,11 @@ msgstr "Cerrando sesión…"
 #, elixir-autogen, elixir-format
 msgid "Signing secret"
 msgstr "Secreto de firma"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signing secret copied."
+msgstr "Secreto de firma copiado."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -19660,8 +19696,8 @@ msgstr "No hemos podido suscribirte ahora mismo. Inténtalo de nuevo en unos mom
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
-msgid "Webhook added."
-msgstr "Webhook añadido."
+msgid "Webhook added. Copy its signing secret into your receiver."
+msgstr "Webhook añadido. Copia su secreto de firma en tu receptor."
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
