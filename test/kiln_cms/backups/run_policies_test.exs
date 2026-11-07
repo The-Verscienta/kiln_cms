@@ -60,6 +60,12 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
       record_progress: fn actor -> Backups.record_run_progress(run, %{}, actor: actor) end,
       finish: fn actor -> Backups.finish_run(run, %{}, actor: actor) end,
       fail: fn actor -> Backups.fail_run(run, %{error: "x"}, actor: actor) end,
+      # A fresh failed run per call: the guard refuses anything else, and a
+      # refusal by the guard would hide whether the POLICY admitted the actor.
+      resume: fn actor ->
+        failed = Backups.fail_run!(run!(), %{error: "x"}, actor: Backups.system())
+        Backups.resume_run(failed, %{}, actor: actor)
+      end,
       import: fn actor ->
         Backups.import_run(%{stamp: stamp(), trigger: "cron", status: :succeeded}, actor: actor)
       end

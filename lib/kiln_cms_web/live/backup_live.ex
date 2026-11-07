@@ -40,6 +40,16 @@ defmodule KilnCMSWeb.BackupLive do
   Whether each run's files are still on disk is computed for the visible page
   only (`Backups.Presence`).
 
+  ## Resume (#2218)
+
+  A failed or interrupted in-app run whose `.work/<stamp>/state.json` still
+  exists gets a **Resume** button (platform admin only, computed for the visible
+  page and bounded by its 25 rows). The `resume_run` handler re-checks
+  `platform_admin?`, takes only the run's **id** from the client, looks the run
+  up itself and passes ITS stamp to `Backups.enqueue(resume: stamp)`, which
+  refuses anything that is not resumable (a succeeded or still-running run, a
+  forged id, a run whose files are gone). The page never sends or trusts a stamp.
+
   ## Restore is not here
 
   Deliberately, and the page says so rather than leaving an admin hunting for
@@ -125,29 +135,67 @@ defmodule KilnCMSWeb.BackupLive do
 
   def handle_event("page", _params, socket), do: {:noreply, socket}
 
+  # Resume: the client names a run by id; the stamp is read from the server's
+  # own record of that run, and `Backups.enqueue/1` decides whether it may be
+  # resumed. A non-admin, a mangled payload or an unknown id gets nothing.
+  def handle_event("resume_run", %{"id" => id}, socket) when is_binary(id) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      resume_backup(socket, id)
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("resume_run", _params, socket), do: {:noreply, socket}
+
   defp start_backup(socket) do
     case Backups.enqueue(trigger: :manual) do
       {:ok, _job} ->
-        # `running?` is optimistic and local to this session: the job is on a
-        # queue with a concurrency of one, and the manifest is the source of
-        # truth once it lands. A spinner that lies for a few seconds is
-        # better than a button that looks like it did nothing for a minute.
-        {:noreply,
-         socket
-         |> assign(:running?, true)
-         # Captured HERE, not at mount: on a page left open for an hour, a
-         # cron backup that landed in the meantime would otherwise satisfy
-         # `finished_since?/2` on the first tick and be reported as the result
-         # of this click.
-         |> assign(:since, DateTime.utc_now())
-         |> assign(:polls_left, @max_polls)
-         |> put_flash(:info, gettext("Backup started — this page updates when it finishes."))
-         |> schedule_refresh()}
+        {:noreply, watch(socket, gettext("Backup started — this page updates when it finishes."))}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, unavailable_message(reason))}
     end
   end
+
+  defp resume_backup(socket, id) do
+    with {:ok, %{stamp: stamp}} <- Backups.get_run(id, actor: socket.assigns.current_user),
+         {:ok, _job} <- Backups.enqueue(trigger: :manual, resume: stamp) do
+      {:noreply, watch(socket, gettext("Backup resumed — this page updates when it finishes."))}
+    else
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, resume_message(reason))}
+    end
+  end
+
+  # `running?` is optimistic and local to this session: the job is on a queue
+  # with a concurrency of one, and the manifest is the source of truth once it
+  # lands. A spinner that lies for a few seconds is better than a button that
+  # looks like it did nothing for a minute.
+  defp watch(socket, message) do
+    socket
+    |> assign(:running?, true)
+    # Captured HERE, not at mount: on a page left open for an hour, a cron
+    # backup that landed in the meantime would otherwise satisfy
+    # `finished_since?/2` on the first tick and be reported as the result of
+    # this click.
+    |> assign(:since, DateTime.utc_now())
+    |> assign(:polls_left, @max_polls)
+    |> put_flash(:info, message)
+    |> schedule_refresh()
+  end
+
+  defp resume_message({:not_resumable, _status}),
+    do: gettext("That backup can't be resumed: only a failed or interrupted backup can.")
+
+  defp resume_message(reason) when reason in [:no_state, :no_such_run],
+    do: gettext("That backup can't be resumed: the files it had written are gone.")
+
+  defp resume_message(reason)
+       when reason in [:disabled, :no_database_url, :no_pg_dump, :no_pg_restore],
+       do: unavailable_message(reason)
+
+  defp resume_message(_reason), do: gettext("That backup can't be resumed.")
 
   @impl true
   def handle_info(:refresh, socket) do
@@ -219,8 +267,13 @@ defmodule KilnCMSWeb.BackupLive do
   # Stat'ed for the visible page only (<= @per_page rows).
   defp with_presence(runs) do
     {dir, now} = {backup_dir(), DateTime.utc_now()}
-    for run <- runs, do: {run, Presence.for(run, dir, keep_days(), now)}
+    for run <- runs, do: {run, Presence.for(run, dir, keep_days(), now), resumable?(run, now)}
   end
+
+  # A cheap status check first, so the one `stat` per row is only paid by the
+  # (few) failed or running rows of the page.
+  defp resumable?(run, now),
+    do: Backups.run_resumable?(run, now) and Backups.work_state?(run.stamp)
 
   defp last_page(count), do: max(div(count + @per_page - 1, @per_page), 1)
 
@@ -404,7 +457,7 @@ defmodule KilnCMSWeb.BackupLive do
           </p>
         </section>
 
-        <.history runs={@runs} page={@page} run_count={@run_count} />
+        <.history runs={@runs} page={@page} run_count={@run_count} running?={@running?} />
       </div>
     </Layouts.console>
     """
@@ -413,6 +466,7 @@ defmodule KilnCMSWeb.BackupLive do
   attr :runs, :list, required: true
   attr :page, :integer, required: true
   attr :run_count, :integer, required: true
+  attr :running?, :boolean, default: false
 
   defp history(assigns) do
     assigns = assign(assigns, :last_page, last_page(assigns.run_count))
@@ -429,7 +483,7 @@ defmodule KilnCMSWeb.BackupLive do
 
       <ul :if={@runs != []} class="mt-3 divide-y divide-base-content/10">
         <li
-          :for={{run, presence} <- @runs}
+          :for={{run, presence, resumable?} <- @runs}
           id={"backup-run-#{run.id}"}
           class="space-y-1.5 py-3 text-sm"
         >
@@ -461,6 +515,9 @@ defmodule KilnCMSWeb.BackupLive do
 
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/70">
             <span data-role="verified">{verified_label(run)}</span>
+            <span :for={count <- part_counts(run)} data-role="parts">
+              {ngettext("%{count} part", "%{count} parts", count)}
+            </span>
             <span
               :for={{label, status} <- destination_chips(run)}
               data-role="destination"
@@ -471,6 +528,19 @@ defmodule KilnCMSWeb.BackupLive do
             <span :if={presence != :none} data-role="presence" data-presence={presence}>
               {presence_label(presence)}
             </span>
+            <button
+              :if={resumable?}
+              type="button"
+              phx-click="resume_run"
+              phx-value-id={run.id}
+              disabled={@running?}
+              data-role="resume"
+              title={gettext("Continue this backup from the files it already wrote")}
+              class="btn btn-sm btn-default ml-auto"
+            >
+              <.icon name="hero-arrow-path" class="mr-1 size-4" />
+              {gettext("Resume")}
+            </button>
           </div>
 
           <pre
@@ -507,7 +577,13 @@ defmodule KilnCMSWeb.BackupLive do
     """
   end
 
+  # The artifact's bytes are already the sum of its parts (#2218).
   defp total_bytes(run), do: Enum.reduce(run.artifacts, 0, &(&1.bytes + &2))
+
+  # One entry per media set written in several parts.
+  defp part_counts(run) do
+    for %{parts: [_, _ | _] = parts} <- run.artifacts, do: length(parts)
+  end
 
   defp status_class(:succeeded), do: "bg-success/15 text-success-ink"
   defp status_class(:failed), do: "bg-error/15 text-error-ink"

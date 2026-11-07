@@ -6,7 +6,7 @@
 #   ./scripts/backup.sh db       # pg_dump -Fc DATABASE_URL → $BACKUP_DIR/db/
 #   ./scripts/backup.sh media    # tar $MEDIA_DIR → $BACKUP_DIR/media/
 #   ./scripts/backup.sh all      # both (media skipped unless MEDIA_DIR is set)
-#   ./scripts/backup.sh verify   # sanity-check the newest dump + media archive
+#   ./scripts/backup.sh verify   # sanity-check every file of the newest backup(s)
 #   ./scripts/backup.sh prune    # delete backups older than $BACKUP_KEEP_DAYS
 #
 # Environment:
@@ -27,6 +27,13 @@
 # `all` writes $BACKUP_DIR/manifest.json — the file the in-app backup panel
 # reads (#484). Kept in the same format KilnCMS.Backups.Manifest writes, so
 # either path can produce it and the console reports on whichever ran last.
+#
+# Every artifact gets a sha256 in the manifest and a sidecar next to it
+# (`kiln-db-<stamp>.sha256`, `kiln-media-<stamp>.sha256`, `sha256sum -c`
+# format) — the same files the in-app backup writes, so one restore path
+# verifies both. This script writes ONE media archive and does not split it
+# into parts (the app does; see docs/backups.md). `verify` and `prune` handle
+# part sets written by the app: a stamp's files are checked, and aged, as a set.
 #
 # Every dump is verified (pg_restore --list) before it counts as a backup.
 # Plain shell + pg_dump/tar so it behaves the same on a laptop and on the VPS.
@@ -66,6 +73,57 @@ offsite() {
   fi
 }
 
+# SHA-256 (lowercase hex) of a file: sha256sum on GNU/Linux, shasum on macOS.
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -- "$1" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -- "$1" | cut -d' ' -f1
+  else
+    die "neither sha256sum nor shasum is installed"
+  fi
+}
+
+# A sidecar is `<64 hex>  <file name>` per line (what the app and this script
+# write). `sha256sum -c` / `shasum -c` SKIP lines they cannot parse and still
+# exit 0 (Darwin's sha256sum has no --strict), so a truncated digest would
+# verify nothing: validate every line ourselves first.
+sidecar_well_formed() {
+  [ -s "$1" ] && ! grep -Evq '^[0-9a-fA-F]{64} [ *][^/]+$' "$1"
+}
+
+# Verify a sidecar ($1 = directory, $2 = sidecar file name) with whichever tool exists.
+sha_check() {
+  sidecar_well_formed "$1/$2" || {
+    echo "error: $2 has a missing or malformed checksum line" >&2
+    return 1
+  }
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd -- "$1" && sha256sum -c -- "$2")
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd -- "$1" && shasum -a 256 -c -- "$2")
+  else
+    die "neither sha256sum nor shasum is installed"
+  fi
+}
+
+# Write the per-stamp sidecar next to the archive in `sha256sum -c` format
+# (`<hex>  <filename>`), mode 0600, via .partial + mv. $1 = archive path,
+# $2 = hex digest. Sets SIDECAR_PATH.
+write_sidecar() {
+  local dir name kind stamp
+  dir="$(dirname "$1")"
+  name="$(basename "$1")"
+  kind="${name#kiln-}"
+  kind="${kind%%-*}"
+  stamp="${name#kiln-"${kind}"-}"
+  stamp="${stamp%%.*}"
+  SIDECAR_PATH="${dir}/kiln-${kind}-${stamp}.sha256"
+  track_partial "${SIDECAR_PATH}.partial"
+  (umask 077 && printf '%s  %s\n' "$2" "$name" > "${SIDECAR_PATH}.partial")
+  mv "${SIDECAR_PATH}.partial" "$SIDECAR_PATH"
+}
+
 ping_ok() {
   if [ -n "${BACKUP_PING_URL:-}" ]; then
     curl -fsS -m 10 --retry 3 -o /dev/null "$BACKUP_PING_URL" || true
@@ -82,12 +140,13 @@ ping_ok() {
 MANIFEST_ARTIFACTS=""
 
 record_artifact() {
-  # $1 = kind ("db"/"media"), $2 = absolute path to the verified artifact
+  # $1 = kind ("db"/"media"), $2 = absolute path to the verified artifact,
+  # $3 = its sha256 (hex)
   local bytes
   bytes="$(wc -c < "$2" | tr -d ' ')"
   local entry
-  entry="$(printf '{"kind":"%s","path":"%s/%s","bytes":%s,"verified":true}' \
-    "$1" "$1" "$(basename "$2")" "$bytes")"
+  entry="$(printf '{"kind":"%s","path":"%s/%s","bytes":%s,"verified":true,"sha256":"%s"}' \
+    "$1" "$1" "$(basename "$2")" "$bytes" "$3")"
 
   if [ -n "$MANIFEST_ARTIFACTS" ]; then
     MANIFEST_ARTIFACTS="${MANIFEST_ARTIFACTS},${entry}"
@@ -181,11 +240,6 @@ track_partial() {
   OWN_PARTIALS="${OWN_PARTIALS} $1"
 }
 
-newest() {
-  # newest file matching $1 glob, or empty
-  ls -1t $1 2>/dev/null | head -1 || true
-}
-
 cmd_db() {
   require DATABASE_URL
   mkdir -p "$BACKUP_DIR/db"
@@ -207,8 +261,12 @@ cmd_db() {
   mv "${out}.partial" "$out"
 
   echo "    ok: $(du -h "$out" | cut -f1) $(basename "$out")"
-  record_artifact db "$out"
+  local sha
+  sha="$(sha256_of "$out")"
+  write_sidecar "$out" "$sha"
+  record_artifact db "$out" "$sha"
   offsite "$out"
+  offsite "$SIDECAR_PATH"
 }
 
 cmd_media() {
@@ -229,8 +287,12 @@ cmd_media() {
   mv "${out}.partial" "$out"
 
   echo "    ok: $(du -h "$out" | cut -f1) $(basename "$out")"
-  record_artifact media "$out"
+  local sha
+  sha="$(sha256_of "$out")"
+  write_sidecar "$out" "$sha"
+  record_artifact media "$out" "$sha"
   offsite "$out"
+  offsite "$SIDECAR_PATH"
 }
 
 cmd_all() {
@@ -245,27 +307,105 @@ cmd_all() {
   ping_ok
 }
 
-cmd_verify() {
-  local dump archive
-  dump="$(newest "$BACKUP_DIR/db/kiln-db-*.dump")"
-  [ -n "$dump" ] || die "no dumps found under $BACKUP_DIR/db"
-  echo "==> Newest dump: $(basename "$dump") ($(du -h "$dump" | cut -f1))"
-  pg_restore --list "$dump" >/dev/null && echo "    dump: ok"
+# The newest stamp among the files of one kind in $1/$2 ($2 = "kiln-db" or
+# "kiln-media"): stamps sort lexicographically, so the largest is the newest —
+# unlike mtime, which a part set's files do not share.
+newest_stamp() {
+  # shellcheck disable=SC2012 # names are filtered by the sed regex below
+  ls -1 "$1" 2>/dev/null |
+    sed -n -E "s/^${2}-([0-9]{8}-[0-9]{6})(\\.part[0-9]+)?\\.(dump|tar\\.gz)\$/\\1/p" |
+    sort -u | tail -1 || true
+}
 
-  archive="$(newest "$BACKUP_DIR/media/kiln-media-*.tar.gz")"
-  if [ -n "$archive" ]; then
-    echo "==> Newest media archive: $(basename "$archive") ($(du -h "$archive" | cut -f1))"
-    tar -tzf "$archive" >/dev/null && echo "    media: ok"
+# Check a stamp's sidecar if there is one ($1 = directory, $2 = sidecar name).
+verify_sidecar() {
+  if [ -f "$1/$2" ]; then
+    sha_check "$1" "$2" >/dev/null || die "checksum mismatch against $2"
+    echo "    sha256: ok ($2)"
+  else
+    echo "    sha256: no sidecar ($2) — structure checked only"
+  fi
+}
+
+# A part set must be numbered 01..N with no gap. Without a sidecar nothing
+# else notices a missing middle part (a missing LAST one is only visible to the
+# sidecar). $1 = directory, $2 = stamp.
+verify_part_contiguity() {
+  local n expected=1 num f
+  for f in "$1/kiln-media-${2}".part*.tar.gz; do
+    [ -f "$f" ] || continue
+    n="${f##*.part}"
+    n="${n%.tar.gz}"
+    [[ "$n" =~ ^[0-9]+$ ]] || continue
+    num=$((10#$n))
+    echo "$num"
+  done | sort -n | {
+    while IFS= read -r num; do
+      if [ "$num" -ne "$expected" ]; then
+        echo "error: media set ${2} is missing part$(printf '%02d' "$expected") (found part$(printf '%02d' "$num"))" >&2
+        exit 1
+      fi
+      expected=$((expected + 1))
+    done
+  } || die "media part set ${2} is not contiguous from part01"
+}
+
+cmd_verify() {
+  local dump_stamp media_stamp f
+
+  dump_stamp="$(newest_stamp "$BACKUP_DIR/db" kiln-db)"
+  [ -n "$dump_stamp" ] || die "no dumps found under $BACKUP_DIR/db"
+  f="$BACKUP_DIR/db/kiln-db-${dump_stamp}.dump"
+  echo "==> Newest dump: $(basename "$f") ($(du -h "$f" | cut -f1))"
+  pg_restore --list "$f" >/dev/null && echo "    dump: ok"
+  verify_sidecar "$BACKUP_DIR/db" "kiln-db-${dump_stamp}.sha256"
+
+  media_stamp="$(newest_stamp "$BACKUP_DIR/media" kiln-media)"
+  if [ -n "$media_stamp" ]; then
+    echo "==> Newest media backup: ${media_stamp}"
+    # Every file of the stamp — a single legacy archive or all its parts —
+    # not just whichever is newest by mtime.
+    verify_part_contiguity "$BACKUP_DIR/media" "$media_stamp"
+    for f in "$BACKUP_DIR/media/kiln-media-${media_stamp}.tar.gz" \
+      "$BACKUP_DIR/media/kiln-media-${media_stamp}".part*.tar.gz; do
+      [ -f "$f" ] || continue
+      echo "    $(basename "$f") ($(du -h "$f" | cut -f1))"
+      tar -tzf "$f" >/dev/null || die "media archive $(basename "$f") failed tar -tzf"
+    done
+    echo "    media: ok"
+    verify_sidecar "$BACKUP_DIR/media" "kiln-media-${media_stamp}.sha256"
   else
     echo "==> No media archives (fine on S3-adapter deployments)"
   fi
 }
 
+# Prune whole backups, not files: everything stamped alike (the dump, the media
+# archive or ALL its parts, and the sidecars) is one set, deleted together once
+# even its NEWEST member is older than the retention. A per-file `find -mtime`
+# would reap an old part while its fresh siblings survive, leaving a set that
+# can't be restored.
 cmd_prune() {
   echo "==> Pruning backups older than ${BACKUP_KEEP_DAYS} days"
-  find "$BACKUP_DIR" -type f \
-    \( -name 'kiln-db-*.dump' -o -name 'kiln-media-*.tar.gz' \) \
-    -mtime "+${BACKUP_KEEP_DAYS}" -print -delete 2>/dev/null || true
+  local stamps stamp dirs=()
+  [ -d "$BACKUP_DIR/db" ] && dirs+=("$BACKUP_DIR/db")
+  [ -d "$BACKUP_DIR/media" ] && dirs+=("$BACKUP_DIR/media")
+  [ "${#dirs[@]}" -gt 0 ] || return 0
+
+  # shellcheck disable=SC2012 # names are filtered by the sed regex below
+  stamps="$(ls -1 "${dirs[@]}" 2>/dev/null |
+    sed -n -E 's/^kiln-(db|media)-([0-9]{8}-[0-9]{6})\.(dump|tar\.gz|sha256|part[0-9]+\.tar\.gz)$/\2/p' |
+    sort -u || true)"
+
+  for stamp in $stamps; do
+    # Any member that is not older than the cutoff keeps the whole set.
+    if [ -z "$(find "${dirs[@]}" -maxdepth 1 -type f \
+      \( -name "kiln-db-${stamp}.*" -o -name "kiln-media-${stamp}.*" \) \
+      ! -name '*.partial' ! -mtime "+${BACKUP_KEEP_DAYS}" -print 2>/dev/null | head -1)" ]; then
+      find "${dirs[@]}" -maxdepth 1 -type f \
+        \( -name "kiln-db-${stamp}.*" -o -name "kiln-media-${stamp}.*" \) \
+        ! -name '*.partial' -print -delete 2>/dev/null || true
+    fi
+  done
 }
 
 case "${1:-}" in

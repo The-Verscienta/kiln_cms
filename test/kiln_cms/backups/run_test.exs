@@ -77,13 +77,30 @@ defmodule KilnCMS.Backups.RunTest do
     end
   end
 
-  describe "reconcile_stale_runs/1" do
-    test "fails a run older than the worker timeout plus grace, and only that one" do
-      now = ~U[2026-11-07 12:00:00.000000Z]
-      stale = start!(%{started_at: DateTime.add(now, -(2 * 3600 + 16 * 60), :second)})
-      fresh = start!(%{started_at: DateTime.add(now, -(2 * 3600 + 14 * 60), :second)})
+  # `updated_at` is stamped by the write that created the row, so a run that
+  # went quiet has to be made quiet by hand.
+  defp backdate!(run, at) do
+    import Ecto.Query
 
-      done = start!(%{started_at: DateTime.add(now, -86_400, :second)})
+    {1, _} =
+      KilnCMS.Repo.update_all(
+        from(r in "backup_runs", where: r.id == type(^run.id, :binary_id)),
+        set: [updated_at: at]
+      )
+
+    run
+  end
+
+  describe "reconcile_stale_runs/1" do
+    test "fails a run quiet for longer than the worker timeout plus grace, and only that one" do
+      now = DateTime.utc_now()
+      stale_at = DateTime.add(now, -(2 * 3600 + 16 * 60), :second)
+      fresh_at = DateTime.add(now, -(2 * 3600 + 14 * 60), :second)
+
+      stale = %{started_at: stale_at} |> start!() |> backdate!(stale_at)
+      fresh = %{started_at: fresh_at} |> start!() |> backdate!(fresh_at)
+
+      done = %{started_at: DateTime.add(now, -86_400, :second)} |> start!()
       Backups.finish_run!(done, %{}, actor: Backups.system())
 
       assert Backups.reconcile_stale_runs(now) == 1
@@ -95,12 +112,83 @@ defmodule KilnCMS.Backups.RunTest do
       assert Backups.get_run!(done.id, actor: Backups.system()).status == :succeeded
     end
 
+    test "a RESUMED run (old started_at, recently updated) is not failed; an untouched old one is" do
+      # A resume keeps the original attempt's `started_at` and every progress
+      # write bumps `updated_at`: going by `started_at` alone would fail a run
+      # that is working, moments after it resumed.
+      now = DateTime.utc_now()
+      long_ago = DateTime.add(now, -3 * 86_400, :second)
+
+      resumed = start!(%{started_at: long_ago})
+      untouched = %{started_at: long_ago} |> start!() |> backdate!(long_ago)
+
+      assert Backups.reconcile_stale_runs(now) == 1
+
+      assert Backups.get_run!(resumed.id, actor: Backups.system()).status == :running
+      assert Backups.get_run!(untouched.id, actor: Backups.system()).status == :failed
+    end
+
     test "is idempotent" do
-      now = ~U[2026-11-07 12:00:00.000000Z]
-      start!(%{started_at: DateTime.add(now, -86_400, :second)})
+      now = DateTime.utc_now()
+      long_ago = DateTime.add(now, -86_400, :second)
+      %{started_at: long_ago} |> start!() |> backdate!(long_ago)
 
       assert Backups.reconcile_stale_runs(now) >= 1
       assert Backups.reconcile_stale_runs(now) == 0
+    end
+  end
+
+  describe "the :resume action" do
+    defp failed!(attrs \\ %{}) do
+      run = start!(attrs)
+      Backups.fail_run!(run, %{error: "boom"}, actor: Backups.system())
+    end
+
+    test "re-opens a failed run: running, outcome cleared, a log line added" do
+      run = failed!()
+      assert run.finished_at && run.error
+
+      resumed = Backups.resume_run!(run, %{}, actor: Backups.system())
+
+      assert resumed.status == :running
+      assert resumed.finished_at == nil
+      assert resumed.error == nil
+      assert resumed.stamp == run.stamp
+      assert resumed.started_at == run.started_at
+      assert %{step: "resume", level: :info} = List.last(resumed.log)
+    end
+
+    test "re-opens a running run only when it has gone quiet" do
+      quiet_at = DateTime.add(DateTime.utc_now(), -3 * 3600, :second)
+      quiet = %{started_at: quiet_at} |> start!() |> backdate!(quiet_at)
+      live = start!()
+
+      assert {:ok, _} =
+               Backups.resume_run(Backups.get_run!(quiet.id, actor: Backups.system()), %{},
+                 actor: Backups.system()
+               )
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Backups.resume_run(live, %{}, actor: Backups.system())
+    end
+
+    test "refuses a succeeded, skipped or imported run" do
+      done = Backups.finish_run!(start!(), %{}, actor: Backups.system())
+
+      skipped =
+        Backups.skip_run!(%{stamp: stamp(), trigger: "t", error: "no pg_dump"},
+          actor: Backups.system()
+        )
+
+      imported =
+        Backups.import_run!(%{stamp: stamp(), trigger: "cron", status: :failed, error: "x"},
+          actor: Backups.system()
+        )
+
+      for run <- [done, skipped, imported] do
+        assert {:error, %Ash.Error.Invalid{}} =
+                 Backups.resume_run(run, %{}, actor: Backups.system())
+      end
     end
   end
 end

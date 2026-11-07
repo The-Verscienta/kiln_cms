@@ -364,6 +364,50 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert row =~ "on disk"
     end
 
+    test "a media part set is one row: summed size, an 'N parts' note, per-part presence",
+         %{conn: conn, dir: dir} do
+      stamp = "20260105-030000"
+      names = Backups.Artifact.set_names(stamp, 3)
+      File.mkdir_p!(Path.join(dir, "media"))
+      for name <- names, do: File.write!(Path.join([dir, "media", name]), "x")
+
+      run =
+        Backups.import_run!(
+          %{
+            stamp: stamp,
+            trigger: "manual",
+            status: :succeeded,
+            components: [:media],
+            started_at: ~U[2026-01-05 03:00:00.000000Z],
+            finished_at: ~U[2026-01-05 03:05:00.000000Z],
+            artifacts: [
+              %{
+                kind: :media,
+                name: "kiln-media-#{stamp}",
+                bytes: 3 * 1024,
+                verified: true,
+                parts: Enum.map(names, &%{"name" => &1, "bytes" => 1024, "sha256" => nil}),
+                destinations: %{"local" => %{"status" => "ok"}}
+              }
+            ]
+          },
+          actor: Backups.system()
+        )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      row = lv |> element("#backup-run-#{run.id}") |> render()
+      assert row =~ "3.0 KB"
+      assert row =~ "3 parts"
+      assert has_element?(lv, "#backup-run-#{run.id} [data-presence=present]", "on disk")
+
+      File.rm!(Path.join([dir, "media", Enum.at(names, 1)]))
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+      assert has_element?(lv, "#backup-run-#{run.id} [data-presence=missing]", "missing")
+    end
+
     test "a file deleted out-of-band reads missing", %{conn: conn, dir: dir} do
       run = seed_run!(dir, 1, started_at: DateTime.add(DateTime.utc_now(), -3600, :second))
       File.rm!(Path.join([dir, "db", hd(run.artifacts).name]))
@@ -538,6 +582,146 @@ defmodule KilnCMSWeb.BackupLiveTest do
       send(lv.pid, :refresh)
 
       assert render(lv) =~ "2026-01-01 03:00 UTC"
+    end
+  end
+
+  describe "resume (#2218)" do
+    alias KilnCMS.Backups.WorkState
+
+    # An in-app run in `status`, with (or without) the state file a resume needs.
+    defp app_run!(dir, n, status, opts \\ []) do
+      stamp = "2026110#{n}-101010"
+
+      run =
+        Backups.start_run!(%{stamp: stamp, trigger: "manual", components: [:db, :media]},
+          actor: Backups.system()
+        )
+
+      run =
+        case status do
+          :failed -> Backups.fail_run!(run, %{error: "tar exited 2"}, actor: Backups.system())
+          :succeeded -> Backups.finish_run!(run, %{}, actor: Backups.system())
+          :running -> run
+        end
+
+      if Keyword.get(opts, :state?, true) do
+        work = WorkState.path(dir, stamp)
+        File.mkdir_p!(work)
+        :ok = WorkState.write(work, WorkState.new(stamp))
+      end
+
+      run
+    end
+
+    defp backup_jobs do
+      Enum.filter(KilnCMS.Repo.all(Oban.Job), &String.starts_with?(&1.worker, "KilnCMS.Backups."))
+    end
+
+    test "a platform admin sees Resume on a failed run that kept its state", %{
+      conn: conn,
+      dir: dir
+    } do
+      run = app_run!(dir, 1, :failed)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert has_element?(lv, ~s|#backup-run-#{run.id} button[data-role="resume"]|, "Resume")
+    end
+
+    test "only resumable runs get the button", %{conn: conn, dir: dir} do
+      succeeded = app_run!(dir, 2, :succeeded)
+      running = app_run!(dir, 3, :running)
+      no_state = app_run!(dir, 4, :failed, state?: false)
+      imported = seed_run!(dir, 5)
+      File.mkdir_p!(WorkState.path(dir, imported.stamp))
+      :ok = WorkState.write(WorkState.path(dir, imported.stamp), WorkState.new(imported.stamp))
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      for run <- [succeeded, running, no_state, imported] do
+        assert has_element?(lv, "#backup-run-#{run.id}")
+        refute has_element?(lv, ~s|#backup-run-#{run.id} [data-role="resume"]|)
+      end
+    end
+
+    @tag :pg_tools
+    test "clicking it enqueues a resume job for THAT run's stamp and says so", %{
+      conn: conn,
+      dir: dir
+    } do
+      run = app_run!(dir, 1, :failed)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      html = lv |> element(~s|#backup-run-#{run.id} [data-role="resume"]|) |> render_click()
+
+      assert html =~ "Backup resumed"
+      assert [%Oban.Job{args: args, queue: "backups"}] = backup_jobs()
+      assert args["resume"] == run.stamp
+      # The poll now follows it, and the buttons wait.
+      assert has_element?(lv, ~s|button[phx-click="backup_now"][disabled]|)
+    end
+
+    @tag :pg_tools
+    test "a forged event naming a succeeded or running run, or no run, is refused", %{
+      conn: conn,
+      dir: dir
+    } do
+      succeeded = app_run!(dir, 2, :succeeded)
+      running = app_run!(dir, 3, :running)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      for id <- [succeeded.id, running.id, Ecto.UUID.generate(), "not-a-uuid"] do
+        html = render_hook(lv, "resume_run", %{"id" => id})
+        assert html =~ "can&#39;t be resumed"
+      end
+
+      # A forged STAMP is not even a parameter the handler reads.
+      render_hook(lv, "resume_run", %{"id" => succeeded.id, "stamp" => "../../x"})
+      render_hook(lv, "resume_run", %{"stamp" => "../../x"})
+      render_hook(lv, "resume_run", %{"id" => 7})
+
+      assert backup_jobs() == []
+    end
+
+    @tag :pg_tools
+    test "a failed run whose state is gone is refused", %{conn: conn, dir: dir} do
+      run = app_run!(dir, 4, :failed, state?: false)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert render_hook(lv, "resume_run", %{"id" => run.id}) =~ "can&#39;t be resumed"
+      assert backup_jobs() == []
+    end
+
+    @tag :pg_tools
+    test "the handler re-checks platform admin: editor, org admin and anonymous get nothing", %{
+      dir: dir
+    } do
+      run = app_run!(dir, 1, :failed)
+
+      org_admin = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: org_admin.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      for user <- [authed_user(:editor), org_admin, authed_user(:viewer), nil] do
+        socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, current_user: user}}
+
+        assert {:noreply, ^socket} =
+                 KilnCMSWeb.BackupLive.handle_event("resume_run", %{"id" => run.id}, socket)
+      end
+
+      assert backup_jobs() == []
     end
   end
 

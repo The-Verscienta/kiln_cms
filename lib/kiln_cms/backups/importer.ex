@@ -17,7 +17,8 @@ defmodule KilnCMS.Backups.Importer do
   ## What an imported run is
 
   `origin: :imported`, trigger `"cron"` unless a manifest says otherwise,
-  `verified: false` and `sha256: nil` (nothing is hashed or verified on import),
+  `verified: false` (nothing is hashed or verified on import; a `sha256` is
+  recorded only when the manifest or the stamp's checksum sidecar supplies one),
   `succeeded` unless a file is zero bytes (`failed`, "empty artifact").
   `started_at` is the stamp read as UTC; `finished_at` is the newest file's
   mtime. Components are inferred from the files.
@@ -44,16 +45,33 @@ defmodule KilnCMS.Backups.Importer do
   Runs as `KilnCMS.Backups.system/0` and fails closed: with the grant revoked it
   reports `{:error, _}` and writes nothing.
 
+  ## Media part sets (#2218)
+
+  The `kiln-media-<stamp>.partNN.tar.gz` files of one stamp are ONE artifact
+  (`Artifact.group_files/1`): logical name `kiln-media-<stamp>`, `parts` in
+  numeric order, `bytes` summed. A set with a gap (`part03` missing) is imported
+  as a `failed` run, "incomplete media set: missing part03", because a restore
+  from it would silently lack files; so is a stamp carrying both a legacy single
+  archive and parts. A `.partNN…partial` holds the stamp's settle window like
+  any other partial.
+
+  `kiln-<kind>-<stamp>.sha256` sidecars are not artifacts and never make a run
+  by themselves, but are accounted for by their stamp: a well-formed one
+  (`Checksum.parse_sidecar/1`) supplies the per-file `sha256` of the imported
+  artifact; a malformed or oversized one is ignored with a warning.
+
   Separate cron entries (`backup.sh db`, then `backup.sh media`) have different
   stamps, so they become two runs.
   """
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Manifest}
+  alias KilnCMS.Backups.{Artifact, Checksum, Manifest}
 
   require Logger
 
   @settle_ms :timer.minutes(10)
   @max_trigger 64
+  @max_sidecar_bytes 4 * 1024 * 1024
+  @sidecar ~r/\Akiln-(db|media)-(\d{8}-\d{6})\.sha256(\.partial)?\z/
 
   @type summary :: %{
           imported: non_neg_integer(),
@@ -132,7 +150,7 @@ defmodule KilnCMS.Backups.Importer do
   defp import_new(dir, listed, existing) do
     manifest = Manifest.read(dir)
 
-    {files, partials} = classify(listed)
+    {files, partials, sidecars} = classify(listed)
 
     {valid, invalid} =
       files
@@ -152,7 +170,7 @@ defmodule KilnCMS.Backups.Importer do
       |> Enum.reject(&(&1.files == []))
       |> Enum.split_with(&settled?(&1, partials, covered))
 
-    attrs = Enum.map(ready, &run_attrs(&1, manifest, covered))
+    attrs = Enum.map(ready, &run_attrs(&1, manifest, covered, dir, sidecars))
     manifest_only = failed_manifest_attrs(manifest, existing, files)
 
     results = Enum.map(attrs ++ manifest_only, &import_one/1)
@@ -166,22 +184,46 @@ defmodule KilnCMS.Backups.Importer do
      }}
   end
 
-  # `{files, partials}`: artifact names grouped by stamp, and the set of stamps
-  # that still have a `.partial` (of either kind) beside them.
+  # `{files, partials, sidecars}`: artifact names grouped by stamp, the set of
+  # stamps that still have a `.partial` (of any kind, a sidecar's included)
+  # beside them, and the checksum sidecars (`%{stamp => [{kind, name}]}`).
   defp classify(listed) do
-    Enum.reduce(listed, {%{}, MapSet.new()}, fn {sub, name}, {files, partials} ->
-      case Artifact.parse_name(name) do
-        {:ok, kind, stamp, false} -> {add_file(files, sub, kind, stamp, name), partials}
-        {:ok, _kind, stamp, true} -> {files, MapSet.put(partials, stamp)}
-        :error -> {files, partials}
+    Enum.reduce(listed, {%{}, MapSet.new(), %{}}, fn {sub, name}, {files, partials, sidecars} ->
+      case Artifact.parse_file(name) do
+        {:ok, %{partial?: false} = parsed} ->
+          {add_file(files, sub, parsed, name), partials, sidecars}
+
+        {:ok, %{stamp: stamp, partial?: true}} ->
+          {files, MapSet.put(partials, stamp), sidecars}
+
+        :error ->
+          classify_sidecar(sub, name, files, partials, sidecars)
       end
     end)
   end
 
+  defp classify_sidecar(sub, name, files, partials, sidecars) do
+    case Regex.run(@sidecar, name) do
+      [_, _kind, stamp, ".partial"] ->
+        {files, MapSet.put(partials, stamp), sidecars}
+
+      [_, kind, stamp] ->
+        kind = String.to_existing_atom(kind)
+
+        if Artifact.subdir(kind) == sub,
+          do:
+            {files, partials, Map.update(sidecars, stamp, [{kind, name}], &[{kind, name} | &1])},
+          else: {files, partials, sidecars}
+
+      _ ->
+        {files, partials, sidecars}
+    end
+  end
+
   # A file only counts in the directory its kind lives in.
-  defp add_file(files, sub, kind, stamp, name) do
+  defp add_file(files, sub, %{kind: kind, stamp: stamp, part: part}, name) do
     if Artifact.subdir(kind) == sub,
-      do: Map.update(files, stamp, [{kind, name}], &[{kind, name} | &1]),
+      do: Map.update(files, stamp, [{kind, name, part}], &[{kind, name, part} | &1]),
       else: files
   end
 
@@ -189,14 +231,14 @@ defmodule KilnCMS.Backups.Importer do
   # the files of a stamp we are about to create.
   defp entry(dir, stamp, names) do
     files =
-      for {kind, name} <- names,
+      for {kind, name, part} <- names,
           path = Path.join([dir, Artifact.subdir(kind), name]),
           {:ok, %File.Stat{type: :regular, size: size, mtime: mtime}} <-
             [File.lstat(path, time: :posix)] do
-        %{kind: kind, name: name, bytes: size, mtime: mtime}
+        %{kind: kind, name: name, bytes: size, mtime: mtime, part: part}
       end
 
-    %{stamp: stamp, files: Enum.sort_by(files, & &1.kind)}
+    %{stamp: stamp, files: Enum.sort_by(files, &{&1.kind, &1.part || 0})}
   end
 
   defp settled?(%{stamp: stamp, files: files}, partials, covered) do
@@ -215,27 +257,25 @@ defmodule KilnCMS.Backups.Importer do
   defp covered_stamps(%Manifest{} = manifest) do
     manifest.artifacts
     |> Enum.flat_map(fn artifact ->
-      case Artifact.parse_name(Path.basename(artifact.path)) do
-        {:ok, _kind, stamp, false} -> [stamp]
+      case Artifact.parse_file(Path.basename(artifact.path)) do
+        {:ok, %{stamp: stamp, partial?: false}} -> [stamp]
         _ -> []
       end
     end)
     |> MapSet.new()
   end
 
-  defp run_attrs(%{stamp: stamp, files: files}, manifest, covered) do
+  defp run_attrs(%{stamp: stamp, files: files}, manifest, covered, dir, sidecars) do
     {:ok, started_at} = Artifact.parse_stamp(stamp)
     finished_at = files |> Enum.map(& &1.mtime) |> Enum.max() |> DateTime.from_unix!()
     manifest = if MapSet.member?(covered, stamp), do: manifest
 
     empty? = Enum.any?(files, &(&1.bytes == 0))
+    problem = media_problem(files)
 
-    {status, error} =
-      case {manifest, empty?} do
-        {%Manifest{ok: false, error: error}, _} -> {:failed, error}
-        {_, true} -> {:failed, "empty artifact"}
-        _ -> {:succeeded, nil}
-      end
+    {status, error} = outcome(manifest, problem, empty?)
+
+    digests = digests(dir, stamp, sidecars)
 
     %{
       stamp: stamp,
@@ -252,8 +292,78 @@ defmodule KilnCMS.Backups.Importer do
           message: "Found in the backup directory; this application did not record the run"
         }
       ],
-      artifacts: Enum.map(files, &artifact_attrs(&1, manifest))
+      artifacts:
+        files |> Enum.map(&artifact_attrs(&1, manifest, digests)) |> Artifact.group_files()
     }
+  end
+
+  defp outcome(%Manifest{ok: false, error: error}, _problem, _empty?), do: {:failed, error}
+  defp outcome(_manifest, problem, _empty?) when is_binary(problem), do: {:failed, problem}
+  defp outcome(_manifest, _problem, true), do: {:failed, "empty artifact"}
+  defp outcome(_manifest, _problem, _empty?), do: {:succeeded, nil}
+
+  # What is wrong with the media files of a stamp, or `nil`: parts that don't
+  # run 1..N, or a legacy single archive sitting beside parts. Part numbers are
+  # unique per stamp (one file name each), so there is no duplicate to resolve.
+  defp media_problem(files) do
+    media = Enum.filter(files, &(&1.kind == :media))
+    parts = for %{part: part} <- media, is_integer(part), do: part
+    singles = Enum.count(media, &is_nil(&1.part))
+
+    cond do
+      parts == [] ->
+        nil
+
+      missing = missing_parts(parts) ->
+        "incomplete media set: missing " <> Enum.map_join(missing, ", ", &part_label/1)
+
+      singles > 0 ->
+        "ambiguous media set: both a single archive and parts"
+
+      true ->
+        nil
+    end
+  end
+
+  # The first few absent part numbers below the highest present one, lazily (a
+  # file named `part99999999` must not cost a hundred million iterations).
+  defp missing_parts(parts) do
+    present = MapSet.new(parts)
+
+    case 1..Enum.max(parts)//1
+         |> Stream.reject(&MapSet.member?(present, &1))
+         |> Enum.take(5) do
+      [] -> nil
+      missing -> missing
+    end
+  end
+
+  defp part_label(n), do: "part" <> String.pad_leading(Integer.to_string(n), 2, "0")
+
+  # `%{file_name => sha256}` from the stamp's sidecars. Never raises, never
+  # trusts: a sidecar that is not a small regular file, or does not parse
+  # strictly, is ignored with a warning.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp digests(dir, stamp, sidecars) do
+    sidecars
+    |> Map.get(stamp, [])
+    |> Enum.flat_map(&sidecar_digests(dir, &1))
+    |> Map.new()
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp sidecar_digests(dir, {kind, name}) do
+    path = Path.join([dir, Artifact.subdir(kind), name])
+
+    with {:ok, %File.Stat{type: :regular, size: size}} when size <= @max_sidecar_bytes <-
+           File.lstat(path),
+         {:ok, entries} <- Checksum.parse_sidecar(path) do
+      for {hex, file} <- entries, do: {file, hex}
+    else
+      _ ->
+        Logger.warning("Ignoring an unreadable or malformed checksum sidecar: #{name}")
+        []
+    end
   end
 
   defp trigger(%Manifest{trigger: trigger}) when is_binary(trigger),
@@ -261,7 +371,7 @@ defmodule KilnCMS.Backups.Importer do
 
   defp trigger(_none), do: "cron"
 
-  defp artifact_attrs(file, manifest) do
+  defp artifact_attrs(file, manifest, digests) do
     base = %{
       kind: file.kind,
       name: file.name,
@@ -270,12 +380,20 @@ defmodule KilnCMS.Backups.Importer do
       destinations: %{"local" => %{"status" => "ok"}}
     }
 
-    with %Manifest{} <- manifest,
-         %{} = listed <- Enum.find(manifest.artifacts, &(Path.basename(&1.path) == file.name)),
-         {:ok, attrs} <- Artifact.from_manifest(listed, manifest.offsite) do
-      %{attrs | bytes: file.bytes}
-    else
-      _ -> base
+    attrs =
+      with %Manifest{} <- manifest,
+           %{} = listed <-
+             Enum.find(manifest.artifacts, &(Path.basename(&1.path) == file.name)),
+           {:ok, attrs} <- Artifact.from_manifest(listed, manifest.offsite) do
+        %{attrs | bytes: file.bytes}
+      else
+        _ -> base
+      end
+
+    # Recorded, not verified: nothing here hashes the file.
+    case {attrs[:sha256], digests[file.name]} do
+      {nil, hex} when is_binary(hex) -> Map.put(attrs, :sha256, hex)
+      _ -> attrs
     end
   end
 
@@ -311,7 +429,7 @@ defmodule KilnCMS.Backups.Importer do
   defp failed_manifest_attrs(_manifest, _existing, _files), do: []
 
   defp stamped?(artifact),
-    do: match?({:ok, _, _, false}, Artifact.parse_name(Path.basename(artifact.path)))
+    do: match?({:ok, %{partial?: false}}, Artifact.parse_file(Path.basename(artifact.path)))
 
   defp import_one(attrs) do
     case Backups.import_run(attrs, actor: Backups.system()) do

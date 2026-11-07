@@ -55,7 +55,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
             KILN_PROVENANCE_ENABLED TENANT_STRICT_HOST API_DOCS_ENABLED
             GRAPHQL_INTROSPECTION_ENABLED KILN_API_REJECT_INVALID_BEARER
-            BACKUP_ENABLED OEMBED_ENABLED
+            BACKUP_ENABLED OEMBED_ENABLED BACKUP_MEDIA_PART_MB BACKUP_MEDIA_EXCLUDE
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
             BRAND_PRIMARY_COLOR ASK_RERANK SEARCH_CHUNK_LONG_DOCUMENTS
@@ -960,6 +960,53 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
         refute stderr =~ var
         assert get_in(config, [:kiln_cms, :config_warnings]) == []
+      end
+    end
+  end
+
+  describe "media archive parts and exclusions (#2218)" do
+    @part_path [:kiln_cms, KilnCMS.Backups, :media_part_bytes]
+    @exclude_path [:kiln_cms, KilnCMS.Backups, :media_exclude]
+
+    test "BACKUP_MEDIA_PART_MB is read in MB and stored in bytes" do
+      assert get_in(eval(%{"BACKUP_MEDIA_PART_MB" => " 64 "}), @part_path) == 64 * 1_048_576
+      assert get_in(eval(%{"BACKUP_MEDIA_PART_MB" => "16"}), @part_path) == 16 * 1_048_576
+      assert get_in(eval(%{"BACKUP_MEDIA_PART_MB" => "10240"}), @part_path) == 10_240 * 1_048_576
+    end
+
+    test "unset or blank writes nothing, so the 400 MB default stands, silently" do
+      for value <- [nil, "", "  "] do
+        {config, stderr} = eval_io(%{"BACKUP_MEDIA_PART_MB" => value}, :prod)
+        assert get_in(config, @part_path) == nil
+        refute stderr =~ "BACKUP_MEDIA_PART_MB"
+      end
+    end
+
+    test "out of range or unparseable values keep the default and warn naming the range" do
+      for value <- ["0", "5", "15", "10241", "999999", "seven", "3.5", "64 MB"] do
+        {config, stderr} = eval_io(%{"BACKUP_MEDIA_PART_MB" => value}, :prod)
+
+        assert get_in(config, @part_path) == nil,
+               "BACKUP_MEDIA_PART_MB=#{inspect(value)} must be refused, not clamped"
+
+        assert stderr =~ "BACKUP_MEDIA_PART_MB"
+        assert stderr =~ "from 16 to 10240"
+
+        assert {"BACKUP_MEDIA_PART_MB", ^value, {:integer_in, 16, 10_240}} =
+                 config
+                 |> get_in([:kiln_cms, :config_warnings])
+                 |> Enum.find(&(elem(&1, 0) == "BACKUP_MEDIA_PART_MB"))
+      end
+    end
+
+    test "BACKUP_MEDIA_EXCLUDE splits on commas, trims and drops blanks" do
+      assert get_in(eval(%{"BACKUP_MEDIA_EXCLUDE" => " tmp/** , ,cache/*.bin,"}), @exclude_path) ==
+               ["tmp/**", "cache/*.bin"]
+    end
+
+    test "BACKUP_MEDIA_EXCLUDE unset, blank or only separators leaves exclusions off" do
+      for value <- [nil, "", "  ", " , ,"] do
+        assert get_in(eval(%{"BACKUP_MEDIA_EXCLUDE" => value}), @exclude_path) == nil
       end
     end
   end

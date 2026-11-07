@@ -1,6 +1,9 @@
 # Backups, UpdraftPlus-style — plan
 
-Status: proposed. Tracking epic: #2216 (children are checklisted there).
+Status: in progress. Tracking epic: #2216 (children are checklisted there).
+#2217 (backup history) is built; #2218 (split archives and checksums) is built
+except for the Oban job-per-step chain, which stays open as a follow-up; the
+rest is proposed.
 Builds on #484 (in-app status + "Back up now"), `scripts/backup.sh`,
 `scripts/restore.sh` and `docs/backups.md`.
 
@@ -41,7 +44,7 @@ It deliberately has no (4), (5) or (6). This plan closes those gaps.
 | Remote storage (many), multiple at once | rclone single remote | Destination behaviour, fan-out (#2220, #2221, #2222) |
 | Test settings button | none | Per-destination test (#2221) |
 | Resumable uploads / chunked | `.partial` rename | Chunked, resumable (#2223) |
-| Split archives by size | one tar | Parts + sha256 (#2218) |
+| Split archives by size | one tar | Parts + sha256 (#2218, built for the in-app path; `backup.sh` still writes one archive) |
 | Existing backups list, rescan remote, upload, download | status of newest only | Backup history + rescan/import/download (#2217, #2225) |
 | Restore with component choice | runbook only | Restore wizard + engine (#2226, #2227) |
 | Backup before updates | none | Pre-risky-operation hook (#2228) |
@@ -72,6 +75,13 @@ It deliberately has no (4), (5) or (6). This plan closes those gaps.
 - **Pipeline** as separate Oban jobs on the `backups` queue (concurrency 1):
   `dump → archive(parts) → checksum → encrypt → upload(dest, part)` so a
   failure resumes at the failed step, not from scratch.
+  **Decision for #2218:** the resume property ships first without the job
+  chain. One Oban job still runs the steps in order, but each finished step and
+  media part is durable in `<BACKUP_DIR>/.work/<stamp>/` (`state.json` plus the
+  frozen file lists, with a recorded sha256 per part), and a platform admin's
+  **Resume** button re-runs the same backup, reusing only parts whose hash
+  still verifies. The job-per-step chain is a follow-up on top of that state;
+  #2218 stays open for it.
 - **Restore engine**: `Backups.Restore` — preflight (versions, extensions,
   space, checksums, decrypt), safety snapshot, maintenance mode, restore DB to
   a scratch database then rename/swap, restore media to a staging dir then

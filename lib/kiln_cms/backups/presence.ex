@@ -7,7 +7,8 @@ defmodule KilnCMS.Backups.Presence do
   **computed on read** (never stored) by `File.stat/1` on the run's artifacts,
   for the runs on the page being shown, so the cost is bounded by the page size.
 
-    * `:present` - every artifact file is a regular file under `dir`.
+    * `:present` - every artifact file (every part of a media set) is a regular
+      file under `dir`.
     * `:pruned` - the application's own retention removed them (the artifact's
       `"local"` destination is marked `"pruned"`).
     * `:off_site_only` - nothing is left locally, but every missing artifact has
@@ -34,33 +35,70 @@ defmodule KilnCMS.Backups.Presence do
   def for(%Run{artifacts: []}, _dir, _keep_days, _now), do: :none
 
   def for(%Run{artifacts: artifacts} = run, dir, keep_days, now) when is_binary(dir) do
-    states = Enum.map(artifacts, &{&1, local_state(&1, dir)})
-    absent = for {artifact, state} <- states, state != :present, do: {artifact, state}
+    # One unit per FILE: a media set's parts are judged one by one, so a single
+    # missing part makes the run `:missing` rather than `:present`. The checksum
+    # sidecar is not an artifact and is never looked at.
+    states =
+      for artifact <- artifacts, unit <- units(artifact), do: {unit, local_state(unit, dir)}
+
+    absent = for {unit, state} <- states, state != :present, do: {unit, state}
 
     cond do
       absent == [] -> :present
       length(absent) < length(states) -> :missing
-      Enum.all?(absent, fn {_artifact, state} -> state == :pruned end) -> :pruned
-      Enum.all?(absent, fn {artifact, _state} -> off_site?(artifact) end) -> :off_site_only
-      expired?(run, keep_days, now) -> :expired
+      true -> all_absent(absent, expired?(run, keep_days, now))
+    end
+  end
+
+  defp all_absent(absent, expired?) do
+    cond do
+      Enum.all?(absent, fn {_unit, state} -> state == :pruned end) -> :pruned
+      Enum.all?(absent, fn {unit, _state} -> off_site?(unit) end) -> :off_site_only
+      expired? -> :expired
       true -> :missing
     end
   end
 
-  defp local_state(%Artifact{} = artifact, dir) do
-    path = Path.join([dir, Artifact.subdir(artifact.kind), Path.basename(artifact.name)])
+  # `%{kind, file, local, destinations}`: one per file the artifact occupies. A
+  # part's own recorded destinations win; one with none recorded (a set
+  # imported from disk) falls back to the artifact's.
+  defp units(%Artifact{parts: [_ | _] = parts} = artifact) do
+    for %{} = part <- parts, is_binary(part["name"]) do
+      %{
+        kind: artifact.kind,
+        file: part["name"],
+        local: local_of(part["destinations"], artifact.destinations),
+        destinations: part["destinations"] || artifact.destinations
+      }
+    end
+  end
+
+  defp units(%Artifact{} = artifact) do
+    [
+      %{
+        kind: artifact.kind,
+        file: artifact.name,
+        local: local_of(artifact.destinations, %{}),
+        destinations: artifact.destinations
+      }
+    ]
+  end
+
+  defp local_of(%{"local" => %{"status" => status}}, _fallback), do: status
+  defp local_of(_own, %{"local" => %{"status" => status}}), do: status
+  defp local_of(_own, _fallback), do: nil
+
+  defp local_state(unit, dir) do
+    path = Path.join([dir, Artifact.subdir(unit.kind), Path.basename(unit.file)])
 
     # `lstat`, like the importer: a symlink named like an artifact is not one.
     case File.lstat(path) do
       {:ok, %File.Stat{type: :regular}} -> :present
-      _ -> if pruned?(artifact), do: :pruned, else: :gone
+      _ -> if unit.local == "pruned", do: :pruned, else: :gone
     end
   end
 
-  defp pruned?(%Artifact{destinations: %{"local" => %{"status" => "pruned"}}}), do: true
-  defp pruned?(_artifact), do: false
-
-  defp off_site?(%Artifact{destinations: destinations}) do
+  defp off_site?(%{destinations: destinations}) do
     Enum.any?(destinations, fn
       {"rclone:" <> _remote, %{"status" => "ok"}} -> true
       _ -> false
