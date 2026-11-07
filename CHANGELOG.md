@@ -185,6 +185,8 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Three dead links in the docs now resolve (the `KilnCMS.Keys` link in Memberships and Ghost's schema in both comparison pages), and a docs test refuses relative `.html` links.** ([#2167](https://github.com/The-Verscienta/kiln_cms/issues/2167))
+
 - **The sign-in, register and reset pages now have a header landmark, one `h1`, and `autocomplete` on their email and password boxes.**
   ([#2162](https://github.com/The-Verscienta/kiln_cms/issues/2162) · [long form](docs/changelog/unreleased.md#auth-pages-landmarks-autocomplete))
 
