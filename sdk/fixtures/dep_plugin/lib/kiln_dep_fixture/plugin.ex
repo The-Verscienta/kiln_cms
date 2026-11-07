@@ -27,6 +27,7 @@ defmodule KilnDepFixture.Plugin do
       {:post, "/fixture-hooks/echo", KilnDepFixture.HookPlug, :echo},
       {:post, "/fixture-hooks/provider/:name", KilnDepFixture.HookPlug, :echo},
       {:get, "/fixture-hooks/tenant", KilnDepFixture.HookPlug, :tenant},
+      {:post, "/fixture-hooks/webhook", KilnDepFixture.HookPlug, :webhook},
       {:forward, "/fixture-forward", KilnDepFixture.FeedRouter, []}
     ]
   end
