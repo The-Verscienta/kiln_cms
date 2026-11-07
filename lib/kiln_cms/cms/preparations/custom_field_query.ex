@@ -10,8 +10,21 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
     * `custom_filter` — `%{"price" => %{"gt" => "10"}, "color" => "red"}`;
       a bare value means equality, a map holds operators (`eq`, `not_eq`,
-      `gt`, `gte`, `lt`, `lte`, `in`, `ilike`, `null`; `is_nil` is a
-      synonym of `null`). Conditions are ANDed.
+      `gt`, `gte`, `lt`, `lte`, `in`, `ilike`, `contains`, `starts_with`,
+      `null`; `is_nil` is a synonym of `null`). `contains` / `starts_with`
+      match text case-insensitively and take their operand literally (`%`,
+      `_` and `\` are escaped), unlike `ilike`. Conditions are ANDed.
+    * `custom_where` — the typed form of `custom_filter` (GraphQL
+      `customWhere`, #2290): a list of `%{name: "price", float: %{gt: 10.0}}`,
+      one kind key (`string`, `int`, `float`, `boolean`, `date`, `date_time`)
+      per condition, which must be the kind of the field
+      (`KilnCMS.CMS.FieldKind`). It is translated into `custom_filter`
+      conditions here, once the definitions are resolved, so casting,
+      privacy, tenant and Entry scoping are the same code as `custom_filter`'s
+      (a private field is the same "unknown custom field"). Reference, media,
+      group, geolocation, link and relationship fields keep using
+      `custom_filter`; so does a `multiple` field, except `string` `eq`/`in` on
+      a multiple string or select.
     * `custom_sort` — comma-separated field names, `-` prefix for descending
       (`"-price,title"`), appended to any explicit `sort` so it wins over an
       action's *default* order but not over a caller's.
@@ -63,14 +76,27 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   alias Ash.Error.Query.InvalidArgument
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Relations
 
-  @operators ~w(eq not_eq gt gte lt lte in ilike null is_nil)
+  @operators ~w(eq not_eq gt gte lt lte in ilike contains starts_with null is_nil)
+
+  # `custom_where`: the condition's kind keys, and the operators of each.
+  @kind_keys [:string, :int, :float, :boolean, :date, :date_time]
+  @comparison_ops ~w(eq not_eq in gt gte lt lte is_null)
+  @kind_ops %{
+    string: ~w(eq not_eq in contains starts_with is_null),
+    int: @comparison_ops,
+    float: @comparison_ops,
+    boolean: ~w(eq is_null),
+    date: @comparison_ops,
+    date_time: @comparison_ops
+  }
 
   @impl true
   def prepare(query, _opts, context) do
     filter = Ash.Query.get_argument(query, :custom_filter) || %{}
     sort = Ash.Query.get_argument(query, :custom_sort) || ""
+    where = Ash.Query.get_argument(query, :custom_where) || []
 
-    if filter == %{} and sort == "" do
+    if filter == %{} and sort == "" and where == [] do
       query
     else
       defs = query |> definitions() |> visible_to(query, context)
@@ -84,6 +110,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
       query
       |> apply_filter(filter, defs, ctx)
+      |> apply_where(where, defs, ctx)
       |> apply_sort(sort, defs)
     end
   end
@@ -337,6 +364,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp link_condition(_link, op, _raw, label) when op not in @operators,
     do: {:error, "unknown operator #{inspect(op)} for link field #{inspect(label)}"}
 
+  defp link_condition(_link, op, _raw, label) when op in ~w(contains starts_with),
+    do: {:error, "#{op} is not supported on link fields (#{inspect(label)})"}
+
   defp link_condition(%{name: name}, "null", raw, label) do
     path = expr(get_path(metadata, [^name]))
 
@@ -494,6 +524,16 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     end)
   end
 
+  defp condition(%{name: name} = definition, op, raw) when op in ~w(contains starts_with) do
+    if ash_type(definition) do
+      {:error, "#{op} is only supported on text-like custom fields (#{inspect(name)})"}
+    else
+      with {:ok, text} <- cast_value(raw, nil, name) do
+        {:ok, text_match(name, op, text)}
+      end
+    end
+  end
+
   defp condition(%{name: name} = definition, "ilike", raw) do
     if ash_type(definition) do
       {:error, "ilike is only supported on text-like custom fields (#{inspect(name)})"}
@@ -506,6 +546,15 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     with {:ok, value} <- cast_value(raw, ash_type(definition), name) do
       {:ok, jsonb_condition(:custom_fields, op, name, value)}
     end
+  end
+
+  # Case-insensitive substring / prefix match on the field's text. The operand is
+  # text, not a pattern: `\`, `%` and `_` are escaped before the wildcard goes on.
+  defp text_match(name, op, text) do
+    escaped = String.replace(text, ["\\", "%", "_"], &("\\" <> &1))
+    pattern = if op == "contains", do: "%" <> escaped <> "%", else: escaped <> "%"
+
+    expr(fragment("(? ->> ?::text) ILIKE ? ESCAPE '\\'", ^ref(:custom_fields), ^name, ^pattern))
   end
 
   # Compare at the jsonb level (`->` keeps the value's JSON type) rather than
@@ -619,6 +668,165 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       )
     )
   end
+
+  # --- typed conditions (`custom_where`) -----------------------------------------
+
+  defp apply_where(query, where, defs, ctx) when is_list(where) do
+    max = KilnCMSWeb.GraphqlLimits.max_custom_conditions()
+
+    if length(where) > max do
+      invalid(query, :custom_where, "at most #{max} conditions are allowed")
+    else
+      Enum.reduce(where, query, &where_condition(&2, &1, defs, ctx))
+    end
+  end
+
+  defp apply_where(query, _where, _defs, _ctx),
+    do: invalid(query, :custom_where, "must be a list of conditions")
+
+  # The same `resolve/2` as `custom_filter`, over the same already
+  # privacy-filtered `defs`: a missing and a private field answer alike.
+  defp where_condition(query, raw, defs, ctx) do
+    with {:ok, name, kind, ops} <- parse_condition(raw),
+         {:ok, definition} <- resolve(defs, name),
+         :ok <- check_kind(definition, kind, ops),
+         {:ok, filter} <- translate_ops(kind, ops, name),
+         {:ok, exprs} <- conditions(definition, filter, ctx) do
+      Enum.reduce(exprs, query, &Ash.Query.do_filter(&2, &1))
+    else
+      {:error, message} -> invalid(query, :custom_where, message)
+    end
+  end
+
+  # `{:ok, name, kind, ops}`: exactly one kind key, its operators (string keys,
+  # nil operands dropped, as GraphQL gives an explicit `null`).
+  defp parse_condition(raw) when is_map(raw) do
+    raw = Map.new(raw, fn {key, value} -> {to_string(key), value} end)
+    kind_names = Enum.map(@kind_keys, &Atom.to_string/1)
+    unknown = Map.keys(raw) -- ["name" | kind_names]
+    given = Enum.filter(kind_names, &(raw[&1] != nil))
+    name = raw["name"]
+
+    cond do
+      not is_binary(name) or name == "" ->
+        {:error, "every condition needs a name"}
+
+      unknown != [] ->
+        {:error, "unknown key #{inspect(hd(unknown))} in the condition on #{inspect(name)}"}
+
+      length(given) != 1 ->
+        {:error,
+         "the condition on #{inspect(name)} needs exactly one of #{kind_list()}, " <>
+           "got #{if given == [], do: "none", else: Enum.map_join(given, ", ", &camel/1)}"}
+
+      true ->
+        [key] = given
+        operators(name, String.to_existing_atom(key), raw[key])
+    end
+  end
+
+  defp parse_condition(_raw), do: {:error, "every condition must be an object"}
+
+  defp operators(name, kind, ops) when is_map(ops) do
+    ops =
+      ops
+      |> Map.new(fn {op, value} -> {to_string(op), value} end)
+      |> Map.reject(fn {_op, value} -> is_nil(value) end)
+
+    if ops == %{},
+      do: {:error, "the condition on #{inspect(name)} needs at least one operator"},
+      else: {:ok, name, kind, ops}
+  end
+
+  defp operators(name, kind, _ops),
+    do: {:error, "the #{camel(kind)} condition on #{inspect(name)} must be an object"}
+
+  defp kind_list, do: Enum.map_join(@kind_keys, ", ", &camel/1)
+
+  defp camel(key), do: key |> to_string() |> Macro.camelize() |> lcfirst()
+  defp lcfirst(<<first::utf8, rest::binary>>), do: String.downcase(<<first::utf8>>) <> rest
+
+  # The kind given must be the field's own. A `multiple` field is a `:list`;
+  # a multiple string or select keeps today's "list contains" meaning for
+  # `eq` / `in` and nothing else.
+  defp check_kind(definition, kind, ops) do
+    actual = KilnCMS.CMS.FieldKind.kind_for(definition)
+    given = if kind == :date_time, do: :datetime, else: kind
+    name = definition.name
+
+    cond do
+      actual == given ->
+        :ok
+
+      actual == :list and given == :string and definition.field_type in [:string, :select] ->
+        if Map.keys(ops) -- ~w(eq in) == [],
+          do: :ok,
+          else:
+            {:error,
+             "custom field #{inspect(name)} is a list: customWhere supports only eq and in on it"}
+
+      actual in [:string, :int, :float, :boolean, :date, :datetime] ->
+        {:error,
+         "custom field #{inspect(name)} is a #{camel(actual_key(actual))} field, " <>
+           "not #{camel(kind)}; use the #{camel(actual_key(actual))} condition"}
+
+      true ->
+        {:error,
+         "custom field #{inspect(name)} has kind #{actual}, which customWhere does not " <>
+           "support; use customFilter"}
+    end
+  end
+
+  defp actual_key(:datetime), do: :date_time
+  defp actual_key(kind), do: kind
+
+  # `custom_filter`'s own shape: `%{operator => operand}` with operands in the
+  # types `cast_value/3` takes.
+  defp translate_ops(kind, ops, name) do
+    allowed = Map.fetch!(@kind_ops, kind)
+
+    error =
+      Enum.find_value(ops, fn {op, value} ->
+        case check_operator(op, value, allowed, kind, name) do
+          :ok -> nil
+          {:error, _message} = error -> error
+        end
+      end)
+
+    error ||
+      {:ok,
+       Map.new(ops, fn {op, value} ->
+         {if(op == "is_null", do: "null", else: op), operand(value)}
+       end)}
+  end
+
+  defp check_operator(op, value, allowed, kind, name) do
+    max_in = KilnCMSWeb.GraphqlLimits.max_custom_in_values()
+
+    cond do
+      op not in allowed ->
+        {:error,
+         "unknown operator #{inspect(op)} for a #{camel(kind)} condition on #{inspect(name)} " <>
+           "(#{Enum.join(allowed, ", ")})"}
+
+      op == "in" and not is_list(value) ->
+        {:error, "in on #{inspect(name)} must be a list"}
+
+      op == "in" and length(value) > max_in ->
+        {:error, "in on #{inspect(name)} takes at most #{max_in} values"}
+
+      true ->
+        :ok
+    end
+  end
+
+  # A datetime operand is an instant; custom datetimes are stored offset-less.
+  defp operand(values) when is_list(values), do: Enum.map(values, &operand/1)
+
+  defp operand(%DateTime{} = datetime),
+    do: datetime |> DateTime.shift_zone!("Etc/UTC") |> DateTime.to_naive()
+
+  defp operand(value), do: value
 
   # --- sorting -----------------------------------------------------------------
 

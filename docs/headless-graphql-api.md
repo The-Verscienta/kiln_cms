@@ -109,13 +109,57 @@ consumers never need the plain, credential-widened list.
 > bare-name form: custom fields are only reachable through `customFilter` /
 > `customSort`.
 
+### Typed filters: `customWhere`
+
+`customWhere` is the typed form of `customFilter`, on every query that takes
+`customFilter`. A condition names a field and gives **exactly one** kind key,
+which must be the field's kind (the one its `customFloat`-style accessor
+reads):
+
+```graphql
+{
+  publishedPosts(
+    limit: 20
+    customWhere: [
+      { name: "price", float: { gt: 10, lte: 50 } }
+      { name: "color", string: { contains: "re" } }
+    ]
+  ) { results { title customFloat(name: "price") } }
+}
+```
+
+| Kind key | For fields of kind | Operators |
+|---|---|---|
+| `string` | `string`, `text`, `url`, `select` | `eq`, `notEq`, `in`, `contains`, `startsWith`, `isNull` |
+| `int` | `integer` | `eq`, `notEq`, `in`, `gt`, `gte`, `lt`, `lte`, `isNull` |
+| `float` | `float` | same as `int` |
+| `boolean` | `boolean` | `eq`, `isNull` |
+| `date` | `date` | same as `int`, with `Date` operands |
+| `dateTime` | `datetime` | same as `int`, with `DateTime` operands |
+
+- Operands are real GraphQL scalars: `float: {gt: "abc"}` fails validation, not
+  the database. Conditions (and the operators in one condition) are ANDed, and
+  they are ANDed with `customFilter` if both are given.
+- A wrong kind (`float:` on a string field), no kind key, or two of them is an
+  error that names the field's kind. A name that is unknown, or private to the
+  reader, is the same `unknown custom field` error.
+- `contains` and `startsWith` ignore case and take their text literally: `%`,
+  `_` and `\` are not wildcards. `customFilter` accepts them too, as
+  `contains` / `starts_with`, on text-like fields.
+- Not in `customWhere`: a `multiple` field (except `string: {eq | in}`, which
+  means "the list contains"), and reference, media, group, geolocation and link
+  fields and the relationship operators. Use `customFilter` for those.
+  Sorting stays `customSort`.
+- Limits: at most 10 conditions per query and 50 values in an `in`; each
+  condition adds 5 to the query's [complexity](#query-cost).
+
 How a custom field's `customFilter` / `customSort` differs from a column's
 `filter` / `sort` (the same vocabulary as JSON:API, full table in
 [json-api.md](json-api.md) → "Naming a custom field like a column"):
 
 | | `customFilter` / `customSort` | `filter` / `sort` |
 |---|---|---|
-| Operators | `eq`, `not_eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ilike` (text only), `null` (`is_nil` is a synonym) | the generated filter input |
+| Operators | `eq`, `not_eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ilike` (text only), `contains`, `starts_with` (text only), `null` (`is_nil` is a synonym) | the generated filter input |
 | Unknown name | error `unknown custom field "x"` | rejected by the schema |
 | Sort nulls | last, both directions | plain `asc` / `desc` |
 | Relationship operators | `has`, `has_all`, `has_none`, `count` | not available |

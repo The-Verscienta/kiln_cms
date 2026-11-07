@@ -4,6 +4,12 @@ schema {
   query: RootQueryType
 }
 
+"Operators for a `boolean` custom field."
+input BooleanFilter {
+  eq: Boolean
+  isNull: Boolean
+}
+
 "A `boolean` field."
 type BooleanValue implements CustomFieldValue {
   name: String!
@@ -24,6 +30,8 @@ type Category {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
 
     "The number of records to return."
@@ -40,6 +48,8 @@ type Category {
     filter: PostFilterInput
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
 
@@ -389,6 +399,21 @@ type CreatePostResult {
 }
 
 """
+A condition on one custom field. Give `name` and exactly one of `string`,
+`int`, `float`, `boolean`, `date` or `dateTime`, which must be the kind of
+the field (`customString`, `customInt`, ...). Conditions in a list are ANDed.
+"""
+input CustomFieldCondition {
+  name: String!
+  string: StringFilter
+  int: IntFilter
+  float: FloatFilter
+  boolean: BooleanFilter
+  date: DateFilter
+  dateTime: DateTimeFilter
+}
+
+"""
 The value of one admin-defined custom field, by the kind its definition has.
 `name` is the field's name. Narrow with `... on FloatValue { value }`.
 """
@@ -402,6 +427,18 @@ response as an ISO8601 formatted string, without a time component.
 """
 scalar Date
 
+"Operators for a `date` custom field."
+input DateFilter {
+  eq: Date
+  notEq: Date
+  in: [Date!]
+  gt: Date
+  gte: Date
+  lt: Date
+  lte: Date
+  isNull: Boolean
+}
+
 """
 The `DateTime` scalar type represents a date and time in the UTC
 timezone. The DateTime appears in a JSON response as an ISO8601 formatted
@@ -409,6 +446,18 @@ string, including UTC timezone ("Z"). The parsed date and time string will
 be converted to UTC if there is an offset.
 """
 scalar DateTime
+
+"Operators for a `datetime` custom field."
+input DateTimeFilter {
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime!]
+  gt: DateTime
+  gte: DateTime
+  lt: DateTime
+  lte: DateTime
+  isNull: Boolean
+}
 
 "A `datetime` field."
 type DateTimeValue implements CustomFieldValue {
@@ -605,6 +654,8 @@ type Entry implements ContentRecord {
     filter: EntryFilterInput
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
 
@@ -1342,6 +1393,18 @@ input EntrySortInput {
   highlightInput: EntryHighlightFieldInput
 }
 
+"Operators for a `float` custom field."
+input FloatFilter {
+  eq: Float
+  notEq: Float
+  in: [Float!]
+  gt: Float
+  gte: Float
+  lt: Float
+  lte: Float
+  isNull: Boolean
+}
+
 "A `float` field."
 type FloatValue implements CustomFieldValue {
   name: String!
@@ -1364,6 +1427,18 @@ sub-fields, as values.
 type GroupValue implements CustomFieldValue {
   name: String!
   fields: [CustomFieldValue!]!
+}
+
+"Operators for an `integer` custom field."
+input IntFilter {
+  eq: Int
+  notEq: Int
+  in: [Int!]
+  gt: Int
+  gte: Int
+  lt: Int
+  lte: Int
+  isNull: Boolean
 }
 
 "An `integer` field."
@@ -1451,6 +1526,8 @@ type MediaItem {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
 
     "The number of records to return."
@@ -1467,6 +1544,8 @@ type MediaItem {
     filter: PostFilterInput
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
 
@@ -1946,6 +2025,8 @@ type Page implements ContentRecord {
     filter: PageFilterInput
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
 
@@ -2790,6 +2871,8 @@ type Post implements ContentRecord {
     filter: PostFilterInput
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
 
@@ -3681,45 +3764,81 @@ type RootMutationType {
 
   createPage(input: CreatePageInput!): CreatePageResult!
 
-  updatePage(id: ID!, customFilter: JsonString, customSort: String, input: UpdatePageInput): UpdatePageResult!
+  updatePage(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: UpdatePageInput
+  ): UpdatePageResult!
 
-  submitPageForReview(id: ID!, customFilter: JsonString, customSort: String, input: SubmitPageForReviewInput): SubmitPageForReviewResult!
+  submitPageForReview(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: SubmitPageForReviewInput
+  ): SubmitPageForReviewResult!
 
-  returnPageToDraft(id: ID!, customFilter: JsonString, customSort: String, input: ReturnPageToDraftInput): ReturnPageToDraftResult!
+  returnPageToDraft(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: ReturnPageToDraftInput
+  ): ReturnPageToDraftResult!
 
-  publishPage(id: ID!, customFilter: JsonString, customSort: String, input: PublishPageInput): PublishPageResult!
+  publishPage(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: PublishPageInput
+  ): PublishPageResult!
 
-  unpublishPage(id: ID!, customFilter: JsonString, customSort: String, input: UnpublishPageInput): UnpublishPageResult!
+  unpublishPage(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: UnpublishPageInput
+  ): UnpublishPageResult!
 
-  deletePage(id: ID!, customFilter: JsonString, customSort: String, input: DeletePageInput!): DeletePageResult!
+  deletePage(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: DeletePageInput!
+  ): DeletePageResult!
 
   createPost(input: CreatePostInput!): CreatePostResult!
 
-  updatePost(id: ID!, customFilter: JsonString, customSort: String, input: UpdatePostInput): UpdatePostResult!
+  updatePost(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: UpdatePostInput
+  ): UpdatePostResult!
 
-  submitPostForReview(id: ID!, customFilter: JsonString, customSort: String, input: SubmitPostForReviewInput): SubmitPostForReviewResult!
+  submitPostForReview(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: SubmitPostForReviewInput
+  ): SubmitPostForReviewResult!
 
-  returnPostToDraft(id: ID!, customFilter: JsonString, customSort: String, input: ReturnPostToDraftInput): ReturnPostToDraftResult!
+  returnPostToDraft(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: ReturnPostToDraftInput
+  ): ReturnPostToDraftResult!
 
-  publishPost(id: ID!, customFilter: JsonString, customSort: String, input: PublishPostInput): PublishPostResult!
+  publishPost(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: PublishPostInput
+  ): PublishPostResult!
 
-  unpublishPost(id: ID!, customFilter: JsonString, customSort: String, input: UnpublishPostInput): UnpublishPostResult!
+  unpublishPost(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: UnpublishPostInput
+  ): UnpublishPostResult!
 
-  deletePost(id: ID!, customFilter: JsonString, customSort: String, input: DeletePostInput!): DeletePostResult!
+  deletePost(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: DeletePostInput!
+  ): DeletePostResult!
 
   createEntry(input: CreateEntryInput!): CreateEntryResult!
 
-  updateEntry(id: ID!, customFilter: JsonString, customSort: String, input: UpdateEntryInput): UpdateEntryResult!
+  updateEntry(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: UpdateEntryInput
+  ): UpdateEntryResult!
 
-  submitEntryForReview(id: ID!, customFilter: JsonString, customSort: String, input: SubmitEntryForReviewInput): SubmitEntryForReviewResult!
+  submitEntryForReview(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: SubmitEntryForReviewInput
+  ): SubmitEntryForReviewResult!
 
-  returnEntryToDraft(id: ID!, customFilter: JsonString, customSort: String, input: ReturnEntryToDraftInput): ReturnEntryToDraftResult!
+  returnEntryToDraft(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: ReturnEntryToDraftInput
+  ): ReturnEntryToDraftResult!
 
-  publishEntry(id: ID!, customFilter: JsonString, customSort: String, input: PublishEntryInput): PublishEntryResult!
+  publishEntry(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: PublishEntryInput
+  ): PublishEntryResult!
 
-  unpublishEntry(id: ID!, customFilter: JsonString, customSort: String, input: UnpublishEntryInput): UnpublishEntryResult!
+  unpublishEntry(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: UnpublishEntryInput
+  ): UnpublishEntryResult!
 
-  deleteEntry(id: ID!, customFilter: JsonString, customSort: String, input: DeleteEntryInput!): DeleteEntryResult!
+  deleteEntry(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: DeleteEntryInput!
+  ): DeleteEntryResult!
 
   updateMediaItem(id: ID!, input: UpdateMediaItemInput): UpdateMediaItemResult!
 }
@@ -3784,6 +3903,8 @@ type RootQueryType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): PageOfPage
 
@@ -3808,6 +3929,8 @@ type RootQueryType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): [Page!]!
 
@@ -3831,6 +3954,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
   ): [Page!]!
@@ -3866,6 +3991,8 @@ type RootQueryType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): [Page!]!
 
@@ -3887,6 +4014,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
   ): [Page!]!
@@ -3930,6 +4059,8 @@ type RootQueryType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): PageOfPost
 
@@ -3954,6 +4085,8 @@ type RootQueryType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): [Post!]!
 
@@ -3977,6 +4110,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
   ): [Post!]!
@@ -4012,6 +4147,8 @@ type RootQueryType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): [Post!]!
 
@@ -4033,6 +4170,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
   ): [Post!]!
@@ -4078,6 +4217,8 @@ type RootQueryType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): PageOfEntry
 
@@ -4102,6 +4243,8 @@ type RootQueryType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): [Entry!]!
 
@@ -4125,6 +4268,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
   ): [Entry!]!
@@ -4160,6 +4305,8 @@ type RootQueryType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): [Entry!]!
 
@@ -4181,6 +4328,8 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
   ): [Entry!]!
@@ -4235,6 +4384,8 @@ type RootSubscriptionType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): page_changed_result
   postChanged(
@@ -4243,6 +4394,8 @@ type RootSubscriptionType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): post_changed_result
   entryChanged(
@@ -4250,6 +4403,8 @@ type RootSubscriptionType {
     filter: EntryFilterInput
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
   ): entry_changed_result
@@ -4262,6 +4417,16 @@ enum SortOrder {
   ASC
   ASC_NULLS_FIRST
   ASC_NULLS_LAST
+}
+
+"Operators for a text-like custom field. `contains` and `startsWith` ignore case and match text, not patterns."
+input StringFilter {
+  eq: String
+  notEq: String
+  in: [String!]
+  contains: String
+  startsWith: String
+  isNull: Boolean
 }
 
 "A text-like field: `string`, `text`, `url`, `select` or `user`."
@@ -4324,6 +4489,8 @@ type Tag {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
 
     "The number of records to return."
@@ -4340,6 +4507,8 @@ type Tag {
     filter: PostFilterInput
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
 

@@ -74,6 +74,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
+  A wrong operand type is a schema error; `contains` and `startsWith` (case-insensitive, literal) also work in `customFilter`.
+  ([#2290](https://github.com/The-Verscienta/kiln_cms/issues/2290) · [long form](docs/changelog/unreleased.md#graphql-custom-where))
+
 - **Admins can move one document to the trash from the content list's row menu or the editor's Settings tab.**
   Same soft delete as bulk Delete; pending autosave edits are saved first. Guide: [docs/trash.md](docs/trash.md).
   ([#2333](https://github.com/The-Verscienta/kiln_cms/pull/2333) · [long form](docs/changelog/unreleased.md#move-to-trash-in-editor))

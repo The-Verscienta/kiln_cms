@@ -17361,6 +17361,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -18377,6 +18389,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -18608,6 +18632,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -18827,6 +18863,18 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
           },
           {
             "in": "query",
@@ -19061,6 +19109,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -19283,6 +19343,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -19465,6 +19537,18 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
           },
           {
             "in": "query",
@@ -21602,6 +21686,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -22593,6 +22689,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -22824,6 +22932,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -23043,6 +23163,18 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
           },
           {
             "in": "query",
@@ -23277,6 +23409,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -23499,6 +23643,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -23681,6 +23837,18 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
           },
           {
             "in": "query",
@@ -24982,6 +25150,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -25983,6 +26163,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -26214,6 +26406,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -26433,6 +26637,18 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
           },
           {
             "in": "query",
@@ -26667,6 +26883,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -26889,6 +27117,18 @@
           },
           {
             "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "custom_sort",
             "required": false,
             "schema": {
@@ -27071,6 +27311,18 @@
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "custom_where",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "style": "form"
           },
           {
             "in": "query",

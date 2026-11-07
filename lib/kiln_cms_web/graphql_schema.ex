@@ -29,6 +29,9 @@ defmodule KilnCMSWeb.GraphqlSchema do
   # `fields(names:)`.
   import_types KilnCMSWeb.Graphql.CustomFieldValues
 
+  # The typed conditions of `customWhere` (#2290).
+  import_types KilnCMSWeb.Graphql.CustomWhere
+
   KilnCMSWeb.Graphql.ContentRecord.Notation.implement_content_record(
     Application.compile_env(:kiln_cms, :content_domains, [KilnCMS.CMS])
   )

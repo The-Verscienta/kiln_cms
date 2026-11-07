@@ -819,6 +819,7 @@ defmodule KilnCMS.CMS.Content do
           # see the preparation). Declared before the default-sort build so a
           # `custom_sort` outranks `published_at` but not an explicit `sort`.
           argument :custom_filter, :map
+          argument :custom_where, {:array, KilnCMS.CMS.Types.CustomFieldCondition}
           argument :custom_sort, :string
           prepare KilnCMS.CMS.Preparations.CustomFieldQuery
 
@@ -844,7 +845,9 @@ defmodule KilnCMS.CMS.Content do
     # surface can't be asked to load every published row at once.
     published_query =
       quote do
-        list unquote(:"published_#{type}s"), :published, paginate_with: :offset
+        list unquote(:"published_#{type}s"), :published,
+          paginate_with: :offset,
+          complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
       end
 
     # JSON:API route for the published feed.
@@ -927,19 +930,30 @@ defmodule KilnCMS.CMS.Content do
 
               # The published index (newest first), across all dynamic types —
               # scope by the `type_name` filter like the plain list.
-              list :published_entries, :published, paginate_with: :offset
+              list :published_entries, :published,
+                paginate_with: :offset,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               # `paginate_with: nil` keeps these plain lists (the pre-pagination
               # schema shape); the actions' prepare caps unpaginated reads.
-              list :search_entries, :search, paginate_with: nil
-              list :semantic_search_entries, :search_semantic, paginate_with: nil
+              list :search_entries, :search,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
+
+              list :semantic_search_entries, :search_semantic,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
+
               list :autocomplete_entries, :autocomplete
 
               # Published-only delivery twins (#297) — state pinned server-side.
-              list :search_published_entries, :search_published, paginate_with: nil
+              list :search_published_entries, :search_published,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               list :semantic_search_published_entries, :search_semantic_published,
-                paginate_with: nil
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               list :autocomplete_published_entries, :autocomplete_published
             end
@@ -1080,15 +1094,24 @@ defmodule KilnCMS.CMS.Content do
               # title autocomplete, per content type. `paginate_with: nil` keeps
               # these plain lists (the pre-pagination schema shape); the actions'
               # prepare caps unpaginated reads instead.
-              list unquote(:"search_#{type}s"), :search, paginate_with: nil
-              list unquote(:"semantic_search_#{type}s"), :search_semantic, paginate_with: nil
+              list unquote(:"search_#{type}s"), :search,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
+
+              list unquote(:"semantic_search_#{type}s"), :search_semantic,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
+
               list unquote(:"autocomplete_#{type}s"), :autocomplete
 
               # Published-only delivery twins (#297) — state pinned server-side.
-              list unquote(:"search_published_#{type}s"), :search_published, paginate_with: nil
+              list unquote(:"search_published_#{type}s"), :search_published,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               list unquote(:"semantic_search_published_#{type}s"), :search_semantic_published,
-                paginate_with: nil
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               list unquote(:"autocomplete_published_#{type}s"), :autocomplete_published
             end
@@ -1571,6 +1594,7 @@ defmodule KilnCMS.CMS.Content do
         if(published?, do: nil, else: quote(do: argument(:state, :atom))),
         quote(do: argument(:tag_ids, {:array, :uuid})),
         quote(do: argument(:custom_filter, :map)),
+        quote(do: argument(:custom_where, {:array, KilnCMS.CMS.Types.CustomFieldCondition})),
         quote(do: prepare(KilnCMS.CMS.Preparations.CustomFieldQuery))
       ]
       |> Enum.reject(&is_nil/1)
@@ -2699,6 +2723,7 @@ defmodule KilnCMS.CMS.Content do
           # preparation turns these into typed `get_path` predicates/sort keys
           # validated against the FieldDefinition registry (docs/json-api.md).
           argument :custom_filter, :map
+          argument :custom_where, {:array, KilnCMS.CMS.Types.CustomFieldCondition}
           argument :custom_sort, :string
           prepare KilnCMS.CMS.Preparations.CustomFieldQuery
 
