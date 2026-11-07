@@ -14,7 +14,10 @@ defmodule KilnCMS.CMS.CustomFieldIndexTest do
   then may switch to a value-blind generic plan; a forced generic plan is
   checked too.
   """
-  use KilnCMSWeb.ConnCase, async: true
+  # Not async: the plan assertions cost a table other tests are also writing and
+  # rolling back (dead tuples inflate its size), which made the planner flip to a
+  # Seq Scan under load. Alone, the plan is stable.
+  use KilnCMSWeb.ConnCase, async: false
 
   alias KilnCMS.CMS
   alias KilnCMS.Repo
