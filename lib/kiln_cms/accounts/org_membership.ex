@@ -127,6 +127,7 @@ defmodule KilnCMS.Accounts.OrgMembership do
       :editable_types,
       :readable_types,
       :field_grants,
+      :field_read_grants,
       :role_id
     ]
 
@@ -176,6 +177,12 @@ defmodule KilnCMS.Accounts.OrgMembership do
     # A malformed grant map must fail on the admin's write, not crash the
     # editor's next save (see the validation module).
     validate KilnCMS.Accounts.Validations.FieldGrantsShape, on: [:create, :update]
+
+    validate {KilnCMS.Accounts.Validations.FieldGrantsShape, attribute: :field_read_grants},
+      on: [:create, :update]
+
+    validate KilnCMS.Accounts.Validations.ReadGrantsPrivate, on: [:create, :update]
+
     # A client-supplied role_id must reference a role of THIS org.
     validate KilnCMS.Accounts.Validations.RoleBelongsToOrg, on: [:create, :update]
     # A temporary platform admin must not confer a site tier — on anyone, itself
@@ -239,6 +246,17 @@ defmodule KilnCMS.Accounts.OrgMembership do
     # slice 3). Empty means no restriction; a non-empty map wins wholesale
     # over the user column for this org (see KilnCMS.Accounts.Scoping).
     attribute :field_grants, :map do
+      default %{}
+      allow_nil? false
+      public? false
+    end
+
+    # Per-custom-field READ restrictions (#2281): content-type name → the
+    # private custom fields (`custom_fields.<name>`, or the bare
+    # `custom_fields`) the editor may see. No entry for a type = unrestricted;
+    # `[]` hides every private field. Resolved like `field_grants`
+    # (KilnCMS.Accounts.Scoping.field_read_grant/3).
+    attribute :field_read_grants, :map do
       default %{}
       allow_nil? false
       public? false

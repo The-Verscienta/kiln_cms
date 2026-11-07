@@ -605,7 +605,9 @@ cannot read, are simply missing from the file.
 always private), are left out unless you tick **Include private fields** in
 the Export panel. The box appears only when the type has such a field you
 could show as a column. Ticking it changes the download links; it does not
-change the list.
+change the list. A private field your role hides from you
+([granular-rbac.md](granular-rbac.md#per-custom-field-grants-and-read-restrictions))
+is never exported, with or without the box, and `private=1` does not bypass it.
 
 **What a cell holds.** The file is data, not a copy of the screen, so some
 values differ from the on-screen text:

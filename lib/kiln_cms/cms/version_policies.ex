@@ -81,6 +81,12 @@ defmodule KilnCMS.CMS.VersionPolicies do
         change KilnCMS.Governance.Changes.SignVersion, on: [:create]
       end
 
+      # An editor's read restriction (#2281) hides private custom fields from
+      # a version's `changes` too.
+      preparations do
+        prepare KilnCMS.CMS.Preparations.MaskVersionFields
+      end
+
       policies do
         bypass KilnCMS.CMS.Checks.OrgAdmin do
           authorize_if always()

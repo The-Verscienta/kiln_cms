@@ -295,10 +295,19 @@ defmodule KilnCMS.Accounts.User do
     # access is granted — self-registration always lands on `:viewer` with no
     # audiences. See KilnCMS.CMS.Audiences and the content read policy.
     update :manage_access do
-      accept [:role, :audiences, :editable_types, :readable_types, :field_grants]
+      accept [
+        :role,
+        :audiences,
+        :editable_types,
+        :readable_types,
+        :field_grants,
+        :field_read_grants
+      ]
+
       # The shape validation inspects the whole map — no atomic expression.
       require_atomic? false
       validate KilnCMS.Accounts.Validations.FieldGrantsShape
+      validate {KilnCMS.Accounts.Validations.FieldGrantsShape, attribute: :field_read_grants}
 
       # A temporary admin must not be able to make itself a permanent one — the
       # bound on a grant is otherwise whatever the grantee decides. See the module.
@@ -1186,6 +1195,17 @@ defmodule KilnCMS.Accounts.User do
     # KilnCMS.CMS.Changes.EnforceFieldGrants; per-org override on
     # `OrgMembership` (see KilnCMS.Accounts.Scoping.field_grant/3).
     attribute :field_grants, :map do
+      default %{}
+      allow_nil? false
+      public? false
+    end
+
+    # Per-custom-field READ restrictions (#2281): content-type name → the
+    # private custom fields (`custom_fields.<name>`, or the bare
+    # `custom_fields`) the editor may see. No entry for a type = unrestricted;
+    # `[]` hides every private field. Resolved like `field_grants`
+    # (KilnCMS.Accounts.Scoping.field_read_grant/3).
+    attribute :field_read_grants, :map do
       default %{}
       allow_nil? false
       public? false

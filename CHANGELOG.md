@@ -83,6 +83,9 @@ Every summary line below that was shortened links to its own entry there.
   on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
   ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
 
+- **Overlays: run `mix ash.codegen`, commit the migration and run `mix ash.migrate`. Users, memberships and roles gain a `field_read_grants` column.**
+  Additive (`NOT NULL DEFAULT '{}'`). Rolling the pin back is safe for data, but an older release ignores read grants, so a private field you restricted shows to editors again.
+  ([long form](docs/changelog/unreleased.md#custom-field-grants-upgrade))
 - **Field definitions gain a `validation` column (`NOT NULL DEFAULT '{}'`, additive, safe to roll back). Overlays: run `mix ash.codegen`.
   `unique` fields have no database backstop; audit with `mix kiln.fields.duplicates`.**
   ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation-upgrade))
@@ -93,6 +96,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-bootstrap-return))
 
 ### Added
+
+- **Roles and members can be granted individual custom fields, and private custom fields can be hidden from some editors.**
+  New `custom_fields.<name>` grant keys and a `field_read_grants` axis; set both on `/editor/team`. Guide: [docs/granular-rbac.md](docs/granular-rbac.md#per-custom-field-grants-and-read-restrictions).
+  ([long form](docs/changelog/unreleased.md#custom-field-grants))
 
 - **Backups gains a History of every attempt, app- and cron-made, with verified state and whether files are still on disk.**
   Platform admins, at `/editor/backups`; no new settings.

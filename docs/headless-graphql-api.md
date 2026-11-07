@@ -358,7 +358,10 @@ reads with GraphQL:
 For a dynamic type the fragment is on `Entry`; use it with
 `publishedEntries(filter: {typeName: {eq: "recipe"}})`. The comment above each
 generated type says which. The fragment goes one level into lists and groups.
-Private custom fields are not in the export.
+Private custom fields are not in the export. An editor whose role hides a
+private field from them
+([granular-rbac.md](granular-rbac.md#per-custom-field-grants-and-read-restrictions))
+gets `null` for it, as for any private field read below editor.
 
 Why the schema types the accessor and the export types the names, and the
 alternatives that were rejected, is in

@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.EditorLive.ListScope do
 
   alias KilnCMS.Accounts
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.HiddenFields
   alias KilnCMS.CMS.ListFieldQuery
   alias KilnCMS.CMS.ListFields
   alias KilnCMSWeb.ContentEditor.NewDraft
@@ -72,12 +73,17 @@ defmodule KilnCMSWeb.EditorLive.ListScope do
         []
 
       descriptor ->
-        ListFields.readable_fields(
-          actor,
-          org,
-          FieldCells.definitions(descriptor, actor, org),
-          true
-        )
+        # A private field a read restriction hides from `actor` is not offered
+        # as a column, filter or sort, and so never reaches an export (#2281).
+        definitions =
+          actor
+          |> HiddenFields.visible_definitions(
+            org,
+            descriptor,
+            FieldCells.definitions(descriptor, actor, org)
+          )
+
+        ListFields.readable_fields(actor, org, definitions, true)
     end
   end
 
