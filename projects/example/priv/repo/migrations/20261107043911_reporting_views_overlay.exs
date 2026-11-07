@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.ReportingViews do
+defmodule KilnCMS.Repo.Migrations.ReportingViewsOverlay do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 
