@@ -180,7 +180,7 @@ defmodule KilnCMSWeb.Layouts do
     ~H"""
     <div class={["flex w-full justify-center", @class]}>
       <a href="/" class="auth-brand">
-        <img src={@brand.logo_url} class="h-10 w-auto" alt="" referrerpolicy="no-referrer" />
+        <.brand_mark brand={@brand} class="h-10 w-auto" />
         <span>{@brand.site_name}</span>
       </a>
     </div>
@@ -311,6 +311,43 @@ defmodule KilnCMSWeb.Layouts do
 
   @doc "The header logo URL for an org, resolved through the branding fallback chain."
   def brand_logo(org), do: Branding.for_org(org).logo_url
+
+  @doc """
+  The brand's logo `<img>`, decorative (the site name sits beside it).
+
+  The built-in mark is a 278x379 PNG that is shown at 20-40 css px, so it gets
+  a right-sized WebP/PNG pair in a `<picture>` (#2165). Anything else — an
+  operator's own `logo_url` — renders as a plain `<img>` of that URL, untouched.
+  The built-in mark carries explicit dimensions so the row does not shift while
+  it loads; a custom URL's size is unknown, so it carries none rather than a wrong one.
+  """
+  attr :brand, :map, required: true
+  attr :class, :string, default: nil
+
+  def brand_mark(assigns) do
+    assigns = assign(assigns, :default?, assigns.brand.logo_url == Branding.default_logo_url())
+
+    ~H"""
+    <picture :if={@default?}>
+      <source type="image/webp" srcset={~p"/images/logo-mark-sm.webp"} />
+      <img
+        src={~p"/images/logo-mark-sm.png"}
+        width="88"
+        height="120"
+        class={@class}
+        alt=""
+        referrerpolicy="no-referrer"
+      />
+    </picture>
+    <img
+      :if={!@default?}
+      src={@brand.logo_url}
+      class={@class}
+      alt=""
+      referrerpolicy="no-referrer"
+    />
+    """
+  end
 
   @doc """
   Renders your app layout.
@@ -1263,7 +1300,7 @@ defmodule KilnCMSWeb.Layouts do
               narrow column beside it. --%>
         <div class="public-measure flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
           <a href="/" class="flex min-w-0 items-center gap-3">
-            <img src={@brand.logo_url} class="h-7 w-auto" alt="" referrerpolicy="no-referrer" />
+            <.brand_mark brand={@brand} class="h-7 w-auto" />
             <span class="public-site-name text-sm font-semibold tracking-tight">
               {@brand.site_name}
             </span>

@@ -83,11 +83,14 @@
 
     <%!-- The editor, bleeding off the bottom edge of the hero card. --%>
     <figure class="relative mt-12 -mb-px overflow-hidden rounded-t-xl border border-b-0 border-base-content/15 bg-base-100 shadow-2xl shadow-base-content/10">
-      <img
-        src={~p"/images/home/editor.jpg"}
-        width="1440"
-        height="900"
-        class="block w-full"
+      <%!-- The hero is the likely LCP element and sits above the fold: not lazy,
+            fetched first. It is shown at most ~60rem wide, so the 1440w WebP
+            already covers a 1.5x screen; 2880w serves 2x displays. --%>
+      <.home_shot
+        name="editor"
+        widths={[720, 1440, 2880]}
+        sizes="(min-width: 64rem) 940px, (min-width: 40rem) calc(100vw - 8rem), calc(100vw - 5rem)"
+        hero
         alt={
           gettext(
             "The KilnCMS block editor: a page's headings, text and image blocks, with the inspector alongside."
@@ -107,12 +110,11 @@
 
     <div class="mt-8 grid gap-6 md:grid-cols-3">
       <figure :for={shot <- tour_shots()} class="card overflow-hidden">
-        <img
-          src={shot.src}
-          width="1440"
-          height="900"
-          loading="lazy"
-          class="block aspect-[16/10] w-full border-b border-base-content/10 object-cover object-left-top"
+        <.home_shot
+          name={shot.name}
+          widths={[720, 1440]}
+          sizes="(min-width: 64rem) 325px, (min-width: 48rem) 33vw, 100vw"
+          class="aspect-[16/10] border-b border-base-content/10 object-cover object-left-top"
           alt={shot.alt}
         />
         <figcaption class="p-4">

@@ -145,6 +145,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **The signed-out home page and the default logo ship right-sized images: page image weight drops from about 1,030 KB to about 100 KB (WebP).**
+  ([#2165](https://github.com/The-Verscienta/kiln_cms/issues/2165) · [long form](docs/changelog/unreleased.md#public-image-weight))
+
 - **CSV exports write a negative number as `-5`, not `'-5`; text starting with `=`, `+`, `-` or `@` is still prefixed.**
   Affects any CSV that passes a negative number to `KilnCMSWeb.CSV`; text is unchanged.
   ([long form](docs/changelog/unreleased.md#csv-numbers-unguarded))
