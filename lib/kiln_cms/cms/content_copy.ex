@@ -81,14 +81,22 @@ defmodule KilnCMS.CMS.ContentCopy do
   duplicate takes a fresh slug, so it has no source to differ from. Neither is
   a caller choosing a value the copy would overwrite
   (`KilnCMS.I18n.Validations.SharedFieldsReadOnly`, #1860).
+
+  `custom_fields_constraints: :skip` — a copy carries values the source
+  already holds, so a constraint tightened since (a minimum, a pattern, #2276)
+  is not litigated over them; it applies on the copy's next edit.
   """
   @spec create_opts(keyword()) :: keyword()
   def create_opts(opts) do
     Keyword.update(
       opts,
       :context,
-      %{custom_fields: :drop, shared_fields_check: :skip},
-      &Map.merge(&1, %{custom_fields: :drop, shared_fields_check: :skip})
+      %{custom_fields: :drop, shared_fields_check: :skip, custom_fields_constraints: :skip},
+      &Map.merge(&1, %{
+        custom_fields: :drop,
+        shared_fields_check: :skip,
+        custom_fields_constraints: :skip
+      })
     )
   end
 

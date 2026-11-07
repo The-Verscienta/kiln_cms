@@ -14,6 +14,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Accounts.User
+  alias KilnCMS.Backups
   alias KilnCMS.Backups.Manifest
 
   @password "password123456"
@@ -87,6 +88,21 @@ defmodule KilnCMSWeb.BackupLiveTest do
           overrides
         )
       )
+  end
+
+  describe "off-site remote" do
+    test "a connection-string remote's credentials never reach the page", %{conn: conn, dir: dir} do
+      seed_manifest!(dir, %{
+        offsite: ":s3,access_key_id=AKIAEXAMPLE,secret_access_key=hunter2hunter2:bucket/path"
+      })
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+
+      assert html =~ "Off-site"
+      refute html =~ "hunter2hunter2"
+      assert html =~ "secret_access_key=***"
+    end
   end
 
   describe "authorization" do
@@ -275,6 +291,253 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
         assert args["trigger"] == "manual"
       end
+    end
+  end
+
+  describe "history" do
+    defp admin_conn(conn), do: log_in(conn, authed_user(:admin))
+
+    # A run row with one artifact whose file is (optionally) on disk.
+    defp seed_run!(dir, n, opts \\ []) do
+      stamp = Keyword.get(opts, :stamp, "2026010#{rem(n, 10)}-0#{n}0000")
+      name = "kiln-db-#{stamp}.dump"
+      if Keyword.get(opts, :file?, true), do: write_artifact!(dir, name)
+
+      artifact = %{
+        kind: :db,
+        name: name,
+        bytes: Keyword.get(opts, :bytes, 2048),
+        verified: Keyword.get(opts, :verified, true),
+        destinations: Keyword.get(opts, :destinations, %{"local" => %{"status" => "ok"}})
+      }
+
+      Backups.import_run!(
+        %{
+          stamp: stamp,
+          trigger: Keyword.get(opts, :trigger, "manual"),
+          status: :succeeded,
+          components: [:db],
+          started_at: Keyword.get(opts, :started_at, ~U[2026-01-01 03:00:00.000000Z]),
+          finished_at: ~U[2026-01-01 03:05:00.000000Z],
+          artifacts: [artifact]
+        },
+        actor: Backups.system()
+      )
+    end
+
+    defp write_artifact!(dir, name) do
+      File.mkdir_p!(Path.join(dir, "db"))
+      File.write!(Path.join([dir, "db", name]), "x")
+    end
+
+    test "shows an empty state when nothing was ever recorded", %{conn: conn} do
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert has_element?(lv, "#backup-history-empty", "No backups have been recorded yet.")
+    end
+
+    test "lists a row with its trigger, size, verified badge and destinations", %{
+      conn: conn,
+      dir: dir
+    } do
+      seed_run!(dir, 1,
+        trigger: "manual",
+        destinations: %{
+          "local" => %{"status" => "ok"},
+          "rclone:offsite" => %{"status" => "ok"}
+        }
+      )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      row = lv |> element("#backup-history li") |> render()
+      assert row =~ "2026-01-01 03:00 UTC"
+      assert row =~ "manual"
+      assert row =~ "Succeeded"
+      assert row =~ "Database"
+      assert row =~ "2.0 KB"
+      assert row =~ "Verified"
+      assert row =~ "Local"
+      assert row =~ "offsite"
+      assert row =~ "on disk"
+    end
+
+    test "a file deleted out-of-band reads missing", %{conn: conn, dir: dir} do
+      run = seed_run!(dir, 1, started_at: DateTime.add(DateTime.utc_now(), -3600, :second))
+      File.rm!(Path.join([dir, "db", hd(run.artifacts).name]))
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert has_element?(lv, "#backup-run-#{run.id} [data-presence=missing]", "missing")
+    end
+
+    test "pruned, expired and off-site-only are told apart", %{conn: conn, dir: dir} do
+      pruned =
+        seed_run!(dir, 1,
+          file?: false,
+          destinations: %{"local" => %{"status" => "pruned"}}
+        )
+
+      off_site =
+        seed_run!(dir, 2,
+          file?: false,
+          destinations: %{
+            "local" => %{"status" => "ok"},
+            "rclone:offsite" => %{"status" => "ok"}
+          }
+        )
+
+      # Imported (cron-made), long past retention.
+      expired =
+        Backups.import_run!(
+          %{
+            stamp: "20250101-030000",
+            trigger: "cron",
+            status: :succeeded,
+            components: [:db],
+            started_at: ~U[2025-01-01 03:00:00.000000Z],
+            artifacts: [%{kind: :db, name: "kiln-db-20250101-030000.dump", bytes: 5}]
+          },
+          actor: Backups.system()
+        )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert has_element?(
+               lv,
+               "#backup-run-#{pruned.id} [data-presence=pruned]",
+               "pruned (retention)"
+             )
+
+      assert has_element?(
+               lv,
+               "#backup-run-#{off_site.id} [data-presence=off_site_only]",
+               "off-site only"
+             )
+
+      assert has_element?(lv, "#backup-run-#{expired.id} [data-presence=expired]", "expired")
+      assert has_element?(lv, "#backup-run-#{expired.id}", "unverified (imported)")
+    end
+
+    test "cron-made backups on disk are imported and shown", %{conn: conn, dir: dir} do
+      path = Path.join([dir, "db"])
+      File.mkdir_p!(path)
+      file = Path.join(path, "kiln-db-20260102-030000.dump")
+      File.write!(file, "dump")
+      File.touch!(file, System.os_time(:second) - 3600)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert has_element?(lv, "#backup-history li", "2026-01-02 03:00 UTC")
+      assert has_element?(lv, "#backup-history li", "cron")
+      assert has_element?(lv, "#backup-history li", "unverified (imported)")
+    end
+
+    test "pages 25 at a time, and an out-of-range page lands on the last one", %{
+      conn: conn,
+      dir: dir
+    } do
+      for n <- 1..27 do
+        stamp = "20260101-00#{String.pad_leading(Integer.to_string(n), 2, "0")}00"
+
+        seed_run!(dir, n,
+          stamp: stamp,
+          started_at: DateTime.add(~U[2026-01-01 00:00:00.000000Z], n * 3600, :second)
+        )
+      end
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert lv |> element("#backup-history") |> render() =~ "Page 1 of 2"
+      assert lv |> render() |> String.split("backup-run-") |> length() == 26
+
+      lv
+      |> element(~s|#backup-history button[phx-click="page"]:not([disabled])|)
+      |> render_click()
+
+      assert_patch(lv, ~p"/editor/backups?page=2")
+      assert lv |> element("#backup-history") |> render() =~ "Page 2 of 2"
+      assert lv |> render() |> String.split("backup-run-") |> length() == 3
+
+      assert {:error, {:live_redirect, %{to: "/editor/backups?page=2"}}} =
+               conn |> admin_conn() |> live(~p"/editor/backups?page=99")
+
+      # Garbage reads as page 1.
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups?page=abc")
+      assert lv |> element("#backup-history") |> render() =~ "Page 1 of 2"
+    end
+
+    test "the import runs on the connected mount, not the disconnected render", %{
+      conn: conn,
+      dir: dir
+    } do
+      file = Path.join([dir, "db", "kiln-db-20260102-030000.dump"])
+      File.mkdir_p!(Path.dirname(file))
+      File.write!(file, "dump")
+      File.touch!(file, System.os_time(:second) - 3600)
+
+      conn = admin_conn(conn)
+      assert conn |> get(~p"/editor/backups") |> html_response(200) =~ "Backups"
+      assert Backups.list_runs!(actor: Backups.system()) == []
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/backups")
+      render_async(lv, 2_000)
+      assert [%{origin: :imported}] = Backups.list_runs!(actor: Backups.system())
+    end
+
+    test "a refused user starts no import", %{conn: conn, dir: dir} do
+      file = Path.join([dir, "db", "kiln-db-20260102-030000.dump"])
+      File.mkdir_p!(Path.dirname(file))
+      File.write!(file, "dump")
+      File.touch!(file, System.os_time(:second) - 3600)
+
+      for user <- [authed_user(:editor), org_admin()] do
+        assert {:error, {_kind, _}} = conn |> log_in(user) |> live(~p"/editor/backups")
+      end
+
+      assert {:error, {:redirect, %{to: "/sign-in"}}} = live(conn, ~p"/editor/backups")
+      assert Backups.list_runs!(actor: Backups.system()) == []
+    end
+
+    defp org_admin do
+      user = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: user.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      user
+    end
+
+    test "handle_params and the page event refuse a non-admin on their own" do
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{__changed__: %{}, current_user: %{role: :editor}}
+      }
+
+      assert {:noreply, ^socket} =
+               KilnCMSWeb.BackupLive.handle_event("page", %{"to" => "2"}, socket)
+
+      assert {:noreply, refused} = KilnCMSWeb.BackupLive.handle_params(%{}, "/", socket)
+      assert {:live, :redirect, %{to: "/access-denied?needs=platform"}} = refused.redirected
+    end
+
+    test "the history refreshes when a manual backup finishes", %{conn: conn, dir: dir} do
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+      assert has_element?(lv, "#backup-history-empty")
+
+      seed_run!(dir, 1)
+      send(lv.pid, :refresh)
+
+      assert render(lv) =~ "2026-01-01 03:00 UTC"
     end
   end
 

@@ -7,6 +7,25 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="backup-history-upgrade"></a>
+
+- **Run `mix ash.migrate` for the backup history, and add `KilnCMS.Backups` to
+  an overlay's `:ash_domains` (#2217).** The migration
+  (`20261107205448_add_backup_runs`) creates one table, `backup_runs`. It is
+  expand-only and changes no existing data, so rolling the pin back is safe;
+  the table is simply unused.
+  - **Overlays that restate `:ash_domains`.** `KilnCMS.Backups` is now an Ash
+    domain (it was a plain module). `:ash_domains` replaces rather than merges,
+    so an overlay's `config/project.exs` that lists the core domains must add
+    `KilnCMS.Backups` (next to `KilnCMS.Billing`), as
+    `projects/example/project.exs` now does. Without it the resource sits
+    outside every configured domain and `mix ash.codegen` offers to drop the
+    `backup_runs` table. See [the overlay contract](../overlay-contract.md).
+  - **Nothing else to set.** No new environment variables; `manifest.json`,
+    `Backups.status/0` and the overview strip are unchanged, so cron-based
+    deployments keep working untouched.
+  ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217))
+
 <a id="breached-password-upgrade"></a>
 
 - **Run `mix ash.migrate` for the breached-password check, and decide whether
@@ -125,6 +144,10 @@ carries the reasoning.
   hidden from some editors is visible to them again until you upgrade. Core's
   own table is migrated by core's migration; the new column does not touch the
   `kiln_reporting_v1` views.
+<a id="field-validation-upgrade"></a>
+
+- **Field definitions gain a `validation` column (#2276).** `field_definitions.validation` is `jsonb NOT NULL DEFAULT '{}'`: additive, instant, and every existing field starts with no constraints, so nothing about stored data or writes changes until an admin sets one. Rolling the pin back is safe (the old release ignores the column). Overlays that carry their own migrations run `mix ash.codegen` and commit the result.
+  - **Unique is not a database constraint.** Once an admin marks a field `unique`, the write path enforces it; raw SQL and a database restore bypass it. Run `mix kiln.fields.duplicates` (read-only, exits non-zero on repeats) after bulk imports or restores.
 
 ## Breaking
 
@@ -173,6 +196,126 @@ carries the reasoning.
     surfaces (fired artifacts, webhooks, change feed, RSS, the
     `kiln_reporting_v1` views); those already drop every private field.
   See [Per-custom-field grants and read restrictions](../granular-rbac.md#per-custom-field-grants-and-read-restrictions).
+<a id="backup-history"></a>
+
+- **Backups has a History: every backup attempt, app-made and cron-made, with
+  its outcome and whether its files are still on disk (#2217).** `/editor/backups`
+  (platform admins) lists runs newest first, 25 to a page, each with trigger,
+  status (Succeeded, Failed, Running, Skipped), Database and Media badges, size,
+  `Verified` / `Not verified` / `unverified (imported)`, destinations and the
+  local state of its files: `on disk`, `missing`, `pruned (retention)`,
+  `expired` or `off-site only`.
+  - **Worker.** Each attempt writes a run; a failed run write never fails the
+    backup. A refused attempt (no `pg_dump`) is a `skipped` run and still leaves
+    `manifest.json` untouched. A job that was killed mid-run is marked failed
+    ("Interrupted") by a sweep once it is 2h15m old.
+  - **Cron's backups.** `KilnCMS.Backups.Importer.run/0` records
+    `kiln-db-<stamp>` / `kiln-media-<stamp>` files found under `BACKUP_DIR` that
+    have no run: when a platform admin opens the page, at the end of each worker
+    run, and from `bin/kiln eval "KilnCMS.Backups.Importer.run()"`. It is
+    idempotent by stamp, waits until a stamp's newest file is 10 minutes old and
+    has no `.partial`, and never hashes or verifies a file, hence "unverified
+    (imported)". `backup.sh db` and `backup.sh media` as separate cron entries
+    have different stamps and appear as two runs.
+  - **Missing is computed on read**, for the visible page only. `BACKUP_DIR` is
+    host-local: on a multi-node deployment a run recorded by another node reads
+    `missing`. `expired` is a heuristic for imported runs older than the
+    retention window plus a day (cron records no prune).
+  - **Secrets.** Text stored in a run goes through `KilnCMS.Backups.Redact`
+    (URL userinfo, `key=value` credentials, rclone connection-string remotes).
+    The status panel's off-site remote and `manifest.json`'s `offsite` are now
+    redacted too.
+  - **Access.** `KilnCMS.Backups.Run` is read-only for platform admins and
+    written only by the `:backups` system actor (worker, importer, stale sweep).
+    `Worker.run/1` still works; it is now `run(trigger, job_id \\ nil)`.
+    `Staging.Scrub` purges runs (`backup_runs_purged`).
+  - **Reserved** for the rest of the epic (#2216): `parts` and `sha256` (#2218),
+    `destinations` (#2220), `encrypted?` (#2224).
+  ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217))
+
+<a id="ip-block-rules"></a>
+
+- **Site admins can block an IP address or range from `/editor/ip-blocks`
+  ("Blocked addresses") (#2242).** A blocked address gets an empty `403` on
+  every dynamic route and is refused on the `/live`, `/ws/gql`, `/ws/collab`
+  and `/ws/bridge` sockets. Rules take an IPv4 or IPv6 address or CIDR range,
+  an optional note and an optional expiry, and belong to one site. Guard rails:
+  loopback is never blocked, `/up` and `/ready` are exempt, ranges wider than
+  `/8` (IPv4) or `/16` (IPv6) are refused, and a rule that includes the admin's
+  own address asks for confirmation. Rules are cached for a minute per node and
+  cleared on every node when one is added or removed; if the list cannot be
+  read, requests pass.
+  - **Limits.** Static assets and `/uploads/*` are served before the site is
+    known and are not covered: refuse those at a CDN or proxy. Behind a reverse
+    proxy, set `TRUSTED_PROXIES` (or `CLIENT_IP_HEADER`) first, or a rule
+    matches the proxy's address and blocks every visitor.
+  - **Operators.** One new table, `ip_block_rules`, additive; rolling back
+    leaves it unused. No new environment variables. If an admin locks
+    themselves out, `DELETE FROM ip_block_rules WHERE ...` in SQL; it takes
+    effect within the one-minute cache. Expired rules are not swept and still
+    hold their slot until removed in the console.
+  - **Developers.** The resource, `KilnCMS.CMS.IpBlockRule`, is org-admin only
+    and deliberately absent from JSON:API, GraphQL and MCP. The request path
+    reads it as the `:ip_block` system actor. New counter
+    `kiln_cms.ip_block.refused.count`, tagged `surface`, never the address.
+  See [ip-blocking.md](../ip-blocking.md).
+
+<a id="conditional-custom-fields"></a>
+
+- **A custom field can be shown only when another field has a given value, and required only then (#2277).**
+  Open a field in `/editor/fields` (admins), expand **Conditions**, and set
+  **Show when** and/or **Required when**: one or more tests on a field beside
+  it ("Kind is one of Event, Talk"), joined by "All of these are true" or "Any
+  of these is true". In the content editor the field appears and disappears as
+  the editor changes the other value, with no round trip to the server, and
+  a **Required when** field blocks the save only while its rule holds. The
+  same fields work on a group's sub-fields, where a sub-field reads the other
+  sub-fields of the same row. The how-to is in
+  [extending-content.md](../extending-content.md#make-a-field-conditional).
+  - **For developers.** `field_definition` gains two attributes,
+    `visible_when` and `required_when`: plain JSON (`{"field", "op", "value"}`
+    leaves under `{"all": [...]}` / `{"any": [...]}`; ops `eq`, `neq`, `in`,
+    `empty`, `not_empty`, `gt`, `lt`; at most 3 levels and 10 nodes). They
+    show up in `?include=field_definitions`, the OpenAPI document and the
+    `read_field_definitions` MCP tool; creating or updating a definition is
+    still admin-only and goes through the `CMS.create_field_definition` /
+    `CMS.update_field_definition` code interfaces. The rule logic is
+    `KilnCMS.CMS.Conditions`; the editor runs a JavaScript twin
+    (`assets/js/conditions.js`) held to the same fixture
+    (`test/support/fixtures/conditions_cases.json`).
+  - **Hidden is an editor concept, not a privacy control.** A hidden field
+    keeps its stored value, and that value is still delivered by the JSON:API,
+    GraphQL, search and computed fields. Use **Private** for a value that
+    must not be public. A value written through the API to a hidden field is
+    still checked and stored.
+  - **How it is enforced.** On a normal write, a hidden field is never
+    required and a **Required when** field is required while its rule
+    holds, judged on the merged view (what the request sends over what is
+    stored). A restore, and a copy that drops custom fields, skip
+    **Required when**, and a record saved before a rule existed is not
+    rechecked by an unrelated write. There is no cascade: a field hidden by
+    its own rule still counts with its stored value when another rule reads
+    it, on the server and in the browser alike.
+  - **Keeping rules consistent.** A rule can read only a plain value field
+    (text, number, date, yes/no, choice) in the same scope, not itself, not a
+    private field, and without a cycle. Deleting a field other rules read is
+    refused, naming them; changing its type or making it private is refused
+    when a rule would stop being valid; renaming it rewrites the rules that
+    read it in the same transaction.
+  - **Limits.** `gt` / `lt` compare numbers and ISO dates or datetimes, and
+    are false when a side can't be read as one. A datetime needs seconds
+    (`2026-11-07T10:00:00`): the browser's `datetime-local` input posts none,
+    so a `gt` / `lt` test on such a field never holds, in the editor and on the
+    server. A rule nested beyond one level (possible only through the code
+    interface) is shown read-only in the admin UI until you remove it.
+    Link fields, computed fields and a group as a whole carry no conditions.
+  - **Upgrade.** Run migrations: two nullable columns are added to
+    `field_definitions`, nothing is backfilled and the `kiln_reporting_v1`
+    views are untouched. The change is expand-only, so rolling the pin back is
+    safe (the older release ignores the columns). Overlays: run
+    `mix ash.codegen` and commit the migration if you carry a copy of the
+    resource. CI gains a step, `npm test --prefix assets`, that runs the
+    JavaScript evaluator against the shared fixture.
 
 <a id="breached-password-check"></a>
 
@@ -722,6 +865,15 @@ carries the reasoning.
   `noindex_default` / `nofollow_default` (compiled option or Content-type
   setting) for new documents only. An advisory warns when a published page
   linked from an enabled menu item is set to noindex.
+
+<a id="field-validation"></a>
+
+- **Admins can constrain a custom field's values: a range, a length, a pattern, or "unique" (#2276).** In `/editor/fields`, a field's form has a **Validation (optional)** group with the controls its type takes. Numbers get `min`/`max`; `:string`, `:url` and plain `:text` get `min_length`/`max_length` and a whole-value `pattern` with an optional `pattern_message`; `:string`, `:url`, numbers and dates can be `unique`. The rules are stored in the new `validation` attribute of the field definition and checked on every write path (editor, JSON:API, GraphQL, MCP, importers), so an editor and an API client see the same error, naming the field (`SKU (sku) doesn't match the required format`).
+  - **Existing data is left alone.** A value equal to the stored one is never re-checked, so tightening a rule does not block unrelated edits. Version restore, type promotion and content copy skip the value rules (they carry values that were valid when written); `unique` is still enforced for restores, and a duplicated document starts with its unique fields blank.
+  - **Unique is enforced by the write path, not the database.** An advisory lock plus an in-transaction check makes two racing saves safe; matching is exact and case-sensitive, within the organization, content type and locale, ignoring the trash. A working copy only stages a value: the check runs when it reaches live `custom_fields`. Turning `unique` on is refused while values already repeat. Raw SQL and a database restore bypass it, so `mix kiln.fields.duplicates` audits for repeats.
+  - **Patterns are safe to run.** The pattern must match the whole value, is at most 200 characters, and runs with match limits; a value over 2,000 characters or a runaway pattern counts as not matching.
+  - **API and export.** Field definitions carry `validation` on JSON:API (and in `docs/api/openapi.json`). The schema export adds `x-kiln-minimum`, `x-kiln-maximum`, `x-kiln-min-length`, `x-kiln-max-length`, `x-kiln-pattern` and `x-kiln-unique` as annotations rather than JSON Schema assertions, since stored values may predate a rule; `pattern_message` is not exported.
+  - Guide: [Constrain the values of a field](../extending-content.md#constrain-the-values-of-a-field).
 
 ## Changed
 

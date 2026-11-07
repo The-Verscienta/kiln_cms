@@ -98,6 +98,20 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert Repo.aggregate(KilnCMS.Mail.Settings, :count) == 0
     end
 
+    test "purges the backup history (a clone must not carry destinations)" do
+      KilnCMS.Backups.start_run!(
+        %{stamp: "20260102-030000", trigger: "cron"},
+        actor: KilnCMS.Backups.system()
+      )
+
+      assert Repo.aggregate(KilnCMS.Backups.Run, :count) >= 1
+
+      summary = Scrub.run([])
+
+      assert summary.backup_runs_purged >= 1
+      assert Repo.aggregate(KilnCMS.Backups.Run, :count) == 0
+    end
+
     test "provisions one usable pre-confirmed admin when credentials are given" do
       _real = admin()
 

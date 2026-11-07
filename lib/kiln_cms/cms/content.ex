@@ -3630,6 +3630,11 @@ defmodule KilnCMS.CMS.Content do
           require_atomic? false
           change set_attribute(:archived_at, nil)
 
+          # While it sat in the trash another record may have taken a
+          # `unique` custom-field value (#2276): the lookup ignores trashed
+          # records, so the restore re-checks.
+          change KilnCMS.CMS.Changes.CheckUniqueFields
+
           # Trashing is a soft delete: `:destroy` runs `DeleteArtifacts`, which
           # purges the fired artifacts AND enqueues a Meilisearch removal — but
           # it does not change `state`, so a trashed published document is still

@@ -190,6 +190,20 @@ defmodule KilnCMSWeb.Plugs.ClientIp do
     end
   end
 
+  @doc """
+  Is this connection in the state `warn_once_if_forwarded/1` warns about: it carries
+  a forwarding header while neither `TRUSTED_PROXIES` nor a platform
+  `CLIENT_IP_HEADER` is configured? Then the resolved address is the proxy's, not
+  the visitor's. A pure read, no latch — the IP block list screen (#2242) uses it
+  to say its own-address check cannot be trusted.
+  """
+  @spec untrusted_forwarding?([{String.t(), String.t()}]) :: boolean()
+  def untrusted_forwarding?(x_headers) do
+    proxies() == [] and
+      not match?({:header, _}, Application.get_env(:kiln_cms, :client_ip_header)) and
+      forwarded?(x_headers)
+  end
+
   @doc false
   # Exposed so tests can start from a known latch state — otherwise the first
   # forwarded request in a run silences every later one.

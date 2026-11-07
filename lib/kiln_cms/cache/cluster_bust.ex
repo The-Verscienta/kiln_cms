@@ -79,6 +79,23 @@ defmodule KilnCMS.Cache.ClusterBust do
   end
 
   @doc """
+  The sibling of `broadcast/1` for a key in a cache of its own: delete `keys` from
+  the Cachex instance `cache` on this node now, and on every other node.
+
+  For the caches that deliberately sit outside `KilnCMS.Cache` (the IP block list,
+  #2242) but need the same cluster-wide "forget this" signal. Same guarantees as
+  `broadcast/1`.
+  """
+  @spec broadcast_in(atom(), [String.t()]) :: :ok
+  def broadcast_in(cache, keys) when is_atom(cache) and is_list(keys) do
+    Enum.each(keys, &Cachex.del(cache, &1))
+
+    Phoenix.PubSub.broadcast(KilnCMS.PubSub, @topic, {:bust_cache_keys, cache, keys})
+
+    :ok
+  end
+
+  @doc """
   Write `entries` on this node now, and ask every other node to do the same.
 
   The sibling of `broadcast/1` for a value that must *move*, not merely vanish
@@ -169,6 +186,11 @@ defmodule KilnCMS.Cache.ClusterBust do
   @impl true
   def handle_info({:bust_keys, keys}, state) when is_list(keys) do
     Enum.each(keys, &Cachex.del(KilnCMS.Cache.cache_name(), &1))
+    {:noreply, state}
+  end
+
+  def handle_info({:bust_cache_keys, cache, keys}, state) when is_atom(cache) and is_list(keys) do
+    Enum.each(keys, &Cachex.del(cache, &1))
     {:noreply, state}
   end
 

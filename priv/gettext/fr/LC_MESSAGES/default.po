@@ -113,6 +113,13 @@ msgid_plural "%{count} comments · Resolved"
 msgstr[0] "%{count} commentaire · Résolu"
 msgstr[1] "%{count} commentaires · Résolu"
 
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} condition"
+msgid_plural "%{count} conditions"
+msgstr[0] "%{count} condition"
+msgstr[1] "%{count} conditions"
+
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} connected"
@@ -641,6 +648,11 @@ msgstr "Pages de %{field}"
 msgid "%{field} points at a record that was deleted or moved to the trash."
 msgstr "%{field} pointe vers un élément supprimé ou placé dans la corbeille."
 
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} reads this field in its condition: %{message}"
+msgstr "%{field} lit ce champ dans sa condition : %{message}"
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{field}, item %{position}"
@@ -695,6 +707,11 @@ msgstr "%{min} min %{sec} s"
 #, elixir-autogen, elixir-format
 msgid "%{min} to %{max}"
 msgstr "de %{min} à %{max}"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{min} to %{max} characters."
+msgstr "De %{min} à %{max} caractères."
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
@@ -1469,6 +1486,11 @@ msgstr "Un calendrier de publication"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "A regular expression the whole value must match."
+msgstr "Une expression régulière à laquelle la valeur entière doit correspondre."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "A relationship"
 msgstr "Une relation"
 
@@ -1933,6 +1955,11 @@ msgstr "Ajouter un bloc (hors d’un champ de saisie)"
 msgid "Add a block here"
 msgstr "Ajouter un bloc ici"
 
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "Add a condition"
+msgstr "Ajouter une condition"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add a detail"
@@ -2282,6 +2309,16 @@ msgstr "Ajouté au lancement."
 msgid "Added to the working copy — publish changes to make it live"
 msgstr "Ajouté à la copie de travail — publiez les modifications pour la mettre en ligne"
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Address blocked."
+msgstr "Adresse bloquée."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Address or range"
+msgstr "Adresse ou plage"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Address removed — it can receive mail again."
@@ -2425,6 +2462,11 @@ msgstr "Tous les menus"
 #, elixir-autogen, elixir-format
 msgid "All notifications are on by default. Uncheck any you'd rather not receive."
 msgstr "Toutes les notifications sont activées par défaut. Décochez celles que vous ne souhaitez pas recevoir."
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "All of these are true"
+msgstr "Toutes ces conditions sont vraies"
 
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -2774,6 +2816,11 @@ msgstr "Autant d'enregistrements %{source} que voulu"
 msgid "Any number of rows."
 msgstr "Un nombre quelconque de lignes."
 
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "Any of these is true"
+msgstr "Au moins une de ces conditions est vraie"
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Any standing role"
@@ -3025,6 +3072,18 @@ msgstr "Assignation"
 msgid "At least"
 msgstr "Au moins"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "At least %{count} character."
+msgid_plural "At least %{count} characters."
+msgstr[0] "Au moins %{count} caractère."
+msgstr[1] "Au moins %{count} caractères."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "At least %{min}."
+msgstr "Au moins %{min}."
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "At least 8 characters."
@@ -3042,6 +3101,18 @@ msgstr[1] "Au moins %{count} lignes."
 #, elixir-autogen, elixir-format
 msgid "At most"
 msgstr "Au maximum"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "At most %{count} character."
+msgid_plural "At most %{count} characters."
+msgstr[0] "Au plus %{count} caractère."
+msgstr[1] "Au plus %{count} caractères."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "At most %{max}."
+msgstr "Au plus %{max}."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -3313,6 +3384,7 @@ msgstr "La facturation n'est pas encore configurée. Tant que les deux secrets n
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/federation_live.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Block"
@@ -3348,10 +3420,20 @@ msgstr "Éditeur de blocs"
 msgid "Block instance"
 msgstr "Bloquer l'instance"
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block it anyway"
+msgstr "Bloquer quand même"
+
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
 msgid "Block removed"
 msgstr "Bloc supprimé"
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block removed."
+msgstr "Blocage supprimé."
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
@@ -3367,6 +3449,17 @@ msgstr "Bloquer toute cette instance ? Tous ses abonnés sont supprimés et les 
 #, elixir-autogen, elixir-format
 msgid "Blocked"
 msgstr "Bloqués"
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Blocked addresses"
+msgstr "Adresses bloquées"
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Blocked visitors get an empty 403 on pages, the API, and live connections. Static files and uploaded media are served before this check and are not covered; use your CDN or proxy for those. Your own loopback address, health checks, and very wide ranges (wider than /8 for IPv4, /16 for IPv6) cannot be blocked."
+msgstr "Les visiteurs bloqués reçoivent un 403 vide sur les pages, l'API et les connexions en direct. Les fichiers statiques et les médias téléversés sont servis avant cette vérification et ne sont pas couverts ; utilisez votre CDN ou proxy pour ceux-ci. L'adresse de bouclage, les contrôles de santé et les plages très larges (plus larges que /8 en IPv4, /16 en IPv6) ne peuvent pas être bloqués."
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -3620,6 +3713,7 @@ msgstr "Impossible de reprogrammer dans le passé."
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -4062,6 +4156,7 @@ msgstr "Choisissez d’abord la version à garder pour chaque champ."
 msgid "Choose “Only these sites” to use the list you typed, or clear the box."
 msgstr "Choisissez « Uniquement ces sites » pour utiliser la liste saisie, ou videz le champ."
 
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose…"
@@ -4397,6 +4492,7 @@ msgid "Condition"
 msgstr "Condition"
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
 #, elixir-autogen, elixir-format
 msgid "Conditions"
 msgstr "Conditions"
@@ -5023,6 +5119,11 @@ msgstr "Impossible de générer le texte. Veuillez réessayer."
 msgid "Couldn't import that photo from Unsplash."
 msgstr "Import de cette photo depuis Unsplash impossible."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't load the backup history."
+msgstr "Impossible de charger l’historique des sauvegardes."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
@@ -5541,6 +5642,11 @@ msgstr "Ctrl+Z"
 msgid "Current"
 msgstr "Actuel"
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Current blocks"
+msgstr "Blocages actuels"
+
 #: lib/kiln_cms_web/live/content_editor/inspector_history_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -5688,6 +5794,11 @@ msgstr "Sombre"
 #, elixir-autogen, elixir-format
 msgid "Dark mode"
 msgstr "Mode sombre"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Database"
+msgstr "Base de données"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
@@ -6684,6 +6795,11 @@ msgstr "Chaque soumission est envoyée par e-mail ici. Laissez vide pour ne rece
 msgid "Each tier grants one audience. Configure the price in your provider's dashboard and paste its price ID here, so there is one source of truth for money."
 msgstr "Chaque niveau accorde une audience. Configurez le prix dans le tableau de bord de votre prestataire et collez son identifiant de prix ici, afin qu'il n'y ait qu'une seule source de vérité pour les montants."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Each value used once."
+msgstr "Chaque valeur n’est utilisée qu’une fois."
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -7513,6 +7629,7 @@ msgstr "Les expériences sont désactivées sur ce déploiement : rien n'est ser
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "Expired"
 msgstr "Expiré"
@@ -7527,6 +7644,16 @@ msgstr "Expiré (signalé)"
 #, elixir-autogen, elixir-format
 msgid "Expires"
 msgstr "Expiration"
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Expires %{at}"
+msgstr "Expire %{at}"
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Expires (UTC)"
+msgstr "Expire (UTC)"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -7606,6 +7733,7 @@ msgstr "L'export de contenu nécessite un compte éditeur."
 msgid "Exports the columns shown in the list."
 msgstr "Exporte les colonnes affichées dans la liste."
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
@@ -7703,6 +7831,7 @@ msgstr "Paramètres de flux enregistrés."
 msgid "Feeds"
 msgstr "Flux"
 
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Field"
@@ -8164,6 +8293,11 @@ msgstr "ven."
 #, elixir-autogen, elixir-format
 msgid "From"
 msgstr "De"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "From %{min} to %{max}."
+msgstr "De %{min} à %{max}."
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
@@ -8674,6 +8808,7 @@ msgid "Highlighted quotation"
 msgstr "Citation mise en avant"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "History"
 msgstr "Historique"
@@ -8830,6 +8965,11 @@ msgstr "Fonctionnement de la provenance"
 msgid "How scheduled backups are set up"
 msgstr "Comment configurer les sauvegardes planifiées"
 
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "How the conditions combine"
+msgstr "Combinaison des conditions"
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "How this instance sends email, and its DNS records."
@@ -8859,6 +8999,11 @@ msgstr "Je les ai enregistrés"
 #, elixir-autogen, elixir-format
 msgid "ID"
 msgstr "ID"
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "IPv4 or IPv6, with an optional /prefix."
+msgstr "IPv4 ou IPv6, avec un /préfixe facultatif."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -9727,6 +9872,11 @@ msgstr "Laissez vide pour utiliser le nom du site."
 msgid "Leave blank to use the slug URL above. Set a nested address such as /about/team and the slug URL redirects (301) to it; changing it later leaves a redirect behind on published content."
 msgstr "Laissez vide pour utiliser l'URL du slug ci-dessus. Définissez une adresse imbriquée comme /about/team et l'URL du slug y redirige (301) ; la modifier ensuite laisse une redirection derrière elle sur le contenu publié."
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Leave empty to block until removed."
+msgstr "Laissez vide pour bloquer jusqu'à suppression."
+
 #: lib/kiln_cms_web/live/content_editor/localization.ex
 #, elixir-autogen, elixir-format
 msgid "Leave empty to inherit along the site's fallback chain."
@@ -9924,6 +10074,11 @@ msgstr "Charger plus"
 #, elixir-autogen, elixir-format
 msgid "Loading…"
 msgstr "Chargement…"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Local"
+msgstr "Local"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -10175,6 +10330,16 @@ msgstr "Enregistrements correspondants"
 msgid "Maximum"
 msgstr "Maximum"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Maximum length"
+msgstr "Longueur maximale"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Maximum value"
+msgstr "Valeur maximale"
+
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "May"
@@ -10274,8 +10439,23 @@ msgstr "Message"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "Message when it doesn't match"
+msgstr "Message en cas de non-correspondance"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "Minimum"
 msgstr "Minimum"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Minimum length"
+msgstr "Longueur minimale"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Minimum value"
+msgstr "Valeur minimale"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -10592,6 +10772,11 @@ msgstr "Multiplier"
 msgid "Must be an address your provider will send for."
 msgstr "Doit être une adresse pour laquelle votre fournisseur accepte d’envoyer."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Must match a pattern."
+msgstr "Doit correspondre à un motif."
+
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #, elixir-autogen, elixir-format
 msgid "My drafts"
@@ -10901,6 +11086,7 @@ msgstr "Les newsletters suivent la version dans la langue par défaut, et ceci e
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Next"
 msgstr "Suivant"
@@ -11012,6 +11198,11 @@ msgstr "Aucune sauvegarde n'a jamais été enregistrée"
 #, elixir-autogen, elixir-format
 msgid "No backup has ever been recorded for this deployment."
 msgstr "Aucune sauvegarde n'a jamais été enregistrée pour cette installation."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "No backups have been recorded yet."
+msgstr "Aucune sauvegarde n’a encore été enregistrée."
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
@@ -11592,6 +11783,11 @@ msgstr "Aucun terme n'est utilisé une seule fois."
 msgid "No tiers yet"
 msgstr "Aucun niveau pour l'instant"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "No two documents of this type and language may hold the same value."
+msgstr "Deux documents de ce type et de cette langue ne peuvent pas avoir la même valeur."
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "No usable result"
@@ -11746,6 +11942,7 @@ msgstr "Pas encore traduit"
 msgid "Not used by any published document."
 msgstr "Utilisée par aucun document publié."
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not verified"
@@ -11764,6 +11961,7 @@ msgstr "Notable"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/live/governance_live.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "Note"
 msgstr "Note"
@@ -11845,6 +12043,7 @@ msgid "Nothing in this release"
 msgstr "Ce lancement est vide"
 
 #: lib/kiln_cms_web/live/federation_live.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing is blocked."
 msgstr "Rien n'est bloqué."
@@ -12675,6 +12874,11 @@ msgstr "Page"
 msgid "Page %{page}"
 msgstr "Page %{page}"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Page %{page} of %{last}"
+msgstr "Page %{page} sur %{last}"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Page actions"
@@ -12864,6 +13068,11 @@ msgstr "Modèle d'alias de chemin (facultatif)"
 #, elixir-autogen, elixir-format
 msgid "Paths visitors asked for that nothing on the site could serve, most-requested first. Counters only — no IPs, no user agents. Rows are dropped %{days} days after they were last hit, and common vulnerability probing — dotfiles, scanner roots, script and asset extensions — is filtered out before it is recorded."
 msgstr "Chemins demandés par les visiteurs que rien sur le site n'a pu servir, les plus demandés en premier. Uniquement des compteurs : ni adresses IP, ni agents utilisateurs. Les lignes sont supprimées %{days} jours après la dernière requête, et les sondages de vulnérabilités courants — fichiers cachés, racines de scanners, extensions de scripts et de ressources — sont filtrés avant d'être enregistrés."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Pattern"
+msgstr "Motif"
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
@@ -13281,6 +13490,7 @@ msgstr "Aperçu des modifications non publiées — les lecteurs voient toujours
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Previous"
 msgstr "Précédent"
@@ -13935,6 +14145,16 @@ msgstr "Référents"
 msgid "Refresh"
 msgstr "Actualiser"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Refuse requests from an IP address or range."
+msgstr "Refuser les requêtes d'une adresse ou plage IP."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Refuse requests from an IP address or range. Applies to this site only."
+msgstr "Refuser les requêtes d'une adresse ou plage IP. S'applique à ce site uniquement."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Refuse to publish a document containing a blocking claim"
@@ -14137,6 +14357,7 @@ msgstr "Retrait en attente"
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
@@ -14185,6 +14406,11 @@ msgstr "Supprimer le bloc"
 #, elixir-autogen, elixir-format
 msgid "Remove column"
 msgstr "Supprimer la colonne"
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "Remove condition"
+msgstr "Supprimer la condition"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -14276,6 +14502,11 @@ msgstr "Supprimer ce compte ?"
 #, elixir-autogen, elixir-format
 msgid "Remove this column and its blocks?"
 msgstr "Supprimer cette colonne et ses blocs ?"
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "Remove this condition"
+msgstr "Supprimer cette condition"
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
@@ -14567,6 +14798,11 @@ msgstr "Obligatoire pour chaque connexion"
 #, elixir-autogen, elixir-format
 msgid "Required on every row"
 msgstr "Obligatoire sur chaque ligne"
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "Required when"
+msgstr "Obligatoire quand"
 
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
@@ -14986,6 +15222,7 @@ msgstr "Hébergez-le sur vos propres serveurs"
 msgid "Run the analysis on this content and deliver what it finds. A preview doesn't run it: it costs what the real rule costs, and may send the page to an outside AI provider."
 msgstr "Lancer l’analyse sur ce contenu et transmettre ce qu’elle trouve. L’aperçu ne la lance pas : elle coûte autant que la vraie règle et peut envoyer la page à un fournisseur d’IA externe."
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -15343,6 +15580,7 @@ msgstr "En enregistrant ceci, le contenu de ce site est envoyé à l'URL ci-dess
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
@@ -16104,6 +16342,11 @@ msgstr "Afficher ceci dans l’éditeur"
 msgid "Show this list of shortcuts"
 msgstr "Afficher cette liste de raccourcis"
 
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "Show when"
+msgstr "Afficher quand"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Showing only blocks that need attention."
@@ -16184,6 +16427,11 @@ msgstr "Affiché dans votre fuseau horaire local ; stocké en UTC."
 #, elixir-autogen, elixir-format
 msgid "Shown on the thank-you page after a successful submission."
 msgstr "Affiché sur la page de remerciement après une soumission réussie."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shown to editors. Leave empty for the standard message."
+msgstr "Affiché aux éditeurs. Laissez vide pour le message standard."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -16452,6 +16700,7 @@ msgstr "Taille"
 msgid "Skip to main content"
 msgstr "Aller au contenu principal"
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Skipped"
@@ -16792,6 +17041,11 @@ msgstr "Les étapes sont comptées indépendamment — il ne s'agit pas d'un tau
 msgid "Stock links (Blog, Search)"
 msgstr "Liens d'origine (Blog, Rechercher)"
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Stop blocking %{cidr}?"
+msgstr "Arrêter de bloquer %{cidr} ?"
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stop checking outbound links for this site?"
@@ -16945,6 +17199,11 @@ msgstr "Abonnés"
 #, elixir-autogen, elixir-format
 msgid "Subscription confirmed"
 msgstr "Abonnement confirmé"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Succeeded"
+msgstr "Réussie"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -17279,6 +17538,11 @@ msgstr "Niveau temporaire terminé."
 msgid "Terms"
 msgstr "Termes"
 
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "Test"
+msgstr "Test"
+
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "Test a headline, an excerpt or a block against a variant, measure which converts, and promote the winner into the document."
@@ -17436,6 +17700,11 @@ msgstr "Ce compte est introuvable."
 #, elixir-autogen, elixir-format
 msgid "That action isn't allowed right now."
 msgstr "Cette action n'est pas autorisée pour le moment."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "That block no longer exists."
+msgstr "Ce blocage n'existe plus."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -17769,6 +18038,11 @@ msgstr "L'icône de l'application a été enregistrée mais n'est pas encore ins
 msgid "The backup status can't be determined."
 msgstr "L'état des sauvegardes ne peut pas être déterminé."
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "The block could not be saved."
+msgstr "Le blocage n'a pas pu être enregistré."
+
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "The block this task was anchored to has been removed."
@@ -17935,6 +18209,11 @@ msgstr "Le budget d'embeddings a refusé cette demande."
 msgid "The entry limit is deployment-wide and not configurable per site: it bounds the work a feed request costs the server, rather than expressing a publishing choice."
 msgstr "La limite d'entrées vaut pour tout le déploiement et n'est pas configurable par site : elle borne le travail qu'une requête de flux coûte au serveur, plutôt que d'exprimer un choix éditorial."
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "The expiry is not a valid date and time."
+msgstr "L'expiration n'est pas une date et heure valides."
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "The favicon must be a PNG image."
@@ -17944,6 +18223,16 @@ msgstr "Le favicon doit être une image PNG."
 #, elixir-autogen, elixir-format
 msgid "The field filter or sort could no longer be applied, so it was cleared."
 msgstr "Le filtre ou le tri sur un champ n'a plus pu être appliqué ; il a été retiré."
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "The field is hidden in the editor while this is false. A hidden field keeps its stored value, and the value is still delivered by the API."
+msgstr "Le champ est masqué dans l'éditeur tant que ceci est faux. Un champ masqué conserve sa valeur enregistrée, et l'API la fournit toujours."
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "The field must be filled in while this is true."
+msgstr "Le champ doit être renseigné tant que ceci est vrai."
 
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #, elixir-autogen, elixir-format
@@ -18182,6 +18471,11 @@ msgstr "Le verrou de publication n'agit que sur les règles marquées comme bloq
 #, elixir-autogen, elixir-format
 msgid "The push key could not be saved."
 msgstr "La clé push n'a pas pu être enregistrée."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "The range %{cidr} includes your own address, %{ip}. Confirm to add it anyway."
+msgstr "La plage %{cidr} inclut votre propre adresse, %{ip}. Confirmez pour l'ajouter quand même."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -18462,6 +18756,11 @@ msgstr "Thème"
 msgid "Then show"
 msgstr "Alors, afficher"
 
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "There are no other fields to test yet. Conditions can read a text, number, date, yes/no or choice field beside this one."
+msgstr "Il n'y a pas encore d'autre champ à tester. Une condition peut lire un champ texte, nombre, date, oui/non ou choix voisin de celui-ci."
+
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "There is a problem with your submission"
@@ -18587,6 +18886,11 @@ msgstr "Ce service ne peut pas vérifier sa connexion."
 msgid "This block has settings only an admin can change, so only an admin can move it."
 msgstr "Ce bloc a des réglages que seul un administrateur peut modifier, donc seul un administrateur peut le déplacer."
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "This block may lock you out."
+msgstr "Ce blocage pourrait vous verrouiller."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "This block needs at least %{count} characters to work from."
@@ -18704,6 +19008,11 @@ msgstr "Cette date d'expiration est à plus d'un an."
 #, elixir-autogen, elixir-format
 msgid "This export has more than %{max} rows. Narrow the list with a filter and try again."
 msgstr "Cet export dépasse %{max} lignes. Réduisez la liste avec un filtre et réessayez."
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "This field has a nested condition set through the API. It can't be edited here; it stays as it is until you remove it."
+msgstr "Ce champ a une condition imbriquée définie via l'API. Elle ne peut pas être modifiée ici ; elle reste telle quelle jusqu'à sa suppression."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -18888,6 +19197,11 @@ msgstr "Ce lancement est complet. Publiez-le ou déplacez des éléments vers un
 #, elixir-autogen, elixir-format
 msgid "This release is nearly full (%{count} of %{cap})."
 msgstr "Ce lancement est presque complet (%{count} sur %{cap})."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "This request arrived with a forwarding header, but no trusted proxies are configured (TRUSTED_PROXIES), so Kiln sees your proxy's address, not the visitor's. Blocks would then match the proxy, and the check that stops you blocking yourself cannot be relied on. Set TRUSTED_PROXIES before adding blocks."
+msgstr "Cette requête est arrivée avec un en-tête de transfert, mais aucun proxy de confiance n'est configuré (TRUSTED_PROXIES) : Kiln voit l'adresse de votre proxy, pas celle du visiteur. Les blocages cibleraient alors le proxy, et la vérification qui vous empêche de vous bloquer vous-même n'est pas fiable. Définissez TRUSTED_PROXIES avant d'ajouter des blocages."
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
@@ -19161,6 +19475,11 @@ msgstr "Cochez au moins une étiquette à appliquer."
 #, elixir-autogen, elixir-format
 msgid "Tick every type that should carry this field. Each gets its own copy under the same machine name, which you can then change on its own."
 msgstr "Cochez chaque type qui doit porter ce champ. Chacun reçoit sa propre copie sous le même nom machine, que vous pouvez ensuite modifier séparément."
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "Ticked"
+msgstr "Coché"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -19656,6 +19975,11 @@ msgstr "Sans groupe"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "Unique"
+msgstr "Unique"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "Unit"
 msgstr "Unité"
 
@@ -20101,7 +20425,13 @@ msgstr "Utilise la date du jour (%{date}). Les valeurs enregistrées sont actual
 msgid "Valid for one hour."
 msgstr "Valable une heure."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Validation"
+msgstr "Validation"
+
 #: lib/kiln_cms/cms/computed/recipes.ex
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Value"
@@ -20297,6 +20627,11 @@ msgstr "Vues au fil du temps"
 #, elixir-autogen, elixir-format
 msgid "Visible"
 msgstr "Visibilité"
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Visitor addresses may be your proxy's."
+msgstr "Les adresses des visiteurs peuvent être celles de votre proxy."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -20740,6 +21075,11 @@ msgstr "Années complètes entre la date de début et la date de fin, comme un �
 msgid "Whole years since a date, like a person's age. Refreshed daily."
 msgstr "Années complètes depuis une date, comme l’âge d’une personne. Actualisé chaque jour."
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Why this was blocked"
+msgstr "Pourquoi ce blocage"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Width"
@@ -20910,6 +21250,11 @@ msgstr "Vous pouvez en rédiger et en démarrer une, mais aucune variante n'est 
 msgid "You can view this content but not edit it."
 msgstr "Vous pouvez consulter ce contenu, mais pas le modifier."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "You can't change custom fields."
+msgstr "Vous ne pouvez pas modifier les champs personnalisés."
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "You can't change that view. Only an admin can share or edit a shared view."
@@ -21000,6 +21345,11 @@ msgstr "Vous n'avez pas l'autorisation de modifier les synonymes de recherche."
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's AI provider."
 msgstr "Vous n'avez pas l'autorisation de modifier le fournisseur d'IA de ce site."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's blocked addresses."
+msgstr "Vous n'avez pas la permission de modifier les adresses bloquées de ce site."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -21314,6 +21664,11 @@ msgstr "Votre bibliothèque regroupée par sujet, pas seulement par classement �
 msgid "Your name"
 msgstr "Votre nom"
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your own address could not be determined, so %{cidr} cannot be checked against it. Confirm to add it anyway."
+msgstr "Votre propre adresse n'a pas pu être déterminée ; %{cidr} ne peut donc pas être vérifiée. Confirmez pour l'ajouter quand même."
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Your own identity provider on this site's sign-in page."
@@ -21607,6 +21962,26 @@ msgstr "ne peut pas être stocké pour le moment : le serveur n'a plus d'espace 
 #, elixir-autogen, elixir-format
 msgid "can't be stored — video and audio metadata stripping isn't available on this server"
 msgstr "ne peut pas être stocké : la suppression des métadonnées vidéo et audio n'est pas disponible sur ce serveur"
+
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "can't compare %{field} with greater/less than: it is not a number or a date"
+msgstr "ne peut pas comparer %{field} avec supérieur/inférieur à : ce n'est ni un nombre ni une date"
+
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "can't depend on %{field}, a private field"
+msgstr "ne peut pas dépendre de %{field}, un champ privé"
+
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "can't depend on %{field}: a %{type} field has no simple value to test"
+msgstr "ne peut pas dépendre de %{field} : un champ %{type} n'a pas de valeur simple à tester"
+
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "can't depend on the field itself"
+msgstr "ne peut pas dépendre du champ lui-même"
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -21928,6 +22303,7 @@ msgid "exactly %{count}"
 msgstr "exactement %{count}"
 
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "expired"
 msgstr "expiré"
@@ -21942,6 +22318,7 @@ msgstr "expire"
 msgid "fail"
 msgstr "échec"
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -22061,6 +22438,7 @@ msgid "intact (unsigned)"
 msgstr "intact (non signé)"
 
 #: lib/kiln_cms/cms/computed/recipes.ex
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "is"
@@ -22077,11 +22455,18 @@ msgid "is assigned"
 msgstr "est attribuée"
 
 #: lib/kiln_cms/cms/computed/recipes.ex
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
 #, elixir-autogen, elixir-format
 msgid "is empty"
 msgstr "est vide"
 
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "is greater than"
+msgstr "est supérieur à"
+
 #: lib/kiln_cms/cms/computed/recipes.ex
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
 #, elixir-autogen, elixir-format
 msgid "is less than"
 msgstr "est inférieur à"
@@ -22090,6 +22475,36 @@ msgstr "est inférieur à"
 #, elixir-autogen, elixir-format
 msgid "is more than"
 msgstr "est supérieur à"
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "is not"
+msgstr "n'est pas"
+
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "is not a valid condition: it %{reason}"
+msgstr "n'est pas une condition valide : elle %{reason}"
+
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "is not available for a %{type} field"
+msgstr "n'est pas disponible pour un champ %{type}"
+
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "is not available for a link field"
+msgstr "n'est pas disponible pour un champ de lien"
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "is not empty"
+msgstr "n'est pas vide"
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "is one of"
+msgstr "est l'un de"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
@@ -22130,6 +22545,11 @@ msgstr "est dépublié"
 #, elixir-autogen, elixir-format
 msgid "is updated"
 msgstr "est mis à jour"
+
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "is used in the conditions of %{fields}; remove those conditions first"
+msgstr "est utilisé dans les conditions de %{fields} ; supprimez d'abord ces conditions"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -22261,6 +22681,7 @@ msgstr "médiathèque"
 msgid "min read"
 msgstr "min de lecture"
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "missing"
@@ -22270,6 +22691,11 @@ msgstr "manquant"
 #, elixir-autogen, elixir-format
 msgid "more conversions than impressions — these counters are not trustworthy"
 msgstr "plus de conversions que d'impressions — ces compteurs ne sont pas fiables"
+
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "names %{field}, which is not a field beside this one"
+msgstr "nomme %{field}, qui n'est pas un champ voisin de celui-ci"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -22399,6 +22825,12 @@ msgstr "nombre"
 msgid "off"
 msgstr "désactivée"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "off-site only"
+msgstr "hors site uniquement"
+
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "ok"
@@ -22414,6 +22846,11 @@ msgstr "activée"
 msgid "on behalf of %{who}"
 msgstr "au nom de %{who}"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "on disk"
+msgstr "sur disque"
+
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "on manual trigger"
@@ -22428,6 +22865,11 @@ msgstr "un mot-clé ou une expression par ligne"
 #, elixir-autogen, elixir-format
 msgid "one segment"
 msgstr "un segment"
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "one, two, three"
+msgstr "un, deux, trois"
 
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
@@ -22453,6 +22895,11 @@ msgstr "ou glissez-déposez"
 #, elixir-autogen, elixir-format
 msgid "orphaned"
 msgstr "orphelin"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "pending"
+msgstr "en attente"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -22490,6 +22937,16 @@ msgstr "privé"
 #, elixir-autogen, elixir-format
 msgid "proposed to publish — an admin confirms"
 msgstr "publication proposée ; un administrateur confirme"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "pruned"
+msgstr "purgée"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "pruned (retention)"
+msgstr "purgée (rétention)"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/translations_live.ex
@@ -22953,6 +23410,11 @@ msgstr "type non pris en charge"
 msgid "until"
 msgstr "jusqu'à"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "unverified (imported)"
+msgstr "non vérifiée (importée)"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "up to %{max}"
@@ -23010,6 +23472,11 @@ msgstr "a été mis en ligne"
 #, elixir-autogen, elixir-format
 msgid "winner"
 msgstr "gagnante"
+
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "would depend on itself through other conditions"
+msgstr "dépendrait de lui-même via d'autres conditions"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format

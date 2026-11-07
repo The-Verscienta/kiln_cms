@@ -34,6 +34,7 @@ import {FlashAutoDismiss} from "./flash_auto_dismiss"
 import {SavedTicker} from "./saved_ticker"
 import {TabKeys} from "./tab_keys"
 import {ReferencePicker} from "./reference_picker"
+import {FieldConditions} from "./field_conditions"
 import {BodyImageUploader} from "./body_image_uploader"
 import {watchLiveness} from "./liveness"
 import {watchConnectionNotices} from "./connection_notice"
@@ -60,6 +61,9 @@ const Hooks = {
   // Combobox keys and drag-to-reorder for a reference custom field — see
   // assets/js/reference_picker.js.
   ReferencePicker,
+  // Show/hide and required-when for conditional custom fields (#2277) — see
+  // assets/js/field_conditions.js.
+  FieldConditions,
   BodyImageUploader,
   FocusTrap,
   // Info flashes close themselves after a few seconds — see

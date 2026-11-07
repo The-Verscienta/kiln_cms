@@ -51,12 +51,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   @default_types ~w(string text url integer float boolean date datetime select)
 
   import KilnCMSWeb.ComputedBuilderComponents, only: [compute_builder: 1]
+  import KilnCMSWeb.ConditionsBuilderComponents, only: [conditions_field: 1]
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Computed
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.Validations.FieldCondition
   alias KilnCMSWeb.ComputedBuilder
+  alias KilnCMSWeb.ConditionsBuilder
 
   @impl true
   def mount(_params, _session, socket) do
@@ -97,6 +101,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
      socket
      |> assign(:default_scopes, default_scopes)
      |> assign(:scopes, default_scopes)
+     |> assign(:cond_siblings, create_siblings(socket.assigns, default_scopes))
      |> assign_create_builder()}
   end
 
@@ -113,10 +118,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     params = if name_edited?, do: params, else: suggest_name(params)
     params = drop_default_on_type_change(params, socket.assigns.form)
     {params, builder} = ComputedBuilder.apply_params(params, socket.assigns.builder)
+    {socket, conds} = apply_create_conditions(socket, params, scopes)
 
     form =
       socket.assigns.form
-      |> AshPhoenix.Form.validate(normalize(params, List.first(scopes)))
+      |> AshPhoenix.Form.validate(
+        params
+        |> normalize(List.first(scopes))
+        |> put_rules(conds, params["field_type"], socket.assigns.cond_siblings)
+      )
       |> refuse_duplicates(params, scopes, socket.assigns)
 
     {:noreply,
@@ -136,6 +146,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     # still gets the name its label suggests.
     params = if blank?(params["name"]), do: suggest_name(params), else: params
     {params, builder} = ComputedBuilder.apply_params(params, socket.assigns.builder)
+    {socket, conds} = apply_create_conditions(socket, params, scopes)
     assigns = socket.assigns
     socket = socket |> assign(:scopes, scopes) |> assign(:builder, builder)
 
@@ -146,6 +157,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         params =
           params
           |> normalize(scope)
+          |> put_rules(conds, params["field_type"], assigns.cond_siblings)
           |> Map.put("position", next_position(assigns.definitions, scope))
 
         assigns.actor
@@ -183,7 +195,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        id: id,
        form: form,
        builder: ComputedBuilder.new(form[:compute].value),
-       ctx: nil
+       ctx: nil,
+       conds: ConditionsBuilder.new(Enum.find(socket.assigns.definitions, &(&1.id == id))),
+       cond_siblings: edit_siblings(socket.assigns, id)
      })
      |> assign_edit_builder()}
   end
@@ -194,11 +208,19 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       when is_map(params) do
     params = params |> apply_kind() |> drop_default_on_type_change(socket.assigns.edit.form)
     {params, builder} = ComputedBuilder.apply_params(params, socket.assigns.edit.builder)
+    old = socket.assigns.edit
+
+    conds = ConditionsBuilder.apply_params(old.conds, params["conditions"], old.cond_siblings)
 
     edit = %{
-      socket.assigns.edit
-      | form: AshPhoenix.Form.validate(socket.assigns.edit.form, normalize(params)),
-        builder: builder
+      old
+      | form:
+          AshPhoenix.Form.validate(
+            old.form,
+            params |> normalize() |> put_rules(conds, params["field_type"], old.cond_siblings)
+          ),
+        builder: builder,
+        conds: conds
     }
 
     {:noreply, socket |> assign(:edit, edit) |> assign_edit_builder()}
@@ -208,7 +230,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     {params, builder} =
       params |> apply_kind() |> ComputedBuilder.apply_params(socket.assigns.edit.builder)
 
-    case AshPhoenix.Form.submit(socket.assigns.edit.form, params: normalize(params)) do
+    old = socket.assigns.edit
+
+    conds = ConditionsBuilder.apply_params(old.conds, params["conditions"], old.cond_siblings)
+
+    submitted =
+      params |> normalize() |> put_rules(conds, params["field_type"], old.cond_siblings)
+
+    case AshPhoenix.Form.submit(old.form, params: submitted) do
       {:ok, _definition} ->
         {:noreply,
          socket |> assign(:edit, nil) |> load_definitions() |> put_flash(:info, gettext("Saved."))}
@@ -216,7 +245,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       {:error, form} ->
         {:noreply,
          socket
-         |> assign(:edit, %{socket.assigns.edit | form: form, builder: builder})
+         |> assign(:edit, %{old | form: form, builder: builder, conds: conds})
          |> assign_edit_builder()}
     end
   end
@@ -236,6 +265,41 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     {:noreply, assign(socket, :edit, nil)}
   end
 
+  # --- conditions (#2277) ----------------------------------------------------
+
+  # "Add a condition", the trash button, "Remove condition": the rows live in
+  # the live view (the form posts them on every change), so these only edit
+  # that state. Nothing is read or written here, but they are admin-only like
+  # the rest of the page, so each re-checks.
+  def handle_event("cond_add", %{"ctx" => ctx, "rule" => rule}, socket)
+      when ctx in ["create", "edit", "link"] and rule in ["visible_when", "required_when"] do
+    {:noreply,
+     with_conds(socket, ctx, fn state, siblings ->
+       ConditionsBuilder.add(state, rule, siblings)
+     end)}
+  end
+
+  def handle_event("cond_remove", %{"ctx" => ctx, "rule" => rule, "index" => index}, socket)
+      when ctx in ["create", "edit", "link"] and rule in ["visible_when", "required_when"] and
+             is_binary(index) do
+    case Integer.parse(index) do
+      {index, ""} ->
+        {:noreply,
+         with_conds(socket, ctx, fn state, _siblings ->
+           ConditionsBuilder.remove(state, rule, index)
+         end)}
+
+      _other ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("cond_clear", %{"ctx" => ctx, "rule" => rule}, socket)
+      when ctx in ["create", "edit", "link"] and rule in ["visible_when", "required_when"] do
+    {:noreply,
+     with_conds(socket, ctx, fn state, _siblings -> ConditionsBuilder.clear(state, rule) end)}
+  end
+
   # --- link fields (R3) -----------------------------------------------------
 
   # "Add a detail" under a reference field, or "Add a field" under a group: a
@@ -252,7 +316,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
            kind: child_kind(type),
            id: nil,
            form: form,
-           name_edited?: false
+           name_edited?: false,
+           conds: ConditionsBuilder.new(),
+           cond_siblings: link_siblings(socket.assigns, parent_id, nil, child_kind(type))
          })}
 
       _other ->
@@ -274,7 +340,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
            kind: if(link.group_of_id, do: :group, else: :link),
            id: id,
            form: form,
-           name_edited?: true
+           name_edited?: true,
+           conds: ConditionsBuilder.new(link),
+           cond_siblings:
+             link_siblings(
+               socket.assigns,
+               FieldDefinition.parent_id(link),
+               id,
+               if(link.group_of_id, do: :group, else: :link)
+             )
          })}
     end
   end
@@ -293,9 +367,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     params = if name_edited?, do: params, else: suggest_name(params)
     params = drop_default_on_type_change(params, lf.form)
-    form = AshPhoenix.Form.validate(lf.form, link_params(params, lf))
+    conds = ConditionsBuilder.apply_params(lf.conds, params["conditions"], lf.cond_siblings)
 
-    {:noreply, assign(socket, :link_form, %{lf | form: form, name_edited?: name_edited?})}
+    form =
+      AshPhoenix.Form.validate(
+        lf.form,
+        params |> link_params(lf) |> put_link_rules(lf, conds, params["field_type"])
+      )
+
+    {:noreply,
+     assign(socket, :link_form, %{lf | form: form, name_edited?: name_edited?, conds: conds})}
   end
 
   def handle_event(
@@ -306,7 +387,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       when is_map(params) do
     params = if lf.id == nil and blank?(params["name"]), do: suggest_name(params), else: params
 
-    case AshPhoenix.Form.submit(lf.form, params: link_params(params, lf, socket.assigns)) do
+    conds = ConditionsBuilder.apply_params(lf.conds, params["conditions"], lf.cond_siblings)
+
+    submitted =
+      params
+      |> link_params(lf, socket.assigns)
+      |> put_link_rules(lf, conds, params["field_type"])
+
+    case AshPhoenix.Form.submit(lf.form, params: submitted) do
       {:ok, _link} ->
         {:noreply,
          socket
@@ -315,7 +403,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
          |> put_flash(:info, gettext("Saved."))}
 
       {:error, form} ->
-        {:noreply, assign(socket, :link_form, %{lf | form: form})}
+        {:noreply, assign(socket, :link_form, %{lf | form: form, conds: conds})}
     end
   end
 
@@ -365,6 +453,119 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       {:noreply, socket}
     end
   end
+
+  # --- conditions helpers (#2277) ---------------------------------------------
+
+  defp with_conds(socket, ctx, fun) do
+    assigns = socket.assigns
+
+    if CMS.can_create_field_definition?(assigns.actor, %{}, tenant: assigns.current_org) do
+      case conds_for(assigns, ctx) do
+        {state, siblings} -> put_conds(socket, ctx, fun.(state, siblings))
+        nil -> socket
+      end
+    else
+      put_flash(socket, :error, gettext("You can't change custom fields."))
+    end
+  end
+
+  defp conds_for(assigns, "create"), do: {assigns.conds, assigns.cond_siblings}
+  defp conds_for(%{edit: %{} = edit}, "edit"), do: {edit.conds, edit.cond_siblings}
+  defp conds_for(%{link_form: %{} = lf}, "link"), do: {lf.conds, lf.cond_siblings}
+  defp conds_for(_assigns, _ctx), do: nil
+
+  defp put_conds(socket, "create", state), do: assign(socket, :conds, state)
+
+  defp put_conds(%{assigns: %{edit: %{} = edit}} = socket, "edit", state),
+    do: assign(socket, :edit, %{edit | conds: state})
+
+  defp put_conds(%{assigns: %{link_form: %{} = lf}} = socket, "link", state),
+    do: assign(socket, :link_form, %{lf | conds: state})
+
+  defp put_conds(socket, _ctx, _state), do: socket
+
+  # The create form's rows follow the ticked types: the fields a rule may read
+  # are the ones every ticked type has by that name and type.
+  defp apply_create_conditions(socket, params, scopes) do
+    socket =
+      if scopes == socket.assigns.scopes and Map.has_key?(socket.assigns, :cond_siblings),
+        do: socket,
+        else: assign(socket, :cond_siblings, create_siblings(socket.assigns, scopes))
+
+    conds =
+      ConditionsBuilder.apply_params(
+        socket.assigns.conds,
+        params["conditions"],
+        socket.assigns.cond_siblings
+      )
+
+    {assign(socket, :conds, conds), conds}
+  end
+
+  defp create_siblings(_assigns, []), do: []
+
+  defp create_siblings(assigns, scopes) do
+    [first | rest] = Enum.map(scopes, &scope_siblings(&1, assigns.current_org))
+
+    Enum.filter(first, fn s ->
+      Enum.all?(rest, fn other ->
+        Enum.any?(other, &(&1.name == s.name and &1.field_type == s.field_type))
+      end)
+    end)
+  end
+
+  defp scope_siblings("def:" <> id, org),
+    do: cond_siblings(%{id: nil, type_definition_id: id}, org, nil)
+
+  defp scope_siblings(type, org),
+    do: cond_siblings(%{id: nil, content_type: String.to_existing_atom(type)}, org, nil)
+
+  defp edit_siblings(assigns, id) do
+    case Enum.find(assigns.definitions, &(&1.id == id)) do
+      nil -> []
+      definition -> cond_siblings(definition, assigns.current_org, definition.name)
+    end
+  end
+
+  # A group's sub-fields read each other; a reference's link fields carry no
+  # conditions.
+  defp link_siblings(assigns, parent_id, id, :group),
+    do: cond_siblings(%{id: id, group_of_id: parent_id}, assigns.current_org, nil)
+
+  defp link_siblings(_assigns, _parent_id, _id, _kind), do: []
+
+  defp cond_siblings(scope, org, own_name) do
+    scope =
+      Map.merge(
+        %{
+          id: nil,
+          content_type: nil,
+          type_definition_id: nil,
+          group_of_id: nil,
+          link_of_id: nil
+        },
+        Map.take(scope, [:id, :content_type, :type_definition_id, :group_of_id, :link_of_id])
+      )
+
+    scope
+    |> FieldCondition.siblings(org)
+    |> Enum.filter(&(&1.field_type in FieldDefinition.link_field_types() and not &1.private))
+    |> Enum.reject(&(&1.name == own_name))
+    |> Enum.sort_by(& &1.position)
+  end
+
+  # The rules for the params the resource validates. A type that carries none
+  # (a group or computed field) sends both as nil so a stale row can't fail it.
+  defp put_rules(params, _conds, type, _siblings) when type in ["group", "computed"],
+    do: Map.merge(params, %{"visible_when" => nil, "required_when" => nil})
+
+  defp put_rules(params, conds, _type, siblings),
+    do: Map.merge(params, ConditionsBuilder.rule_params(conds, siblings))
+
+  defp put_link_rules(params, %{kind: :group, cond_siblings: siblings}, conds, type),
+    do: put_rules(params, conds, type, siblings)
+
+  defp put_link_rules(params, _lf, _conds, _type), do: params
 
   # --- create helpers --------------------------------------------------------
 
@@ -417,6 +618,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> assign(:scope_error, nil)
     |> assign(:name_edited?, false)
     |> assign(:builder, ComputedBuilder.new())
+    |> assign(:conds, ConditionsBuilder.new())
+    |> assign(
+      :cond_siblings,
+      create_siblings(socket.assigns, socket.assigns.default_scopes)
+    )
   end
 
   # The machine name tracks the label until the admin types into the name
@@ -703,7 +909,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   defp link_params(params, %{id: nil, parent: parent_id, kind: kind}, assigns) do
     column = if kind == :group, do: "group_of_id", else: "link_of_id"
-    params = params |> normalize() |> Map.put(column, parent_id)
+    params = params |> normalize() |> without_unique() |> Map.put(column, parent_id)
 
     case assigns do
       nil -> params
@@ -712,7 +918,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   end
 
   defp link_params(params, _link_form, _assigns),
-    do: params |> normalize() |> Map.drop(["link_of_id", "group_of_id"])
+    do: params |> normalize() |> without_unique() |> Map.drop(["link_of_id", "group_of_id"])
 
   defp reorder_links(socket, parent_id, order) do
     by_id = socket.assigns.link_fields |> Map.get(parent_id, []) |> Map.new(&{&1.id, &1})
@@ -942,14 +1148,93 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     params
     |> Map.delete("scopes")
+    |> Map.delete("conditions")
     |> Map.put("options", options)
     |> Map.put("option_labels", labels)
     |> Map.put("default", default)
+    |> unpack_validation()
     |> unpack_targets()
     |> unpack_sources_limit()
     |> unpack_inverse()
     |> unpack_scope(scope)
   end
+
+  # The Validation fieldset posts every constraint as text (#2276). Blank
+  # ones are dropped, numbers parsed, and the keys that mean nothing for the
+  # chosen type left out — its inputs leave the page on a type change, and
+  # `Validations.FieldConstraints` refuses what is stale. A value that is no
+  # number stays text, so the save names the input it is wrong in. Without a
+  # type in the params the constraints are left as they were.
+  defp unpack_validation(%{"field_type" => type} = params) when is_binary(type) do
+    allowed = FieldConstraints.allowed_keys(type_atom(type), format_atom(params["format"]))
+
+    allowed =
+      if params["multiple"] in [true, "true"], do: allowed -- ["unique"], else: allowed
+
+    posted = if is_map(params["validation"]), do: params["validation"], else: %{}
+
+    validation =
+      for key <- allowed,
+          {:ok, value} <- [constraint_value(key, type, posted[key])],
+          into: %{},
+          do: {key, value}
+
+    validation =
+      if Map.has_key?(validation, "pattern"),
+        do: validation,
+        else: Map.delete(validation, "pattern_message")
+
+    Map.put(params, "validation", validation)
+  end
+
+  defp unpack_validation(params), do: params
+
+  defp constraint_value("unique", _type, value),
+    do: if(value in [true, "true"], do: {:ok, true}, else: :error)
+
+  defp constraint_value(key, type, value) when key in ["min", "max"] and is_binary(value) do
+    value = String.trim(value)
+
+    cond do
+      value == "" -> :error
+      type == "integer" -> {:ok, number(Integer.parse(value), value)}
+      true -> {:ok, number(Float.parse(value), value)}
+    end
+  end
+
+  defp constraint_value(key, _type, value)
+       when key in ["min_length", "max_length"] and is_binary(value) do
+    value = String.trim(value)
+    if value == "", do: :error, else: {:ok, number(Integer.parse(value), value)}
+  end
+
+  defp constraint_value(key, _type, value) when key in ["pattern", "pattern_message"] do
+    if is_binary(value) and String.trim(value) != "", do: {:ok, value}, else: :error
+  end
+
+  defp constraint_value(_key, _type, value) when is_number(value), do: {:ok, value}
+  defp constraint_value(_key, _type, _value), do: :error
+
+  defp number({number, ""}, _text), do: number
+  defp number(_unparsed, text), do: text
+
+  defp type_atom("integer"), do: :integer
+  defp type_atom("float"), do: :float
+  defp type_atom("string"), do: :string
+  defp type_atom("url"), do: :url
+  defp type_atom("text"), do: :text
+  defp type_atom("date"), do: :date
+  defp type_atom("datetime"), do: :datetime
+  defp type_atom(_other), do: :other
+
+  defp format_atom("plain"), do: :plain
+  defp format_atom(_other), do: :rich
+
+  # A detail on a connection or a field in a group is never unique.
+  defp without_unique(%{"validation" => %{} = validation} = params),
+    do: Map.put(params, "validation", Map.delete(validation, "unique"))
+
+  defp without_unique(params), do: params
 
   # Emptying the other side's name removes the reverse list (R4), so its
   # machine name goes with it rather than standing alone.
@@ -1015,6 +1300,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # Whether the reference-target select applies to the form's current type.
   defp reference?(form), do: to_string(form[:field_type].value) == "reference"
+
+  # Whether the Conditions disclosure applies: not to a group as a whole or a
+  # computed field (`Validations.FieldCondition`).
+  defp conditions?(form), do: to_string(form[:field_type].value) not in ["group", "computed"]
 
   # Whether the compute-formula textarea applies (a `:computed` field, #429).
   defp computed?(form), do: to_string(form[:field_type].value) == "computed"
@@ -1346,7 +1635,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         >
           <legend class="px-1 text-sm font-medium">
             {bounds_legend(@type, @target)}
-            <span class="font-normal text-base-content/60">{gettext("(optional)")}</span>
+            <span class="font-normal text-base-content/70">{gettext("(optional)")}</span>
           </legend>
           <div class="grid gap-3 sm:grid-cols-2">
             <.input
@@ -1390,7 +1679,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           />
           <span>
             {gettext("Editors can add new terms")}
-            <span class="block text-xs text-base-content/60">
+            <span class="block text-xs text-base-content/70">
               {gettext(
                 "For a vocabulary that grows, like properties or keywords. The options become suggestions, and terms already used on this type are suggested too. A new term does not join the options."
               )}
@@ -1509,6 +1798,36 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       {min, max} -> gettext("Between %{min} and %{max} rows.", min: min, max: max)
     end
   end
+
+  # A field's value constraints in the list (#2276), when it has any.
+  defp constraints_summary(%{validation: validation}) do
+    validation = FieldConstraints.normalize(validation)
+
+    [
+      range_summary(validation["min"], validation["max"]),
+      length_summary(validation["min_length"], validation["max_length"]),
+      if(validation["pattern"], do: gettext("Must match a pattern.")),
+      if(validation["unique"] == true, do: gettext("Each value used once."))
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" ")
+  end
+
+  defp range_summary(nil, nil), do: nil
+  defp range_summary(min, nil), do: gettext("At least %{min}.", min: min)
+  defp range_summary(nil, max), do: gettext("At most %{max}.", max: max)
+  defp range_summary(min, max), do: gettext("From %{min} to %{max}.", min: min, max: max)
+
+  defp length_summary(nil, nil), do: nil
+
+  defp length_summary(min, nil),
+    do: ngettext("At least %{count} character.", "At least %{count} characters.", min)
+
+  defp length_summary(nil, max),
+    do: ngettext("At most %{count} character.", "At most %{count} characters.", max)
+
+  defp length_summary(min, max),
+    do: gettext("%{min} to %{max} characters.", min: min, max: max)
 
   # The structured-data meaning in the list (#2044), when it has one.
   defp schema_org_summary(%{schema_org_property: :author}),
@@ -2474,6 +2793,159 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   attr :form, :any, required: true
   attr :id, :string, required: true
+  attr :nested?, :boolean, default: false
+
+  # The value constraints of a field (#2276), as a fieldset of the inputs its
+  # type takes: bounds for a number, length and pattern for text, and whether
+  # every value must be unique. The server stays the authority; a constraint
+  # the type doesn't take is not offered (and `unpack_validation/1` drops it).
+  defp validation_field(assigns) do
+    type = to_string(assigns.form[:field_type].value)
+    format = assigns.form[:format].value |> to_string() |> format_atom()
+    keys = FieldConstraints.allowed_keys(type_atom(type), format)
+    multiple? = assigns.form[:multiple].value in [true, "true"]
+    validation = FieldConstraints.normalize(assigns.form[:validation].value)
+
+    errors =
+      if Phoenix.Component.used_input?(assigns.form[:validation]),
+        do: Enum.map(assigns.form[:validation].errors, fn {message, _opts} -> message end),
+        else: []
+
+    assigns =
+      assigns
+      |> assign(:type, type)
+      |> assign(:keys, keys)
+      |> assign(:unique?, "unique" in keys and not assigns.nested? and not multiple?)
+      |> assign(:validation, validation)
+      |> assign(:errors, errors)
+      |> assign(:name, assigns.form[:validation].name)
+
+    ~H"""
+    <fieldset
+      :if={@keys != []}
+      id={@id}
+      class="rounded-lg border border-base-content/10 bg-base-200/40 p-3 sm:col-span-2"
+    >
+      <legend class="px-1 text-sm font-medium">
+        {gettext("Validation")}
+        <span class="font-normal text-base-content/60">{gettext("(optional)")}</span>
+      </legend>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <.input
+          :if={"min" in @keys}
+          id={"#{@id}-min"}
+          name={"#{@name}[min]"}
+          value={@validation["min"]}
+          type="number"
+          step={if @type == "integer", do: "1", else: "any"}
+          label={gettext("Minimum value")}
+          placeholder={gettext("No minimum")}
+          errors={key_errors(@errors, "min")}
+        />
+        <.input
+          :if={"max" in @keys}
+          id={"#{@id}-max"}
+          name={"#{@name}[max]"}
+          value={@validation["max"]}
+          type="number"
+          step={if @type == "integer", do: "1", else: "any"}
+          label={gettext("Maximum value")}
+          placeholder={gettext("No limit")}
+          errors={key_errors(@errors, "max")}
+        />
+        <.input
+          :if={"min_length" in @keys}
+          id={"#{@id}-min-length"}
+          name={"#{@name}[min_length]"}
+          value={@validation["min_length"]}
+          type="number"
+          min="0"
+          step="1"
+          inputmode="numeric"
+          label={gettext("Minimum length")}
+          placeholder={gettext("No minimum")}
+          errors={key_errors(@errors, "min_length")}
+        />
+        <.input
+          :if={"max_length" in @keys}
+          id={"#{@id}-max-length"}
+          name={"#{@name}[max_length]"}
+          value={@validation["max_length"]}
+          type="number"
+          min="0"
+          step="1"
+          inputmode="numeric"
+          label={gettext("Maximum length")}
+          placeholder={gettext("No limit")}
+          errors={key_errors(@errors, "max_length")}
+        />
+        <.input
+          :if={"pattern" in @keys}
+          id={"#{@id}-pattern"}
+          name={"#{@name}[pattern]"}
+          value={@validation["pattern"]}
+          label={gettext("Pattern")}
+          placeholder="[A-Z]{3}-[0-9]+"
+          hint={gettext("A regular expression the whole value must match.")}
+          errors={key_errors(@errors, "pattern")}
+        />
+        <.input
+          :if={"pattern_message" in @keys}
+          id={"#{@id}-pattern-message"}
+          name={"#{@name}[pattern_message]"}
+          value={@validation["pattern_message"]}
+          label={gettext("Message when it doesn't match")}
+          hint={gettext("Shown to editors. Leave empty for the standard message.")}
+          errors={key_errors(@errors, "pattern_message")}
+        />
+        <label :if={@unique?} for={"#{@id}-unique"} class="flex items-start gap-2 text-sm">
+          <input type="hidden" name={"#{@name}[unique]"} value="false" />
+          <input
+            type="checkbox"
+            id={"#{@id}-unique"}
+            name={"#{@name}[unique]"}
+            value="true"
+            checked={@validation["unique"] == true}
+            class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
+          />
+          <span>
+            {gettext("Unique")}
+            <span class="block text-xs text-base-content/60">
+              {gettext("No two documents of this type and language may hold the same value.")}
+            </span>
+          </span>
+        </label>
+      </div>
+      <p
+        :for={message <- other_errors(@errors, @keys)}
+        class="mt-2 text-sm text-error"
+        role="alert"
+      >
+        {message}
+      </p>
+    </fieldset>
+    """
+  end
+
+  # A validation error belongs to the input of the constraint it opens with
+  # ("pattern is not a valid regular expression: ...").
+  defp key_errors(errors, key) do
+    Enum.filter(errors, &(constraint_of(&1) == key))
+  end
+
+  defp other_errors(errors, keys) do
+    Enum.reject(errors, &(constraint_of(&1) in keys))
+  end
+
+  defp constraint_of(message) do
+    message
+    |> String.split(" ", parts: 2)
+    |> List.first()
+    |> then(&if &1 in FieldConstraints.keys(), do: &1)
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
 
   # Whether the value is for editors and admins only (#2044,
   # `KilnCMS.CMS.PrivateFields`). Offered for the types that can be private;
@@ -2787,6 +3259,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <.text_format_field form={@form} id="new-field-format" />
             <.deliver_plain_field form={@form} id="new-field-deliver-plain" />
             <.deliver_portable_field form={@form} id="new-field-deliver-portable" />
+            <.validation_field form={@form} id="new-field-validation" />
             <.private_field form={@form} id="new-field-private" />
             <label class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="field_definition[required]" value="false" />
@@ -2799,6 +3272,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               />
               {gettext("Required")}
             </label>
+            <.conditions_field
+              :if={conditions?(@form)}
+              id="new-field-conditions"
+              form={@form}
+              state={@conds}
+              siblings={@cond_siblings}
+              ctx="create"
+            />
             <label class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="field_definition[names_record]" value="false" />
               <input
@@ -2970,14 +3451,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     </p>
                     <p
                       :if={definition.field_type == :select and definition.options != []}
-                      class="text-xs text-base-content/60"
+                      class="text-xs text-base-content/70"
                     >
                       {gettext("Options")}: {options_summary(definition)}
                     </p>
                     <p
                       :if={definition.field_type == :reference}
                       id={"field-#{definition.id}-links"}
-                      class="text-xs text-base-content/60"
+                      class="text-xs text-base-content/70"
                     >
                       {reference_summary(definition, @target_types, @dynamic_types)}
                     </p>
@@ -3002,6 +3483,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     </p>
                     <p :if={definition.compute} class="text-xs text-base-content/60">
                       {gettext("Formula")}: <code>{definition.compute}</code>
+                    </p>
+                    <p
+                      :if={constraints_summary(definition) != ""}
+                      id={"field-#{definition.id}-validation"}
+                      class="text-xs text-base-content/60"
+                    >
+                      {constraints_summary(definition)}
                     </p>
                     <p
                       :if={definition.field_type == :group and definition.multiple}
@@ -3156,6 +3644,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     form={@edit.form}
                     id={"edit-field-deliver-portable-#{@edit.id}"}
                   />
+                  <.validation_field
+                    form={@edit.form}
+                    id={"edit-field-validation-#{@edit.id}"}
+                  />
                   <.private_field form={@edit.form} id={"edit-field-private-#{@edit.id}"} />
                   <label class="flex items-center gap-2 self-end text-sm">
                     <input type="hidden" name="field_definition[required]" value="false" />
@@ -3168,6 +3660,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     />
                     {gettext("Required")}
                   </label>
+                  <.conditions_field
+                    :if={conditions?(@edit.form)}
+                    id={"edit-field-conditions-#{@edit.id}"}
+                    form={@edit.form}
+                    state={@edit.conds}
+                    siblings={@edit.cond_siblings}
+                    ctx="edit"
+                  />
                   <.relationship_summary
                     form={@edit.form}
                     id={"edit-field-summary-#{@edit.id}"}
@@ -3342,6 +3842,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               >
                 {options_summary(link)}
               </span>
+              <span
+                :if={constraints_summary(link) != ""}
+                id={"field-#{link.id}-validation"}
+                class="text-xs text-base-content/60"
+              >
+                {constraints_summary(link)}
+              </span>
             </div>
             <div class="flex shrink-0 items-center gap-1">
               <button
@@ -3399,6 +3906,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             form={@open.form}
             id={"link-field-form-#{link.id}"}
             group?={@group?}
+            open={@open}
           />
         </li>
       </ol>
@@ -3412,6 +3920,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         form={@open.form}
         id={"link-field-form-new-#{@definition.id}"}
         group?={@group?}
+        open={@open}
       />
     </div>
     """
@@ -3420,6 +3929,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :form, :any, required: true
   attr :id, :string, required: true
   attr :group?, :boolean, default: false
+  attr :open, :map, required: true
 
   defp link_field_form(assigns) do
     ~H"""
@@ -3450,6 +3960,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       <.input field={@form[:help_text]} label={gettext("Help text")} />
       <.options_field form={@form} id={"#{@id}-options"} />
       <.default_field form={@form} />
+      <.validation_field form={@form} id={"#{@id}-validation"} nested? />
       <label class="flex items-center gap-2 self-end text-sm">
         <input type="hidden" name={@form[:required].name} value="false" />
         <input
@@ -3463,6 +3974,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           do: gettext("Required on every row"),
           else: gettext("Required on every connection")}
       </label>
+      <.conditions_field
+        :if={@group? and conditions?(@form)}
+        id={"#{@id}-conditions"}
+        form={@form}
+        state={@open.conds}
+        siblings={@open.cond_siblings}
+        ctx="link"
+      />
       <div class="flex gap-2 sm:col-span-2">
         <.button type="submit" variant="primary">
           {if @group?, do: gettext("Save field"), else: gettext("Save detail")}

@@ -236,6 +236,13 @@ defmodule KilnCMSWeb.Telemetry do
             "series); `surface` is safe because KilnCMSWeb.ViewTracking bounds " <>
             "it to the known surface names."
       ),
+      counter("kiln_cms.ip_block.refused.count",
+        tags: [:surface],
+        description:
+          "Requests and socket connects refused by an operator's IP block list " <>
+            "(#2242), tagged http / live / gql / collab / bridge. The address is " <>
+            "deliberately not a tag or a log field."
+      ),
 
       # Oban job Metrics (emitted by Oban) — queue throughput, latency, failures
       distribution("oban.job.stop.duration",
