@@ -10,6 +10,7 @@ defmodule KilnCMS.Backups.WorkerTest do
   """
   use KilnCMS.DataCase, async: false
 
+  alias KilnCMS.Backups
   alias KilnCMS.Backups.Manifest
   alias KilnCMS.Backups.Worker
 
@@ -248,6 +249,241 @@ defmodule KilnCMS.Backups.WorkerTest do
 
       assert :ok = Worker.run("manual")
       refute File.exists?(partial)
+    end
+  end
+
+  describe "run history (#2217)" do
+    defp runs, do: Backups.list_runs!(actor: Backups.system())
+
+    defp set_config(overrides) do
+      original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+      Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.merge(original, overrides))
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Backups, original) end)
+    end
+
+    # A directory of fake executables ahead of the real ones on PATH.
+    defp fake_bin(scripts) do
+      bin = Path.join(System.tmp_dir!(), "kiln_bkbin_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(bin)
+
+      for {name, body} <- scripts do
+        path = Path.join(bin, name)
+        File.write!(path, "#!/bin/sh\n" <> body)
+        File.chmod!(path, 0o755)
+      end
+
+      path = System.get_env("PATH")
+      System.put_env("PATH", bin <> ":" <> path)
+
+      on_exit(fn ->
+        System.put_env("PATH", path)
+        File.rm_rf!(bin)
+      end)
+
+      bin
+    end
+
+    @tag :pg_tools
+    test "a successful run is recorded with its artifacts and local destinations", %{dir: dir} do
+      assert :ok = Worker.run("manual", 42)
+
+      assert [run] = runs()
+      assert run.status == :succeeded
+      assert run.origin == :app
+      assert run.trigger == "manual"
+      assert run.oban_job_id == 42
+      assert run.components == [:db, :media]
+      assert run.finished_at
+      assert run.stamp =~ ~r/\A\d{8}-\d{6}\z/
+
+      assert [%{kind: :db} = db, %{kind: :media}] = run.artifacts
+      assert db.bytes > 0
+      assert db.verified
+      assert db.destinations == %{"local" => %{"status" => "ok"}}
+      assert File.exists?(Path.join([dir, "db", db.name]))
+      assert Enum.any?(run.log, &(&1.step == "dump"))
+    end
+
+    @tag :pg_tools
+    test "the manifest keeps its exact shape", %{dir: dir} do
+      assert :ok = Worker.run("manual")
+
+      raw = File.read!(Manifest.path(dir))
+      decoded = Jason.decode!(raw)
+
+      assert decoded |> Map.keys() |> Enum.sort() ==
+               ~w(artifacts error finished_at keep_days offsite ok started_at trigger version)
+
+      assert decoded["artifacts"] |> hd() |> Map.keys() |> Enum.sort() ==
+               ~w(bytes kind path verified)
+
+      # Byte-for-byte what `Manifest.write/2` produces from what it reads back.
+      Manifest.write(dir, Manifest.read(dir))
+      assert File.read!(Manifest.path(dir)) == raw
+    end
+
+    @tag :pg_tools
+    test "a failure after the dump keeps the partial artifact and fails the run", %{dir: dir} do
+      set_config(media_dir: Path.join(dir, "no-such-media-dir"))
+
+      assert {:error, _} = Worker.run("manual")
+
+      assert [run] = runs()
+      assert run.status == :failed
+      assert run.error =~ "missing_media_dir"
+      assert [%{kind: :db}] = run.artifacts
+      refute Manifest.read(dir).ok
+    end
+
+    @tag :pg_tools
+    test "a failure before anything lands records the redacted error" do
+      set_config(database_url: "postgres://someone:hunter2@127.0.0.1:1/nope")
+
+      assert {:error, _} = Worker.run("manual")
+
+      assert [run] = runs()
+      assert run.status == :failed
+      assert run.artifacts == []
+      assert is_binary(run.error)
+      refute run.error =~ "hunter2"
+      refute inspect(run.log) =~ "hunter2"
+    end
+
+    test "a refused attempt is a skipped run and leaves the manifest alone", %{dir: dir} do
+      :ok =
+        Manifest.write(dir, %Manifest{
+          finished_at: DateTime.utc_now(),
+          trigger: "cron",
+          ok: true,
+          artifacts: [%{kind: "db", path: "db/x.dump", bytes: 1, verified: true}]
+        })
+
+      before = File.read!(Manifest.path(dir))
+      set_config(enabled: false)
+
+      assert {:error, :disabled} = Worker.run("manual")
+
+      assert [%{status: :skipped, error: "Refused: disabled", finished_at: %DateTime{}}] = runs()
+      assert File.read!(Manifest.path(dir)) == before
+    end
+
+    @tag :pg_tools
+    test "a run killed mid-flight is reconciled by the next one" do
+      long_ago = DateTime.add(DateTime.utc_now(), -86_400, :second)
+
+      killed =
+        Backups.start_run!(
+          %{stamp: "20200101-000000", trigger: "manual", started_at: long_ago},
+          actor: Backups.system()
+        )
+
+      assert :ok = Worker.run("manual")
+
+      assert %{status: :failed, error: "Interrupted: " <> _} =
+               Backups.get_run!(killed.id, actor: Backups.system())
+    end
+
+    @tag :pg_tools
+    test "pruning marks the pruned run's local copy", %{dir: dir} do
+      old = Path.join([dir, "db", "kiln-db-20200101-000000.dump"])
+      File.mkdir_p!(Path.dirname(old))
+      File.write!(old, "old")
+      File.touch!(old, System.os_time(:second) - 365 * 24 * 3600)
+
+      {:ok, attrs} =
+        Backups.Artifact.from_manifest(%{kind: "db", path: "db/#{Path.basename(old)}"})
+
+      prior =
+        Backups.start_run!(
+          %{stamp: "20200101-000000", trigger: "cron", started_at: ~U[2020-01-01 00:00:00Z]},
+          actor: Backups.system()
+        )
+
+      Backups.finish_run!(prior, %{artifacts: [attrs]}, actor: Backups.system())
+
+      assert :ok = Worker.run("manual")
+
+      refute File.exists?(old)
+      stored = Backups.get_run_by_stamp!("20200101-000000", actor: Backups.system())
+      assert [%{destinations: %{"local" => %{"status" => "pruned"}}}] = stored.artifacts
+    end
+
+    @tag :pg_tools
+    test "cron-made backups beside it are imported at the end of a run", %{dir: dir} do
+      cron = Path.join([dir, "db", "kiln-db-20260101-000000.dump"])
+      File.mkdir_p!(Path.dirname(cron))
+      File.write!(cron, "from cron")
+      File.touch!(cron, System.os_time(:second) - 3600)
+
+      assert :ok = Worker.run("manual")
+
+      assert %{origin: :imported, trigger: "cron"} =
+               Backups.get_run_by_stamp!("20260101-000000", actor: Backups.system())
+    end
+
+    @tag :pg_tools
+    test "a Run-write failure never fails the backup", %{dir: dir} do
+      # Grant revoked: every Run write is refused.
+      assert :ok = Backups.with_actor(nil, fn -> Worker.run("manual") end)
+
+      assert runs() == []
+      assert %Manifest{ok: true} = Manifest.read(dir)
+      assert [_dump] = Path.wildcard(Path.join([dir, "db", "*.dump"]))
+    end
+
+    @tag :pg_tools
+    test "a Run row deleted mid-run (a database restore) leaves the backup whole", %{dir: dir} do
+      gate = Path.join(dir, "gate")
+      real = System.find_executable("pg_dump")
+
+      fake_bin([
+        {"pg_dump", ~s|while [ ! -f "#{gate}" ]; do sleep 0.05; done\nexec "#{real}" "$@"\n|}
+      ])
+
+      task = Task.async(fn -> Worker.run("manual") end)
+
+      wait_until(fn -> Enum.any?(runs(), &(&1.status == :running)) end)
+      KilnCMS.Repo.delete_all(Backups.Run)
+      File.write!(gate, "")
+
+      assert :ok = Task.await(task, 60_000)
+      assert %Manifest{ok: true} = Manifest.read(dir)
+      assert [_dump] = Path.wildcard(Path.join([dir, "db", "*.dump"]))
+      assert [_archive] = Path.wildcard(Path.join([dir, "media", "*.tar.gz"]))
+    end
+
+    @tag :pg_tools
+    test "rclone results are per artifact, with a connection-string remote redacted" do
+      remote = ":s3,access_key_id=AKIAEXAMPLE1,secret_access_key=SUPERSECRETVAL:bucket"
+      set_config(rclone_remote: remote)
+
+      fake_bin([
+        {"rclone",
+         ~s|case "$*" in *kiln-media*) echo "Failed secret_access_key=SUPERSECRETVAL ($*)" >&2; exit 1;; esac\nexit 0\n|}
+      ])
+
+      assert :ok = Worker.run("manual")
+
+      assert [run] = runs()
+      assert run.status == :succeeded
+      assert [db, media] = run.artifacts
+
+      assert [key] = db.destinations |> Map.keys() |> Enum.reject(&(&1 == "local"))
+      assert String.starts_with?(key, "rclone:")
+      assert %{"status" => "ok"} = db.destinations[key]
+      assert %{"status" => "failed", "error" => error} = media.destinations[key]
+      assert error != ""
+
+      refute inspect(run) =~ "SUPERSECRETVAL"
+      refute inspect(run) =~ "AKIAEXAMPLE1"
+    end
+
+    defp wait_until(fun, tries \\ 200) do
+      cond do
+        fun.() -> :ok
+        tries == 0 -> flunk("condition never held")
+        true -> Process.sleep(25) && wait_until(fun, tries - 1)
+      end
     end
   end
 end

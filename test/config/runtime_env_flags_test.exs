@@ -64,6 +64,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             SEARCH_KEYWORD_ANY_IDF_COVERAGE SEARCH_TERM_GATE SEARCH_TERM_GATE_MIN_SHARE
             KILN_DEMO_RESET KILN_DEMO_RESET_CRON KILN_DEMO_GOLDEN_PATH
             KILN_FEDERATION_ENABLED
+            BREACHED_PASSWORD_CHECK BREACHED_PASSWORD_POLICY
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
             AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
             KILN_IMAGE_TRANSFORM_KEY KILN_IMAGE_TRANSFORM_UNSIGNED
@@ -1325,6 +1326,52 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
       # config.exs, so the key is simply absent from what it returns.
       assert public_base_url(%{"PUBLIC_BASE_URL" => "https://cms.example.com"}, :test) == nil
       assert Application.get_env(:kiln_cms, :public_base_url) == "http://localhost:4000"
+    end
+  end
+
+  describe "BREACHED_PASSWORD_* (#2240)" do
+    defp breach_config(vars, env \\ :prod),
+      do:
+        vars
+        |> eval(env)
+        |> get_in([:kiln_cms, KilnCMS.Accounts.BreachedPassword])
+        |> Kernel.||([])
+
+    test "unset writes nothing, leaving the check on with the :warn default" do
+      assert breach_config(%{}) == []
+    end
+
+    test "BREACHED_PASSWORD_CHECK=false is the kill switch, in any spelling" do
+      for value <- ["false", "FALSE", "0", "off", " no "] do
+        assert breach_config(%{"BREACHED_PASSWORD_CHECK" => value})[:enabled] == false
+      end
+    end
+
+    test "an explicit true, or a value it cannot read, never turns anything on or off" do
+      assert breach_config(%{"BREACHED_PASSWORD_CHECK" => "true"})[:enabled] == nil
+
+      {config, stderr} =
+        eval_io(%{"BREACHED_PASSWORD_CHECK" => "maybe"}, :prod)
+
+      assert get_in(config, [:kiln_cms, KilnCMS.Accounts.BreachedPassword]) in [nil, []]
+      assert stderr =~ "BREACHED_PASSWORD_CHECK"
+    end
+
+    test "BREACHED_PASSWORD_POLICY sets the operator default" do
+      for {value, policy} <- [{"off", :off}, {"WARN", :warn}, {" block ", :block}] do
+        assert breach_config(%{"BREACHED_PASSWORD_POLICY" => value})[:default_policy] == policy
+      end
+    end
+
+    test "an unrecognized policy keeps the default and warns" do
+      {config, stderr} = eval_io(%{"BREACHED_PASSWORD_POLICY" => "strict"}, :prod)
+      assert get_in(config, [:kiln_cms, KilnCMS.Accounts.BreachedPassword]) in [nil, []]
+      assert stderr =~ "BREACHED_PASSWORD_POLICY"
+    end
+
+    test "the policy is not read in the test env, so an exported value cannot change the suite" do
+      assert breach_config(%{"BREACHED_PASSWORD_POLICY" => "block"}, :test)[:default_policy] ==
+               nil
     end
   end
 end

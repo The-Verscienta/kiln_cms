@@ -120,6 +120,12 @@ jobs:
       # the `ml` job below, which is the only leg with the full tree and
       # therefore the only one that can answer the question.
 
+      # The editor's JavaScript twin of `KilnCMS.CMS.Conditions` (#2277), held
+      # to the same fixture as the Elixir module. Dependency-free, so it needs
+      # no `npm ci`; Node is the runner's own (22+ runs `--test`).
+      - name: Test the conditions evaluator (JS parity)
+        run: npm test --prefix assets
+
       - name: Check the toolchain declarations agree
         # .tool-versions is the source of truth, and this job already reads it
         # via setup-beam. The two places that *cannot* read it — mix.exs's

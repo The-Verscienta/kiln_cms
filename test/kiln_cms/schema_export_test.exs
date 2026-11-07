@@ -119,6 +119,65 @@ defmodule KilnCMS.SchemaExportTest do
       assert fields["additionalProperties"] == true
     end
 
+    test "value constraints are annotations, never JSON Schema assertions (#2276)",
+         %{actor: actor, org: org} do
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "sku",
+          label: "SKU",
+          field_type: :string,
+          validation: %{
+            "min_length" => 3,
+            "max_length" => 12,
+            "pattern" => "[A-Z]+-[0-9]+",
+            "pattern_message" => "Use LETTERS-123",
+            "unique" => true
+          }
+        },
+        actor: actor,
+        tenant: org
+      )
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "rating",
+          label: "Rating",
+          field_type: :integer,
+          validation: %{"min" => 1, "max" => 5}
+        },
+        actor: actor,
+        tenant: org
+      )
+
+      CMS.create_field_definition!(
+        %{content_type: :page, name: "plain", label: "Plain", field_type: :string},
+        actor: actor,
+        tenant: org
+      )
+
+      properties = custom_fields(org, "content_page")["properties"]
+
+      sku = properties["sku"]
+
+      assert {sku["x-kiln-min-length"], sku["x-kiln-max-length"], sku["x-kiln-pattern"],
+              sku["x-kiln-unique"]} == {3, 12, "[A-Z]+-[0-9]+", true}
+
+      assert {properties["rating"]["x-kiln-minimum"], properties["rating"]["x-kiln-maximum"]} ==
+               {1, 5}
+
+      # A stored value may predate a constraint, so none is an assertion; the
+      # editor-facing message is not exported.
+      for key <- ~w(minLength maxLength pattern minimum maximum),
+          do: refute(Map.has_key?(sku, key) or Map.has_key?(properties["rating"], key))
+
+      refute Jason.encode!(sku) =~ "Use LETTERS-123"
+
+      # No constraint, no annotation.
+      assert properties["plain"] == %{"type" => ["string", "null"]}
+    end
+
     test "a select's options are neither published nor pinned as an enum",
          %{actor: actor, org: org} do
       CMS.create_field_definition!(

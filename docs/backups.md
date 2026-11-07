@@ -118,6 +118,76 @@ implementing a dump in Elixir: a hand-rolled export would be a second format
 with a second restore procedure, and the restore path is where a backup system
 earns its keep.
 
+### Backup history (#2217)
+
+**Back up now** is not the only thing the page remembers. Below the status panel,
+**History** lists every backup attempt, newest first, 25 to a page. Platform
+admins only, like the rest of the page.
+
+1. Open **Backups** (`/editor/backups`) as a platform admin.
+2. Scroll to **History**. Each row shows the trigger, a status (`Succeeded`,
+   `Failed`, `Running` or `Skipped`), **Database** and **Media** badges, the
+   size, whether it was verified, its destinations, and whether its files are
+   still on this host.
+3. Use **Previous** / **Next** to page ("Page 1 of 3").
+
+The files column reads:
+
+| Shown | Meaning |
+|-------|---------|
+| `on disk` | Every file is under `BACKUP_DIR`. |
+| `pruned (retention)` | The application's own retention removed them. |
+| `off-site only` | Gone locally, but every missing file has a successful rclone copy. |
+| `expired` | A cron-made backup older than the retention window plus a day; `backup.sh`'s own prune almost certainly removed it. A guess: cron records no prune. |
+| `missing` | Gone with no recorded reason: deleted by hand, or recorded by another node. |
+
+"Missing" is worked out when the page is shown, for the 25 rows in view only; it
+is never stored, so a restored file turns back to `on disk`.
+
+**Multi-node.** `BACKUP_DIR` belongs to one host. A run recorded by another node
+reads `missing` on this one. That is the node's view, not data loss.
+
+**Verified.** An app-made backup is `Verified` once `pg_restore --list` /
+`tar -tzf` passed. A backup picked up from cron's files reads
+`unverified (imported)`: nothing is hashed or checked on import.
+
+**A failed or refused attempt is history too.** A refusal (for example no
+`pg_dump` in the image) is a `Skipped` row with the reason, and still leaves
+`manifest.json` alone. A backup job killed mid-run stays `Running` until it is
+2h15m old, then reads `Failed` ("Interrupted"). Failing to write a row never
+fails the backup itself.
+
+### Cron's backups appear in History
+
+`KilnCMS.Backups.Importer.run/0` turns files cron wrote into rows. It runs when
+a platform admin opens the page, at the end of every in-app backup, and on
+demand:
+
+```bash
+bin/kiln eval "KilnCMS.Backups.Importer.run()"
+# {:ok, %{imported: 2, pending: 0, skipped: 0, failed: 0}}
+```
+
+It scans `$BACKUP_DIR/db` and `$BACKUP_DIR/media` for `kiln-db-<stamp>` and
+`kiln-media-<stamp>` files and creates one row per stamp. It is safe to repeat
+(idempotent by stamp, never touching a row the application owns), waits until a
+stamp's newest file is 10 minutes old and has no `.partial` sibling (`pending`
+in the summary), and does not need `BACKUP_ENABLED` or `pg_dump`. `manifest.json`
+only enriches a row whose stamped files it names. Run it as a one-off to see
+older backups already on disk.
+
+If cron runs `backup.sh db` and `backup.sh media` as separate entries, their
+stamps differ and they show as **two** rows, not one. `backup.sh all` is one.
+
+### Secrets in history
+
+Everything stored in a row (errors, log lines, off-site remote) is passed
+through `KilnCMS.Backups.Redact`: URL userinfo, `key=value` credentials and
+rclone connection-string remotes are replaced with `***`. The status panel's
+off-site remote and `manifest.json`'s `offsite` are redacted the same way. Read
+access is the platform admin only; the table is written only by the `:backups`
+system actor and is purged by the staging scrub (`backup_runs_purged`).
+
 ### It needs the client tools in the image
 
 The worker calls `pg_dump`/`pg_restore`, so the runtime image installs

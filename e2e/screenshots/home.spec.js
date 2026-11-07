@@ -2,14 +2,24 @@
 // Product screenshots for the signed-out home page. Not a test — see
 // ../screenshots.config.js for how and when to run it. Seed the showcase
 // content first (showcase_seeds.exs) or the console photographs as empty.
+//
+// Output: the raw 2880x1800 captures go to e2e/screenshots/raw/ (gitignored,
+// never served). They are NOT what the site ships: after a capture run
+//
+//     scripts/optimize_home_images.sh
+//
+// which derives the WebP + JPEG variants under priv/static/images/home/ (the
+// only files the home page references; see its header for tools and sizes).
+const fs = require("fs");
 const path = require("path");
 const { test, signInAsAdmin } = require("../tests/fixtures");
 
-const OUT = path.resolve(__dirname, "..", "..", "priv", "static", "images", "home");
+const OUT = path.resolve(__dirname, "raw");
 
-// JPEG, not PNG: a 2x console screenshot is ~2 MB as PNG and ~300 KB here,
-// and the home page is the one route every anonymous visitor loads.
+// JPEG, not PNG: a 2x console screenshot is ~2 MB as PNG and ~300 KB here;
+// optimize_home_images.sh shrinks it further for the home page.
 async function shoot(page, name) {
+  fs.mkdirSync(OUT, { recursive: true });
   // Let LiveView finish patching and any fade-in settle before the capture.
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(400);

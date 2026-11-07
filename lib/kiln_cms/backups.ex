@@ -40,7 +40,108 @@ defmodule KilnCMS.Backups do
   documented drill in `docs/backups.md` is the supported path.
   """
 
+  use Ash.Domain
+
   alias KilnCMS.Backups.Manifest
+
+  resources do
+    resource KilnCMS.Backups.Run do
+      # Every write is the `:backups` system actor's (`system/0`): the worker,
+      # the importer and `reconcile_stale_runs/0`. The history page reads
+      # `run_history` as a platform admin.
+      define :start_run, action: :start
+      define :skip_run, action: :skip
+      define :record_run_progress, action: :record_progress
+      define :finish_run, action: :finish
+      define :fail_run, action: :fail
+      define :import_run, action: :import
+      define :list_runs, action: :read
+      define :run_history, action: :history
+      define :get_run, action: :read, get_by: [:id]
+      define :get_run_by_stamp, action: :by_stamp, args: [:stamp], not_found_error?: false
+      define :list_running_runs, action: :running
+    end
+  end
+
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor the backup pipeline runs as (#2217): the worker that records a run,
+  the importer that turns cron-made backups into rows, and
+  `reconcile_stale_runs/0`.
+
+  A `KilnCMS.SystemActor` labelled `:backups`, admitted by name on
+  `KilnCMS.Backups.Run` for exactly the actions those callers use (see
+  `docs/policy-matrix.md`, "The system actor") rather than `authorize?: false`.
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(:backups)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam, as `KilnCMS.Billing.with_actor/2`: run `fun` with `system/0`
+  # answering `actor` in this process, so a test can take the grant away and
+  # prove the importer and the stale sweep fail CLOSED. Process-local; nothing
+  # on a request path calls it.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
+
+  # How long past the worker's own timeout a `running` run may sit before it is
+  # presumed dead: slack for a slow final write, and for a node whose clock
+  # lags the one that started the run.
+  @stale_grace_minutes 15
+
+  @doc """
+  Fail every `running` run that can no longer be running (#2217), and return how
+  many.
+
+  **Time-based, not Oban-state-based**: `Worker.run/1` may be called from a
+  console with no job behind it, so a run is stale when it started more than
+  `Worker.timeout/1` plus #{@stale_grace_minutes} minutes before `now`, whatever
+  Oban says. The job was killed or the node stopped; the run says so.
+
+  Reads and writes as `system/0` and fails closed: a revoked grant raises
+  instead of reporting "nothing stale". Callers on a request or job tail wrap it.
+  """
+  @spec reconcile_stale_runs(DateTime.t()) :: non_neg_integer()
+  def reconcile_stale_runs(now \\ DateTime.utc_now()) do
+    cutoff = DateTime.add(now, -stale_after_ms(), :millisecond)
+
+    # One stale row failing to update must not strand the rest as `running`.
+    for run <- list_running_runs!(actor: system(), authorize_with: :error),
+        DateTime.compare(run.started_at, cutoff) == :lt,
+        match?(
+          {:ok, _},
+          fail_run(
+            run,
+            %{error: "Interrupted: the job was killed or the node stopped"},
+            actor: system()
+          )
+        ) do
+      run
+    end
+    |> length()
+  end
+
+  defp stale_after_ms do
+    KilnCMS.Backups.Worker.timeout(nil) + :timer.minutes(@stale_grace_minutes)
+  end
 
   @type status :: %{
           configured?: boolean(),

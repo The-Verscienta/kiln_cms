@@ -335,6 +335,20 @@ build if a resource is ever registered without that authorizer.
   the resulting cookie then signs the user in later *without* a code is the
   deliberate part — it is a "this device completed every factor" credential, and
   that is what remember-me is for on a 2FA account.
+- **Breached-password check (#2240)** — when a password is set (register,
+  change, reset, first-run setup) `KilnCMS.Accounts.Changes.CheckBreachedPassword`
+  looks it up against the Have I Been Pwned range API by k-anonymity: SHA-1
+  here, only the 5-character prefix out (`Add-Padding: true`), the match made
+  locally, through `KilnCMS.SafeFetch` with no redirects, a 128 KB cap and a 3 s
+  deadline. The site's stance is `CMS.SitePasswordPolicy` (off / warn / block,
+  `/editor/password-policy`, admin-only), then `BREACHED_PASSWORD_POLICY`, then
+  warn; `block` refuses only an account whose tier is admin (the stricter of its
+  global role and its tier on the request's org), and the tier is the
+  *target's*, never the actor's. `BREACHED_PASSWORD_CHECK=false` makes no call.
+  The lookup runs once per submitted action (a `before_transaction` hook, so
+  not per keystroke and holding no connection), after the validations and the
+  registration throttle, and nothing identifying the password, hash, prefix,
+  account or org is logged or put in telemetry. See *Breached passwords* below.
 - **SSRF protection on outbound calls** — `KilnCMS.Webhooks.SafeUrl`: HTTPS
   required in prod, private/loopback/link-local/metadata ranges rejected for
   both IPv4 and IPv6, DNS resolved with an all-or-nothing rule and a hard
@@ -756,13 +770,56 @@ a credential, so the operator's trust assumptions do not carry over:
   page's text, a block and the editor's instruction, or published passages and
   an anonymous visitor's question. It is the site's choice and the page says so.
 
+### Breached passwords
+
+`KilnCMS.Accounts.BreachedPassword`, #2240. The one place a derivative of a
+password leaves the server.
+
+- **What leaves.** The first five hex characters of the password's SHA-1, as the
+  path of `GET /range/<prefix>`, with `Add-Padding: true` so the response length
+  does not reveal how many real hits the prefix has (padding lines carry count
+  `0` and are never read as hits). The suffix, the password and the account
+  stay on the node. The provider learns that *someone* on this IP set a
+  password whose hash starts with that prefix, and nothing more.
+- **Where it applies.** Self-registration, change password, password reset by
+  token and the first-run wizard. **Not** sign-in: a breached password that was
+  set before this shipped is not noticed. Follow-up.
+- **Exempt paths, deliberately.** The admin-sent reset *mail* is checked when
+  its token is used (it is `reset_password_with_token`), but these set or
+  create a credential without a lookup: `AdminPasswordReset` (the admin
+  triggers a mail, not a password), magic links, SSO and passkey registration
+  (no password is set), `AnonymizeUser` (account erasure), seeds,
+  `Beta.Round` and `Staging.Scrub` (operator-run scripts).
+- **Fails open.** A timeout, a non-200, a transport or malformed answer, an
+  unreadable policy row, or an exception resolving the tier accepts the
+  password, logs one warning without detail, and emits the telemetry event
+  with `result: :error`. This is the right trade for an advisory control: the
+  alternative is an attacker, or an outage at a third party, deciding whether
+  anyone can change a password. An attacker who can block egress from the
+  server (or poison its DNS, which `SafeUrl` pins against) can therefore turn
+  the check off; they already hold the network position to do worse.
+- **Residual risks.** (1) Fail-open, above. (2) The policy is the *request's*
+  org and the tier is the account's tier the stricter of global role and that
+  org's membership: an admin of org A with `block`, changing their password on
+  org B's host, is judged by B's policy and B's tier for them. (3) No check at
+  sign-in. (4) The warning after register or reset is a best-effort note held
+  in a node-local cache for ten minutes; on a multi-node deployment without
+  sticky routing, or after a restart, the person may never see it. The password
+  was accepted either way. (5) `warn` is advisory; only an administrator's
+  password can be refused. (6) The check is only as complete as the public
+  corpus.
+- **Telemetry.** `[:kiln_cms, :password, :breach_check]`; see
+  [observability.md](observability.md#breached-password-checks).
+
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;
 admin-triggered, and the feed's `links.next` is followed only on its own
 origin),
 Meilisearch (the operator's instance — a site's own is below), S3/MinIO, the
 mailer, and the LLM providers behind `/api/ask` and
-SEO drafting all make outbound requests to *operator-configured or fixed*
+SEO drafting, and the breached-password check (`api.pwnedpasswords.com`, a
+fixed host, 5-character hash prefix only, through `SafeFetch`; below),
+all make outbound requests to *operator-configured or fixed*
 endpoints, not user-supplied ones — so they are not SSRF vectors in the way
 webhooks are. The exceptions are a site's own SMTP relay (#1322) and AI
 endpoint (above), which are tenant-chosen and SSRF-checked, and
