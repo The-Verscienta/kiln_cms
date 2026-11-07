@@ -7,6 +7,28 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="breached-password-upgrade"></a>
+
+- **Run `mix ash.migrate` for the breached-password check, and decide whether
+  your deployment may call a third party (#2240).** The migration
+  (`20261107194057_add_site_password_policy`) creates one table,
+  `site_password_policy` (one row per organization, created lazily when an
+  admin saves the setting). It is expand-only and changes no existing data, so
+  rolling the pin back is safe; the table is simply unused.
+  - **New outbound call, on by default.** Setting a password (register, change,
+    reset, first-run setup) now sends the first five characters of the
+    password's SHA-1 hash to `api.pwnedpasswords.com`. The password, the full
+    hash and the account never leave the server. If the service is slow or
+    down, the password is accepted.
+  - **Air-gapped or no-egress deployments.** Set `BREACHED_PASSWORD_CHECK=false`
+    to make no call at all. Firewalls that allow only listed hosts should allow
+    `api.pwnedpasswords.com:443` instead, or the check quietly does nothing
+    (it fails open, logging a warning and emitting the telemetry event).
+  - **Overlays.** Run `mix ash.codegen` only if your overlay adds its own
+    resources; core's migration ships the table. See also the Breaking entry
+    for `Bootstrap.create_first_admin/1`.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240))
+
 <a id="reject-invalid-bearer-default-on"></a>
 
 - **An unverifiable bearer token is a `401` by default (#2161).** The
@@ -89,6 +111,20 @@ carries the reasoning.
   the migrations are expand-only: the previous release ignores the columns and
   gets `false` on insert. No re-fire is needed.
 
+## Breaking
+
+<a id="breached-password-bootstrap-return"></a>
+
+- **`KilnCMS.Accounts.Bootstrap.create_first_admin/1` returns `{:ok, user, notices}` (#2240).**
+  `notices` is `[:password_breach]` when the typed password is in a known
+  breach and the site's policy allowed it, `[]` otherwise. Before it returned
+  `{:ok, user}`. The core `/setup` wizard is updated; an overlay or script that
+  matches `{:ok, user}` on this call must match the three-tuple. The error
+  returns (`{:error, :already_bootstrapped}`, `{:error, changeset_error}`)
+  are unchanged. The breach lookup now happens before the advisory-locked
+  transaction, so the lock is never held while waiting on the third party.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240))
+
 ## Added
 
 <a id="conditional-custom-fields"></a>
@@ -147,6 +183,48 @@ carries the reasoning.
     `mix ash.codegen` and commit the migration if you carry a copy of the
     resource. CI gains a step, `npm test --prefix assets`, that runs the
     JavaScript evaluator against the shared fixture.
+
+<a id="breached-password-check"></a>
+
+- **Admins choose what happens when a new password is in a known breach (#2240).**
+  A new page, **Organization → Password policy** (`/editor/password-policy`, admins
+  only), sets one of three stances for the site: **Off** (no warning),
+  **Warn** (the default: accept the password and say so) or **Block** (refuse
+  it for administrators; editors and viewers are still only warned).
+  Passwords are checked when someone registers, changes their password, resets
+  it, or when the first-run wizard creates the first admin. Sign-in is not
+  checked.
+  - **How a password is checked.** Kiln hashes the password with SHA-1 and
+    sends only the first five characters to `api.pwnedpasswords.com` (the
+    k-anonymity range API, with `Add-Padding`), through `KilnCMS.SafeFetch`.
+    The match is made locally. Nothing is cached and no password, hash or
+    address is logged.
+  - **Fails open.** A timeout (3 s overall), an error status or a malformed
+    answer accepts the password, logs a warning and emits
+    `[:kiln_cms, :password, :breach_check]` with `result: :error` and a
+    `reason`. An outage at a third party never stops anyone setting a password.
+  - **Who counts as an administrator.** The stricter of the account's role
+    (including a temporary role) and its membership tier on the site being
+    used. `Block` is evaluated against the site the request is on.
+  - **What people see.** Blocked: a field error on the password, "This password
+    has appeared in a known data breach. Choose a different one." Warned after
+    a password change or first-run setup: the message appears with the redirect
+    to sign-in. Warned after registering or resetting: shown after the next
+    password sign-in (a one-time note kept for ten minutes on that node, so on a
+    multi-node deployment without sticky routing it can be missed).
+  - **Operators.** `BREACHED_PASSWORD_CHECK=false` turns the check off for the
+    whole deployment; `BREACHED_PASSWORD_POLICY=off|warn|block` sets the default
+    for sites that have not saved a choice. See
+    [Environment variables](../environment-variables.md#breached-password-check-2240).
+  - **Not covered.** Admin-triggered password resets, magic links, SSO and
+    passkey sign-up, account anonymization, seeds, the beta round and the
+    staging scrub do not check. See the [threat model](../threat-model.md#breached-passwords).
+  - **Developers.** `SitePasswordPolicy` is a new org-scoped resource
+    (`CMS.list_site_password_policy/1`, `save_site_password_policy/2`,
+    `reset_site_password_policy/2`); the four password actions on `User` carry
+    a `:password_breach` metadata key. See `KilnCMS.Accounts.PasswordPolicy`
+    and `KilnCMS.Accounts.BreachedPassword`.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240))
 
 <a id="webhook-rotate-secret"></a>
 

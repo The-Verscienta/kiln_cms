@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.SetupLiveTest do
   """
   use KilnCMSWeb.ConnCase, async: false
 
+  import KilnCMS.BreachedPasswordFixtures
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Accounts
@@ -95,6 +96,50 @@ defmodule KilnCMSWeb.SetupLiveTest do
                  password: "password1234!",
                  password_confirmation: "password1234!"
                })
+    end
+  end
+
+  describe "a breached password (#2240)" do
+    defp finish_with(conn, password) do
+      {:ok, lv, _html} = live(conn, ~p"/setup")
+
+      lv
+      |> form("#setup-admin-form",
+        admin: %{
+          email: "breach-owner@example.com",
+          password: password,
+          password_confirmation: password
+        }
+      )
+      |> render_submit()
+
+      lv |> form("#setup-site-form", site: %{}) |> render_submit()
+      lv |> element("button[phx-click=finish]") |> render_click()
+      lv
+    end
+
+    test "is allowed, with the warning carried to sign-in", %{conn: conn} do
+      pw = password()
+      enable!(&ok(&1, breached_body(pw, 12)))
+
+      lv = finish_with(conn, pw)
+      flash = assert_redirect(lv, ~p"/sign-in")
+
+      assert flash["error"] == KilnCMS.Accounts.PasswordNotice.message()
+      assert flash["info"] =~ "Your site is ready"
+
+      assert {:ok, %User{role: :admin}} =
+               Accounts.get_user_by_email("breach-owner@example.com", authorize?: false)
+    end
+
+    test "a clean password carries no warning", %{conn: conn} do
+      pw = password()
+      enable!(&ok(&1, clean_body(pw)))
+
+      lv = finish_with(conn, pw)
+      flash = assert_redirect(lv, ~p"/sign-in")
+
+      refute Map.has_key?(flash, "error")
     end
   end
 

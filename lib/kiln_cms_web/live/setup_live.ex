@@ -91,7 +91,7 @@ defmodule KilnCMSWeb.SetupLive do
            password: admin["password"],
            password_confirmation: admin["password_confirmation"]
          }) do
-      {:ok, user} ->
+      {:ok, user, notices} ->
         save_branding(socket, user)
         save_publishing(socket, user)
         create_starter_home(socket, user)
@@ -104,6 +104,7 @@ defmodule KilnCMSWeb.SetupLive do
              "Your site is ready — sign in with the account you just created. A draft home page is waiting for you."
            )
          )
+         |> put_breach_warning(notices)
          |> redirect(to: ~p"/sign-in")}
 
       {:error, :already_bootstrapped} ->
@@ -120,6 +121,14 @@ defmodule KilnCMSWeb.SetupLive do
            ash_error_message(error, fallback: gettext("The account could not be created."))
          )}
     end
+  end
+
+  # `:error`, not `:info`: the info flash dismisses itself, and this is a nudge
+  # to act on. It rides the redirect to /sign-in with the "site is ready" note.
+  defp put_breach_warning(socket, notices) do
+    if :password_breach in notices,
+      do: put_flash(socket, :error, KilnCMS.Accounts.PasswordNotice.message()),
+      else: socket
   end
 
   # Lightweight step gate so obvious problems surface next to the fields rather
