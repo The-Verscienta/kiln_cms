@@ -263,6 +263,9 @@ defmodule KilnCMSWeb.FormBuilderLive do
   def handle_event("copied", _params, socket),
     do: {:noreply, put_flash(socket, :info, gettext("Embed code copied to clipboard."))}
 
+  # The form's public page (#2138), on the org's own host like the snippet.
+  defp public_url(form, org), do: KilnCMSWeb.Tenant.base_url(org) <> "/forms/" <> form.slug
+
   # The one-line snippet an embedder pastes on their site (see `/embed.js`) —
   # on the org's own host (#557); shared with the forms list.
   defp embed_snippet(slug, org), do: KilnCMSWeb.Embed.form_snippet(slug, org)
@@ -560,11 +563,27 @@ defmodule KilnCMSWeb.FormBuilderLive do
                 {gettext("Inactive")}
               </span>
             </h1>
-            <code class="text-xs text-base-content/60">/forms/{@form.slug}</code>
+            <%!-- The form's public page (#2138). Only an active form answers
+                  there, so an inactive one says so instead of showing an
+                  address that 404s. --%>
+            <a
+              :if={@form.active}
+              id="form-public-url"
+              href={public_url(@form, @current_org)}
+              target="_blank"
+              rel="noopener"
+              class="break-all font-mono text-xs text-base-content/60 hover:underline"
+            >
+              {public_url(@form, @current_org)}
+              <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+            </a>
+            <p :if={!@form.active} id="form-public-url" class="text-xs text-base-content/60">
+              {gettext("Not public while inactive.")}
+            </p>
           </div>
           <a
             :if={@form.active}
-            href={"/forms/" <> @form.slug <> "/embed"}
+            href={public_url(@form, @current_org)}
             target="_blank"
             rel="noopener"
             class="btn btn-sm btn-default"

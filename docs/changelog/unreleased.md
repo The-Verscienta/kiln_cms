@@ -532,6 +532,35 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="public-form-page"></a>
+
+- **`/forms/<slug>` is the form's own page: an active form, inside the site's
+  layout.** The form builder showed `/forms/<slug>` under every form's name,
+  and that address answered 404: the only browser page for a form was the
+  iframe document at `/forms/<slug>/embed`, which the forms list linked
+  instead (#1783) and which looks unfinished outside a frame. A GET there now
+  renders the form's name, description and fields in the site's header and
+  footer, posting to `POST /forms/<slug>` like a form block. Under a language
+  prefix (`/fr/forms/<slug>`) it posts back under the prefix, so a refused
+  submission re-renders in the visitor's language. The page is served with
+  `Cache-Control: public, max-age=60, stale-while-revalidate=300`,
+  `Vary: Accept-Language` and `X-Robots-Tag: noindex`, matching the embed
+  document's `noindex`; forms stay out of `sitemap.xml`.
+
+  It is not a new route and `forms` is not a reserved path segment: the page
+  is the last fallback of the delivery 404, the slot the event index already
+  takes. A site with a content type of its own at `/forms` keeps its entries,
+  and a path alias, redirect, lock page or teaser at the address still wins.
+  An inactive form, an unknown slug and another site's slug 404 as before and
+  are recorded on the 404s list.
+
+  In the console, the builder's header links the page's full address on the
+  site's host (or says "Not public while inactive.") and **Preview** opens it;
+  the forms list's **Hosted form** address is now the page rather than
+  `/embed`. The thank-you page after a submission is still the plain card
+  without the site's layout. Nothing to configure or migrate. See
+  [Share a form at its own address](../forms.md#share-a-form-at-its-own-address).
+
 <a id="webhook-delete-labelled"></a>
 
 - **A webhook's Delete is a labelled button on its row, and the edit form has

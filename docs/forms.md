@@ -41,6 +41,74 @@ The `:form` content block references a form by slug:
   headless frontends fetch the schema from `GET /api/forms/<slug>` (fields,
   labels, types, options, honeypot field name, submit URL) and POST JSON to
   `/api/forms/<slug>` (`{ok: true}` or `{ok: false, errors: {...}}`).
+- **The form's own page**, `GET /forms/<slug>` (#2138), renders an active
+  form with no content around it: its name, description and fields inside the
+  site's layout. See [below](#share-a-form-at-its-own-address).
+
+## Share a form at its own address
+
+Every active form has a page of its own at `/forms/<slug>` on the site's
+host, so you can link to it from an email, a social post or a QR code without
+first making a content page to hold a form block. The page shows the form's
+name as its heading, then its description and fields, inside the site's
+header and footer, and posts to the same `POST /forms/<slug>` as a form block.
+
+You need the **admin** role: the Forms pages are admin-only.
+
+1. Open **Forms** in the console (`/editor/forms`). Under *Your forms*, each
+   active form's row lists a **Hosted form** address, which is the form's page
+   (for example `https://www.example.com/forms/contact`), beside its **JSON
+   API** address and its embed code. An inactive form's row says it is not
+   public yet instead.
+2. Click the form's name to open the builder (`/editor/forms/<id>`). Under the
+   form's name in the header you see the same address as a link.
+3. If the header says **Not public while inactive.**, open the **General**
+   tab, tick **Active (accepting submissions)** and click **Save**. The header
+   now shows the address. A new form is active from the start.
+4. Click the address, or **Preview** beside it. The page opens in a new tab,
+   the way a visitor sees it.
+5. Copy the address and share it. A visitor who submits the form sees the
+   form's success message on a thank-you page; a submission with mistakes
+   comes back to the form page with each error shown against its field.
+
+The address follows the form's **Slug** (General tab). Change the slug and
+the old address stops answering, so shared links break; Kiln does not add a
+redirect for it.
+
+On a multilingual site the page answers under each language prefix too:
+`/fr/forms/contact` renders the form in French and posts back to
+`/fr/forms/contact`, so the thank-you page and any error messages stay in
+French.
+
+What the page sends with it:
+
+| Header | Value | Why |
+| --- | --- | --- |
+| `Cache-Control` | `public, max-age=60, stale-while-revalidate=300` | The page changes only when an admin edits the form. A form deactivated within that minute refuses the submission anyway. |
+| `Vary` | `Accept-Language` | The text Kiln adds around your form (the default **Submit** label, the site's chrome) follows the visitor's language. |
+| `X-Robots-Tag` | `noindex` | A form is somewhere a link sends people, not content to find by search. The embed document carries `noindex` for the same reason, and forms are not listed in `sitemap.xml`. |
+
+The page is not a route of its own. It is the last thing Kiln tries for a
+`/forms/<slug>` address before answering 404, so anything else at that
+address wins: a content type of your own whose path segment is `forms` keeps
+its entries, and a path alias, a redirect, a locked page or a members-only
+teaser at the address is served instead of the form. The form shows only
+when none of those answer.
+
+What can go wrong:
+
+- **404 at `/forms/<slug>`.** The form is inactive, the slug is wrong (slugs
+  are exact, so check the General tab), or the form belongs to another site:
+  each site serves only its own forms, on its own host. The miss is recorded
+  like any other 404, so it shows on the **404s** tab of
+  `/editor/redirects`.
+- **A different page at the address.** Something else answers at
+  `/forms/<slug>` first (above). Give the form another slug, or remove the
+  alias or redirect.
+- **The thank-you page has no site header or footer.** It is a plain card
+  with a **Back** link, the same as after a form block's submission. Only the
+  form page itself and a refused submission's re-render carry the site's
+  layout.
 
 ## Embedding on another site
 

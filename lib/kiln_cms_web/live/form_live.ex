@@ -4,10 +4,11 @@ defmodule KilnCMSWeb.FormLive do
   duplicate, and delete public forms. Building a form — its fields, settings,
   embed code, and entries — happens in the visual builder
   (`KilnCMSWeb.FormBuilderLive`, `/editor/forms/:id`). Public rendering
-  happens through the `:form` content block or the hosted embed page
-  (`GET /forms/:slug/embed`, which each active form's row links to alongside
-  its embed snippet and `GET /api/forms/:slug`); submissions arrive via
-  `POST /forms/:slug` (see `KilnCMS.Forms`).
+  happens through the `:form` content block, the form's own public page
+  (`GET /forms/:slug`, #2138, which each active form's row links to alongside
+  its embed snippet and `GET /api/forms/:slug`) or the iframe embed
+  (`GET /forms/:slug/embed`); submissions arrive via `POST /forms/:slug` (see
+  `KilnCMS.Forms`).
   """
   use KilnCMSWeb, :live_view
 
@@ -125,11 +126,12 @@ defmodule KilnCMSWeb.FormLive do
     )
   end
 
-  # The addresses that actually answer for an active form (#1783): the hosted
-  # embed page (`GET /forms/:slug/embed`, also fine as a top-level page) and the
+  # The addresses that actually answer for an active form (#1783): the form's
+  # public page (`GET /forms/:slug`, #2138 — #1783 linked the iframe document at
+  # `/forms/:slug/embed` instead, because there was no page then) and the
   # headless schema (`GET /api/forms/:slug`). On the org's own host, like the
   # embed snippet (#557).
-  defp hosted_url(form, org), do: KilnCMSWeb.Tenant.base_url(org) <> "/forms/#{form.slug}/embed"
+  defp hosted_url(form, org), do: KilnCMSWeb.Tenant.base_url(org) <> "/forms/#{form.slug}"
   defp api_url(form, org), do: KilnCMSWeb.Tenant.base_url(org) <> "/api/forms/#{form.slug}"
 
   # A slug not yet taken by any listed form: `contact-copy`, `contact-copy-2`, …
@@ -266,12 +268,10 @@ defmodule KilnCMSWeb.FormLive do
                   <.icon name="hero-trash" class="size-4" />
                 </button>
               </div>
-              <%!-- #1783: only addresses that answer. There is no HTML page at
-                    `/forms/:slug` (GET there is nothing; the schema lives under
-                    `/api`), so the list names the hosted embed page, the
-                    embed snippet, and the JSON API — each labelled for what
-                    it is. An inactive form answers 404 on all three, so it
-                    advertises none of them. --%>
+              <%!-- #1783: only addresses that answer — the form's public page
+                    (`/forms/:slug`, served since #2138), the embed snippet, and
+                    the JSON API, each labelled for what it is. An inactive form
+                    answers 404 on all three, so it advertises none of them. --%>
               <div
                 :if={form.active}
                 id={"form-links-#{form.id}"}

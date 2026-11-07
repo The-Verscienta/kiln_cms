@@ -290,16 +290,22 @@ defmodule KilnCMSWeb.BlockComponents do
   # measuring from when they first saw the form rather than from the refusal.
   attr :rendered_at, :string, default: nil
 
+  # Where the form posts. nil is the bare `/forms/<slug>`; the standalone form
+  # page (#2138) passes the locale-prefixed path it was served under, so a
+  # refused submission re-renders in the visitor's language.
+  attr :action, :string, default: nil
+
   def public_form(assigns) do
     assigns =
       assigns
       |> assign(:id_prefix, "kiln-form-" <> assigns.form.slug)
+      |> assign(:action, assigns.action || "/forms/" <> assigns.form.slug)
       |> assign(:error_items, error_items(assigns.form, assigns.errors))
 
     ~H"""
     <form
       method="post"
-      action={"/forms/" <> @form.slug}
+      action={@action}
       class="kiln-form space-y-4 rounded-lg border border-base-300 p-4"
     >
       <%!-- The error summary (#1683). `autofocus` moves focus here on load with
