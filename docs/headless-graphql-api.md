@@ -316,7 +316,12 @@ For a dynamic type the fragment is on `Entry`; use it with
 generated type says which. The fragment goes one level into lists and groups.
 Private custom fields are not in the export.
 
-Not available yet: typed filter operators, a per-site schema with a regenerate step, and typed writes.
+Why the schema types the accessor and the export types the names, and the
+alternatives that were rejected, is in
+[ADR 0016](decisions/0016-the-graphql-schema-types-the-custom-field-accessor-and-a-per-org-export-types-the-names.md).
+
+Not available yet: typed
+filter operators, a per-site schema with a regenerate step, and typed writes.
 
 ### Taxonomy — categories, tags & tag groups
 
