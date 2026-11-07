@@ -2496,6 +2496,29 @@ defmodule KilnCMS.CMS.Content do
 
             down unquote("ALTER TABLE #{table} DROP COLUMN IF EXISTS name_lexemes")
           end
+
+          # The read-only SQL reporting views (#2295, `KilnCMS.Reporting.ViewSql`):
+          # the schema, then this table's two views. They read the live
+          # `field_definitions` and `type_definitions`, hence `after_tables`.
+          statement :reporting_schema do
+            up unquote(KilnCMS.Reporting.ViewSql.create_schema())
+            down unquote(KilnCMS.Reporting.ViewSql.keep_schema())
+          end
+
+          statement :reporting_view do
+            up unquote(KilnCMS.Reporting.ViewSql.records_view(table, to_string(type), dynamic?))
+            down unquote(KilnCMS.Reporting.ViewSql.drop_records_view(table))
+            after_tables ["field_definitions", "type_definitions"]
+          end
+
+          statement :reporting_field_values_view do
+            up unquote(
+                 KilnCMS.Reporting.ViewSql.field_values_view(table, to_string(type), dynamic?)
+               )
+
+            down unquote(KilnCMS.Reporting.ViewSql.drop_field_values_view(table))
+            after_tables ["field_definitions", "type_definitions"]
+          end
         end
 
         custom_indexes do

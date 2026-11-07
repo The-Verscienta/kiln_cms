@@ -60,6 +60,10 @@ Every summary line below that was shortened links to its own entry there.
   column, filled for every row by the migration (a table rewrite). Nothing else to run.**
   ([long form](docs/changelog/unreleased.md#search-name-lexemes-upgrade))
 
+- **Overlays: run `mix ash.codegen` and commit the migration. Existing content types gain the `kiln_reporting_v1` SQL views.**
+  Additive; re-run `mix kiln.reporting.sql` grants after upgrading.
+  ([long form](docs/changelog/unreleased.md#reporting-views-upgrade))
+
 ### Added
 
 - **The content list can show up to four custom fields on each row; pick them under Columns once one content type is listed.**
@@ -76,6 +80,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Change severity: an edit to a safety-relevant field of published content is recorded as critical, notable or routine on its own version.**
   The editor asks before publishing; API writes default to notable; read back as `latest_edit_severity` / `latest_edit_at`.
   ([long form](docs/changelog/unreleased.md#change-severity))
+
+- **Read-only SQL views of published content for BI tools: the `kiln_reporting_v1` schema, with a read-only role from `mix kiln.reporting.sql`.**
+  Allowlisted custom fields, wide and one-row-per-field; no typed columns yet. Guide: [docs/reporting.md](docs/reporting.md).
+  ([long form](docs/changelog/unreleased.md#reporting-views))
 
 - **Plugins can mount plain-Plug endpoints (webhooks, JSON, feeds) with `plug_routes/0`, new in `kiln_plugin` 1.4.**
   No session or CSRF check, raw body kept for HMACs, own 300/min rate limit; `mix kiln.plugins.doctor` checks paths.

@@ -620,3 +620,9 @@ section is where a release says if it needs more (a new required variable, a
 reindex, a backfill). Downstream projects that pin Kiln as a submodule move
 the pin with `mix kiln.update`, which prints that section before it does —
 [`releasing.md`](releasing.md#updating-a-project-to-a-release).
+
+**Reporting access.** BI tools read published content through the
+`kiln_reporting_v1` views with a read-only role that
+`mix kiln.reporting.sql` prints. Re-run its grants after an upgrade that adds
+views, and point the tool at a read replica. See
+[`reporting.md`](reporting.md).
