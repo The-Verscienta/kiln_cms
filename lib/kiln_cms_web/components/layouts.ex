@@ -1505,7 +1505,7 @@ defmodule KilnCMSWeb.Layouts do
           "rounded px-1.5 py-1 uppercase",
           if(loc == @current,
             do: "font-semibold text-base-content",
-            else: "text-base-content/60 hover:text-base-content"
+            else: "text-base-content/70 hover:text-base-content"
           )
         ]}
       >

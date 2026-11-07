@@ -229,6 +229,9 @@ Every summary line below that was shortened links to its own entry there.
   the character is no longer cut in two and refused.**
   ([#2214](https://github.com/The-Verscienta/kiln_cms/pull/2214))
 
+- **Muted text on public pages and shared form components is now readable: `text-base-content/70`, 4.5:1 or better on every surface.**
+  ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163) · [long form](docs/changelog/unreleased.md#public-muted-text-contrast))
+
 ### Security
 
 - **ecto 3.14.3 fixes EEF-CVE-2026-118391 (unbounded query cache growth), and

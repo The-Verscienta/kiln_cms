@@ -391,7 +391,7 @@ defmodule KilnCMSWeb.SetupLive do
                 />
                 <span>
                   <span class="font-medium">{gettext("Editors publish their own work")}</span>
-                  <span class="block text-xs text-base-content/60">
+                  <span class="block text-xs text-base-content/70">
                     {gettext(
                       "Anyone with editor access can publish. Submitting for review stays available."
                     )}
@@ -408,12 +408,12 @@ defmodule KilnCMSWeb.SetupLive do
                 />
                 <span>
                   <span class="font-medium">{gettext("An admin approves everything")}</span>
-                  <span class="block text-xs text-base-content/60">
+                  <span class="block text-xs text-base-content/70">
                     {gettext("Editors submit for review, and an admin publishes.")}
                   </span>
                 </span>
               </label>
-              <p class="text-xs text-base-content/60">
+              <p class="text-xs text-base-content/70">
                 {gettext("Admins can always publish. You can change this later under Team.")}
               </p>
             </fieldset>

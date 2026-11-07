@@ -1070,6 +1070,36 @@ carries the reasoning.
   every LiveView patch, so a list refresh behind an open menu snapped it
   shut; the new one keeps its state across patches it didn't cause.
 
+<a id="public-muted-text-contrast"></a>
+
+- **Secondary text on public pages and in the shared form components moves from 50-60% to 70% opacity, so it clears WCAG 1.4.3 (4.5:1).**
+  Muted text is `text-base-content` at reduced opacity, and nothing renders
+  wrong when the opacity is too low. Measured against the theme tokens in
+  `assets/css/app.css`, `/60` is 4.12:1 on the light theme's page background
+  and `/50` is 3.09:1; `/70` is about 5.1:1 or better on every surface in both
+  themes. The public templates (blog and event indexes, search, newsletter
+  confirmation, the home page), the release preview, the setup wizard, public
+  forms, the block components, form field hints, the empty-state text, the
+  password show/hide toggle and the flash close icon (`opacity-40` to
+  `opacity-70`) now use `/70`. Overlays and plugins that copy these classes
+  are unaffected; nothing changes in markup structure or in any API.
+  - **A guard keeps it that way.** `test/kiln_cms_web/muted_text_contrast_test.exs`
+    scans `lib/kiln_cms_web` for `text-base-content/N` (and bare `opacity-N`)
+    below 70. Public paths must be at zero. The console is a ratchet against
+    `test/kiln_cms_web/muted_text_console_baseline.txt`: a file may not gain
+    offenders, and the count only goes down. A non-text use (an icon glyph, a
+    disabled control) is exempted with a `contrast-ok: <why>` comment on the
+    same line or the line above.
+  - **What the guard does not do.** It reads class names, not rendered
+    contrast: it does not run axe (there is none in the repo), and it does not
+    see templates authored outside this repo, such as a plugin's. The
+    authenticated console still has muted text below the floor; it is counted
+    in the baseline and lowered as files are touched.
+  - **Contributors.** After lowering a console count, regenerate the baseline
+    with `KILN_UPDATE_CONTRAST_BASELINE=1 mix test test/kiln_cms_web/muted_text_contrast_test.exs`
+    and commit the file. See [Muted text](../design-language.md#muted-text).
+  ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163))
+
 ## Security
 
 <a id="ecto-query-cache-advisory"></a>
