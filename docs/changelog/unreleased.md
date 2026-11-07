@@ -127,6 +127,33 @@ carries the reasoning.
 
 ## Added
 
+<a id="ip-block-rules"></a>
+
+- **Site admins can block an IP address or range from `/editor/ip-blocks`
+  ("Blocked addresses") (#2242).** A blocked address gets an empty `403` on
+  every dynamic route and is refused on the `/live`, `/ws/gql`, `/ws/collab`
+  and `/ws/bridge` sockets. Rules take an IPv4 or IPv6 address or CIDR range,
+  an optional note and an optional expiry, and belong to one site. Guard rails:
+  loopback is never blocked, `/up` and `/ready` are exempt, ranges wider than
+  `/8` (IPv4) or `/16` (IPv6) are refused, and a rule that includes the admin's
+  own address asks for confirmation. Rules are cached for a minute per node and
+  cleared on every node when one is added or removed; if the list cannot be
+  read, requests pass.
+  - **Limits.** Static assets and `/uploads/*` are served before the site is
+    known and are not covered: refuse those at a CDN or proxy. Behind a reverse
+    proxy, set `TRUSTED_PROXIES` (or `CLIENT_IP_HEADER`) first, or a rule
+    matches the proxy's address and blocks every visitor.
+  - **Operators.** One new table, `ip_block_rules`, additive; rolling back
+    leaves it unused. No new environment variables. If an admin locks
+    themselves out, `DELETE FROM ip_block_rules WHERE ...` in SQL; it takes
+    effect within the one-minute cache. Expired rules are not swept and still
+    hold their slot until removed in the console.
+  - **Developers.** The resource, `KilnCMS.CMS.IpBlockRule`, is org-admin only
+    and deliberately absent from JSON:API, GraphQL and MCP. The request path
+    reads it as the `:ip_block` system actor. New counter
+    `kiln_cms.ip_block.refused.count`, tagged `surface`, never the address.
+  See [ip-blocking.md](../ip-blocking.md).
+
 <a id="conditional-custom-fields"></a>
 
 - **A custom field can be shown only when another field has a given value, and required only then (#2277).**

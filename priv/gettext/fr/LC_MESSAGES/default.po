@@ -2299,6 +2299,16 @@ msgstr "Ajouté au lancement."
 msgid "Added to the working copy — publish changes to make it live"
 msgstr "Ajouté à la copie de travail — publiez les modifications pour la mettre en ligne"
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Address blocked."
+msgstr "Adresse bloquée."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Address or range"
+msgstr "Adresse ou plage"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Address removed — it can receive mail again."
@@ -3335,6 +3345,7 @@ msgstr "La facturation n'est pas encore configurée. Tant que les deux secrets n
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/federation_live.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Block"
@@ -3370,10 +3381,20 @@ msgstr "Éditeur de blocs"
 msgid "Block instance"
 msgstr "Bloquer l'instance"
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block it anyway"
+msgstr "Bloquer quand même"
+
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
 msgid "Block removed"
 msgstr "Bloc supprimé"
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block removed."
+msgstr "Blocage supprimé."
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
@@ -3389,6 +3410,17 @@ msgstr "Bloquer toute cette instance ? Tous ses abonnés sont supprimés et les 
 #, elixir-autogen, elixir-format
 msgid "Blocked"
 msgstr "Bloqués"
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Blocked addresses"
+msgstr "Adresses bloquées"
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Blocked visitors get an empty 403 on pages, the API, and live connections. Static files and uploaded media are served before this check and are not covered; use your CDN or proxy for those. Your own loopback address, health checks, and very wide ranges (wider than /8 for IPv4, /16 for IPv6) cannot be blocked."
+msgstr "Les visiteurs bloqués reçoivent un 403 vide sur les pages, l'API et les connexions en direct. Les fichiers statiques et les médias téléversés sont servis avant cette vérification et ne sont pas couverts ; utilisez votre CDN ou proxy pour ceux-ci. L'adresse de bouclage, les contrôles de santé et les plages très larges (plus larges que /8 en IPv4, /16 en IPv6) ne peuvent pas être bloqués."
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -3642,6 +3674,7 @@ msgstr "Impossible de reprogrammer dans le passé."
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -5564,6 +5597,11 @@ msgstr "Ctrl+Z"
 #, elixir-autogen, elixir-format
 msgid "Current"
 msgstr "Actuel"
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Current blocks"
+msgstr "Blocages actuels"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_history_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -7537,6 +7575,7 @@ msgstr "Les expériences sont désactivées sur ce déploiement : rien n'est ser
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "Expired"
 msgstr "Expiré"
@@ -7551,6 +7590,16 @@ msgstr "Expiré (signalé)"
 #, elixir-autogen, elixir-format
 msgid "Expires"
 msgstr "Expiration"
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Expires %{at}"
+msgstr "Expire %{at}"
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Expires (UTC)"
+msgstr "Expire (UTC)"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -8890,6 +8939,11 @@ msgstr "Je les ai enregistrés"
 msgid "ID"
 msgstr "ID"
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "IPv4 or IPv6, with an optional /prefix."
+msgstr "IPv4 ou IPv6, avec un /préfixe facultatif."
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Identity"
@@ -9751,6 +9805,11 @@ msgstr "Laissez vide pour utiliser le nom du site."
 #, elixir-autogen, elixir-format
 msgid "Leave blank to use the slug URL above. Set a nested address such as /about/team and the slug URL redirects (301) to it; changing it later leaves a redirect behind on published content."
 msgstr "Laissez vide pour utiliser l'URL du slug ci-dessus. Définissez une adresse imbriquée comme /about/team et l'URL du slug y redirige (301) ; la modifier ensuite laisse une redirection derrière elle sur le contenu publié."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Leave empty to block until removed."
+msgstr "Laissez vide pour bloquer jusqu'à suppression."
 
 #: lib/kiln_cms_web/live/content_editor/localization.ex
 #, elixir-autogen, elixir-format
@@ -11784,6 +11843,7 @@ msgstr "Notable"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/live/governance_live.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "Note"
 msgstr "Note"
@@ -11865,6 +11925,7 @@ msgid "Nothing in this release"
 msgstr "Ce lancement est vide"
 
 #: lib/kiln_cms_web/live/federation_live.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing is blocked."
 msgstr "Rien n'est bloqué."
@@ -13935,6 +13996,16 @@ msgstr "Référents"
 msgid "Refresh"
 msgstr "Actualiser"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Refuse requests from an IP address or range."
+msgstr "Refuser les requêtes d'une adresse ou plage IP."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Refuse requests from an IP address or range. Applies to this site only."
+msgstr "Refuser les requêtes d'une adresse ou plage IP. S'applique à ce site uniquement."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Refuse to publish a document containing a blocking claim"
@@ -14137,6 +14208,7 @@ msgstr "Retrait en attente"
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
@@ -15358,6 +15430,7 @@ msgstr "En enregistrant ceci, le contenu de ce site est envoyé à l'URL ci-dess
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
+#: lib/kiln_cms_web/live/ip_block_live.ex
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
@@ -16812,6 +16885,11 @@ msgstr "Les étapes sont comptées indépendamment — il ne s'agit pas d'un tau
 msgid "Stock links (Blog, Search)"
 msgstr "Liens d'origine (Blog, Rechercher)"
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Stop blocking %{cidr}?"
+msgstr "Arrêter de bloquer %{cidr} ?"
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stop checking outbound links for this site?"
@@ -17457,6 +17535,11 @@ msgstr "Ce compte est introuvable."
 msgid "That action isn't allowed right now."
 msgstr "Cette action n'est pas autorisée pour le moment."
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "That block no longer exists."
+msgstr "Ce blocage n'existe plus."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid — 2FA is still on."
@@ -17789,6 +17872,11 @@ msgstr "L'icône de l'application a été enregistrée mais n'est pas encore ins
 msgid "The backup status can't be determined."
 msgstr "L'état des sauvegardes ne peut pas être déterminé."
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "The block could not be saved."
+msgstr "Le blocage n'a pas pu être enregistré."
+
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "The block this task was anchored to has been removed."
@@ -17954,6 +18042,11 @@ msgstr "Le budget d'embeddings a refusé cette demande."
 #, elixir-autogen, elixir-format
 msgid "The entry limit is deployment-wide and not configurable per site: it bounds the work a feed request costs the server, rather than expressing a publishing choice."
 msgstr "La limite d'entrées vaut pour tout le déploiement et n'est pas configurable par site : elle borne le travail qu'une requête de flux coûte au serveur, plutôt que d'exprimer un choix éditorial."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "The expiry is not a valid date and time."
+msgstr "L'expiration n'est pas une date et heure valides."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -18212,6 +18305,11 @@ msgstr "Le verrou de publication n'agit que sur les règles marquées comme bloq
 #, elixir-autogen, elixir-format
 msgid "The push key could not be saved."
 msgstr "La clé push n'a pas pu être enregistrée."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "The range %{cidr} includes your own address, %{ip}. Confirm to add it anyway."
+msgstr "La plage %{cidr} inclut votre propre adresse, %{ip}. Confirmez pour l'ajouter quand même."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -18622,6 +18720,11 @@ msgstr "Ce service ne peut pas vérifier sa connexion."
 msgid "This block has settings only an admin can change, so only an admin can move it."
 msgstr "Ce bloc a des réglages que seul un administrateur peut modifier, donc seul un administrateur peut le déplacer."
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "This block may lock you out."
+msgstr "Ce blocage pourrait vous verrouiller."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "This block needs at least %{count} characters to work from."
@@ -18928,6 +19031,11 @@ msgstr "Ce lancement est complet. Publiez-le ou déplacez des éléments vers un
 #, elixir-autogen, elixir-format
 msgid "This release is nearly full (%{count} of %{cap})."
 msgstr "Ce lancement est presque complet (%{count} sur %{cap})."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "This request arrived with a forwarding header, but no trusted proxies are configured (TRUSTED_PROXIES), so Kiln sees your proxy's address, not the visitor's. Blocks would then match the proxy, and the check that stops you blocking yourself cannot be relied on. Set TRUSTED_PROXIES before adding blocks."
+msgstr "Cette requête est arrivée avec un en-tête de transfert, mais aucun proxy de confiance n'est configuré (TRUSTED_PROXIES) : Kiln voit l'adresse de votre proxy, pas celle du visiteur. Les blocages cibleraient alors le proxy, et la vérification qui vous empêche de vous bloquer vous-même n'est pas fiable. Définissez TRUSTED_PROXIES avant d'ajouter des blocages."
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
@@ -20339,6 +20447,11 @@ msgstr "Vues au fil du temps"
 msgid "Visible"
 msgstr "Visibilité"
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Visitor addresses may be your proxy's."
+msgstr "Les adresses des visiteurs peuvent être celles de votre proxy."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Visual"
@@ -20781,6 +20894,11 @@ msgstr "Années complètes entre la date de début et la date de fin, comme un �
 msgid "Whole years since a date, like a person's age. Refreshed daily."
 msgstr "Années complètes depuis une date, comme l’âge d’une personne. Actualisé chaque jour."
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Why this was blocked"
+msgstr "Pourquoi ce blocage"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Width"
@@ -21046,6 +21164,11 @@ msgstr "Vous n'avez pas l'autorisation de modifier les synonymes de recherche."
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's AI provider."
 msgstr "Vous n'avez pas l'autorisation de modifier le fournisseur d'IA de ce site."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's blocked addresses."
+msgstr "Vous n'avez pas la permission de modifier les adresses bloquées de ce site."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -21359,6 +21482,11 @@ msgstr "Votre bibliothèque regroupée par sujet, pas seulement par classement �
 #, elixir-autogen, elixir-format
 msgid "Your name"
 msgstr "Votre nom"
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your own address could not be determined, so %{cidr} cannot be checked against it. Confirm to add it anyway."
+msgstr "Votre propre adresse n'a pas pu être déterminée ; %{cidr} ne peut donc pas être vérifiée. Confirmez pour l'ajouter quand même."
 
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format

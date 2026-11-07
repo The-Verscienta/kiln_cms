@@ -68,6 +68,7 @@ defmodule KilnCMSWeb do
       # the router's hooks are exactly what a url-less join skips (#688). A hook
       # declared here survives that, and refuses the join. The join budget
       # (#1183) sits FIRST so a join the guard refuses is still charged.
+      on_mount KilnCMSWeb.IpBlock
       on_mount KilnCMSWeb.LiveJoinBudget
       on_mount KilnCMSWeb.LiveRouteGuard
 
