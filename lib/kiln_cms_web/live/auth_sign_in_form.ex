@@ -28,7 +28,7 @@ defmodule KilnCMSWeb.AuthSignInForm do
 
   alias AshAuthentication.Phoenix.Components.Password.Input
   alias AshAuthentication.Phoenix.Web
-  alias KilnCMSWeb.{AuthOverrides, AuthPasswordInput}
+  alias KilnCMSWeb.{AuthIdentityInput, AuthOverrides, AuthPasswordInput}
 
   # Aliased, not spelled out: the template below names it, and inside `~H` a
   # `@`-prefixed name is an assign rather than a module attribute.
@@ -62,13 +62,14 @@ defmodule KilnCMSWeb.AuthSignInForm do
         method="POST"
         class={AuthOverrides.override_for(@overrides, Upstream, :form_class)}
       >
-        <Input.identity_field
+        <AuthIdentityInput.identity_field
           strategy={@strategy}
           form={form}
           overrides={@overrides}
           gettext_fn={@gettext_fn}
         />
         <AuthPasswordInput.password_field
+          autocomplete="current-password"
           strategy={@strategy}
           form={form}
           overrides={@overrides}

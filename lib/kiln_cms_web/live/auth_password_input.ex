@@ -9,6 +9,12 @@ defmodule KilnCMSWeb.AuthPasswordInput do
   `KilnCMSWeb.CoreComponents.password_reveal/1`, and takes `pr-10` so the text
   never runs under the button. The toggle itself is described there.
 
+  The other addition is `autocomplete` (#2162), which the caller must name:
+  `current-password` on sign-in, `new-password` on register and both reset
+  forms. Upstream sets none, and a password manager that guesses wrong offers
+  to fill a saved password into a "choose a password" box. The email box has
+  the same treatment in `KilnCMSWeb.AuthIdentityInput`.
+
   ## Why a copy
 
   Upstream's field renders its `<input>` through `password_input/3` with no slot
@@ -42,6 +48,10 @@ defmodule KilnCMSWeb.AuthPasswordInput do
   attr :gettext_fn, :any, default: nil
   attr :reveal, :boolean, default: true
 
+  attr :autocomplete, :string,
+    required: true,
+    doc: ~s("current-password" to sign in, "new-password" wherever one is being chosen)
+
   def password_field(assigns) do
     assigns
     |> assign(:field, assigns.strategy.password_field)
@@ -55,6 +65,10 @@ defmodule KilnCMSWeb.AuthPasswordInput do
   attr :overrides, :list, default: [AshAuthentication.Phoenix.Overrides.Default]
   attr :gettext_fn, :any, default: nil
   attr :reveal, :boolean, default: true
+
+  attr :autocomplete, :string,
+    required: true,
+    doc: ~s(always "new-password": a confirmation only exists where one is being chosen)
 
   def password_confirmation_field(assigns) do
     assigns
@@ -83,7 +97,8 @@ defmodule KilnCMSWeb.AuthPasswordInput do
           {password_input(@form, @field,
             class: padded(@input_class),
             value: input_value(@form, @field),
-            phx_debounce: @debounce
+            phx_debounce: @debounce,
+            autocomplete: @autocomplete
           )}
           <.password_reveal for={input_id(@form, @field)} />
         </div>
@@ -91,7 +106,8 @@ defmodule KilnCMSWeb.AuthPasswordInput do
         {password_input(@form, @field,
           class: @input_class,
           value: input_value(@form, @field),
-          phx_debounce: @debounce
+          phx_debounce: @debounce,
+          autocomplete: @autocomplete
         )}
       <% end %>
       <Input.error form={@form} field={@field} overrides={@overrides} />
