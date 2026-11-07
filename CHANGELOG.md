@@ -62,6 +62,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Custom fields can be filtered and sorted by bare name (`filter[price]`, `sort=title,price`), and `custom_sort` now works on search routes.**
+  ([long form](docs/changelog/unreleased.md#custom-field-native-filter-sort))
+
 - **Opt-in `KILN_API_REJECT_INVALID_BEARER=true` answers 401 for an unverifiable bearer token on the API
   instead of serving anonymous data; the default flips on in the next release.**
   ([#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161) · [long form](docs/changelog/unreleased.md#reject-invalid-bearer))

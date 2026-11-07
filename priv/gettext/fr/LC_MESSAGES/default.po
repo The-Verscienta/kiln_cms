@@ -2472,7 +2472,6 @@ msgstr "Utiliser aussi les règles fournies par ce déploiement"
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/live/content_editor/block_params.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Alt text"
@@ -3541,7 +3540,6 @@ msgid "Canonical URL"
 msgstr "URL canonique"
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Caption"
@@ -3888,6 +3886,7 @@ msgstr "Choisir un audio"
 msgid "Choose files"
 msgstr "Choisir des fichiers"
 
+#: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -8527,8 +8526,8 @@ msgstr "Si le compte utilise l'authentification à deux facteurs, la connexion r
 msgid "If … then …"
 msgstr "Si … alors …"
 
+#: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/live/content_editor/block_params.ex
-#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Image URL"
 msgstr "URL de l'image"
@@ -22246,7 +22245,7 @@ msgstr "« %{value} » n’est pas une valeur utilisable dans une formule."
 msgid "“Leading” means the highest rate so far over at least %{floor} impressions per arm — a comparison, not a significance test."
 msgstr "« En tête » signifie le taux le plus élevé à ce jour sur au moins %{floor} impressions par variante — une comparaison, pas un test de significativité."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "…or paste a URL"
 msgstr "…ou collez une URL"

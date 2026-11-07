@@ -125,6 +125,17 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
     |> Enum.find_index(fn sub -> to_string(AshPhoenix.Form.value(sub, :id)) == bid end)
   end
 
+  # The block module of the block whose stable id is `bid`, or nil.
+  def block_module_by_id(form, bid) do
+    bid = to_string(bid)
+
+    form
+    |> block_subforms()
+    |> Enum.find_value(fn sub ->
+      to_string(AshPhoenix.Form.value(sub, :id)) == bid && sub.resource
+    end)
+  end
+
   # Move a just-appended block (currently last) to the requested insert position
   # (B2 inline insertion): `nil`/absent leaves it at the end (append), "start"
   # moves it to the top, and a block id moves it directly after that block. The

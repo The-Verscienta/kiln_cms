@@ -1276,6 +1276,11 @@ defmodule KilnCMSWeb.Router do
       # (e2e/tests/field_localization.spec.js); the rest of the suite stays
       # single-locale. Same gating and :prod refusal.
       forward "/e2e-locales", KilnCMSWeb.Plugs.E2ELocales
+
+      # Marks core block fields shared / fallback per locale (#2270) for the
+      # block cases of that spec; the site configures none otherwise.
+      # Same gating and :prod refusal.
+      forward "/e2e-block-fields", KilnCMSWeb.Plugs.E2EBlockFields
     end
   end
 
