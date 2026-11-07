@@ -55,7 +55,7 @@ defmodule KilnCMSWeb.ContentExportController do
       stream(conn, plan, format, type, params["private"] == "1")
     else
       {:head, conn} -> conn
-      {:error, status, code} -> refuse(conn, status, code)
+      {:error, status, code} -> refuse(conn, params, status, code)
       {:deny, retry_after_ms} -> RateLimitPlug.deny(conn, retry_after_ms)
     end
   end
@@ -160,10 +160,39 @@ defmodule KilnCMSWeb.ContentExportController do
     end
   end
 
-  defp refuse(conn, status, code) do
-    conn
-    |> put_status(status)
-    |> json(%{error: code, message: message(code)})
+  # A refusal is JSON for a script. A person who clicked a link in the list
+  # (the browser asks for HTML) goes back to the list with the reason as a
+  # flash, instead of landing on a raw JSON body. A non-editor has no list to go
+  # back to, so that refusal stays JSON.
+  defp refuse(conn, params, status, code) do
+    if code != "editor_required" and html?(conn) do
+      conn
+      |> put_flash(:error, message(code))
+      |> redirect(to: back_to_list(params, code))
+    else
+      conn
+      |> put_status(status)
+      |> json(%{error: code, message: message(code)})
+    end
+  end
+
+  defp html?(conn) do
+    conn |> get_req_header("accept") |> Enum.any?(&String.contains?(&1, "text/html"))
+  end
+
+  # The list the person came from, minus whatever the refusal was about: a bad
+  # selection drops `ids`, an unknown type drops `type`; an over-cap export keeps
+  # the filters so they can be narrowed.
+  defp back_to_list(params, code) do
+    drop =
+      case code do
+        "type_out_of_scope" -> ["ids", "private", "type"]
+        _other -> ["ids", "private"]
+      end
+
+    query = params |> Map.drop(drop) |> Map.filter(fn {_key, value} -> is_binary(value) end)
+
+    if query == %{}, do: ~p"/editor", else: ~p"/editor?#{query}"
   end
 
   defp message("editor_required"), do: gettext("Exporting content needs an editor account.")

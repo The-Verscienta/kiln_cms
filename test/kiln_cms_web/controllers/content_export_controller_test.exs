@@ -490,6 +490,40 @@ defmodule KilnCMSWeb.ContentExportControllerTest do
     end
   end
 
+  describe "a refusal in the browser" do
+    # A link clicked in the list asks for HTML: back to the list with the reason.
+    defp browser(conn), do: Plug.Conn.put_req_header(conn, "accept", "text/html")
+
+    test "a bad selection returns to the list without the ids, with a flash", %{conn: conn} do
+      conn = conn |> browser() |> csv(%{"type" => "page", "ids" => "nope", "private" => "1"})
+
+      assert redirected_to(conn) == "/editor?type=page"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "not a list of content ids"
+    end
+
+    test "an unknown type returns to the list without it", %{conn: conn} do
+      conn = conn |> browser() |> csv(%{"type" => "no-such-type", "q" => "x"})
+
+      assert redirected_to(conn) == "/editor?q=x"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "cannot export"
+    end
+
+    test "over the cap returns to the same filtered list", %{conn: conn, prefix: prefix} do
+      Application.put_env(:kiln_cms, :content_export, max_rows: 1)
+      for _ <- 1..2, do: a_page(prefix)
+
+      conn = conn |> browser() |> csv(%{"q" => prefix})
+
+      assert redirected_to(conn) == "/editor?q=#{prefix}"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "more than 1 rows"
+    end
+
+    test "a script that does not ask for HTML still gets JSON", %{conn: conn} do
+      assert %{"error" => "invalid_ids"} =
+               conn |> csv(%{"ids" => "nope"}) |> json_response(400)
+    end
+  end
+
   describe "limits" do
     test "over the row cap is a 413 with a message, never a truncated file", %{
       conn: conn,

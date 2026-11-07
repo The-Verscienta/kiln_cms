@@ -505,7 +505,11 @@ no longer applies.*) and opening it says *The view "…" named a field that no
 longer applies, so that condition was left out.* The remaining conditions still
 apply.
 
-**What can go wrong.**
+**What can go wrong.** When you click a download in the list, a refusal sends you back
+to the list (with the same filters, except what the refusal was about) and shows the
+message at the top. A script, or anything that does not ask for HTML, gets the status
+code below with a JSON body `{error, message}`; a person without an editor account gets
+the JSON 403 either way.
 
 - *That field filter is not valid here.* The field, condition or value is not
   one the type offers (for example text typed into a number, or a select value
@@ -636,7 +640,7 @@ characters.
 **What can go wrong.**
 
 - *Exporting content needs an editor account.* (403) A viewer, or a request
-  without a session.
+  without a session. Always JSON.
 - *You cannot export that content type.* (403) The type is outside the ones
   you can author.
 - *The selection is not a list of content ids.* (400) `ids` was empty or held
