@@ -194,4 +194,50 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
       assert get_resp_header(conn, "surrogate-key") == []
     end
   end
+
+  describe "telemetry (ADR 0017)" do
+    @event [:kiln_cms, :api, :invalid_bearer]
+
+    setup do
+      id = "invalid-bearer-#{System.unique_integer([:positive])}"
+      test = self()
+      :telemetry.attach(id, @event, fn e, m, meta, _ -> send(test, {e, m, meta}) end, nil)
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    defp expired_jwt do
+      {:ok, token, _} =
+        AshAuthentication.Jwt.token_for_user(user(:editor), %{}, token_lifetime: {-1, :minutes})
+
+      token
+    end
+
+    test "says reason, surface, read-ness and enforcement" do
+      flag(true)
+
+      api_get("Bearer garbage")
+
+      assert_receive {@event, %{count: 1},
+                      %{reason: :malformed, surface: :json_api, read?: true, enforced: true}}
+
+      api_get("Bearer " <> expired_jwt())
+      assert_receive {@event, _, %{reason: :expired}}
+
+      gql("Bearer garbage")
+      assert_receive {@event, _, %{surface: :graphql, read?: true}}
+    end
+
+    test "fires with the escape hatch on, marked not enforced" do
+      flag(false)
+      assert api_get("Bearer garbage").status == 200
+      assert_receive {@event, _, %{enforced: false}}
+    end
+
+    test "silent for anonymous, valid and other-scheme requests" do
+      api_get(nil)
+      api_get("Bearer " <> jwt(user(:editor)))
+      api_get("Basic dXNlcjpwYXNz")
+      refute_receive {@event, _, _}
+    end
+  end
 end

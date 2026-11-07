@@ -39,9 +39,13 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   attr :broken_references, :list, required: true
   attr :record, :any, default: nil
   attr :reverse_fields, :list, default: []
+  # Names of the top-level fields the editor's role may read but not change
+  # (`KilnCMS.CMS.HiddenFields.console_access/4`, #2281).
+  attr :read_only, :list, default: []
 
   # What every field row needs from the panel.
   @row_assigns [
+    :read_only,
     :form,
     :localization,
     :kind,
@@ -166,6 +170,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   attr :actor, :any, required: true
   attr :tenant, :any, required: true
   attr :record, :any, required: true
+  attr :read_only, :list, default: []
   # `Conditional.effective/2` for the panel's fields (#2277): hidden / required now.
   attr :conditions, :map, required: true
 
@@ -190,7 +195,10 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
       state={@state}
     >
       <fieldset
-        disabled={Localization.locked?(@localization, {:custom, @definition.name})}
+        disabled={
+          Localization.locked?(@localization, {:custom, @definition.name}) or
+            @definition.name in @read_only
+        }
         class="contents"
       >
         <%!-- A reference searches its target type as the editor (R9), so it
@@ -225,6 +233,14 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
           kind={@kind}
           inherited={Localization.inherited(@localization, {:custom, @definition.name})}
         />
+        <p
+          :if={@definition.name in @read_only}
+          id={"cf-read-only-#{@definition.name}"}
+          class="-mt-2 flex items-center gap-1 text-xs text-base-content/70"
+        >
+          <.icon name="hero-lock-closed" class="size-3.5" />
+          {gettext("Your role can see this field but not change it.")}
+        </p>
       </fieldset>
     </Conditional.conditional>
     """

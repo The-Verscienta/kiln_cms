@@ -41,11 +41,27 @@ defmodule KilnCMS.Accounts.Role do
   actions do
     defaults [:read, :destroy]
 
-    default_accept [:name, :description, :editable_types, :readable_types, :field_grants]
+    default_accept [
+      :name,
+      :description,
+      :editable_types,
+      :readable_types,
+      :field_grants,
+      :field_read_grants
+    ]
 
     create :create do
       primary? true
-      accept [:name, :description, :editable_types, :readable_types, :field_grants, :org_id]
+
+      accept [
+        :name,
+        :description,
+        :editable_types,
+        :readable_types,
+        :field_grants,
+        :field_read_grants,
+        :org_id
+      ]
     end
 
     update :update do
@@ -78,6 +94,11 @@ defmodule KilnCMS.Accounts.Role do
     # A malformed grant map must fail on the admin's write, not crash the
     # editors it applies to (see the validation module).
     validate KilnCMS.Accounts.Validations.FieldGrantsShape, on: [:create, :update]
+
+    validate {KilnCMS.Accounts.Validations.FieldGrantsShape, attribute: :field_read_grants},
+      on: [:create, :update]
+
+    validate KilnCMS.Accounts.Validations.ReadGrantsPrivate, on: [:create, :update]
   end
 
   attributes do
@@ -117,6 +138,17 @@ defmodule KilnCMS.Accounts.Role do
     end
 
     attribute :field_grants, :map do
+      default %{}
+      allow_nil? false
+      public? false
+    end
+
+    # Per-custom-field READ restrictions (#2281): content-type name → the
+    # private custom fields (`custom_fields.<name>`, or the bare
+    # `custom_fields`) the editor may see. No entry for a type = unrestricted;
+    # `[]` hides every private field. Resolved like `field_grants`
+    # (KilnCMS.Accounts.Scoping.field_read_grant/3).
+    attribute :field_read_grants, :map do
       default %{}
       allow_nil? false
       public? false

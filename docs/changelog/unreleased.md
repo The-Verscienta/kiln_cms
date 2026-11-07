@@ -98,6 +98,12 @@ carries the reasoning.
     to buy time while you fix the client.
   - Unset now means on. Nothing to migrate and no config to change if your
     clients send valid tokens or none.
+  - **Counting them.** Each such request, refused or not, emits
+    `[:kiln_cms, :api, :invalid_bearer]` (`count: 1`; metadata `enforced`,
+    `surface`, `read?` and `reason: :expired | :malformed | :invalid`, read from
+    the unverified token and never sent to the client). Attach a handler to see
+    which clients still send a stale token before the escape hatch goes. See
+    [ADR 0017](../decisions/0017-an-unverifiable-bearer-flips-on-a-minor-with-a-breaking-note-and-is-counted-first.md).
 
 <a id="search-name-lexemes-upgrade"></a>
 
@@ -153,6 +159,20 @@ carries the reasoning.
   the migrations are expand-only: the previous release ignores the columns and
   gets `false` on insert. No re-fire is needed.
 
+<a id="custom-field-grants-upgrade"></a>
+
+- **Users, memberships and roles gain a `field_read_grants` column; overlays
+  run `mix ash.codegen`, commit the migration and run `mix ash.migrate`.** The
+  column is `map NOT NULL DEFAULT '{}'` on `users`, `org_memberships` and
+  `roles`, so the migration is expand-only and nothing is rewritten in a way
+  the previous release trips over. Rolling the pin back is safe, with two
+  effects to know first. A role that uses the new `custom_fields.<name>`
+  write keys is read by the older release as holding unknown field names, and
+  fails closed: those editors can change fewer fields, not more. The older
+  release also ignores `field_read_grants`, so a private custom field you had
+  hidden from some editors is visible to them again until you upgrade. Core's
+  own table is migrated by core's migration; the new column does not touch the
+  `kiln_reporting_v1` views.
 <a id="field-validation-upgrade"></a>
 
 - **Field definitions gain a `validation` column (#2276).** `field_definitions.validation` is `jsonb NOT NULL DEFAULT '{}'`: additive, instant, and every existing field starts with no constraints, so nothing about stored data or writes changes until an admin sets one. Rolling the pin back is safe (the old release ignores the column). Overlays that carry their own migrations run `mix ash.codegen` and commit the result.
@@ -220,6 +240,38 @@ carries the reasoning.
     [backups.md](../backups.md#media-backups-in-parts-2218).
   ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))
 
+
+<a id="custom-field-grants"></a>
+
+- **Roles and members can be granted individual custom fields, and private
+  custom fields can be hidden from some editors (#2281).** Until now
+  `custom_fields` was one grant for all of them. A `field_grants` list can now
+  hold `custom_fields.<name>`, `custom_fields.<group>` (rows included) and
+  `custom_fields.<group>.<sub>`, and a new `field_read_grants` map names the
+  private fields an editor may see. On `/editor/team` the field-grant picker
+  lists the individual custom fields, indented under their group, and a new
+  **Custom fields they can read** picker sets the read axis.
+  - **Rules.** A write grant implies reading. Only top-level `private: true`
+    fields can be hidden (a public field is world-readable anyway), and a
+    field named in a read grant cannot be made public until it is removed from
+    the grant. A role holding any `custom_fields.*` key is held to those keys
+    on a create too; roles with only the bare `custom_fields` key keep the old
+    rule. Admins are exempt.
+  - **What a restricted editor sees.** Hidden fields are absent from the
+    editor, the content list (columns, filter, sort, CSV/JSON export), version
+    history and diffs, JSON:API, GraphQL and MCP responses (mutation results
+    too), and filtering on one answers like an unknown field. Hidden values
+    survive their saves untouched. Restoring a version is refused for an
+    editor with a field grant or a read restriction on the type. Copies,
+    translations and imports carry only the fields the actor may write.
+  - **Visible change for existing roles.** An editor holding a whole-attribute
+    grant that omits `custom_fields` now sees the custom fields read-only in
+    the editor instead of editable-looking inputs that the save would refuse.
+  - **Limits.** A hidden `required` private field makes that editor's create,
+    copy or import of the type fail. Read grants do not apply to actor-less
+    surfaces (fired artifacts, webhooks, change feed, RSS, the
+    `kiln_reporting_v1` views); those already drop every private field.
+  See [Per-custom-field grants and read restrictions](../granular-rbac.md#per-custom-field-grants-and-read-restrictions).
 <a id="backup-history"></a>
 
 - **Backups has a History: every backup attempt, app-made and cron-made, with
@@ -275,8 +327,9 @@ carries the reasoning.
     matches the proxy's address and blocks every visitor.
   - **Operators.** One new table, `ip_block_rules`, additive; rolling back
     leaves it unused. No new environment variables. If an admin locks
-    themselves out, `DELETE FROM ip_block_rules WHERE ...` in SQL; it takes
-    effect within the one-minute cache. Expired rules are not swept and still
+    themselves out, `bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(remove: true)'`
+    lists (without `remove: true`) or lifts the site's rules and clears every
+    node's cache at once; SQL still works within the one-minute cache. Expired rules are not swept and still
     hold their slot until removed in the console.
   - **Developers.** The resource, `KilnCMS.CMS.IpBlockRule`, is org-admin only
     and deliberately absent from JSON:API, GraphQL and MCP. The request path

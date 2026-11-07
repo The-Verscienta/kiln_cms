@@ -142,17 +142,138 @@ Deliberate semantics:
   exist, and `audience`, because dropping it would fall back to the `:public`
   default and quietly *widen* access to a gated body. Links stay ungoverned
   there too.
-- `custom_fields` is granted as a whole attribute; per-custom-field keys
-  (`custom_fields.<name>`) are a possible later refinement.
+- `custom_fields` as a bare key grants every custom field, as before. A
+  single custom field, a group or one sub-field of a group is granted with a
+  dotted key (`custom_fields.<name>`), and the private ones can also be hidden
+  from an editor: see
+  [Per-custom-field grants and read restrictions](#per-custom-field-grants-and-read-restrictions).
 - **Version restores require full field access**: `restore_version` rewrites
   the whole document from a snapshot (via force-changes the param inspection
   can't see), so any editor under a field grant for the type is refused the
-  verb outright.
+  verb outright. So is an editor with a read restriction on the type (below):
+  a restore would overwrite the values they cannot see.
 - Grant maps resolve **per type key** across the levels (membership → role →
   user): an override for one type never discards another level's restriction
   on a different type. A key falls through only when it is absent; a `[]` at
   the membership stops resolution there, so it overrides a role's list for
   that type.
+
+## Per-custom-field grants and read restrictions
+
+Custom fields (see [extending-content.md](extending-content.md)) can be granted
+one at a time, and a private custom field can be hidden from some editors.
+Both live on the same three levels as the other axes (membership, custom
+role, user; the first level that names the type wins), and both apply to
+editors only: admins are exempt, and so are system and actor-less writes.
+
+### Write: `field_grants` keys
+
+An entry in a type's `field_grants` list can be:
+
+| Entry | Lets the editor change |
+|---|---|
+| `custom_fields` | every custom field (the original grant, unchanged) |
+| `custom_fields.<name>` | that one top-level field |
+| `custom_fields.<group>` | a whole group field, including adding, removing and reordering its rows |
+| `custom_fields.<group>.<sub>` | that one sub-field, in every row of the group |
+
+Field names are lower-case letters, digits and underscores, starting with a
+letter, so the dot is unambiguous. Saving a role with a malformed entry
+(`custom_fields.Name`, `custom_fields.a.b.c`) is refused, instead of silently
+granting nothing. Whether the name is a real field is not checked at save: a
+stale name is shown as "(not found)" in the pickers. Link fields are not
+granted on their own (they ride on the reference they belong to), and computed
+fields are never written by anyone.
+
+- **Only the keys the editor changes are judged.** Re-sending a stored value,
+  in whatever spelling the form uses, is not a change, so saving a document
+  whose other fields are out of the editor's reach works. A change outside the
+  grant is refused with "custom_fields.price cannot be changed: outside your
+  field grant for this content type" (the key named is the one that failed).
+- **Creates are held to the keys too, but only for a role that lists a
+  `custom_fields.*` entry.** A key outside the grant may carry only its
+  default on a new document. A role with just the bare `custom_fields` key (or
+  none) keeps the old rule: creating a document is ungoverned.
+- **A hidden field cannot be written** (below), on a create or an update.
+
+### Read: `field_read_grants`
+
+`field_read_grants` is a map of type to the private custom fields the editor
+may see, with the same type keys as `field_grants`:
+
+```elixir
+%{
+  field_grants: %{"post" => ["title", "custom_fields.summary"]},
+  field_read_grants: %{"post" => ["custom_fields.internal_notes"]}
+}
+```
+
+- A type with no key is unrestricted. `[]` hides every private field of the
+  type. `"custom_fields"` shows all of them, and `custom_fields.<name>` one.
+- **A field the editor may write is always readable.** Reading is implied by
+  the write grant.
+- **Only top-level `private: true` fields can be restricted.** A field that is
+  not private is world-readable on published content, cached anonymous
+  responses and fired artifacts, so hiding it from one role would promise
+  something Kiln cannot deliver. Group sub-fields cannot be private, so they
+  cannot be hidden (they can still be write-granted).
+- **A read-granted field can't stop being private.** Switching it to public in
+  the field definition is refused ("can't be turned off while a role or
+  member's read grant for this type names the field"); remove it from the role
+  or member first. Saving a read grant that names a field that exists but is
+  not private is refused too ("... is not a private custom field of ...").
+- **The editor does not see a hidden field anywhere**: not in the document
+  form, the content list's columns, filter, sort and CSV/JSON export, version
+  history and diffs, nor in JSON:API, GraphQL and MCP responses (mutation
+  responses included). Filtering or sorting on a hidden name answers like an
+  unknown field. A restricted editor's save leaves hidden values exactly as
+  stored.
+- **A field they can read but not change is shown read-only** in the editor
+  ("Your role can see this field but not change it."). This now also applies to
+  an editor holding an old whole-attribute grant that omits `custom_fields`.
+- **Version restore is refused** for an editor with a read restriction on the
+  type, with the same message as for a field grant.
+- **Duplicates, translations, copies and imports** carry only the custom
+  fields the actor may write; hidden and unwritable values are left out.
+- **Known limit: a hidden required field blocks creating.** If a private field
+  that is `required` is hidden from the editor, their create, copy or import
+  of that type fails validation, because they cannot supply the value.
+  Either make the field optional, or let that role read it.
+
+**Actor-less surfaces are unaffected, and need not be.** Fired artifacts,
+webhooks, the change feed, RSS and the `kiln_reporting_v1` SQL views read as no
+Kiln user and already leave out every `private` field
+(see [reporting.md](reporting.md)), so a read restriction only narrows *which
+editors* see a private field.
+
+### Restrict custom fields on a role
+
+Start on `/editor/team` as a platform admin, in the **Custom roles** section,
+on a role (or **Edit** on a member) whose type has custom fields. A private
+custom field must exist on the type for the read picker to appear.
+
+1. Open the type's row under **Field grants** and choose **Only these fields**
+   in **Fields of Post** (for example).
+2. Under **Individual custom fields**, tick the fields they may change. A
+   group's own box lets them add, remove and reorder its rows; the indented
+   boxes beneath it change one sub-field in every row. Leave all of them
+   unticked and tick **Custom fields (all of them)** for the old all-or-nothing
+   grant.
+3. Below, in **Custom fields they can read**, choose **Only these private
+   fields** and tick the private fields they may see (or **All private
+   fields**). **None of them** hides every private field; on a role the first
+   choice is **All private fields** (no restriction), on a member it is the
+   inherit choice.
+4. Click **Add role** on a new role, or **Save** on an existing role or
+   member. The role's row summarises the scope, for example
+   `fields: Post: title, custom_fields.summary · can read: Post: custom_fields.internal_notes`.
+
+| Message | Meaning |
+|---|---|
+| "Pick at least one field, or choose None of them." | **Only these private fields** with nothing ticked. |
+| "... is not a valid field name for ..." | A `field_grants` or `field_read_grants` entry is malformed. |
+| "... is not a private custom field of ..." | A read grant names a field that is not private. |
+| "custom_fields.<name> cannot be changed: outside your field grant for this content type" | What the editor sees when they change a field outside their grant. |
 
 ## Phase 2, slice 4 (shipped) — custom roles + `/editor/team`
 
@@ -192,7 +313,8 @@ What the pickers store:
   key. Field grants list each custom type on its own row, under its own name.
 - The fields offered for a type are the ones its edit actions accept, named
   the way enforcement compares them (`title` and `blocks` cover the working
-  copy too; `custom_fields` is one grant for all custom fields). Developers
+  copy too; `custom_fields` is the grant for all custom fields, and the
+  individual custom fields are listed beneath it, see below). Developers
   can read the same list from
   `KilnCMS.CMS.Changes.EnforceFieldGrants.grantable_fields/1`.
 - A saved form is **merged onto the stored value**: a stored type name, grant

@@ -2480,6 +2480,11 @@ msgstr "Toutes ces conditions sont vraies"
 msgid "All of this is optional and can be changed later under Branding."
 msgstr "Tout ceci est facultatif et peut être modifié plus tard dans Marque."
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "All private fields"
+msgstr "Tous les champs privés"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "All quiet."
@@ -5742,8 +5747,8 @@ msgstr "Champs personnalisés (tous)"
 
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
-msgid "Custom fields are granted all together: there is no grant for one custom field on its own."
-msgstr "Les champs personnalisés sont accordés tous ensemble : il n'existe pas d'autorisation pour un seul champ personnalisé isolément."
+msgid "Custom fields they can read"
+msgstr "Champs personnalisés qu'ils peuvent lire"
 
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
@@ -9296,6 +9301,11 @@ msgstr[1] "Indexation : %{count} tâches restantes."
 msgid "Indexing…"
 msgstr "Indexation…"
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Individual custom fields"
+msgstr "Champs personnalisés individuels"
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Info"
@@ -10127,6 +10137,11 @@ msgstr "Langues"
 #, elixir-autogen, elixir-format
 msgid "Locales %{locale} falls back to"
 msgstr "Langues de repli pour %{locale}"
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Locked yourself out? An operator can lift blocks from the server: see docs/ip-blocking.md, \"Recovering from a lock-out\"."
+msgstr "Vous vous êtes bloqué ? Un opérateur peut lever les blocages depuis le serveur : voir docs/ip-blocking.md, \"Recovering from a lock-out\"."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -11853,6 +11868,11 @@ msgstr "Personne ne le recevrait : l’audience n’a aucun abonné confirmé. A
 msgid "None"
 msgstr "Aucun"
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "None of them"
+msgstr "Aucun"
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
@@ -12484,6 +12504,11 @@ msgstr "Un seul enregistrement %{source}"
 msgid "Only one locale is configured — add locales to config :kiln_cms, :i18n."
 msgstr "Une seule langue est configurée — ajoutez des langues dans config :kiln_cms, :i18n."
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Only private custom fields can be hidden: everyone who can edit this type already reads the others. A field they may change is always readable."
+msgstr "Seuls les champs personnalisés privés peuvent être masqués : quiconque peut modifier ce type lit déjà les autres. Un champ qu'ils peuvent modifier reste toujours lisible."
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "Only published content is readable without a key"
@@ -12518,6 +12543,11 @@ msgstr "Seulement ces champs"
 #, elixir-autogen, elixir-format
 msgid "Only these fields may be varied. Leave a field as it is to keep the document's value."
 msgstr "Seuls ces champs peuvent varier. Laissez un champ tel quel pour conserver la valeur du document."
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Only these private fields"
+msgstr "Uniquement ces champs privés"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_settings_live.ex
@@ -13211,6 +13241,11 @@ msgstr "Choisissez au moins un champ, ou choisissez Aucun champ."
 
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
+msgid "Pick at least one field, or choose None of them."
+msgstr "Choisissez au moins un champ, ou choisissez Aucun."
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
 msgid "Pick at least one type, or choose Inherit."
 msgstr "Choisissez au moins un type, ou choisissez Hériter."
 
@@ -13522,6 +13557,11 @@ msgstr "Privé"
 #, elixir-autogen, elixir-format
 msgid "Private bucket"
 msgstr "Bucket privé"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Private fields of %{type} they can read"
+msgstr "Champs privés de %{type} qu'ils peuvent lire"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -17079,6 +17119,11 @@ msgstr "Stocké chiffré et plus jamais affiché. Vider l’identifiant le suppr
 msgid "Stored for this type, but not a field that can be granted here, so they allow nothing. Untick one to remove it."
 msgstr "Enregistrés pour ce type, mais ce ne sont pas des champs pouvant être accordés ici : ils n'autorisent donc rien. Décochez-en un pour le retirer."
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Stored for this type, but not a private field here, so they allow nothing. Untick one to remove it."
+msgstr "Enregistrés pour ce type, mais ce ne sont pas des champs privés ici : ils n'autorisent rien. Décochez-en un pour le retirer."
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/structure_live.ex
@@ -19448,6 +19493,11 @@ msgstr "Trois étapes rapides : votre compte administrateur, l'apparence de votr
 msgid "Thu"
 msgstr "jeu."
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Tick Custom fields (all of them) above for every custom field, or pick individual ones here. A group's own box lets them add, remove and reorder its rows; a field under it lets them change just that field in every row. With any of these ticked, creating a document is held to them too."
+msgstr "Cochez Champs personnalisés (tous) ci-dessus pour tous les champs personnalisés, ou choisissez des champs individuels ici. La case d'un groupe leur permet d'ajouter, de retirer et de réordonner ses lignes ; un champ placé dessous leur permet de ne modifier que ce champ dans chaque ligne. Dès que l'un d'eux est coché, la création d'un document y est aussi limitée."
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Tick a row to export."
@@ -21691,6 +21741,11 @@ msgstr "Votre fournisseur ne peut connecter que des adresses de ces domaines, un
 msgid "Your recovery codes — save them now, they won't be shown again."
 msgstr "Vos codes de récupération — enregistrez-les maintenant, ils ne seront plus affichés."
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Your role can see this field but not change it."
+msgstr "Votre rôle peut voir ce champ, mais pas le modifier."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -21929,6 +21984,11 @@ msgstr "diffuser sur « %{topic} »"
 #, elixir-autogen, elixir-format
 msgid "by"
 msgstr "par"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "can read: %{grants}"
+msgstr "peut lire : %{grants}"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format

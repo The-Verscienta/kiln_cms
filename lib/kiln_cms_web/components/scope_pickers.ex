@@ -29,6 +29,8 @@ defmodule KilnCMSWeb.ScopePickers do
   import KilnCMSWeb.CoreComponents, only: [input: 1, icon: 1, translate_error: 1]
 
   alias KilnCMS.CMS.Changes.EnforceFieldGrants
+  alias KilnCMS.CMS.FieldAccess
+  alias KilnCMS.CMS.FieldDefinition
   alias Phoenix.LiveView.JS
 
   @doc """
@@ -45,7 +47,12 @@ defmodule KilnCMSWeb.ScopePickers do
   attr :stored, :map, required: true, doc: "`KilnCMSWeb.ScopeParams.stored/1`"
   attr :picks, :map, default: nil, doc: "`KilnCMSWeb.ScopeParams.picks/1` of the last post"
   attr :errors, :map, default: %{}, doc: "`KilnCMSWeb.ScopeParams.normalize/2` errors"
-  attr :catalog, :map, required: true, doc: "`%{compiled: [descriptor], dynamic: [descriptor]}`"
+
+  attr :catalog, :map,
+    required: true,
+    doc:
+      "`catalog/2`: `%{compiled: [descriptor], dynamic: [descriptor], fields: %{type => [def]}}`"
+
   attr :inherited, :map, default: nil
 
   def scope_pickers(assigns) do
@@ -183,7 +190,7 @@ defmodule KilnCMSWeb.ScopePickers do
         </p>
         <div :if={@stale != []} class="space-y-1">
           <p class="text-xs font-medium text-base-content/70">{gettext("Not found on this site")}</p>
-          <p class="text-xs text-base-content/60">
+          <p class="text-xs text-base-content/70">
             {gettext(
               "These stored names match no content type here, so they allow nothing. A custom type's own name never matches on this list — use Custom content types (all of them). Untick a name to remove it."
             )}
@@ -210,30 +217,113 @@ defmodule KilnCMSWeb.ScopePickers do
   # --- field grants ------------------------------------------------------------
 
   defp grants_assigns(assigns) do
-    %{catalog: catalog, stored: %{field_grants: stored}} = assigns
+    %{catalog: catalog, stored: %{field_grants: stored} = stored_all} = assigns
+    stored_read = Map.get(stored_all, :field_read_grants, %{})
     picks = (assigns.picks && assigns.picks.field_grants) || %{}
+    read_picks = (assigns.picks && Map.get(assigns.picks, :field_read_grants)) || %{}
 
     known =
       Enum.map(catalog.compiled, &{:compiled, to_string(&1.type), &1.label, fields_of(&1)}) ++
         Enum.map(catalog.dynamic, &{:dynamic, to_string(&1.type), &1.label, fields_of(&1)})
 
     known_keys = Enum.map(known, &elem(&1, 1))
-    stale = for key <- stored |> Map.keys() |> Enum.sort(), key not in known_keys, do: key
+
+    stale =
+      for key <- Enum.sort(Enum.uniq(Map.keys(stored) ++ Map.keys(stored_read))),
+          key not in known_keys,
+          do: key
 
     rows =
       (known ++ Enum.map(stale, &{:stale, &1, &1, []}))
       |> Enum.with_index()
       |> Enum.map(fn {{group, key, label, fields}, index} ->
-        grant_row(assigns, group, key, label, fields, index, Map.get(stored, key), picks[key])
+        definitions = Map.get(Map.get(catalog, :fields, %{}), key, [])
+
+        assigns
+        |> grant_row(group, key, label, fields, index, Map.get(stored, key), picks[key])
+        |> Map.merge(custom_assigns(definitions))
+        |> Map.merge(read_assigns(assigns, key, definitions, stored_read, read_picks))
+        |> then(fn row ->
+          %{row | other: row.other -- Enum.map(row.custom, & &1.key)}
+        end)
       end)
 
     %{
       base: "#{assigns.id}-grants",
       level: assigns.level,
       rows: rows,
-      field_errors: form_errors(assigns.form, :field_grants)
+      field_errors:
+        form_errors(assigns.form, :field_grants) ++ form_errors(assigns.form, :field_read_grants)
     }
   end
+
+  # The individual custom fields a write grant can name (#2281): top-level
+  # fields by name, a group's sub-fields beneath it. Computed fields are the
+  # system's, and link fields ride on their reference, so neither is offered.
+  defp custom_assigns(definitions) do
+    custom =
+      for %{field_type: type} = definition <- top_level(definitions),
+          type != :computed,
+          entry <- [entry(definition, 0) | group_entries(definition)],
+          do: entry
+
+    %{custom: custom}
+  end
+
+  defp group_entries(%{field_type: :group} = group) do
+    for sub <- FieldDefinition.group_fields(group),
+        sub.field_type != :computed,
+        do: %{
+          key: FieldAccess.key([group.name, sub.name]),
+          label: definition_label(sub),
+          depth: 1
+        }
+  end
+
+  defp group_entries(_definition), do: []
+
+  defp entry(definition, depth),
+    do: %{
+      key: FieldAccess.key([definition.name]),
+      label: definition_label(definition),
+      depth: depth
+    }
+
+  defp definition_label(%{label: label}) when is_binary(label) and label != "", do: label
+  defp definition_label(%{name: name}), do: name
+
+  defp top_level(definitions),
+    do: Enum.filter(definitions, &(is_nil(&1.link_of_id) and is_nil(&1.group_of_id)))
+
+  # The read picker (#2281): only private top-level fields can be hidden, so
+  # only those are offered; the bare key stands for all of them.
+  defp read_assigns(assigns, key, definitions, stored_read, read_picks) do
+    stored = Map.get(stored_read, key)
+    pick = read_picks[key]
+
+    private =
+      for %{private: true} = definition <- top_level(definitions), do: entry(definition, 0)
+
+    checked = picked_values(pick, stored)
+    offered = ["custom_fields" | Enum.map(private, & &1.key)]
+
+    %{
+      read_mode: picked_mode(pick, stored),
+      read_private: private,
+      read_checked: checked,
+      read_other: Enum.uniq((stored || []) ++ checked) -- offered,
+      read_error: Map.get(assigns.errors, {:read_grant, key}),
+      read_shown?: private != [] or not is_nil(stored) or not is_nil(pick)
+    }
+  end
+
+  defp picked_mode(%{mode: mode}, _stored), do: mode
+  defp picked_mode(_pick, nil), do: "any"
+  defp picked_mode(_pick, []), do: "none"
+  defp picked_mode(_pick, _stored), do: "only"
+
+  defp picked_values(%{values: values}, _stored) when values not in [nil, false], do: values
+  defp picked_values(_pick, stored), do: stored || []
 
   defp fields_of(descriptor), do: EnforceFieldGrants.grantable_fields(descriptor)
 
@@ -360,11 +450,38 @@ defmodule KilnCMSWeb.ScopePickers do
               raw={field}
             />
           </div>
-          <p :if={"custom_fields" in @row.fields} class="text-xs text-base-content/60">
-            {gettext(
-              "Custom fields are granted all together: there is no grant for one custom field on its own."
-            )}
-          </p>
+          <div :if={@row.custom != []} class="space-y-1">
+            <p class="text-xs font-medium text-base-content/70">
+              {gettext("Individual custom fields")}
+            </p>
+            <p class="text-xs text-base-content/70">
+              {gettext(
+                "Tick Custom fields (all of them) above for every custom field, or pick individual ones here. A group's own box lets them add, remove and reorder its rows; a field under it lets them change just that field in every row. With any of these ticked, creating a document is held to them too."
+              )}
+            </p>
+            <ul class="space-y-1">
+              <li
+                :for={{entry, index} <- Enum.with_index(@row.custom)}
+                class={[entry.depth > 0 && "ml-6"]}
+              >
+                <label
+                  for={"#{@row.base}-custom-#{index}"}
+                  class="inline-flex cursor-pointer items-center gap-2 text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    id={"#{@row.base}-custom-#{index}"}
+                    name={"#{@row.name}[grant_fields][#{@row.index}][]"}
+                    value={entry.key}
+                    checked={entry.key in @row.checked}
+                    class="field-checkbox size-4"
+                  />
+                  {entry.label}
+                  <code class="font-mono text-xs text-base-content/70">{entry.key}</code>
+                </label>
+              </li>
+            </ul>
+          </div>
           <div :if={@row.other != []} class="space-y-1">
             <p class="text-xs font-medium text-base-content/70">{gettext("Other stored fields")}</p>
             <p class="text-xs text-base-content/60">
@@ -389,9 +506,90 @@ defmodule KilnCMSWeb.ScopePickers do
           :if={@row.error}
           message={gettext("Pick at least one field, or choose No fields.")}
         />
+
+        <.read_picker :if={@row.read_shown?} row={@row} level={@level} />
       </div>
     </details>
     """
+  end
+
+  attr :row, :map, required: true
+  attr :level, :atom, required: true
+
+  # Which private custom fields of the type they can see (#2281).
+  defp read_picker(assigns) do
+    ~H"""
+    <div class="space-y-2 border-t border-base-content/10 pt-3">
+      <.input
+        type="select"
+        id={"#{@row.base}-read-mode"}
+        name={"#{@row.name}[grant_read_mode][#{@row.index}]"}
+        value={@row.read_mode}
+        options={read_mode_options(@level)}
+        label={gettext("Custom fields they can read")}
+        hint={
+          gettext(
+            "Only private custom fields can be hidden: everyone who can edit this type already reads the others. A field they may change is always readable."
+          )
+        }
+      />
+      <fieldset :if={@row.read_mode == "only"} class="space-y-2">
+        <legend class="text-xs font-medium text-base-content/70">
+          {gettext("Private fields of %{type} they can read", type: @row.label)}
+        </legend>
+        <input type="hidden" name={"#{@row.name}[grant_read_fields][#{@row.index}][]"} value="" />
+        <div class="flex flex-wrap gap-2">
+          <.choice
+            id={"#{@row.base}-read-all"}
+            name={"#{@row.name}[grant_read_fields][#{@row.index}][]"}
+            value="custom_fields"
+            checked={"custom_fields" in @row.read_checked}
+            label={gettext("All private fields")}
+            raw="custom_fields"
+          />
+          <.choice
+            :for={{entry, index} <- Enum.with_index(@row.read_private)}
+            id={"#{@row.base}-read-#{index}"}
+            name={"#{@row.name}[grant_read_fields][#{@row.index}][]"}
+            value={entry.key}
+            checked={entry.key in @row.read_checked}
+            label={entry.label}
+            raw={entry.key}
+          />
+        </div>
+        <div :if={@row.read_other != []} class="space-y-1">
+          <p class="text-xs font-medium text-base-content/70">{gettext("Other stored fields")}</p>
+          <p class="text-xs text-base-content/60">
+            {gettext(
+              "Stored for this type, but not a private field here, so they allow nothing. Untick one to remove it."
+            )}
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <.choice
+              :for={{field, index} <- Enum.with_index(@row.read_other)}
+              id={"#{@row.base}-read-other-#{index}"}
+              name={"#{@row.name}[grant_read_fields][#{@row.index}][]"}
+              value={field}
+              checked={field in @row.read_checked}
+              label={gettext("%{name} (not found)", name: field)}
+            />
+          </div>
+        </div>
+      </fieldset>
+      <.picker_error
+        :if={@row.read_error}
+        message={gettext("Pick at least one field, or choose None of them.")}
+      />
+    </div>
+    """
+  end
+
+  defp read_mode_options(level) do
+    [
+      {if(level == :role, do: gettext("All private fields"), else: unset_label(level)), "any"},
+      {gettext("Only these private fields"), "only"},
+      {gettext("None of them"), "none"}
+    ]
   end
 
   # --- shared pieces -----------------------------------------------------------
@@ -573,15 +771,51 @@ defmodule KilnCMSWeb.ScopePickers do
 
   def grants_summary(_grants, _catalog), do: nil
 
+  @doc """
+  A field-read-grants map in words, for a role or member row (the twin of
+  `grants_summary/2`).
+  """
+  @spec read_grants_summary(map() | nil, map()) :: String.t() | nil
+  def read_grants_summary(grants, catalog) when is_map(grants) and map_size(grants) > 0 do
+    labels = Map.new(catalog.compiled ++ catalog.dynamic, &{to_string(&1.type), &1.label})
+
+    parts =
+      grants
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.map_join("; ", fn {key, fields} ->
+        "#{Map.get(labels, key, key)}: #{grant_fields_text(fields)}"
+      end)
+
+    gettext("can read: %{grants}", grants: parts)
+  end
+
+  def read_grants_summary(_grants, _catalog), do: nil
+
   defp grant_fields_text([]), do: gettext("none")
   defp grant_fields_text(fields), do: Enum.join(fields, ", ")
 
-  @doc "The catalog `scope_pickers/1` offers for `org`."
-  @spec catalog(term()) :: map()
-  def catalog(org) do
-    %{
-      compiled: KilnCMS.CMS.ContentTypes.all(),
-      dynamic: KilnCMS.CMS.ContentTypes.dynamic_all(org)
-    }
+  @doc """
+  The catalog `scope_pickers/1` offers for `org`: the content types, and each
+  type's custom field definitions (read as `actor`) under its grant key, for
+  the per-field pickers (#2281).
+  """
+  @spec catalog(term(), map() | nil) :: map()
+  def catalog(org, actor \\ nil) do
+    compiled = KilnCMS.CMS.ContentTypes.all()
+    dynamic = KilnCMS.CMS.ContentTypes.dynamic_all(org)
+    org_id = KilnCMS.Accounts.org_id(org)
+
+    fields =
+      if actor,
+        do: Map.new(compiled ++ dynamic, &{to_string(&1.type), definitions(&1, actor, org_id)}),
+        else: %{}
+
+    %{compiled: compiled, dynamic: dynamic, fields: fields}
   end
+
+  defp definitions(%{source: :dynamic, definition: %{id: id}}, actor, org_id),
+    do: KilnCMS.CMS.field_definitions_for_definition!(id, actor: actor, tenant: org_id)
+
+  defp definitions(%{type: type}, actor, org_id),
+    do: KilnCMS.CMS.field_definitions_for!(type, actor: actor, tenant: org_id)
 end

@@ -85,19 +85,44 @@ There is no environment variable: the behaviour is fixed.
 
 ## Recovering from a lock-out
 
-If an admin blocked the range they work from, the console cannot be reached
-from it. Delete the row from the database, from any host that can reach it:
+If an admin blocked the range they work from (a shared proxy or a whole office
+included), the console cannot be reached from it. An operator with shell access
+to the running release lifts the block, from any network. Use `rpc`, not `eval`:
+the change must reach the running node and clear every node's cache.
+
+List the site's rules first (nothing is changed):
+
+```sh
+bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks()'
+```
+
+Remove one rule, or every rule:
+
+```sh
+bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(cidr: "203.0.113.0/24", remove: true)'
+bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(remove: true)'
+```
+
+Options: `org: "<slug>"` for a site other than the default one, `cidr:` to act on
+one rule (typed any way the form accepts), `remove: true` to delete (without it
+the call only lists). The result prints what was found or removed, and the
+change takes effect on every node at once. It runs as the `:operator` system
+actor, which may list and remove rules but not add them.
+
+`rpc` exits `0` whatever the call returns, including an error such as an unknown
+site slug or a `cidr:` with no rule. A script that must fail on an error matches
+the result: `'{:ok, _} = KilnCMS.Release.ip_blocks(remove: true)'`.
+
+Without a release, from a checkout or a database console, deleting the row also
+works, and is seen when the one-minute cache runs out:
 
 ```sql
 DELETE FROM ip_block_rules WHERE cidr = '203.0.113.0/24';
 -- or, to clear every rule: DELETE FROM ip_block_rules;
 ```
 
-The change is effective within the one-minute cache. (A release `rpc` that
-destroys the rule through `KilnCMS.CMS.destroy_ip_block_rule/2` works as well
-and clears the caches immediately, but needs the rule fetched under the right
-tenant; SQL is simpler.) You can also reach the console from another network, or
-over loopback, which is never blocked.
+You can also reach the console from another network, or over loopback, which is
+never blocked.
 
 ## Things to know
 
