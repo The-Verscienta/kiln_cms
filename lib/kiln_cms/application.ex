@@ -112,6 +112,13 @@ defmodule KilnCMS.Application do
       # deleted code-injection snippet stops executing everywhere rather than
       # on whichever node served the delete. After PubSub, which it needs.
       KilnCMS.Cache.ClusterBust,
+      # The change feed's local fan-out (#2083): one relay per scheduler,
+      # keyed by org, so a publish hands its feed event off in one send
+      # instead of delivering to every subscriber itself. After PubSub, which
+      # it broadcasts on, and before the Endpoint, so it outlives the
+      # subscribers on shutdown.
+      {PartitionSupervisor,
+       child_spec: KilnCMS.Delivery.Feed.Relay, name: KilnCMS.Delivery.Feed.Relays},
       # Whether more than one organization exists — what an unset
       # TENANT_STRICT_HOST decides strict host matching by (#1547). Counts
       # once in `init/1`, before the endpoint starts, so the first request
