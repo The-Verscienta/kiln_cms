@@ -404,6 +404,34 @@ carries the reasoning.
 
 ## Changed
 
+<a id="team-scope-pickers"></a>
+
+- **The scope of a custom role or a member on `/editor/team` is now picked
+  instead of typed.** The role and member forms asked for comma-separated type
+  names and a JSON object of field grants, which suited a developer but not
+  the operator who manages a team (#2141). Each type axis (**Content types
+  they may edit**, **Content types they may read in the editor**) is now a
+  choice between no restriction (on a member: **Inherit (custom role, then
+  account)**) and **Only these types**, with the site's types as checkboxes.
+  Custom types are one choice, **Custom content types (all of them)**, stored
+  as `entry` as before. **Field grants** has a row per content type with three
+  choices: no restriction (key absent), **Only these fields**, or
+  **No fields (can't change existing documents)**, which stores `[]`. "Only
+  these…" with nothing ticked is refused rather than saved as `[]`, which on a
+  type axis would mean every type.
+
+  Saving merges onto the stored value: names this site doesn't recognize are
+  shown "(not found)" and kept until unticked, so opening a form and saving it
+  writes back exactly what was there. A role saved unchanged isn't written at
+  all ("No changes."), so its members' live connections aren't dropped for
+  nothing. The member form shows what an inherited axis currently resolves to.
+  Who can change scope, the stored shapes, and `Accounts.update_role/3` and
+  the membership actions are unchanged; the new
+  `KilnCMS.CMS.Changes.EnforceFieldGrants.grantable_fields/1` lists the field
+  names a grant can usefully name for a type. No migration, config or API
+  change; rolling back the pin is safe. See
+  [Scope a custom role](../granular-rbac.md#scope-a-custom-role).
+
 <a id="webhook-secret-masked"></a>
 
 - **A webhook's signing secret is masked on `/editor/webhooks` until an admin

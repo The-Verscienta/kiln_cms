@@ -22,7 +22,9 @@ for the current model.
 
 Each scope axis lives on the org membership (`KilnCMS.Accounts.OrgMembership`),
 on its custom role, and on the user; the effective value resolves
-membership → role → user, first non-empty wins. Admins bypass the scope axes.
+membership → role → user, first non-empty wins (for `field_grants`, per type:
+the first level that has the type's key wins, even with `[]`). Admins bypass
+the scope axes.
 Everything is managed per org at **`/editor/team`** (admin-only); the user-level
 columns are the single-org fallback, set through `:manage_access`.
 
@@ -103,7 +105,9 @@ scope `editable_types` alongside it.
 `field_grants` (user + membership, same membership-wins resolution) maps a
 content-type name to the attribute names an editor may **change** on existing
 documents of that type — `%{"post" => ["title", "blocks"]}`. No entry for a
-type means no per-field restriction.
+type means no per-field restriction. An **empty list** is a restriction, not
+its absence: `%{"post" => []}` lets the editor change *no* field of an
+existing post (creating posts and running workflow verbs still work).
 
 An **admin-defined (dynamic) type is named by its own name**, not by `entry` —
 `%{"recipe" => ["title"]}` binds recipes and nothing else (#927). This differs
@@ -146,7 +150,9 @@ Deliberate semantics:
   verb outright.
 - Grant maps resolve **per type key** across the levels (membership → role →
   user): an override for one type never discards another level's restriction
-  on a different type.
+  on a different type. A key falls through only when it is absent; a `[]` at
+  the membership stops resolution there, so it overrides a role's list for
+  that type.
 
 ## Phase 2, slice 4 (shipped) — custom roles + `/editor/team`
 
@@ -162,8 +168,104 @@ custom role simply has no extra restriction bundle.
 
 **Team UI.** `/editor/team` (admin-only) manages the current org's members —
 add by existing account email, set tier / custom role / per-member scope
-overrides, grant a temporary tier, remove — and its custom roles. Scope inputs
-are plain comma-separated type lists and a JSON textarea for field grants.
+overrides, grant a temporary tier, remove — and its custom roles. The three
+scope axes are set with pickers (#2141): content types are ticked from the
+site's own list, and each content type's field grant is a choice between no
+restriction, **Only these fields** and **No fields**. Roles and memberships
+themselves are changed by platform admins only (`/editor/team`'s policies, as
+in [memberships.md](memberships.md)).
+
+What the pickers store:
+
+| Picker choice | Type axis stores | Field grant for the type stores |
+|---|---|---|
+| **No restriction from this role** (role) / **Inherit (custom role, then account)** (member) | `[]` | no key |
+| **Only these types** / **Only these fields** | the ticked list | the ticked list |
+| **No fields (can't change existing documents)** | — | `[]` |
+
+- **Only these…** with nothing ticked is refused, never saved as `[]`: on a
+  type axis `[]` means *no restriction*, so an empty pick would silently widen
+  the axis to every type.
+- Built-in types are ticked one by one. Every custom (dynamic) type is one
+  choice, **Custom content types (all of them)**, stored as `"entry"`,
+  because `editable_types` and `readable_types` still group them under that
+  key. Field grants list each custom type on its own row, under its own name.
+- The fields offered for a type are the ones its edit actions accept, named
+  the way enforcement compares them (`title` and `blocks` cover the working
+  copy too; `custom_fields` is one grant for all custom fields). Developers
+  can read the same list from
+  `KilnCMS.CMS.Changes.EnforceFieldGrants.grantable_fields/1`.
+- A saved form is **merged onto the stored value**: a stored type name, grant
+  key or field name this site no longer recognizes is shown marked
+  "(not found)" with its current state and kept on save; unticking it removes
+  it. A role saved without any change is not written at all (the page says
+  "No changes."), because every role update drops the live connections of
+  everyone holding the role.
+- On a member, **Only these…** *replaces* the custom role's list or grant for
+  that axis or type — it can widen past the role — and **No fields** overrides
+  the role's grant. Under **Inherit**, the form shows what currently applies:
+  "Currently inherited: …", taken from the custom role picked in the form, else
+  the account.
+
+### Scope a custom role
+
+Start on `/editor/team` as a platform admin, in the **Custom roles** section.
+
+1. In the new-role form, type a **Name** (for example "Blog editor") and an
+   optional **Description**.
+2. Under **Content types they may edit**, choose **Only these types**. The
+   site's content types appear as checkboxes; tick **Post**.
+3. Under **Content types they may read in the editor**, leave
+   **No restriction from this role**, or choose **Only these types** and tick
+   the types whose drafts members should see. Types they may edit are always
+   readable.
+4. Under **Field grants**, open the row for **Post** (under **Built-in**). In
+   **Fields of Post**, choose **Only these fields** and tick **Title** and
+   **Blocks**. To stop members changing a type's existing documents at all,
+   choose **No fields (can't change existing documents)** instead.
+5. Click **Add role**. The page says "Role added.", and the role's row
+   summarises its scope, for example
+   `edit: post · fields: Post: title, blocks`.
+6. Assign the role to members: click **Edit** on a member, pick it under
+   **Custom role**, and click **Save**.
+
+The role above stores:
+
+```elixir
+%{
+  editable_types: ["post"],
+  readable_types: [],
+  field_grants: %{"post" => ["title", "blocks"]}
+}
+```
+
+To change it later, click **Edit** on the role's row, change the pickers, and
+click **Save**.
+
+### Override one member's scope
+
+1. On `/editor/team`, click **Edit** on the member's row.
+2. Each axis starts at **Inherit (custom role, then account)**, with
+   "Currently inherited: …" showing what applies now. Choosing a different
+   **Custom role** in the same form updates that line.
+3. Choose **Only these types** (or, on a field-grant row, **Only these
+   fields** or **No fields**) for the axis to override, tick the values, and
+   click **Save**. The page says "Saved."
+
+### When the pickers refuse a save
+
+| Message | Meaning |
+|---|---|
+| "Pick at least one type, or choose No restriction from this role." | A role's type axis is on **Only these types** with nothing ticked. |
+| "Pick at least one type, or choose Inherit." | The same, on a member. |
+| "Pick at least one field, or choose No fields." | A field-grant row is on **Only these fields** with nothing ticked. |
+
+A refused save writes nothing: the other axes keep their stored values too.
+
+An editor held to a field grant sees "cannot be changed: outside your field
+grant for this content type" on a field outside it, and any grant on a type
+(including **No fields**) refuses restoring an old version of it: "restoring
+a version requires full field access for this content type".
 
 The accounts it can add from — every registration on the instance, with the
 platform role, password resets and account removal — are at `/editor/accounts`:
