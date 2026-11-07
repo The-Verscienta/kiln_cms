@@ -5158,6 +5158,11 @@ msgstr "No se pudo mostrar ese secreto de firma."
 msgid "Couldn't revoke that key."
 msgstr "No se pudo revocar esa clave."
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't rotate that signing secret."
+msgstr "No se pudo rotar ese secreto de firma."
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't save that item."
@@ -6437,6 +6442,16 @@ msgstr "Hecho:"
 msgid "Done: %{changed} renamed, %{pinned} hand-picked skipped, %{scanned} scanned."
 msgstr "Listo: %{changed} renombrados, %{pinned} definidos manualmente omitidos, %{scanned} analizados."
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Download CSV"
+msgstr "Descargar CSV"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Download JSON"
+msgstr "Descargar JSON"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Download a copy of your account profile and notification preferences as JSON."
@@ -7551,10 +7566,16 @@ msgstr "Caduca (UTC)"
 msgid "Expires in"
 msgstr "Caduca en"
 
+#: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Export"
 msgstr "Exportar"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Export %{count} matching"
+msgstr "Exportar %{count} coincidentes"
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -7582,11 +7603,21 @@ msgstr "Exportar (JSON)"
 msgid "Export CSV"
 msgstr "Exportar CSV"
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Export matching"
+msgstr "Exportar coincidentes"
+
 #: lib/kiln_cms_web/live/account_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Export my data"
 msgstr "Exportar mis datos"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Export selected"
+msgstr "Exportar seleccionados"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -7597,6 +7628,16 @@ msgstr "Exportar el registro (CSV)"
 #, elixir-autogen, elixir-format
 msgid "Export trail (JSON)"
 msgstr "Exportar el registro (JSON)"
+
+#: lib/kiln_cms_web/controllers/content_export_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Exporting content needs an editor account."
+msgstr "Exportar contenido requiere una cuenta de editor."
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Exports the columns shown in the list."
+msgstr "Exporta las columnas que muestra la lista."
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
@@ -9051,6 +9092,11 @@ msgstr "Incluir %{type} en los feeds de este sitio"
 msgid "Include in the XLIFF export"
 msgstr "Incluir en la exportación XLIFF"
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Include private fields"
+msgstr "Incluir campos privados"
+
 #: lib/kiln_cms_web/controllers/auth_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Incorrect email or password"
@@ -10355,6 +10401,11 @@ msgstr "Más filtros"
 #, elixir-autogen, elixir-format
 msgid "More surfaces"
 msgstr "Más superficies"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "More than %{max} rows — narrow the list first"
+msgstr "Más de %{max} filas: acota primero la lista"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
@@ -14816,6 +14867,11 @@ msgstr "Girar a la izquierda"
 msgid "Rotate right"
 msgstr "Girar a la derecha"
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotate secret"
+msgstr "Rotar secreto"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Rotate the DKIM key? You must publish the new DNS record before signed mail verifies again."
@@ -14825,6 +14881,11 @@ msgstr "¿Rotar la clave DKIM? Debe publicar el nuevo registro DNS antes de que 
 #, elixir-autogen, elixir-format
 msgid "Rotate the key"
 msgstr "Rotar la clave"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotate this signing secret? Deliveries start using the new secret now, and the old one stops working, so update the receiver with the new secret."
+msgstr "¿Rotar este secreto de firma? Los envíos empiezan a usar el nuevo secreto ahora y el anterior deja de funcionar, así que actualice el receptor con el nuevo secreto."
 
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
@@ -14852,6 +14913,11 @@ msgstr "Rotada desde %{id}"
 #, elixir-autogen, elixir-format
 msgid "Rotates itself until %{date}"
 msgstr "Se rota sola hasta el %{date}"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotating…"
+msgstr "Rotando…"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
@@ -15607,6 +15673,12 @@ msgstr "Seleccionar todo lo cargado"
 msgid "Select all visible"
 msgstr "Seleccionar todo lo visible"
 
+#: lib/kiln_cms_web/controllers/content_export_controller.ex
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Select at most %{max} rows to export."
+msgstr "Selecciona como máximo %{max} filas para exportar."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Select content in the content list and use “Add to release”."
@@ -16233,6 +16305,11 @@ msgstr "Secreto de firma"
 #, elixir-autogen, elixir-format
 msgid "Signing secret copied."
 msgstr "Secreto de firma copiado."
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signing secret replaced. Copy the new secret into your receiver; the old one no longer works."
+msgstr "Secreto de firma reemplazado. Copie el nuevo secreto en su receptor; el anterior ya no funciona."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -18145,6 +18222,11 @@ msgstr "No se pudo guardar la instancia de búsqueda."
 msgid "The section editors see it under"
 msgstr "La sección en la que lo ven los editores"
 
+#: lib/kiln_cms_web/controllers/content_export_controller.ex
+#, elixir-autogen, elixir-format
+msgid "The selection is not a list of content ids."
+msgstr "La selección no es una lista de ids de contenido."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "The shipped pack deliberately leaves out bare marketing words — \"best\", \"free\", \"proven\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
@@ -18600,6 +18682,11 @@ msgstr "Este experimento concluyó sin ganadora."
 #, elixir-autogen, elixir-format
 msgid "This expiry date is more than a year away."
 msgstr "Esta fecha de caducidad está a más de un año."
+
+#: lib/kiln_cms_web/controllers/content_export_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This export has more than %{max} rows. Narrow the list with a filter and try again."
+msgstr "Esta exportación tiene más de %{max} filas. Acota la lista con un filtro e inténtalo de nuevo."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -20821,6 +20908,11 @@ msgstr "No puedes fijar la fecha de publicación de este contenido."
 msgid "You can't share a preview of this document."
 msgstr "No puedes compartir una vista previa de este documento."
 
+#: lib/kiln_cms_web/controllers/content_export_controller.ex
+#, elixir-autogen, elixir-format
+msgid "You cannot export that content type."
+msgstr "No puedes exportar ese tipo de contenido."
+
 #: lib/kiln_cms_web/controllers/billing_controller.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have a membership to manage yet."
@@ -22789,8 +22881,8 @@ msgstr "ilegible: los envíos fallan. Probablemente se rotó SECRET_KEY_BASE sin
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
-msgid "unreadable — it was encrypted under a SECRET_KEY_BASE this server no longer has. Delete and re-create the endpoint."
-msgstr "ilegible — se cifró con un SECRET_KEY_BASE que este servidor ya no tiene. Elimine y vuelva a crear el endpoint."
+msgid "unreadable — it was encrypted under a SECRET_KEY_BASE this server no longer has. Rotate the secret, or delete and re-create the endpoint."
+msgstr "ilegible — se cifró con un SECRET_KEY_BASE que este servidor ya no tiene. Rote el secreto, o elimine y vuelva a crear el endpoint."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex

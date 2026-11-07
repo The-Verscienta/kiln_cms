@@ -118,6 +118,28 @@ carries the reasoning.
     `kiln_cms.ip_block.refused.count`, tagged `surface`, never the address.
   See [ip-blocking.md](../ip-blocking.md).
 
+<a id="webhook-rotate-secret"></a>
+
+- **Admins can rotate a webhook endpoint's signing secret (#2347).** Each row
+  on `/editor/webhooks` has a **Rotate secret** button (admin only, with a
+  confirmation). It replaces the secret and reveals the new one so you can
+  copy it into the receiver. Before this, the only way to change a secret was
+  to delete the endpoint and add it again, which also lost its settings.
+  Rotation takes effect immediately and there is no dual-secret window: it is
+  the remedy for a leaked secret, so the old one must stop working. Queued and
+  retried deliveries sign at send time and use the new secret; one attempt
+  already in flight can fail and is retried. Health counters
+  (`consecutive_failures`, `auto_disabled_at`) are not touched, so an endpoint
+  near the auto-disable limit can tip over while the receiver still holds the
+  old secret. The old ciphertext is never decrypted, so an endpoint whose
+  secret is unreadable after `SECRET_KEY_BASE` was lost can be rotated back to
+  health; the unreadable-secret message now points at the button. Rotation
+  logs `webhook secret rotated endpoint_id=… org_id=… actor_id=…` at info
+  level (never the secret) and leaves no other audit trail. Over code it is
+  `KilnCMS.CMS.rotate_webhook_secret/2`. No migration, no env var, no upgrade
+  step; rolling the pin back is safe. See
+  [Rotate a webhook signing secret](../webhooks.md#rotate-a-webhook-signing-secret).
+
 <a id="graphql-custom-where"></a>
 
 - **GraphQL filters custom fields with typed operators (`customWhere`, #2290).**
@@ -260,6 +282,48 @@ carries the reasoning.
   - **Upgrade.** No migration, no config. `saved_views.params` is an existing
     map, now allowed a `cf` key; rolling the pin back leaves such a view with an
     unknown key an older list ignores.
+
+<a id="content-list-export"></a>
+
+- **The content list can be downloaded as CSV or JSON.** On `/editor`, editors
+  and admins get an **Export** menu in the list's header bar with **Download
+  CSV** and **Download JSON**, and the bulk bar gains **Export selected** (CSV,
+  the ticked rows). This is the third part of #2293, after the Columns picker
+  and field filter and sort.
+  - **What is exported.** The rows the list shows for the same type, status,
+    search, field conditions and field sort, as the person asking (a record
+    they cannot read is absent). Columns are `id,type,title,slug,status,locale,updated_at`
+    plus the person's saved list columns for the type, nothing else; the panel
+    says *Exports the columns shown in the list.* The scope is the types the
+    editor can author, as in the list. With "All types" the types come one
+    after another, not merged into the list's order. Export selected takes at
+    most 100 rows and ignores every filter but the type.
+  - **Private fields.** Left out unless **Include private fields** is ticked
+    (shown when the type has any); every user field counts as private. A `cf`
+    condition on a private field is accepted even when the column is not
+    exported, as in the list.
+  - **Values.** The file is data, not the screen: booleans are `true` / `false`
+    (not Yes / No), media is the file name (not the alt text), select is the
+    stored value, long values are not cut. A reference is its readable title
+    (JSON `{id, label}`); an unreadable or deleted target is `Unavailable`
+    (JSON `{id: null, label: "Unavailable"}`), never the title stored in the
+    field. CSV starts with a UTF-8 byte order mark for Excel.
+  - **Limits.** More than 10,000 rows is HTTP 413 with a message, never a
+    truncated file; a download is stopped after 60 seconds; 10 downloads a
+    minute per account, 429 with `Retry-After`. The rate limit is counted per
+    node, and a refused request also spends it. A download stopped part-way
+    drops the connection unfinished: a CSV ends mid-file and a JSON array is
+    never closed, so a file that parses is complete.
+  - **Operators and developers.** Optional
+    `config :kiln_cms, :content_export, max_rows: 10_000, time_limit_ms: 60_000`.
+    Each download logs `content export` and emits
+    `[:kiln_cms, :content_export, :stop]` (`%{rows: n}`; metadata `user_id`,
+    `org_id`, `type`, `format`, `rows`, `columns`, `include_private`), never a
+    value or filter text. There is no audit trail of exports yet. Routes:
+    `GET /editor/content/export.csv` and `.json`, editor-only, session auth.
+    Guide: [Export the content list as CSV or JSON](../extending-content.md#export-the-content-list-as-csv-or-json).
+  - **Upgrade.** No migration, no required config; rolling the pin back
+    removes the menu and the routes.
 
 <a id="custom-field-native-filter-sort"></a>
 
@@ -563,6 +627,19 @@ carries the reasoning.
 
 ## Changed
 
+<a id="csv-numbers-unguarded"></a>
+
+- **A real number in a CSV export is written as itself.** The CSV writer
+  prefixed any value starting with `-` with `'` to stop a spreadsheet running
+  it as a formula, which turned the number -5 into the text `'-5`. A value that
+  is a number (integer, float, decimal) now skips the guard; text is
+  unchanged, so the string `-5` and `=1+1` are still prefixed, even in an
+  integer field. Chosen as Changed rather than Fixed because it alters the
+  bytes a CSV writes for a negative number, wherever `KilnCMSWeb.CSV.line/1`
+  is given one (core exports mostly write counts, which are not negative; an
+  overlay's may). `parse/1` reads
+  both forms back to `-5`.
+
 <a id="access-denied-page"></a>
 
 - **A console page you lack the role for now lands on a persistent `/access-denied`
@@ -829,6 +906,43 @@ carries the reasoning.
 
 <a id="custom-sort-json-null-last"></a>
 
+<a id="auth-pages-landmarks-autocomplete"></a>
+
+- **The sign-in, register and reset pages now have a header landmark, one `h1`,
+  and `autocomplete` on their email and password boxes (#2162).** An
+  accessibility audit found auth content outside any landmark, no `h1`, and
+  fields a password manager had to guess at.
+  - **Landmarks and heading.** The environment banner and logo row are a
+    `<header>`, and the flash toast sits inside `<main id="main">`. The page
+    carries one screen-reader-only `h1` holding the page title (the tab title
+    the page already had), so it follows sign-in, register and reset as the
+    view changes. Each view keeps its visible heading, which stays an `h2`.
+    The two-factor prompt at `/sign-in/verify` follows the same rule: its
+    visible "Two-factor authentication" heading is now an `h2`, under the
+    hidden `h1`. Nothing looks different.
+  - **`autocomplete`.** The email box on sign-in, register and the
+    reset-request form has `autocomplete="email"`. The password box has
+    `current-password` on sign-in and `new-password` on register and on the
+    reset-token form, as do the confirmation boxes, so a password manager
+    offers to save a new password and does not fill a saved one into a "choose
+    a password" box (WCAG 1.3.5).
+  - **Not covered.** The email box on the magic-link request form still has no
+    `autocomplete`: it is rendered inside the library's component, and
+    changing it would mean copying that whole component.
+  - **For overlay authors.** Two more library renders are now Kiln copies:
+    `KilnCMSWeb.AuthIdentityInput` (the email box) and
+    `KilnCMSWeb.AuthResetRequestForm` (the `/reset` request form), next to
+    `AuthSignInForm`, `AuthRegisterForm`, `AuthResetForm` and
+    `AuthPasswordInput`. `KilnCMSWeb.AuthOverridesTest` renders the sign-in,
+    register and reset-token forms against upstream's and fails if they differ
+    by more than the `autocomplete` attribute, so re-run it when bumping
+    `ash_authentication_phoenix`; the `/reset` request form is not in that
+    comparison, so re-read `AuthResetRequestForm` against upstream's
+    `Password.ResetForm` by hand.
+    `AuthPasswordInput.password_field/1` and `password_confirmation_field/1`
+    now require an `autocomplete` attribute; an overlay that calls them must
+    pass one. No configuration, migration or upgrade step.
+
 - **`custom_sort` treats a stored JSON `null`, array or object as no value, and
   page 2 of a keyset-paged `custom_sort` no longer fails on one.** On the
   JSON:API and GraphQL reads, a record whose custom field was stored as a JSON
@@ -982,6 +1096,36 @@ carries the reasoning.
   modal keeps its focus. The old `<details>` also lost its `open` state on
   every LiveView patch, so a list refresh behind an open menu snapped it
   shut; the new one keeps its state across patches it didn't cause.
+
+<a id="public-muted-text-contrast"></a>
+
+- **Secondary text on public pages and in the shared form components moves from 50-60% to 70% opacity, so it clears WCAG 1.4.3 (4.5:1).**
+  Muted text is `text-base-content` at reduced opacity, and nothing renders
+  wrong when the opacity is too low. Measured against the theme tokens in
+  `assets/css/app.css`, `/60` is 4.12:1 on the light theme's page background
+  and `/50` is 3.09:1; `/70` is about 5.1:1 or better on every surface in both
+  themes. The public templates (blog and event indexes, search, newsletter
+  confirmation, the home page), the release preview, the setup wizard, public
+  forms, the block components, form field hints, the empty-state text, the
+  password show/hide toggle and the flash close icon (`opacity-40` to
+  `opacity-70`) now use `/70`. Overlays and plugins that copy these classes
+  are unaffected; nothing changes in markup structure or in any API.
+  - **A guard keeps it that way.** `test/kiln_cms_web/muted_text_contrast_test.exs`
+    scans `lib/kiln_cms_web` for `text-base-content/N` (and bare `opacity-N`)
+    below 70. Public paths must be at zero. The console is a ratchet against
+    `test/kiln_cms_web/muted_text_console_baseline.txt`: a file may not gain
+    offenders, and the count only goes down. A non-text use (an icon glyph, a
+    disabled control) is exempted with a `contrast-ok: <why>` comment on the
+    same line or the line above.
+  - **What the guard does not do.** It reads class names, not rendered
+    contrast: it does not run axe (there is none in the repo), and it does not
+    see templates authored outside this repo, such as a plugin's. The
+    authenticated console still has muted text below the floor; it is counted
+    in the baseline and lowered as files are touched.
+  - **Contributors.** After lowering a console count, regenerate the baseline
+    with `KILN_UPDATE_CONTRAST_BASELINE=1 mix test test/kiln_cms_web/muted_text_contrast_test.exs`
+    and commit the file. See [Muted text](../design-language.md#muted-text).
+  ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163))
 
 ## Security
 

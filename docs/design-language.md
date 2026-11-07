@@ -71,6 +71,35 @@ link, in-content links) are darkened for AA on light surfaces. Retune by editing
 the `@theme` / `[data-theme="dark"]` blocks — do **not** introduce new raw colors
 in components.
 
+### Muted text
+
+Secondary text is `text-base-content` at reduced opacity. Nothing looks wrong
+when the opacity is too low, so the floor is a rule: **`text-base-content/70`
+for any text**. Measured from the tokens above, `/70` is about 5.1:1 or better on
+`base-100`, `base-200` and `base-300` in both themes; `/60` is 4.12:1 on light
+`base-100` and `/50` is 3.09:1, both under the 4.5:1 AA line. Go lower only
+for non-text: an icon glyph, a decorative empty-state mark, a disabled
+control. Mark each such use with a `contrast-ok: <why>` comment on the same
+line or the line above (`<%!-- contrast-ok: decorative glyph --%>`). Opacity
+on an icon that carries meaning (the flash close button) is still `/70`.
+
+`test/kiln_cms_web/muted_text_contrast_test.exs` enforces this by scanning
+`lib/kiln_cms_web` for `text-base-content/N` and bare `opacity-N` below 70:
+
+- Public paths (controller templates, block components, and the live views
+  that render before sign-in) must have **zero** hits.
+- The console is a **ratchet** against
+  `test/kiln_cms_web/muted_text_console_baseline.txt`: a file may not gain
+  hits. When you lower a count, regenerate the baseline with
+  `KILN_UPDATE_CONTRAST_BASELINE=1 mix test test/kiln_cms_web/muted_text_contrast_test.exs`
+  and commit it.
+
+Limits: the guard reads class names, not rendered contrast. It does not run
+axe (the repo has none), it cannot see text colours set another way (a custom
+class, an inline style, a different token), and it does not cover templates
+authored outside this repo, such as a plugin's. Check those by eye in both
+themes.
+
 ## Component kit (`@layer components` in `app.css`)
 
 These are plain, token-driven CSS classes so a control looks identical whether
@@ -124,7 +153,10 @@ written as a function component or a raw `class="…"` in a template.
   `Layouts.auth_brand/1`, over every sign-in page and the first-run wizard).
   The library's sign-in pages take these through `AuthOverrides`; Kiln's own
   `/sign-in/verify` template uses them directly, so the two steps of a sign-in
-  look like one flow.
+  look like one flow. `Layouts.auth/1` wraps the brand row in a `<header>`,
+  puts the page in `<main id="main">` and draws the page's one `h1`, visually
+  hidden (`sr-only`) and taken from the page title; every view's visible
+  heading is therefore an `h2`, including the `/sign-in/verify` template.
 - **Tabs** — `.tabs` (segmented-control container) + `.tab`; drive the active
   segment with `aria-selected="true"` (accessible, no extra class). Used for the
   media Library/Trash switch. When the tabs switch panels on the same page (the
