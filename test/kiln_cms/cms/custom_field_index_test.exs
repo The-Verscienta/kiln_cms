@@ -14,9 +14,8 @@ defmodule KilnCMS.CMS.CustomFieldIndexTest do
   then may switch to a value-blind generic plan; a forced generic plan is
   checked too.
   """
-  # Not async: the plan assertions cost a table other tests are also writing and
-  # rolling back (dead tuples inflate its size), which made the planner flip to a
-  # Seq Scan under load. Alone, the plan is stable.
+  # Not async (the plan assertions cost a table other tests also write and
+  # roll back, and dead tuples skew its size).
   use KilnCMSWeb.ConnCase, async: false
 
   alias KilnCMS.CMS
@@ -168,13 +167,19 @@ defmodule KilnCMS.CMS.CustomFieldIndexTest do
       end
     end
 
-    defp assert_indexed(source, fun, index) do
+    # `seqscan: :off` is for `in`: a bitmap OR of GIN scans carries a fixed cost per
+    # value, so at fixture scale the planner may rightly prefer a Seq Scan (the
+    # 100k benchmark in docs/benchmarks.md covers its real choice). It still proves
+    # the predicate is index-matchable, which is what the rewrite is for.
+    defp assert_indexed(source, fun, index, opts \\ []) do
+      pre = if opts[:seqscan] == :off, do: "SET LOCAL enable_seqscan = off"
+
       {sql, params} = capture_query(source, fun)
 
       # Every execution: the first ones are planned against the real values,
       # later ones may be a generic plan.
       for run <- 1..8 do
-        plan = explain(sql, params)
+        plan = explain(sql, params, pre)
 
         assert plan =~ index, "run #{run}: #{plan}"
 
@@ -188,7 +193,7 @@ defmodule KilnCMS.CMS.CustomFieldIndexTest do
       end
 
       # And a plan that never sees the values at all.
-      plan = explain(sql, params, "SET LOCAL plan_cache_mode = force_generic_plan")
+      plan = explain(sql, params, [pre, "SET LOCAL plan_cache_mode = force_generic_plan"])
       assert plan =~ index, plan
       assert plan =~ "Index Cond:", plan
       refute plan =~ "Seq Scan on #{source}", plan
@@ -212,7 +217,8 @@ defmodule KilnCMS.CMS.CustomFieldIndexTest do
       assert_indexed(
         "pages",
         read_page(%{"price" => %{"in" => ["7", "8", "9"]}}, admin),
-        "pages_custom_fields_gin_index"
+        "pages_custom_fields_gin_index",
+        seqscan: :off
       )
     end
 
@@ -236,7 +242,8 @@ defmodule KilnCMS.CMS.CustomFieldIndexTest do
       assert_indexed(
         "entries",
         read_entry(%{"color" => %{"in" => ["c7", "c8", "c9"]}}, type, admin),
-        "entries_custom_fields_gin_index"
+        "entries_custom_fields_gin_index",
+        seqscan: :off
       )
     end
 
@@ -353,7 +360,7 @@ defmodule KilnCMS.CMS.CustomFieldIndexTest do
   end
 
   def explain(sql, params, setup \\ nil) do
-    if setup, do: Repo.query!(setup)
+    for stmt <- List.wrap(setup), stmt, do: Repo.query!(stmt)
 
     Repo.query!("EXPLAIN (FORMAT TEXT) " <> sql, params).rows
     |> Enum.map_join("\n", &hd/1)
