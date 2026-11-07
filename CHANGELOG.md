@@ -174,12 +174,9 @@ Every summary line below that was shortened links to its own entry there.
   in `AshPhoenix.Form`; the editor now builds the block list from the form's current values.
   ([long form](docs/changelog/unreleased.md#columns-child-fresh-form))
 
-- **Global search's compound leg (a name written spaced or joined: `huang qi`, `xiao yao san`) is about
-  3× cheaper per candidate name.** It rebuilt each rewrite's `to_tsvector` and each span's
-  `phraseto_tsquery` for every candidate row × variant; they are now built once per statement, and a
-  name's own tsvector and tsquery once per name. Same rows, same order. Verscienta reported 1.6–4.0 s
-  for the leg on multi-word queries after #2205.
-  ([#2367](https://github.com/The-Verscienta/kiln_cms/pull/2367))
+- **Global search's compound leg (`huang qi`, `xiao yao san`) is about 3× cheaper per candidate name: variant
+  tsvectors and span tsqueries are built once per statement, not per row.**
+  ([#2367](https://github.com/The-Verscienta/kiln_cms/pull/2367) · [long form](docs/changelog/unreleased.md#compound-leg-hoist))
 
 - **Phoenix 1.8.16 with absinthe_phoenix 2.0.6: GraphQL subscription pushes still reach
   WebSocket clients after the bump, which silently dropped every push on absinthe_phoenix 2.0.5.**

@@ -787,3 +787,18 @@ carries the reasoning.
   fail `mix hex.audit` on every branch until taken. Lock-only: `mix
   deps.unlock ecto ash_sql`, nothing else moved.
   ([#2204](https://github.com/The-Verscienta/kiln_cms/pull/2204))
+
+<a id="compound-leg-hoist"></a>
+
+- **Global search's compound leg is about 3× cheaper per candidate name.**
+  The leg matches a name written spaced or joined differently from the query
+  (`huang qi` for Huangqi, `xiao yao san`). It rebuilt each rewrite's
+  `to_tsvector` and each span's `phraseto_tsquery` for every candidate row ×
+  variant, though neither depends on the row. Both are now scalar subselects
+  Postgres runs once per statement, and a name's own tsvector and tsquery are
+  built once per name in a `LATERAL ... OFFSET 0`. Same rows, same order;
+  empty names are still skipped before any tsquery is built. On a synthetic
+  2,047-row table with 16 variants, `EXPLAIN ANALYZE` went from about 30 ms to
+  about 10 ms. Verscienta reported 1.6–4.0 s for the leg on multi-word queries
+  after #2205; that figure has not been re-measured on their data.
+  ([#2367](https://github.com/The-Verscienta/kiln_cms/pull/2367))
