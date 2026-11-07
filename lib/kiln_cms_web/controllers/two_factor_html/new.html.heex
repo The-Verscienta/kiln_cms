@@ -1,6 +1,8 @@
 <div class="auth-page">
   <div class="auth-card py-12">
-    <h1 class="auth-title mb-2">{gettext("Two-factor authentication")}</h1>
+    <%!-- An h2: `Layouts.auth/1` draws the page's one (sr-only) h1 from this
+          same title (#2162). --%>
+    <h2 class="auth-title mb-2">{gettext("Two-factor authentication")}</h2>
     <p id="two-factor-help" class="auth-muted mb-6">
       {gettext("Enter the 6-digit code from your authenticator app.")}
     </p>

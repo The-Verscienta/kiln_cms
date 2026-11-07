@@ -104,6 +104,7 @@ defmodule KilnCMSWeb.AuthResetForm do
         />
 
         <AuthPasswordInput.password_field
+          autocomplete="new-password"
           strategy={@strategy}
           form={form}
           overrides={@overrides}
@@ -113,6 +114,7 @@ defmodule KilnCMSWeb.AuthResetForm do
 
         <%= if @strategy.confirmation_required? do %>
           <AuthPasswordInput.password_confirmation_field
+            autocomplete="new-password"
             strategy={@strategy}
             form={form}
             overrides={@overrides}

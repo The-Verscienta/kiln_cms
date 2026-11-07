@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (new table `site_password_policy`, no data change). Password changes now call the Have I Been Pwned range API by
+  default; air-gapped deployments set `BREACHED_PASSWORD_CHECK=false`.** Rolling the pin back is safe.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-upgrade))
+
 - **API consumers: a stale, expired or garbled `Authorization: Bearer` JWT is now a 401 (`invalid_token`), not anonymous
   data. Fix the client; `KILN_API_REJECT_INVALID_BEARER=false` restores the old fallback for this release only.**
   ([#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161) · [long form](docs/changelog/unreleased.md#reject-invalid-bearer-default-on))
@@ -80,12 +84,22 @@ Every summary line below that was shortened links to its own entry there.
   Additive (`NOT NULL DEFAULT '{}'`). Rolling the pin back is safe for data, but an older release ignores read grants, so a private field you restricted shows to editors again.
   ([long form](docs/changelog/unreleased.md#custom-field-grants-upgrade))
 
+### Breaking
+
+- **Overlays: `Accounts.Bootstrap.create_first_admin/1` returns `{:ok, user, notices}`, not `{:ok, user}`.**
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-bootstrap-return))
+
 ### Added
 
 - **Roles and members can be granted individual custom fields, and private custom fields can be hidden from some editors.**
   New `custom_fields.<name>` grant keys and a `field_read_grants` axis; set both on `/editor/team`. Guide: [docs/granular-rbac.md](docs/granular-rbac.md#per-custom-field-grants-and-read-restrictions).
   ([long form](docs/changelog/unreleased.md#custom-field-grants))
 
+- **Admins choose what happens to a breached password at Organization → Password policy: off, warn (default) or block for administrators.**
+  Checked on register, change, reset and first-run setup, by k-anonymity.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-check))
+- **Admins can replace a webhook's signing secret with Rotate secret on `/editor/webhooks`; it works even when the old secret is unreadable.**
+  ([#2347](https://github.com/The-Verscienta/kiln_cms/issues/2347) · [long form](docs/changelog/unreleased.md#webhook-rotate-secret))
 - **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
   A wrong operand type is a schema error; `contains` and `startsWith` (case-insensitive, literal) also work in `customFilter`.
   ([#2290](https://github.com/The-Verscienta/kiln_cms/issues/2290) · [long form](docs/changelog/unreleased.md#graphql-custom-where))
@@ -151,6 +165,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **The signed-out home page and the default logo ship right-sized images: page image weight drops from about 1,030 KB to about 100 KB (WebP).**
+  ([#2165](https://github.com/The-Verscienta/kiln_cms/issues/2165) · [long form](docs/changelog/unreleased.md#public-image-weight))
+
 - **CSV exports write a negative number as `-5`, not `'-5`; text starting with `=`, `+`, `-` or `@` is still prefixed.**
   Affects any CSV that passes a negative number to `KilnCMSWeb.CSV`; text is unchanged.
   ([long form](docs/changelog/unreleased.md#csv-numbers-unguarded))
@@ -190,6 +207,11 @@ Every summary line below that was shortened links to its own entry there.
   ([#2144](https://github.com/The-Verscienta/kiln_cms/issues/2144) · [long form](docs/changelog/unreleased.md#essentials-hidden-screens-hint))
 
 ### Fixed
+
+- **Three dead links in the docs now resolve (the `KilnCMS.Keys` link in Memberships and Ghost's schema in both comparison pages), and a docs test refuses relative `.html` links.** ([#2167](https://github.com/The-Verscienta/kiln_cms/issues/2167))
+
+- **The sign-in, register and reset pages now have a header landmark, one `h1`, and `autocomplete` on their email and password boxes.**
+  ([#2162](https://github.com/The-Verscienta/kiln_cms/issues/2162) · [long form](docs/changelog/unreleased.md#auth-pages-landmarks-autocomplete))
 
 - **`custom_sort` ranks a stored JSON `null`, array or object as no value (last in either direction), and page 2 of a keyset-paged sort no longer fails on one.**
   ([long form](docs/changelog/unreleased.md#custom-sort-json-null-last))
@@ -231,6 +253,9 @@ Every summary line below that was shortened links to its own entry there.
   (`內`, many other CJK characters) saves again: line splitting reads Unicode, not bytes, so
   the character is no longer cut in two and refused.**
   ([#2214](https://github.com/The-Verscienta/kiln_cms/pull/2214))
+
+- **Muted text on public pages and shared form components is now readable: `text-base-content/70`, 4.5:1 or better on every surface.**
+  ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163) · [long form](docs/changelog/unreleased.md#public-muted-text-contrast))
 
 ### Security
 

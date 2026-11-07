@@ -3,6 +3,7 @@ defmodule KilnCMSWeb.AuthController do
   use AshAuthentication.Phoenix.Controller
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.PasswordNotice
   alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMSWeb.SafeRedirect
 
@@ -12,6 +13,8 @@ defmodule KilnCMSWeb.AuthController do
   @remember_me_cookie KilnCMSWeb.SessionCookie.remember_me_key(@secure_cookies)
 
   def success(conn, activity, user, token) do
+    conn = carry_password_notice(conn, activity, user)
+
     # If the account has two-factor enabled, the first factor alone must not grant
     # a session: stash a signed, expiring pending token (carrying the first-factor
     # auth token, already minted + stored) and divert to the code prompt.
@@ -35,6 +38,26 @@ defmodule KilnCMSWeb.AuthController do
       complete_sign_in(conn, user, message_for(activity))
     end
   end
+
+  # The "breached password" note left by a register or reset (#2240) is taken
+  # only at a *password* sign-in (register, reset, sign-in, sign-in with token),
+  # never at a magic link or any other method. It rides the session, as a
+  # boolean, to wherever the sign-in completes: straight away below, or after
+  # the second factor in `TwoFactorController`.
+  defp carry_password_notice(conn, {:password, _phase}, user) do
+    # Always drop any earlier marker first: one left by another account that
+    # abandoned its second-factor prompt must not surface for this one.
+    conn = delete_session(conn, :password_breach_notice)
+
+    if PasswordNotice.take(user.id),
+      do: put_session(conn, :password_breach_notice, true),
+      else: conn
+  end
+
+  # Any other method: drop a leftover from an abandoned password attempt, so a
+  # later magic-link + second-factor sign-in cannot surface it.
+  defp carry_password_notice(conn, _activity, _user),
+    do: delete_session(conn, :password_breach_notice)
 
   # A remember-me cookie is a *complete* sign-in in a cookie: the read plug hands
   # it to `store_in_session/2` directly, which never passes through this module
@@ -103,17 +126,25 @@ defmodule KilnCMSWeb.AuthController do
   """
   def complete_sign_in(conn, user, message) do
     return_to = sign_in_destination(conn, user)
+    notice? = get_session(conn, :password_breach_notice) == true
 
     conn
     |> delete_session(:return_to)
+    |> delete_session(:password_breach_notice)
     |> delete_session(:pending_2fa)
     |> store_in_session(user)
     |> put_live_socket_id(user)
     # If your resource has a different name, update the assign name here (i.e :current_admin)
     |> assign(:current_user, user)
     |> put_flash(:info, message)
+    |> flash_password_notice(notice?)
     |> redirect(to: return_to)
   end
+
+  # `:error`, not `:info`: the info flash dismisses itself, and this is a
+  # nudge to act on.
+  defp flash_password_notice(conn, true), do: put_flash(conn, :error, PasswordNotice.message())
+  defp flash_password_notice(conn, false), do: conn
 
   @doc """
   Key this session's LiveView socket to its user, so it can be dropped (#675).
