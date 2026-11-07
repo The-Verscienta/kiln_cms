@@ -26,6 +26,14 @@ defmodule KilnCMS.SchemaExport.GoldenTest do
     assert SchemaExport.TypeScript.emit(document) == File.read!(Path.join(@dir, "full.d.ts"))
   end
 
+  test "TypeScript with GraphQL fragments reproduces full.graphql.ts" do
+    document =
+      @dir |> Path.join("full.graphql.schema.json") |> File.read!() |> Jason.decode!()
+
+    assert SchemaExport.TypeScript.emit_graphql(document) ==
+             File.read!(Path.join(@dir, "full.graphql.ts"))
+  end
+
   test "Swift reproduces full.swift", %{document: document} do
     assert SchemaExport.Swift.emit(document) == File.read!(Path.join(@dir, "full.swift"))
   end
