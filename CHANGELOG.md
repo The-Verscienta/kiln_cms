@@ -136,6 +136,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Renaming a form field now saves on Enter or Save, keeps a refused name on screen with its error, and shows
+  machine names on the canvas; the Entries tab groups old keys under "From a renamed or removed field".**
+  ([long form](docs/changelog/unreleased.md#form-field-rename))
+
 - **`/forms/<slug>`, the address the form builder shows, now serves the active form as a page in the
   site's layout (it was a 404); the builder and forms list link it. Content at that address still wins.**
   ([#2341](https://github.com/The-Verscienta/kiln_cms/pull/2341) · [long form](docs/changelog/unreleased.md#public-form-page))
