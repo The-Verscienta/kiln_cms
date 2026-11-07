@@ -27,6 +27,18 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   the anonymous fallback; that escape hatch is kept for one more release, then
   removed.
 
+  ### Counting the stale tokens
+
+  Every request that presents such a bearer emits
+  `[:kiln_cms, :api, :invalid_bearer]`, whether or not it was refused:
+  measurement `count: 1`, metadata `enforced: boolean()`,
+  `surface: :json_api | :graphql | :media | :other`, `read?: boolean()` (a
+  `GET`/`HEAD`, or anything on `/gql`: the nearest cheap proxy for "a public
+  route that never needed the token") and `reason: :expired | :malformed |
+  :invalid` (read from the unverified payload, never sent to the client;
+  revoked, deleted-user and bad-signature tokens are all `:invalid`). No token,
+  user or address is in the event.
+
   Keeping the two apart matters: the API-key plug treats a present-but-unrecognised
   `Bearer` value as an *invalid key* (401), so it must never see a JWT.
   """
@@ -55,8 +67,50 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   def call(conn, {opts, loads_bearer?}) do
     cond do
       api_key_request?(conn) -> AshAuthentication.Strategy.ApiKey.Plug.call(conn, opts)
-      loads_bearer? and reject_invalid_bearer?() and unverified_bearer?(conn) -> reject(conn)
+      loads_bearer? and unverified_bearer?(conn) -> stale_bearer(conn)
       true -> conn
+    end
+  end
+
+  defp stale_bearer(conn) do
+    enforced? = reject_invalid_bearer?()
+
+    :telemetry.execute([:kiln_cms, :api, :invalid_bearer], %{count: 1}, %{
+      enforced: enforced?,
+      surface: surface(conn),
+      read?: read?(conn),
+      reason: reason(conn)
+    })
+
+    if enforced?, do: reject(conn), else: conn
+  end
+
+  defp surface(%Plug.Conn{path_info: ["api", "json" | _]}), do: :json_api
+  defp surface(%Plug.Conn{path_info: ["api", "graphql" | _]}), do: :graphql
+  defp surface(%Plug.Conn{path_info: ["gql" | _]}), do: :graphql
+  defp surface(%Plug.Conn{path_info: ["api", "media" | _]}), do: :media
+  defp surface(_conn), do: :other
+
+  defp read?(%Plug.Conn{method: method} = conn),
+    do: surface(conn) == :graphql or method in ["GET", "HEAD"]
+
+  # Classified from the unverified payload, for telemetry only.
+  defp reason(conn) do
+    token =
+      case bearer_headers(conn) do
+        ["Bearer " <> token | _] -> String.trim(token)
+        _ -> nil
+      end
+
+    case token && Joken.peek_claims(token) do
+      {:ok, %{"exp" => exp}} when is_number(exp) ->
+        if exp < System.os_time(:second), do: :expired, else: :invalid
+
+      {:ok, _claims} ->
+        :invalid
+
+      _ ->
+        :malformed
     end
   end
 

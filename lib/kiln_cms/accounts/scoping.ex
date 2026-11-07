@@ -118,20 +118,41 @@ defmodule KilnCMS.Accounts.Scoping do
         ) :: [String.t()] | nil
   def field_grant(_actor, _subject, nil), do: nil
 
-  def field_grant(actor, subject, type_name) do
+  def field_grant(actor, subject, type_name),
+    do: resolve_grant(actor, subject, type_name, :field_grants)
+
+  # Membership → role → user, per type key, for either grant map.
+  defp resolve_grant(actor, subject, type_name, attribute) do
     case affiliation(actor, subject_org_id(subject)) do
       {:member, membership} ->
-        grant_key(membership, type_name) ||
-          grant_key(role_of(membership), type_name) ||
-          grant_key(actor, type_name)
+        grant_key(membership, type_name, attribute) ||
+          grant_key(role_of(membership), type_name, attribute) ||
+          grant_key(actor, type_name, attribute)
 
       :unaffiliated ->
-        grant_key(actor, type_name)
+        grant_key(actor, type_name, attribute)
 
       :foreign_org ->
         []
     end
   end
+
+  @doc """
+  The actor's effective per-custom-field READ restriction for `type_name`
+  (#2281): the same shape and the same membership → role → user resolution as
+  `field_grant/3`, over `field_read_grants`. `nil` means unrestricted, a list
+  names the private custom fields that stay visible (`[]` hides all of them),
+  and a foreign-org actor gets `[]`. See `KilnCMS.CMS.FieldAccess`.
+  """
+  @spec field_read_grant(
+          map(),
+          Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil,
+          String.t() | nil
+        ) :: [String.t()] | nil
+  def field_read_grant(_actor, _subject, nil), do: nil
+
+  def field_read_grant(actor, subject, type_name),
+    do: resolve_grant(actor, subject, type_name, :field_read_grants)
 
   @doc """
   The consumer **audiences** the actor holds on the org the subject runs under
@@ -459,10 +480,10 @@ defmodule KilnCMS.Accounts.Scoping do
     end
   end
 
-  defp grant_key(nil, _type_name), do: nil
+  defp grant_key(nil, _type_name, _attribute), do: nil
 
-  defp grant_key(source, type_name) do
-    with grants when is_map(grants) <- Map.get(source, :field_grants),
+  defp grant_key(source, type_name, attribute) do
+    with grants when is_map(grants) <- Map.get(source, attribute),
          fields when is_list(fields) <- Map.get(grants, type_name) do
       fields
     else

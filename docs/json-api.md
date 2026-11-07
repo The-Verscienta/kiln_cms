@@ -239,7 +239,10 @@ route, see "Sorting" under "Custom fields" below.
 A **private** custom field (`private: true`, see
 [extending-content.md](extending-content.md)) is not in `custom_fields` for a
 caller below editor, and naming it in `custom_filter` or `custom_sort` is a
-`400` for them, as for a field that does not exist.
+`400` for them, as for a field that does not exist. The same holds for an
+editor whose role hides that private field from them (a read restriction,
+see [granular-rbac.md](granular-rbac.md#per-custom-field-grants-and-read-restrictions)),
+and a create or update response omits it too.
 
 Admin-defined custom fields (see
 [extending-content.md](extending-content.md)) live in one `custom_fields`

@@ -86,6 +86,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Overlays and plugins: the field type names `email`, `telephone`, `color`, `slug`, `time` and `json` are now built in. Rename a type that uses one; stored definitions with that name get the new strict check.**
   ([long form](docs/changelog/unreleased.md#builtin-field-type-names-upgrade))
 
+- **Overlays: run `mix ash.codegen`, commit the migration and run `mix ash.migrate`. Users, memberships and roles gain a `field_read_grants` column.**
+  Additive (`NOT NULL DEFAULT '{}'`). Rolling the pin back is safe for data, but an older release ignores read grants, so a private field you restricted shows to editors again.
+  ([long form](docs/changelog/unreleased.md#custom-field-grants-upgrade))
+
 - **Field definitions gain a `validation` column (`NOT NULL DEFAULT '{}'`, additive, safe to roll back). Overlays: run `mix ash.codegen`.
   `unique` fields have no database backstop; audit with `mix kiln.fields.duplicates`.**
   ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation-upgrade))
@@ -97,10 +101,13 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Roles and members can be granted individual custom fields, and private custom fields can be hidden from some editors.**
+  New `custom_fields.<name>` grant keys and a `field_read_grants` axis; set both on `/editor/team`. Guide: [docs/granular-rbac.md](docs/granular-rbac.md#per-custom-field-grants-and-read-restrictions).
+  ([long form](docs/changelog/unreleased.md#custom-field-grants))
+
 - **Backups gains a History of every attempt, app- and cron-made, with verified state and whether files are still on disk.**
   Platform admins, at `/editor/backups`; no new settings.
   ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217) · [long form](docs/changelog/unreleased.md#backup-history))
-
 
 - **Site admins can block an IP address or range at `/editor/ip-blocks` ("Blocked addresses"): an empty 403 on dynamic routes and sockets.
   Static assets and `/uploads` are not covered; behind a proxy set `TRUSTED_PROXIES` first.**

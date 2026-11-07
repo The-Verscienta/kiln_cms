@@ -49,7 +49,8 @@ defmodule KilnCMS.CMS.Translations do
   # (published_version, artifacts) start fresh; canonical_url is locale-specific
   # by nature, so it isn't carried over. The robots flags are document-level, so
   # they are (via `ContentCopy`).
-  @copied_attrs [:slug | ContentCopy.content_attrs()]
+  # `custom_fields` is carried key by key (`ContentCopy.custom_fields/3`, #2281).
+  @copied_attrs [:slug | ContentCopy.content_attrs() -- [:custom_fields]]
 
   # Carried whatever the acting editor's field grant says (#1157), each for its
   # own reason:
@@ -236,6 +237,7 @@ defmodule KilnCMS.CMS.Translations do
     # is reordered. See `ContentCopy.dump_blocks/2` for why sharing them is safe.
     grant = ContentCopy.field_grant(record, opts)
     {copied, dropped} = ContentCopy.permitted(@copied_attrs, grant, @grant_exempt_attrs)
+    {custom_fields, custom_withheld} = ContentCopy.custom_fields(record, grant, opts)
 
     # Blocks follow the grant the way the `block_tree` argument does in
     # `Changes.EnforceFieldGrants`: a grant that does not name them does not
@@ -247,12 +249,17 @@ defmodule KilnCMS.CMS.Translations do
     attrs =
       record
       |> ContentCopy.take(copied)
+      |> put_custom_fields(custom_fields)
       |> Map.put(:locale, target_locale)
       |> Map.put(:blocks, blocks)
       |> Map.put(:tag_ids, ContentCopy.tag_ids(record))
 
-    {ContentTypes.create!(kind, attrs, ContentCopy.create_opts(opts)), dropped ++ reset}
+    {ContentTypes.create!(kind, attrs, ContentCopy.create_opts(opts)),
+     dropped ++ custom_withheld ++ reset}
   end
+
+  defp put_custom_fields(attrs, nil), do: attrs
+  defp put_custom_fields(attrs, values), do: Map.put(attrs, :custom_fields, values)
 
   defp translated_blocks(record, grant, opts) do
     cond do

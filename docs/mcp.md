@@ -195,6 +195,10 @@ curl -s https://your-kiln-host/mcp \
 ## Operational notes
 
 - Requests ride the `:api` rate-limit bucket.
+- A key reads as its owner. A private custom field that the owner's role hides
+  from them ([granular-rbac.md](granular-rbac.md#per-custom-field-grants-and-read-restrictions))
+  is left out of reads and of create/update results, and a write that changes a
+  custom field outside the owner's field grant is refused.
 - Keys expire and can be revoked instantly at `/editor/api-keys`; a revoked
   key 401s on the next request.
 - Every write is attributed to the key's owning user in versions/audit trails —
