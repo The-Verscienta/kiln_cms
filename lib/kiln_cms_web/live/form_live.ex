@@ -236,7 +236,7 @@ defmodule KilnCMSWeb.FormLive do
                 <span :if={!form.active} class="rounded bg-base-200 px-1.5 py-0.5 text-xs">
                   {gettext("Inactive")}
                 </span>
-                <span class="text-xs text-base-content/60">
+                <span class="text-xs text-base-content/70">
                   {gettext("%{count} submissions", count: form.submission_count)}
                 </span>
                 <button
@@ -315,7 +315,7 @@ defmodule KilnCMSWeb.FormLive do
               <p
                 :if={!form.active}
                 id={"form-links-#{form.id}"}
-                class="text-xs text-base-content/60"
+                class="text-xs text-base-content/70"
               >
                 {gettext(
                   "Not public yet: activate it in the form builder to get its hosted page, embed code and API address."

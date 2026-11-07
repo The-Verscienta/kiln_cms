@@ -304,7 +304,8 @@ defmodule KilnCMSWeb.ContentControllerTest do
       html = conn |> get(~p"/#{page.slug}") |> html_response(200)
 
       assert html =~ "/uploads/o-thumb 400w"
-      refute html =~ "<source"
+      # The header's stock-logo <picture> (#2165) is the one legitimate <source>.
+      refute html =~ ~r/<source(?![^>]*logo-mark-sm)/
     end
 
     test "focal point flows to object-position; cropped variants stay out of srcset", %{

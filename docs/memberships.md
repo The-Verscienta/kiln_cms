@@ -68,7 +68,7 @@ There is deliberately **no publishable-key field**: hosted checkout means Kiln
 redirects to a provider-hosted page and never mounts the provider's JavaScript,
 so the publishable key has no use here.
 
-Each secret follows the key-provider model ([`KilnCMS.Keys`](KilnCMS.Keys.html)),
+Each secret follows the key-provider model ([`KilnCMS.Keys`](https://github.com/The-Verscienta/kiln_cms/blob/main/lib/kiln_cms/keys.ex)),
 the same one the DKIM key uses:
 
 - **Environment variable** — recommended for production. You choose the variable

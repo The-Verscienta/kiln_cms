@@ -246,6 +246,12 @@ green "No vulnerabilities found" — a pass that verified nothing.
   concurrent-test deadlocks.
 - Seed fixtures with `Ash.Seed.seed!` when you want to bypass the very
   policies/actions under test.
+- Muted text must be `text-base-content/70` or darker; a lexical guard
+  (`test/kiln_cms_web/muted_text_contrast_test.exs`) fails on lower values in
+  public paths and ratchets the console. After lowering a console count,
+  regenerate its baseline with
+  `KILN_UPDATE_CONTRAST_BASELINE=1 mix test test/kiln_cms_web/muted_text_contrast_test.exs`.
+  See [Muted text](docs/design-language.md#muted-text).
 
 ### Coverage
 
@@ -302,6 +308,27 @@ holding `:4002`; `PORT=4012 POSTGRES_DB=kiln_cms_e2e_mine npx playwright test`
 runs isolated). Several journeys depend on server-side state only a fresh boot
 delivers: the media and release journeys need Oban queues running, the
 `@mention` journey needs the Swoosh mailbox route and named demo users.
+
+#### Refreshing the home page screenshots
+
+The signed-out home page shows four console screenshots. They are captured
+by a Playwright script that is not part of the suite, and the page never
+serves the raw captures (#2165):
+
+1. Seed the showcase content (`showcase_seeds.exs`), or the console is
+   photographed empty.
+2. Capture: `cd e2e && npx playwright test -c screenshots.config.js`. The
+   2880x1800 JPEGs land in `e2e/screenshots/raw/` (gitignored).
+3. Derive the shipped files: `scripts/optimize_home_images.sh` from the repo
+   root (`home` for the screenshots only, `logo` for the default logo
+   variants, `all` is the default). It writes the 720/1440 WebP files (plus
+   `editor-2880.webp`) and the 1440-wide JPEG fallbacks under
+   `priv/static/images/home/`. It needs `cwebp` (`brew install webp`) and
+   either `sips` (macOS) or ImageMagick. `WEBP_QUALITY` (default 80) and
+   `JPEG_QUALITY` (default 78) tune it.
+4. Commit the files under `priv/static/images/home/`. CI does not run the
+   script; `test/kiln_cms_web/home_image_weight_test.exs` checks the committed
+   sizes, so copying a raw capture into `priv/static` fails the test.
 
 ## Commits & pull requests
 
