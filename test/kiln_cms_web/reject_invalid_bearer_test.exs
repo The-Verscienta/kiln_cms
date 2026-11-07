@@ -151,4 +151,85 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
       assert api_get("Bearer not.a.jwt").status == 200
     end
   end
+
+  describe "staleness header and telemetry (ADR 0013)" do
+    @event [:kiln_cms, :api, :invalid_bearer]
+
+    defp attach do
+      id = "invalid-bearer-#{System.unique_integer([:positive])}"
+      test = self()
+
+      :telemetry.attach(
+        id,
+        @event,
+        fn e, m, meta, _ -> send(test, {e, m, meta}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    defp expired_jwt do
+      {:ok, token, _} =
+        AshAuthentication.Jwt.token_for_user(user(:editor), %{}, token_lifetime: {-1, :minutes})
+
+      token
+    end
+
+    test "flag off: served anonymously with one fixed-word header" do
+      flag(false)
+
+      for conn <- [
+            api_get("Bearer garbage"),
+            api_get("Bearer " <> expired_jwt()),
+            gql("Bearer garbage")
+          ] do
+        assert conn.status == 200
+        assert get_resp_header(conn, "x-kiln-token-status") == ["invalid"]
+
+        assert "authorization" in (conn
+                                   |> get_resp_header("vary")
+                                   |> Enum.flat_map(&String.split(&1, ","))
+                                   |> Enum.map(&String.trim(String.downcase(&1))))
+      end
+    end
+
+    test "no header for anonymous, valid or other-scheme requests" do
+      flag(false)
+      valid = "Bearer " <> jwt(user(:editor))
+
+      for conn <- [api_get(nil), api_get(valid), api_get("Basic dXNlcjpwYXNz")] do
+        assert get_resp_header(conn, "x-kiln-token-status") == []
+      end
+    end
+
+    test "flag on: the refusal does not carry the header" do
+      flag(true)
+      assert get_resp_header(api_get("Bearer garbage"), "x-kiln-token-status") == []
+    end
+
+    test "the event says reason, surface, read-ness and enforcement" do
+      flag(false)
+      attach()
+
+      api_get("Bearer garbage")
+
+      assert_receive {@event, %{count: 1},
+                      %{reason: :malformed, surface: :json_api, read?: true, enforced: false}}
+
+      api_get("Bearer " <> expired_jwt())
+      assert_receive {@event, _, %{reason: :expired}}
+
+      gql("Bearer garbage")
+      assert_receive {@event, _, %{surface: :graphql, read?: true}}
+
+      flag(true)
+      api_get("Bearer garbage")
+      assert_receive {@event, _, %{enforced: true}}
+
+      api_get(nil)
+      api_get("Bearer " <> jwt(user(:editor)))
+      refute_receive {@event, _, _}
+    end
+  end
 end

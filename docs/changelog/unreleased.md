@@ -28,6 +28,15 @@ carries the reasoning.
   fails verification gets a 401 `invalid_token` envelope instead of silently reading as anonymous.
   Off by default for this release, because a consumer sending a stale token today gets 200;
   the default flips next release, so announce it in that release's upgrade notes.
+  - **Measure and warn first** ([ADR 0013](../decisions/0013-the-invalid-bearer-default-flips-on-evidence-not-on-the-calendar-alone.md)).
+    Flag on or off, a request with such a bearer emits
+    `[:kiln_cms, :api, :invalid_bearer]` (`count: 1`; metadata `enforced`,
+    `surface`, `read?` and `reason: :expired | :malformed | :invalid`, read from
+    the unverified token and never sent to the client). With the flag off the
+    request is still served as anonymous, but the response carries
+    `x-kiln-token-status: invalid` (and `vary: authorization`) so a client can
+    notice it is signed out. Additive; no client has to change. The flip is made
+    on that evidence, not only the calendar.
 
 <a id="change-severity"></a>
 

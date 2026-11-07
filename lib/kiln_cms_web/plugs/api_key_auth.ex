@@ -25,6 +25,20 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   it turns a response that used to be `200` into a `401` for any consumer
   already sending a stale token. See `docs/decisions/0012-*` for the schedule.
 
+  ### Measuring and flagging a stale token (ADR 0013)
+
+  Whether or not the flag is on, a request that presents such a bearer emits
+  `[:kiln_cms, :api, :invalid_bearer]` (measurement `count: 1`, metadata
+  `enforced: boolean()`, `surface: :json_api | :graphql | :media | :other`,
+  `read?: boolean()` (a `GET`/`HEAD`, or anything on `/gql`) and
+  `reason: :expired | :malformed | :invalid`). The reason is read from the
+  unverified JWT payload, is never sent to the client, and the event carries no
+  token, user or address. With the flag **off** the request is still served as
+  anonymous, but the response carries `x-kiln-token-status: invalid` (one fixed
+  word, with `vary: authorization`) so a client can notice it is signed out.
+  A request with a credential is never anonymous to `PublicCache`, so the
+  header cannot reach a shared cache entry.
+
   Keeping the two apart matters: the API-key plug treats a present-but-unrecognised
   `Bearer` value as an *invalid key* (401), so it must never see a JWT.
   """
@@ -53,8 +67,56 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   def call(conn, {opts, loads_bearer?}) do
     cond do
       api_key_request?(conn) -> AshAuthentication.Strategy.ApiKey.Plug.call(conn, opts)
-      loads_bearer? and reject_invalid_bearer?() and unverified_bearer?(conn) -> reject(conn)
+      loads_bearer? and unverified_bearer?(conn) -> stale_bearer(conn)
       true -> conn
+    end
+  end
+
+  defp stale_bearer(conn) do
+    enforced? = reject_invalid_bearer?()
+
+    :telemetry.execute([:kiln_cms, :api, :invalid_bearer], %{count: 1}, %{
+      enforced: enforced?,
+      surface: surface(conn),
+      read?: read?(conn),
+      reason: reason(conn)
+    })
+
+    if enforced? do
+      reject(conn)
+    else
+      conn
+      |> Plug.Conn.put_resp_header("x-kiln-token-status", "invalid")
+      |> KilnCMSWeb.Plugs.PublicCache.put_vary(["authorization"])
+    end
+  end
+
+  defp surface(%Plug.Conn{path_info: ["api", "json" | _]}), do: :json_api
+  defp surface(%Plug.Conn{path_info: ["api", "graphql" | _]}), do: :graphql
+  defp surface(%Plug.Conn{path_info: ["gql" | _]}), do: :graphql
+  defp surface(%Plug.Conn{path_info: ["api", "media" | _]}), do: :media
+  defp surface(_conn), do: :other
+
+  defp read?(%Plug.Conn{method: method} = conn),
+    do: surface(conn) == :graphql or method in ["GET", "HEAD"]
+
+  # Classified from the unverified payload, for telemetry only.
+  defp reason(conn) do
+    token =
+      case bearer_headers(conn) do
+        ["Bearer " <> token | _] -> String.trim(token)
+        _ -> nil
+      end
+
+    case token && Joken.peek_claims(token) do
+      {:ok, %{"exp" => exp}} when is_number(exp) ->
+        if exp < System.os_time(:second), do: :expired, else: :invalid
+
+      {:ok, _claims} ->
+        :invalid
+
+      _ ->
+        :malformed
     end
   end
 
