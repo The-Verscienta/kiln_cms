@@ -84,9 +84,10 @@ end
 
 # ## Reject unverifiable bearer tokens (KilnCMSWeb.Plugs.ApiKeyAuth, #2161)
 #
-# Off by default: a JWT that fails verification is treated as no credential and
-# the request is answered anonymously. Set KILN_API_REJECT_INVALID_BEARER=true
-# to answer 401 instead. The default flips in the next release (ADR 0012).
+# On by default: a JWT that fails verification is answered 401 instead of being
+# served anonymously. KILN_API_REJECT_INVALID_BEARER=false restores the anonymous
+# fallback; that escape hatch is removed in the release after this one (ADR 0012).
+# Unset writes no config, so the plug's default (on) applies.
 with {:ok, reject?} <- Env.fetch("KILN_API_REJECT_INVALID_BEARER") do
   config :kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth, reject_invalid_bearer: reject?
 end

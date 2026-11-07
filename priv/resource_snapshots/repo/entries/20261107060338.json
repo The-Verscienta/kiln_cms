@@ -217,30 +217,6 @@
       "type": "text"
     },
     {
-      "allow_nil?": false,
-      "default": "false",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "noindex",
-      "type": "boolean"
-    },
-    {
-      "allow_nil?": false,
-      "default": "false",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "nofollow",
-      "type": "boolean"
-    },
-    {
       "allow_nil?": true,
       "default": "\"en\"",
       "generated?": false,
@@ -875,6 +851,27 @@
     },
     {
       "all_tenants?": true,
+      "concurrently": true,
+      "error_fields": [],
+      "fields": [
+        {
+          "type": "string",
+          "value": "custom_fields jsonb_path_ops"
+        }
+      ],
+      "include": null,
+      "include_base_filter?": true,
+      "message": null,
+      "name": "entries_custom_fields_gin_index",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": "gin",
+      "where": null
+    },
+    {
+      "all_tenants?": true,
       "concurrently": false,
       "error_fields": [
         "slug",
@@ -1060,10 +1057,40 @@
       "global?": false,
       "name": "name_lexemes",
       "up": "ALTER TABLE entries ADD COLUMN IF NOT EXISTS name_lexemes text[] GENERATED ALWAYS AS (CASE WHEN search_weighted IS NULL THEN NULL ELSE tsvector_to_array(to_tsvector(kiln_regconfig(locale), coalesce(search_weighted[1], ''))) || kiln_han_runs(search_weighted[1]) END) STORED"
+    },
+    {
+      "after_tables": [],
+      "code?": false,
+      "down": "SELECT 1",
+      "global?": false,
+      "name": "reporting_schema",
+      "up": "CREATE SCHEMA IF NOT EXISTS kiln_reporting_v1"
+    },
+    {
+      "after_tables": [
+        "field_definitions",
+        "type_definitions"
+      ],
+      "code?": false,
+      "down": "DROP VIEW IF EXISTS kiln_reporting_v1.entries",
+      "global?": false,
+      "name": "reporting_view",
+      "up": "CREATE OR REPLACE VIEW kiln_reporting_v1.entries WITH (security_barrier = true) AS SELECT t.id, t.org_id, t.title, t.slug, t.locale, t.audience, t.state, t.published_at, t.inserted_at, t.updated_at, t.type_definition_id, td.name AS type_name, td.path_segment AS type_slug, COALESCE(cf.allowed, '{}'::jsonb) AS custom_fields FROM entries t LEFT JOIN type_definitions td ON td.id = t.type_definition_id AND td.org_id = t.org_id LEFT JOIN LATERAL (SELECT jsonb_object_agg(fd.name, CASE WHEN jsonb_typeof(val.v) = 'object' THEN CASE WHEN jsonb_typeof(val.v) = 'object' AND (fd.field_type::text = 'reference' OR (val.v ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT val.v ? 'url')) THEN jsonb_build_object('id', val.v -> 'id', 'type', val.v -> 'type') ELSE val.v END WHEN jsonb_typeof(val.v) = 'array' AND (fd.field_type::text = 'reference' OR val.v @? '$[*].slug') THEN COALESCE((SELECT jsonb_agg(CASE WHEN jsonb_typeof(e.x) = 'object' AND (fd.field_type::text = 'reference' OR (e.x ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT e.x ? 'url')) THEN jsonb_build_object('id', e.x -> 'id', 'type', e.x -> 'type') ELSE e.x END ORDER BY e.n) FROM jsonb_array_elements(val.v) WITH ORDINALITY AS e(x, n)), '[]'::jsonb) ELSE val.v END) AS allowed FROM field_definitions fd CROSS JOIN LATERAL (SELECT t.custom_fields -> fd.name AS v) val WHERE fd.name = ANY (ARRAY(SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(t.custom_fields) = 'object' THEN t.custom_fields ELSE '{}'::jsonb END))) AND fd.org_id = t.org_id AND fd.type_definition_id = t.type_definition_id AND fd.private = false AND fd.field_type <> 'user' AND fd.link_of_id IS NULL AND fd.group_of_id IS NULL) cf ON true WHERE t.state = 'published' AND t.archived_at IS NULL AND t.access_password_hash IS NULL AND t.audience = 'public'"
+    },
+    {
+      "after_tables": [
+        "field_definitions",
+        "type_definitions"
+      ],
+      "code?": false,
+      "down": "DROP VIEW IF EXISTS kiln_reporting_v1.entries_field_values",
+      "global?": false,
+      "name": "reporting_field_values_view",
+      "up": "CREATE OR REPLACE VIEW kiln_reporting_v1.entries_field_values WITH (security_barrier = true) AS SELECT t.org_id, t.id AS record_id, td.name AS type_name, f.name AS field_name, f.field_type, f.multiple, CASE WHEN f.field_type = 'reference' AND f.multiple IS NOT TRUE AND jsonb_typeof(f.value) = 'object' THEN f.value ->> 'id' ELSE f.value #>> '{}' END AS value_text, f.value AS value_json FROM entries t LEFT JOIN type_definitions td ON td.id = t.type_definition_id AND td.org_id = t.org_id CROSS JOIN LATERAL (SELECT fd.name, fd.field_type::text AS field_type, fd.multiple, CASE WHEN jsonb_typeof(val.v) = 'object' THEN CASE WHEN jsonb_typeof(val.v) = 'object' AND (fd.field_type::text = 'reference' OR (val.v ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT val.v ? 'url')) THEN jsonb_build_object('id', val.v -> 'id', 'type', val.v -> 'type') ELSE val.v END WHEN jsonb_typeof(val.v) = 'array' AND (fd.field_type::text = 'reference' OR val.v @? '$[*].slug') THEN COALESCE((SELECT jsonb_agg(CASE WHEN jsonb_typeof(e.x) = 'object' AND (fd.field_type::text = 'reference' OR (e.x ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT e.x ? 'url')) THEN jsonb_build_object('id', e.x -> 'id', 'type', e.x -> 'type') ELSE e.x END ORDER BY e.n) FROM jsonb_array_elements(val.v) WITH ORDINALITY AS e(x, n)), '[]'::jsonb) ELSE val.v END AS value FROM field_definitions fd CROSS JOIN LATERAL (SELECT t.custom_fields -> fd.name AS v) val WHERE fd.name = ANY (ARRAY(SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(t.custom_fields) = 'object' THEN t.custom_fields ELSE '{}'::jsonb END))) AND fd.org_id = t.org_id AND fd.type_definition_id = t.type_definition_id AND fd.private = false AND fd.field_type <> 'user' AND fd.link_of_id IS NULL AND fd.group_of_id IS NULL) f WHERE t.state = 'published' AND t.archived_at IS NULL AND t.access_password_hash IS NULL AND t.audience = 'public'"
     }
   ],
   "has_create_action": true,
-  "hash": "396DE1E54FF7373CB341EB4CF9D18148DC68E51BD0B2EB67BE52442151D0BF1D",
+  "hash": "F5B987A14780A7A977A0953CCAF85AFA22558DCA2DECCF4E192A28C477AB1721",
   "identities": [
     {
       "all_tenants?": false,

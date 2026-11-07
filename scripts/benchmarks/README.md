@@ -163,8 +163,8 @@ Each leg (one per `BENCH_SUBSCRIBERS` value) starts a fresh story, then:
 | Re-fires | every `"firing"` broadcast during the leg, by type and id: the story's, anything else's, and any update fired twice |
 | Oban queue depth | `available` + `executing` rows by queue, sampled every second |
 | DB load | `[:kiln_cms, :repo, :query]` count and total time (the sampler's own queries excluded), and the `pg_stat_database` counters for the benchmark database |
-| Feed event | publish start → the update's `published` event on the change feed (`KilnCMS.Delivery.Feed`, #2050), timed by its `[:kiln_cms, :delivery, :feed, :event]` telemetry, which fires once the PubSub broadcast is sent. Also the count of feed events per leg and per story edit |
-| Last subscriber | with N subscribers, N processes on the site's feed topic (`Feed.topic/1`); the time from publish start until the last of them has received the update's event |
+| Feed event | publish start → the update's `published` event on the change feed (`KilnCMS.Delivery.Feed`, #2050), timed by its `[:kiln_cms, :delivery, :feed, :event]` telemetry, which fires in the publisher once the event is handed to the site's relay (#2083), before any subscriber has it. Also the count of feed events per leg and per story edit |
+| Last subscriber | with N subscribers, N processes on the site's feed topic (`Feed.topic/1`); the time from publish start until the last of them has received the update's event, so it includes the relay's local broadcast |
 | Idle baseline | `BENCH_BASELINE` seconds with nothing published, after the legs. The per-update DB figures are net of it |
 
 The subscribers are in-BEAM processes: the feed's server side (2.1) with

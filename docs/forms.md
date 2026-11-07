@@ -41,6 +41,163 @@ The `:form` content block references a form by slug:
   headless frontends fetch the schema from `GET /api/forms/<slug>` (fields,
   labels, types, options, honeypot field name, submit URL) and POST JSON to
   `/api/forms/<slug>` (`{ok: true}` or `{ok: false, errors: {...}}`).
+- **The form's own page**, `GET /forms/<slug>` (#2138), renders an active
+  form with no content around it: its name, description and fields inside the
+  site's layout. See [below](#share-a-form-at-its-own-address).
+
+## Edit and rename form fields
+
+Each field has a **label**, which visitors see, and a **machine name**, the
+key its value is stored under in every submission. The machine name is also
+what the CSV export's columns, the `form.submitted` webhook's `data`, the
+`GET /api/forms/<slug>` schema and the autoresponder's `[field:<name>]` tokens
+use. You can change it at any time, but a submission keeps the keys it was
+received with, so read step 5 before renaming a field on a form that already
+has entries.
+
+You need the **admin** role: the Forms pages are admin-only.
+
+1. Open **Forms** (`/editor/forms`) and click the form's name. The builder
+   opens on its **Fields** tab, with the palette (**Add a field**), a preview
+   of the form, and **Field settings** side by side on a wide screen. Each
+   field on the preview shows its machine name in small monospace text under
+   it.
+2. Click a field on the preview. **Field settings** shows its **Label**,
+   **Machine name**, **Type**, **Width**, **Required**, **Default value** and
+   **Help text**, plus **Placeholder** for every type but a checkbox or
+   dropdown, and **Options — one per line** for a dropdown.
+3. Edit a value. Most inputs save as you type or choose; **Machine name**
+   saves when you leave the input. To save straight away, press Enter in any
+   input or click **Save** at the bottom of the panel. After a save that
+   changed something, the panel says **Saved.**, and a new machine name
+   appears under the field on the preview.
+4. If a value is refused, it stays in the input as you typed it, marked as
+   invalid, with the reason underneath. Fix it and save again. A refused value
+   does not hold up the other inputs: a label you change meanwhile still
+   saves. Selecting another field or closing the panel discards the refused
+   value and shows what is stored.
+5. If you renamed a field on a form that has received entries, the panel also
+   says *Entries already received keep the old key “email”.* (with the old
+   name). Kiln does not rewrite stored submissions: entries received before
+   the rename are keyed by the old name, and entries from now on by the new
+   one.
+
+For example, renaming `string` to `full_name` on a contact form that has two
+entries: the preview shows `full_name` under the field, the panel says
+*Saved.* and *Entries already received keep the old key “string”.*, and the
+next submission is stored as `{"full_name": "…"}` while the two earlier ones
+stay `{"string": "…"}`.
+
+### Read entries after a rename
+
+The **Entries** tab lists each submission's values under the current field's
+label, with its machine name beside it, in the order the fields appear on the
+form. A key that no current field has (left by a field that was renamed or
+deleted) is not hidden: it appears in a dashed box headed **From a renamed or
+removed field**, under its raw key.
+
+So after the rename above, the two earlier entries show their value in that
+box under `string`, and new entries show it under the field's label, with
+`full_name` beside it.
+
+### What a rename does not carry over
+
+- **CSV export.** **Export CSV** has one column per current machine name, so
+  an old key's values are not in the file
+  ([#2342](https://github.com/The-Verscienta/kiln_cms/issues/2342)). Export
+  before renaming if you need them in one sheet.
+- **Autoresponder.** A `[field:<old name>]` token in the **Confirmations**
+  subject or body renders empty once no field has that name
+  ([#2343](https://github.com/The-Verscienta/kiln_cms/issues/2343)), and
+  nothing warns you. Update the template to the new name after renaming: while
+  the autoresponder is on, the tab refuses to save a template whose tokens
+  name no current field, so its next save fails until the token is fixed.
+- **Headless clients and webhook consumers.** `GET /api/forms/<slug>` and
+  new `form.submitted` payloads carry the new name straight away; a frontend
+  or integration that reads the old key needs changing at the same time.
+- **Reusing an old name.** If you rename `email` to `work_email` and later
+  give another field the machine name `email`, the old entries' `email`
+  values show under that new field on the Entries tab, because the key
+  matches it.
+
+Kiln has no option to rewrite the keys in existing entries
+([#2344](https://github.com/The-Verscienta/kiln_cms/issues/2344)).
+
+### Errors you can see
+
+| Message | Meaning |
+| --- | --- |
+| must be lowercase letters, digits and underscores, starting with a letter | The machine name has a capital, a space, a hyphen or another character outside `a-z`, `0-9` and `_`, or starts with a digit or underscore. |
+| has already been taken | Another field on this form already has that machine name. Machine names are unique per form. |
+| a select field must list at least one option | A dropdown's **Options** box is empty. Enter at least one option, one per line. |
+
+An error that belongs to no input in the panel, such as a permission error,
+shows as a message at the corner of the screen instead.
+
+## Share a form at its own address
+
+Every active form has a page of its own at `/forms/<slug>` on the site's
+host, so you can link to it from an email, a social post or a QR code without
+first making a content page to hold a form block. The page shows the form's
+name as its heading, then its description and fields, inside the site's
+header and footer, and posts to the same `POST /forms/<slug>` as a form block.
+
+You need the **admin** role: the Forms pages are admin-only.
+
+1. Open **Forms** in the console (`/editor/forms`). Under *Your forms*, each
+   active form's row lists a **Hosted form** address, which is the form's page
+   (for example `https://www.example.com/forms/contact`), beside its **JSON
+   API** address and its embed code. An inactive form's row says it is not
+   public yet instead.
+2. Click the form's name to open the builder (`/editor/forms/<id>`). Under the
+   form's name in the header you see the same address as a link.
+3. If the header says **Not public while inactive.**, open the **General**
+   tab, tick **Active (accepting submissions)** and click **Save**. The header
+   now shows the address. A new form is active from the start.
+4. Click the address, or **Preview** beside it. The page opens in a new tab,
+   the way a visitor sees it.
+5. Copy the address and share it. A visitor who submits the form sees the
+   form's success message on a thank-you page; a submission with mistakes
+   comes back to the form page with each error shown against its field.
+
+The address follows the form's **Slug** (General tab). Change the slug and
+the old address stops answering, so shared links break; Kiln does not add a
+redirect for it.
+
+On a multilingual site the page answers under each language prefix too:
+`/fr/forms/contact` renders the form in French and posts back to
+`/fr/forms/contact`, so the thank-you page and any error messages stay in
+French.
+
+What the page sends with it:
+
+| Header | Value | Why |
+| --- | --- | --- |
+| `Cache-Control` | `public, max-age=60, stale-while-revalidate=300` | The page changes only when an admin edits the form. A form deactivated within that minute refuses the submission anyway. |
+| `Vary` | `Accept-Language` | The text Kiln adds around your form (the default **Submit** label, the site's chrome) follows the visitor's language. |
+| `X-Robots-Tag` | `noindex` | A form is somewhere a link sends people, not content to find by search. The embed document carries `noindex` for the same reason, and forms are not listed in `sitemap.xml`. |
+
+The page is not a route of its own. It is the last thing Kiln tries for a
+`/forms/<slug>` address before answering 404, so anything else at that
+address wins: a content type of your own whose path segment is `forms` keeps
+its entries, and a path alias, a redirect, a locked page or a members-only
+teaser at the address is served instead of the form. The form shows only
+when none of those answer.
+
+What can go wrong:
+
+- **404 at `/forms/<slug>`.** The form is inactive, the slug is wrong (slugs
+  are exact, so check the General tab), or the form belongs to another site:
+  each site serves only its own forms, on its own host. The miss is recorded
+  like any other 404, so it shows on the **404s** tab of
+  `/editor/redirects`.
+- **A different page at the address.** Something else answers at
+  `/forms/<slug>` first (above). Give the form another slug, or remove the
+  alias or redirect.
+- **The thank-you page has no site header or footer.** It is a plain card
+  with a **Back** link, the same as after a form block's submission. Only the
+  form page itself and a refused submission's re-render carry the site's
+  layout.
 
 ## Embedding on another site
 

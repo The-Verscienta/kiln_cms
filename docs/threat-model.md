@@ -66,6 +66,7 @@ the router so preflights are answered before route matching).
 | MCP (LLM authoring) | `/mcp` | **API key required** | `:api` |
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
 | Form embed | `GET /forms/:slug/embed` | none | `:delivery` (framing CSP) |
+| Form page | `GET /forms/:slug` (#2138): not a route, the last fallback of `/:type/:slug` delivery; active forms of the serving org only | none | `:delivery` (site CSP) |
 | Preview | `/preview/:token`, `/preview/:token/live`, `/preview/release/:token` | signed token *is* the credential | `:preview` |
 | Headless draft mode | `GET /api/json/*`, `GET /api/content/:type/:slug` and `GET /api/visual-editing/:type/:slug` with `x-kiln-preview-token` / `?preview_token=` (#1887) | signed token, pinned to the serving site, admits its one record on the primary read only; never read on a write | `:api` + `:preview_api` |
 | Newsletter | `POST /newsletter/subscribe`, `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | honeypot / opaque token; the confirm and unsubscribe GETs only render a page, the POST changes the subscription (#1664) — confirm's POST is also CSRF-checked | `:form` |
@@ -661,6 +662,10 @@ build if a resource is ever registered without that authorizer.
   sign deliveries. The trade-off is the vault's: rotating `SECRET_KEY_BASE`
   orphans the secrets, and each endpoint must be re-created
   ([secrets-rotation.md](secrets-rotation.md)).
+  In the console (`/editor/webhooks`, admin-only) each secret is masked to its
+  last four characters, and the plaintext reaches the browser only when an
+  admin clicks **Reveal** or has just added the endpoint (#2140), so a screen
+  share or a saved page of the list doesn't carry it.
 
 ### oEmbed resolution (`OEMBED_ENABLED`, #489)
 - **Content choosing the destination** — prevented by design. Kiln does **not**

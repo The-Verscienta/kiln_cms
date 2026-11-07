@@ -377,7 +377,22 @@ defmodule KilnCMS.CMS.PoliciesTest do
       assert CMS.can_update_webhook_endpoint?(admin, endpoint)
       assert CMS.can_destroy_webhook_endpoint?(admin, endpoint)
       refute CMS.can_update_webhook_endpoint?(editor, endpoint)
+      refute CMS.can_destroy_webhook_endpoint?(editor, endpoint)
       refute CMS.can_destroy_webhook_endpoint?(viewer, endpoint)
+    end
+
+    # The Webhooks page only mounts for admins, so a forged `delete` event
+    # from an editor never reaches the action; this pins the action itself.
+    test "an editor's destroy of an active endpoint is forbidden", %{
+      editor: editor,
+      endpoint: endpoint
+    } do
+      assert endpoint.active
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.destroy_webhook_endpoint(endpoint, actor: editor)
+
+      assert {:ok, _} = CMS.get_webhook_endpoint(endpoint.id, authorize?: false)
     end
   end
 end

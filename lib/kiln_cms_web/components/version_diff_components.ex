@@ -39,15 +39,20 @@ defmodule KilnCMSWeb.VersionDiffComponents do
   attr :definitions, :map, default: %{}
   attr :display, :map, default: nil
 
+  # Whether the Restore buttons are offered, and why not (#2294 follow-up). The
+  # `restore` handler enforces the same rule; this only keeps the UI honest.
+  attr :can_restore?, :boolean, default: true
+  attr :restore_refusal, :string, default: nil
+
   def version_compare(assigns) do
     ~H"""
     <.modal id="version-compare-dialog" on_close="close_compare">
       <:title>{gettext("Compare versions")}</:title>
       <:subtitle>
         <div class="flex flex-wrap items-center gap-2">
-          <.side_label side={@left} />
+          <.side_label side={@left} can_restore?={@can_restore?} restore_refusal={@restore_refusal} />
           <.icon name="hero-arrow-right" class="size-4 shrink-0" />
-          <.side_label side={@right} />
+          <.side_label side={@right} can_restore?={@can_restore?} restore_refusal={@restore_refusal} />
         </div>
       </:subtitle>
 
@@ -242,6 +247,8 @@ defmodule KilnCMSWeb.VersionDiffComponents do
   end
 
   attr :side, :map, required: true
+  attr :can_restore?, :boolean, default: true
+  attr :restore_refusal, :string, default: nil
 
   defp side_label(assigns) do
     ~H"""
@@ -250,9 +257,12 @@ defmodule KilnCMSWeb.VersionDiffComponents do
       <button
         :if={@side.version_id}
         type="button"
-        phx-click="restore"
+        phx-click={@can_restore? && "restore"}
         phx-value-version_id={@side.version_id}
-        class="btn-link text-xs text-primary-ink hover:underline"
+        disabled={!@can_restore?}
+        aria-disabled={to_string(!@can_restore?)}
+        title={@restore_refusal}
+        class="btn-link text-xs text-primary-ink hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
       >
         {gettext("Restore")}
       </button>

@@ -2,9 +2,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
   @moduledoc """
   The inspector rail's Settings panel (#1311): assignment, document notes,
   releases, organization & relationships, accessibility, compliance, SEO &
-  scheduling, internal links and similar content. Markup moved verbatim from
-  `KilnCMSWeb.ContentEditorLive.render/1`. Custom fields are not here: they
-  sit under the blocks (`KilnCMSWeb.ContentEditor.CustomFieldsPanel`).
+  scheduling, internal links, similar content and Move to trash (#2137).
+  Markup moved verbatim from `KilnCMSWeb.ContentEditorLive.render/1`. Custom
+  fields are not here: they sit under the blocks
+  (`KilnCMSWeb.ContentEditor.CustomFieldsPanel`).
 
   Two standing invariants ride along:
 
@@ -31,6 +32,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
   import KilnCMSWeb.ContentEditor.Shared
 
   alias KilnCMSWeb.ContentEditor.Localization
+  alias KilnCMSWeb.ContentTrash
 
   @impl true
   def render(assigns) do
@@ -891,6 +893,24 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
             name="hero-arrow-path"
             class="ml-1 size-3 motion-safe:animate-spin"
           />
+        </button>
+      </.inspector_section>
+
+      <%!-- Move to trash (#2137) — last, after everything that edits the
+              document. Drawn only for someone the destroy policy allows;
+              `move_to_trash` asks the policy again. `type="button"` matters:
+              this panel renders inside the editor's form. --%>
+      <.inspector_section :if={@may_trash?} id="inspector-trash" title={gettext("Trash")}>
+        <p class="text-xs text-base-content/60">{ContentTrash.explanation(@record)}</p>
+        <button
+          id="inspector-move-to-trash"
+          type="button"
+          phx-click="move_to_trash"
+          data-confirm={ContentTrash.confirm(@record)}
+          class="btn btn-sm btn-danger"
+        >
+          <.icon name="hero-trash" class="size-4" />
+          {gettext("Move to trash")}
         </button>
       </.inspector_section>
     </div>

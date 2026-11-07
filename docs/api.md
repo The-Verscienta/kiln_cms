@@ -1378,6 +1378,10 @@ Submissions post to the normal `POST /forms/:slug` endpoint and render the
 form's success message inside the iframe. No CORS is involved: the iframe is
 served *from* the CMS origin, so its form post is same-origin.
 
+The iframe document is for framing. To link to a form instead, use its own
+page, **`GET /forms/:slug`** (#2138): the same form inside the site's layout,
+for an active form only. See [Share a form at its own address](forms.md#share-a-form-at-its-own-address).
+
 **Who may embed** is set per form, in the builder's Embed tab, and becomes that
 page's CSP `frame-ancestors`. A form that leaves it alone inherits the
 deployment-wide `EMBED_ORIGINS`:

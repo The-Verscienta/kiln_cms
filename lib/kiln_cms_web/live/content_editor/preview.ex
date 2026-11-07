@@ -354,6 +354,21 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
     end)
   end
 
+  # `AshPhoenix.Form.params/1` plus a guaranteed `"blocks"` list. Params only
+  # carry *touched* nested forms, so a freshly loaded record (no `phx-change`
+  # yet) has no `"blocks"` key (or a nil one). Injecting children or a rich body into that
+  # leaves the nil in place, and `Form.validate/2` then crashes in
+  # `AshPhoenix.Form.condense/2` — so synthesize the list from the form's
+  # current values (full typed maps) instead. Use this wherever a handler
+  # re-validates the form from its own params.
+  def form_params_with_blocks(form) do
+    params = AshPhoenix.Form.params(form)
+
+    if is_nil(params["blocks"]),
+      do: Map.put(params, "blocks", preview_block_maps(form)),
+      else: params
+  end
+
   def preview_block_maps(form) do
     case AshPhoenix.Form.value(form, :blocks) do
       forms when is_list(forms) -> Enum.map(forms, &block_full_map/1)

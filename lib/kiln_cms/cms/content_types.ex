@@ -783,6 +783,15 @@ defmodule KilnCMS.CMS.ContentTypes do
   def destroy(type, record, opts \\ []),
     do: call(type, "destroy_#{atom(type, opts)}", [record, opts], opts)
 
+  @doc """
+  Whether `actor` may move `record` to the trash — the generated
+  `can_destroy_<type>?` helper behind `destroy/3` (`can_destroy_entry?` for a
+  dynamic type), so a control that offers the trash asks the policy the
+  destroy itself will run. `opts` takes `:tenant`.
+  """
+  def can_destroy?(type, record, actor, opts \\ []),
+    do: call(type, "can_destroy_#{atom(type, opts)}?", [actor, record, %{}, opts], opts)
+
   # --- internals -------------------------------------------------------------
 
   # Resolve a convention-built interface name to the existing function on the

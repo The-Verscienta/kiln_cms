@@ -312,13 +312,20 @@ Treat "what can this credential see" as part of its blast radius: a leaked
 editor-keyed delivery config exposes drafts, and an admin-keyed one exposes
 every paying member's content as well — not just rate-limit headroom.
 
-### A bad bearer token is a `401` (opt-in)
+### A bad bearer token is a `401`
 
-By default a malformed or expired JWT in `Authorization: Bearer …` is treated
-as no credential and the request is served as anonymous. Set
-`KILN_API_REJECT_INVALID_BEARER=true` to answer `401` instead; the default
-flips on in the next release. A request with no `Authorization` header is
-unchanged, and a bad `kiln_` key is already a `401`.
+A malformed, expired or foreign JWT in `Authorization: Bearer …` is answered
+`401` with an `invalid_token` error envelope and
+`WWW-Authenticate: Bearer error="invalid_token"`, on `/api/json`, `/gql` and the
+other `/api` routes. It used to be served as anonymous, so a client with a
+stale token read public content and took it for success; treat this `401` as
+"re-authenticate", not as "forbidden". A request with no `Authorization` header
+is still anonymous, and a bad `kiln_` key was always a `401`.
+
+An operator who needs time to fix a client can set
+`KILN_API_REJECT_INVALID_BEARER=false` to restore the anonymous fallback. That
+escape hatch lasts one release and is then removed
+([ADR 0012](decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)).
 
 ## Mirroring: sync instead of re-reading everything
 

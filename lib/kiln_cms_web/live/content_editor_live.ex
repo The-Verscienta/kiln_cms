@@ -58,6 +58,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMSWeb.ContentEditor.InlineTerms
   alias KilnCMSWeb.ContentEditor.NewDraft
   alias KilnCMSWeb.ContentEditor.ReferenceValues
+  alias KilnCMSWeb.ContentTrash
   alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
   alias KilnCMSWeb.VersionDiffComponents
@@ -186,6 +187,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:reverse_fields, [])
     |> assign(:actor, socket.assigns.current_user)
     |> assign(:record, nil)
+    |> assign(:can_restore?, false)
+    |> assign(:restore_refusal, nil)
     |> assign(:page_title, gettext("New %{type}", type: String.downcase(content_type.label)))
     |> assign(:form, to_form(%{"title" => ""}, as: :form))
   end
@@ -900,6 +903,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:page_title, view.title)
     |> assign(:slug_customized?, slug_customized?(socket))
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    |> assign_restore_refusal()
+    # Only OFFERS the Settings tab's Move to trash (#2137); `move_to_trash`
+    # asks again. Computed when a record is assigned (mount, reload), not on
+    # every save: the destroy policy doesn't depend on the record's state, and
+    # the handler's own check is the one that counts.
+    |> assign(
+      :may_trash?,
+      ContentTypes.can_destroy?(socket.assigns.kind, record, socket.assigns.actor,
+        tenant: record.org_id
+      )
+    )
     # Only OFFERS the Copy preview link action; `share_preview` asks again.
     |> assign(:may_share_preview?, PreviewToken.mintable?(record, socket.assigns.actor))
     # Recomputed alongside `may_write?` and for the same reason: a reload that
@@ -2113,16 +2127,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     body = KilnCMS.Blocks.PortableText.from_tiptap(doc)
     rich_bodies = Map.put(socket.assigns.rich_bodies, key, body)
 
-    # A pristine form has no "blocks" params yet — synthesize them from the
-    # form's current values (full typed maps) so the injected body has a block
-    # list to land in.
-    base = AshPhoenix.Form.params(socket.assigns.form)
-
-    base =
-      case base["blocks"] do
-        nil -> Map.put(base, "blocks", preview_block_maps(socket.assigns.form))
-        _ -> base
-      end
+    base = form_params_with_blocks(socket.assigns.form)
 
     params =
       base
@@ -3729,6 +3734,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # "Move to trash" from the Settings tab (#2137). The section is drawn only
+  # for `@may_trash?`, and the policy is asked again here, so a forged event
+  # from someone the section was never offered to is refused before any
+  # write. Edits still waiting for the autosave debounce are saved first, the
+  # way a workflow transition settles them (`settle_before_workflow/1`): the
+  # trash is restorable, and what comes back should be what was on screen. A
+  # save that fails stops the trash and says why.
+  def handle_event("move_to_trash", _params, socket) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+
+    if socket.assigns.may_trash? and
+         ContentTypes.can_destroy?(kind, record, actor, tenant: record.org_id) do
+      case settle_before_workflow(socket) do
+        {:ok, socket} -> {:noreply, move_to_trash(socket)}
+        {:error, socket} -> {:noreply, socket}
+      end
+    else
+      {:noreply, put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.forbidden("trash"))}
+    end
+  end
+
   # ── Version compare (#467) ─────────────────────────────────────────────────
 
   def handle_event("toggle_compare", %{"version_id" => version_id}, socket)
@@ -3850,6 +3876,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # to an effective editor with a field grant for this type.
   defp restore_refusal(socket) do
     %{record: record, actor: actor} = socket.assigns
+    restore_refusal_for(record, actor)
+  end
+
+  defp restore_refusal_for(record, actor) do
     org = record.org_id
 
     cond do
@@ -3862,6 +3892,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       true ->
         :ok
+    end
+  end
+
+  # Computed once per record change (not per render) for the Restore buttons:
+  # `restore_refusal` is the refusal message, `can_restore?` its absence. The
+  # buttons only reflect it; the `restore` / `confirm_restore` handlers still
+  # call `restore_refusal/1` afresh, so a forged event is refused regardless.
+  defp assign_restore_refusal(socket) do
+    case restore_refusal_for(socket.assigns.record, socket.assigns.actor) do
+      :ok ->
+        socket |> assign(:can_restore?, true) |> assign(:restore_refusal, nil)
+
+      {:refused, message} ->
+        socket |> assign(:can_restore?, false) |> assign(:restore_refusal, message)
     end
   end
 
@@ -5144,6 +5188,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # The record as settled (a flush reloads it), so the destroy sees the lock
+  # version the last save left behind.
+  defp move_to_trash(socket) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+    socket = cancel_autosave_timer(socket)
+
+    case ContentTrash.trash(kind, record, actor, record.org_id) do
+      :ok ->
+        socket
+        |> put_flash(:info, ContentTrash.moved(record))
+        |> push_navigate(to: ~p"/editor")
+
+      {:error, error} ->
+        put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("trash", error))
+    end
+  end
+
   defp settle_before_workflow(%{assigns: %{save_state: state}} = socket)
        when state in [:pending, :error] do
     socket = socket |> cancel_autosave_timer() |> do_autosave()
@@ -5626,6 +5687,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:saved_at, record.updated_at)
     |> assign(:page_title, record.title)
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    |> assign_restore_refusal()
     |> assign(
       :may_suggest_seo?,
       may_write_fields?(
@@ -7882,6 +7944,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               locked_fields={@locked_fields}
               cursors={@cursors}
               may_write?={@may_write?}
+              may_trash?={@may_trash?}
               may_suggest_seo?={@may_suggest_seo?}
               conflict={@conflict}
               editor_version={@editor_version}
@@ -7905,6 +7968,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
               versions={@versions}
               current_pick={@current_pick}
               compare_pick={@compare_pick}
+              can_restore?={@can_restore?}
+              restore_refusal={@restore_refusal}
             />
           </div>
         </div>
@@ -7957,6 +8022,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
         right={@compare.right}
         definitions={@compare.definitions}
         display={@compare.display}
+        can_restore?={@can_restore?}
+        restore_refusal={@restore_refusal}
       />
 
       <.restore_preview :if={@restore_preview} preview={@restore_preview} />

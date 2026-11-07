@@ -33,7 +33,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "posts_org_id_fkey",
+        "name": "products_org_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -215,30 +215,6 @@
       "size": null,
       "source": "canonical_url",
       "type": "text"
-    },
-    {
-      "allow_nil?": false,
-      "default": "false",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "noindex",
-      "type": "boolean"
-    },
-    {
-      "allow_nil?": false,
-      "default": "false",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "nofollow",
-      "type": "boolean"
     },
     {
       "allow_nil?": true,
@@ -603,7 +579,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "posts_author_id_fkey",
+        "name": "products_author_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -636,7 +612,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "posts_category_id_fkey",
+        "name": "products_category_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -669,12 +645,12 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "posts_parent_id_fkey",
+        "name": "products_parent_id_fkey",
         "on_delete": "nilify",
         "on_update": null,
         "primary_key?": true,
         "schema": "public",
-        "table": "posts"
+        "table": "products"
       },
       "scale": null,
       "size": null,
@@ -702,7 +678,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "posts_featured_image_id_fkey",
+        "name": "products_featured_image_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -746,7 +722,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_path_alias_index",
+      "name": "products_path_alias_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -769,7 +745,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_parent_lookup_index",
+      "name": "products_parent_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -790,7 +766,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_embedding_hnsw_index",
+      "name": "products_embedding_hnsw_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -811,7 +787,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_title_trgm_index",
+      "name": "products_title_trgm_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -832,7 +808,28 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_title_lexemes_index",
+      "name": "products_title_lexemes_index",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": "gin",
+      "where": null
+    },
+    {
+      "all_tenants?": true,
+      "concurrently": true,
+      "error_fields": [],
+      "fields": [
+        {
+          "type": "string",
+          "value": "custom_fields jsonb_path_ops"
+        }
+      ],
+      "include": null,
+      "include_base_filter?": true,
+      "message": null,
+      "name": "products_custom_fields_gin_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -860,7 +857,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_slug_locale_lookup_index",
+      "name": "products_slug_locale_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -883,7 +880,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_next_occurrence_index",
+      "name": "products_next_occurrence_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -906,7 +903,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_unpublish_at_index",
+      "name": "products_unpublish_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -929,7 +926,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_last_reviewed_at_index",
+      "name": "products_last_reviewed_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -957,7 +954,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_console_updated_index",
+      "name": "products_console_updated_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -985,7 +982,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_console_title_index",
+      "name": "products_console_title_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -1010,7 +1007,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_console_published_index",
+      "name": "products_console_published_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -1023,19 +1020,49 @@
     {
       "after_tables": [],
       "code?": false,
-      "down": "ALTER TABLE posts DROP COLUMN IF EXISTS name_lexemes",
+      "down": "ALTER TABLE products DROP COLUMN IF EXISTS name_lexemes",
       "global?": false,
       "name": "name_lexemes",
-      "up": "ALTER TABLE posts ADD COLUMN IF NOT EXISTS name_lexemes text[] GENERATED ALWAYS AS (CASE WHEN search_weighted IS NULL THEN NULL ELSE tsvector_to_array(to_tsvector(kiln_regconfig(locale), coalesce(search_weighted[1], ''))) || kiln_han_runs(search_weighted[1]) END) STORED"
+      "up": "ALTER TABLE products ADD COLUMN IF NOT EXISTS name_lexemes text[] GENERATED ALWAYS AS (CASE WHEN search_weighted IS NULL THEN NULL ELSE tsvector_to_array(to_tsvector(kiln_regconfig(locale), coalesce(search_weighted[1], ''))) || kiln_han_runs(search_weighted[1]) END) STORED"
+    },
+    {
+      "after_tables": [],
+      "code?": false,
+      "down": "SELECT 1",
+      "global?": false,
+      "name": "reporting_schema",
+      "up": "CREATE SCHEMA IF NOT EXISTS kiln_reporting_v1"
+    },
+    {
+      "after_tables": [
+        "field_definitions",
+        "type_definitions"
+      ],
+      "code?": false,
+      "down": "DROP VIEW IF EXISTS kiln_reporting_v1.products",
+      "global?": false,
+      "name": "reporting_view",
+      "up": "CREATE OR REPLACE VIEW kiln_reporting_v1.products WITH (security_barrier = true) AS SELECT t.id, t.org_id, t.title, t.slug, t.locale, t.audience, t.state, t.published_at, t.inserted_at, t.updated_at, COALESCE(cf.allowed, '{}'::jsonb) AS custom_fields FROM products t LEFT JOIN LATERAL (SELECT jsonb_object_agg(fd.name, CASE WHEN jsonb_typeof(val.v) = 'object' THEN CASE WHEN jsonb_typeof(val.v) = 'object' AND (fd.field_type::text = 'reference' OR (val.v ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT val.v ? 'url')) THEN jsonb_build_object('id', val.v -> 'id', 'type', val.v -> 'type') ELSE val.v END WHEN jsonb_typeof(val.v) = 'array' AND (fd.field_type::text = 'reference' OR val.v @? '$[*].slug') THEN COALESCE((SELECT jsonb_agg(CASE WHEN jsonb_typeof(e.x) = 'object' AND (fd.field_type::text = 'reference' OR (e.x ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT e.x ? 'url')) THEN jsonb_build_object('id', e.x -> 'id', 'type', e.x -> 'type') ELSE e.x END ORDER BY e.n) FROM jsonb_array_elements(val.v) WITH ORDINALITY AS e(x, n)), '[]'::jsonb) ELSE val.v END) AS allowed FROM field_definitions fd CROSS JOIN LATERAL (SELECT t.custom_fields -> fd.name AS v) val WHERE fd.name = ANY (ARRAY(SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(t.custom_fields) = 'object' THEN t.custom_fields ELSE '{}'::jsonb END))) AND fd.org_id = t.org_id AND fd.type_definition_id IS NULL AND fd.content_type = 'product' AND fd.private = false AND fd.field_type <> 'user' AND fd.link_of_id IS NULL AND fd.group_of_id IS NULL) cf ON true WHERE t.state = 'published' AND t.archived_at IS NULL AND t.access_password_hash IS NULL AND t.audience = 'public'"
+    },
+    {
+      "after_tables": [
+        "field_definitions",
+        "type_definitions"
+      ],
+      "code?": false,
+      "down": "DROP VIEW IF EXISTS kiln_reporting_v1.products_field_values",
+      "global?": false,
+      "name": "reporting_field_values_view",
+      "up": "CREATE OR REPLACE VIEW kiln_reporting_v1.products_field_values WITH (security_barrier = true) AS SELECT t.org_id, t.id AS record_id, 'product'::text AS type_name, f.name AS field_name, f.field_type, f.multiple, CASE WHEN f.field_type = 'reference' AND f.multiple IS NOT TRUE AND jsonb_typeof(f.value) = 'object' THEN f.value ->> 'id' ELSE f.value #>> '{}' END AS value_text, f.value AS value_json FROM products t CROSS JOIN LATERAL (SELECT fd.name, fd.field_type::text AS field_type, fd.multiple, CASE WHEN jsonb_typeof(val.v) = 'object' THEN CASE WHEN jsonb_typeof(val.v) = 'object' AND (fd.field_type::text = 'reference' OR (val.v ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT val.v ? 'url')) THEN jsonb_build_object('id', val.v -> 'id', 'type', val.v -> 'type') ELSE val.v END WHEN jsonb_typeof(val.v) = 'array' AND (fd.field_type::text = 'reference' OR val.v @? '$[*].slug') THEN COALESCE((SELECT jsonb_agg(CASE WHEN jsonb_typeof(e.x) = 'object' AND (fd.field_type::text = 'reference' OR (e.x ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT e.x ? 'url')) THEN jsonb_build_object('id', e.x -> 'id', 'type', e.x -> 'type') ELSE e.x END ORDER BY e.n) FROM jsonb_array_elements(val.v) WITH ORDINALITY AS e(x, n)), '[]'::jsonb) ELSE val.v END AS value FROM field_definitions fd CROSS JOIN LATERAL (SELECT t.custom_fields -> fd.name AS v) val WHERE fd.name = ANY (ARRAY(SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(t.custom_fields) = 'object' THEN t.custom_fields ELSE '{}'::jsonb END))) AND fd.org_id = t.org_id AND fd.type_definition_id IS NULL AND fd.content_type = 'product' AND fd.private = false AND fd.field_type <> 'user' AND fd.link_of_id IS NULL AND fd.group_of_id IS NULL) f WHERE t.state = 'published' AND t.archived_at IS NULL AND t.access_password_hash IS NULL AND t.audience = 'public'"
     }
   ],
   "has_create_action": true,
-  "hash": "119E52A85EA18FE378A46F8DDD1439E66A65F1CE619EACAF97819DB96923A8EA",
+  "hash": "0770729BB768522BD2ECFC5A3F3628817CAB8C9845E2FB6B1FDE5BA3A13AF2E0",
   "identities": [
     {
       "all_tenants?": false,
       "base_filter": null,
-      "index_name": "posts_unique_slug_index",
+      "index_name": "products_unique_slug_index",
       "keys": [
         {
           "type": "atom",
@@ -1058,6 +1085,6 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "posts",
+  "table": "products",
   "temporal": null
 }
