@@ -7,7 +7,7 @@
   (default off); this record decides when, and whether, that default flips.
 - **References** — [#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161),
   [#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273),
-  [ADR 0012](0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)
+  ADR 0012
   (on the #2273 branch; renumber at merge if another record lands first).
 - **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md).
 
