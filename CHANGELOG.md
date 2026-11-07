@@ -166,6 +166,9 @@ Every summary line below that was shortened links to its own entry there.
   feed telemetry now fires at hand-off. 10k-subscriber publish p99 1.5 s → 143 ms; p95 still ~4× the 0 leg.**
   ([#2327](https://github.com/The-Verscienta/kiln_cms/pull/2327) · [long form](docs/changelog/unreleased.md#feed-relay))
 
+- **The Essentials sidebar now says where Forms, Webhooks, API keys and Trash went and how to list them.**
+  ([#2144](https://github.com/The-Verscienta/kiln_cms/issues/2144) · [long form](docs/changelog/unreleased.md#essentials-hidden-screens-hint))
+
 ### Fixed
 
 - **Renaming a form field now saves on Enter or Save, keeps a refused name on screen with its error, and shows

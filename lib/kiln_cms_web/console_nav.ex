@@ -85,7 +85,7 @@ defmodule KilnCMSWeb.ConsoleNav do
   The nav as the SIDEBAR draws it for `user` — `nav/2` filtered by the user's
   sidebar preset (`User.nav_preset`).
 
-    * `:everything` — `nav/2` unchanged, plus `pinned: []`.
+    * `:everything` — `nav/2` unchanged, plus `pinned: []` and `hidden_screens: []`.
     * `:essentials` — the daily author screens, the Configure hub for an admin,
       and `:pinned`: **Your settings**, plus whichever screen is `active` when
       the preset would otherwise hide it, so nobody lands on a page the sidebar
@@ -99,7 +99,7 @@ defmodule KilnCMSWeb.ConsoleNav do
 
     case preset(user) do
       :essentials -> essentials(nav, active)
-      :everything -> Map.put(nav, :pinned, [])
+      :everything -> nav |> Map.put(:pinned, []) |> Map.put(:hidden_screens, [])
     end
   end
 
@@ -125,6 +125,20 @@ defmodule KilnCMSWeb.ConsoleNav do
         plugin: []
     }
     |> Map.put(:pinned, Enum.reject([stray, settings], &is_nil/1))
+    |> Map.put(:hidden_screens, hidden_screens(grouped, nav.hub))
+  end
+
+  # The screens an admin goes looking for that Essentials drops from the
+  # sidebar (#2144), as the labels the actor can actually open — read from the
+  # nav map, so a screen that moves, is renamed or is gated for this actor
+  # changes (or leaves) the hint with it. Only for someone who has the Configure
+  # hub to send them to.
+  @hint_keys [:forms, :webhooks, :api_keys, :trash]
+
+  defp hidden_screens(_grouped, nil), do: []
+
+  defp hidden_screens(grouped, _hub) do
+    for key <- @hint_keys, item = Enum.find(grouped, &(&1.key == key)), do: item.label
   end
 
   defp on_page?(_item, nil), do: false

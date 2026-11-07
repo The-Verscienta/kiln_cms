@@ -870,6 +870,11 @@ msgstr "%{role} jusqu'au %{when}."
 msgid "%{scanned} scanned, %{changes} renamed so far."
 msgstr "%{scanned} analysés, %{changes} renommés jusqu'ici."
 
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "%{screens} are under Configure. Use Show all tools to list every screen here."
+msgstr "%{screens} se trouvent dans Configurer. Utilisez « Afficher tous les outils » pour lister tous les écrans ici."
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{selected} of %{total}"

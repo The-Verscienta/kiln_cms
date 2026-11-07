@@ -743,6 +743,21 @@ carries the reasoning.
   - **Upgrade.** Nothing to do: no migration, no config, no change to the
     topic, `subscribe/1` or the event shape. Rolling back the pin is safe.
 
+<a id="essentials-hidden-screens-hint"></a>
+
+- **The Essentials sidebar now tells an admin where Forms, Webhooks, API keys
+  and Trash went, and how to get them back in the sidebar.** Essentials keeps
+  the sidebar to the daily screens plus the Configure hub, so those four
+  vanished from it with no clue where to look (issue #2144). Under the
+  Configure link there is now one line: "Forms, Webhooks, API keys, Trash are
+  under Configure. Use Show all tools to list every screen here." The names
+  are read from the nav map for the signed-in user, so a screen they cannot
+  open is left out (an organisation admin's line omits API keys). Everything,
+  and users without the Configure hub such as editors, see no line. Nothing is
+  added to the Essentials link list, no screen moved, and there is no
+  migration or setting; the hint is hidden when the sidebar rail is collapsed.
+  Nothing to do on upgrade.
+
 ## Fixed
 
 <a id="form-field-rename"></a>
