@@ -391,6 +391,58 @@ results" above).
 > `customSort` arguments — see
 > [headless-graphql-api.md](headless-graphql-api.md).
 
+### Which custom filters use an index
+
+Since #2291 a GIN index (`jsonb_path_ops`) on each content table's
+`custom_fields` serves the filters that ask "does this record hold exactly
+this value": `eq` (a bare value), `in`, membership in a multiple select,
+string, media or reference field (`eq`, `in`), and a single media or
+reference field matched by id. One index covers every field name of every
+dynamic type. The rows returned are the same as before; only the speed
+changes, and the planner still prefers a scan when a filter matches a large
+share of the table.
+
+These are **not** accelerated: `not_eq`, `gt`, `gte`, `lt`, `lte`, `ilike`,
+`null`, and `custom_sort`. `not_eq` stays on the older `->` form on purpose,
+because a record without the field must stay excluded from it. If a field
+needs fast range filters or sorting, make it a compiled attribute (the D4
+answer in [dynamic-content-types-plan.md](dynamic-content-types-plan.md)).
+
+The index costs about 26% of the table's size, slows bulk inserts by about
+25% and single saves by 10-35%; see
+[Custom-field filters at 100k rows](benchmarks.md#custom-field-filters-at-100k-rows)
+for the method and the caveats.
+
+**A recipe, not a feature: a range or sort index for one hot field.** If you
+must keep a field dynamic and sort or range-filter on it, add two expression
+btrees for that field, one `ASC NULLS LAST` and one `DESC NULLS LAST`, from
+a reviewed migration (with `@disable_ddl_transaction true` and
+`@disable_migration_lock true`, see
+[releasing.md](releasing.md#migrations-expand-migrate-contract)):
+
+```elixir
+create index(:posts, ["(custom_fields -> 'price') ASC NULLS LAST"],
+  name: "posts_cf_price_asc_index", concurrently: true)
+
+create index(:posts, ["(custom_fields -> 'price') DESC NULLS LAST"],
+  name: "posts_cf_price_desc_index", concurrently: true)
+```
+
+An overlay can instead declare the same expression strings as
+`custom_indexes` entries on its resource (column strings pass through to the
+DDL, as the GIN index's `"custom_fields jsonb_path_ops"` does) and let
+`mix ash.codegen` write the migration. Limits to know before you do:
+
+- Postgres uses the index only when the field name is a literal in the
+  query. Kiln's query binds the name, so a prepared statement can use the
+  btree for roughly its first five executions, then switches to a generic plan
+  that cannot. Expect it to help in a benchmark and fade in production.
+- Use it for integer, float, boolean, date and datetime fields. A string btree
+  can hit the index row limit (about 2.7 KB).
+- Each index adds write cost like the GIN one. Measure with your own data.
+
+Kiln does not create, test or support these indexes.
+
 ## Pagination
 
 All collection reads support **offset** and **keyset** pagination via the

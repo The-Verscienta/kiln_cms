@@ -20,6 +20,24 @@ carries the reasoning.
   before deploying. No re-fire is needed: a row written before 1.8, with no
   `search_weighted`, still takes the full match.
 
+<a id="custom-fields-gin-upgrade"></a>
+
+- **Content tables gain a GIN index on `custom_fields`, built concurrently;
+  overlays run `mix ash.codegen` to add it to their own content types.** The
+  migration builds `pages_custom_fields_gin_index`,
+  `posts_custom_fields_gin_index` and `entries_custom_fields_gin_index` with
+  `CREATE INDEX CONCURRENTLY`, so writes continue during the build, but the
+  build reads the whole table and can run for a long time on a large
+  `entries`. Plan for it as a slow migration, not a hang, and do not kill the
+  deploy halfway. If a build fails or is interrupted, Postgres leaves an
+  `INVALID` index behind that is maintained on every write but never used.
+  Find it with `SELECT indexrelid::regclass FROM pg_index WHERE NOT
+  indisvalid;`, drop it with `DROP INDEX CONCURRENTLY <name>;`, and run
+  `mix ash.migrate` (or your release's migrate command) again. Each index is
+  roughly 26% of its table's size. The change is additive and safe to roll
+  back: the previous release ignores the indexes, and the migration's `down`
+  drops them. See [Custom fields](../json-api.md#which-custom-filters-use-an-index).
+
 ## Added
 
 <a id="change-severity"></a>
@@ -52,6 +70,37 @@ carries the reasoning.
   - **Upgrade.** Additive: a nullable column on each `*_versions` table and one
     new settings table. Overlays run `mix ash.codegen` for their own content
     types. Until a site lists a field, nothing changes.
+
+<a id="custom-field-indexes"></a>
+
+- **`custom_filter` equality, `in` and list membership on custom fields use an
+  index, so a selective filter on a large catalogue no longer scans the
+  table.** Equality used to compare `(custom_fields -> name) = value`, which no
+  index can serve. Positive `eq` and `in` (and the list and single media or
+  reference equivalents) now ask `custom_fields @> {name: value}`, which the new
+  GIN `jsonb_path_ops` index on `custom_fields` answers; one index covers every
+  field name of every dynamic type, because the name is inside the indexed
+  value. On 100,000 pages in one tenant, a filter matching one row dropped from
+  about 40 ms to about 3 ms. The results are the same rows as before.
+  - **Accelerated:** `eq`, `in`, and membership in a multiple select, string,
+    media or reference field (`eq`, `in`), and a single media or
+    reference field by id.
+  - **Not accelerated:** `not_eq`, `gt`/`gte`/`lt`/`lte`, `ilike`, `null` and
+    `custom_sort`. `not_eq` keeps the old form on purpose: a record without the
+    field must stay excluded from it. For range and sort, the compiled
+    attribute remains the answer (see the D4 note in
+    [dynamic-content-types-plan.md](../dynamic-content-types-plan.md)), or an
+    expression btree per field as described in
+    [Custom fields](../json-api.md#which-custom-filters-use-an-index).
+  - **Cost.** About 26% of the table's size per index, about 25% slower bulk
+    inserts and bulk `custom_fields` updates, and 10-35% slower single saves
+    (within the run-to-run noise). `custom_fields` is rewritten on every save,
+    so no update is a heap-only tuple once it is indexed. Measured on a loaded
+    host: rerun [the benchmark](../benchmarks.md#custom-field-filters-at-100k-rows)
+    before quoting absolutes.
+  - **Developers.** `KilnCMS.CMS.Preparations.CustomFieldQuery.contains/3`
+    builds the containment expression for a column, and `ash_type/1`, now
+    public, gives the type a field's input is cast with.
 
 ## Changed
 
