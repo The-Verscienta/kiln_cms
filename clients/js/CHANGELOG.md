@@ -7,6 +7,10 @@ tagged `client-js-vX.Y.Z` in the
 
 ## Unreleased
 
+- `textSearch` / `semanticSearch` take `customSort` (kiln_cms#2292). The server
+  also accepts a custom field's bare name in `filter` / `sort`, but this client
+  keeps emitting `custom_filter` / `custom_sort`, the stable form.
+
 - **`:draft_write` keys (kiln_cms#2273):** `create()` takes `onBehalfOf`
   (`CreateOptions`), sent as the `X-Kiln-On-Behalf-Of` header, which Kiln
   records on a draft created with a `:draft_write` API key so reviewers see

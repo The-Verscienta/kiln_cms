@@ -55,8 +55,8 @@ from its singular type name. For `post`:
 | `postBySlug` | `:public_by_slug` | `slug: String!`, `locale: String!`, `fallback`, `fallbackLocale` | one published post (or `null`), through the site's locale fallback chain |
 | `postTranslations` | `:published_translations` | `slug: String!` | every published locale variant of a slug |
 | `publishedPosts` | `:published` | `limit`, `offset`, `customFilter`, `customSort` | published posts, newest first, **offset-paginated** (`PageOfPost`) |
-| `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds`, `customFilter` | full-text matches, relevance-ranked |
-| `semanticSearchPosts` | `:search_semantic` | `query: String!`, `locale`, `customFilter` | vector/semantic matches |
+| `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds`, `customFilter`, `customSort` | full-text matches, relevance-ranked |
+| `semanticSearchPosts` | `:search_semantic` | `query: String!`, `locale`, `customFilter`, `customSort` | vector/semantic matches |
 | `autocompletePosts` | `:autocomplete` | `prefix: String!`, `locale` | typo-tolerant title suggestions |
 | `searchPublishedPosts` | `:search_published` | as `searchPosts`, minus `state` | published-only full-text matches — the anonymous rule (published, `audience: :public`, unlocked) pinned server-side (#297, #1013) |
 | `semanticSearchPublishedPosts` | `:search_semantic_published` | as `semanticSearchPosts`, minus `state` | published-only semantic matches |
@@ -98,6 +98,24 @@ consumers never need the plain, credential-widened list.
 > under their snake_case names: `customFilter: {tags: {has_all: ["<id>",
 > "<id>"]}, related_posts: {has_none: ["<id>"]}}`. A target the caller may not
 > read (a draft, for an anonymous caller) neither matches nor counts.
+>
+> `customSort` is also an argument of the keyword and semantic search queries
+> (and their `…Published` twins). Precedence: explicit `sort` > `customSort` >
+> relevance or distance > recency. On semantic search a leading custom sort
+> replaces distance ordering and the "name match first" rule. GraphQL has no
+> bare-name form: custom fields are only reachable through `customFilter` /
+> `customSort`.
+
+How a custom field's `customFilter` / `customSort` differs from a column's
+`filter` / `sort` (the same vocabulary as JSON:API, full table in
+[json-api.md](json-api.md) → "Naming a custom field like a column"):
+
+| | `customFilter` / `customSort` | `filter` / `sort` |
+|---|---|---|
+| Operators | `eq`, `not_eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ilike` (text only), `null` (`is_nil` is a synonym) | the generated filter input |
+| Unknown name | error `unknown custom field "x"` | rejected by the schema |
+| Sort nulls | last, both directions | plain `asc` / `desc` |
+| Relationship operators | `has`, `has_all`, `has_none`, `count` | not available |
 
 ### Relationships: references and referencedBy
 
