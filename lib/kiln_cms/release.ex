@@ -352,6 +352,127 @@ defmodule KilnCMS.Release do
   def convert_field(type, source, target, opts \\ []),
     do: run_conversion(type, source, target, opts, serving?())
 
+  @doc """
+  List, or remove, a site's IP block rules (#2242) — the way back in when an
+  operator has blocked the address they work from.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks()'
+      bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(cidr: "203.0.113.0/24", remove: true)'
+      bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(org: "acme", remove: true)'
+
+  Without `remove: true` it only lists. Options: `org: "<slug>"` for a site
+  other than the default one, `cidr: "<address or range>"` to act on one rule
+  (any spelling the console accepts; it is normalised the same way), and
+  `remove: true` to delete — every rule of the site, or just the `cidr:` one.
+  Prints what it found or removed and returns `{:ok, rules}` (the rules listed
+  or removed) or `{:error, message}`.
+
+  It goes through the resource's code interface as the `:operator` system actor
+  (granted `list` and `destroy` only), so validations and the tenant filter
+  still run, and busts the site's cache on every node.
+
+  Through `rpc`, not `eval`: the cluster-wide cache bust needs the running
+  application. `rpc` exits 0 whatever this returns; a script that must fail on
+  an error matches the result:
+
+      bin/kiln_cms rpc '{:ok, _} = KilnCMS.Release.ip_blocks(remove: true)'
+  """
+  @spec ip_blocks(keyword()) :: {:ok, [map()]} | {:error, String.t()}
+  def ip_blocks(opts \\ []), do: run_ip_blocks(opts, serving?())
+
+  # `serving?` is an argument only so the test can take the `eval` branch.
+  @doc false
+  def run_ip_blocks(opts, serving?) do
+    result =
+      with true <- serving? || {:error, @needs_running_node},
+           {:ok, org_id} <- KilnCMS.CMS.FieldConversion.org_id(opts[:org]),
+           {:ok, cidr} <- ip_block_cidr(opts[:cidr]),
+           {:ok, rules} <- ip_block_rules(org_id, cidr) do
+        if opts[:remove] == true,
+          do: remove_ip_blocks(org_id, rules),
+          else: list_ip_blocks(rules)
+      end
+
+    with {:error, message} <- result, do: IO.puts(message)
+    result
+  end
+
+  defp ip_block_cidr(nil), do: {:ok, nil}
+
+  defp ip_block_cidr(text) do
+    case KilnCMS.Security.Cidr.normalise(text) do
+      {:ok, cidr} -> {:ok, cidr}
+      {:error, _} -> {:error, "#{inspect(text)} is not an IP address or range."}
+    end
+  end
+
+  defp ip_block_rules(org_id, cidr) do
+    case KilnCMS.CMS.list_ip_block_rules(
+           actor: KilnCMS.SystemActor.new(:operator),
+           tenant: org_id,
+           authorize_with: :error
+         ) do
+      {:ok, rules} ->
+        case Enum.filter(rules, &(is_nil(cidr) or &1.cidr == cidr)) do
+          [] when not is_nil(cidr) -> {:error, "No block rule for #{cidr} on this site."}
+          rules -> {:ok, rules}
+        end
+
+      {:error, error} ->
+        {:error, "Could not read the block rules: #{Exception.message(error)}"}
+    end
+  end
+
+  defp list_ip_blocks([]) do
+    IO.puts("No block rules on this site.")
+    {:ok, []}
+  end
+
+  defp list_ip_blocks(rules) do
+    IO.puts("#{length(rules)} block rule(s):")
+    Enum.each(rules, &IO.puts("  " <> describe_ip_block(&1)))
+    IO.puts("Nothing removed. Add remove: true (and cidr: \"...\" for one rule) to delete.")
+    {:ok, rules}
+  end
+
+  defp remove_ip_blocks(_org_id, []) do
+    IO.puts("No block rules on this site; nothing to remove.")
+    {:ok, []}
+  end
+
+  defp remove_ip_blocks(org_id, rules) do
+    actor = KilnCMS.SystemActor.new(:operator)
+
+    failed =
+      for rule <- rules,
+          {:error, error} <- [
+            KilnCMS.CMS.destroy_ip_block_rule(rule, actor: actor, tenant: org_id)
+          ],
+          do: "#{rule.cidr}: #{Exception.message(error)}"
+
+    # The resource busts after each commit; once more for the whole set.
+    KilnCMS.Security.IpBlocklist.bust(org_id)
+
+    if failed == [] do
+      Enum.each(rules, &IO.puts("  removed " <> describe_ip_block(&1)))
+      IO.puts("Removed #{length(rules)} block rule(s); the change reaches every node now.")
+      {:ok, rules}
+    else
+      {:error, "Could not remove #{length(failed)} rule(s):\n  " <> Enum.join(failed, "\n  ")}
+    end
+  end
+
+  defp describe_ip_block(rule) do
+    expiry =
+      case rule.expires_at do
+        nil -> ""
+        at -> " expires #{DateTime.to_iso8601(at)}"
+      end
+
+    note = if rule.note, do: " — #{rule.note}", else: ""
+    rule.cidr <> expiry <> note
+  end
+
   # `serving?` is an argument only so the test can take the `eval` branch.
   @doc false
   def run_conversion(type, source, target, opts, serving?) do

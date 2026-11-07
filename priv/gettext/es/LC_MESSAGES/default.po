@@ -10121,6 +10121,11 @@ msgstr "Idiomas"
 msgid "Locales %{locale} falls back to"
 msgstr "Idiomas a los que recurre %{locale}"
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Locked yourself out? An operator can lift blocks from the server: see docs/ip-blocking.md, \"Recovering from a lock-out\"."
+msgstr "¿Se ha bloqueado a sí mismo? Un operador puede levantar los bloqueos desde el servidor: consulte docs/ip-blocking.md, \"Recovering from a lock-out\"."
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Logo"

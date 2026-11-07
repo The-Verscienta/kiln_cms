@@ -257,6 +257,12 @@ defmodule KilnCMSWeb.IpBlockLive do
         </:subtitle>
       </.header>
 
+      <p id="ip-block-recovery-hint" class="text-sm text-base-content/70">
+        {gettext(
+          "Locked yourself out? An operator can lift blocks from the server: see docs/ip-blocking.md, \"Recovering from a lock-out\"."
+        )}
+      </p>
+
       <div
         :if={@untrusted_forwarding?}
         id="ip-block-proxy-warning"

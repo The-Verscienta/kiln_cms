@@ -107,7 +107,8 @@ Every summary line below that was shortened links to its own entry there.
 
 
 - **Site admins can block an IP address or range at `/editor/ip-blocks` ("Blocked addresses"): an empty 403 on dynamic routes and sockets.
-  Static assets and `/uploads` are not covered; behind a proxy set `TRUSTED_PROXIES` first.**
+  Static assets and `/uploads` are not covered; behind a proxy set `TRUSTED_PROXIES` first.
+  If an admin blocks their own network, `bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(remove: true)'` lifts the blocks.**
   ([#2242](https://github.com/The-Verscienta/kiln_cms/issues/2242) · [long form](docs/changelog/unreleased.md#ip-block-rules))
 - **Custom fields can be shown or required only when another field has a given value (Conditions in `/editor/fields`).**
   Hidden values are kept and still served by the API; new `visible_when` / `required_when` attributes; additive migration, nothing else to run.

@@ -257,8 +257,9 @@ carries the reasoning.
     matches the proxy's address and blocks every visitor.
   - **Operators.** One new table, `ip_block_rules`, additive; rolling back
     leaves it unused. No new environment variables. If an admin locks
-    themselves out, `DELETE FROM ip_block_rules WHERE ...` in SQL; it takes
-    effect within the one-minute cache. Expired rules are not swept and still
+    themselves out, `bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(remove: true)'`
+    lists (without `remove: true`) or lifts the site's rules and clears every
+    node's cache at once; SQL still works within the one-minute cache. Expired rules are not swept and still
     hold their slot until removed in the console.
   - **Developers.** The resource, `KilnCMS.CMS.IpBlockRule`, is org-admin only
     and deliberately absent from JSON:API, GraphQL and MCP. The request path
