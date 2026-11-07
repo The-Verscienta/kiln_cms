@@ -7,6 +7,25 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="backup-history-upgrade"></a>
+
+- **Run `mix ash.migrate` for the backup history, and add `KilnCMS.Backups` to
+  an overlay's `:ash_domains` (#2217).** The migration
+  (`20261107205448_add_backup_runs`) creates one table, `backup_runs`. It is
+  expand-only and changes no existing data, so rolling the pin back is safe;
+  the table is simply unused.
+  - **Overlays that restate `:ash_domains`.** `KilnCMS.Backups` is now an Ash
+    domain (it was a plain module). `:ash_domains` replaces rather than merges,
+    so an overlay's `config/project.exs` that lists the core domains must add
+    `KilnCMS.Backups` (next to `KilnCMS.Billing`), as
+    `projects/example/project.exs` now does. Without it the resource sits
+    outside every configured domain and `mix ash.codegen` offers to drop the
+    `backup_runs` table. See [the overlay contract](../overlay-contract.md).
+  - **Nothing else to set.** No new environment variables; `manifest.json`,
+    `Backups.status/0` and the overview strip are unchanged, so cron-based
+    deployments keep working untouched.
+  ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217))
+
 <a id="breached-password-upgrade"></a>
 
 - **Run `mix ash.migrate` for the breached-password check, and decide whether
@@ -126,6 +145,43 @@ carries the reasoning.
   ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240))
 
 ## Added
+
+<a id="backup-history"></a>
+
+- **Backups has a History: every backup attempt, app-made and cron-made, with
+  its outcome and whether its files are still on disk (#2217).** `/editor/backups`
+  (platform admins) lists runs newest first, 25 to a page, each with trigger,
+  status (Succeeded, Failed, Running, Skipped), Database and Media badges, size,
+  `Verified` / `Not verified` / `unverified (imported)`, destinations and the
+  local state of its files: `on disk`, `missing`, `pruned (retention)`,
+  `expired` or `off-site only`.
+  - **Worker.** Each attempt writes a run; a failed run write never fails the
+    backup. A refused attempt (no `pg_dump`) is a `skipped` run and still leaves
+    `manifest.json` untouched. A job that was killed mid-run is marked failed
+    ("Interrupted") by a sweep once it is 2h15m old.
+  - **Cron's backups.** `KilnCMS.Backups.Importer.run/0` records
+    `kiln-db-<stamp>` / `kiln-media-<stamp>` files found under `BACKUP_DIR` that
+    have no run: when a platform admin opens the page, at the end of each worker
+    run, and from `bin/kiln eval "KilnCMS.Backups.Importer.run()"`. It is
+    idempotent by stamp, waits until a stamp's newest file is 10 minutes old and
+    has no `.partial`, and never hashes or verifies a file, hence "unverified
+    (imported)". `backup.sh db` and `backup.sh media` as separate cron entries
+    have different stamps and appear as two runs.
+  - **Missing is computed on read**, for the visible page only. `BACKUP_DIR` is
+    host-local: on a multi-node deployment a run recorded by another node reads
+    `missing`. `expired` is a heuristic for imported runs older than the
+    retention window plus a day (cron records no prune).
+  - **Secrets.** Text stored in a run goes through `KilnCMS.Backups.Redact`
+    (URL userinfo, `key=value` credentials, rclone connection-string remotes).
+    The status panel's off-site remote and `manifest.json`'s `offsite` are now
+    redacted too.
+  - **Access.** `KilnCMS.Backups.Run` is read-only for platform admins and
+    written only by the `:backups` system actor (worker, importer, stale sweep).
+    `Worker.run/1` still works; it is now `run(trigger, job_id \\ nil)`.
+    `Staging.Scrub` purges runs (`backup_runs_purged`).
+  - **Reserved** for the rest of the epic (#2216): `parts` and `sha256` (#2218),
+    `destinations` (#2220), `encrypted?` (#2224).
+  ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217))
 
 <a id="breached-password-check"></a>
 

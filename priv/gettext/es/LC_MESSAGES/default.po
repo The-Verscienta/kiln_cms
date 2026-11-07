@@ -5018,6 +5018,11 @@ msgstr "No se pudo generar el texto. Inténtalo de nuevo."
 msgid "Couldn't import that photo from Unsplash."
 msgstr "No se pudo importar esa foto de Unsplash."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't load the backup history."
+msgstr "No se pudo cargar el historial de copias de seguridad."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
@@ -5683,6 +5688,11 @@ msgstr "Oscuro"
 #, elixir-autogen, elixir-format
 msgid "Dark mode"
 msgstr "Modo oscuro"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Database"
+msgstr "Base de datos"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
@@ -7601,6 +7611,7 @@ msgstr "Exportar contenido requiere una cuenta de editor."
 msgid "Exports the columns shown in the list."
 msgstr "Exporta las columnas que muestra la lista."
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
@@ -8669,6 +8680,7 @@ msgid "Highlighted quotation"
 msgstr "Cita destacada"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "History"
 msgstr "Historial"
@@ -9915,6 +9927,11 @@ msgstr "Cargar más"
 msgid "Loading…"
 msgstr "Cargando…"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Local"
+msgstr "Local"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Local mailbox (no real delivery)"
@@ -10891,6 +10908,7 @@ msgstr "Los boletines siguen la versión en el idioma predeterminado, y esto es 
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Next"
 msgstr "Siguiente"
@@ -11002,6 +11020,11 @@ msgstr "No se ha registrado ninguna copia de seguridad"
 #, elixir-autogen, elixir-format
 msgid "No backup has ever been recorded for this deployment."
 msgstr "No se ha registrado ninguna copia de seguridad en esta instalación."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "No backups have been recorded yet."
+msgstr "Todavía no se ha registrado ninguna copia de seguridad."
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
@@ -11731,6 +11754,7 @@ msgstr "Aún sin traducir"
 msgid "Not used by any published document."
 msgstr "No la usa ningún documento publicado."
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not verified"
@@ -12650,6 +12674,11 @@ msgstr "Página"
 msgid "Page %{page}"
 msgstr "Página %{page}"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Page %{page} of %{last}"
+msgstr "Página %{page} de %{last}"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Page actions"
@@ -13251,6 +13280,7 @@ msgstr "Vista previa de cambios sin publicar: los lectores siguen viendo el text
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Previous"
 msgstr "Anterior"
@@ -14951,6 +14981,7 @@ msgstr "Ejecútelo en sus propios servidores"
 msgid "Run the analysis on this content and deliver what it finds. A preview doesn't run it: it costs what the real rule costs, and may send the page to an outside AI provider."
 msgstr "Ejecutar el análisis sobre este contenido y entregar lo que encuentre. La vista previa no lo ejecuta: cuesta lo mismo que la regla real y puede enviar la página a un proveedor de IA externo."
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -16417,6 +16448,7 @@ msgstr "Tamaño"
 msgid "Skip to main content"
 msgstr "Saltar al contenido principal"
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Skipped"
@@ -16905,6 +16937,11 @@ msgstr "Suscriptores"
 #, elixir-autogen, elixir-format
 msgid "Subscription confirmed"
 msgstr "Suscripción confirmada"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Succeeded"
+msgstr "Correcta"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -21873,6 +21910,7 @@ msgid "exactly %{count}"
 msgstr "exactamente %{count}"
 
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "expired"
 msgstr "caducado"
@@ -21887,6 +21925,7 @@ msgstr "caduca"
 msgid "fail"
 msgstr "error"
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -22206,6 +22245,7 @@ msgstr "biblioteca de medios"
 msgid "min read"
 msgstr "min de lectura"
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "missing"
@@ -22344,6 +22384,12 @@ msgstr "número"
 msgid "off"
 msgstr "desactivada"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "off-site only"
+msgstr "solo fuera del servidor"
+
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "ok"
@@ -22358,6 +22404,11 @@ msgstr "activada"
 #, elixir-autogen, elixir-format
 msgid "on behalf of %{who}"
 msgstr "en nombre de %{who}"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "on disk"
+msgstr "en disco"
 
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format
@@ -22399,6 +22450,11 @@ msgstr "o arrastre y suelte"
 msgid "orphaned"
 msgstr "huérfano"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "pending"
+msgstr "pendiente"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "plain"
@@ -22435,6 +22491,16 @@ msgstr "privado"
 #, elixir-autogen, elixir-format
 msgid "proposed to publish — an admin confirms"
 msgstr "propuesta de publicación; la confirma un administrador"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "pruned"
+msgstr "depurada"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "pruned (retention)"
+msgstr "depurada (retención)"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/translations_live.ex
@@ -22897,6 +22963,11 @@ msgstr "tipo no compatible"
 #, elixir-autogen, elixir-format
 msgid "until"
 msgstr "hasta"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "unverified (imported)"
+msgstr "sin verificar (importada)"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
