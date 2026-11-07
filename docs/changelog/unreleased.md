@@ -835,8 +835,12 @@ carries the reasoning.
   unaffected. The `-ml` image and any overlay building with `KILN_ML` on
   failed, and an overlay could not pin around it, since
   `mix kiln.plugins.doctor` holds core dependencies at core's lock.
-  `mix.exs` now caps `lazy_html` below 0.1.14, which puts both lock entries
-  back to their v1.8.0 versions. CI's ML leg missed the break because EXLA
+  Two guards now hold it, landed in parallel: the KILN_ML dependency list
+  requires `fine ~> 0.1.0` (#2212), and `lazy_html` is capped below 0.1.14
+  (#2213), so a lean lock refresh, where the KILN_ML list isn't loaded, can't
+  pull fine 0.2.0 back in either. Both lock entries are back to their v1.8.0
+  versions; lift both guards together once an EXLA release builds against
+  fine 0.2. CI's ML leg missed the break because EXLA
   caches `libexla.so` under a key without `fine`, and the leg restored that
   cache on the lock change. It now rebuilds the NIF from source whenever its
   cache isn't an exact hit. Overlays that re-seeded `project.lock` from the

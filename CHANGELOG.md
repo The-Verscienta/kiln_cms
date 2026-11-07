@@ -190,17 +190,13 @@ Every summary line below that was shortened links to its own entry there.
   WebSocket clients after the bump, which silently dropped every push on absinthe_phoenix 2.0.5.**
   ([#2202](https://github.com/The-Verscienta/kiln_cms/pull/2202) · [long form](docs/changelog/unreleased.md#phoenix-1-8-16-subscription-pushes))
 
-- **The KILN_ML build compiles again: lazy_html stays below 0.1.14, which keeps `fine` at
-  0.1.6, the version EXLA 1.0.0's NIF builds against.**
-  ([long form](docs/changelog/unreleased.md#exla-fine-pin))
+- **`KILN_ML=1` builds compile EXLA again: `fine` is held at 0.1.x, since EXLA 1.0.0's NIF
+  does not build against fine 0.2.0, which lazy_html 0.1.14 had pulled into the lock.**
+  ([#2212](https://github.com/The-Verscienta/kiln_cms/pull/2212) · [#2213](https://github.com/The-Verscienta/kiln_cms/pull/2213) · [long form](docs/changelog/unreleased.md#exla-fine-pin))
 
 - **The content list's "New" menu (sites with more than three content types) is a real
   button that reports open/closed to assistive tech.**
   ([#2145](https://github.com/The-Verscienta/kiln_cms/issues/2145) · [long form](docs/changelog/unreleased.md#new-menu-button))
-
-- **`KILN_ML=1` builds compile EXLA again: `fine` is held at 0.1.x, since EXLA 1.0.0's NIF
-  does not build against fine 0.2.0, which lazy_html 0.1.14 had pulled into the lock.**
-  ([#2212](https://github.com/The-Verscienta/kiln_cms/pull/2212))
 
 - **A phrase list (multiple `:string`) holding a character whose UTF-8 contains byte 0x85
   (`內`, many other CJK characters) saves again: line splitting reads Unicode, not bytes, so
