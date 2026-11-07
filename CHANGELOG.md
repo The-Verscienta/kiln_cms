@@ -118,6 +118,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **On `/editor/team`, a custom role's or member's content types and field grants are picked from the site's types
+  and fields instead of typed as a list and JSON; "No fields" stores `[]`, and unrecognized stored names are kept.**
+  ([#2352](https://github.com/The-Verscienta/kiln_cms/pull/2352) · [long form](docs/changelog/unreleased.md#team-scope-pickers))
+
 - **Webhook signing secrets on `/editor/webhooks` are masked to their last four characters until an admin clicks Reveal;
   a revealed secret has Copy and Hide, and a new endpoint's secret starts revealed.**
   ([#2349](https://github.com/The-Verscienta/kiln_cms/pull/2349) · [long form](docs/changelog/unreleased.md#webhook-secret-masked))

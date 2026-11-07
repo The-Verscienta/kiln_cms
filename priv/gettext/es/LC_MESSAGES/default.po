@@ -686,6 +686,16 @@ msgstr "%{names} están escribiendo…"
 msgid "%{name} (copy)"
 msgstr "%{name} (copia)"
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} (not found)"
+msgstr "%{name} (no encontrado)"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} (type not found)"
+msgstr "%{name} (tipo no encontrado)"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} couldn't be uploaded: %{reason}"
@@ -3427,6 +3437,7 @@ msgstr "Pensado para desarrolladores"
 msgid "Built on"
 msgstr "Construido con"
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
@@ -4556,11 +4567,6 @@ msgstr "Tipo de contenido creado. Ahora añada sus campos."
 msgid "Content type restored."
 msgstr "Tipo de contenido restaurado."
 
-#: lib/kiln_cms_web/live/team_live.ex
-#, elixir-autogen, elixir-format
-msgid "Content type → attributes a member may change. Empty = no field restriction."
-msgstr "Tipo de contenido → atributos que un miembro puede cambiar. Vacío = sin restricción de campos."
-
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/system_live.ex
@@ -4569,6 +4575,16 @@ msgstr "Tipo de contenido → atributos que un miembro puede cambiar. Vacío = s
 #, elixir-autogen, elixir-format
 msgid "Content types"
 msgstr "Tipos de contenido"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Content types they may edit"
+msgstr "Tipos de contenido que se pueden editar"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Content types they may read in the editor"
+msgstr "Tipos de contenido que se pueden leer en el editor"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
@@ -5426,6 +5442,12 @@ msgstr "Contraseña actual"
 msgid "Current target (unpublished or not listed)"
 msgstr "Destino actual (no publicado o fuera de la lista)"
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Currently inherited: %{value}"
+msgstr "Heredado actualmente: %{value}"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
@@ -5463,12 +5485,32 @@ msgstr "Carga útil de bloque personalizada"
 msgid "Custom content"
 msgstr "Contenido personalizado"
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Custom content types (all of them)"
+msgstr "Tipos de contenido personalizados (todos)"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Custom content types (all of them) covers every custom type on this site: %{types}. They can't be picked one by one here."
+msgstr "Tipos de contenido personalizados (todos) abarca todos los tipos personalizados de este sitio: %{types}. Aquí no se pueden elegir uno por uno."
+
 #: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Custom fields"
 msgstr "Campos personalizados"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Custom fields (all of them)"
+msgstr "Campos personalizados (todos)"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Custom fields are granted all together: there is no grant for one custom field on its own."
+msgstr "Los campos personalizados se conceden todos juntos: no existe un permiso para un solo campo personalizado por separado."
 
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
@@ -6607,11 +6649,6 @@ msgstr "Editar los bloques de este documento como Markdown"
 msgid "Edit tier"
 msgstr "Editar nivel"
 
-#: lib/kiln_cms_web/live/team_live.ex
-#, elixir-autogen, elixir-format
-msgid "Editable types"
-msgstr "Tipos editables"
-
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editing"
@@ -7237,6 +7274,11 @@ msgstr[1] "Exactamente %{count} filas."
 msgid "Excerpt"
 msgstr "Extracto"
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Existing documents of this type can't be changed at all: duplicates and translations carry no fields, and restoring a version is refused. Creating new ones and workflow steps still work."
+msgstr "Los documentos existentes de este tipo no se pueden cambiar en absoluto: los duplicados y las traducciones no llevan ningún campo, y se rechaza restaurar una versión. Crear documentos nuevos y los pasos del flujo de trabajo siguen funcionando."
+
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #, elixir-autogen, elixir-format
 msgid "Expand"
@@ -7478,15 +7520,10 @@ msgstr[1] "Campo añadido a %{count} tipos de contenido."
 msgid "Field deleted."
 msgstr "Campo eliminado."
 
-#: lib/kiln_cms_web/live/team_live.ex
+#: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
-msgid "Field grants (JSON)"
-msgstr "Permisos de campos (JSON)"
-
-#: lib/kiln_cms_web/live/team_live.ex
-#, elixir-autogen, elixir-format
-msgid "Field grants must be a JSON object."
-msgstr "Los permisos de campos deben ser un objeto JSON."
+msgid "Field grants"
+msgstr "Permisos de campos"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -7520,6 +7557,16 @@ msgstr "Los campos aparecen en el editor en este orden. Arrastre un campo por su
 #, elixir-autogen, elixir-format
 msgid "Fields in each row"
 msgstr "Campos de cada fila"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Fields of %{type}"
+msgstr "Campos de %{type}"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Fields of %{type} they may change"
+msgstr "Campos de %{type} que se pueden cambiar"
 
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #, elixir-autogen, elixir-format
@@ -7783,6 +7830,16 @@ msgstr "Para una opinión externa sobre la entregabilidad (puntuación SPF/DKIM/
 #, elixir-autogen, elixir-format
 msgid "For dividers, textures, and images that only repeat nearby text."
 msgstr "Para separadores, texturas e imágenes que solo repiten el texto cercano."
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "For each content type, which fields members with this role may change on existing documents. Creating documents and workflow steps are not affected, and any grant on a type also refuses restoring an old version of it."
+msgstr "Para cada tipo de contenido, qué campos pueden cambiar en los documentos existentes los miembros con este rol. Crear documentos y los pasos del flujo de trabajo no se ven afectados, y cualquier permiso sobre un tipo también rechaza restaurar una versión anterior de él."
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "For each content type, which fields this member may change on existing documents. Only these fields replaces their custom role's grant for that type, and No fields overrides it. Creating documents and workflow steps are not affected, and any grant on a type also refuses restoring an old version of it."
+msgstr "Para cada tipo de contenido, qué campos puede cambiar este miembro en los documentos existentes. Solo estos campos sustituye el permiso de su rol personalizado para ese tipo, y Ningún campo lo anula. Crear documentos y los pasos del flujo de trabajo no se ven afectados, y cualquier permiso sobre un tipo también rechaza restaurar una versión anterior de él."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -8149,6 +8206,11 @@ msgstr "Nivel a conceder"
 #, elixir-autogen, elixir-format
 msgid "Grantor"
 msgstr "Otorgante"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Grants stored for types this site doesn't have. Setting one to no restriction deletes it — and a type created later with that name would then not be field-restricted."
+msgstr "Permisos guardados para tipos que este sitio no tiene. Poner uno en sin restricción lo elimina, y un tipo creado más tarde con ese nombre ya no tendría restricción de campos."
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -8837,6 +8899,11 @@ msgstr "Informativo (info)"
 #, elixir-autogen, elixir-format
 msgid "Ingredients"
 msgstr "Ingredientes"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Inherit (custom role, then account)"
+msgstr "Heredar (rol personalizado y luego cuenta)"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -10685,6 +10752,11 @@ msgstr "Aún no hay categorías."
 msgid "No changes"
 msgstr "Sin cambios"
 
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "No changes."
+msgstr "Sin cambios."
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "No checkpoint has been minted yet."
@@ -10812,6 +10884,11 @@ msgstr "No hay ningún testigo externo configurado. Los puntos de control se emi
 #, elixir-autogen, elixir-format
 msgid "No fallback"
 msgstr "Sin respaldo"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "No fields (can't change existing documents)"
+msgstr "Ningún campo (no puede cambiar documentos existentes)"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -11064,6 +11141,11 @@ msgstr "Ninguna página relacionada coincide. Activar la búsqueda semántica me
 msgid "No releases here"
 msgstr "No hay lanzamientos aquí"
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "No restriction from this role"
+msgstr "Sin restricción por este rol"
+
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
@@ -11292,6 +11374,11 @@ msgstr "Sin configurar"
 #, elixir-autogen, elixir-format
 msgid "Not enough data to call a leader: every variant needs at least %{floor} impressions first. Rates on fewer are shown but not compared."
 msgstr "No hay datos suficientes para declarar una líder: cada variante necesita al menos %{floor} impresiones. Las tasas con menos se muestran pero no se comparan."
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Not found on this site"
+msgstr "No encontrado en este sitio"
 
 #: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
@@ -11892,6 +11979,11 @@ msgstr "Solo se envía cuando el formulario tiene un campo de correo electrónic
 msgid "Only the %{count} most recently updated published documents were scanned; there may be more."
 msgstr "Solo se analizaron los %{count} documentos publicados actualizados más recientemente; puede haber más."
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Only these fields"
+msgstr "Solo estos campos"
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Only these fields may be varied. Leave a field as it is to keep the document's value."
@@ -11902,6 +11994,11 @@ msgstr "Solo estos campos pueden variarse. Deje un campo como está para conserv
 #, elixir-autogen, elixir-format
 msgid "Only these sites:"
 msgstr "Solo estos sitios:"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Only these types"
+msgstr "Solo estos tipos"
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -12142,6 +12239,11 @@ msgstr "Otro"
 #, elixir-autogen, elixir-format
 msgid "Other block types (full editor)"
 msgstr "Otros tipos de bloque (editor completo)"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Other stored fields"
+msgstr "Otros campos guardados"
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
@@ -12540,6 +12642,21 @@ msgstr "Elige un valor para «%{slot}»."
 #, elixir-autogen, elixir-format
 msgid "Pick at least one content type."
 msgstr "Elija al menos un tipo de contenido."
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Pick at least one field, or choose No fields."
+msgstr "Elija al menos un campo o elija Ningún campo."
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Pick at least one type, or choose Inherit."
+msgstr "Elija al menos un tipo o elija Heredar."
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Pick at least one type, or choose No restriction from this role."
+msgstr "Elija al menos un tipo o elija Sin restricción por este rol."
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
@@ -13254,11 +13371,6 @@ msgstr "Solo lectura"
 #, elixir-autogen, elixir-format
 msgid "Read-only (delivery)"
 msgstr "Solo lectura (entrega)"
-
-#: lib/kiln_cms_web/live/team_live.ex
-#, elixir-autogen, elixir-format
-msgid "Readable types (editorial)"
-msgstr "Tipos legibles (editorial)"
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
@@ -16311,6 +16423,11 @@ msgstr "Se guarda cifrada y no se vuelve a mostrar. Cambiar el proveedor o el en
 msgid "Stored encrypted and never shown again. Clearing the username removes it."
 msgstr "Se guarda cifrada y no se vuelve a mostrar. Si vacías el usuario, se elimina."
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Stored for this type, but not a field that can be granted here, so they allow nothing. Untick one to remove it."
+msgstr "Guardados para este tipo, pero no son campos que se puedan conceder aquí, así que no permiten nada. Desmarque uno para quitarlo."
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/structure_live.ex
@@ -17919,6 +18036,11 @@ msgstr "Estos campos cambiaron en la página publicada desde entonces. Para cada
 #, elixir-autogen, elixir-format
 msgid "These items are not reachable from the top level, so they do not appear in the menu above or on the site. Moving one to the top level brings it back, along with anything nested under it — start with the outermost, and the rest may return on their own."
 msgstr "No se puede llegar a estos elementos desde el primer nivel, así que no aparecen ni en el menú de arriba ni en el sitio. Mover uno al primer nivel lo recupera junto con todo lo que contenga: empiece por el más externo, y puede que los demás vuelvan solos."
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "These stored names match no content type here, so they allow nothing. A custom type's own name never matches on this list — use Custom content types (all of them). Untick a name to remove it."
+msgstr "Estos nombres guardados no coinciden con ningún tipo de contenido de aquí, así que no permiten nada. El nombre propio de un tipo personalizado nunca coincide en esta lista: use Tipos de contenido personalizados (todos). Desmarque un nombre para quitarlo."
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
@@ -19981,10 +20103,30 @@ msgstr "Qué tipos de contenido de este sitio aparecen en sus feeds Atom y JSON,
 msgid "Which records connect"
 msgstr "Qué registros se conectan"
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Which types members with this role may create and edit."
+msgstr "Qué tipos pueden crear y editar los miembros con este rol."
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Which types syndicate, and whether in full."
 msgstr "Qué tipos se sindican, y si lo hacen por completo."
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Which types this member may create and edit. Only these types replaces their custom role's list — it can widen past it."
+msgstr "Qué tipos puede crear y editar este miembro. Solo estos tipos sustituye la lista de su rol personalizado y puede ir más allá de ella."
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Which unpublished content they see in the editor. Types they may edit are always readable."
+msgstr "Qué contenido no publicado ven en el editor. Los tipos que pueden editar siempre se pueden leer."
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "Which unpublished content they see in the editor. Types they may edit are always readable. Only these types replaces their custom role's list — it can widen past it."
+msgstr "Qué contenido no publicado ve en el editor. Los tipos que puede editar siempre se pueden leer. Solo estos tipos sustituye la lista de su rol personalizado y puede ir más allá de ella."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -21239,10 +21381,10 @@ msgstr "falló"
 msgid "failing since %{at}"
 msgstr "fallando desde el %{at}"
 
-#: lib/kiln_cms_web/live/team_live.ex
+#: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
-msgid "field grants: %{types}"
-msgstr "permisos de campos: %{types}"
+msgid "fields: %{grants}"
+msgstr "campos: %{grants}"
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -21320,6 +21462,11 @@ msgstr "en la papelera"
 #, elixir-autogen, elixir-format
 msgid "includes unpublished content"
 msgstr "incluye contenido no publicado"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "inherited"
+msgstr "heredado"
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
@@ -21556,6 +21703,11 @@ msgstr "nunca"
 msgid "never enabled"
 msgstr "nunca activada"
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "no fields"
+msgstr "ningún campo"
+
 #: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "no goal document is set"
@@ -21581,6 +21733,11 @@ msgstr "sin clave — el correo sale sin firmar"
 msgid "no recent activity recorded"
 msgstr "sin actividad reciente registrada"
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "no restriction"
+msgstr "sin restricción"
+
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "no schedule"
@@ -21591,6 +21748,7 @@ msgstr "sin programación"
 msgid "no winner — just stop"
 msgstr "sin ganadora: solo detener"
 
+#: lib/kiln_cms_web/components/scope_pickers.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "none"
@@ -21647,6 +21805,11 @@ msgstr "todavía no"
 #, elixir-autogen, elixir-format
 msgid "not yet anchored"
 msgstr "aún sin anclar"
+
+#: lib/kiln_cms_web/components/scope_pickers.ex
+#, elixir-autogen, elixir-format
+msgid "nothing picked yet"
+msgstr "aún no se ha elegido nada"
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #, elixir-autogen, elixir-format
@@ -21732,16 +21895,6 @@ msgstr "publicar en %{network}"
 #, elixir-autogen, elixir-format
 msgid "post to social media"
 msgstr "publicar en redes sociales"
-
-#: lib/kiln_cms_web/live/team_live.ex
-#, elixir-autogen, elixir-format
-msgid "post — empty = all"
-msgstr "entrada — vacío = todos"
-
-#: lib/kiln_cms_web/live/team_live.ex
-#, elixir-autogen, elixir-format
-msgid "post, page — empty = all"
-msgstr "entrada, página — vacío = todos"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
