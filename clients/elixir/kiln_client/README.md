@@ -26,7 +26,7 @@ one production incident at a time.
 ```elixir
 def deps do
   [
-    {:kiln_client, "~> 0.6"}
+    {:kiln_client, "~> 0.7"}
   ]
 end
 ```
