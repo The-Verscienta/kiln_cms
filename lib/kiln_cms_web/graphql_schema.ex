@@ -25,6 +25,10 @@ defmodule KilnCMSWeb.GraphqlSchema do
   # `referencedBy`. See `KilnCMSWeb.Graphql.ContentRecord`.
   import_types KilnCMSWeb.Graphql.ContentRecord
 
+  # The typed values of admin-defined custom fields (#2290), behind
+  # `fields(names:)`.
+  import_types KilnCMSWeb.Graphql.CustomFieldValues
+
   KilnCMSWeb.Graphql.ContentRecord.Notation.implement_content_record(
     Application.compile_env(:kiln_cms, :content_domains, [KilnCMS.CMS])
   )

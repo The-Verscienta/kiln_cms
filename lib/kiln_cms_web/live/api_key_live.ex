@@ -10,6 +10,11 @@ defmodule KilnCMSWeb.ApiKeyLive do
   within the owner's role (built for LLM/automation clients on `/mcp`). The
   plaintext key is shown **once**, right after minting — it's only stored
   hashed, so it can't be retrieved again.
+
+  A drafts-only key may be given a **rotation window** at mint: until that date
+  the service can exchange the key for a fresh one itself (`POST
+  /api/keys/rotate`). The list shows each key's window and where it came from,
+  and a key retired by rotation reads "Rotated", not "Revoked".
   """
   use KilnCMSWeb, :live_view
 
@@ -28,6 +33,7 @@ defmodule KilnCMSWeb.ApiKeyLive do
        |> assign(:actor, actor)
        |> assign(:page_title, gettext("API keys"))
        |> assign(:durations, @durations)
+       |> assign(:rotation_windows, rotation_windows())
        |> assign_users(actor)
        |> assign(:new_key, nil)
        |> load_keys()}
@@ -52,9 +58,9 @@ defmodule KilnCMSWeb.ApiKeyLive do
     access = access_scope(params["access"])
     expires_at = DateTime.add(DateTime.utc_now(), duration_days(days, access), :day)
 
-    case Accounts.mint_api_key(user_id, String.trim(name), expires_at, %{access: access},
-           actor: actor
-         ) do
+    attrs = %{access: access, rotatable_until: rotatable_until(params["rotate_days"], access)}
+
+    case Accounts.mint_api_key(user_id, String.trim(name), expires_at, attrs, actor: actor) do
       {:ok, key} ->
         {:noreply,
          socket
@@ -121,7 +127,7 @@ defmodule KilnCMSWeb.ApiKeyLive do
     keys =
       Accounts.list_all_api_keys!(
         actor: socket.assigns.actor,
-        load: [:user, :valid],
+        load: [:user, :valid, :rotated_to],
         query: [sort: [created_at: :desc]]
       )
 
@@ -142,6 +148,34 @@ defmodule KilnCMSWeb.ApiKeyLive do
       else: n
   end
 
+  # Self-rotation windows offered for a drafts-only key, capped at the
+  # configured ceiling. 0 = no self-rotation (the default).
+  defp rotation_windows do
+    max = KilnCMS.Accounts.Validations.DraftWriteKey.max_rotation_days()
+
+    [{gettext("Off"), 0}] ++
+      for {label, days} <- [
+            {gettext("90 days"), 90},
+            {gettext("180 days"), 180},
+            {gettext("1 year"), 365}
+          ],
+          days <= max,
+          do: {label, days}
+  end
+
+  # Only a drafts-only key can rotate; any other scope gets no window rather
+  # than a refused mint, since the field sits on the shared form.
+  defp rotatable_until(days, :draft_write) do
+    allowed = for {_label, n} <- rotation_windows(), n > 0, do: n
+
+    case Integer.parse(to_string(days)) do
+      {n, ""} -> if n in allowed, do: DateTime.add(DateTime.utc_now(), n, :day)
+      _ -> nil
+    end
+  end
+
+  defp rotatable_until(_days, _access), do: nil
+
   # Anything but an explicit opt-in falls back to read-only.
   defp access_scope("read_write"), do: :read_write
   defp access_scope("draft_write"), do: :draft_write
@@ -150,6 +184,9 @@ defmodule KilnCMSWeb.ApiKeyLive do
   defp access_label(:read_write), do: gettext("Read + write")
   defp access_label(:draft_write), do: gettext("Drafts only")
   defp access_label(_), do: gettext("Read-only")
+
+  defp status(%{revoked_at: at, rotated_to: %KilnCMS.Accounts.ApiKey{}}) when not is_nil(at),
+    do: {:rotated, gettext("Rotated")}
 
   defp status(%{revoked_at: at}) when not is_nil(at), do: {:revoked, gettext("Revoked")}
   defp status(%{valid: true}), do: {:active, gettext("Active")}
@@ -258,6 +295,22 @@ defmodule KilnCMSWeb.ApiKeyLive do
                 <option value="draft_write">{gettext("Drafts only (headless service)")}</option>
               </select>
             </label>
+            <label class="text-sm">
+              <span class="mb-1 block font-medium">{gettext("Self-rotation")}</span>
+              <select
+                id="new-api-key-rotation"
+                name="rotate_days"
+                aria-describedby="new-api-key-rotation-hint"
+                class="w-full rounded border border-base-content/30 px-2 py-1.5 text-sm"
+              >
+                <option :for={{label, days} <- @rotation_windows} value={days}>{label}</option>
+              </select>
+              <span id="new-api-key-rotation-hint" class="mt-1 block text-xs text-base-content/60">
+                {gettext(
+                  "Drafts-only keys only. Until this date the service can swap the key for a fresh one itself; after it, mint a new key. Other scopes ignore it."
+                )}
+              </span>
+            </label>
             <div class="flex items-end">
               <.button type="submit" variant="primary">{gettext("Create key")}</.button>
             </div>
@@ -285,7 +338,24 @@ defmodule KilnCMSWeb.ApiKeyLive do
               </thead>
               <tbody class="divide-y divide-base-content/5">
                 <tr :for={key <- @keys} id={"api-key-#{key.id}"}>
-                  <td class="py-2 pr-3 font-medium">{key.name}</td>
+                  <td class="py-2 pr-3">
+                    <span class="font-medium">{key.name}</span>
+                    <span
+                      :if={key.rotatable_until}
+                      class="block text-xs text-base-content/60"
+                    >
+                      {gettext("Rotates itself until %{date}",
+                        date: Calendar.strftime(key.rotatable_until, "%Y-%m-%d")
+                      )}
+                    </span>
+                    <span
+                      :if={key.rotated_from_id}
+                      class="block text-xs text-base-content/60"
+                      title={key.rotated_from_id}
+                    >
+                      {gettext("Rotated from %{id}", id: String.slice(key.rotated_from_id, 0, 8))}
+                    </span>
+                  </td>
                   <td class="py-2 pr-3 text-base-content/70">{key.user && key.user.email}</td>
                   <td class="py-2 pr-3">
                     <span class={[
@@ -302,6 +372,7 @@ defmodule KilnCMSWeb.ApiKeyLive do
                       "rounded px-1.5 py-0.5 text-xs font-medium",
                       kind == :active && "bg-success/15 text-success-ink",
                       kind == :revoked && "bg-error/15 text-error-ink",
+                      kind == :rotated && "bg-base-200 text-base-content/70",
                       kind == :expired && "bg-base-200 text-base-content/70"
                     ]}>
                       {label}

@@ -4,6 +4,12 @@ schema {
   query: RootQueryType
 }
 
+"A `boolean` field."
+type BooleanValue implements CustomFieldValue {
+  name: String!
+  value: Boolean!
+}
+
 type Category {
   id: ID!
   name: String!
@@ -212,6 +218,32 @@ interface ContentRecord {
   defaults to, and is capped at, 100.
   """
   referencedBy(field: String, sourceType: String, inverse: String, limit: Int, offset: Int): [ContentReferrer!]!
+
+  "The `string`, `text`, `url`, `select` or `user` custom field `name`, or null."
+  customString(name: String!): String
+
+  "The `integer` custom field `name`, or null."
+  customInt(name: String!): Int
+
+  "The `float` custom field `name`, or null."
+  customFloat(name: String!): Float
+
+  "The `boolean` custom field `name`, or null."
+  customBoolean(name: String!): Boolean
+
+  "The `date` custom field `name`, or null."
+  customDate(name: String!): Date
+
+  "The `datetime` custom field `name`, or null."
+  customDateTime(name: String!): DateTime
+
+  """
+  The custom fields `names` (at most 50), each as a `CustomFieldValue`
+  narrowed with `... on FloatValue { value }`. A name that is unknown,
+  empty, private to the reader or of no value is left out. Priced at one
+  plus the child's price per name.
+  """
+  fields(names: [String!]!): [CustomFieldValue!]!
 }
 
 """
@@ -357,12 +389,38 @@ type CreatePostResult {
 }
 
 """
+The value of one admin-defined custom field, by the kind its definition has.
+`name` is the field's name. Narrow with `... on FloatValue { value }`.
+"""
+interface CustomFieldValue {
+  name: String!
+}
+
+"""
+The `Date` scalar type represents a date. The Date appears in a JSON
+response as an ISO8601 formatted string, without a time component.
+"""
+scalar Date
+
+"""
 The `DateTime` scalar type represents a date and time in the UTC
 timezone. The DateTime appears in a JSON response as an ISO8601 formatted
 string, including UTC timezone ("Z"). The parsed date and time string will
 be converted to UTC if there is an offset.
 """
 scalar DateTime
+
+"A `datetime` field."
+type DateTimeValue implements CustomFieldValue {
+  name: String!
+  value: DateTime!
+}
+
+"A `date` field."
+type DateValue implements CustomFieldValue {
+  name: String!
+  value: Date!
+}
 
 input DeleteEntryInput {
   title: String!
@@ -592,6 +650,32 @@ type Entry implements ContentRecord {
   latestEditAt: DateTime
 
   highlight(locale: String!, query: String!): String
+
+  """
+  The custom fields `names` (at most 50), each as a `CustomFieldValue`
+  narrowed with `... on FloatValue { value }`. A name that is unknown,
+  empty, private to the reader or of no value is left out. Priced at one
+  plus the child's price per name.
+  """
+  fields(names: [String!]!): [CustomFieldValue!]!
+
+  "The `datetime` custom field `name`, or null."
+  customDateTime(name: String!): DateTime
+
+  "The `date` custom field `name`, or null."
+  customDate(name: String!): Date
+
+  "The `boolean` custom field `name`, or null."
+  customBoolean(name: String!): Boolean
+
+  "The `float` custom field `name`, or null."
+  customFloat(name: String!): Float
+
+  "The `integer` custom field `name`, or null."
+  customInt(name: String!): Int
+
+  "The `string`, `text`, `url`, `select` or `user` custom field `name`, or null."
+  customString(name: String!): String
 
   """
   The records that link to this one through a `:reference` custom field,
@@ -1258,6 +1342,36 @@ input EntrySortInput {
   highlightInput: EntryHighlightFieldInput
 }
 
+"A `float` field."
+type FloatValue implements CustomFieldValue {
+  name: String!
+  value: Float!
+}
+
+"A `geolocation` field: a coordinate, with its optional place name and map zoom."
+type GeolocationValue implements CustomFieldValue {
+  name: String!
+  lat: Float!
+  lng: Float!
+  label: String
+  zoom: Int
+}
+
+"""
+A `group` field: one object (or, in a `ListValue`, each row) of its
+sub-fields, as values.
+"""
+type GroupValue implements CustomFieldValue {
+  name: String!
+  fields: [CustomFieldValue!]!
+}
+
+"An `integer` field."
+type IntValue implements CustomFieldValue {
+  name: String!
+  value: Int!
+}
+
 """
 The `Json` scalar type represents arbitrary json string data, represented as UTF-8
 character sequences. The Json type is most often used to represent a free-form
@@ -1271,6 +1385,31 @@ character sequences. The Json type is most often used to represent a free-form
 human-readable json string.
 """
 scalar JsonString
+
+"""
+Anything that does not fit one scalar: a `computed` field, the other
+composite built-ins (`datetime_range`, `recurrence`) and a plugin type
+that does not name a GraphQL kind. `value` is the stored value as JSON.
+"""
+type JsonValue implements CustomFieldValue {
+  name: String!
+  value: JsonString
+}
+
+"""
+A `multiple` field: its items, in order, each a value of the field's item
+type. An item that does not match the definition is left out.
+"""
+type ListValue implements CustomFieldValue {
+  name: String!
+  items: [CustomFieldValue!]!
+}
+
+"A media item's focal point, as fractions of its width and height."
+type MediaFocal {
+  x: Float!
+  y: Float!
+}
 
 type MediaItem {
   id: ID!
@@ -1652,6 +1791,30 @@ input MediaItemSortInput {
   field: MediaItemSortField!
 }
 
+"A `media` field, in the shape every delivery surface serves a media item."
+type MediaValue implements CustomFieldValue {
+  name: String!
+  id: ID!
+  url: String
+  alt: String
+  width: Int
+  height: Int
+  mimeType: String
+  focal: MediaFocal
+  variants: [MediaVariant!]!
+}
+
+"One derived rendition of a media item."
+type MediaVariant {
+  label: String
+  width: Int
+  height: Int
+  format: String
+  url: String
+  bytes: Int
+  cropped: Boolean
+}
+
 "A resolved navigation menu (#466)."
 type Menu {
   key: String!
@@ -1826,6 +1989,32 @@ type Page implements ContentRecord {
   latestEditAt: DateTime
 
   highlight(locale: String!, query: String!): String
+
+  """
+  The custom fields `names` (at most 50), each as a `CustomFieldValue`
+  narrowed with `... on FloatValue { value }`. A name that is unknown,
+  empty, private to the reader or of no value is left out. Priced at one
+  plus the child's price per name.
+  """
+  fields(names: [String!]!): [CustomFieldValue!]!
+
+  "The `datetime` custom field `name`, or null."
+  customDateTime(name: String!): DateTime
+
+  "The `date` custom field `name`, or null."
+  customDate(name: String!): Date
+
+  "The `boolean` custom field `name`, or null."
+  customBoolean(name: String!): Boolean
+
+  "The `float` custom field `name`, or null."
+  customFloat(name: String!): Float
+
+  "The `integer` custom field `name`, or null."
+  customInt(name: String!): Int
+
+  "The `string`, `text`, `url`, `select` or `user` custom field `name`, or null."
+  customString(name: String!): String
 
   """
   The records that link to this one through a `:reference` custom field,
@@ -2646,6 +2835,32 @@ type Post implements ContentRecord {
   highlight(locale: String!, query: String!): String
 
   """
+  The custom fields `names` (at most 50), each as a `CustomFieldValue`
+  narrowed with `... on FloatValue { value }`. A name that is unknown,
+  empty, private to the reader or of no value is left out. Priced at one
+  plus the child's price per name.
+  """
+  fields(names: [String!]!): [CustomFieldValue!]!
+
+  "The `datetime` custom field `name`, or null."
+  customDateTime(name: String!): DateTime
+
+  "The `date` custom field `name`, or null."
+  customDate(name: String!): Date
+
+  "The `boolean` custom field `name`, or null."
+  customBoolean(name: String!): Boolean
+
+  "The `float` custom field `name`, or null."
+  customFloat(name: String!): Float
+
+  "The `integer` custom field `name`, or null."
+  customInt(name: String!): Int
+
+  "The `string`, `text`, `url`, `select` or `user` custom field `name`, or null."
+  customString(name: String!): String
+
+  """
   The records that link to this one through a `:reference` custom field,
   optionally only through `field` and only from `sourceType` (a content
   type name, e.g. `post` or a dynamic type's name). `inverse` names a
@@ -3349,6 +3564,15 @@ input ReferenceTargetInput {
   link: JsonString
 }
 
+"""
+A `reference` field: the ids of the records it points at, in order. Only ids
+the reader may see are listed. Read the records through `references(field:)`.
+"""
+type ReferenceValue implements CustomFieldValue {
+  name: String!
+  ids: [ID!]!
+}
+
 input ReturnEntryToDraftInput {
   expectedLockVersion: Int
 }
@@ -4014,6 +4238,12 @@ enum SortOrder {
   ASC
   ASC_NULLS_FIRST
   ASC_NULLS_LAST
+}
+
+"A text-like field: `string`, `text`, `url`, `select` or `user`."
+type StringValue implements CustomFieldValue {
+  name: String!
+  value: String!
 }
 
 input SubmitEntryForReviewInput {

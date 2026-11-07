@@ -156,6 +156,146 @@ query {
   by the usual limits below: both fields are priced like any to-many
   relationship.
 
+### Read custom fields typed by kind
+
+`customFields` is one `JsonString` holding every admin-defined field. To read
+a field with a real GraphQL type instead, every content type (`Page`, `Post`, a
+project type, `Entry`) and the `ContentRecord` interface has these readers:
+
+| Field | Returns |
+|-------|---------|
+| `customString(name:)` | `String`: a `string`, `text`, `url`, `select` or `user` field |
+| `customInt(name:)` | `Int`: an `integer` field |
+| `customFloat(name:)` | `Float`: a `float` field |
+| `customBoolean(name:)` | `Boolean`: a `boolean` field |
+| `customDate(name:)` | `Date`: a `date` field |
+| `customDateTime(name:)` | `DateTime`: a `datetime` field |
+| `fields(names: [String!]!)` | `[CustomFieldValue!]!`: any field, including the kinds above that have no accessor |
+
+Use an alias to name the result after the field:
+
+```graphql
+query {
+  postBySlug(slug: "pancakes", locale: "en") {
+    title
+    price: customFloat(name: "price")
+    servings: customInt(name: "servings")
+    fields(names: ["ingredients", "hero_image", "nutrition"]) {
+      __typename
+      name
+      ... on ReferenceValue { ids }
+      ... on MediaValue { id url alt }
+      ... on JsonValue { asJson: value }
+      ... on GroupValue { fields { name ... on FloatValue { asFloat: value } } }
+    }
+  }
+}
+```
+
+**What is typed, and what is not.** The schema is compiled and the same for
+every site, while an admin adds and renames fields at runtime, so a field
+cannot become a GraphQL field of its own (`price: Float`). What is typed is the
+*accessor*: `customFloat(name: "price")` is a `Float` or `null`, and the server
+cannot tell you that `"price"` is misspelled. A typo, a renamed or deleted
+field, a field of another kind, a stored value that no longer fits its
+definition, and a private field read below editor are all `null` (and left out
+of `fields`), never an error. Catch a wrong name at build time with the
+generated types [below](#generate-types-and-fragments-for-your-site).
+
+- `fields(names:)` returns the `CustomFieldValue` interface (`name: String!`).
+  Narrow with `... on FloatValue { value }`. The members are `StringValue`,
+  `IntValue`, `FloatValue`, `BooleanValue`, `DateValue`, `DateTimeValue`,
+  `ListValue { items }`, `GroupValue { fields }`, `ReferenceValue { ids }`,
+  `MediaValue` (the shape every surface serves a media item: `id`, `url`,
+  `alt`, `width`, `height`, `mimeType`, `focal`, `variants`),
+  `GeolocationValue { lat lng label zoom }` and `JsonValue { value }`.
+- Alias `value` per member (`asString: value`, `asFloat: value`): GraphQL does
+  not allow one response key to have two types, and the generated fragments do
+  the same.
+- A field with `multiple` is a `ListValue`, whatever its item type. A group
+  is a `GroupValue` of its sub-fields (a repeating group is a `ListValue` of
+  `GroupValue`s), nested to depth 3.
+- A `geolocation` field is a `GeolocationValue`: `lat` and `lng` are floats,
+  `label` (place name) and `zoom` are `null` when not set. A stored value that
+  is not a coordinate (a legacy shape) is left out, as for any other kind.
+- `computed`, `datetime_range` and `recurrence` fields, and a plugin type that does not name a GraphQL kind, are `JsonValue`.
+- **A reference field returns ids only** (`ReferenceValue { ids }`; a
+  `multiple` one is a `ListValue` of `ReferenceValue`s, one id each). For the
+  records, use [`references(field:)`](#relationships-references-and-referencedby).
+- `names` is required and at most 50; more is an error. The cost is 1 plus the
+  selection once per name, and an accessor costs 1, within the usual
+  [limits](#query-cost).
+- Values are the record's own, as `customFields` serves them. A
+  `localization: :fallback` field does **not** inherit along the locale chain
+  here: read the record in the locale whose value you want.
+- A page of records reads the site's field definitions once per content type,
+  not once per record.
+- Filtering and sorting are unchanged: `customFilter` and `customSort` take the
+  same names as before. Only reads are typed.
+- A dynamic content type is an `Entry`; read it with
+  `publishedEntries(filter: {typeName: {eq: "recipe"}})`.
+
+`null` means "not served", not "empty". An unset field, an unknown name and a
+private one look the same on purpose: a client can't learn from the response
+which private fields exist.
+
+### Generate types and fragments for your site
+
+`GET /api/schema` takes a `format` (a closed set; anything else is a `400` with
+code `invalid_format`):
+
+| `format` | Response |
+|----------|----------|
+| `json` (default) | JSON Schema, as before ([api.md](api.md#schema-discovery-typed-clients)) |
+| `typescript` | The same types as a `.d.ts` declaration file |
+| `typescript-graphql` | A `.ts` **module** (the fragments are values): the declarations above plus, per content type, a `<Type>CustomFields` interface and a `<Type>CustomFieldsFragment` string |
+
+Fetch it at build time and commit the file. A recipe for a front end that
+reads with GraphQL:
+
+1. Download the module from the site, with no key for published content:
+
+   ```bash
+   curl -s 'https://cms.example.com/api/schema?format=typescript-graphql&type=post' \
+     -o src/generated/kiln.ts
+   ```
+
+   The file now has `PostCustomFields` and `PostCustomFieldsFragment`. A type
+   with no public custom field has no section, and `?type=` limits the output
+   as it does for JSON.
+2. Spread the fragment in your query:
+
+   ```ts
+   import { PostCustomFieldsFragment, type PostCustomFields } from "./generated/kiln";
+
+   const query = `
+     query ($slug: String!) {
+       postBySlug(slug: $slug, locale: "en") { title ...PostCustomFields }
+     }
+     ${PostCustomFieldsFragment}`;
+
+   type PostResult = { postBySlug: { title: string } & PostCustomFields };
+   ```
+
+3. Read the result. A scalar field is a property named after the field in
+   camelCase (`price` is `price: number | null`, `launch_date` is
+   `launchDate: string | null`), and every other kind arrives in `fields`,
+   narrowed on `__typename`. A name that collides with a record property (such
+   as `title` or `slug`) gets a `custom` prefix (`customTitle`), and two names
+   that camelize alike get a numeric suffix.
+4. Regenerate after an admin adds, renames or removes a field, and fail CI on a
+   diff: the generated names are the site's definitions *now*. The response is
+   cached for five minutes and is refreshed when a content type or field
+   definition is written.
+
+For a dynamic type the fragment is on `Entry`; use it with
+`publishedEntries(filter: {typeName: {eq: "recipe"}})`. The comment above each
+generated type says which. The fragment goes one level into lists and groups.
+Private custom fields are not in the export.
+
+Not available yet: Swift and Kotlin emitters for the GraphQL section, typed
+filter operators, a per-site schema with a regenerate step, and typed writes.
+
 ### Taxonomy — categories, tags & tag groups
 
 Taxonomy is world-readable and exposed as plain (unpaginated) lists plus a
@@ -296,6 +436,15 @@ create/update/submit; **return-to-draft, publish, unpublish and delete require a
 `:admin`** account — an editor submits for review, and deciding the outcome
 (approve or return) is the admin's half. The hard delete (`:purge`) is **never** exposed as a mutation and is
 API-key-banned regardless of scope.
+
+A **`:draft_write` key** (#2273) may run `create…` and `update…` on a draft its
+account authored while it is still a draft, whatever the owner's role; every
+other mutation above is refused, as are the reference, tag, category and media
+mutations. An HTTP `X-Kiln-On-Behalf-Of` header on the create is stored as
+`onBehalfOf` (beside `createdViaKeyId` / `createdViaKeyName`); those fields
+resolve to `null`, with a `forbidden_field` error, for anyone but editors,
+admins and the creating key. See
+[headless-consumer-guide.md](headless-consumer-guide.md#submitting-drafts-from-your-app-the-draft_write-key).
 
 ### Media metadata — `updateMediaItem`
 
