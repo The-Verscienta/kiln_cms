@@ -33,7 +33,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "entries_org_id_fkey",
+        "name": "products_org_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -155,6 +155,42 @@
       "size": null,
       "source": "path_alias_derived",
       "type": "boolean"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "created_via_key_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "created_via_key_name",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "on_behalf_of",
+      "type": "text"
     },
     {
       "allow_nil?": true,
@@ -523,39 +559,6 @@
       "type": "text"
     },
     {
-      "allow_nil?": false,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": {
-        "deferrable": false,
-        "destination_attribute": "id",
-        "destination_attribute_default": null,
-        "destination_attribute_generated": null,
-        "index?": false,
-        "index_where": null,
-        "match_tenant?": false,
-        "match_type": null,
-        "match_with": null,
-        "multitenancy": {
-          "attribute": "org_id",
-          "global": false,
-          "strategy": "attribute"
-        },
-        "name": "entries_type_definition_id_fkey",
-        "on_delete": null,
-        "on_update": null,
-        "primary_key?": true,
-        "schema": "public",
-        "table": "type_definitions"
-      },
-      "scale": null,
-      "size": null,
-      "source": "type_definition_id",
-      "type": "uuid"
-    },
-    {
       "allow_nil?": true,
       "default": "nil",
       "generated?": false,
@@ -576,7 +579,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "entries_author_id_fkey",
+        "name": "products_author_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -609,7 +612,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "entries_category_id_fkey",
+        "name": "products_category_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -642,12 +645,12 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "entries_parent_id_fkey",
+        "name": "products_parent_id_fkey",
         "on_delete": "nilify",
         "on_update": null,
         "primary_key?": true,
         "schema": "public",
-        "table": "entries"
+        "table": "products"
       },
       "scale": null,
       "size": null,
@@ -675,7 +678,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "entries_featured_image_id_fkey",
+        "name": "products_featured_image_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -719,7 +722,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_path_alias_index",
+      "name": "products_path_alias_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -742,7 +745,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_parent_lookup_index",
+      "name": "products_parent_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -763,7 +766,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_embedding_hnsw_index",
+      "name": "products_embedding_hnsw_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -784,7 +787,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_title_trgm_index",
+      "name": "products_title_trgm_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -805,7 +808,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_title_lexemes_index",
+      "name": "products_title_lexemes_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -826,7 +829,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_custom_fields_gin_index",
+      "name": "products_custom_fields_gin_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -854,7 +857,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_slug_locale_lookup_index",
+      "name": "products_slug_locale_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -877,7 +880,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_next_occurrence_index",
+      "name": "products_next_occurrence_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -900,7 +903,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_unpublish_at_index",
+      "name": "products_unpublish_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -923,7 +926,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_last_reviewed_at_index",
+      "name": "products_last_reviewed_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -951,7 +954,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_console_updated_index",
+      "name": "products_console_updated_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -979,7 +982,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_console_title_index",
+      "name": "products_console_title_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -1004,7 +1007,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_console_published_index",
+      "name": "products_console_published_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -1017,24 +1020,20 @@
     {
       "after_tables": [],
       "code?": false,
-      "down": "ALTER TABLE entries DROP COLUMN IF EXISTS name_lexemes",
+      "down": "ALTER TABLE products DROP COLUMN IF EXISTS name_lexemes",
       "global?": false,
       "name": "name_lexemes",
-      "up": "ALTER TABLE entries ADD COLUMN IF NOT EXISTS name_lexemes text[] GENERATED ALWAYS AS (CASE WHEN search_weighted IS NULL THEN NULL ELSE tsvector_to_array(to_tsvector(kiln_regconfig(locale), coalesce(search_weighted[1], ''))) || kiln_han_runs(search_weighted[1]) END) STORED"
+      "up": "ALTER TABLE products ADD COLUMN IF NOT EXISTS name_lexemes text[] GENERATED ALWAYS AS (CASE WHEN search_weighted IS NULL THEN NULL ELSE tsvector_to_array(to_tsvector(kiln_regconfig(locale), coalesce(search_weighted[1], ''))) || kiln_han_runs(search_weighted[1]) END) STORED"
     }
   ],
   "has_create_action": true,
-  "hash": "A34D38E6DA0519304D85274D5B1F60A83BF98CDAC951517E074FD97744079281",
+  "hash": "A18A5F96480E8D08719ED7E03D217AB0A2E0B6CA484B7D5244C04C509F29C52F",
   "identities": [
     {
       "all_tenants?": false,
       "base_filter": null,
-      "index_name": "entries_unique_slug_index",
+      "index_name": "products_unique_slug_index",
       "keys": [
-        {
-          "type": "atom",
-          "value": "type_definition_id"
-        },
         {
           "type": "atom",
           "value": "slug"
@@ -1056,6 +1055,6 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "entries",
+  "table": "products",
   "temporal": null
 }

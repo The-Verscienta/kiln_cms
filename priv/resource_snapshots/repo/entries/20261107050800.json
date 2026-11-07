@@ -33,7 +33,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "posts_org_id_fkey",
+        "name": "entries_org_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -155,6 +155,42 @@
       "size": null,
       "source": "path_alias_derived",
       "type": "boolean"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "created_via_key_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "created_via_key_name",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "on_behalf_of",
+      "type": "text"
     },
     {
       "allow_nil?": true,
@@ -523,6 +559,39 @@
       "type": "text"
     },
     {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "index_where": null,
+        "match_tenant?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": "org_id",
+          "global": false,
+          "strategy": "attribute"
+        },
+        "name": "entries_type_definition_id_fkey",
+        "on_delete": null,
+        "on_update": null,
+        "primary_key?": true,
+        "schema": "public",
+        "table": "type_definitions"
+      },
+      "scale": null,
+      "size": null,
+      "source": "type_definition_id",
+      "type": "uuid"
+    },
+    {
       "allow_nil?": true,
       "default": "nil",
       "generated?": false,
@@ -543,7 +612,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "posts_author_id_fkey",
+        "name": "entries_author_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -576,7 +645,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "posts_category_id_fkey",
+        "name": "entries_category_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -609,12 +678,12 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "posts_parent_id_fkey",
+        "name": "entries_parent_id_fkey",
         "on_delete": "nilify",
         "on_update": null,
         "primary_key?": true,
         "schema": "public",
-        "table": "posts"
+        "table": "entries"
       },
       "scale": null,
       "size": null,
@@ -642,7 +711,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "posts_featured_image_id_fkey",
+        "name": "entries_featured_image_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -686,7 +755,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_path_alias_index",
+      "name": "entries_path_alias_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -709,7 +778,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_parent_lookup_index",
+      "name": "entries_parent_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -730,7 +799,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_embedding_hnsw_index",
+      "name": "entries_embedding_hnsw_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -751,7 +820,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_title_trgm_index",
+      "name": "entries_title_trgm_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -772,7 +841,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_title_lexemes_index",
+      "name": "entries_title_lexemes_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -793,7 +862,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_custom_fields_gin_index",
+      "name": "entries_custom_fields_gin_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -821,7 +890,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_slug_locale_lookup_index",
+      "name": "entries_slug_locale_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -844,7 +913,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_next_occurrence_index",
+      "name": "entries_next_occurrence_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -867,7 +936,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_unpublish_at_index",
+      "name": "entries_unpublish_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -890,7 +959,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_last_reviewed_at_index",
+      "name": "entries_last_reviewed_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -918,7 +987,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_console_updated_index",
+      "name": "entries_console_updated_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -946,7 +1015,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_console_title_index",
+      "name": "entries_console_title_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -971,7 +1040,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "posts_console_published_index",
+      "name": "entries_console_published_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -984,20 +1053,24 @@
     {
       "after_tables": [],
       "code?": false,
-      "down": "ALTER TABLE posts DROP COLUMN IF EXISTS name_lexemes",
+      "down": "ALTER TABLE entries DROP COLUMN IF EXISTS name_lexemes",
       "global?": false,
       "name": "name_lexemes",
-      "up": "ALTER TABLE posts ADD COLUMN IF NOT EXISTS name_lexemes text[] GENERATED ALWAYS AS (CASE WHEN search_weighted IS NULL THEN NULL ELSE tsvector_to_array(to_tsvector(kiln_regconfig(locale), coalesce(search_weighted[1], ''))) || kiln_han_runs(search_weighted[1]) END) STORED"
+      "up": "ALTER TABLE entries ADD COLUMN IF NOT EXISTS name_lexemes text[] GENERATED ALWAYS AS (CASE WHEN search_weighted IS NULL THEN NULL ELSE tsvector_to_array(to_tsvector(kiln_regconfig(locale), coalesce(search_weighted[1], ''))) || kiln_han_runs(search_weighted[1]) END) STORED"
     }
   ],
   "has_create_action": true,
-  "hash": "ECEEAAA6CAC2B68C4011D2C5E64A9283FF37339D53D1F872059A3C5826D81176",
+  "hash": "45255371FE87ED45085BBD862323478C3A978E05E43F5C8CAEB55E341237EAA8",
   "identities": [
     {
       "all_tenants?": false,
       "base_filter": null,
-      "index_name": "posts_unique_slug_index",
+      "index_name": "entries_unique_slug_index",
       "keys": [
+        {
+          "type": "atom",
+          "value": "type_definition_id"
+        },
         {
           "type": "atom",
           "value": "slug"
@@ -1019,6 +1092,6 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "posts",
+  "table": "entries",
   "temporal": null
 }

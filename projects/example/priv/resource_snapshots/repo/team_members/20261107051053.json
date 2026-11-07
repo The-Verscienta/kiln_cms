@@ -165,6 +165,42 @@
       "references": null,
       "scale": null,
       "size": null,
+      "source": "created_via_key_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "created_via_key_name",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "on_behalf_of",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
       "source": "seo_image",
       "type": "text"
     },
@@ -991,7 +1027,7 @@
     }
   ],
   "has_create_action": true,
-  "hash": "3289020D0DA38D6DE1404C700B26C022DF33319E4C6AC48DF1571DE305609F6C",
+  "hash": "EEB94388E11E16BFAF3579D07CBAADFB6E1BA5CD9295C31A8A4B380AF40A0984",
   "identities": [
     {
       "all_tenants?": false,
