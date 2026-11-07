@@ -28,15 +28,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   import KilnCMSWeb.BlockDiscussionComponents,
     only: [block_discussion: 1, discussion_state: 3]
 
-  import KilnCMSWeb.VersionDiffComponents, only: [version_compare: 1]
+  import KilnCMSWeb.VersionDiffComponents, only: [restore_preview: 1, version_compare: 1]
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.Changes.RestoreVersion
   alias KilnCMS.CMS.ContentLinks
   alias KilnCMS.CMS.ContentTree
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.FieldDisplay
   alias KilnCMS.CMS.Mentions
   alias KilnCMS.CMS.PreviewToken
   alias KilnCMS.CMS.ReverseFields
@@ -324,6 +326,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # after the draft was saved, and what the editor chose for each, while the
     # "Publish changes" panel is open. `nil` when it is closed.
     |> assign(:publish_conflicts, nil)
+    |> assign(:custom_conflict_detail, nil)
     |> assign(:conflict_choices, %{})
     # The change-severity question (`KilnCMS.CMS.Severity`), asked when a
     # published edit touches a field the site lists as safety-relevant: `nil`
@@ -360,6 +363,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:current_pick, @current_pick)
     |> assign(:compare_pick, [])
     |> assign(:compare, nil)
+    # Restore preview (#2294): what a restore would change, shown before the
+    # confirm. Both Restore buttons post "restore"; only "confirm_restore"
+    # writes, and only for the version this preview shows.
+    |> assign(:restore_preview, nil)
     # Right inspector rail (Theme A): which panel is showing. All panels stay
     # mounted (form fields must survive submit) — the tab only toggles CSS
     # visibility, never `:if`. Always mounts as `:preview` here (even for
@@ -1029,6 +1036,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :keys, :list, required: true
   attr :choices, :map, required: true
   attr :resource, :atom, required: true
+  # Per-key detail for the whole-map "custom_fields" row (#2294): entries, the
+  # definitions by name, and the resolved media / reference labels.
+  attr :custom_detail, :map, default: nil
 
   # The lost-update guard's question (#1815), asked before "Publish changes"
   # would overwrite a live value someone changed after the draft was saved.
@@ -1056,6 +1066,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
           class="flex flex-wrap items-center justify-between gap-2 py-2"
         >
           <span class="text-sm font-medium">{held_key_label(@resource, key)}</span>
+          <VersionDiffComponents.entry_detail
+            :if={key == "custom_fields" && @custom_detail}
+            id="publish-conflict-custom_fields-detail"
+            entries={@custom_detail.entries}
+            definitions={@custom_detail.definitions}
+            display={@custom_detail.display}
+          />
           <span class="flex gap-1">
             <button
               type="button"
@@ -1729,9 +1746,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
          false <- Enum.any?(resolved, &is_nil/1),
          [left, right] <- Enum.sort(resolved, &pick_before?/2),
          {:ok, old, new} <- snapshots(Module.concat(resource, Version), record, left, right, opts) do
+      diff = VersionDiff.between(old, new, resource)
+      definitions = Map.new(socket.assigns.field_definitions, &{&1.name, &1})
+
       {:ok,
        %{
-         diff: VersionDiff.between(old, new, resource),
+         diff: diff,
+         definitions: definitions,
+         display:
+           FieldDisplay.context(
+             socket.assigns.field_definitions,
+             diff,
+             opts[:actor],
+             opts[:tenant]
+           ),
          left: side(left),
          right: side(right)
        }}
@@ -3736,7 +3764,50 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, assign(socket, :compare, nil)}
   end
 
+  # Restore is two steps (#2294): "restore" (both buttons, the compare modal's
+  # and the history list's) only PREVIEWS; "confirm_restore" writes. The gate is
+  # here rather than on the buttons because a forged event arrives regardless of
+  # what is rendered. A preview is offered only to someone whose restore could
+  # succeed: `Ash.can?` is blind to the field-grant refusal (it lives in a
+  # change, not a policy), so that is checked by hand in `restore_refusal/1`.
   def handle_event("restore", %{"version_id" => version_id}, socket) when is_binary(version_id) do
+    with :ok <- restore_refusal(socket),
+         {:ok, preview} <- build_restore_preview(socket, version_id) do
+      {:noreply, assign(socket, :restore_preview, preview)}
+    else
+      {:refused, message} -> {:noreply, put_flash(socket, :error, message)}
+      :error -> {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
+    end
+  end
+
+  def handle_event("cancel_restore", _params, socket) do
+    {:noreply, assign(socket, :restore_preview, nil)}
+  end
+
+  def handle_event("confirm_restore", %{"version_id" => version_id}, socket)
+      when is_binary(version_id) do
+    with :ok <- restore_refusal(socket),
+         %{version_id: ^version_id, error: nil} = shown <- socket.assigns.restore_preview,
+         {:ok, fresh} <- build_restore_preview(socket, version_id) do
+      if same_restore?(shown, fresh) do
+        {:noreply, run_restore(socket, version_id)}
+      else
+        # The document or the schema moved since the preview was drawn: what
+        # would be restored is no longer what the editor agreed to.
+        {:noreply,
+         socket
+         |> assign(:restore_preview, fresh)
+         |> put_flash(:info, gettext("That version changed since the preview. Review it again."))}
+      end
+    else
+      {:refused, message} -> {:noreply, put_flash(socket, :error, message)}
+      :error -> {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
+      # No preview for this version (a forged or stale confirm): nothing to do.
+      _no_preview -> {:noreply, socket}
+    end
+  end
+
+  defp run_restore(socket, version_id) do
     result =
       restore_version(
         socket.assigns.kind,
@@ -3745,6 +3816,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
         socket.assigns.actor
       )
 
+    socket = assign(socket, :restore_preview, nil)
+
     case result do
       {:ok, record} ->
         # Re-read rather than adopted: a restore can bring back a working
@@ -3752,25 +3825,112 @@ defmodule KilnCMSWeb.ContentEditorLive do
         # those from what `fetch!/4` loads, not from the action's result.
         record = fetch!(socket.assigns.kind, record.id, socket.assigns.actor, record.org_id)
 
-        {:noreply,
-         socket
-         |> assign_record(record)
-         |> broadcast_saved()
-         |> reset_editors()
-         |> mark_saved()
-         # Restore can be fired from inside the compare modal; the diff it was
-         # showing describes a document that no longer exists.
-         |> assign(:compare, nil)
-         |> assign(:compare_pick, [])
-         |> put_flash(:info, gettext("Restored that version."))}
+        socket
+        |> assign_record(record)
+        |> broadcast_saved()
+        |> reset_editors()
+        |> mark_saved()
+        # Restore can be fired from inside the compare modal; the diff it was
+        # showing describes a document that no longer exists.
+        |> assign(:compare, nil)
+        |> assign(:compare_pick, [])
+        |> put_flash(:info, gettext("Restored that version."))
 
       {:error, error} ->
-        {:noreply, put_flash(socket, :error, restore_error_message(error))}
+        put_flash(socket, :error, restore_error_message(error))
 
       _ ->
-        {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
+        put_flash(socket, :error, gettext("Couldn't restore that version."))
     end
   end
+
+  # Whether this actor may restore a version of this record, or the message to
+  # show instead. Mirrors what the action will do: the policy chain (`Ash.can?`)
+  # and `Changes.EnforceFieldGrants`, which refuses `:restore_version` outright
+  # to an effective editor with a field grant for this type.
+  defp restore_refusal(socket) do
+    %{record: record, actor: actor} = socket.assigns
+    org = record.org_id
+
+    cond do
+      not Ash.can?({record, :restore_version}, actor, tenant: org) ->
+        {:refused, gettext("You can't restore versions of this content.")}
+
+      restore_field_grant?(record, actor, org) ->
+        {:refused,
+         gettext("Restoring a version requires full field access for this content type.")}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp restore_field_grant?(record, actor, org) do
+    Scoping.effective_tier(actor, org) == :editor and
+      Scoping.field_grant(actor, org, ContentTypes.type_name_for(record)) != nil
+  end
+
+  # What the restore would do, as the same `RestoreVersion.plan/3` the action
+  # runs, rendered with the compare modal's diff. A failing plan still yields a
+  # preview, carrying the reason and no confirm.
+  defp build_restore_preview(socket, version_id) do
+    %{record: record, actor: actor} = socket.assigns
+    opts = [actor: actor, tenant: record.org_id]
+    plan = RestoreVersion.preview(record, version_id, opts)
+    label = restore_version_label(socket.assigns.versions, version_id)
+
+    if plan.errors == [] do
+      resource = record.__struct__
+      planned = struct(record, plan.values)
+
+      diff =
+        VersionDiff.between(
+          VersionSnapshot.current(record),
+          VersionSnapshot.current(planned),
+          resource
+        )
+
+      {:ok,
+       %{
+         version_id: version_id,
+         label: label,
+         diff: diff,
+         definitions: Map.new(socket.assigns.field_definitions, &{&1.name, &1}),
+         display:
+           FieldDisplay.context(socket.assigns.field_definitions, diff, actor, record.org_id),
+         dropped: plan.dropped,
+         error: nil
+       }}
+    else
+      {:ok,
+       %{
+         version_id: version_id,
+         label: label,
+         diff: nil,
+         definitions: %{},
+         display: nil,
+         dropped: [],
+         error: restore_error_message(plan.errors)
+       }}
+    end
+  rescue
+    error ->
+      # A forbidden history read raises rather than previewing a partial one
+      # (see `RestoreVersion`, "As the caller"); same logging as `build_compare/2`.
+      Logger.error("restore preview failed: #{Exception.format(:error, error, __STACKTRACE__)}")
+
+      :error
+  end
+
+  defp restore_version_label(versions, version_id) do
+    case Enum.find(versions, &(&1.id == version_id)) do
+      nil -> gettext("Selected version")
+      version -> version_label(version)
+    end
+  end
+
+  defp same_restore?(shown, fresh),
+    do: shown.diff == fresh.diff and shown.dropped == fresh.dropped and is_nil(fresh.error)
 
   # Apply a picked media item to whatever the picker was opened for. Shared by
   # the "pick_image" handlers above and `route_picked_item/2` below (an
@@ -4818,6 +4978,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       keys ->
         socket
         |> assign(:publish_conflicts, keys)
+        |> assign(:custom_conflict_detail, custom_conflict_detail(socket, keys))
         |> assign(:conflict_choices, %{})
     end
   end
@@ -4921,9 +5082,39 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:severity_error?, false)
   end
 
+  # The per-key detail under the whole-map "Custom fields" row (#2294), for a
+  # draft-versus-live conflict. Computed fields are the system's, not the
+  # editor's edits, so they are left out; `nil` when nothing is left, so the
+  # panel never draws an empty detail. Values are shown as stored (never
+  # through `MaskPrivateFields`: a masked side would read as a false change);
+  # media / reference labels resolve as the signed-in reader.
+  defp custom_conflict_detail(socket, keys) do
+    with true <- "custom_fields" in keys,
+         %{record: record, actor: actor, field_definitions: definitions} <- socket.assigns,
+         entries when entries != [] <-
+           record
+           |> WorkingCopy.custom_field_changes()
+           |> Enum.reject(fn entry ->
+             Enum.any?(definitions, &(&1.name == entry.key and &1.field_type == :computed))
+           end) do
+      diff = %VersionDiff{
+        fields: [%VersionDiff.Field{name: :custom_fields, status: :changed, entries: entries}]
+      }
+
+      %{
+        entries: entries,
+        definitions: Map.new(definitions, &{&1.name, &1}),
+        display: FieldDisplay.context(definitions, diff, actor, record.org_id)
+      }
+    else
+      _none -> nil
+    end
+  end
+
   defp close_conflicts(socket) do
     socket
     |> assign(:publish_conflicts, nil)
+    |> assign(:custom_conflict_detail, nil)
     |> assign(:conflict_choices, %{})
   end
 
@@ -6993,6 +7184,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
         <.publish_conflicts
           :if={@publish_conflicts}
+          custom_detail={@custom_conflict_detail}
           keys={@publish_conflicts}
           choices={@conflict_choices}
           resource={@record.__struct__}
@@ -7759,11 +7951,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
       />
 
       <.version_compare
-        :if={@compare}
+        :if={@compare && !@restore_preview}
         diff={@compare.diff}
         left={@compare.left}
         right={@compare.right}
+        definitions={@compare.definitions}
+        display={@compare.display}
       />
+
+      <.restore_preview :if={@restore_preview} preview={@restore_preview} />
     </Layouts.console>
     """
   end

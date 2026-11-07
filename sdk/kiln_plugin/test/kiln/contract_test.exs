@@ -12,6 +12,7 @@ defmodule Kiln.ContractTest do
     assert Plugin.name() == "contract_test"
     assert Plugin.blocks() == [Note]
     assert Plugin.field_types() == []
+    assert Plugin.plug_routes() == []
   end
 
   test "use Kiln.Block builds an embedded resource from the DSL" do

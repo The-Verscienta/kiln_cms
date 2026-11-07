@@ -26,6 +26,13 @@ defmodule KilnCMS.CMS.FieldTypes.Geolocation do
   (`-0.1278, 51.5074` for London) is usually caught rather than silently
   dropping the point in the Arctic Ocean.
 
+  ## GraphQL
+
+  Typed as `GeolocationValue { name lat lng label zoom }` by
+  `KilnCMS.CMS.FieldKind`, which maps `:geolocation` directly (a plugin
+  `graphql_kind/1` can only name a scalar). A stored value of another shape is
+  left out of the response.
+
   ## Delivery
 
   Values ride on `custom_fields`, so every existing surface carries them. The

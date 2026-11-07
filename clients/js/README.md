@@ -472,6 +472,40 @@ await admin.delete("posts", post.id); // reversible soft-delete
   `"submit_for_review"`, …) and kebab-cases it into the route, so a verb a
   newer server adds is reachable before a client release names it.
 
+### Submitting drafts for review: a `:draft_write` key
+
+A service that only sends content in for a person to review (user-submitted
+articles, imported listings) should hold a **`:draft_write`** key instead of a
+`:read_write` one (a Kiln server newer than 1.8, kiln_cms#2273). It may
+`create()`, and `update()` a draft its account authored while it is still a
+draft — nothing else: every transition (`submitForReview` included), `delete`,
+a live or someone else's document, tags, categories and all media calls throw
+`KilnAuthError` (403). Pass `onBehalfOf` on the create to record which of your
+users the draft is for:
+
+```ts
+import { createClient, type ContentProvenance, type Item } from "@kiln-cms/client";
+
+// A viewer-tier service account's :draft_write key.
+const drafts = createClient({ baseUrl, apiKey: process.env.KILN_DRAFT_KEY });
+
+const draft = await drafts.create<Item & ContentProvenance>(
+  "posts",
+  { title: "Reader tip", slug: "reader-tip" },
+  { onBehalfOf: "user-42" },
+);
+draft.on_behalf_of; // "user-42"
+draft.created_via_key_name; // the key's name
+```
+
+`onBehalfOf` becomes the `X-Kiln-On-Behalf-Of` header. Kiln stores it on the
+draft beside the key's id and name so a reviewer sees who it was for; it is
+never authorization, and any other key's request ignores it. The three
+`ContentProvenance` attributes are returned only to editors, admins and the
+key that created the draft; everyone else's reads lack them, which is why each
+is optional. See
+[`docs/headless-consumer-guide.md`](../../docs/headless-consumer-guide.md#submitting-drafts-from-your-app-the-draft_write-key).
+
 ## GraphQL
 
 ```ts

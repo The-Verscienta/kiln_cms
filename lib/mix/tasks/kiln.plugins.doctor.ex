@@ -21,6 +21,12 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       the backend selected in `config :kiln_cms, :image_backend` is one an
       installed plugin declares;
     * nav paths and admin routes are well-formed (`/editor/...`);
+    * plug routes (#2272) are well-formed `{verb, path, plug, opts}` /
+      `{:forward, path, plug, opts}` tuples, take no first segment a core route
+      already owns (`/editor`, `/api`, `/gql`, `/mcp`, and every other static
+      root in the compiled router) and no parameter or wildcard first segment,
+      and do not overlap another plugin's plug or public routes, compared on
+      whole path segments;
     * a block's `:json` render agrees with its exported schema (#937) —
       the same conformance check `test/kiln/block/json_schema_test.exs` runs
       for core blocks, which a third-party plugin never executes;
@@ -89,6 +95,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         block_collisions(plugins, blocks_by_plugin) ++
         field_type_problems(plugins, field_types_by_plugin) ++
         queue_collisions(plugins) ++
+        plug_route_problems(plugins) ++
         image_backend_problems(plugins, Application.get_env(:kiln_cms, :image_backend)) ++
         block_schema_problems(plugins, blocks_by_plugin) ++
         field_type_schema_problems(plugins, field_types_by_plugin) ++
@@ -362,6 +369,104 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       end
 
     nav ++ routes ++ editor_routes ++ public_routes
+  end
+
+  @doc false
+  # Plug routes (#2272). `core_roots` is injectable so a test can pass a table
+  # without compiling a router; by default it is read from the compiled
+  # `KilnCMSWeb.Router`, minus the routes plugins themselves mounted there.
+  def plug_route_problems(plugins, core_roots \\ core_route_roots()) do
+    claims =
+      for plugin <- plugins,
+          Code.ensure_loaded?(plugin),
+          route <- Kiln.Plugins.PlugRoute.of(plugin),
+          do: {plugin, route}
+
+    {valid, shape_problems} =
+      Enum.reduce(claims, {[], []}, fn {plugin, route} = claim, {valid, problems} ->
+        case plug_route_problem(plugin, route, core_roots) do
+          nil -> {[claim | valid], problems}
+          problem -> {valid, [problem | problems]}
+        end
+      end)
+
+    public =
+      for plugin <- plugins,
+          Code.ensure_loaded?(plugin),
+          function_exported?(plugin, :public_routes, 0),
+          {path, _lv, _action} <- plugin.public_routes(),
+          do: {plugin, {:get, path, :public_route, nil}}
+
+    valid = Enum.reverse(valid)
+
+    Enum.reverse(shape_problems) ++ plug_route_overlaps(valid ++ public)
+  end
+
+  defp plug_route_problem(plugin, route, core_roots) do
+    case Kiln.Plugins.PlugRoute.validate(route) do
+      {:error, reason} ->
+        "#{plugin.name()}: plug route #{reason}"
+
+      :ok ->
+        {_verb, path, _plug, _opts} = route
+        root = Kiln.Plugins.PlugRoute.root(path)
+
+        if root in core_roots do
+          "#{plugin.name()}: plug route #{inspect(path)} sits under /#{root}, " <>
+            "which core routes already own"
+        end
+    end
+  end
+
+  # Every pair that can answer the same request. At least one side must be a
+  # plug route: public routes are not this check's business among themselves.
+  defp plug_route_overlaps(claims) do
+    for {{plugin_a, {verb_a, path_a, plug_a, _}}, index} <- Enum.with_index(claims),
+        {plugin_b, {verb_b, path_b, plug_b, _}} <- Enum.drop(claims, index + 1),
+        :public_route != plug_a or :public_route != plug_b,
+        Kiln.Plugins.PlugRoute.overlap?({verb_a, path_a}, {verb_b, path_b}) do
+      "#{plugin_a.name()}: plug route #{inspect(path_a)} overlaps #{plugin_b.name()}'s " <>
+        "#{route_kind(plug_b)} #{inspect(path_b)}"
+    end
+  end
+
+  defp route_kind(:public_route), do: "public route"
+  defp route_kind(_plug), do: "plug route"
+
+  # The static first segments of the compiled core route table. Routes a plugin
+  # mounted itself are left out (they would collide with their own plugin), and
+  # the roots the endpoint answers outside the router are always included.
+  defp core_route_roots do
+    plugin_modules =
+      Kiln.Plugins.all()
+      |> Enum.flat_map(fn plugin ->
+        for {_verb, _path, mod, _opts} <- Kiln.Plugins.PlugRoute.of(plugin), do: mod
+      end)
+
+    live_views =
+      for {_path, lv, _action} <-
+            Kiln.Plugins.admin_routes() ++
+              Kiln.Plugins.editor_routes() ++ Kiln.Plugins.public_routes(),
+          do: lv
+
+    roots =
+      for route <- Phoenix.Router.routes(KilnCMSWeb.Router),
+          not plugin_mounted?(route, plugin_modules, live_views),
+          root = Kiln.Plugins.PlugRoute.root(route.path),
+          not String.starts_with?(root, [":", "*"]),
+          do: root
+
+    Enum.uniq(roots ++ Kiln.Plugins.PlugRoute.reserved_roots())
+  end
+
+  defp plugin_mounted?(route, plugin_modules, live_views) do
+    live_view =
+      case route.metadata do
+        %{phoenix_live_view: {view, _action, _opts, _session}} -> view
+        _ -> nil
+      end
+
+    route.plug in plugin_modules or live_view in live_views
   end
 
   defp block_collisions(plugins, blocks_by_plugin) do

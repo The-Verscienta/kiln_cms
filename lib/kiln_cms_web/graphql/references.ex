@@ -230,20 +230,23 @@ defmodule KilnCMSWeb.Graphql.References do
     query = Ash.Query.filter(query, id in ^ids)
 
     resource
-    |> read(query, actor: actor, tenant: tenant)
+    |> read_records(query, actor: actor, tenant: tenant)
     |> Map.new(&{&1.id, &1})
   end
 
   # Dynamic types share the `Entry` tier (D17): ids are unique across it, so
   # one read covers every dynamic type in the list.
-  defp read(CMS.Entry, query, opts) do
+  @doc false
+  # Public for `KilnCMSWeb.Graphql.CustomFields`, which re-reads parents the
+  # same way: through the type's code interface, as the reader.
+  def read_records(CMS.Entry, query, opts) do
     case CMS.list_entries([query: query] ++ opts) do
       {:ok, records} -> records
       {:error, _error} -> []
     end
   end
 
-  defp read(resource, query, opts) do
+  def read_records(resource, query, opts) do
     ContentTypes.list!(ContentTypes.type_atom(resource), [query: query] ++ opts)
   rescue
     # A refused or failed read lists nothing; denying is the safe direction.
