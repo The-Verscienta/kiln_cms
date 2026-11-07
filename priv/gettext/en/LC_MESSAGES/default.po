@@ -5619,6 +5619,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
+#: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete"
 msgstr ""
@@ -5830,7 +5831,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
-msgid "Delete this webhook? Deliveries will stop."
+msgid "Delete this webhook? Queued deliveries, including retractions, won't be sent. Delivery history is kept."
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex

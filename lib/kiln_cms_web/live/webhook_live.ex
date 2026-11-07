@@ -381,7 +381,7 @@ defmodule KilnCMSWeb.WebhookLive do
             <li :for={endpoint <- @endpoints} id={"webhook-#{endpoint.id}"} class="p-4">
               <div
                 :if={!editing?(@edit, endpoint.id)}
-                class="flex items-start justify-between gap-4"
+                class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
               >
                 <div class="min-w-0 space-y-2">
                   <div class="flex items-center gap-2">
@@ -438,7 +438,7 @@ defmodule KilnCMSWeb.WebhookLive do
                     <% end %>
                   </p>
                 </div>
-                <div class="flex shrink-0 items-center gap-1">
+                <div class="flex shrink-0 flex-wrap items-center gap-1">
                   <button
                     type="button"
                     phx-click="ping"
@@ -463,15 +463,20 @@ defmodule KilnCMSWeb.WebhookLive do
                   >
                     {gettext("Edit")}
                   </button>
+                  <%!-- Labelled, not icon-only (#2136): beside three text
+                       buttons an unlabelled trash icon went unseen. This and
+                       the edit form's Delete share a selector; the row and
+                       the form are `:if`-exclusive, so only one renders. --%>
                   <button
                     type="button"
                     phx-click="delete"
                     phx-value-id={endpoint.id}
-                    data-confirm={gettext("Delete this webhook? Deliveries will stop.")}
+                    data-confirm={delete_confirmation()}
                     aria-label={gettext("Delete webhook")}
-                    class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
+                    class="btn btn-sm btn-danger"
                   >
                     <.icon name="hero-trash" class="size-4" />
+                    {gettext("Delete")}
                   </button>
                 </div>
               </div>
@@ -504,10 +509,20 @@ defmodule KilnCMSWeb.WebhookLive do
                     target="edit"
                   />
                 </fieldset>
-                <div class="flex gap-2">
+                <div class="flex flex-wrap items-center gap-2">
                   <.button type="submit" variant="primary">{gettext("Save")}</.button>
                   <button type="button" phx-click="cancel_edit" class="btn btn-sm btn-default">
                     {gettext("Cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    phx-click="delete"
+                    phx-value-id={endpoint.id}
+                    data-confirm={delete_confirmation()}
+                    class="btn btn-sm btn-danger ml-auto"
+                  >
+                    <.icon name="hero-trash" class="size-4" />
+                    {gettext("Delete webhook")}
                   </button>
                 </div>
               </.form>
@@ -689,6 +704,15 @@ defmodule KilnCMSWeb.WebhookLive do
       </div>
     </div>
     """
+  end
+
+  # Deleting nilifies the deliveries' endpoint (history stays, under the usual
+  # retention), and the delivery worker settles a queued row whose endpoint is
+  # gone as failed rather than sending it.
+  defp delete_confirmation do
+    gettext(
+      "Delete this webhook? Queued deliveries, including retractions, won't be sent. Delivery history is kept."
+    )
   end
 
   defp editing?(nil, _id), do: false

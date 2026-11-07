@@ -495,6 +495,24 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="webhook-delete-labelled"></a>
+
+- **A webhook's Delete is a labelled button on its row, and the edit form has
+  one too.** Delete on `/editor/webhooks` was an unlabelled grey trash icon
+  after three text buttons (Ping, Disable, Edit), easy to miss; an admin
+  looking for it concluded an endpoint had to be disabled before it could be
+  deleted. It never did, and the row now shows a red **Delete** with its icon
+  for every endpoint, active or disabled. The edit form gains **Delete
+  webhook** beside Save and Cancel. Both ask the same question, which now says
+  what deleting does: "Delete this webhook? Queued deliveries, including
+  retractions, won't be sent. Delivery history is kept." The old prompt said
+  only that deliveries would stop. Who may delete is unchanged (admins only),
+  and the `docs/webhooks.md` line that said deleting an endpoint takes its
+  delivery history with it, untrue since deliveries outlive their endpoint,
+  is corrected. On a narrow screen the row's actions now wrap below the
+  endpoint's details instead of beside them. See
+  [Delete an endpoint](../webhooks.md#delete-an-endpoint).
+
 <a id="columns-child-fresh-form"></a>
 
 - **Nested column events work on a freshly opened page.** `AshPhoenix.Form.params/1`
