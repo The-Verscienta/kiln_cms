@@ -328,8 +328,40 @@ If the app reads with GraphQL rather than the `json` artifact, ask for
 for web and React Native clients. They include a ready fragment per content type
 that reads the site's custom fields through typed accessors; see
 [headless-graphql-api.md → Generate types and fragments for your site](headless-graphql-api.md#generate-types-and-fragments-for-your-site).
-Swift and Kotlin models still come from the JSON document; they have no GraphQL
-section yet.
+
+A Swift or Kotlin app that reads with GraphQL asks for `?format=swift-graphql`
+or `?format=kotlin-graphql`. Each is the same file `mix kiln.export.schema`
+writes for that language (the `json` artifact models) plus a GraphQL section:
+per content type a `<Type>CustomFields` result type and the fragment that
+selects it. The fragment, the aliases and the collision rules are identical to
+the TypeScript module, so the three languages read the same response.
+
+```bash
+curl -s 'https://cms.example.com/api/schema?format=swift-graphql&type=post' \
+  -o Sources/Kiln/Kiln.swift
+curl -s 'https://cms.example.com/api/schema?format=kotlin-graphql&type=post' \
+  -o app/src/main/java/kiln/Kiln.kt
+```
+
+- **Swift.** `PostCustomFields` is a `Codable` struct and
+  `PostCustomFields.fragment` the fragment string. A string, integer, float,
+  boolean, date or datetime field is an optional property under its alias
+  (`price` is `Double?`, `launch_date` is `launchDate: String?`). Every other
+  kind is in `fields: [KilnCustomFieldValue]`, an enum with a case per
+  `CustomFieldValue` member (`.geolocation(name:value:)` carries a
+  `KilnGeolocationValue`, `.media` a `KilnMediaValue`) and `.unknown` for a
+  kind added after you generated the file.
+- **Kotlin.** `PostCustomFields` is a `@Serializable` data class and
+  `PostCustomFields.FRAGMENT` the fragment string. Scalars are nullable
+  properties with a `null` default; `fields` is `List<KilnCustomFieldValue>`,
+  a sealed interface (`KilnCustomFieldValue.GeolocationValue`, `.MediaValue`,
+  `.Unknown`, ...) read by a bundled serializer that works with any `Json`
+  instance. The endpoint's package is `kiln`; change the `package` line after
+  downloading, or call `KilnCMS.SchemaExport.Kotlin.emit_graphql/2` with
+  `package:` from a release `rpc`.
+
+Dates and datetimes are strings, as in the rest of the file. Regenerate after
+an admin changes fields; the names are the site's definitions *now*.
 
 The schema is cacheable (`public, max-age=300`). An app can fetch it at runtime
 to detect drift, but it can't change its compiled types. Use it in CI

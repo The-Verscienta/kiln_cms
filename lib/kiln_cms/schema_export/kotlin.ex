@@ -41,6 +41,7 @@ defmodule KilnCMS.SchemaExport.Kotlin do
   and `kotlinx-serialization-json`, nothing else.
   """
 
+  alias KilnCMS.SchemaExport.GraphQL
   alias KilnCMS.SchemaExport.Walk
 
   @indent "    "
@@ -86,7 +87,30 @@ defmodule KilnCMS.SchemaExport.Kotlin do
     * `:package` — the file's `package` (default `#{@default_package}`).
   """
   @spec emit(map(), keyword()) :: String.t()
-  def emit(document, opts \\ []) do
+  def emit(document, opts \\ []), do: render(document, opts, false)
+
+  @doc """
+  `emit/1` plus a GraphQL section (#2290): per content type, a serializable
+  result type for the site's custom fields and the GraphQL fragment that selects
+  them.
+
+  Mirrors `KilnCMS.SchemaExport.TypeScript.emit_graphql/1` — the aliases, the
+  collision rules and the fragment text come from `KilnCMS.SchemaExport.GraphQL`
+  — so the document must come from
+  `KilnCMS.SchemaExport.json_schema(graphql: true)`; one without the
+  annotations gets no GraphQL section. Takes the same options as `emit/2`.
+
+  Per content type `<Type>CustomFields` is the shape of the fragment's result
+  and `<Type>CustomFields.FRAGMENT` the fragment to spread. A string, integer,
+  float, boolean, date or datetime field is a nullable property under the alias
+  it is read as; every other kind arrives in `fields` as
+  `KilnCustomFieldValue`s (`GeolocationValue` and `MediaValue` among them). A
+  value kind this build does not know decodes as `KilnCustomFieldValue.Unknown`.
+  """
+  @spec emit_graphql(map(), keyword()) :: String.t()
+  def emit_graphql(document, opts \\ []), do: render(document, opts, true)
+
+  defp render(document, opts, graphql?) do
     package = Keyword.get(opts, :package, @default_package)
 
     unless valid_package?(package),
@@ -106,9 +130,10 @@ defmodule KilnCMS.SchemaExport.Kotlin do
     }
 
     union? = Enum.any?(rows, fn {_name, rows} -> rows != [] end)
+    graphql = if graphql?, do: graphql_declarations(model, names), else: []
 
     [
-      header(model, package, union?),
+      header(model, package, union?, graphql != []),
       section("Shared", Enum.map(model.shared, &declaration(&1, ctx))),
       section("Blocks", Enum.map(model.blocks, &declaration(&1, ctx))),
       section("Block union", [tagged_union("Block", model.block_union, rows["Block"], ctx)]),
@@ -116,18 +141,266 @@ defmodule KilnCMS.SchemaExport.Kotlin do
       section("Document union", [
         tagged_union("Document", model.document_union, rows["Document"], ctx)
       ]),
+      section("GraphQL custom fields", graphql),
       section("Json", [json_config(union?)])
     ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n")
   end
 
-  defp header(model, package, union?) do
+  defp graphql_declarations(model, names) do
+    taken =
+      taken_set(
+        Map.values(names) ++
+          ~w(Block BlockSerializer Document DocumentSerializer KilnJson KilnCustomFieldValue
+             KilnCustomFieldValueSerializer)
+      )
+
+    {types, _taken} =
+      model
+      |> GraphQL.types(&upper_camel(String.replace_prefix(&1, "content_", "")))
+      |> Enum.map_reduce(taken, fn type, taken ->
+        name = unique(type.base <> "CustomFields", taken)
+        {graphql_class(name, type), MapSet.put(taken, fold(name))}
+      end)
+
+    if types == [], do: [], else: [graphql_values() | types]
+  end
+
+  defp graphql_class(name, %{scalars: scalars, others: others} = type) do
+    props =
+      Enum.map(scalars, fn field ->
+        "#{@indent}public val #{ident(field.alias)}: #{scalar_type(field.graphql_kind)}? = null,"
+      end) ++
+        if(others == [],
+          do: [],
+          else: [
+            "#{@indent}public val fields: List<KilnCustomFieldValue> = emptyList(),"
+          ]
+        )
+
+    comment =
+      case type.type_name do
+        nil -> "On `#{type.on}`."
+        type_name -> "On `#{type.on}` with `typeName: #{literal(type_name)}`."
+      end
+
+    i2 = @indent <> @indent
+    i3 = i2 <> @indent
+
+    lines =
+      name |> GraphQL.fragment(type) |> String.split("\n") |> Enum.map_join("\n", &(i3 <> &1))
+
+    doc("The result of [#{name}.FRAGMENT] — the site's custom fields. " <> comment, "") <>
+      """
+      @Serializable
+      public data class #{name}(
+      #{Enum.join(props, "\n")}
+      ) {
+      #{@indent}public companion object {
+      #{i2}/** The GraphQL fragment to spread into a query; it decodes into [#{name}]. */
+      #{i2}public val FRAGMENT: String = \"\"\"
+      #{lines}
+      #{i3}\"\"\".trimIndent()
+      #{@indent}}
+      }\
+      """
+  end
+
+  # `Long`, not `Int`, as for the document types: JSON integers are not 32-bit.
+  defp scalar_type("int"), do: "Long"
+  defp scalar_type("float"), do: "Double"
+  defp scalar_type("boolean"), do: "Boolean"
+  defp scalar_type(kind) when kind in ["string", "date", "datetime"], do: "String"
+
+  @value_members [
+    {"StringValue", "asString", "String"},
+    {"IntValue", "asInt", "Long"},
+    {"FloatValue", "asFloat", "Double"},
+    {"BooleanValue", "asBoolean", "Boolean"},
+    {"DateValue", "asDate", "String"},
+    {"DateTimeValue", "asDateTime", "String"}
+  ]
+
+  defp graphql_values do
+    scalars =
+      Enum.map_join(@value_members, "\n\n", fn {cls, key, type} ->
+        """
+        #{@indent}@Serializable
+        #{@indent}public data class #{cls}(
+        #{@indent}    public override val name: String,
+        #{@indent}    @SerialName("#{key}") public val value: #{type},
+        #{@indent}) : KilnCustomFieldValue\
+        """
+      end)
+
+    encodables =
+      [
+        "StringValue",
+        "IntValue",
+        "FloatValue",
+        "BooleanValue",
+        "DateValue",
+        "DateTimeValue",
+        "GeolocationValue",
+        "JsonValue",
+        "ReferenceValue",
+        "MediaValue",
+        "ListValue",
+        "GroupValue"
+      ]
+
+    i1 = @indent
+    i2 = i1 <> @indent
+    i3 = i2 <> @indent
+
+    decode_rows =
+      Enum.map_join(encodables, "\n", fn cls ->
+        "#{i3}\"#{cls}\" -> input.json.decodeFromJsonElement(KilnCustomFieldValue.#{cls}.serializer(), fields)"
+      end)
+
+    encode_rows =
+      Enum.map_join(encodables, "\n", fn cls ->
+        "#{i3}is KilnCustomFieldValue.#{cls} -> output.json.encodeToJsonElement(KilnCustomFieldValue.#{cls}.serializer(), value).kilnTagged(\"#{cls}\")"
+      end)
+
+    """
+    /*
+     * The GraphQL schema is the same for every site; a custom field cannot be a
+     * GraphQL field of its own, so it is read through an *accessor* typed by the
+     * field's kind. For each content type this section has:
+     *
+     *   - `<Type>CustomFields`           the shape of the fragment's result;
+     *   - `<Type>CustomFields.FRAGMENT`  a named GraphQL fragment to spread.
+     *
+     * A string, integer, float, boolean, date or datetime field is read as an
+     * alias of its accessor (`price: customFloat(name: "price")`) and is typed
+     * here. Every other kind (list, group, reference, media, geolocation, json)
+     * has no scalar accessor, so those names are read together through
+     * `fields(names: [...])`, which returns `KilnCustomFieldValue`s. Values
+     * arrive under per-kind aliases (`asString`, `asInt`, ...) because GraphQL
+     * forbids one response key with several types. The fragment goes one level
+     * into lists and groups.
+     *
+     * A field that is unknown, deleted, private to the reader or of another
+     * kind than the accessor is `null` (or absent from `fields`), so the server
+     * never rejects a stale fragment. A dynamic content type is an `Entry`:
+     * select its fragment on `publishedEntries(filter: {typeName: ...})`. The
+     * names here are the site's definitions *now*: regenerate after an admin
+     * changes them. Filtering and sorting still use `customFilter`/`customSort`.
+     */
+
+    /** A custom-field value as `fields(names:)` returns it, told apart by `__typename`. */
+    @Serializable(with = KilnCustomFieldValueSerializer::class)
+    public sealed interface KilnCustomFieldValue {
+    #{i1}/** The custom field's name. */
+    #{i1}public val name: String
+
+    #{scalars}
+
+    #{i1}@Serializable
+    #{i1}public data class GeolocationValue(
+    #{i2}public override val name: String,
+    #{i2}public val lat: Double,
+    #{i2}public val lng: Double,
+    #{i2}public val label: String? = null,
+    #{i2}public val zoom: Double? = null,
+    #{i1}) : KilnCustomFieldValue
+
+    #{i1}@Serializable
+    #{i1}public data class JsonValue(
+    #{i2}public override val name: String,
+    #{i2}@SerialName("asJson") public val value: String? = null,
+    #{i1}) : KilnCustomFieldValue
+
+    #{i1}@Serializable
+    #{i1}public data class ReferenceValue(
+    #{i2}public override val name: String,
+    #{i2}public val ids: List<String>,
+    #{i1}) : KilnCustomFieldValue
+
+    #{i1}@Serializable
+    #{i1}public data class MediaValue(
+    #{i2}public override val name: String,
+    #{i2}public val id: String,
+    #{i2}public val url: String? = null,
+    #{i2}public val alt: String? = null,
+    #{i2}public val width: Long? = null,
+    #{i2}public val height: Long? = null,
+    #{i2}public val mimeType: String? = null,
+    #{i2}public val focal: Focal? = null,
+    #{i2}public val variants: List<Variant> = emptyList(),
+    #{i1}) : KilnCustomFieldValue {
+    #{i2}@Serializable
+    #{i2}public data class Focal(public val x: Double, public val y: Double)
+
+    #{i2}@Serializable
+    #{i2}public data class Variant(
+    #{i3}public val label: String? = null,
+    #{i3}public val width: Long? = null,
+    #{i3}public val height: Long? = null,
+    #{i3}public val format: String? = null,
+    #{i3}public val url: String? = null,
+    #{i3}public val bytes: Long? = null,
+    #{i3}public val cropped: Boolean? = null,
+    #{i2})
+    #{i1}}
+
+    #{i1}@Serializable
+    #{i1}public data class ListValue(
+    #{i2}public override val name: String,
+    #{i2}public val items: List<KilnCustomFieldValue>,
+    #{i1}) : KilnCustomFieldValue
+
+    #{i1}@Serializable
+    #{i1}public data class GroupValue(
+    #{i2}public override val name: String,
+    #{i2}public val fields: List<KilnCustomFieldValue>,
+    #{i1}) : KilnCustomFieldValue
+
+    #{i1}/** A value kind this schema does not know — one added since it was generated. */
+    #{i1}public data class Unknown(
+    #{i2}public override val name: String,
+    #{i2}public val typename: String,
+    #{i2}public val raw: JsonObject,
+    #{i1}) : KilnCustomFieldValue
+    }
+
+    /** Reads a [KilnCustomFieldValue] by its `__typename`; JSON only. */
+    public object KilnCustomFieldValueSerializer : KSerializer<KilnCustomFieldValue> {
+    #{i1}override val descriptor: SerialDescriptor = buildClassSerialDescriptor("KilnCustomFieldValue")
+
+    #{i1}override fun deserialize(decoder: Decoder): KilnCustomFieldValue {
+    #{i2}val input = decoder as? JsonDecoder ?: throw SerializationException("KilnCustomFieldValue decodes from JSON only")
+    #{i2}val raw = input.decodeJsonElement().jsonObject
+    #{i2}val fields = JsonObject(raw - "__typename")
+    #{i2}return when (val typename = (raw["__typename"] as? JsonPrimitive)?.contentOrNull) {
+    #{decode_rows}
+    #{i3}else -> KilnCustomFieldValue.Unknown((raw["name"] as? JsonPrimitive)?.contentOrNull.orEmpty(), typename.orEmpty(), raw)
+    #{i2}}
+    #{i1}}
+
+    #{i1}override fun serialize(encoder: Encoder, value: KilnCustomFieldValue) {
+    #{i2}val output = encoder as? JsonEncoder ?: throw SerializationException("KilnCustomFieldValue encodes to JSON only")
+    #{i2}val raw = when (value) {
+    #{encode_rows}
+    #{i3}is KilnCustomFieldValue.Unknown -> value.raw
+    #{i2}}
+    #{i2}output.encodeJsonElement(raw)
+    #{i1}}
+    }
+
+    private fun JsonElement.kilnTagged(typename: String): JsonObject =
+    #{i1}JsonObject(jsonObject + ("__typename" to JsonPrimitive(typename)))\
+    """
+  end
+
+  defp header(model, package, union?, graphql?) do
     imports =
       ~w(kotlinx.serialization.SerialName kotlinx.serialization.Serializable
          kotlinx.serialization.json.Json kotlinx.serialization.json.JsonElement
          kotlinx.serialization.json.JsonObject) ++
-        if(union?,
+        if(union? or graphql?,
           do: ~w(kotlinx.serialization.KSerializer kotlinx.serialization.SerializationException
                kotlinx.serialization.descriptors.SerialDescriptor
                kotlinx.serialization.descriptors.buildClassSerialDescriptor

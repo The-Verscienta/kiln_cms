@@ -270,6 +270,8 @@ code `invalid_format`):
 | `json` (default) | JSON Schema, as before ([api.md](api.md#schema-discovery-typed-clients)) |
 | `typescript` | The same types as a `.d.ts` declaration file |
 | `typescript-graphql` | A `.ts` **module** (the fragments are values): the declarations above plus, per content type, a `<Type>CustomFields` interface and a `<Type>CustomFieldsFragment` string |
+| `swift-graphql` | The Swift models of the `json` artifact plus, per content type, a `<Type>CustomFields` struct with a `fragment` string ([native-apps.md](native-apps.md#typed-models-from-get-apischema)) |
+| `kotlin-graphql` | The Kotlin models (package `kiln`) plus, per content type, a `<Type>CustomFields` data class with a `FRAGMENT` string |
 
 Fetch it at build time and commit the file. A recipe for a front end that
 reads with GraphQL:
@@ -314,8 +316,7 @@ For a dynamic type the fragment is on `Entry`; use it with
 generated type says which. The fragment goes one level into lists and groups.
 Private custom fields are not in the export.
 
-Not available yet: Swift and Kotlin emitters for the GraphQL section, typed
-filter operators, a per-site schema with a regenerate step, and typed writes.
+Not available yet: typed filter operators, a per-site schema with a regenerate step, and typed writes.
 
 ### Taxonomy — categories, tags & tag groups
 

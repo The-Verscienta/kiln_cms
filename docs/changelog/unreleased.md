@@ -368,8 +368,18 @@ carries the reasoning.
     in `kiln_plugin` 1.4.0. A type without it, or compiled against an older
     SDK, is served as `JsonValue`, so nothing breaks. Publish the SDK to Hex
     before a plugin requires `~> 1.4`.
-  - **Not yet.** Swift and Kotlin emitters for the GraphQL section, typed
-    filter operators, a per-site SDL with a regenerate step, and typed writes.
+  - **Swift and Kotlin.** `?format=swift-graphql` and `?format=kotlin-graphql`
+    add the same section to the native-app models: per content type a
+    `<Type>CustomFields` result type (`Codable` struct / `@Serializable` data
+    class) with the fragment as `fragment` / `FRAGMENT`, and a
+    `KilnCustomFieldValue` enum / sealed interface for the `fields(names:)`
+    kinds, `GeolocationValue` and `MediaValue` included, with an `unknown` case
+    for a kind added later. Aliases, collision rules and fragment text are
+    shared with the TypeScript emitter (`KilnCMS.SchemaExport.GraphQL`), so the
+    three cannot disagree. The Kotlin form uses package `kiln`; call
+    `KilnCMS.SchemaExport.Kotlin.emit_graphql/2` for another.
+  - **Not yet.** Typed filter operators, a per-site SDL with a regenerate step,
+    and typed writes.
   - **Upgrade.** Additive and org-independent: no migration, no config, and
     rolling the pin back removes the new fields only. The new fields
     are added to every content type in the schema's `:content_domains`, so an

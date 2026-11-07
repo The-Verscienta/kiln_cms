@@ -20,23 +20,18 @@ defmodule KilnCMS.SchemaExport.TypeScript do
   worse than one that is merely loose about it.
   """
 
+  alias KilnCMS.SchemaExport.GraphQL
   alias KilnCMS.SchemaExport.Walk
 
-  # Reserved GraphQL names a custom field's alias must not shadow: the document's
-  # own properties (camelized by AshGraphql) and the typed readers themselves.
-  @reserved_aliases ~w(id title slug excerpt blocks type locale status audience customFields
-                       customFieldsPlain customFieldsPortable fields typeName inheritedFields
-                       seoTitle seoDescription seoKeywords pathAlias seoImage canonicalUrl
-                       state published publishedAt insertedAt updatedAt references referencedBy
-                       customString customInt customFloat customBoolean customDate customDateTime)
-
-  @scalar_accessors %{
-    "string" => {"customString", "string"},
-    "int" => {"customInt", "number"},
-    "float" => {"customFloat", "number"},
-    "boolean" => {"customBoolean", "boolean"},
-    "date" => {"customDate", "string"},
-    "datetime" => {"customDateTime", "string"}
+  # The TypeScript spelling of each scalar GraphQL kind
+  # (`KilnCMS.SchemaExport.GraphQL.accessor/1` names the accessor).
+  @scalar_ts %{
+    "string" => "string",
+    "int" => "number",
+    "float" => "number",
+    "boolean" => "boolean",
+    "date" => "string",
+    "datetime" => "string"
   }
 
   @doc """
@@ -75,15 +70,9 @@ defmodule KilnCMS.SchemaExport.TypeScript do
     model = Walk.model(document)
 
     sections =
-      model.documents
-      |> Enum.filter(& &1.graphql)
-      |> Enum.map(
-        &{&1, custom_fields(Enum.find(elem(&1.shape, 1), fn f -> f.key == "custom_fields" end))}
-      )
-      # A type with no (public) custom field has nothing to select, and an empty
-      # selection set is not valid GraphQL.
-      |> Enum.reject(fn {_decl, custom} -> custom == [] end)
-      |> Enum.map(fn {decl, custom} -> graphql_type(decl, custom) end)
+      model
+      |> GraphQL.types(&(&1 |> String.replace_prefix("content_", "") |> pascal()))
+      |> Enum.map(&graphql_type/1)
 
     if sections == [] do
       emit(document)
@@ -162,28 +151,15 @@ defmodule KilnCMS.SchemaExport.TypeScript do
     """
   end
 
-  defp graphql_type(decl, custom) do
-    {scalars, others} =
-      Enum.split_with(custom, fn field -> Map.has_key?(@scalar_accessors, field.graphql_kind) end)
-
-    scalars = put_aliases(scalars)
-
-    base = decl.name |> String.replace_prefix("content_", "") |> pascal()
-    on = decl.graphql["type"]
-    name = base <> "CustomFields"
+  defp graphql_type(%{decl: decl, scalars: scalars, others: others} = type) do
+    on = type.on
+    name = type.base <> "CustomFields"
 
     members =
       Enum.map(scalars, fn field ->
-        {_accessor, ts} = Map.fetch!(@scalar_accessors, field.graphql_kind)
-        "  #{property_key(field.alias)}: #{ts} | null;"
+        "  #{property_key(field.alias)}: #{Map.fetch!(@scalar_ts, field.graphql_kind)} | null;"
       end) ++
         if others == [], do: [], else: ["  fields: KilnCustomFieldValue[];"]
-
-    selection =
-      Enum.map(scalars, fn field ->
-        {accessor, _ts} = Map.fetch!(@scalar_accessors, field.graphql_kind)
-        "  #{field.alias}: #{accessor}(name: #{inspect(field.key)})"
-      end) ++ fields_selection(others)
 
     """
     #{graphql_comment(decl, on)}export interface #{name} {
@@ -191,9 +167,7 @@ defmodule KilnCMS.SchemaExport.TypeScript do
     }
 
     export const #{name}Fragment = `
-    fragment #{name} on #{on} {
-    #{Enum.join(selection, "\n")}
-    }
+    #{GraphQL.fragment(name, type)}
     `;
     """
   end
@@ -202,91 +176,6 @@ defmodule KilnCMS.SchemaExport.TypeScript do
     do: "/** On `#{on}` with `typeName: #{literal(type_name)}`. */\n"
 
   defp graphql_comment(_decl, on), do: "/** On `#{on}`. */\n"
-
-  defp custom_fields(nil), do: []
-
-  defp custom_fields(%{type: {:object, fields, _open?}}),
-    do: Enum.filter(fields, & &1.graphql_kind)
-
-  defp custom_fields(_other), do: []
-
-  # Aliases must be unique within one fragment: `Macro.camelize/1` is not
-  # injective (`foo_bar` and `foo__bar` both give `fooBar`), so a taken alias
-  # gets a numeric suffix.
-  defp put_aliases(fields) do
-    {fields, _taken} =
-      Enum.map_reduce(fields, MapSet.new(), fn field, taken ->
-        base = field_alias(field.key)
-
-        alias_name =
-          Enum.find(
-            [base | Enum.map(2..1000, &"#{base}#{&1}")],
-            &(not MapSet.member?(taken, &1))
-          )
-
-        {Map.put(field, :alias, alias_name), MapSet.put(taken, alias_name)}
-      end)
-
-    fields
-  end
-
-  # `custom_fields` is a nullable-free inline object in the walked model; every
-  # field name is `[a-z][a-z0-9_]*` (`FieldDefinition`), a valid GraphQL name.
-  defp field_alias(key) do
-    <<first::utf8, rest::binary>> = Macro.camelize(key)
-    camel = String.downcase(<<first::utf8>>) <> rest
-
-    if camel in @reserved_aliases, do: "custom" <> Macro.camelize(key), else: camel
-  end
-
-  defp fields_selection([]), do: []
-
-  defp fields_selection(others) do
-    names = Enum.map_join(others, ", ", &inspect(&1.key))
-
-    ["  fields(names: [#{names}]) {", value_selection(2, true), "  }"]
-  end
-
-  # The selection under `fields(names:)`, as lines already indented. One level
-  # into lists and groups; a row of a repeating group is a `GroupValue` item.
-  defp value_selection(indent, true) do
-    items = ["... on ListValue {", "  items {"] ++ indent_lines(value_parts() ++ [group_row()], 4)
-    group = ["... on GroupValue {", "  fields {"] ++ indent_lines(value_parts(), 4)
-
-    (value_parts() ++ items ++ ["  }", "}"] ++ group ++ ["  }", "}"])
-    |> indent_lines(indent * 2)
-    |> Enum.join("\n")
-  end
-
-  defp indent_lines(lines, n), do: Enum.map(lines, &(String.duplicate(" ", n) <> &1))
-
-  defp value_parts do
-    [
-      "__typename",
-      "name"
-    ] ++ scalar_parts() ++ ["... on ReferenceValue { ids }", media_part()]
-  end
-
-  defp scalar_parts do
-    [
-      "... on StringValue { asString: value }",
-      "... on IntValue { asInt: value }",
-      "... on FloatValue { asFloat: value }",
-      "... on BooleanValue { asBoolean: value }",
-      "... on DateValue { asDate: value }",
-      "... on DateTimeValue { asDateTime: value }",
-      "... on GeolocationValue { lat lng label zoom }",
-      "... on JsonValue { asJson: value }"
-    ]
-  end
-
-  defp media_part,
-    do:
-      "... on MediaValue { id url alt width height mimeType focal { x y } " <>
-        "variants { label width height format url bytes cropped } }"
-
-  defp group_row,
-    do: "... on GroupValue { fields { __typename name #{Enum.join(scalar_parts(), " ")} } }"
 
   defp header(model) do
     """

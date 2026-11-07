@@ -34,6 +34,7 @@ defmodule KilnCMS.SchemaExport.Swift do
   decode). The file needs only the Swift standard library.
   """
 
+  alias KilnCMS.SchemaExport.GraphQL
   alias KilnCMS.SchemaExport.Walk
 
   @indent "    "
@@ -81,6 +82,319 @@ defmodule KilnCMS.SchemaExport.Swift do
     ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n")
+  end
+
+  @doc """
+  `emit/1` plus a GraphQL section (#2290): per content type, a `Codable` result
+  type for the site's custom fields and the GraphQL fragment that selects them.
+
+  Mirrors `KilnCMS.SchemaExport.TypeScript.emit_graphql/1` — the aliases, the
+  collision rules and the fragment text come from `KilnCMS.SchemaExport.GraphQL`
+  — so the document must come from
+  `KilnCMS.SchemaExport.json_schema(graphql: true)`; one without the
+  annotations gets no GraphQL section.
+
+  Per content type `<Type>CustomFields` is the shape of the fragment's result
+  and `<Type>CustomFields.fragment` the fragment to spread. A string, integer,
+  float, boolean, date or datetime field is an optional property under the alias
+  it is read as; every other kind arrives in `fields` as
+  `KilnCustomFieldValue`s, which carry the `GeolocationValue` and `MediaValue`
+  payloads. A value kind this build does not know decodes as `.unknown`.
+  """
+  @spec emit_graphql(map()) :: String.t()
+  def emit_graphql(document) do
+    model = Walk.model(document)
+    names = top_level_names(model)
+
+    taken =
+      MapSet.union(
+        MapSet.new(Map.values(names)),
+        MapSet.new(~w(Block Document JSONValue KilnCustomFieldValue KilnGeolocationValue
+                      KilnMediaValue))
+      )
+
+    {types, _taken} =
+      model
+      |> GraphQL.types(&upper_camel(String.replace_prefix(&1, "content_", "")))
+      |> Enum.map_reduce(taken, fn type, taken ->
+        name = unique(type.base <> "CustomFields", taken)
+        {graphql_type(name, type), MapSet.put(taken, name)}
+      end)
+
+    if types == [] do
+      emit(document)
+    else
+      emit(document) <> "\n" <> section("GraphQL custom fields", [graphql_values() | types])
+    end
+  end
+
+  defp graphql_type(name, %{scalars: scalars, others: others} = type) do
+    props =
+      Enum.map(scalars, fn field ->
+        %{
+          name: unquotable(field.alias),
+          key: field.alias,
+          type: scalar_type(field.graphql_kind),
+          optional?: true
+        }
+      end) ++
+        if(others == [],
+          do: [],
+          else: [
+            %{name: "fields", key: "fields", type: "[KilnCustomFieldValue]", optional?: false}
+          ]
+        )
+
+    comment =
+      case type.type_name do
+        nil -> "On `#{type.on}`."
+        type_name -> "On `#{type.on}` with `typeName: #{literal(type_name)}`."
+      end
+
+    members =
+      [
+        Enum.map_join(props, "\n", &property_line/1),
+        initializer(props, @indent),
+        result_coding_keys(props),
+        fragment_constant(name, type)
+      ]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n\n")
+
+    doc("The result of `#{name}.fragment` — the site's custom fields. " <> comment, "") <>
+      "public struct #{name}: #{@conformances} {\n#{members}\n}"
+  end
+
+  # The response key is the alias; the property only differs for the few names
+  # Swift cannot take as a stored property (`self`, `Type`, ...).
+  defp result_coding_keys(props) do
+    if Enum.all?(props, &(&1.name == &1.key)) do
+      ""
+    else
+      i2 = @indent <> @indent
+      cases = Enum.map_join(props, "\n", &"#{i2}case #{ident(&1.name)}#{result_raw(&1)}")
+      "#{@indent}enum CodingKeys: String, CodingKey {\n#{cases}\n#{@indent}}"
+    end
+  end
+
+  defp result_raw(%{name: key, key: key}), do: ""
+  defp result_raw(%{key: key}), do: " = " <> literal(key)
+
+  defp property_line(prop),
+    do: "#{@indent}public let #{ident(prop.name)}: #{type_ref(prop)}"
+
+  defp fragment_constant(name, type) do
+    i2 = @indent <> @indent
+
+    lines =
+      name
+      |> GraphQL.fragment(type)
+      |> String.split("\n")
+      |> Enum.map_join("\n", &(i2 <> &1))
+
+    doc("The GraphQL fragment to spread into a query; it decodes into this type.", @indent) <>
+      "#{@indent}public static let fragment = \"\"\"\n#{lines}\n#{i2}\"\"\""
+  end
+
+  defp scalar_type("int"), do: "Int"
+  defp scalar_type("float"), do: "Double"
+  defp scalar_type("boolean"), do: "Bool"
+  defp scalar_type(kind) when kind in ["string", "date", "datetime"], do: "String"
+
+  defp graphql_values do
+    """
+    // The GraphQL schema is the same for every site; a custom field cannot be a
+    // GraphQL field of its own, so it is read through an *accessor* typed by the
+    // field's kind. For each content type this section has:
+    //
+    //   * `<Type>CustomFields`          the shape of the fragment's result;
+    //   * `<Type>CustomFields.fragment` a named GraphQL fragment to spread.
+    //
+    // A string, integer, float, boolean, date or datetime field is read as an
+    // alias of its accessor (`price: customFloat(name: "price")`) and is typed
+    // here. Every other kind (list, group, reference, media, geolocation, json)
+    // has no scalar accessor, so those names are read together through
+    // `fields(names: [...])`, which returns `KilnCustomFieldValue`s. Values
+    // arrive under per-kind aliases (`asString`, `asInt`, ...) because GraphQL
+    // forbids one response key with several types. The fragment goes one level
+    // into lists and groups.
+    //
+    // A field that is unknown, deleted, private to the reader or of another
+    // kind than the accessor is `null` (or absent from `fields`), so the server
+    // never rejects a stale fragment. A dynamic content type is an `Entry`:
+    // select its fragment on `publishedEntries(filter: {typeName: ...})`. The
+    // names here are the site's definitions *now*: regenerate after an admin
+    // changes them. Filtering and sorting still use `customFilter`/`customSort`.
+
+    /// A custom-field value as `fields(names:)` returns it, told apart by `__typename`.
+    public enum KilnCustomFieldValue: #{@conformances} {
+        case string(name: String, value: String)
+        case int(name: String, value: Int)
+        case float(name: String, value: Double)
+        case boolean(name: String, value: Bool)
+        case date(name: String, value: String)
+        case dateTime(name: String, value: String)
+        case geolocation(name: String, value: KilnGeolocationValue)
+        case json(name: String, value: String?)
+        case reference(name: String, ids: [String])
+        case media(name: String, value: KilnMediaValue)
+        case list(name: String, items: [KilnCustomFieldValue])
+        case group(name: String, fields: [KilnCustomFieldValue])
+        /// A value kind this schema does not know — one added since it was generated.
+        case unknown(typename: String, name: String)
+
+        /// The custom field's name.
+        public var name: String {
+            switch self {
+            case .string(let name, _), .int(let name, _), .float(let name, _),
+                 .boolean(let name, _), .date(let name, _), .dateTime(let name, _),
+                 .geolocation(let name, _), .json(let name, _), .reference(let name, _),
+                 .media(let name, _), .list(let name, _), .group(let name, _),
+                 .unknown(_, let name):
+                return name
+            }
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case typename = "__typename"
+            case name, asString, asInt, asFloat, asBoolean, asDate, asDateTime, asJson, ids, items, fields
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let typename = try container.decode(String.self, forKey: .typename)
+            let name = try container.decode(String.self, forKey: .name)
+            switch typename {
+            case "StringValue": self = .string(name: name, value: try container.decode(String.self, forKey: .asString))
+            case "IntValue": self = .int(name: name, value: try container.decode(Int.self, forKey: .asInt))
+            case "FloatValue": self = .float(name: name, value: try container.decode(Double.self, forKey: .asFloat))
+            case "BooleanValue": self = .boolean(name: name, value: try container.decode(Bool.self, forKey: .asBoolean))
+            case "DateValue": self = .date(name: name, value: try container.decode(String.self, forKey: .asDate))
+            case "DateTimeValue": self = .dateTime(name: name, value: try container.decode(String.self, forKey: .asDateTime))
+            case "GeolocationValue": self = .geolocation(name: name, value: try KilnGeolocationValue(from: decoder))
+            case "JsonValue": self = .json(name: name, value: try container.decodeIfPresent(String.self, forKey: .asJson))
+            case "ReferenceValue": self = .reference(name: name, ids: try container.decode([String].self, forKey: .ids))
+            case "MediaValue": self = .media(name: name, value: try KilnMediaValue(from: decoder))
+            case "ListValue": self = .list(name: name, items: try container.decode([KilnCustomFieldValue].self, forKey: .items))
+            case "GroupValue": self = .group(name: name, fields: try container.decode([KilnCustomFieldValue].self, forKey: .fields))
+            default: self = .unknown(typename: typename, name: name)
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(name, forKey: .name)
+            switch self {
+            case .string(_, let value):
+                try container.encode("StringValue", forKey: .typename)
+                try container.encode(value, forKey: .asString)
+            case .int(_, let value):
+                try container.encode("IntValue", forKey: .typename)
+                try container.encode(value, forKey: .asInt)
+            case .float(_, let value):
+                try container.encode("FloatValue", forKey: .typename)
+                try container.encode(value, forKey: .asFloat)
+            case .boolean(_, let value):
+                try container.encode("BooleanValue", forKey: .typename)
+                try container.encode(value, forKey: .asBoolean)
+            case .date(_, let value):
+                try container.encode("DateValue", forKey: .typename)
+                try container.encode(value, forKey: .asDate)
+            case .dateTime(_, let value):
+                try container.encode("DateTimeValue", forKey: .typename)
+                try container.encode(value, forKey: .asDateTime)
+            case .geolocation(_, let value):
+                try container.encode("GeolocationValue", forKey: .typename)
+                try value.encode(to: encoder)
+            case .json(_, let value):
+                try container.encode("JsonValue", forKey: .typename)
+                try container.encode(value, forKey: .asJson)
+            case .reference(_, let ids):
+                try container.encode("ReferenceValue", forKey: .typename)
+                try container.encode(ids, forKey: .ids)
+            case .media(_, let value):
+                try container.encode("MediaValue", forKey: .typename)
+                try value.encode(to: encoder)
+            case .list(_, let items):
+                try container.encode("ListValue", forKey: .typename)
+                try container.encode(items, forKey: .items)
+            case .group(_, let fields):
+                try container.encode("GroupValue", forKey: .typename)
+                try container.encode(fields, forKey: .fields)
+            case .unknown(let typename, _):
+                try container.encode(typename, forKey: .typename)
+            }
+        }
+    }
+
+    /// A `GeolocationValue` — a point, with an optional label and zoom.
+    public struct KilnGeolocationValue: #{@conformances} {
+        public let lat: Double
+        public let lng: Double
+        public let label: String?
+        public let zoom: Double?
+
+        public init(lat: Double, lng: Double, label: String? = nil, zoom: Double? = nil) {
+            self.lat = lat
+            self.lng = lng
+            self.label = label
+            self.zoom = zoom
+        }
+    }
+
+    /// A `MediaValue` — the media a custom field points at, with its variants.
+    public struct KilnMediaValue: #{@conformances} {
+        public let id: String
+        public let url: String?
+        public let alt: String?
+        public let width: Int?
+        public let height: Int?
+        public let mimeType: String?
+        public let focal: Focal?
+        public let variants: [Variant]
+
+        public struct Focal: #{@conformances} {
+            public let x: Double
+            public let y: Double
+
+            public init(x: Double, y: Double) {
+                self.x = x
+                self.y = y
+            }
+        }
+
+        public struct Variant: #{@conformances} {
+            public let label: String?
+            public let width: Int?
+            public let height: Int?
+            public let format: String?
+            public let url: String?
+            public let bytes: Int?
+            public let cropped: Bool?
+
+            public init(label: String? = nil, width: Int? = nil, height: Int? = nil, format: String? = nil, url: String? = nil, bytes: Int? = nil, cropped: Bool? = nil) {
+                self.label = label
+                self.width = width
+                self.height = height
+                self.format = format
+                self.url = url
+                self.bytes = bytes
+                self.cropped = cropped
+            }
+        }
+
+        public init(id: String, url: String? = nil, alt: String? = nil, width: Int? = nil, height: Int? = nil, mimeType: String? = nil, focal: Focal? = nil, variants: [Variant] = []) {
+            self.id = id
+            self.url = url
+            self.alt = alt
+            self.width = width
+            self.height = height
+            self.mimeType = mimeType
+            self.focal = focal
+            self.variants = variants
+        }
+    }\
+    """
   end
 
   defp header(model) do
