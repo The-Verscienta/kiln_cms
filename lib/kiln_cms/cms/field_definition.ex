@@ -317,6 +317,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :inverse_name,
       :private,
       :schema_org_property,
+      :validation,
       :visible_when,
       :required_when
     ]
@@ -528,6 +529,12 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # its value somewhere public.
     validate KilnCMS.CMS.Validations.PrivateField
 
+    # Value constraints (#2276) are well-formed, fit the field's type, and
+    # its default satisfies them.
+    validate KilnCMS.CMS.Validations.FieldConstraints
+
+    # Switching `unique` on over values that already repeat is refused (#2276).
+    validate KilnCMS.CMS.Validations.UniqueFieldClean
     # `visible_when` / `required_when` are well-formed rules over this
     # field's siblings, with no cycle (#2277). On destroy it refuses to
     # remove a field other rules read.
@@ -719,6 +726,14 @@ defmodule KilnCMS.CMS.FieldDefinition do
       public? true
     end
 
+    # Value constraints an editor's input must satisfy (#2276), as string keys:
+    # `min`/`max` (numbers), `min_length`/`max_length`/`pattern`/
+    # `pattern_message` (text) and `unique`. A plain map, not an embedded
+    # resource: each new constraint is then a validation rule, not a schema
+    # change. Shape, type fit and regex safety are checked on save by
+    # `Validations.FieldConstraints`; the value rules live in
+    # `KilnCMS.CMS.FieldConstraints`, applied by `Changes.ApplyCustomFields`.
+    attribute :validation, :map, allow_nil?: false, default: %{}, public?: true
     # Conditional rules (#2277), `KilnCMS.CMS.Conditions` JSON: the field is
     # hidden in the editor while `visible_when` is false, and required while
     # `required_when` is true. Both nil — always shown, `required` alone —

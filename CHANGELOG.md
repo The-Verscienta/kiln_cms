@@ -80,6 +80,10 @@ Every summary line below that was shortened links to its own entry there.
   on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
   ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
 
+- **Field definitions gain a `validation` column (`NOT NULL DEFAULT '{}'`, additive, safe to roll back). Overlays: run `mix ash.codegen`.
+  `unique` fields have no database backstop; audit with `mix kiln.fields.duplicates`.**
+  ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation-upgrade))
+
 ### Breaking
 
 - **Overlays: `Accounts.Bootstrap.create_first_admin/1` returns `{:ok, user, notices}`, not `{:ok, user}`.**
@@ -96,6 +100,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Admins choose what happens to a breached password at Organization → Password policy: off, warn (default) or block for administrators.**
   Checked on register, change, reset and first-run setup, by k-anonymity.
   ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-check))
+- **Admins can constrain a custom field: `min`/`max`, length, a whole-value `pattern`, or `unique`, enforced on every write path.**
+  Set in `/editor/fields` or via the `validation` attribute; stored values are grandfathered. Audit with `mix kiln.fields.duplicates`.
+  ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation))
 - **Admins can replace a webhook's signing secret with Rotate secret on `/editor/webhooks`; it works even when the old secret is unreadable.**
   ([#2347](https://github.com/The-Verscienta/kiln_cms/issues/2347) · [long form](docs/changelog/unreleased.md#webhook-rotate-secret))
 - **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**

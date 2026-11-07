@@ -532,12 +532,40 @@ defmodule KilnCMS.SchemaExport do
   defp custom_field_schema(definition) do
     definition.field_type
     |> base_custom_field_schema(definition)
+    |> put_constraints(definition)
     |> put_target_types(definition)
     |> put_target_rules(definition)
     |> put_inverse(definition)
     |> put_link_fields(definition)
     |> put_localization(Map.get(definition, :localization))
     |> put_section(Map.get(definition, :section))
+  end
+
+  # A field's value constraints (#2276) as annotations, not as JSON Schema's
+  # `minimum`/`maxLength`/`pattern` — for the reason the item bounds are: they
+  # govern what a *write* accepts, and a value stored before a constraint was
+  # added or tightened may fall outside it, so as assertions they would fail
+  # legitimately-published documents. `x-kiln-unique` is the flag as set; the
+  # check runs on write only. On a `multiple` string field the text
+  # constraints apply to each item. The editor-facing `pattern_message` is
+  # not exported.
+  @constraint_annotations [
+    {"min", "x-kiln-minimum"},
+    {"max", "x-kiln-maximum"},
+    {"min_length", "x-kiln-min-length"},
+    {"max_length", "x-kiln-max-length"},
+    {"pattern", "x-kiln-pattern"}
+  ]
+
+  defp put_constraints(schema, definition) do
+    validation = KilnCMS.CMS.FieldConstraints.normalize(Map.get(definition, :validation))
+
+    schema =
+      Enum.reduce(@constraint_annotations, schema, fn {key, annotation}, acc ->
+        put_bound(acc, annotation, validation[key])
+      end)
+
+    if validation["unique"] == true, do: Map.put(schema, "x-kiln-unique", true), else: schema
   end
 
   # A reference's link fields (R3): each connection's snapshot carries their

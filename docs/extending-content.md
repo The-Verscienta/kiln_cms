@@ -22,7 +22,7 @@ UI" workflow, scoped to fields.
   `max_sources`, `on_target_delete`, `inverse_label`, `inverse_name`,
   `schema_org_property`,
   `link_of_id`, `group_of_id`, `help_text`, `position`, `default`, `compute`,
-  `private`). Field types: `:string`,
+  `private`, `validation`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
   `:select`, `:media`, `:reference`, `:group`, `:user`, `:geolocation`,
   `:datetime_range`, `:recurrence`, `:computed` — plus
@@ -707,6 +707,110 @@ page) and `KilnCMSWeb.EditorLive.FieldCells.value/3` resolves a cell once for
 the screen, the CSV (`csv_value/1`) and the JSON (`json_value/2`), so they
 cannot disagree about who may see a reference's target. The route handler is
 `KilnCMSWeb.ContentExportController`.
+
+### Constrain the values of a field
+
+A field can refuse values that are out of range, too long, in the wrong shape
+or already taken. The rules live in the field's `validation` map, are checked
+on **every** write (the editor, JSON:API, GraphQL, MCP, importers), and an
+editor sees the failure as an error under the field, naming it.
+
+| Constraint | Applies to | Meaning |
+|---|---|---|
+| `min`, `max` | `:integer` (whole numbers), `:float` | Inclusive bounds |
+| `min_length`, `max_length` | `:string`, `:url`, plain `:text` (`format: :plain`) | Length in characters (graphemes) |
+| `pattern` | the same text types | A regular expression the **whole** value must match |
+| `pattern_message` | with `pattern` | The sentence an editor reads when it does not match |
+| `unique` | `:string`, `:url`, `:integer`, `:float`, `:date`, `:datetime` | No other document may hold the same value |
+
+A rich `:text` field takes no constraints (its value is HTML, so its length
+means nothing), nor do the other types. Constraints a type does not take are
+refused when the definition is saved, as are unknown keys, `min` above `max`,
+a default value that breaks the field's own rules, and a pattern that is not a
+valid regular expression.
+
+**Set them** in `/editor/fields` (admin only): open or create a field, and the
+form shows a **Validation (optional)** group with only the controls its type
+takes (*Minimum value*, *Maximum value*, *Minimum length*, *Maximum length*,
+*Pattern*, *Message when it doesn't match*, *Unique*). Or send `validation` on
+the field definition (it is a public attribute, so it appears in the JSON:API
+field-definition payload and the OpenAPI document):
+
+```json
+{"field_type": "string", "name": "sku", "label": "SKU",
+ "validation": {"pattern": "[A-Z]{3}-[0-9]{4}", "pattern_message": "Use three capitals, a dash and four digits.", "unique": true}}
+```
+
+Saving `{"sku": "abc"}` on a record of that type then fails with
+`SKU (sku): Use three capitals, a dash and four digits.`. Without a
+`pattern_message` it reads `SKU (sku) doesn't match the required format`.
+The other messages are `… must be at least 3`, `… must be at most 10`,
+`… must be at least 2 characters long`, `… must be at most 5 characters long`.
+
+How the rules behave:
+
+- **Blank values are not checked.** A blank optional field is simply empty;
+  `required` is what makes it mandatory.
+- **A `multiple` string field is checked per item**, reported as `tags[1]`. A
+  `:group` field checks each row's sub-fields against their own `validation`
+  (`dosages[2].unit`).
+- **A pattern must match the whole value.** `[0-9]+` accepts `123`, not
+  `a123`; you do not write `^…$`. A pattern is at most 200 characters (so is
+  its message), is unicode-aware, and runs with match limits: a value over
+  2,000 characters, or a pattern that backtracks without end, counts as *not
+  matching* instead of hanging the save.
+- **Stored values are grandfathered.** A value equal to what the record
+  already holds is not re-checked, so tightening a rule never blocks an edit
+  to some other field; it applies once that field's value changes. Adding a
+  tag to a list that holds one now-too-long tag still saves. Existing data is
+  not rewritten or reported.
+- **Restore, promote and copy skip the value rules.** A version restore, a
+  dynamic type's promotion and a content copy carry values that were valid
+  when written, so a rule tightened since does not fail them; it applies on
+  the next edit. `unique` is the exception: it is still enforced for a
+  restore (from versions or from the trash). A duplicated document starts with
+  its unique fields **blank**, so the copy does not claim the original's value.
+
+#### Unique values
+
+A custom field has no column of its own, so there is no database index behind
+`unique`. The write path enforces it instead (`KilnCMS.CMS.UniqueValues`): a
+lookup while the editor validates, then a transaction-scoped advisory lock on
+the value and a second lookup in the transaction, so two saves racing for the
+same value cannot both win. The loser gets `SKU (sku) is already in use` (the
+message never names the other record, which the writer may not be allowed to
+read), or `… is being changed by another save at the same time. Try again`.
+
+- The match is **exact and case-sensitive** on the trimmed value, within the
+  same organization, content type and **locale**: translations of one document
+  may share a value.
+- Trashed records are ignored; drafts and archived records count.
+- A working copy only stages a value. The check runs when it reaches the live
+  `custom_fields` (publish, or the fold on unpublish); the check while staging
+  is advisory.
+- `unique` is refused on a `multiple` field, a field inside a group or a
+  relationship, a field shared between locales, and a field with a default.
+- **Turning `unique` on is refused while the data already repeats**: the save
+  fails with `can't require unique values yet: 2 values are shared by several
+  records (…). Make them distinct first`. Fix the records, then save again.
+- **There is no database backstop.** Raw SQL, `update_all` and a database
+  restore bypass the check, and a field made unique while an older node was
+  still writing can lag. Audit with the read-only task below.
+
+```bash
+mix kiln.fields.duplicates                       # every type of the default org
+mix kiln.fields.duplicates --org acme --type herb --samples 20
+```
+
+It lists, per content type and field, the repeated values (scoped exactly like
+the runtime check), writes nothing, and **exits non-zero** when it finds any,
+so it can gate a deploy.
+
+The schema export reports a field's rules as annotations, not as JSON Schema
+assertions, because a stored value may predate a rule: `x-kiln-minimum`,
+`x-kiln-maximum`, `x-kiln-min-length`, `x-kiln-max-length`, `x-kiln-pattern`
+and `x-kiln-unique`. `pattern_message` is not exported. On a `multiple`
+string field the text rules apply to each item.
 
 ### Geolocation fields
 
