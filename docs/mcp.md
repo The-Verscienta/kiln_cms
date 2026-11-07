@@ -29,7 +29,6 @@ anonymous access; anything else is a `401`. Mint keys at `/editor/api-keys`
 | Read + write  | `:viewer`  | Reads only — the role has no authoring rights            |
 | Read + write  | `:editor`  | Author: create/update drafts, tag, submit for review     |
 | Read + write  | `:admin`   | As editor, plus edit any record its role could           |
-
 | Draft write   | `:viewer` service account | `create_*`; `update_*` of its **own drafts** only. No submit-for-review, no tags or categories, no publishing |
 
 A `draft_write` key (#2273) is for a headless app that submits content, not for

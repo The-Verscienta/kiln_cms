@@ -79,7 +79,7 @@ has to be a `projects/<name>/` overlay, which is compiled *inside* the core.
 | Contribution | As a dependency |
 | --- | --- |
 | Blocks (`blocks/0`) | Yes |
-| Field types (`field_types/0`) | Yes, except a colocated client hook (`input_hook/1`): Phoenix writes a dependency's colocated hooks under its own app name, which the core's `app.js` does not import |
+| Field types (`field_types/0`) | Yes, except a colocated client hook (`input_hook/1`): Phoenix writes a dependency's colocated hooks under its own app name, which the core's `app.js` does not import. The optional `graphql_kind/1` (how the GraphQL API types the value) is from 1.4 (`{:kiln_plugin, "~> 1.4"}`) |
 | Spam checks (`spam_checks/0`) | Yes |
 | Image backends (`image_backends/0`) | Yes. The connection check, `check/0`, from 1.2 (`{:kiln_plugin, "~> 1.2"}`) |
 | Nav items, supervision children, Oban queues | Yes |

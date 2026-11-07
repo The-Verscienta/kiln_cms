@@ -38,6 +38,11 @@ defmodule KilnCMS.CMS.FieldTypes.Computed do
   @impl Kiln.FieldType
   def label, do: "Computed"
 
+  # The value's kind is whatever the expression evaluates to, so no one scalar
+  # accessor fits: served through the generic JSON value.
+  @impl Kiln.FieldType
+  def graphql_kind(_definition), do: :json
+
   @impl Kiln.FieldType
   def cast(value, _definition) when is_binary(value) or is_number(value) or is_boolean(value),
     do: {:ok, value}
