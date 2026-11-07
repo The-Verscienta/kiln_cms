@@ -54,7 +54,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_UPDATE_REPO KILN_UPDATE_RELEASES_URL KILN_UPDATE_FEED_URL KILN_PIN_PATH
             MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
             KILN_PROVENANCE_ENABLED TENANT_STRICT_HOST API_DOCS_ENABLED
-            GRAPHQL_INTROSPECTION_ENABLED
+            GRAPHQL_INTROSPECTION_ENABLED KILN_API_REJECT_INVALID_BEARER
             BACKUP_ENABLED OEMBED_ENABLED
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
@@ -313,6 +313,29 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
     test "an unrecognized value writes nothing rather than reading as on" do
       assert visual_editing("enabled") == nil
+    end
+  end
+
+  describe "KILN_API_REJECT_INVALID_BEARER (#2161, ADR 0012)" do
+    defp reject_invalid_bearer(value) do
+      %{"KILN_API_REJECT_INVALID_BEARER" => value}
+      |> eval()
+      |> get_in([:kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth, :reject_invalid_bearer])
+    end
+
+    test "unset writes nothing, so the plug's default (on) applies" do
+      assert reject_invalid_bearer(nil) == nil
+      assert reject_invalid_bearer("enabled") == nil
+    end
+
+    test "an off-spelling turns it off (the escape hatch)" do
+      for value <- ["false", "False", "0", "no", "off"] do
+        assert reject_invalid_bearer(value) == false
+      end
+    end
+
+    test "an on-spelling writes on" do
+      assert reject_invalid_bearer("true") == true
     end
   end
 

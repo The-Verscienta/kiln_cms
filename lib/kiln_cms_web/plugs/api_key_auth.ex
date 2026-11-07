@@ -16,14 +16,16 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
 
   `:load_from_bearer` silently degrades a JWT that fails verification (garbage,
   expired, signed by another instance) to **anonymous**, so a client with a
-  broken credential reads public content and takes it for success. With
-  `config :kiln_cms, #{inspect(__MODULE__)}, reject_invalid_bearer: true`
-  (`KILN_API_REJECT_INVALID_BEARER`) an `Authorization: Bearer …` header that
-  left no actor behind is answered `401` in the standard `KilnCMSWeb.ApiError`
-  envelope instead. A request with no `Authorization` header stays anonymous,
-  and so does one using another scheme. **Off by default** for one release:
-  it turns a response that used to be `200` into a `401` for any consumer
-  already sending a stale token. See `docs/decisions/0012-*` for the schedule.
+  broken credential reads public content and takes it for success. So an
+  `Authorization: Bearer …` header that left no actor behind is answered `401`
+  in the standard `KilnCMSWeb.ApiError` envelope instead. A request with no
+  `Authorization` header stays anonymous, and so does one using another scheme.
+
+  **On by default.** It shipped off for one release and flipped on in the next
+  (`docs/decisions/0012-*`). `config :kiln_cms, #{inspect(__MODULE__)},
+  reject_invalid_bearer: false` (`KILN_API_REJECT_INVALID_BEARER=false`) restores
+  the anonymous fallback; that escape hatch is kept for one more release, then
+  removed.
 
   Keeping the two apart matters: the API-key plug treats a present-but-unrecognised
   `Bearer` value as an *invalid key* (401), so it must never see a JWT.
@@ -61,7 +63,7 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   @doc "Whether an unverifiable bearer token is a `401` (`KILN_API_REJECT_INVALID_BEARER`)."
   @spec reject_invalid_bearer?() :: boolean()
   def reject_invalid_bearer? do
-    :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(:reject_invalid_bearer, false)
+    :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(:reject_invalid_bearer, true)
   end
 
   # A `Bearer` header, not a `kiln_` key (handled above), and no actor: the

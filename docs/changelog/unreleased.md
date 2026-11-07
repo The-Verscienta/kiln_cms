@@ -7,6 +7,34 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="reject-invalid-bearer-default-on"></a>
+
+- **An unverifiable bearer token is a `401` by default (#2161).** The
+  previous release added `KILN_API_REJECT_INVALID_BEARER`, off; this one turns
+  it on, as [ADR 0012](../decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)
+  committed to. An `Authorization: Bearer …` header whose JWT does not verify
+  (garbled, expired, or signed by another instance) is now answered `401` with
+  the standard error envelope (`code: "invalid_token"`) and
+  `WWW-Authenticate: Bearer error="invalid_token"` on `/api/json`, `/gql` and
+  the other `/api` routes. Before, it was served as anonymous: the client got
+  `200` and public content, and took that for success.
+  - **Who notices.** Only a consumer that sends a bearer token that does not
+    verify. A request with no `Authorization` header, or another scheme, is
+    still anonymous. A valid JWT and a valid `kiln_` API key are unchanged, and
+    a bad `kiln_` key was already a `401`.
+  - **What to do.** Before upgrading, look for clients that send a token they
+    never refresh: a static site build or a mobile app holding an old JWT, or
+    one built against another instance's secret. Have them sign in again, or
+    move them to an API key, or send no `Authorization` header when they mean
+    to read as the public. Turning the flag on in the previous release
+    (`KILN_API_REJECT_INVALID_BEARER=true`) shows the same `401`s ahead of time.
+  - **Opting out, for one release.** `KILN_API_REJECT_INVALID_BEARER=false`
+    restores the anonymous fallback. The variable is removed in the next
+    release, after which an unverifiable bearer is always a `401`; use it only
+    to buy time while you fix the client.
+  - Unset now means on. Nothing to migrate and no config to change if your
+    clients send valid tokens or none.
+
 <a id="search-name-lexemes-upgrade"></a>
 
 - **Content tables gain `name_lexemes`, a generated column; overlays run
