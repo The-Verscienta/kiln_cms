@@ -3765,6 +3765,11 @@ msgstr ""
 msgid "Choose a caption track"
 msgstr ""
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a content type to show its fields as columns."
+msgstr ""
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a favicon"
@@ -4134,6 +4139,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Column %{n}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Columns"
 msgstr ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex
@@ -10478,6 +10488,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/editor_live/field_cells.ex
 #, elixir-autogen, elixir-format
 msgid "No"
 msgstr ""
@@ -15464,6 +15475,11 @@ msgstr ""
 msgid "Show essentials"
 msgstr ""
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Show fields on each row. Pick up to %{count}; the first %{shown} show."
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Show more results"
@@ -18875,6 +18891,7 @@ msgid "Unassigned"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#: lib/kiln_cms_web/live/editor_live/field_cells.ex
 #, elixir-autogen, elixir-format
 msgid "Unavailable"
 msgstr ""
@@ -18938,6 +18955,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #, elixir-autogen, elixir-format
 msgid "Unlock"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live/field_cells.ex
+#, elixir-autogen, elixir-format
+msgid "Unnamed user"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
@@ -20055,6 +20077,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#: lib/kiln_cms_web/live/editor_live/field_cells.ex
 #, elixir-autogen, elixir-format
 msgid "Yes"
 msgstr ""
@@ -20454,6 +20477,7 @@ msgstr ""
 msgid "Your browser will prompt you to confirm with this device's screen lock."
 msgstr ""
 
+#: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format

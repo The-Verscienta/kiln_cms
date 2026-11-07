@@ -181,11 +181,26 @@ What the core does with it:
 - **Rate limit.** Per client address, 300 requests a minute, in its own bucket
   (`:plugin_endpoint`), apart from the core APIs. It bounds floods, not
   guessing: authorization is the plugin's.
-- **Raw body.** For a plugin path, a JSON or form body is also kept byte for
-  byte in `conn.private[:raw_body]`, capped at 1 MB (over it the request is
-  refused as too large), so an HMAC over the exact bytes can be verified.
-  Other content types are left unread by the core: read them from the conn
-  yourself.
+- **Raw body.** For a plugin path the request body is kept byte for byte in
+  `conn.private[:raw_body]` for **any content type** (JSON, form, `text/plain`,
+  `application/octet-stream`, XML, …), so an HMAC over the exact bytes can be
+  verified. The body is read for you: `Plug.Conn.read_body/2` in the plugin
+  returns `""`, and `conn.params` holds only the query and path params. A
+  request that sends a body with no `content-type` is treated as
+  `application/octet-stream`. The cap is 1 MB; over it the request is refused
+  with `413` before it reaches the plugin (`Request Entity Too Large`, as plain
+  text, or the JSON error envelope for a client that accepts JSON). Two
+  exceptions: `multipart/*` is parsed into `conn.params` and has no raw bytes
+  (and is spooled to disk under the endpoint's 8 MB limit before the plugin
+  runs, so don't take multipart webhooks), and a body larger than 1 MB is not
+  possible on a plugin path — large uploads belong behind an authenticated
+  core API, not a plugin route. `GET` and `HEAD` carry no body.
+
+  *Decision (#2272):* the core could have left types it has no parser for
+  unread and let the plugin read them. It doesn't, because the plugin would
+  then read with Plug's default 8 MB on a route nobody has authenticated yet,
+  and signature verification would depend on the sender's content type.
+
 - **Compile time.** A malformed entry stops the build with an error naming the
   plugin. `mix kiln.plugins.doctor` reports all of them at once, plus a path a
   core route owns, and any overlap, on whole path segments, with another
@@ -239,15 +254,15 @@ defmodule KilnRatings.WebhookPlug do
     end
   end
 
-  # 1. Authenticate. The core keeps the raw body for JSON and form bodies
-  #    only, so anything else is refused rather than guessed at.
+  # 1. Authenticate. The core keeps the raw body for every content type but
+  #    multipart, which has none to sign, so it is refused rather than guessed at.
   defp verify_signature(conn, secret) do
     raw = conn.private[:raw_body]
     given = conn |> get_req_header("x-signature") |> List.first()
     expected = "sha256=" <> Base.encode16(:crypto.mac(:hmac, :sha256, secret, raw || ""), case: :lower)
 
     cond do
-      not is_binary(raw) -> {:error, 400, "a JSON body is required"}
+      not is_binary(raw) -> {:error, 400, "a raw body is required"}
       is_binary(given) and Plug.Crypto.secure_compare(given, expected) -> :ok
       true -> {:error, 401, "bad signature"}
     end

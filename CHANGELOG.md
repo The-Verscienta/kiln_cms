@@ -66,6 +66,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The content list can show up to four custom fields on each row; pick them under Columns once one content type is listed.**
+  Remembered per person, site and type; additive migration, nothing to run.
+  ([long form](docs/changelog/unreleased.md#content-list-field-columns))
+
 - **Custom fields can be filtered and sorted by bare name (`filter[price]`, `sort=title,price`), and `custom_sort` now works on search routes.**
   ([long form](docs/changelog/unreleased.md#custom-field-native-filter-sort))
 
@@ -95,6 +99,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Drafts-only keys can rotate themselves: an admin sets a window at mint, and until then `POST /api/keys/rotate`
   swaps the key for an identical fresh one and revokes the old. Reusing a rotated-away key burns the chain.**
   ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-key-rotation))
+
+- **`config :kiln_cms, :i18n, block_fields:` makes core image/video/audio block fields shared or
+  fallback across locales; the editor locks them on translations.**
+  ([long form](docs/changelog/unreleased.md#block-field-localization-config))
 
 ### Changed
 

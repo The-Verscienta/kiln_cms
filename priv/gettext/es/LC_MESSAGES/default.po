@@ -3765,6 +3765,11 @@ msgstr "Los puntos de control están desactivados, así que no se emite ninguno 
 msgid "Choose a caption track"
 msgstr "Elegir una pista de subtítulos"
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a content type to show its fields as columns."
+msgstr "Elige un tipo de contenido para mostrar sus campos como columnas."
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a favicon"
@@ -4135,6 +4140,11 @@ msgstr "Paneles plegables sin datos estructurados: usa Preguntas frecuentes para
 #, elixir-autogen, elixir-format
 msgid "Column %{n}"
 msgstr "Columna %{n}"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Columns"
+msgstr "Columnas"
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
@@ -10478,6 +10488,7 @@ msgstr "Semana siguiente"
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/editor_live/field_cells.ex
 #, elixir-autogen, elixir-format
 msgid "No"
 msgstr "No"
@@ -15464,6 +15475,11 @@ msgstr "Mostrar todas las herramientas"
 msgid "Show essentials"
 msgstr "Mostrar lo esencial"
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Show fields on each row. Pick up to %{count}; the first %{shown} show."
+msgstr "Muestra campos en cada fila. Elige hasta %{count}; se ven los primeros %{shown}."
+
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Show more results"
@@ -18875,6 +18891,7 @@ msgid "Unassigned"
 msgstr "Sin asignar"
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#: lib/kiln_cms_web/live/editor_live/field_cells.ex
 #, elixir-autogen, elixir-format
 msgid "Unavailable"
 msgstr "No disponible"
@@ -18939,6 +18956,11 @@ msgstr "Navegador desconocido"
 #, elixir-autogen, elixir-format
 msgid "Unlock"
 msgstr "Desbloquear"
+
+#: lib/kiln_cms_web/live/editor_live/field_cells.ex
+#, elixir-autogen, elixir-format
+msgid "Unnamed user"
+msgstr "Usuario sin nombre"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -20055,6 +20077,7 @@ msgstr "Archivo XLIFF para importar"
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#: lib/kiln_cms_web/live/editor_live/field_cells.ex
 #, elixir-autogen, elixir-format
 msgid "Yes"
 msgstr "Sí"
@@ -20454,6 +20477,7 @@ msgstr "Tu navegador está bloqueando las notificaciones de este sitio. Permíte
 msgid "Your browser will prompt you to confirm with this device's screen lock."
 msgstr "Su navegador le pedirá que confirme con el bloqueo de pantalla de este dispositivo."
 
+#: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
