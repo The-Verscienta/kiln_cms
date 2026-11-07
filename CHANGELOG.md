@@ -90,6 +90,10 @@ Every summary line below that was shortened links to its own entry there.
   Remembered per person, site and type; additive migration, nothing to run.
   ([long form](docs/changelog/unreleased.md#content-list-field-columns))
 
+- **The content list can be filtered by up to four custom-field conditions and sorted by one field once one content type is listed; the count reads "1000+" past 1000.**
+  Saved views keep them and flag a field that no longer applies; no migration.
+  ([long form](docs/changelog/unreleased.md#content-list-field-filter-sort))
+
 - **`custom_filter` equality, `in` and list membership use a new GIN index on `custom_fields`: a selective filter on 100,000 rows drops from about 40 ms to about 3 ms.**
   Range, `not_eq`, `ilike`, `null` and `custom_sort` are unchanged.
   ([#2321](https://github.com/The-Verscienta/kiln_cms/pull/2321) · [long form](docs/changelog/unreleased.md#custom-field-indexes))
@@ -167,6 +171,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2327](https://github.com/The-Verscienta/kiln_cms/pull/2327) · [long form](docs/changelog/unreleased.md#feed-relay))
 
 ### Fixed
+
+- **`custom_sort` ranks a stored JSON `null`, array or object as no value (last in either direction), and page 2 of a keyset-paged sort no longer fails on one.**
+  ([long form](docs/changelog/unreleased.md#custom-sort-json-null-last))
 
 - **Renaming a form field now saves on Enter or Save, keeps a refused name on screen with its error, and shows
   machine names on the canvas; the Entries tab groups old keys under "From a renamed or removed field".**

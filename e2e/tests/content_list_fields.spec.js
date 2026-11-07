@@ -189,3 +189,179 @@ test.describe("content list field columns", () => {
     await expect(colsPanel).toBeHidden();
   });
 });
+
+// Filtering and sorting the list by a custom field (#2293). The type, its
+// integer field, an API key and 54 entries (more than one page of 50) are all
+// this describe's own, written through the JSON:API so the spec does not click
+// through 54 editors, and removed again in `finally`-style afterAll cleanup.
+test.describe("content list field filter and sort", () => {
+  const ROWS = 54;
+  /** @type {string} */
+  let stamp;
+  /** @type {string} */
+  let typeName;
+  /** @type {string} */
+  let fieldName;
+  /** @type {number[]} */
+  let ranks;
+
+  /** @param {import("@playwright/test").Page} page */
+  async function sort(page, value) {
+    await page.locator("#content-sort").selectOption(value);
+  }
+
+  /** The ranks of the rows on screen, in order (the title carries the rank). */
+  async function shownRanks(page) {
+    const rows = await page.locator(`li[id^="${typeName}-"]`).allTextContents();
+    return rows.map(text => Number(new RegExp(`Flt ${stamp} r(\\d+) n`).exec(text)?.[1]));
+  }
+
+  test.beforeEach(async ({ page }) => {
+    stamp = String(Date.now());
+    typeName = `e2e_flt_${stamp}`;
+    fieldName = `rank_${stamp}`;
+    // Duplicates across the page boundary on purpose: 54 rows, ranks 0..8.
+    ranks = Array.from({ length: ROWS }, (_, n) => n % 9);
+    await signInAsAdmin(page);
+
+    await page.goto("/editor/types");
+    await page.fill('#new-type-form input[name="type_definition[label]"]', `Flt ${typeName}`);
+    await page.fill('#new-type-form input[name="type_definition[plural_label]"]', `Flt ${typeName}s`);
+    await page.fill('#new-type-form input[name="type_definition[name]"]', typeName);
+    await page.locator("#new-type-form").getByRole("button", { name: "Create content type" }).click();
+    await expect(page.locator("#flash-info")).toContainText("Content type created.");
+
+    await page.goto("/editor/fields");
+    await page.locator("#new-field-form").getByRole("checkbox", { name: `Flt ${typeName}`, exact: true }).check();
+    await page.selectOption('#new-field-form select[name="field_definition[field_type]"]', "integer");
+    await page.fill('#new-field-form input[name="field_definition[label]"]', "Rank");
+    await page.fill('#new-field-form input[name="field_definition[name]"]', fieldName);
+    await page.locator("#new-field-form button[type=submit]").click();
+    await expect(page.locator("#flash-info")).toContainText("Field added.");
+
+    await page.goto("/editor/api-keys");
+    await page.fill('#new-api-key-form input[name="name"]', `e2e-flt-${stamp}`);
+    await page.selectOption('#new-api-key-form select[name="access"]', "read_write");
+    await page.locator("#new-api-key-form button[type=submit]").click();
+    const key = (await page.locator("#new-key-banner code").textContent())?.trim() ?? "";
+    expect(key).not.toBe("");
+
+    const headers = {
+      authorization: `Bearer ${key}`,
+      accept: "application/vnd.api+json",
+      "content-type": "application/vnd.api+json",
+    };
+    const typeRes = await page.request.get(`/api/json/type-definitions/by-name/${typeName}`, { headers });
+    expect(typeRes.status(), await typeRes.text()).toBe(200);
+    const typeId = (await typeRes.json()).data.id;
+
+    for (const [n, rank] of ranks.entries()) {
+      const res = await page.request.post("/api/json/entries", {
+        headers,
+        data: {
+          data: {
+            type: "entry",
+            attributes: {
+              title: `Flt ${stamp} r${rank} n${String(n).padStart(2, "0")}`,
+              slug: `e2e-flt-${stamp}-${n}`,
+              type_definition_id: typeId,
+              custom_fields: { [fieldName]: rank },
+            },
+          },
+        },
+      });
+      expect(res.status(), await res.text()).toBe(201);
+    }
+  });
+
+  test.afterEach(async ({ page }) => {
+    // Entries first (an archived type's entries drop out of the list), a page
+    // of 50 at a time, then the field, then the type.
+    await page.goto(`/editor?type=${typeName}`);
+    await waitForLiveConnected(page);
+    const rows = page.locator(`li[id^="${typeName}-"]`);
+    while (await rows.count()) {
+      await page.getByLabel("Select all").check();
+      await page.locator('button[phx-click="bulk"][phx-value-action="delete"]').click();
+      await page.locator('button[phx-click="confirm_bulk"]').click();
+      await expect(page.locator("#flash-info, #flash-error").first()).toBeVisible();
+      await page.goto(`/editor?type=${typeName}`);
+      await waitForLiveConnected(page);
+    }
+
+    await page.goto("/editor/fields");
+    const field = page.locator('li[id^="field-"]').filter({ has: page.locator(`code:text-is("${fieldName}")`) });
+    if (await field.count()) {
+      page.once("dialog", dialog => dialog.accept());
+      await field.getByRole("button", { name: "Delete field" }).click();
+      await expect(field).toHaveCount(0);
+    }
+
+    await page.goto("/editor/types");
+    const type = page.locator("li[id^='type-']").filter({ hasText: typeName });
+    if (await type.count()) {
+      page.once("dialog", dialog => dialog.accept());
+      await type.getByRole("button", { name: "Archive content type" }).click();
+      await expect(type).toHaveCount(0);
+    }
+  });
+
+  test("a number condition narrows the list, shows a chip, and survives a reload", async ({ page }) => {
+    const expected = ranks.filter(rank => rank >= 7).length;
+
+    await page.goto(`/editor?type=${typeName}`);
+    await waitForLiveConnected(page);
+    await expect(page.locator("#content-count")).toContainText(`${ROWS} items`);
+
+    await page.locator("#toggle-filters").click();
+    await expect(page.locator("#field-filters")).toBeVisible();
+    // The value control follows the chosen operator and field.
+    await page.locator("#field-filter-op").selectOption("gte");
+    await expect(page.locator("#field-filter-value")).toHaveAttribute("type", "number");
+    await page.locator("#field-filter-value").fill("7");
+    await page.locator("#field-filter-add").click();
+
+    await expect(page.locator("#field-filter-chip-0")).toContainText("Rank ≥ 7");
+    await expect(page.locator("#content-count")).toContainText(`${expected} items`);
+    await expect(page).toHaveURL(/cf=/);
+    expect((await shownRanks(page)).every(rank => rank >= 7)).toBe(true);
+
+    // The URL holds the whole state.
+    await page.reload();
+    await waitForLiveConnected(page);
+    await expect(page.locator("#field-filter-chip-0")).toContainText("Rank ≥ 7");
+    await expect(page.locator("#content-count")).toContainText(`${expected} items`);
+
+    // Removing the chip brings every row back.
+    await page.locator("#field-filter-chip-0").click();
+    await expect(page.locator("#field-filter-chip-0")).toHaveCount(0);
+    await expect(page.locator("#content-count")).toContainText(`${ROWS} items`);
+  });
+
+  test("a field sort orders across the Load more boundary and survives a reload", async ({ page }) => {
+    await page.goto(`/editor?type=${typeName}`);
+    await waitForLiveConnected(page);
+
+    await sort(page, `-field:${fieldName}`);
+    await expect(page).toHaveURL(/sort=-field/);
+    await expect(page.locator(`li[id^="${typeName}-"]`)).toHaveCount(50);
+    await page.getByRole("button", { name: "Load more" }).click();
+    await expect(page.locator(`li[id^="${typeName}-"]`)).toHaveCount(ROWS);
+
+    const shown = await shownRanks(page);
+    expect(shown).toHaveLength(ROWS);
+    expect(shown).toEqual([...shown].sort((a, b) => b - a));
+    // No row repeated or lost across the boundary.
+    expect(new Set(await page.locator(`li[id^="${typeName}-"]`).evaluateAll(els => els.map(e => e.id))).size).toBe(ROWS);
+
+    await page.reload();
+    await waitForLiveConnected(page);
+    await expect(page.locator("#content-sort")).toHaveValue(`-field:${fieldName}`);
+    expect((await shownRanks(page))[0]).toBe(8);
+
+    // Changing another filter keeps the field sort.
+    await page.locator("#content-status-filter").selectOption("draft");
+    await expect(page).toHaveURL(/sort=-field/);
+    await expect(page.locator("#content-sort")).toHaveValue(`-field:${fieldName}`);
+  });
+});

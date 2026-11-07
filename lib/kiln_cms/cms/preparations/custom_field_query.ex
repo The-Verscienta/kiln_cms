@@ -34,7 +34,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   definition's declared type, then compared/sorted **as jsonb** so numbers
   compare numerically without a SQL cast that could raise on off-type rows
   (see `jsonb_condition/3`). Rows without the key are `NULL`: excluded by
-  comparisons, last in sorts (`*_nils_last`).
+  comparisons, last in sorts (`*_nils_last`). A sort also reads a stored JSON
+  `null`, array or object as `NULL` (last in either direction), so it neither
+  leads the order nor breaks the keyset cursor of page 2.
 
   On the shared entry tier the definitions in scope depend on the dynamic
   type, which we recover from the query's own `type_definition_id`/`type_name`
@@ -869,8 +871,23 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # Sort by the jsonb value for the same reason `jsonb_condition` compares by
   # it: numbers order numerically, ISO strings lexically, and a row carrying
   # an off-type value reorders instead of raising.
+  #
+  # A stored JSON `null`, an array and an object read as *no value* (SQL
+  # NULL, so last in either direction), like a missing key. They are not
+  # SQL NULL as jsonb, so left alone a `null` would sort FIRST (jsonb orders
+  # null lowest), and an array/object cursor value cannot be bound back into
+  # the keyset filter (`jsonb > integer[]`), which fails the page-2 read.
+  # Neither is a value a field of a sortable type holds unless it was retyped.
   defp sort_expr(%{name: name}) do
-    Ash.Sort.expr_sort(fragment("(? -> ?::text)", ^ref(:custom_fields), ^name))
+    Ash.Sort.expr_sort(
+      fragment(
+        "(CASE WHEN jsonb_typeof(? -> ?::text) IN ('null', 'array', 'object') THEN NULL ELSE (? -> ?::text) END)",
+        ^ref(:custom_fields),
+        ^name,
+        ^ref(:custom_fields),
+        ^name
+      )
+    )
   end
 
   # --- value casting -------------------------------------------------------------

@@ -83,6 +83,16 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:column_names, [])
      |> assign(:columns, [])
      |> assign(:column_labels, FieldCells.empty())
+     # Custom-field conditions (#2293): the exact count is replaced by "N+"
+     # past `@count_cap`, and each saved view's params are re-read against
+     # today's field definitions (`assign_saved_view_params/1`).
+     |> assign(:total_capped?, false)
+     |> assign(:saved_view_params, %{})
+     |> assign(:stale_views, MapSet.new())
+     # The add-a-condition form's draft: the field and op picked and the value
+     # typed so far. Held server-side so the value control can follow the field.
+     |> assign(:ff_draft, %{field: nil, op: nil, value: ""})
+     |> assign(:field_preload, nil)
      |> load_saved_views()}
   end
 
@@ -101,7 +111,40 @@ defmodule KilnCMSWeb.EditorLive do
     socket
     |> assign(:saved_views, views)
     |> assign(:manageable_views, manageable)
+    |> assign_saved_view_params()
   end
+
+  # Each saved view's params as the list would apply them today, and which
+  # views name a field condition that no longer applies (a field deleted or
+  # made private since the view was saved). A view with a `cf` or a field sort
+  # needs its type's field definitions, read once per such type, so the render never
+  # touches the database. Before `handle_params` has loaded the types there is
+  # nothing to check against.
+  defp assign_saved_view_params(%{assigns: %{content_types: _}} = socket) do
+    ctx = filter_ctx(socket)
+
+    cache =
+      for view <- socket.assigns.saved_views,
+          Filters.needs_fields?(view.params),
+          type = Filters.field_type_in_play(view.params, ctx),
+          uniq: true,
+          into: %{},
+          do: {type, field_definitions(socket, type)}
+
+    ctx = Map.put(ctx, :fields, &Map.get(cache, &1, []))
+
+    params = Map.new(socket.assigns.saved_views, &{&1.id, view_params(&1, ctx)})
+
+    stale =
+      for view <- socket.assigns.saved_views,
+          Filters.stale?(view.params, ctx),
+          into: MapSet.new(),
+          do: view.id
+
+    socket |> assign(:saved_view_params, params) |> assign(:stale_views, stale)
+  end
+
+  defp assign_saved_view_params(socket), do: socket
 
   # Only what the list renders — without a select, every row drags its whole
   # blocks JSONB tree (plus search_text and embedding) into the LiveView heap.
@@ -134,17 +177,86 @@ defmodule KilnCMSWeb.EditorLive do
   # (Re)load the first page under the active filter.
   defp load_items(socket) do
     socket = assign_columns(socket)
-    {items, cursors} = fetch_page(socket, %{})
+
+    case guard_field_query(socket, fn -> {fetch_page(socket, %{}), count_items(socket)} end) do
+      {:ok, {{items, cursors}, {total, capped?}}} ->
+        socket
+        |> assign(:items, items)
+        |> assign(:trashable, trashable(socket, items))
+        |> assign_column_labels(items, FieldCells.empty())
+        |> assign(:cursors, cursors)
+        |> assign(:more?, more?(cursors))
+        |> assign(:total, total)
+        |> assign(:total_capped?, capped?)
+        |> assign(:compliance_settings, compliance_settings(socket, items))
+        |> assign_translated()
+
+      :field_query_failed ->
+        # The patch below reloads the list once, without the field query; this
+        # render only needs assigns that make sense until it lands.
+        socket |> drop_field_query() |> assign_empty_page()
+    end
+  end
+
+  defp assign_empty_page(socket) do
+    socket
+    |> assign(:items, [])
+    |> assign(:trashable, MapSet.new())
+    |> assign(:column_labels, FieldCells.empty())
+    |> assign(:cursors, %{})
+    |> assign(:more?, false)
+    |> assign(:total, 0)
+    |> assign(:total_capped?, false)
+    |> assign(:compliance_settings, nil)
+    |> assign(:translated, nil)
+  end
+
+  # A field-filtered read can fail after its conditions were validated: the
+  # field was deleted, made private or retyped in between (the list holds
+  # the conditions across "Load more", saved views and other tabs). That is
+  # a real boundary, so it is the one place the read's error is caught; any
+  # other read is not touched.
+  defp guard_field_query(socket, read) do
+    if Filters.field_query?(socket.assigns.filters) do
+      try do
+        {:ok, read.()}
+      rescue
+        error in [Ash.Error.Invalid] ->
+          # Only the preparation's refusal of a condition or sort is "the field
+          # went away"; anything else is a real failure and keeps raising.
+          if field_query_error?(error),
+            do: :field_query_failed,
+            else: reraise(error, __STACKTRACE__)
+      end
+    else
+      {:ok, read.()}
+    end
+  end
+
+  @doc false
+  # True when every error is `CustomFieldQuery` refusing a `custom_filter` or
+  # `custom_sort` (unknown field, bad value, unsortable field).
+  def field_query_error?(%Ash.Error.Invalid{errors: [_ | _] = errors}) do
+    Enum.all?(errors, fn
+      %Ash.Error.Query.InvalidArgument{field: field} -> field in [:custom_filter, :custom_sort]
+      _other -> false
+    end)
+  end
+
+  def field_query_error?(_error), do: false
+
+  # Back to the list without its field conditions and field sort, said out
+  # loud, with the URL brought in line.
+  defp drop_field_query(socket) do
+    filters = Filters.clear_field_query(socket.assigns.filters)
 
     socket
-    |> assign(:items, items)
-    |> assign(:trashable, trashable(socket, items))
-    |> assign_column_labels(items, FieldCells.empty())
-    |> assign(:cursors, cursors)
-    |> assign(:more?, more?(cursors))
-    |> assign(:total, count_items(socket))
-    |> assign(:compliance_settings, compliance_settings(socket, items))
-    |> assign_translated()
+    |> assign(:filters, filters)
+    |> put_flash(
+      :error,
+      gettext("The field filter or sort could no longer be applied, so it was cleared.")
+    )
+    |> push_patch(to: list_path(filters), replace: true)
   end
 
   # The rows the actor may move to the trash (#2137), as selection keys
@@ -268,6 +380,7 @@ defmodule KilnCMSWeb.EditorLive do
   defp fetch_page(socket, cursors) do
     %{actor: actor, current_org: org, filters: filters, columns: columns} = socket.assigns
     query = page_query(filters, actor, columns)
+    arguments = Filters.field_arguments(filters, socket.assigns.column_options)
 
     streams =
       for ct <- filtered_types(socket), Map.get(cursors, type_value(ct)) != :done do
@@ -277,7 +390,15 @@ defmodule KilnCMSWeb.EditorLive do
         # Dispatch on the descriptor itself so a type archived between listing
         # and dispatch can't turn into a registry-lookup miss. Scoped to the
         # current site's org (epic #336) so the index only lists this org's content.
-        page = ContentTypes.list!(ct, actor: actor, tenant: org, query: query, page: page_opts)
+        page =
+          ContentTypes.list!(ct,
+            actor: actor,
+            tenant: org,
+            query: query,
+            page: page_opts,
+            arguments: arguments
+          )
+
         %{key: type_value(ct), kind: ct.type, rows: page.results, more?: page.more?}
       end
 
@@ -321,16 +442,36 @@ defmodule KilnCMSWeb.EditorLive do
 
   defp more?(cursors), do: Enum.any?(cursors, fn {_key, cursor} -> cursor != :done end)
 
+  # The most a field-filtered count reports exactly. A custom-field condition
+  # is a scan of the site's rows of that type, and the figure is only context,
+  # so the count stops one row past the cap (`Ash.count/2` counts at most the
+  # query's `limit`) and the list says "1000+".
+  @count_cap 1000
+
   # How many rows the filter matches across the types it reads — one count per
-  # type, through the same filters as the page (#1593).
+  # type, through the same filters as the page (#1593) — and whether it
+  # stopped at `@count_cap`. Only the conditions narrow a count; a field sort
+  # does not, so it is left out of the arguments.
   defp count_items(socket) do
     %{actor: actor, current_org: org, filters: filters} = socket.assigns
     query = Filters.query_filters(filters, actor.id)
 
-    socket
-    |> filtered_types()
-    |> Enum.map(&ContentTypes.count!(&1, actor: actor, tenant: org, query: query))
-    |> Enum.sum()
+    conditions = Filters.conditions(filters)
+
+    arguments =
+      KilnCMS.CMS.ListFieldQuery.arguments(conditions, nil, socket.assigns.column_options)
+
+    query = if conditions == [], do: query, else: query ++ [limit: @count_cap + 1]
+
+    total =
+      socket
+      |> filtered_types()
+      |> Enum.map(
+        &ContentTypes.count!(&1, actor: actor, tenant: org, query: query, arguments: arguments)
+      )
+      |> Enum.sum()
+
+    {min(total, @count_cap), conditions != [] and total > @count_cap}
   end
 
   defp page_query(filters, actor, columns) do
@@ -362,11 +503,42 @@ defmodule KilnCMSWeb.EditorLive do
     end
   end
 
+  # The custom fields of the content type `type` (a type value) that this
+  # actor may list, filter and sort by: what `ListFields` offers an editor,
+  # private fields included. Every field condition is validated against it.
+  defp field_definitions(socket, type) do
+    %{actor: actor, current_org: org, content_types: types} = socket.assigns
+
+    case Enum.find(types, &(type_value(&1) == type)) do
+      nil ->
+        []
+
+      descriptor ->
+        ListFields.readable_fields(
+          actor,
+          org,
+          FieldCells.definitions(descriptor, actor, org),
+          true
+        )
+    end
+  end
+
   # What the column picker offers and what the strip shows, for the current
   # type. The remembered names are re-read against today's field definitions,
   # so a deleted or since-private field simply drops out.
   defp assign_columns(socket) do
-    %{actor: actor, current_org: org, current_user: user} = socket.assigns
+    previous = socket.assigns.column_type && type_value(socket.assigns.column_type)
+    socket = socket |> pick_columns() |> assign(:field_preload, nil)
+    current = socket.assigns.column_type && type_value(socket.assigns.column_type)
+
+    # A half-typed condition belongs to the type it was typed for.
+    if previous == current,
+      do: socket,
+      else: assign(socket, :ff_draft, %{field: nil, op: nil, value: ""})
+  end
+
+  defp pick_columns(socket) do
+    %{current_user: user, current_org: org} = socket.assigns
 
     case column_type(socket) do
       nil ->
@@ -377,13 +549,13 @@ defmodule KilnCMSWeb.EditorLive do
         |> assign(:columns, [])
 
       descriptor ->
+        value = type_value(descriptor)
+
         options =
-          ListFields.readable_fields(
-            actor,
-            org,
-            FieldCells.definitions(descriptor, actor, org),
-            true
-          )
+          case socket.assigns[:field_preload] do
+            {^value, definitions} -> definitions
+            _ -> field_definitions(socket, value)
+          end
 
         known = MapSet.new(options, & &1.name)
 
@@ -492,6 +664,58 @@ defmodule KilnCMSWeb.EditorLive do
       _ -> {:noreply, socket}
     end
   end
+
+  # Custom-field conditions (#2293). The condition is re-validated here
+  # against the fields of the one type in play (`column_options`, empty when
+  # several types are listed), as `Filters.parse/2` will again on the patch: a
+  # forged field, op or value changes nothing but a flash. A fifth condition
+  # (or one that would not fit a saved view) is refused out loud.
+  def handle_event("add_field_filter", %{"field" => field, "op" => op, "value" => value}, socket)
+      when is_binary(field) and is_binary(op) and is_binary(value) do
+    %{filters: filters, column_options: options} = socket.assigns
+
+    case Filters.add_condition(filters, options, field, op, value) do
+      {:ok, filters} ->
+        {:noreply,
+         socket
+         |> assign(:ff_draft, %{field: field, op: op, value: ""})
+         |> patch_filters(%{"cf" => filters["cf"]})}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, field_filter_error(reason))}
+    end
+  end
+
+  def handle_event("add_field_filter", _params, socket), do: {:noreply, socket}
+
+  # The add-a-condition form changing: the value control follows the field and
+  # op. The draft is clamped to what the type offers, so a forged field or op
+  # falls back to the first of each; the typed value is kept unless the field
+  # changed (a value for one field means nothing for another).
+  # Nothing to draw on a list that is not one type with fields: a stale or
+  # forged event is a no-op.
+  def handle_event("field_filter_draft", _params, %{assigns: %{column_options: []}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("field_filter_draft", params, socket) when is_map(params) do
+    options = socket.assigns.column_options
+    previous = socket.assigns.ff_draft
+    field = draft_field(options, params["field"])
+    op = draft_op(field, params["op"])
+    value = if is_binary(params["value"]), do: params["value"], else: ""
+    value = if field.name == previous.field, do: value, else: ""
+
+    {:noreply, assign(socket, :ff_draft, %{field: field.name, op: op, value: value})}
+  end
+
+  def handle_event("remove_field_filter", %{"field" => field, "op" => op}, socket)
+      when is_binary(field) and is_binary(op) do
+    filters = Filters.remove_condition(socket.assigns.filters, field, op)
+    {:noreply, patch_filters(socket, %{"cf" => filters["cf"]})}
+  end
+
+  # A forged or stale payload (missing keys, wrong shapes) changes nothing.
+  def handle_event("remove_field_filter", _params, socket), do: {:noreply, socket}
 
   def handle_event("toggle_filters", _params, socket),
     do: {:noreply, update(socket, :show_filters?, &(not &1))}
@@ -821,22 +1045,26 @@ defmodule KilnCMSWeb.EditorLive do
   def handle_event("move_to_trash", _params, socket), do: {:noreply, socket}
 
   def handle_event("load_more", _params, socket) do
-    case List.last(socket.assigns.items) do
-      nil ->
-        {:noreply, assign(socket, :more?, false)}
+    if socket.assigns.items == [],
+      do: {:noreply, assign(socket, :more?, false)},
+      else: {:noreply, load_next_page(socket)}
+  end
 
-      {_kind, _last} ->
-        {page, cursors} = fetch_page(socket, socket.assigns.cursors)
-
-        {:noreply,
-         socket
-         |> assign(:items, socket.assigns.items ++ page)
-         |> assign(:trashable, MapSet.union(socket.assigns.trashable, trashable(socket, page)))
-         |> assign(:cursors, cursors)
-         |> assign(:more?, more?(cursors))
-         |> assign_column_labels(page, socket.assigns.column_labels)
-         |> assign_translated()}
+  defp load_next_page(socket) do
+    case guard_field_query(socket, fn -> fetch_page(socket, socket.assigns.cursors) end) do
+      {:ok, {page, cursors}} -> append_page(socket, page, cursors)
+      :field_query_failed -> drop_field_query(socket)
     end
+  end
+
+  defp append_page(socket, page, cursors) do
+    socket
+    |> assign(:items, socket.assigns.items ++ page)
+    |> assign(:trashable, MapSet.union(socket.assigns.trashable, trashable(socket, page)))
+    |> assign(:cursors, cursors)
+    |> assign(:more?, more?(cursors))
+    |> assign_column_labels(page, socket.assigns.column_labels)
+    |> assign_translated()
   end
 
   # The "fully translated" bit of each row's status marks: which visible
@@ -896,7 +1124,8 @@ defmodule KilnCMSWeb.EditorLive do
     # unknown `type` (hand-edited URL, or a type deleted/archived since the
     # link was shared) falls back to "all" rather than listing nothing, and
     # `?q[a]=1` — a MAP — reads as absent instead of raising (#764).
-    filters = Filters.parse(params, filter_ctx(socket))
+    {socket, ctx} = preload_fields(socket, params)
+    filters = Filters.parse(params, ctx)
 
     {:noreply,
      socket
@@ -907,16 +1136,99 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:saving_view?, false)
      |> assign(:renaming_view, nil)
      |> assign(:confirming_view_delete, nil)
+     |> assign_saved_view_params()
+     |> flash_stale_view()
      |> load_releases()
      |> load_items()
      |> ensure_overview()}
   end
 
+  # A `cf` or field sort needs the type's readable fields to validate; the
+  # column strip needs the same list a moment later (`assign_columns/1`). Read
+  # it once here, only when the URL asks, and hand it on.
+  defp preload_fields(socket, params) do
+    ctx = filter_ctx(socket)
+    type = Filters.field_type_in_play(params, ctx)
+
+    if type && Filters.needs_fields?(params) do
+      definitions = field_definitions(socket, type)
+
+      {assign(socket, :field_preload, {type, definitions}),
+       Map.put(ctx, :fields, fn
+         ^type -> definitions
+         other -> field_definitions(socket, other)
+       end)}
+    else
+      {assign(socket, :field_preload, nil), ctx}
+    end
+  end
+
+  # `:fields` reads a type's field definitions only when a `cf` or field sort
+  # asks (`Filters.parse/2`), so a plain list costs no extra read.
   defp filter_ctx(socket) do
     %{
       types: Enum.map(socket.assigns.content_types, &type_value/1),
-      locales: socket.assigns.locales
+      locales: socket.assigns.locales,
+      fields: &field_definitions(socket, &1)
     }
+  end
+
+  # The add-a-condition form as drawn: the draft clamped to today's fields
+  # (nil when the list is not one type with fields), with its value control.
+  defp field_filter_form(%{column_options: []}), do: nil
+
+  defp field_filter_form(%{column_options: options, ff_draft: draft}) do
+    field = draft_field(options, draft.field)
+    op = draft_op(field, draft.op)
+    value = if field.name == draft.field, do: draft.value, else: ""
+
+    %{
+      field: field,
+      op: op,
+      value: value,
+      ops: KilnCMS.CMS.ListFieldQuery.ops(field.field_type),
+      control: value_control(field, op)
+    }
+  end
+
+  defp draft_field([first | _] = options, name),
+    do: Enum.find(options, first, &(&1.name == name))
+
+  defp draft_op(field, op) do
+    ops = KilnCMS.CMS.ListFieldQuery.ops(field.field_type)
+    if op in ops, do: op, else: List.first(ops)
+  end
+
+  defp field_filter_error(:limit),
+    do:
+      gettext("A list holds at most %{count} field filters, and they must fit a saved view.",
+        count: Filters.max_conditions()
+      )
+
+  defp field_filter_error(:invalid), do: gettext("That field filter is not valid here.")
+
+  # Opening a saved view whose field conditions no longer apply is said out
+  # loud: the list narrows less than the view was saved to, never silently.
+  defp flash_stale_view(socket) do
+    %{filters: filters, saved_views: views, saved_view_params: params, stale_views: stale} =
+      socket.assigns
+
+    current = Filters.to_params(filters)
+
+    case Enum.find(views, &(&1.id in stale and Map.get(params, &1.id) == current)) do
+      nil ->
+        socket
+
+      view ->
+        put_flash(
+          socket,
+          :info,
+          gettext(
+            "The view “%{name}” named a field that no longer applies, so that condition was left out.",
+            name: view.name
+          )
+        )
+    end
   end
 
   # Releases still open for new content (#500), for the "Add to release" bulk
@@ -965,7 +1277,7 @@ defmodule KilnCMSWeb.EditorLive do
   defp patch_filters(socket, changes, opts \\ []) do
     filters =
       socket.assigns.filters
-      |> Map.merge(changes)
+      |> Filters.merge(changes)
       |> Filters.parse(filter_ctx(socket))
 
     push_patch(socket, Keyword.put(opts, :to, list_path(filters)))
@@ -1328,7 +1640,7 @@ defmodule KilnCMSWeb.EditorLive do
             </li>
             <li :for={view <- @saved_views}>
               <.link
-                patch={params_path(view_params(view, @filter_ctx))}
+                patch={params_path(Map.get(@saved_view_params, view.id, %{}))}
                 id={"view-#{view.id}"}
                 aria-current={view.id == @active_view_id && "page"}
                 class="pill"
@@ -1340,6 +1652,16 @@ defmodule KilnCMSWeb.EditorLive do
                 />
                 <span :if={view.shared} class="sr-only">{gettext("Shared:")}</span>
                 {view.name}
+                <span
+                  :if={view.id in @stale_views}
+                  id={"view-stale-#{view.id}"}
+                  title={gettext("This view names a field that no longer applies.")}
+                >
+                  <.icon name="hero-exclamation-triangle" class="size-3.5 text-warning-ink" />
+                  <span class="sr-only">
+                    {gettext("This view names a field that no longer applies.")}
+                  </span>
+                </span>
               </.link>
             </li>
             <li :if={@filtering? and is_nil(@active_view_id) and not @saving_view?}>
@@ -1580,6 +1902,24 @@ defmodule KilnCMSWeb.EditorLive do
                 >
                   {Filters.sort_label(sort)}
                 </option>
+                <%!-- One group per single-type list: the fields the list can
+                      order by, each ascending and descending. The current
+                      field sort stays selected, so submitting the form does
+                      not reset it. --%>
+                <optgroup
+                  :if={sortable_options(@column_options) != []}
+                  id="field-sort"
+                  label={gettext("Field")}
+                >
+                  <%= for option <- sortable_options(@column_options), dir <- [:asc, :desc] do %>
+                    <option
+                      value={Filters.field_sort_value(option.name, dir)}
+                      selected={Filters.field_sort_value(option.name, dir) == @filters["sort"]}
+                    >
+                      {field_sort_label(option, dir)}
+                    </option>
+                  <% end %>
+                </optgroup>
               </select>
               <button
                 type="button"
@@ -1731,7 +2071,90 @@ defmodule KilnCMSWeb.EditorLive do
                   />
                   {gettext("Only scheduled to publish")}
                 </label>
+                <div
+                  :if={@ff}
+                  id="field-filters"
+                  class="space-y-2 sm:col-span-2 lg:col-span-4"
+                >
+                  <%!-- The form element sits outside `#content-filter` (forms do
+                        not nest); these controls join it by `form=`. --%>
+                  <p class="field-label">{gettext("Field conditions")}</p>
+                  <div class="flex flex-wrap items-end gap-3">
+                    <div class="min-w-40">
+                      <.input
+                        type="select"
+                        id="field-filter-field"
+                        name="field"
+                        form="field-filter-form"
+                        label={gettext("Field")}
+                        value={@ff.field.name}
+                        options={for option <- @column_options, do: {field_name(option), option.name}}
+                      />
+                    </div>
+                    <div class="min-w-36">
+                      <.input
+                        type="select"
+                        id="field-filter-op"
+                        name="op"
+                        form="field-filter-form"
+                        label={gettext("Condition")}
+                        value={@ff.op}
+                        options={
+                          for op <- @ff.ops, do: {op_option_label(@ff.field.field_type, op), op}
+                        }
+                      />
+                    </div>
+                    <% {control_type, control_attrs, control_options} = @ff.control %>
+                    <div class="min-w-40">
+                      <.input
+                        :if={control_options}
+                        type="select"
+                        id="field-filter-value"
+                        name="value"
+                        form="field-filter-form"
+                        label={gettext("Value")}
+                        value={@ff.value}
+                        options={control_options}
+                      />
+                      <.input
+                        :if={!control_options}
+                        type={control_type}
+                        id="field-filter-value"
+                        name="value"
+                        form="field-filter-form"
+                        label={gettext("Value")}
+                        value={@ff.value}
+                        maxlength={KilnCMS.CMS.ListFieldQuery.max_value_length()}
+                        required
+                        {control_attrs}
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      form="field-filter-form"
+                      id="field-filter-add"
+                      class="btn btn-default mb-2"
+                    >
+                      <.icon name="hero-plus" class="size-4" />
+                      {gettext("Add condition")}
+                    </button>
+                  </div>
+                </div>
+                <p
+                  :if={@column_options == [] and is_nil(@column_type) and length(@content_types) > 1}
+                  id="field-filters-hint"
+                  class="text-sm text-base-content/60 sm:col-span-2 lg:col-span-4"
+                >
+                  {gettext("Choose a content type to filter by its fields.")}
+                </p>
               </fieldset>
+            </form>
+            <form
+              :if={@ff && @show_filters?}
+              id="field-filter-form"
+              phx-change="field_filter_draft"
+              phx-submit="add_field_filter"
+            >
             </form>
           </div>
 
@@ -1741,15 +2164,15 @@ defmodule KilnCMSWeb.EditorLive do
             class="flex flex-wrap items-center gap-2"
           >
             <ul id="content-filter-chips" class="flex flex-wrap gap-2">
-              <li :for={{key, label} <- @chips}>
+              <li :for={chip <- @chips}>
                 <button
                   type="button"
-                  phx-click="remove_filter"
-                  phx-value-key={key}
-                  aria-label={gettext("Remove filter: %{filter}", filter: label)}
+                  id={chip.id}
+                  aria-label={gettext("Remove filter: %{filter}", filter: chip.label)}
                   class="chip"
+                  {chip.attrs}
                 >
-                  {label}
+                  {chip.label}
                   <.icon name="hero-x-mark" class="size-3.5" />
                 </button>
               </li>
@@ -1814,7 +2237,11 @@ defmodule KilnCMSWeb.EditorLive do
               {gettext("%{count} selected", count: @selected_count)}
             </span>
             <span class="text-sm text-base-content/60" role="status" id="content-count">
-              {ngettext("%{count} item", "%{count} items", @total)}
+              <%= if @total_capped? do %>
+                {gettext("%{count}+ items", count: @total)}
+              <% else %>
+                {ngettext("%{count} item", "%{count} items", @total)}
+              <% end %>
             </span>
             <div :if={@selected_count > 0} id="bulk-actions" class="ml-auto flex flex-wrap gap-2">
               <button
@@ -2316,7 +2743,7 @@ defmodule KilnCMSWeb.EditorLive do
   end
 
   # The facets behind "More filters" — counted on its button.
-  @panel_keys ~w(author category tag locale health reviewed consent_missing from to scheduled)
+  @panel_keys ~w(author category tag locale health reviewed consent_missing from to scheduled cf)
 
   # The view on screen, if any: the first built-in or saved view whose filter
   # is exactly the current one.
@@ -2330,7 +2757,9 @@ defmodule KilnCMSWeb.EditorLive do
       end)
 
     active_default = Enum.find(defaults, &(view_params(&1, ctx) == current))
-    active_saved = Enum.find(assigns.saved_views, &(view_params(&1, ctx) == current))
+
+    active_saved =
+      Enum.find(assigns.saved_views, &(Map.get(assigns.saved_view_params, &1.id) == current))
 
     assigns
     |> assign(:filter_ctx, ctx)
@@ -2339,6 +2768,7 @@ defmodule KilnCMSWeb.EditorLive do
     |> assign(:active_view_id, (active_default || active_saved || %{id: nil}).id)
     |> assign(:stats, stats(assigns.overview, ctx, current))
     |> assign(:chips, chips(assigns))
+    |> assign(:ff, field_filter_form(assigns))
     |> assign(
       :panel_count,
       assigns.filters |> Map.take(@panel_keys) |> Filters.to_params() |> map_size()
@@ -2380,12 +2810,124 @@ defmodule KilnCMSWeb.EditorLive do
   defp chips(assigns) do
     params = Filters.to_params(assigns.filters)
 
-    for key <-
-          ~w(q status type author category tag locale health reviewed consent_missing from to scheduled),
-        value = params[key],
-        not is_nil(value),
-        do: {key, chip_label(key, value, assigns)}
+    flat =
+      for key <-
+            ~w(q status type author category tag locale health reviewed consent_missing from to scheduled),
+          value = params[key],
+          not is_nil(value),
+          do: %{
+            id: nil,
+            label: chip_label(key, value, assigns),
+            attrs: %{"phx-click" => "remove_filter", "phx-value-key" => key}
+          }
+
+    flat ++ field_chips(assigns)
   end
+
+  # One chip per custom-field condition (#2293), each its own remove button.
+  # The conditions came through `Filters.parse/2`, so each names a field of
+  # `column_options`; the label is looked up there and a condition without one
+  # (it cannot happen after a parse) is simply not drawn.
+  defp field_chips(assigns) do
+    for {%{field: name, op: op, value: value}, n} <-
+          assigns.filters |> Filters.conditions() |> Enum.with_index(),
+        definition = Enum.find(assigns.column_options, &(&1.name == name)),
+        do: %{
+          id: "field-filter-chip-#{n}",
+          label: condition_label(definition, op, value),
+          attrs: %{
+            "phx-click" => "remove_field_filter",
+            "phx-value-field" => name,
+            "phx-value-op" => op
+          }
+        }
+  end
+
+  @chip_value_chars 40
+
+  defp condition_label(definition, "null", value) do
+    field = field_name(definition)
+
+    if value == "true",
+      do: gettext("%{field} is empty", field: field),
+      else: gettext("%{field} has a value", field: field)
+  end
+
+  defp condition_label(definition, op, value) do
+    gettext("%{field} %{op} %{value}",
+      field: field_name(definition),
+      op: op_symbol(definition.field_type, op),
+      value: value |> value_label(definition) |> String.slice(0, @chip_value_chars)
+    )
+  end
+
+  defp field_name(definition), do: definition.label || definition.name
+
+  defp value_label(value, %{field_type: :select} = definition),
+    do: KilnCMS.CMS.FieldDefinition.option_label(definition, value)
+
+  defp value_label("true", %{field_type: :boolean}), do: gettext("Yes")
+  defp value_label("false", %{field_type: :boolean}), do: gettext("No")
+  defp value_label(value, _definition), do: value
+
+  # The chip's short operator: symbols for ranges, words where a symbol reads
+  # oddly (a day range is "from"/"until", a substring is "contains").
+  defp op_symbol(_type, "gt"), do: ">"
+  defp op_symbol(type, "gte") when type in [:date, :datetime], do: gettext("from")
+  defp op_symbol(_type, "gte"), do: "≥"
+  defp op_symbol(_type, "lt"), do: "<"
+  defp op_symbol(type, "lte") when type in [:date, :datetime], do: gettext("until")
+  defp op_symbol(_type, "lte"), do: "≤"
+  defp op_symbol(_type, "contains"), do: gettext("contains")
+  defp op_symbol(type, "eq") when type in [:integer, :float, :date], do: "="
+  defp op_symbol(_type, "eq"), do: gettext("is")
+
+  # The op <select>'s wording, per field type.
+  defp op_option_label(type, "gte") when type in [:date, :datetime], do: gettext("From")
+  defp op_option_label(type, "lte") when type in [:date, :datetime], do: gettext("Until")
+  defp op_option_label(_type, "eq"), do: gettext("Is")
+  defp op_option_label(_type, "gt"), do: gettext("Greater than")
+  defp op_option_label(_type, "gte"), do: gettext("At least")
+  defp op_option_label(_type, "lt"), do: gettext("Less than")
+  defp op_option_label(_type, "lte"), do: gettext("At most")
+  defp op_option_label(_type, "contains"), do: gettext("Contains")
+  defp op_option_label(_type, "null"), do: gettext("Empty or not")
+
+  defp sortable_options(options),
+    do: Enum.filter(options, &KilnCMS.CMS.ListFieldQuery.sortable?/1)
+
+  defp field_sort_label(option, :asc),
+    do: gettext("Field: %{field} (↑)", field: field_name(option))
+
+  defp field_sort_label(option, :desc),
+    do: gettext("Field: %{field} (↓)", field: field_name(option))
+
+  # The value control for the draft condition, by field type: `{input type,
+  # extra attrs, select options or nil}`.
+  defp value_control(_definition, "null"),
+    do: {"select", [], [{gettext("Empty"), "true"}, {gettext("Has a value"), "false"}]}
+
+  defp value_control(%{field_type: :boolean}, _op),
+    do: {"select", [], [{gettext("Yes"), "true"}, {gettext("No"), "false"}]}
+
+  defp value_control(%{field_type: :select} = definition, _op) do
+    options =
+      for option <- List.wrap(definition.options),
+          do: {KilnCMS.CMS.FieldDefinition.option_label(definition, option), option}
+
+    {"select", [], options}
+  end
+
+  defp value_control(%{field_type: :integer}, _op), do: {"number", [step: "1"], nil}
+  defp value_control(%{field_type: :float}, _op), do: {"number", [step: "any"], nil}
+
+  defp value_control(%{field_type: type}, _op) when type in [:date, :datetime],
+    do: {"date", [], nil}
+
+  defp value_control(%{field_type: type}, _op) when type in [:reference, :user, :media],
+    do: {"text", [placeholder: gettext("An id (UUID)"), autocomplete: "off"], nil}
+
+  defp value_control(_definition, _op), do: {"text", [autocomplete: "off"], nil}
 
   defp chip_label("q", q, _assigns), do: gettext("Title contains “%{text}”", text: q)
 

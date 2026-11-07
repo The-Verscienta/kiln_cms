@@ -538,10 +538,30 @@ defmodule KilnCMS.CMS.ContentTypes do
   # collection reads (scoped by `type_definition_id`) and `create!` (which
   # must stamp the type) branch explicitly.
 
+  @doc """
+  Lists the records of `type` through its primary read.
+
+  Takes the `:tenant` / `:actor` / `:authorize?` opts, `query:` (for
+  `Ash.Query.build/2`) and `page:`, plus `arguments:`, a map of the read
+  action's own arguments. The content list passes `custom_filter` /
+  `custom_sort` that way (built by `KilnCMS.CMS.ListFieldQuery.arguments/3`);
+  with none, the call is the same as before the option existed.
+  """
   def list!(type, opts \\ []) do
-    case get!(type, org_from(opts)) do
-      %{source: :dynamic, definition: definition} -> CMS.list_entries!(scoped(opts, definition))
-      _compiled -> call(type, "list_#{plural(type, opts)}!", [opts], opts)
+    {arguments, opts} = Keyword.pop(opts, :arguments, %{})
+
+    case {get!(type, org_from(opts)), arguments == %{}} do
+      {%{source: :dynamic, definition: definition}, true} ->
+        CMS.list_entries!(scoped(opts, definition))
+
+      {%{source: :dynamic, definition: definition}, false} ->
+        CMS.list_entries!(arguments, scoped(opts, definition))
+
+      {_compiled, true} ->
+        call(type, "list_#{plural(type, opts)}!", [opts], opts)
+
+      {_compiled, false} ->
+        call(type, "list_#{plural(type, opts)}!", [arguments, opts], opts)
     end
   end
 
@@ -550,10 +570,16 @@ defmodule KilnCMS.CMS.ContentTypes do
   without the rows.
 
   Takes the same `:tenant` / `:actor` / `:authorize?` opts and the same
-  `query: [filter: …]`; `limit`, `sort` and `select` are meaningless here and a
-  `limit` would silently cap the answer, so pass neither. Counts through the
-  primary read, so AshArchival's soft-delete filter applies (trashed records are
-  not counted) exactly as it does for `list!/2`.
+  `query: [filter: …]` and `arguments:`; `sort` and `select` are meaningless
+  here. A `limit` caps the answer (`Ash.count/2` counts at most that many
+  rows), which is how a caller bounds a count it only wants to show as "N+";
+  leave it out for the exact figure. Counts through the primary read, so AshArchival's soft-delete
+  filter applies (trashed records are not counted) exactly as it does for
+  `list!/2`.
+
+  Read `arguments:` (custom-field conditions, see `KilnCMS.CMS.ListFieldQuery`)
+  are applied as the read action's own arguments, so a count with them runs
+  the same preparation as the list.
   """
   def count!(type, opts \\ []) do
     case get!(type, org_from(opts)) do
@@ -567,11 +593,26 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   defp count_query(resource, opts) do
     {query_opts, opts} = Keyword.pop(opts, :query, [])
+    {arguments, opts} = Keyword.pop(opts, :arguments, %{})
 
-    resource
-    |> Ash.Query.new()
-    |> Ash.Query.build(query_opts)
-    |> Ash.count!(opts)
+    query = resource |> Ash.Query.new() |> Ash.Query.build(query_opts)
+
+    # Arguments belong to a read action, and the preparation that reads them
+    # looks at the query's own filter (the entry tier's `type_definition_id`),
+    # so the action is applied AFTER the filter is built, not left to
+    # `Ash.count!/2` to apply to a bare query.
+    query =
+      if arguments == %{},
+        do: query,
+        else:
+          Ash.Query.for_read(
+            query,
+            :read,
+            arguments,
+            Keyword.take(opts, [:actor, :tenant, :authorize?])
+          )
+
+    Ash.count!(query, opts)
   end
 
   def get_record!(type, id, opts \\ []) do
