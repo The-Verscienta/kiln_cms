@@ -45,7 +45,13 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
     {"gallery", :media, %{multiple: true}},
     {"related", :reference, %{target_type: "post", multiple: true}},
     {"parent", :reference, %{target_type: "post"}},
-    {"where", :geolocation, %{}}
+    {"where", :geolocation, %{}},
+    {"contact_email", :email, %{}},
+    {"phone", :telephone, %{}},
+    {"accent", :color, %{}},
+    {"handle", :slug, %{}},
+    {"opens_at", :time, %{}},
+    {"extra", :json, %{}}
   ]
 
   @tag :regenerate_schema_goldens

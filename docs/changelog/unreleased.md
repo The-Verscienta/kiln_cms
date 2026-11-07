@@ -30,6 +30,26 @@ carries the reasoning.
     is removed when a backup succeeds.
   ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))
 
+<a id="builtin-field-type-names-upgrade"></a>
+
+- **The field type names `email`, `telephone`, `color`, `slug`, `time` and `json` are reserved (#2278).**
+  Kiln now ships a built-in type under each name (see
+  [Built-in format types](../extending-content.md#built-in-format-types)), and
+  a name can be registered only once.
+  - **Overlays and plugins.** A `Kiln.FieldType` that registers one of these
+    names must be renamed, in the module's `name/0` and in any stored
+    `FieldDefinition.field_type`. `mix kiln.plugins.doctor` fails with *collides
+    with a built-in field type* until you do.
+  - **Stored definitions.** A `FieldDefinition` whose `field_type` already
+    holds one of these names is now cast by the built-in type, not yours.
+    Values that do not pass its check (a malformed address, a domestic phone
+    number) are refused the next time that record is saved; stored values are
+    not rewritten. If the data matters, rename your type and migrate the
+    definitions before upgrading.
+  - **Rolling back.** No migration. Rolling the pin back restores the old
+    type; values saved meanwhile in the built-in's tidied form (a lowercased
+    domain, `+442079460958`) stay as stored.
+
 <a id="backup-history-upgrade"></a>
 
 - **Run `mix ash.migrate` for the backup history, and add `KilnCMS.Backups` to
@@ -131,7 +151,6 @@ carries the reasoning.
   by core's migration with nothing to do. A BI role made earlier does not exist
   yet; when you create one (`mix kiln.reporting.sql`), re-run its `GRANT` lines
   after every upgrade that adds views, and after a demo reset.
-
 
 <a id="custom-fields-gin-upgrade"></a>
 
@@ -241,6 +260,34 @@ carries the reasoning.
   ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))
 
 
+<a id="builtin-format-field-types"></a>
+
+- **Six built-in custom field types check and tidy a value: `:email`, `:telephone`, `:color`, `:slug`, `:time` and `:json` (#2278).**
+  An editor can no longer save a malformed address, colour or time, and an
+  API client or import gets the same check. Admins pick them in the fields
+  admin like any type. Guide: [Built-in format types](../extending-content.md#built-in-format-types).
+  - `:email`: shape check, domain lowercased. `:telephone`: a *format* check
+    only, stored as E.164; it requires a leading `+` (or `00`) and refuses
+    domestic numbers and extensions. `:color`: `#rgb`/`#rrggbb`, stored
+    lowercase `#rrggbb`; a text input rather than `type="color"`, so an
+    optional field can stay empty. `:slug`: slugified text, with no uniqueness
+    check and no auto-fill (use `:computed`; uniqueness waits on #2276).
+    `:time`: `HH:MM`, no date or zone.
+  - **Lists.** Email, telephone, color, slug and time fields appear in the
+    content list's Columns picker, filter (email/telephone/slug: Is, Contains,
+    Empty or not; color: Is, Empty or not; time: Is, From, Until, Empty or not)
+    and sort. Condition values are tidied the way the field tidies a saved
+    value.
+  - **`:json`.** An object or array, edited in a monospace textarea. It is
+    filterable only for "Empty or not", not sortable, and not in the Columns
+    picker, but a `searchable` flag indexes the strings and numbers nested in
+    it (not the keys). Limits: 256 KB of input, 64 KB re-encoded, depth 32,
+    5,000 values; NUL is refused.
+  - **Not yet.** A key/value or link type, number options (step, prefix,
+    suffix, range), a colour palette, JSON Schema validation.
+  - The six names are reserved; see the upgrade note
+    [above](#builtin-field-type-names-upgrade).
+
 <a id="custom-field-grants"></a>
 
 - **Roles and members can be granted individual custom fields, and private
@@ -272,6 +319,7 @@ carries the reasoning.
     surfaces (fired artifacts, webhooks, change feed, RSS, the
     `kiln_reporting_v1` views); those already drop every private field.
   See [Per-custom-field grants and read restrictions](../granular-rbac.md#per-custom-field-grants-and-read-restrictions).
+
 <a id="backup-history"></a>
 
 - **Backups has a History: every backup attempt, app-made and cron-made, with

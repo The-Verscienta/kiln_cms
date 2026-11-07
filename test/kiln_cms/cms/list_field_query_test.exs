@@ -125,6 +125,71 @@ defmodule KilnCMS.CMS.ListFieldQueryTest do
     end
   end
 
+  describe "the format field types (#2278)" do
+    test "their ops, and which can be sorted" do
+      assert ListFieldQuery.ops(:email) == ~w(eq contains null)
+      assert ListFieldQuery.ops(:color) == ~w(eq null)
+      assert ListFieldQuery.ops(:time) == ~w(eq gte lte null)
+      assert ListFieldQuery.ops(:json) == []
+
+      for type <- [:email, :telephone, :color, :slug, :time],
+          do: assert(ListFieldQuery.sortable?(%{field_type: type}))
+
+      refute ListFieldQuery.sortable?(%{field_type: :json})
+    end
+
+    test "a value is cast to the type's stored spelling" do
+      assert {:ok, "Ann@example.com"} =
+               ListFieldQuery.cast(%{field_type: :email}, "eq", "Ann@EXAMPLE.com")
+
+      assert {:ok, "#aabbcc"} = ListFieldQuery.cast(%{field_type: :color}, "eq", "#ABC")
+      assert {:ok, "09:05"} = ListFieldQuery.cast(%{field_type: :time}, "gte", "9:05")
+
+      assert {:ok, "+442079460958"} =
+               ListFieldQuery.cast(%{field_type: :telephone}, "eq", "+44 20 7946 0958")
+
+      assert :error = ListFieldQuery.cast(%{field_type: :color}, "eq", "red")
+      assert :error = ListFieldQuery.cast(%{field_type: :color}, "contains", "ff")
+      assert :error = ListFieldQuery.cast(%{field_type: :json}, "eq", "x")
+    end
+
+    test "contains takes the typed fragment as it is" do
+      assert {:ok, "example"} = ListFieldQuery.cast(%{field_type: :email}, "contains", "example")
+    end
+
+    test "the list filters by an email column" do
+      admin = user(:admin)
+      name = "mail#{uniq()}"
+
+      CMS.create_field_definition!(
+        %{content_type: :page, label: "Mail", name: name, field_type: :email},
+        actor: admin
+      )
+
+      keep =
+        CMS.create_page!(
+          %{title: "K", slug: "lfq-#{uniq()}", custom_fields: %{name => "keep@example.com"}},
+          actor: admin
+        )
+
+      _other =
+        CMS.create_page!(
+          %{title: "O", slug: "lfq-#{uniq()}", custom_fields: %{name => "other@elsewhere.org"}},
+          actor: admin
+        )
+
+      args =
+        ListFieldQuery.arguments(
+          [%{field: name, op: "contains", value: "example"}],
+          nil,
+          [%{name: name, field_type: :email}]
+        )
+
+      assert [%{id: id}] = CMS.list_pages!(args, actor: admin)
+      assert id == keep.id
+    end
+  end
+
   describe "ContentTypes.list!/2 and count! with arguments" do
     setup do
       %{admin: user(:admin)}

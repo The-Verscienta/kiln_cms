@@ -463,6 +463,11 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp condition(%{field_type: :geolocation, name: name}, _op, _raw),
     do: {:error, "custom field #{inspect(name)} (geolocation) is not filterable"}
 
+  # A JSON field (#2278) holds an arbitrary object or array, so there is no
+  # scalar to compare either: `null` above is the one question it answers.
+  defp condition(%{field_type: :json, name: name}, _op, _raw),
+    do: {:error, "custom field #{inspect(name)} (json) only supports null"}
+
   # A group is an object or a list of them, for the same reason: `null` above
   # is the one question its value answers as a whole.
   defp condition(%{field_type: :group, name: name}, _op, _raw),
@@ -883,7 +888,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         # Composite values are jsonb objects. Sorting them orders by key count
         # then key/value text, which is meaningless for a coordinate or a
         # snapshot — refuse rather than return a 200 in nonsense order.
-        {:ok, %{field_type: type}} when type in [:media, :reference, :geolocation, :group] ->
+        {:ok, %{field_type: type}} when type in [:media, :reference, :geolocation, :group, :json] ->
           invalid(query, :custom_sort, "custom field #{inspect(name)} (#{type}) is not sortable")
 
         {:ok, %{field_type: type, multiple: true}} when type in [:select, :string] ->

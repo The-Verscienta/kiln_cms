@@ -1257,6 +1257,11 @@ msgstr ""
 msgid "A CMS for content that has to be right"
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/json.ex
+#, elixir-autogen, elixir-format
+msgid "A JSON object or list, up to 64 KB. For structured data from another system that has no field of its own. Cannot be filtered or sorted."
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup can't run on this deployment."
@@ -1355,6 +1360,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A gallery"
+msgstr ""
+
+#: lib/kiln_cms/cms/field_types/color.ex
+#, elixir-autogen, elixir-format
+msgid "A hex colour such as #ff8800. For a brand accent or a category's badge colour."
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -1464,6 +1474,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A person with an account on this site — an admin, editor or viewer. Always private: only editors and admins see it."
+msgstr ""
+
+#: lib/kiln_cms/cms/field_types/telephone.ex
+#, elixir-autogen, elixir-format
+msgid "A phone number with its country code, stored as +15551234567. For a switchboard, a clinic or an emergency line."
 msgstr ""
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
@@ -1599,6 +1614,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "A tier's audience can't change — existing members would keep an entitlement nothing would revoke. Retire this tier and create a new one instead."
+msgstr ""
+
+#: lib/kiln_cms/cms/field_types/time_field.ex
+#, elixir-autogen, elixir-format
+msgid "A time of day such as 09:30, with no date or time zone. For opening hours or when a recurring session starts."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -12380,6 +12400,11 @@ msgstr ""
 msgid "One choice per line. Editors pick one of these."
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/email.ex
+#, elixir-autogen, elixir-format
+msgid "One email address, checked for shape. For a contact, an author or a booking address."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "One image — a hero, a logo, a portrait."
@@ -19949,6 +19974,11 @@ msgstr ""
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "URL slug"
+msgstr ""
+
+#: lib/kiln_cms/cms/field_types/slug.ex
+#, elixir-autogen, elixir-format
+msgid "URL-safe words joined by hyphens; what you type is tidied up. For a short code or a path segment. Not checked for uniqueness."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex

@@ -13,7 +13,7 @@ defmodule KilnCMS.CMS.ListFields do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Scoping
 
-  # What a column can show as one short value. `:group`, `:geolocation` and
+  # What a column can show as one short value. `:group`, `:geolocation`, `:json` and
   # multi-valued fields are left out of the picker in v1.
   @picker_types [
     :string,
@@ -27,7 +27,12 @@ defmodule KilnCMS.CMS.ListFields do
     :select,
     :reference,
     :user,
-    :media
+    :media,
+    :email,
+    :telephone,
+    :color,
+    :slug,
+    :time
   ]
 
   # The most columns remembered per type, and shown in a row's strip.
