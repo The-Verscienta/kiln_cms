@@ -70,6 +70,10 @@ Every summary line below that was shortened links to its own entry there.
   The editor asks before publishing; API writes default to notable; read back as `latest_edit_severity` / `latest_edit_at`.
   ([long form](docs/changelog/unreleased.md#change-severity))
 
+- **Plugins can mount plain-Plug endpoints (webhooks, JSON, feeds) with `plug_routes/0`, new in `kiln_plugin` 1.4.**
+  No session or CSRF check, raw body kept for HMACs, own 300/min rate limit; `mix kiln.plugins.doctor` checks paths.
+  ([#2272](https://github.com/The-Verscienta/kiln_cms/issues/2272) · [long form](docs/changelog/unreleased.md#plugin-plug-routes))
+
 - **GraphQL reads admin-defined custom fields typed by kind (`customFloat(name:)`, `fields(names:)`), and `GET /api/schema?format=typescript-graphql` exports ready fragments and types.**
   ([long form](docs/changelog/unreleased.md#graphql-typed-custom-fields))
 
