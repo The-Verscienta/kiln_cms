@@ -51,12 +51,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   @default_types ~w(string text url integer float boolean date datetime select)
 
   import KilnCMSWeb.ComputedBuilderComponents, only: [compute_builder: 1]
+  import KilnCMSWeb.ConditionsBuilderComponents, only: [conditions_field: 1]
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Computed
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.Validations.FieldCondition
   alias KilnCMSWeb.ComputedBuilder
+  alias KilnCMSWeb.ConditionsBuilder
 
   @impl true
   def mount(_params, _session, socket) do
@@ -97,6 +100,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
      socket
      |> assign(:default_scopes, default_scopes)
      |> assign(:scopes, default_scopes)
+     |> assign(:cond_siblings, create_siblings(socket.assigns, default_scopes))
      |> assign_create_builder()}
   end
 
@@ -113,10 +117,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     params = if name_edited?, do: params, else: suggest_name(params)
     params = drop_default_on_type_change(params, socket.assigns.form)
     {params, builder} = ComputedBuilder.apply_params(params, socket.assigns.builder)
+    {socket, conds} = apply_create_conditions(socket, params, scopes)
 
     form =
       socket.assigns.form
-      |> AshPhoenix.Form.validate(normalize(params, List.first(scopes)))
+      |> AshPhoenix.Form.validate(
+        params
+        |> normalize(List.first(scopes))
+        |> put_rules(conds, params["field_type"], socket.assigns.cond_siblings)
+      )
       |> refuse_duplicates(params, scopes, socket.assigns)
 
     {:noreply,
@@ -136,6 +145,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     # still gets the name its label suggests.
     params = if blank?(params["name"]), do: suggest_name(params), else: params
     {params, builder} = ComputedBuilder.apply_params(params, socket.assigns.builder)
+    {socket, conds} = apply_create_conditions(socket, params, scopes)
     assigns = socket.assigns
     socket = socket |> assign(:scopes, scopes) |> assign(:builder, builder)
 
@@ -146,6 +156,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         params =
           params
           |> normalize(scope)
+          |> put_rules(conds, params["field_type"], assigns.cond_siblings)
           |> Map.put("position", next_position(assigns.definitions, scope))
 
         assigns.actor
@@ -183,7 +194,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        id: id,
        form: form,
        builder: ComputedBuilder.new(form[:compute].value),
-       ctx: nil
+       ctx: nil,
+       conds: ConditionsBuilder.new(Enum.find(socket.assigns.definitions, &(&1.id == id))),
+       cond_siblings: edit_siblings(socket.assigns, id)
      })
      |> assign_edit_builder()}
   end
@@ -194,11 +207,19 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       when is_map(params) do
     params = params |> apply_kind() |> drop_default_on_type_change(socket.assigns.edit.form)
     {params, builder} = ComputedBuilder.apply_params(params, socket.assigns.edit.builder)
+    old = socket.assigns.edit
+
+    conds = ConditionsBuilder.apply_params(old.conds, params["conditions"], old.cond_siblings)
 
     edit = %{
-      socket.assigns.edit
-      | form: AshPhoenix.Form.validate(socket.assigns.edit.form, normalize(params)),
-        builder: builder
+      old
+      | form:
+          AshPhoenix.Form.validate(
+            old.form,
+            params |> normalize() |> put_rules(conds, params["field_type"], old.cond_siblings)
+          ),
+        builder: builder,
+        conds: conds
     }
 
     {:noreply, socket |> assign(:edit, edit) |> assign_edit_builder()}
@@ -208,7 +229,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     {params, builder} =
       params |> apply_kind() |> ComputedBuilder.apply_params(socket.assigns.edit.builder)
 
-    case AshPhoenix.Form.submit(socket.assigns.edit.form, params: normalize(params)) do
+    old = socket.assigns.edit
+
+    conds = ConditionsBuilder.apply_params(old.conds, params["conditions"], old.cond_siblings)
+
+    submitted =
+      params |> normalize() |> put_rules(conds, params["field_type"], old.cond_siblings)
+
+    case AshPhoenix.Form.submit(old.form, params: submitted) do
       {:ok, _definition} ->
         {:noreply,
          socket |> assign(:edit, nil) |> load_definitions() |> put_flash(:info, gettext("Saved."))}
@@ -216,7 +244,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       {:error, form} ->
         {:noreply,
          socket
-         |> assign(:edit, %{socket.assigns.edit | form: form, builder: builder})
+         |> assign(:edit, %{old | form: form, builder: builder, conds: conds})
          |> assign_edit_builder()}
     end
   end
@@ -236,6 +264,41 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     {:noreply, assign(socket, :edit, nil)}
   end
 
+  # --- conditions (#2277) ----------------------------------------------------
+
+  # "Add a condition", the trash button, "Remove condition": the rows live in
+  # the live view (the form posts them on every change), so these only edit
+  # that state. Nothing is read or written here, but they are admin-only like
+  # the rest of the page, so each re-checks.
+  def handle_event("cond_add", %{"ctx" => ctx, "rule" => rule}, socket)
+      when ctx in ["create", "edit", "link"] and rule in ["visible_when", "required_when"] do
+    {:noreply,
+     with_conds(socket, ctx, fn state, siblings ->
+       ConditionsBuilder.add(state, rule, siblings)
+     end)}
+  end
+
+  def handle_event("cond_remove", %{"ctx" => ctx, "rule" => rule, "index" => index}, socket)
+      when ctx in ["create", "edit", "link"] and rule in ["visible_when", "required_when"] and
+             is_binary(index) do
+    case Integer.parse(index) do
+      {index, ""} ->
+        {:noreply,
+         with_conds(socket, ctx, fn state, _siblings ->
+           ConditionsBuilder.remove(state, rule, index)
+         end)}
+
+      _other ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("cond_clear", %{"ctx" => ctx, "rule" => rule}, socket)
+      when ctx in ["create", "edit", "link"] and rule in ["visible_when", "required_when"] do
+    {:noreply,
+     with_conds(socket, ctx, fn state, _siblings -> ConditionsBuilder.clear(state, rule) end)}
+  end
+
   # --- link fields (R3) -----------------------------------------------------
 
   # "Add a detail" under a reference field, or "Add a field" under a group: a
@@ -252,7 +315,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
            kind: child_kind(type),
            id: nil,
            form: form,
-           name_edited?: false
+           name_edited?: false,
+           conds: ConditionsBuilder.new(),
+           cond_siblings: link_siblings(socket.assigns, parent_id, nil, child_kind(type))
          })}
 
       _other ->
@@ -274,7 +339,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
            kind: if(link.group_of_id, do: :group, else: :link),
            id: id,
            form: form,
-           name_edited?: true
+           name_edited?: true,
+           conds: ConditionsBuilder.new(link),
+           cond_siblings:
+             link_siblings(
+               socket.assigns,
+               FieldDefinition.parent_id(link),
+               id,
+               if(link.group_of_id, do: :group, else: :link)
+             )
          })}
     end
   end
@@ -293,9 +366,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     params = if name_edited?, do: params, else: suggest_name(params)
     params = drop_default_on_type_change(params, lf.form)
-    form = AshPhoenix.Form.validate(lf.form, link_params(params, lf))
+    conds = ConditionsBuilder.apply_params(lf.conds, params["conditions"], lf.cond_siblings)
 
-    {:noreply, assign(socket, :link_form, %{lf | form: form, name_edited?: name_edited?})}
+    form =
+      AshPhoenix.Form.validate(
+        lf.form,
+        params |> link_params(lf) |> put_link_rules(lf, conds, params["field_type"])
+      )
+
+    {:noreply,
+     assign(socket, :link_form, %{lf | form: form, name_edited?: name_edited?, conds: conds})}
   end
 
   def handle_event(
@@ -306,7 +386,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       when is_map(params) do
     params = if lf.id == nil and blank?(params["name"]), do: suggest_name(params), else: params
 
-    case AshPhoenix.Form.submit(lf.form, params: link_params(params, lf, socket.assigns)) do
+    conds = ConditionsBuilder.apply_params(lf.conds, params["conditions"], lf.cond_siblings)
+
+    submitted =
+      params
+      |> link_params(lf, socket.assigns)
+      |> put_link_rules(lf, conds, params["field_type"])
+
+    case AshPhoenix.Form.submit(lf.form, params: submitted) do
       {:ok, _link} ->
         {:noreply,
          socket
@@ -315,7 +402,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
          |> put_flash(:info, gettext("Saved."))}
 
       {:error, form} ->
-        {:noreply, assign(socket, :link_form, %{lf | form: form})}
+        {:noreply, assign(socket, :link_form, %{lf | form: form, conds: conds})}
     end
   end
 
@@ -365,6 +452,119 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       {:noreply, socket}
     end
   end
+
+  # --- conditions helpers (#2277) ---------------------------------------------
+
+  defp with_conds(socket, ctx, fun) do
+    assigns = socket.assigns
+
+    if CMS.can_create_field_definition?(assigns.actor, %{}, tenant: assigns.current_org) do
+      case conds_for(assigns, ctx) do
+        {state, siblings} -> put_conds(socket, ctx, fun.(state, siblings))
+        nil -> socket
+      end
+    else
+      put_flash(socket, :error, gettext("You can't change custom fields."))
+    end
+  end
+
+  defp conds_for(assigns, "create"), do: {assigns.conds, assigns.cond_siblings}
+  defp conds_for(%{edit: %{} = edit}, "edit"), do: {edit.conds, edit.cond_siblings}
+  defp conds_for(%{link_form: %{} = lf}, "link"), do: {lf.conds, lf.cond_siblings}
+  defp conds_for(_assigns, _ctx), do: nil
+
+  defp put_conds(socket, "create", state), do: assign(socket, :conds, state)
+
+  defp put_conds(%{assigns: %{edit: %{} = edit}} = socket, "edit", state),
+    do: assign(socket, :edit, %{edit | conds: state})
+
+  defp put_conds(%{assigns: %{link_form: %{} = lf}} = socket, "link", state),
+    do: assign(socket, :link_form, %{lf | conds: state})
+
+  defp put_conds(socket, _ctx, _state), do: socket
+
+  # The create form's rows follow the ticked types: the fields a rule may read
+  # are the ones every ticked type has by that name and type.
+  defp apply_create_conditions(socket, params, scopes) do
+    socket =
+      if scopes == socket.assigns.scopes and Map.has_key?(socket.assigns, :cond_siblings),
+        do: socket,
+        else: assign(socket, :cond_siblings, create_siblings(socket.assigns, scopes))
+
+    conds =
+      ConditionsBuilder.apply_params(
+        socket.assigns.conds,
+        params["conditions"],
+        socket.assigns.cond_siblings
+      )
+
+    {assign(socket, :conds, conds), conds}
+  end
+
+  defp create_siblings(_assigns, []), do: []
+
+  defp create_siblings(assigns, scopes) do
+    [first | rest] = Enum.map(scopes, &scope_siblings(&1, assigns.current_org))
+
+    Enum.filter(first, fn s ->
+      Enum.all?(rest, fn other ->
+        Enum.any?(other, &(&1.name == s.name and &1.field_type == s.field_type))
+      end)
+    end)
+  end
+
+  defp scope_siblings("def:" <> id, org),
+    do: cond_siblings(%{id: nil, type_definition_id: id}, org, nil)
+
+  defp scope_siblings(type, org),
+    do: cond_siblings(%{id: nil, content_type: String.to_existing_atom(type)}, org, nil)
+
+  defp edit_siblings(assigns, id) do
+    case Enum.find(assigns.definitions, &(&1.id == id)) do
+      nil -> []
+      definition -> cond_siblings(definition, assigns.current_org, definition.name)
+    end
+  end
+
+  # A group's sub-fields read each other; a reference's link fields carry no
+  # conditions.
+  defp link_siblings(assigns, parent_id, id, :group),
+    do: cond_siblings(%{id: id, group_of_id: parent_id}, assigns.current_org, nil)
+
+  defp link_siblings(_assigns, _parent_id, _id, _kind), do: []
+
+  defp cond_siblings(scope, org, own_name) do
+    scope =
+      Map.merge(
+        %{
+          id: nil,
+          content_type: nil,
+          type_definition_id: nil,
+          group_of_id: nil,
+          link_of_id: nil
+        },
+        Map.take(scope, [:id, :content_type, :type_definition_id, :group_of_id, :link_of_id])
+      )
+
+    scope
+    |> FieldCondition.siblings(org)
+    |> Enum.filter(&(&1.field_type in FieldDefinition.link_field_types() and not &1.private))
+    |> Enum.reject(&(&1.name == own_name))
+    |> Enum.sort_by(& &1.position)
+  end
+
+  # The rules for the params the resource validates. A type that carries none
+  # (a group or computed field) sends both as nil so a stale row can't fail it.
+  defp put_rules(params, _conds, type, _siblings) when type in ["group", "computed"],
+    do: Map.merge(params, %{"visible_when" => nil, "required_when" => nil})
+
+  defp put_rules(params, conds, _type, siblings),
+    do: Map.merge(params, ConditionsBuilder.rule_params(conds, siblings))
+
+  defp put_link_rules(params, %{kind: :group, cond_siblings: siblings}, conds, type),
+    do: put_rules(params, conds, type, siblings)
+
+  defp put_link_rules(params, _lf, _conds, _type), do: params
 
   # --- create helpers --------------------------------------------------------
 
@@ -417,6 +617,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> assign(:scope_error, nil)
     |> assign(:name_edited?, false)
     |> assign(:builder, ComputedBuilder.new())
+    |> assign(:conds, ConditionsBuilder.new())
+    |> assign(
+      :cond_siblings,
+      create_siblings(socket.assigns, socket.assigns.default_scopes)
+    )
   end
 
   # The machine name tracks the label until the admin types into the name
@@ -942,6 +1147,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     params
     |> Map.delete("scopes")
+    |> Map.delete("conditions")
     |> Map.put("options", options)
     |> Map.put("option_labels", labels)
     |> Map.put("default", default)
@@ -1015,6 +1221,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # Whether the reference-target select applies to the form's current type.
   defp reference?(form), do: to_string(form[:field_type].value) == "reference"
+
+  # Whether the Conditions disclosure applies: not to a group as a whole or a
+  # computed field (`Validations.FieldCondition`).
+  defp conditions?(form), do: to_string(form[:field_type].value) not in ["group", "computed"]
 
   # Whether the compute-formula textarea applies (a `:computed` field, #429).
   defp computed?(form), do: to_string(form[:field_type].value) == "computed"
@@ -2799,6 +3009,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               />
               {gettext("Required")}
             </label>
+            <.conditions_field
+              :if={conditions?(@form)}
+              id="new-field-conditions"
+              form={@form}
+              state={@conds}
+              siblings={@cond_siblings}
+              ctx="create"
+            />
             <label class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="field_definition[names_record]" value="false" />
               <input
@@ -3168,6 +3386,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     />
                     {gettext("Required")}
                   </label>
+                  <.conditions_field
+                    :if={conditions?(@edit.form)}
+                    id={"edit-field-conditions-#{@edit.id}"}
+                    form={@edit.form}
+                    state={@edit.conds}
+                    siblings={@edit.cond_siblings}
+                    ctx="edit"
+                  />
                   <.relationship_summary
                     form={@edit.form}
                     id={"edit-field-summary-#{@edit.id}"}
@@ -3399,6 +3625,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             form={@open.form}
             id={"link-field-form-#{link.id}"}
             group?={@group?}
+            open={@open}
           />
         </li>
       </ol>
@@ -3412,6 +3639,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         form={@open.form}
         id={"link-field-form-new-#{@definition.id}"}
         group?={@group?}
+        open={@open}
       />
     </div>
     """
@@ -3420,6 +3648,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :form, :any, required: true
   attr :id, :string, required: true
   attr :group?, :boolean, default: false
+  attr :open, :map, required: true
 
   defp link_field_form(assigns) do
     ~H"""
@@ -3463,6 +3692,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           do: gettext("Required on every row"),
           else: gettext("Required on every connection")}
       </label>
+      <.conditions_field
+        :if={@group? and conditions?(@form)}
+        id={"#{@id}-conditions"}
+        form={@form}
+        state={@open.conds}
+        siblings={@open.cond_siblings}
+        ctx="link"
+      />
       <div class="flex gap-2 sm:col-span-2">
         <.button type="submit" variant="primary">
           {if @group?, do: gettext("Save field"), else: gettext("Save detail")}

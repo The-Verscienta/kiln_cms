@@ -154,6 +154,63 @@ carries the reasoning.
     `kiln_cms.ip_block.refused.count`, tagged `surface`, never the address.
   See [ip-blocking.md](../ip-blocking.md).
 
+<a id="conditional-custom-fields"></a>
+
+- **A custom field can be shown only when another field has a given value, and required only then (#2277).**
+  Open a field in `/editor/fields` (admins), expand **Conditions**, and set
+  **Show when** and/or **Required when**: one or more tests on a field beside
+  it ("Kind is one of Event, Talk"), joined by "All of these are true" or "Any
+  of these is true". In the content editor the field appears and disappears as
+  the editor changes the other value, with no round trip to the server, and
+  a **Required when** field blocks the save only while its rule holds. The
+  same fields work on a group's sub-fields, where a sub-field reads the other
+  sub-fields of the same row. The how-to is in
+  [extending-content.md](../extending-content.md#make-a-field-conditional).
+  - **For developers.** `field_definition` gains two attributes,
+    `visible_when` and `required_when`: plain JSON (`{"field", "op", "value"}`
+    leaves under `{"all": [...]}` / `{"any": [...]}`; ops `eq`, `neq`, `in`,
+    `empty`, `not_empty`, `gt`, `lt`; at most 3 levels and 10 nodes). They
+    show up in `?include=field_definitions`, the OpenAPI document and the
+    `read_field_definitions` MCP tool; creating or updating a definition is
+    still admin-only and goes through the `CMS.create_field_definition` /
+    `CMS.update_field_definition` code interfaces. The rule logic is
+    `KilnCMS.CMS.Conditions`; the editor runs a JavaScript twin
+    (`assets/js/conditions.js`) held to the same fixture
+    (`test/support/fixtures/conditions_cases.json`).
+  - **Hidden is an editor concept, not a privacy control.** A hidden field
+    keeps its stored value, and that value is still delivered by the JSON:API,
+    GraphQL, search and computed fields. Use **Private** for a value that
+    must not be public. A value written through the API to a hidden field is
+    still checked and stored.
+  - **How it is enforced.** On a normal write, a hidden field is never
+    required and a **Required when** field is required while its rule
+    holds, judged on the merged view (what the request sends over what is
+    stored). A restore, and a copy that drops custom fields, skip
+    **Required when**, and a record saved before a rule existed is not
+    rechecked by an unrelated write. There is no cascade: a field hidden by
+    its own rule still counts with its stored value when another rule reads
+    it, on the server and in the browser alike.
+  - **Keeping rules consistent.** A rule can read only a plain value field
+    (text, number, date, yes/no, choice) in the same scope, not itself, not a
+    private field, and without a cycle. Deleting a field other rules read is
+    refused, naming them; changing its type or making it private is refused
+    when a rule would stop being valid; renaming it rewrites the rules that
+    read it in the same transaction.
+  - **Limits.** `gt` / `lt` compare numbers and ISO dates or datetimes, and
+    are false when a side can't be read as one. A datetime needs seconds
+    (`2026-11-07T10:00:00`): the browser's `datetime-local` input posts none,
+    so a `gt` / `lt` test on such a field never holds, in the editor and on the
+    server. A rule nested beyond one level (possible only through the code
+    interface) is shown read-only in the admin UI until you remove it.
+    Link fields, computed fields and a group as a whole carry no conditions.
+  - **Upgrade.** Run migrations: two nullable columns are added to
+    `field_definitions`, nothing is backfilled and the `kiln_reporting_v1`
+    views are untouched. The change is expand-only, so rolling the pin back is
+    safe (the older release ignores the columns). Overlays: run
+    `mix ash.codegen` and commit the migration if you carry a copy of the
+    resource. CI gains a step, `npm test --prefix assets`, that runs the
+    JavaScript evaluator against the shared fixture.
+
 <a id="breached-password-check"></a>
 
 - **Admins choose what happens when a new password is in a known breach (#2240).**

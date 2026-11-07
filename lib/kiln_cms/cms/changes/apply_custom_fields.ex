@@ -137,6 +137,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   require Logger
 
   alias Ash.Error.Changes.InvalidAttribute
+  alias KilnCMS.CMS.Conditions
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.PrivateFields
   alias KilnCMS.CMS.WorkingCopy
@@ -331,6 +332,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     # error, never a write.
     read_opts = context |> Ash.Context.to_opts() |> Keyword.put(:tenant, changeset.to_tenant)
 
+    # `required_when` (#2277) binds an ordinary write only: a restore, a copy
+    # and the media/convert passes (which hand their own `supplied`) skip it.
+    required_when? = mode == :strict and is_nil(supplied)
+
     supplied =
       supplied ||
         stringify_keys(Ash.Changeset.get_attribute(changeset, :custom_fields) || %{})
@@ -340,6 +345,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     # already-coerced results rather than raw params — and each other's, in
     # dependency order.
     {computed, editable} = Enum.split_with(defs, &(&1.field_type == :computed))
+
+    # Conditional rules (#2277) read the merged view; they only adjust `required`.
+    editable =
+      Conditions.apply_to(editable, Map.merge(existing, supplied), required_when: required_when?)
 
     {cleaned, errors} =
       Enum.reduce(
@@ -773,7 +782,11 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # key is absent), and every key no sub-field declares refused.
   defp coerce_row(%{} = row, def, path, mode) when not is_struct(row) do
     given = stringify_keys(row)
-    subs = FieldDefinition.group_fields(def)
+
+    subs =
+      Conditions.apply_to(FieldDefinition.group_fields(def), given,
+        required_when: mode == :strict
+      )
 
     {cleaned, problems} =
       Enum.reduce(subs, {%{}, []}, fn sub, {cleaned, problems} ->

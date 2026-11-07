@@ -862,7 +862,10 @@ Each row carries `name` (the permanent machine key), `label`, `plural_label`,
 `default_review_after_days`. Add `?include=field_definitions` to get the type's
 custom-field schema (`name`, `label`, `field_type`, `required`, `options`,
 `default`, `help_text`, `position`, …) — the keys an entry's `custom_fields`
-map takes. `?include=field_definitions.group_fields` adds the sub-fields of
+map takes. `visible_when` / `required_when` carry the field's
+conditional rules (or `null`); see
+[extending-content.md](extending-content.md#make-a-field-conditional). A hidden
+field is an editor concept: its value is still in every read. `?include=field_definitions.group_fields` adds the sub-fields of
 each `:group` field — the keys each of its rows takes; a sub-field names its
 group in `group_of_id`.
 
