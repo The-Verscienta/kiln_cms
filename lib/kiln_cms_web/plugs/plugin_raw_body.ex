@@ -1,6 +1,6 @@
 defmodule KilnCMSWeb.Plugs.PluginRawBody do
   @moduledoc """
-  Gives a plugin plug route (`Kiln.Plugin.plug_routes/0`, #2272) the exact
+  Gives a plugin plug route (`c:Kiln.Plugin.plug_routes/0`, #2272) the exact
   request bytes whatever the content type — a parser here, and `PluginRawBody.DefaultType` ahead of it.
 
   `Plug.Parsers` reads a body only for the types it has a parser for
