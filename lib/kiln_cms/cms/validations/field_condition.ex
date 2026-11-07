@@ -159,7 +159,7 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
     start =
       rules |> Enum.flat_map(fn {_attr, rule} -> Conditions.references(rule) end) |> Enum.uniq()
 
-    if reaches?(start, self, graph, MapSet.new()) do
+    if reaches?(start, self, graph, %{}) do
       error(elem(hd(rules), 0), gettext("would depend on itself through other conditions"))
     else
       :ok
@@ -171,8 +171,8 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
   defp reaches?([name | rest], self, graph, seen) do
     cond do
       name == self -> true
-      MapSet.member?(seen, name) -> reaches?(rest, self, graph, seen)
-      true -> reaches?(Map.get(graph, name, []) ++ rest, self, graph, MapSet.put(seen, name))
+      Map.has_key?(seen, name) -> reaches?(rest, self, graph, seen)
+      true -> reaches?(Map.get(graph, name, []) ++ rest, self, graph, Map.put(seen, name, true))
     end
   end
 

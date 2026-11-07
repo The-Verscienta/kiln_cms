@@ -42,17 +42,17 @@ defmodule KilnCMSWeb.ConditionsBuilderComponents do
       <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-sm font-medium">
         <span>
           {gettext("Conditions")}
-          <span :if={@count > 0} class="ml-2 text-xs font-normal text-base-content/60">
+          <span :if={@count > 0} class="ml-2 text-xs font-normal text-base-content/70">
             {ngettext("%{count} condition", "%{count} conditions", @count)}
           </span>
         </span>
         <.icon
           name="hero-chevron-down-mini"
-          class="size-4 text-base-content/50 transition-transform group-open:rotate-180"
+          class="size-4 text-base-content/70 transition-transform group-open:rotate-180"
         />
       </summary>
       <div class="space-y-4 border-t border-base-content/10 p-3">
-        <p :if={@siblings == []} class="text-xs text-base-content/60">
+        <p :if={@siblings == []} class="text-xs text-base-content/70">
           {gettext(
             "There are no other fields to test yet. Conditions can read a text, number, date, yes/no or choice field beside this one."
           )}
@@ -102,7 +102,7 @@ defmodule KilnCMSWeb.ConditionsBuilderComponents do
     ~H"""
     <fieldset id={@id} class="space-y-2">
       <legend class="text-sm font-medium">{rule_title(@rule)}</legend>
-      <p class="text-xs text-base-content/60">{rule_hint(@rule)}</p>
+      <p class="text-xs text-base-content/70">{rule_hint(@rule)}</p>
 
       <div
         :if={@state.nested?}
@@ -157,7 +157,7 @@ defmodule KilnCMSWeb.ConditionsBuilderComponents do
             phx-value-rule={@rule}
             phx-value-index={index}
             aria-label={gettext("Remove this condition")}
-            class="rounded px-1.5 py-2 text-base-content/60 transition-colors hover:bg-base-200 hover:text-error"
+            class="rounded px-1.5 py-2 text-base-content/70 transition-colors hover:bg-base-200 hover:text-error"
           >
             <.icon name="hero-trash" class="size-4" />
           </button>
