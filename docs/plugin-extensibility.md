@@ -93,7 +93,7 @@ what it contributes:
 
 | Shape | How it's installed | What it can contribute |
 |---|---|---|
-| **Mix dependency** — Hex, `git:` or `path:` | Depends on [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md), the package the plugin contract ships in (#1909); the site lists it in the overlay's `config/project_deps.exs` (#1967) | Blocks, field types (no colocated client hooks), spam checks, advisory checks, image backends, nav items, supervision children, Oban queues; routes only to a LiveView that doesn't `use KilnCMSWeb` |
+| **Mix dependency** — Hex, `git:` or `path:` | Depends on [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md), the package the plugin contract ships in (#1909); the site lists it in the overlay's `config/project_deps.exs` (#1967) | Blocks, field types (no colocated client hooks), spam checks, advisory checks, image backends, nav items, supervision children, Oban queues; routes only to a LiveView that doesn't `use KilnCMSWeb`; plug routes (`plug_routes/0`, from `kiln_plugin` 1.4) to any Plug, needing only `plug` |
 | **`projects/<name>/` overlay** | Vendored into the overlay and compiled inside the core | Everything above, plus content types (`KilnCMS.CMS.Content`), Ash domains, and LiveViews built on `KilnCMSWeb` |
 
 A dependency compiles before the core and sees only its own dependencies, so
@@ -117,7 +117,8 @@ policies or web layer is an overlay.
    types — Ash's own mix tasks read those keys directly).
 3. **Verify** — `mix kiln.plugins.doctor` (already gates precommit) asserts the
    contract holds: domains registered, no block/field-type/queue name
-   collisions, well-formed routes, and, for a dependency, that its
+   collisions, well-formed routes (plug routes: no core path, no overlap with
+   another plugin's), and, for a dependency, that its
    `kiln_plugin` requirement accepts the version the core bundles. (The core
    takes `kiln_plugin` with `override: true`, so Mix itself never checks it.)
    With `config/project_deps.exs` it also fails a core dependency that moved
@@ -133,6 +134,68 @@ Mix project depending on `kiln_plugin`: `mix kiln.gen.plugin <Name> --dep`
 scaffolds one at `../<name>` (or `--path`), and `sdk/fixtures/dep_plugin` is
 a worked, CI-compiled example.
 
+#### Plug routes: webhooks, JSON endpoints, feeds (`plug_routes/0`, #2272)
+
+`public_routes/0` mounts a LiveView page. For an endpoint with no page, such as
+a webhook receiver, a small JSON API, a form handler or a feed variant, a
+plugin declares `plug_routes/0` (`kiln_plugin` 1.4; a plugin using it requires
+`{:kiln_plugin, "~> 1.4"}`). It is for content-adjacent endpoints; it is not a
+place to build an application backend.
+
+```elixir
+@impl Kiln.Plugin
+def plug_routes do
+  [
+    # {verb, path, plug_module, plug_opts}: a Phoenix controller is a Plug
+    # whose opts is the action atom.
+    {:post, "/hooks/ratings", KilnRatings.WebhookController, :create},
+    {:get, "/ratings/summary.json", KilnRatings.SummaryPlug, []},
+    # {:forward, path, plug_module, plug_opts}: everything below the path,
+    # with the path stripped. A Plug.Router is the usual target.
+    {:forward, "/ratings/feeds", KilnRatings.FeedRouter, []}
+  ]
+end
+```
+
+The verb is `:get`, `:post`, `:put`, `:patch`, `:delete` or `:match` (any
+method). `:get` also answers `HEAD`. `plug_opts` is baked into the router at
+compile time, so it must be a plain term (atoms, strings, numbers, lists,
+maps), not a function or a pid. A route may not be written against
+`Phoenix` itself: the contract needs only `plug`, so the plugin works as a
+Mix dependency. `sdk/fixtures/dep_plugin` is a worked example of both shapes.
+
+What the core does with it:
+
+- **Placement.** Mounted before the content-delivery catch-alls, like
+  `public_routes/0`, so a plugin path wins over a content slug of the same
+  name. It cannot sit under `/editor`, `/api`, `/gql` or `/mcp`, or under any
+  other first segment a core route already owns. The first segment must be
+  static (`/hooks/:id` is fine, `/:thing/x` is not).
+- **No session, no CSRF, no `accepts`.** The caller is a machine. There is no
+  `current_user`: the plugin authenticates its own caller (an HMAC, a token),
+  and nothing here is an admin or editor surface. No HTML or browser pipeline
+  is offered; a plugin that needs a page uses `public_routes/0`.
+- **Tenant.** The endpoint has already resolved the request's organization:
+  `conn.assigns.current_org`. A plugin that reads or writes content must pass
+  `tenant:` to Ash itself; nothing sets it for the plugin.
+- **Rate limit.** Per client address, 300 requests a minute, in its own bucket
+  (`:plugin_endpoint`), apart from the core APIs. It bounds floods, not
+  guessing: authorization is the plugin's.
+- **Raw body.** For a plugin path, a JSON or form body is also kept byte for
+  byte in `conn.private[:raw_body]`, capped at 1 MB (over it the request is
+  refused as too large), so an HMAC over the exact bytes can be verified.
+  Other content types are left unread by the core: read them from the conn
+  yourself.
+- **Compile time.** A malformed entry stops the build with an error naming the
+  plugin. `mix kiln.plugins.doctor` reports all of them at once, plus a path a
+  core route owns, and any overlap, on whole path segments, with another
+  plugin's plug or public routes (`/hooks` does not overlap `/hooks-extra`; a
+  `:forward` overlaps everything below it). `mix kiln.plugins.list` and System
+  → Plugins count the routes.
+
+A plugin built against `kiln_plugin` older than 1.4 (or one that hand-rolls the
+behaviour) has no such function; the core treats it as declaring none.
+
 ### 2b. Catalog metadata (the "registry")
 
 The registry is **cheap, declarative data carried by the plugin itself** — no
@@ -146,8 +209,8 @@ central service required for v1. Each plugin optionally declares:
 | Homepage | `homepage/0` | Repo / docs URL — **where screenshots, changelog and docs live** |
 
 `Kiln.Plugins.manifests/0` collects these plus each plugin's *contribution
-counts* (domains, blocks, field types, nav items, admin routes, queues,
-children) into plain maps — the data a catalog UI or `mix kiln.plugins.list`
+counts* (domains, blocks, field types, nav items, admin, editor, public and plug
+routes, queues, children) into plain maps — the data a catalog UI or `mix kiln.plugins.list`
 renders. Screenshots and long-form docs deliberately live in the plugin's own
 repository / README, **not** in the running node: the node carries a pointer
 (`homepage/0`), not a media library.

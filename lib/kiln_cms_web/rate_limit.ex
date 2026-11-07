@@ -103,6 +103,12 @@ defmodule KilnCMSWeb.RateLimit do
     # event is a paying member locked out. Generous per IP; the real authorization
     # is the HMAC signature, not the rate limit.
     billing_webhook: {300, :timer.minutes(1)},
+    # Plugin plug routes (#2272): a webhook receiver, a JSON endpoint, a feed
+    # variant. A flood ceiling per client address, sized like `:billing_webhook`
+    # (a sender's small egress IP set can burst) and apart from `:api` so a
+    # plugin endpoint cannot spend the budget the core APIs share. Whatever
+    # authorizes the call is the plugin's (an HMAC, a token), not this.
+    plugin_endpoint: {300, :timer.minutes(1)},
     # `/live` root joins per client address (#1183, `KilnCMSWeb.LiveJoinBudget`).
     # A flood ceiling, not a usage cap: a root join happens once per page LOAD
     # (patch/navigate inside a live_session does not remount), so twenty editors

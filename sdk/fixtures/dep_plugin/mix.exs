@@ -21,7 +21,13 @@ defmodule KilnDepFixture.MixProject do
       app: :kiln_dep_fixture,
       version: "0.1.0",
       elixir: "~> 1.20",
-      deps: [{:kiln_plugin, "~> 1.2", path: "../../kiln_plugin"}]
+      # 1.4 is the minimum on purpose: the fixture declares `plug_routes/0`
+      # (#2272), so it also proves a plugin can require exactly that minor.
+      # `plug` is the one extra dependency a plug route needs.
+      deps: [
+        {:kiln_plugin, "~> 1.4", path: "../../kiln_plugin"},
+        {:plug, "~> 1.14"}
+      ]
     ]
   end
 end
