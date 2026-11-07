@@ -856,6 +856,14 @@ defmodule KilnCMS.CMS do
       define :reset_site_locale_settings, action: :destroy
     end
 
+    # Per-org stance on breached passwords (#2240): off / warn / block (admins).
+    # Resolved through `KilnCMS.Accounts.PasswordPolicy`.
+    resource KilnCMS.CMS.SitePasswordPolicy do
+      define :list_site_password_policy, action: :read
+      define :save_site_password_policy, action: :save
+      define :reset_site_password_policy, action: :destroy
+    end
+
     # Per-org `/.well-known/security.txt` (RFC 9116, #1873). Served through
     # `KilnCMS.SecurityTxt` (cached); this interface is for the settings page
     # and the resolver's own lookup.

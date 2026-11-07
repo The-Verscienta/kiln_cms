@@ -26,7 +26,7 @@ into whichever one holds the read.
 > set these locally. The exceptions — read in *every* environment, because they
 > sit outside the `config_env() == :prod` fragments — are:
 >
-> `PHX_SERVER`, `PORT`, `CSP_IMG_SRC`, `UNSPLASH_ACCESS_KEY`, `CORS_ORIGINS`,
+> `PHX_SERVER`, `PORT`, `CSP_IMG_SRC`, `UNSPLASH_ACCESS_KEY`, `BREACHED_PASSWORD_CHECK`, `CORS_ORIGINS`,
 > `KILN_READING_TIME_WPM`, `VISUAL_EDITING_ENABLED`, the `KILN_API_CACHE*` and
 > `KILN_CDN_PURGE_*` groups, `KILN_LINK_CHECK_CRON` /
 > `KILN_LINK_CHECK_USER_AGENT`, `KILN_TASK_DIGEST_CRON`,
@@ -39,7 +39,7 @@ into whichever one holds the read.
 >
 > Several more are read in every environment **except `:test`**, where they are
 > skipped so the suite cannot depend on a developer's exported shell:
-> `KILN_ENV_LABEL` / `KILN_ENV_COLOR`, `EMBED_ORIGINS` / `EMBED_ORIGINS_LOCKED`,
+> `BREACHED_PASSWORD_POLICY`, `KILN_ENV_LABEL` / `KILN_ENV_COLOR`, `EMBED_ORIGINS` / `EMBED_ORIGINS_LOCKED`,
 > `KILN_AUDIT_ANCHORS_ENABLED`, `KILN_AUDIT_ANCHOR_EVERY_WRITE`, the
 > `KILN_GOVERNANCE_WITNESS*` group (plus `KILN_GOVERNANCE_CHECKPOINT_CRON`), and
 > the `KILN_PROVENANCE_*` group, and the `KILN_DEMO_*` group. `MIX_TEST_PARTITION` and `KILN_STRICT_TEST`
@@ -790,6 +790,19 @@ referrer URL or host. Off by default; enabling requires no rebuild. See
 |----------|---------|---------|-----------------|
 | `KILN_ANALYTICS_REFERRERS` | disabled | Enable recording classified referrer buckets (`KilnCMS.Analytics.ReferrerDay`). Turning it back off stops new writes and hides the dashboard breakdown/export columns, but does **not** delete buckets already recorded — those age out on the normal retention purge like any other bucket. | [`config/runtime/analytics.exs:20`](../config/runtime/analytics.exs#L20) |
 | `KILN_ANALYTICS_LOW_COUNT_THRESHOLD` | `5` | Below this many hits, the dashboard breakdown (#620) and the export render a referrer category as `"< n"` rather than an exact number — a very small count can describe a single visitor's arrival. A second category is also rendered as `hidden` whenever any is naturally low, so that a single `"< n"` is not the sole unknown among four exact numbers (#620, #777); `hidden` is not `"< n"`, since a complementary-suppressed count can be at or above the threshold. The partner is the **largest** of the others, which is what makes the residual split many ways instead of one (#1073) — so raising this hides bigger categories, not just more of them. Where no partner makes the split ambiguous — a handful of views with four genuine zeros — the **whole breakdown** is hidden, zeros included, because a published `0` is one unknown removed from an equation that has only one. That is the exactness this gives up: on the lowest-traffic days the breakdown says nothing at all rather than saying something recoverable. Must be a positive integer; an unparseable or non-positive value keeps the default and warns rather than being interpreted (e.g. `0`, which would silently disable suppression). | [`config/runtime/analytics.exs:39`](../config/runtime/analytics.exs#L39) |
+
+### breached-password check (#2240)
+
+When someone sets a password (register, change, reset, first-run setup) it is
+looked up against the [Have I Been Pwned](https://haveibeenpwned.com/API/v3#PwnedPasswords)
+range API by k-anonymity: only the first five characters of its SHA-1 leave the
+server. See [account-administration.md](account-administration.md#breached-passwords)
+for what each policy does and [threat-model.md](threat-model.md) for the limits.
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `BREACHED_PASSWORD_CHECK` | on | The deployment-wide kill switch. `false` (any off-spelling, see [On/off variables](#boolean-variables)) means **no outbound call is ever made**, whatever any site's policy says; use it for an air-gapped deployment. The Password policy page then shows that the check is switched off. Unset or unreadable leaves the check on. Read in every environment; the test and E2E configs set it off themselves. | [`config/runtime/console.exs:56`](../config/runtime/console.exs#L56) |
+| `BREACHED_PASSWORD_POLICY` | `warn` | The operator default (`off`, `warn` or `block`) for a site that has not saved its own policy at **Organization → Password policy**. A site's saved choice always wins. `block` only ever refuses an administrator's password; editors and viewers are warned. An unrecognized value is ignored with a boot warning and `warn` stays. Skipped in `:test`. | [`config/runtime/console.exs:64`](../config/runtime/console.exs#L64) |
 
 ### environment indicator
 
