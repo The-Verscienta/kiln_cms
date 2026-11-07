@@ -33,7 +33,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "entries_org_id_fkey",
+        "name": "testimonials_org_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -155,6 +155,42 @@
       "size": null,
       "source": "path_alias_derived",
       "type": "boolean"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "created_via_key_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "created_via_key_name",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "on_behalf_of",
+      "type": "text"
     },
     {
       "allow_nil?": true,
@@ -523,39 +559,6 @@
       "type": "text"
     },
     {
-      "allow_nil?": false,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": {
-        "deferrable": false,
-        "destination_attribute": "id",
-        "destination_attribute_default": null,
-        "destination_attribute_generated": null,
-        "index?": false,
-        "index_where": null,
-        "match_tenant?": false,
-        "match_type": null,
-        "match_with": null,
-        "multitenancy": {
-          "attribute": "org_id",
-          "global": false,
-          "strategy": "attribute"
-        },
-        "name": "entries_type_definition_id_fkey",
-        "on_delete": null,
-        "on_update": null,
-        "primary_key?": true,
-        "schema": "public",
-        "table": "type_definitions"
-      },
-      "scale": null,
-      "size": null,
-      "source": "type_definition_id",
-      "type": "uuid"
-    },
-    {
       "allow_nil?": true,
       "default": "nil",
       "generated?": false,
@@ -576,7 +579,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "entries_author_id_fkey",
+        "name": "testimonials_author_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -609,7 +612,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "entries_category_id_fkey",
+        "name": "testimonials_category_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -642,12 +645,12 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "entries_parent_id_fkey",
+        "name": "testimonials_parent_id_fkey",
         "on_delete": "nilify",
         "on_update": null,
         "primary_key?": true,
         "schema": "public",
-        "table": "entries"
+        "table": "testimonials"
       },
       "scale": null,
       "size": null,
@@ -675,7 +678,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "entries_featured_image_id_fkey",
+        "name": "testimonials_featured_image_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -719,7 +722,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_path_alias_index",
+      "name": "testimonials_path_alias_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -742,7 +745,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_parent_lookup_index",
+      "name": "testimonials_parent_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -763,7 +766,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_embedding_hnsw_index",
+      "name": "testimonials_embedding_hnsw_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -784,7 +787,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_title_trgm_index",
+      "name": "testimonials_title_trgm_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -805,7 +808,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_title_lexemes_index",
+      "name": "testimonials_title_lexemes_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -833,7 +836,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_slug_locale_lookup_index",
+      "name": "testimonials_slug_locale_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -856,7 +859,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_next_occurrence_index",
+      "name": "testimonials_next_occurrence_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -879,7 +882,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_unpublish_at_index",
+      "name": "testimonials_unpublish_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -902,7 +905,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_last_reviewed_at_index",
+      "name": "testimonials_last_reviewed_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -930,7 +933,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_console_updated_index",
+      "name": "testimonials_console_updated_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -958,7 +961,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_console_title_index",
+      "name": "testimonials_console_title_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -983,7 +986,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "entries_console_published_index",
+      "name": "testimonials_console_published_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -996,10 +999,10 @@
     {
       "after_tables": [],
       "code?": false,
-      "down": "ALTER TABLE entries DROP COLUMN IF EXISTS name_lexemes",
+      "down": "ALTER TABLE testimonials DROP COLUMN IF EXISTS name_lexemes",
       "global?": false,
       "name": "name_lexemes",
-      "up": "ALTER TABLE entries ADD COLUMN IF NOT EXISTS name_lexemes text[] GENERATED ALWAYS AS (CASE WHEN search_weighted IS NULL THEN NULL ELSE tsvector_to_array(to_tsvector(kiln_regconfig(locale), coalesce(search_weighted[1], ''))) || kiln_han_runs(search_weighted[1]) END) STORED"
+      "up": "ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS name_lexemes text[] GENERATED ALWAYS AS (CASE WHEN search_weighted IS NULL THEN NULL ELSE tsvector_to_array(to_tsvector(kiln_regconfig(locale), coalesce(search_weighted[1], ''))) || kiln_han_runs(search_weighted[1]) END) STORED"
     },
     {
       "after_tables": [],
@@ -1015,10 +1018,10 @@
         "type_definitions"
       ],
       "code?": false,
-      "down": "DROP VIEW IF EXISTS kiln_reporting_v1.entries",
+      "down": "DROP VIEW IF EXISTS kiln_reporting_v1.testimonials",
       "global?": false,
       "name": "reporting_view",
-      "up": "CREATE OR REPLACE VIEW kiln_reporting_v1.entries WITH (security_barrier = true) AS SELECT t.id, t.org_id, t.title, t.slug, t.locale, t.audience, t.state, t.published_at, t.inserted_at, t.updated_at, t.type_definition_id, td.name AS type_name, td.path_segment AS type_slug, COALESCE(cf.allowed, '{}'::jsonb) AS custom_fields FROM entries t LEFT JOIN type_definitions td ON td.id = t.type_definition_id AND td.org_id = t.org_id LEFT JOIN LATERAL (SELECT jsonb_object_agg(fd.name, CASE WHEN jsonb_typeof(val.v) = 'object' THEN CASE WHEN jsonb_typeof(val.v) = 'object' AND (fd.field_type::text = 'reference' OR (val.v ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT val.v ? 'url')) THEN jsonb_build_object('id', val.v -> 'id', 'type', val.v -> 'type') ELSE val.v END WHEN jsonb_typeof(val.v) = 'array' AND (fd.field_type::text = 'reference' OR val.v @? '$[*].slug') THEN COALESCE((SELECT jsonb_agg(CASE WHEN jsonb_typeof(e.x) = 'object' AND (fd.field_type::text = 'reference' OR (e.x ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT e.x ? 'url')) THEN jsonb_build_object('id', e.x -> 'id', 'type', e.x -> 'type') ELSE e.x END ORDER BY e.n) FROM jsonb_array_elements(val.v) WITH ORDINALITY AS e(x, n)), '[]'::jsonb) ELSE val.v END) AS allowed FROM field_definitions fd CROSS JOIN LATERAL (SELECT t.custom_fields -> fd.name AS v) val WHERE fd.name = ANY (ARRAY(SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(t.custom_fields) = 'object' THEN t.custom_fields ELSE '{}'::jsonb END))) AND fd.org_id = t.org_id AND fd.type_definition_id = t.type_definition_id AND fd.private = false AND fd.field_type <> 'user' AND fd.link_of_id IS NULL AND fd.group_of_id IS NULL) cf ON true WHERE t.state = 'published' AND t.archived_at IS NULL AND t.access_password_hash IS NULL AND t.audience = 'public'"
+      "up": "CREATE OR REPLACE VIEW kiln_reporting_v1.testimonials WITH (security_barrier = true) AS SELECT t.id, t.org_id, t.title, t.slug, t.locale, t.audience, t.state, t.published_at, t.inserted_at, t.updated_at, COALESCE(cf.allowed, '{}'::jsonb) AS custom_fields FROM testimonials t LEFT JOIN LATERAL (SELECT jsonb_object_agg(fd.name, CASE WHEN jsonb_typeof(val.v) = 'object' THEN CASE WHEN jsonb_typeof(val.v) = 'object' AND (fd.field_type::text = 'reference' OR (val.v ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT val.v ? 'url')) THEN jsonb_build_object('id', val.v -> 'id', 'type', val.v -> 'type') ELSE val.v END WHEN jsonb_typeof(val.v) = 'array' AND (fd.field_type::text = 'reference' OR val.v @? '$[*].slug') THEN COALESCE((SELECT jsonb_agg(CASE WHEN jsonb_typeof(e.x) = 'object' AND (fd.field_type::text = 'reference' OR (e.x ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT e.x ? 'url')) THEN jsonb_build_object('id', e.x -> 'id', 'type', e.x -> 'type') ELSE e.x END ORDER BY e.n) FROM jsonb_array_elements(val.v) WITH ORDINALITY AS e(x, n)), '[]'::jsonb) ELSE val.v END) AS allowed FROM field_definitions fd CROSS JOIN LATERAL (SELECT t.custom_fields -> fd.name AS v) val WHERE fd.name = ANY (ARRAY(SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(t.custom_fields) = 'object' THEN t.custom_fields ELSE '{}'::jsonb END))) AND fd.org_id = t.org_id AND fd.type_definition_id IS NULL AND fd.content_type = 'testimonial' AND fd.private = false AND fd.field_type <> 'user' AND fd.link_of_id IS NULL AND fd.group_of_id IS NULL) cf ON true WHERE t.state = 'published' AND t.archived_at IS NULL AND t.access_password_hash IS NULL AND t.audience = 'public'"
     },
     {
       "after_tables": [
@@ -1026,24 +1029,20 @@
         "type_definitions"
       ],
       "code?": false,
-      "down": "DROP VIEW IF EXISTS kiln_reporting_v1.entries_field_values",
+      "down": "DROP VIEW IF EXISTS kiln_reporting_v1.testimonials_field_values",
       "global?": false,
       "name": "reporting_field_values_view",
-      "up": "CREATE OR REPLACE VIEW kiln_reporting_v1.entries_field_values WITH (security_barrier = true) AS SELECT t.org_id, t.id AS record_id, td.name AS type_name, f.name AS field_name, f.field_type, f.multiple, CASE WHEN f.field_type = 'reference' AND f.multiple IS NOT TRUE AND jsonb_typeof(f.value) = 'object' THEN f.value ->> 'id' ELSE f.value #>> '{}' END AS value_text, f.value AS value_json FROM entries t LEFT JOIN type_definitions td ON td.id = t.type_definition_id AND td.org_id = t.org_id CROSS JOIN LATERAL (SELECT fd.name, fd.field_type::text AS field_type, fd.multiple, CASE WHEN jsonb_typeof(val.v) = 'object' THEN CASE WHEN jsonb_typeof(val.v) = 'object' AND (fd.field_type::text = 'reference' OR (val.v ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT val.v ? 'url')) THEN jsonb_build_object('id', val.v -> 'id', 'type', val.v -> 'type') ELSE val.v END WHEN jsonb_typeof(val.v) = 'array' AND (fd.field_type::text = 'reference' OR val.v @? '$[*].slug') THEN COALESCE((SELECT jsonb_agg(CASE WHEN jsonb_typeof(e.x) = 'object' AND (fd.field_type::text = 'reference' OR (e.x ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT e.x ? 'url')) THEN jsonb_build_object('id', e.x -> 'id', 'type', e.x -> 'type') ELSE e.x END ORDER BY e.n) FROM jsonb_array_elements(val.v) WITH ORDINALITY AS e(x, n)), '[]'::jsonb) ELSE val.v END AS value FROM field_definitions fd CROSS JOIN LATERAL (SELECT t.custom_fields -> fd.name AS v) val WHERE fd.name = ANY (ARRAY(SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(t.custom_fields) = 'object' THEN t.custom_fields ELSE '{}'::jsonb END))) AND fd.org_id = t.org_id AND fd.type_definition_id = t.type_definition_id AND fd.private = false AND fd.field_type <> 'user' AND fd.link_of_id IS NULL AND fd.group_of_id IS NULL) f WHERE t.state = 'published' AND t.archived_at IS NULL AND t.access_password_hash IS NULL AND t.audience = 'public'"
+      "up": "CREATE OR REPLACE VIEW kiln_reporting_v1.testimonials_field_values WITH (security_barrier = true) AS SELECT t.org_id, t.id AS record_id, 'testimonial'::text AS type_name, f.name AS field_name, f.field_type, f.multiple, CASE WHEN f.field_type = 'reference' AND f.multiple IS NOT TRUE AND jsonb_typeof(f.value) = 'object' THEN f.value ->> 'id' ELSE f.value #>> '{}' END AS value_text, f.value AS value_json FROM testimonials t CROSS JOIN LATERAL (SELECT fd.name, fd.field_type::text AS field_type, fd.multiple, CASE WHEN jsonb_typeof(val.v) = 'object' THEN CASE WHEN jsonb_typeof(val.v) = 'object' AND (fd.field_type::text = 'reference' OR (val.v ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT val.v ? 'url')) THEN jsonb_build_object('id', val.v -> 'id', 'type', val.v -> 'type') ELSE val.v END WHEN jsonb_typeof(val.v) = 'array' AND (fd.field_type::text = 'reference' OR val.v @? '$[*].slug') THEN COALESCE((SELECT jsonb_agg(CASE WHEN jsonb_typeof(e.x) = 'object' AND (fd.field_type::text = 'reference' OR (e.x ?& ARRAY['id', 'type', 'slug', 'title'] AND NOT e.x ? 'url')) THEN jsonb_build_object('id', e.x -> 'id', 'type', e.x -> 'type') ELSE e.x END ORDER BY e.n) FROM jsonb_array_elements(val.v) WITH ORDINALITY AS e(x, n)), '[]'::jsonb) ELSE val.v END AS value FROM field_definitions fd CROSS JOIN LATERAL (SELECT t.custom_fields -> fd.name AS v) val WHERE fd.name = ANY (ARRAY(SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(t.custom_fields) = 'object' THEN t.custom_fields ELSE '{}'::jsonb END))) AND fd.org_id = t.org_id AND fd.type_definition_id IS NULL AND fd.content_type = 'testimonial' AND fd.private = false AND fd.field_type <> 'user' AND fd.link_of_id IS NULL AND fd.group_of_id IS NULL) f WHERE t.state = 'published' AND t.archived_at IS NULL AND t.access_password_hash IS NULL AND t.audience = 'public'"
     }
   ],
   "has_create_action": true,
-  "hash": "A51C82741B51277918AA89206765BB5A46C27A5110889F65DE46331BE2478852",
+  "hash": "504533E8E5E7008332CDCB51D7381BCF428E75DACFFFDC385CA0C642EDEDB324",
   "identities": [
     {
       "all_tenants?": false,
       "base_filter": null,
-      "index_name": "entries_unique_slug_index",
+      "index_name": "testimonials_unique_slug_index",
       "keys": [
-        {
-          "type": "atom",
-          "value": "type_definition_id"
-        },
         {
           "type": "atom",
           "value": "slug"
@@ -1065,6 +1064,6 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "entries",
+  "table": "testimonials",
   "temporal": null
 }
