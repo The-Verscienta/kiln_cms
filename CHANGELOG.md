@@ -106,7 +106,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2272](https://github.com/The-Verscienta/kiln_cms/issues/2272) · [long form](docs/changelog/unreleased.md#plugin-plug-routes))
 
 - **GraphQL reads admin-defined custom fields typed by kind (`customFloat(name:)`, `fields(names:)`), and `GET /api/schema?format=typescript-graphql` exports ready fragments and types; `swift-graphql` and `kotlin-graphql` do the same for native apps.**
-  ([long form](docs/changelog/unreleased.md#graphql-typed-custom-fields))
+  ([#2361](https://github.com/The-Verscienta/kiln_cms/pull/2361) · [long form](docs/changelog/unreleased.md#graphql-typed-custom-fields))
 
 - **Drafts-only API keys (`access: draft_write`): a headless service can create and edit its own drafts
   and never publish, delete or touch live content. Drafts record the key and an optional `X-Kiln-On-Behalf-Of` label.**
