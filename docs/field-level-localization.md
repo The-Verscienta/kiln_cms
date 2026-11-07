@@ -272,6 +272,71 @@ public `inherited_fields` calculation that neither serves unless asked for,
 and XLIFF leaves shared fields out.
 
 
+### Making core block fields per-locale (#2270)
+
+A site cannot edit the core `image`, `video` and `audio` blocks to add
+`localized:`, so it opts them in from config, keyed by the block's type string:
+
+```elixir
+config :kiln_cms, :i18n,
+  block_fields: %{
+    "image" => [shared: [:media_id, :url], fallback: [:alt, :caption]]
+  }
+```
+
+The entry is the same `shared:` / `fallback:` keyword list `field_localization:`
+takes, and the modes mean what they do everywhere else (see the table in
+[localization-workflows.md](localization-workflows.md)). Without a
+`block_fields:` key nothing changes: every core block field stays per locale.
+
+- **Which blocks.** Any registered block type, core or plugin, except
+  `gallery`, `fragment`, `rich_text`, `columns` and `file`: the editor cannot
+  lock or placeholder a gallery's items, a fragment's reference, rich text, a
+  column grid or a file attachment. The fields the media blocks offer are
+  `image` (`url`, `alt`, `caption`, `media_id`), `video` (`media_id`, `url`,
+  `title`, `caption`, `poster_media_id`, `poster_url`, `captions_media_id`,
+  `captions_label`, `captions_lang`, ...) and `audio` (`media_id`, `url`,
+  `title`, `caption`, ...).
+- **Invalid entries are ignored, not fatal.** An unknown or unconfigurable
+  block type, a field the block does not have, a field named both shared and
+  fallback, a key other than `shared:` / `fallback:`, or a value that is not a
+  list of atoms drops that block's entry (the other entries still apply) and
+  logs one warning for each distinct config, not one per request. A
+  `block_fields:` that is not a map is ignored whole, with one warning.
+- **Merging with the block's own declaration.** If a block already declares
+  `localized:` on a field, its declaration wins; the config only adds fields
+  the block leaves per-locale. A field named in both lists of the config is an
+  error (above).
+
+In the editor, on a translation, a `:shared` image, video or audio field is
+read-only under the usual *Shared: edited in the EN version* note, and its
+*Choose from library* / *Choose video* / *Choose audio* buttons are disabled; a
+`:fallback` field shows the inherited value as its placeholder. The server
+refuses the pick too, since a disabled button is not a boundary.
+
+Things to know before you switch it on:
+
+- **Enabling `:shared` overwrites existing translations.** The next time the
+  source variant publishes, the shared values are copied over every
+  translation's own, and from then on edits to them on a translation are
+  refused ([What happens, and when](localization-workflows.md#what-happens-and-when)).
+  A translation that already has its own image loses it. Check before
+  enabling, and do it for fields no translator has customised.
+- **Share `media_id` and `url` together.** The picker writes both. Sharing only
+  one leaves the other free to drift, and a translation can show one image
+  with another's media record.
+- **A `:fallback` `alt` next to an unshared `url` can mismatch.** A
+  translation with its own image and an empty `alt` would read the source
+  image's description. Fall back `alt` and `caption` only when the image is
+  shared.
+- **Nested blocks are limited.** An image inside a `columns` block exposes
+  only `url` and `alt` in the editor, so a `:shared` `media_id` or `caption`
+  there is not shown as locked.
+- **Applies per type, to every document.** There is no per-document switch.
+
+Roll-back is safe: removing the key returns the fields to per-locale, and
+values already copied stay as ordinary translation values. No migration.
+
 ## Tags and related content
 
 Built in 1.7 ([#1859](https://github.com/The-Verscienta/kiln_cms/issues/1859)).

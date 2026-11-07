@@ -52,7 +52,7 @@ mutation API. They grant nothing — every route is still enforced by the Ash
 policies and the API key's access scope — but an anonymous stranger has no need
 of the map. An API key is different: only an admin can mint one, so its holder
 is an integration the site chose, and generating a client against the site's
-own schema is exactly what it needs. Any key works, `read` or `read_write`. A
+own schema is exactly what it needs. Any key works, `read`, `read_write` or `draft_write`. A
 user JWT does not — open registration hands those to anyone.
 
 ```bash
@@ -98,7 +98,8 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Provenance** | `GET /api/provenance/verify/:type/:slug`, `GET /api/provenance/:type/:slug`, `…/verify`, `GET /api/provenance/public-key` | Whether an artifact is `verified`, `tampered` or `unsigned`, and the signed manifests behind the answer. On by default since 1.7; 404 when an operator switches provenance off. | [provenance.md](provenance.md) |
 | **Locales** | `GET /api/locales` | Configured content locales, the default, and each locale's fallback chain. | [§ Locale discovery](#locale-discovery), [§ Locale fallback](#locale-fallback) |
 | **Schema** | `GET /api/schema` | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
-| **Media upload** | `POST /api/media`, `POST /api/media/import-url`, `/api/media/uploads[/complete]` | Upload a file, import one from a public URL, or send a large one straight to object storage; metadata edits ride the JSON:API `PATCH`. `read_write` key on an editor account. | [§ Uploading media](#uploading-media) |
+| **Media upload** | `POST /api/media`, `POST /api/media/import-url`, `/api/media/uploads[/complete]` | Upload a file, import one from a public URL, or send a large one straight to object storage; metadata edits ride the JSON:API `PATCH`. `read_write` key on an editor account (a `draft_write` key is refused). | [§ Uploading media](#uploading-media) |
+| **Key rotation** | `POST /api/keys/rotate` | A drafts-only key with a self-rotation window swaps itself for a fresh one; the old key is revoked. | [headless-consumer-guide.md](headless-consumer-guide.md#keeping-the-key-alive-self-rotation) |
 | **MCP** | `/mcp` | Model Context Protocol server for LLM authoring clients; **API key required**. | [mcp.md](mcp.md) |
 | **Forms** | `GET /api/forms/:slug`, `POST /api/forms/:slug`, `<script src="…/embed.js">` | A form's schema and JSON submission, or an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
 | **Visual editing** | `<script src="…/bridge.js">` | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
@@ -271,6 +272,13 @@ curl -s 'http://localhost:4000/api/json/posts' \
     authoring is draft-only). See [json-api.md](json-api.md) → "Writing",
     [headless-graphql-api.md](headless-graphql-api.md) → "Mutations", and
     [mcp.md](mcp.md).
+  - **Draft write** (`draft_write`, #2273): for a headless service that submits
+    content for a person to review. It may create drafts and edit **its own**
+    drafts while they are drafts, and nothing else (no transitions, deletes,
+    tags, categories, links or media), whatever its owner's role. Minted on a
+    viewer-tier service account with a short lifetime. A create may carry
+    `X-Kiln-On-Behalf-Of`, stored as provenance, never authorization. See
+    [headless-consumer-guide.md](headless-consumer-guide.md#submitting-drafts-from-your-app-the-draft_write-key).
 - **`tag_ids` replaces, it doesn't merge** (#521): sending it on a content write
   overwrites the *entire* tag set, so a partial list detaches every tag not
   named. To attach/detach a subset instead, use `add_tag_ids`/`remove_tag_ids`
@@ -280,6 +288,10 @@ curl -s 'http://localhost:4000/api/json/posts' \
   and [mcp.md](mcp.md) → "Tools".
 - Keys always **expire** and can be **revoked** immediately from the admin UI; an
   expired/revoked key returns **401**.
+- A **drafts-only** (`draft_write`) key minted with a self-rotation window can
+  renew itself: `POST /api/keys/rotate` with the key as the bearer returns a
+  fresh key of the same account, scope and name and revokes the old one. See
+  [headless-consumer-guide.md](headless-consumer-guide.md#keeping-the-key-alive-self-rotation).
 - Works on JSON:API (`/api/json`), GraphQL (`/gql`, incl. the subscription
   WebSocket via the `token` connection param), and MCP (`/mcp`).
 
@@ -312,6 +324,10 @@ surfaces — see [headless-consumer-guide.md](headless-consumer-guide.md) →
 ## Core content endpoints
 
 Full filtering / sorting / pagination reference: **[json-api.md](json-api.md)**.
+Admin-defined custom fields filter and sort on the index routes either as
+`custom_filter[price][gt]=10` / `custom_sort=price` (the stable form) or, when
+no built-in has that name, as `filter[price][gt]=10` / `sort=title,price`; see
+[json-api.md](json-api.md#naming-a-custom-field-like-a-column).
 A quick map:
 
 | Resource  | Collection                  | Single record                   | Extra reads                                   |
@@ -711,6 +727,12 @@ your credential as the actor and the request host's org as the tenant:
 | Admin; editor whose read scope covers the type | ✅ | ✅ with a JWT or a **`:read_write`** key |
 | Same, with a **read-only** key | ✅ | `403` — refused by the content policies |
 | Viewer; editor whose `readable_types` leave the type out | `404` | `404` |
+| **`:draft_write`** key on its (viewer-tier) service account | `404`, its own drafts included | `404` |
+| **`:draft_write`** key whose owner was later promoted | as that role | `403` — the key's draft-only bound outlives the promotion |
+
+A `:draft_write` key's policies do let it read the versions of drafts it
+authored (autosave needs that), but only as a per-row filter, and this surface
+serves a document's whole history or nothing, so the revisions API refuses it.
 
 Anything the caller may not read history for is a `404`, never a `403`, whether
 or not the document exists — a document in another org, a document of a
@@ -978,6 +1000,7 @@ curl -s http://localhost:4000/api/schema | jq '.["$defs"] | keys'
 |-----------|--------|
 | `?type=post,page` | Only these content types. An unknown name is a `400`, not a silent full export. |
 | `?blocks=only` | The block union alone — no content types, no database read. |
+| `?format=json\|typescript\|typescript-graphql` | `json` (default) is this document. `typescript` is the same types as a `.d.ts`; `typescript-graphql` is a `.ts` module that adds a GraphQL fragment per type for the typed custom-field readers ([headless-graphql-api.md](headless-graphql-api.md#generate-types-and-fragments-for-your-site)). Any other value is a `400` with code `invalid_format`. |
 
 It is **per site**: dynamic content types and custom fields are
 organization-scoped, so the document is built for the org the request host

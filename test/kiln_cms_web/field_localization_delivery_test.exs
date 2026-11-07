@@ -313,12 +313,14 @@ defmodule KilnCMSWeb.FieldLocalizationDeliveryTest do
       conn = json_api("/api/json/pages/by-slug/#{fr.slug}?locale=fr")
       attributes = Jason.decode!(conn.resp_body)["data"]["attributes"]
 
-      # `id` is the resource object's own member, not an attribute.
+      # `id` is the resource object's own member, not an attribute. The three
+      # draft-write provenance fields (#2273) are public attributes behind field
+      # policies, so an anonymous read never carries them.
       public =
         CMS.Page
         |> Ash.Resource.Info.public_attributes()
         |> Enum.map(&to_string(&1.name))
-        |> Kernel.--(["id"])
+        |> Kernel.--(["id", "created_via_key_id", "created_via_key_name", "on_behalf_of"])
         |> Enum.sort()
 
       assert attributes |> Map.keys() |> Enum.sort() == public

@@ -72,11 +72,21 @@ export interface RequestOptions {
 export interface ListOptions extends RequestOptions {
   /** Public attribute filters, encoded as `filter[field]=` / `filter[field][op]=`. */
   filter?: Filter;
-  /** Admin-defined custom fields, encoded as `custom_filter[field]=`. */
+  /**
+   * Admin-defined custom fields, encoded as `custom_filter[field]=`. The server
+   * also accepts a custom field's bare name in `filter` (`filter[price]`) when
+   * no built-in attribute has that name, but `customFilter` is the stable
+   * form: a later built-in with the same name would shadow `filter[price]`.
+   * The client keeps emitting `custom_filter` for custom fields.
+   */
   customFilter?: Filter;
   /** Sort fields; `-` prefix descends (e.g. `["-published_at", "title"]`). */
   sort?: string[];
-  /** Sort on admin-defined custom fields. */
+  /**
+   * Sort on admin-defined custom fields (`custom_sort`). The server also
+   * accepts a custom name in `sort` (`sort=-price`) provided custom names come
+   * last, but `customSort` is the stable form and has no ordering rule.
+   */
   customSort?: string[];
   /** Relationship paths to side-load (e.g. `["tags", "category"]`). */
   include?: string[];
@@ -102,10 +112,21 @@ export interface SearchOptions extends RequestOptions {
   locale?: string;
   /** Match content carrying any of these tag ids (facet argument). */
   tagIds?: string[];
-  /** Custom-field facets; compose with the search query. */
+  /**
+   * Custom-field facets (`custom_filter[...]`); compose with the search query.
+   * Prefer this over a bare custom name in `filter`; it is the stable form.
+   */
   customFilter?: Filter;
   /** Explicit sort overrides relevance (which degrades to the tiebreaker). */
   sort?: string[];
+  /**
+   * Sort on admin-defined custom fields (`custom_sort`, e.g. `["price",
+   * "-rating"]`). Precedence: `sort`, then `customSort`, then relevance. On
+   * semantic search a leading custom sort replaces distance ordering, so the
+   * vector index no longer serves the order (same as built-in `sort`). Not
+   * accepted by `autocomplete`.
+   */
+  customSort?: string[];
   /** `page[limit]`; the action caps its own maximum. */
   limit?: number;
   include?: string[];
@@ -672,6 +693,36 @@ export interface WriteOptions extends RequestOptions {
    * content type whose plural is irregular (`people` → `"person"`).
    */
   type?: string;
+}
+
+/** Options for `create()`: a write, plus who a draft is for. */
+export interface CreateOptions extends WriteOptions {
+  /**
+   * Sent as the `X-Kiln-On-Behalf-Of` header: an opaque label (typically your
+   * own user id) that Kiln stores on a draft created with a `:draft_write`
+   * API key, beside the key's id and name, so a reviewer sees who it was for
+   * (kiln_cms#2273; a server newer than 1.8). Stored only, never
+   * authorization; any other key's request ignores it. Omitted or `undefined`
+   * sends no header.
+   */
+  onBehalfOf?: string;
+}
+
+/**
+ * The provenance attributes Kiln records on content created with a
+ * `:draft_write` API key (kiln_cms#2273). They are returned only to an
+ * editor, an admin, or the key that created the record; every other reader's
+ * response simply lacks them, so each is optional. `null` on a record no
+ * `:draft_write` key created. Intersect with `Item`:
+ * `writer.create<Item & ContentProvenance>(…)`.
+ */
+export interface ContentProvenance {
+  /** The id of the `:draft_write` key that created the record. */
+  created_via_key_id?: string | null;
+  /** That key's name when it created the record. */
+  created_via_key_name?: string | null;
+  /** The `X-Kiln-On-Behalf-Of` label sent on the create, if any. */
+  on_behalf_of?: string | null;
 }
 
 // ── GraphQL ─────────────────────────────────────────────────────────────────

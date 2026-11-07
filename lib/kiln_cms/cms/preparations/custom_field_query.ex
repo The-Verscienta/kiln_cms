@@ -10,7 +10,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
     * `custom_filter` — `%{"price" => %{"gt" => "10"}, "color" => "red"}`;
       a bare value means equality, a map holds operators (`eq`, `not_eq`,
-      `gt`, `gte`, `lt`, `lte`, `in`, `ilike`, `null`). Conditions are ANDed.
+      `gt`, `gte`, `lt`, `lte`, `in`, `ilike`, `null`; `is_nil` is a
+      synonym of `null`). Conditions are ANDed.
     * `custom_sort` — comma-separated field names, `-` prefix for descending
       (`"-price,title"`), appended to any explicit `sort` so it wins over an
       action's *default* order but not over a caller's.
@@ -62,7 +63,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   alias Ash.Error.Query.InvalidArgument
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Relations
 
-  @operators ~w(eq not_eq gt gte lt lte in ilike null)
+  @operators ~w(eq not_eq gt gte lt lte in ilike null is_nil)
 
   @impl true
   def prepare(query, _opts, context) do
@@ -304,13 +305,20 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
        "is not a reference"}
   end
 
-  defp relation_or_condition(definition, op, raw, _ctx), do: condition(definition, op, raw)
+  defp relation_or_condition(definition, op, raw, _ctx),
+    do: condition(definition, normalize_op(op), raw)
+
+  # `is_nil` is the native `filter[x][is_nil]` spelling of `null`, accepted so
+  # the same predicate reads the same on a custom field (#2292). Resolved
+  # before the operator guards, so every clause below sees `null` only.
+  defp normalize_op("is_nil"), do: "null"
+  defp normalize_op(op), do: op
 
   defp link_conditions(parent, link, condition, ctx, targets) do
     label = "#{parent.name}.link.#{link.name}"
 
     Enum.reduce_while(condition, {:ok, []}, fn {op, raw}, {:ok, acc} ->
-      case link_condition(link, op, raw, label) do
+      case link_condition(link, normalize_op(op), raw, label) do
         {:ok, condition} ->
           {:cont, {:ok, [Relations.link(parent, condition, ctx, targets) | acc]}}
 

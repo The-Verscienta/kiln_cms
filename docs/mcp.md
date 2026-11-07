@@ -29,6 +29,15 @@ anonymous access; anything else is a `401`. Mint keys at `/editor/api-keys`
 | Read + write  | `:viewer`  | Reads only — the role has no authoring rights            |
 | Read + write  | `:editor`  | Author: create/update drafts, tag, submit for review     |
 | Read + write  | `:admin`   | As editor, plus edit any record its role could           |
+| Draft write   | `:viewer` service account | `create_*`; `update_*` of its **own drafts** only. No submit-for-review, no tags or categories, no publishing |
+
+A `draft_write` key (#2273) is for a headless app that submits content, not for
+an LLM author: it is refused on everything but creating drafts and editing the
+ones it authored, and that bound holds even if its owner is later promoted. The
+review, tag and category tools are not even listed for it. See the
+[consumer guide](headless-consumer-guide.md#submitting-drafts-from-your-app-the-draft_write-key).
+Over `/mcp` the `X-Kiln-On-Behalf-Of` header is not read, so a draft records the
+key but no `on_behalf_of` label; use JSON:API or GraphQL when you need one.
 
 **The recommended setup for an LLM author is a read + write key on a dedicated
 `:editor` account.** Its work lands as drafts and goes through `in_review`;

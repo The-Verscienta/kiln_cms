@@ -169,6 +169,7 @@ describe("per-type search", () => {
       tagIds: ["t1", "t2"],
       customFilter: { badge: "sale" },
       sort: ["-published_at"],
+      customSort: ["price", "-rating"],
       limit: 5,
       include: ["tags"],
       fields: { post: ["title"] },
@@ -182,9 +183,22 @@ describe("per-type search", () => {
     expect(params.getAll("tag_ids[]")).toEqual(["t1", "t2"]);
     expect(params.get("custom_filter[badge]")).toBe("sale");
     expect(params.get("sort")).toBe("-published_at");
+    expect(params.get("custom_sort")).toBe("price,-rating");
     expect(params.get("page[limit]")).toBe("5");
     expect(params.get("include")).toBe("tags");
     expect(params.get("fields[post]")).toBe("title");
+  });
+
+  it("semanticSearch forwards customSort, and omits it when unset", async () => {
+    const stub = stubFetch({ body: emptyDoc() });
+    const kiln = client(stub);
+
+    await kiln.semanticSearch("posts", "kiln", { customSort: ["-price"] });
+    expect(stub.calls[0]!.url.pathname).toBe("/api/json/posts/semantic-search/published");
+    expect(stub.calls[0]!.url.searchParams.get("custom_sort")).toBe("-price");
+
+    await kiln.semanticSearch("posts", "kiln");
+    expect(stub.calls[1]!.url.searchParams.has("custom_sort")).toBe(false);
   });
 
   it("published: false searches the base (draft-widened) route", async () => {

@@ -64,8 +64,39 @@ defmodule Kiln.PluginsTest do
 
     assert manifest.nav_items == 1
     assert manifest.admin_routes == 1
+    assert manifest.plug_routes == 0
     assert manifest.oban_queues == [fixture: 1]
     assert manifest.children == 1
+  end
+
+  test "manifests/0 counts a dependency plugin's plug routes (#2272)" do
+    manifest = Enum.find(Kiln.Plugins.manifests(), &(&1.module == KilnDepFixture.Plugin))
+
+    assert manifest.plug_routes == 6
+
+    assert {:forward, "/fixture-forward", KilnDepFixture.FeedRouter, []} in Kiln.Plugins.plug_routes()
+  end
+
+  describe "a plugin compiled against kiln_plugin before 1.4" do
+    # No `plug_routes/0` at all: the behaviour is implemented by hand, as a
+    # plugin built against the 1.3 package would be.
+    defmodule OldPlugin do
+      def name, do: "old"
+    end
+
+    test "contributes no plug routes, and does not crash the readers" do
+      assert Kiln.Plugins.PlugRoute.of(OldPlugin) == []
+      assert Kiln.Plugins.PlugRoute.of(NotLoadedAnywhere) == []
+    end
+
+    test "a plugin that never overrides the callback contributes none" do
+      defmodule DefaultsPlugin do
+        use Kiln.Plugin
+      end
+
+      assert DefaultsPlugin.plug_routes() == []
+      assert Kiln.Plugins.PlugRoute.of(DefaultsPlugin) == []
+    end
   end
 
   test "a metadata-free plugin reports nil metadata (use defaults)" do
@@ -89,6 +120,7 @@ defmodule Kiln.PluginsTest do
       assert output =~ "https://example.com/fixture-plugin"
       # Contribution summary is pluralized and omits zero-count kinds.
       assert output =~ "5 blocks, 4 field types, 1 image backend, 1 nav item, 1 admin route"
+      assert output =~ "6 plug routes"
     end
 
     test "the contribution summary counts every route kind" do
@@ -97,6 +129,8 @@ defmodule Kiln.PluginsTest do
       # surface is a public booking page must not read as contributing nothing.
       assert contributions(editor_routes: 1, public_routes: 2) ==
                "1 editor route, 2 public routes"
+
+      assert contributions(plug_routes: 1) == "1 plug route"
     end
 
     test "the contribution summary counts advisories and spam checks" do
@@ -139,6 +173,7 @@ defmodule Kiln.PluginsTest do
           admin_routes: 0,
           editor_routes: 0,
           public_routes: 0,
+          plug_routes: 0,
           oban_queues: [],
           children: 0
         },
@@ -345,8 +380,8 @@ defmodule Kiln.PluginsTest do
     # #1909: the core overrides `kiln_plugin` so a plugin's Hex requirement
     # converges on the bundled copy, and Mix then checks no requirement on it.
     test "reads each dependency's kiln_plugin requirement from the resolved graph" do
-      # The real one: sdk/fixtures/dep_plugin/mix.exs declares "~> 1.2".
-      assert {:kiln_dep_fixture, "~> 1.2"} in Mix.Tasks.Kiln.Plugins.Doctor.sdk_requirements(
+      # The real one: sdk/fixtures/dep_plugin/mix.exs declares "~> 1.4".
+      assert {:kiln_dep_fixture, "~> 1.4"} in Mix.Tasks.Kiln.Plugins.Doctor.sdk_requirements(
                Mix.Tasks.Kiln.Plugins.Doctor.declared_deps()
              )
 
@@ -376,6 +411,191 @@ defmodule Kiln.PluginsTest do
                Mix.Tasks.Kiln.Plugins.Doctor.sdk_requirement_problems("1.2.0", [{:c, "one"}])
 
       assert problem =~ ~s[c requires kiln_plugin "one" (not a valid version requirement)]
+    end
+
+    # #2272. `plug_route_problems/1` reads the real compiled router for the core
+    # roots, so these also pin that `/editor`, `/api`, `/gql` and `/mcp` are
+    # taken whatever the table says.
+    defmodule GoodRoutes do
+      use Kiln.Plugin
+
+      def plug_routes,
+        do: [
+          {:post, "/hooks/ping", Hooks, :create},
+          {:get, "/hooks/status", Hooks, :show},
+          {:forward, "/feeds", Hooks, []}
+        ]
+    end
+
+    defmodule MalformedRoutes do
+      use Kiln.Plugin
+
+      def plug_routes,
+        do: [
+          {:post, "no-slash", Hooks, :create},
+          {:fetch, "/hooks/x", Hooks, :create},
+          {:get, "/", Hooks, :index},
+          {:get, "/:slug/x", Hooks, :show},
+          {:forward, "/feeds/:id", Hooks, []},
+          {:get, "/hooks/f", Hooks, fn -> :nope end},
+          {:get, "/hooks/m", "NotAModule", :show},
+          :not_a_tuple
+        ]
+    end
+
+    defmodule ReservedRoutes do
+      use Kiln.Plugin
+
+      def plug_routes,
+        do: [
+          {:get, "/editor/hook", Hooks, :show},
+          {:get, "/api", Hooks, :show},
+          {:forward, "/gql", Hooks, []},
+          {:post, "/mcp/x", Hooks, :show},
+          # Not under /api: a different first segment that merely starts with it.
+          {:get, "/apiary/ok", Hooks, :show},
+          {:get, "/editorial", Hooks, :show}
+        ]
+    end
+
+    defmodule CoreCollision do
+      use Kiln.Plugin
+
+      def plug_routes,
+        do: [
+          {:get, "/up", Hooks, :show},
+          {:get, "/sitemap.xml", Hooks, :show}
+        ]
+    end
+
+    defmodule OverlapsGood do
+      use Kiln.Plugin
+
+      def plug_routes,
+        do: [
+          {:post, "/hooks/ping", Hooks, :create},
+          {:match, "/hooks/status", Hooks, :show},
+          {:get, "/feeds/rss", Hooks, :show},
+          {:get, "/hooks-extra", Hooks, :show}
+        ]
+    end
+
+    defmodule PublicOverlap do
+      use Kiln.Plugin
+      def plug_routes, do: [{:forward, "/book", Hooks, []}]
+    end
+
+    defmodule PublicBooking do
+      use Kiln.Plugin
+      def plug_routes, do: []
+      def public_routes, do: [{"/book/slots", Hooks.Live, :index}]
+    end
+
+    defp plug_problems(plugins), do: Mix.Tasks.Kiln.Plugins.Doctor.plug_route_problems(plugins)
+
+    test "plug routes: a valid set raises nothing" do
+      assert plug_problems([GoodRoutes]) == []
+      assert plug_problems([FixturePlugin, KilnDepFixture.Plugin]) == []
+    end
+
+    test "plug routes: names every malformed entry" do
+      problems = plug_problems([MalformedRoutes])
+
+      assert length(problems) == 8
+      assert Enum.all?(problems, &(&1 =~ "malformed_routes: plug route"))
+      assert Enum.any?(problems, &(&1 =~ "must be absolute"))
+      assert Enum.any?(problems, &(&1 =~ ":fetch"))
+      assert Enum.any?(problems, &(&1 =~ "no first segment"))
+      assert Enum.any?(problems, &(&1 =~ "starts with a parameter or wildcard"))
+      assert Enum.any?(problems, &(&1 =~ "must be static"))
+      assert Enum.any?(problems, &(&1 =~ "cannot be compiled"))
+      assert Enum.any?(problems, &(&1 =~ "is not a module"))
+      assert Enum.any?(problems, &(&1 =~ "is not {verb, path"))
+    end
+
+    test "plug routes: reserved roots are refused on segment boundaries" do
+      problems = plug_problems([ReservedRoutes])
+
+      for root <- ["/editor", "/api", "/gql", "/mcp"] do
+        assert Enum.any?(problems, &(&1 =~ "sits under #{root},")),
+               "expected #{root} to be refused in #{inspect(problems)}"
+      end
+
+      # /apiary and /editorial only start with a reserved root's letters.
+      assert length(problems) == 4
+    end
+
+    test "plug routes: a path a core route already owns is refused" do
+      assert [up, sitemap] = plug_problems([CoreCollision])
+
+      assert up =~ ~s("/up" sits under /up, which core routes already own)
+      assert sitemap =~ "sits under /sitemap.xml"
+    end
+
+    test "plug routes: the doctor reads the roots from the compiled router" do
+      # Not in the hard-coded reserved list; only the route table knows it.
+      refute "sitemap.xml" in Kiln.Plugins.PlugRoute.reserved_roots()
+      assert plug_problems([CoreCollision]) != []
+    end
+
+    test "plug routes: overlaps between plugins are named, on segment boundaries" do
+      problems = plug_problems([GoodRoutes, OverlapsGood])
+
+      assert Enum.any?(
+               problems,
+               &(&1 =~
+                   ~s(good_routes: plug route "/hooks/ping" overlaps overlaps_good's plug route "/hooks/ping"))
+             )
+
+      # :match is any method.
+      assert Enum.any?(
+               problems,
+               &(&1 =~ ~s("/hooks/status" overlaps overlaps_good's plug route "/hooks/status"))
+             )
+
+      # A forward owns everything below it.
+      assert Enum.any?(
+               problems,
+               &(&1 =~ ~s("/feeds" overlaps overlaps_good's plug route "/feeds/rss"))
+             )
+
+      # /hooks-extra shares letters with /hooks, not a segment.
+      refute Enum.any?(problems, &(&1 =~ "hooks-extra"))
+      assert length(problems) == 3
+    end
+
+    test "plug routes: a plugin's own duplicate is an overlap" do
+      defmodule Duplicate do
+        use Kiln.Plugin
+        def plug_routes, do: [{:get, "/dup/a", Hooks, :show}, {:get, "/dup/a", Hooks, :other}]
+      end
+
+      assert [problem] = plug_problems([Duplicate])
+      assert problem =~ "duplicate: plug route \"/dup/a\" overlaps duplicate's plug route"
+    end
+
+    test "plug routes: a public route under a plug route's path overlaps" do
+      assert [problem] = plug_problems([PublicOverlap, PublicBooking])
+      assert problem =~ ~s(plug route "/book" overlaps)
+      assert problem =~ ~s(public route "/book/slots")
+    end
+
+    test "plug routes: public routes alone are not this check's business" do
+      assert plug_problems([PublicBooking]) == []
+    end
+
+    test "plug routes: a plugin without the callback is skipped" do
+      assert plug_problems([Kiln.PluginsTest.OldPlugin]) == []
+    end
+
+    test "plug routes: the run fails with the problem listed" do
+      Application.put_env(:kiln_cms, :plugins, [FixturePlugin, ReservedRoutes])
+
+      assert_raise Mix.Error,
+                   ~r/reserved_routes: plug route "\/editor\/hook" sits under \/editor/,
+                   fn ->
+                     ExUnit.CaptureIO.capture_io(fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end)
+                   end
     end
 
     # A plugin that doesn't say what it does is a gap for operators, not a
