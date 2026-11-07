@@ -62,6 +62,7 @@ defmodule KilnCMS.Portability.Import do
   require Logger
 
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentCopy
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Slugs
   alias KilnCMS.Media.Ingest
@@ -878,6 +879,10 @@ defmodule KilnCMS.Portability.Import do
       |> put_present(:featured_image_id, featured_image_id(record, media))
       |> acceptable(record.kind, opts)
 
+    # An editor under per-custom-field grants (#2281) imports only the keys
+    # they could write by hand; the rest are left out and reported.
+    {attrs, withheld} = ContentCopy.import_attrs(attrs, record.kind, opts)
+
     case create_via_action(record.kind, attrs, opts) do
       {:ok, created} ->
         # Each step returns `{record, issues}`: a step that could not finish
@@ -891,6 +896,7 @@ defmodule KilnCMS.Portability.Import do
           |> maybe_restore_state(record, opts)
           |> restore_published_at(record, opts)
           |> reassign_author(record, opts)
+          |> note_withheld(withheld)
 
         {:created, created,
          %{
@@ -1033,6 +1039,12 @@ defmodule KilnCMS.Portability.Import do
   end
 
   defp maybe_publish({created, issues}, _record, _opts), do: {created, issues}
+
+  defp note_withheld({created, issues}, []), do: {created, issues}
+
+  defp note_withheld({created, issues}, withheld),
+    do:
+      {created, ["not imported, outside your field grant: #{Enum.join(withheld, ", ")}" | issues]}
 
   # One line for the report, and the same line in the log (which carries the
   # record id and runs on the server, where an operator reading the report is

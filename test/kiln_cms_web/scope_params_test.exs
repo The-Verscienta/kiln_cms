@@ -140,7 +140,69 @@ defmodule KilnCMSWeb.ScopeParamsTest do
       assert {:ok, normalized} = ScopeParams.normalize(params, ScopeParams.blank())
 
       assert Map.keys(normalized) |> Enum.sort() ==
-               ~w(editable_types field_grants name readable_types)
+               ~w(editable_types field_grants field_read_grants name readable_types)
+    end
+  end
+
+  describe "read grants (#2281)" do
+    defp read_rows(rows) do
+      rows
+      |> Enum.with_index()
+      |> Enum.reduce(
+        %{"grant_read_mode" => %{}, "grant_type" => %{}, "grant_read_fields" => %{}},
+        fn {{key, mode, fields}, index}, acc ->
+          index = to_string(index)
+
+          acc
+          |> put_in(["grant_read_mode", index], mode)
+          |> put_in(["grant_type", index], key)
+          |> put_read_fields(index, fields)
+        end
+      )
+    end
+
+    defp put_read_fields(acc, _index, nil), do: acc
+
+    defp put_read_fields(acc, index, fields),
+      do: put_in(acc, ["grant_read_fields", index], fields)
+
+    @read_stored Map.put(@stored, :field_read_grants, %{
+                   "post" => ["custom_fields.secret"],
+                   "ghost" => []
+                 })
+
+    test "the three modes store three shapes, other keys pass through" do
+      params =
+        read_rows([
+          {"post", "none", nil},
+          {"page", "only", ["", "custom_fields.pin"]},
+          {"ghost", "any", nil}
+        ])
+
+      assert {:ok, %{"field_read_grants" => grants}} = ScopeParams.normalize(params, @read_stored)
+      assert grants == %{"post" => [], "page" => ["custom_fields.pin"]}
+    end
+
+    test "Only with nothing ticked is refused under its own key" do
+      params = read_rows([{"post", "only", [""]}])
+
+      assert {:error, %{{:read_grant, "post"} => :none_picked}} =
+               ScopeParams.normalize(params, @read_stored)
+    end
+
+    test "a post without read modes leaves the stored grants alone" do
+      assert {:ok, %{"field_read_grants" => grants}} =
+               ScopeParams.normalize(%{"field_read_grants" => "{}"}, @read_stored)
+
+      assert grants == @read_stored.field_read_grants
+    end
+
+    test "the same set keeps the stored list verbatim" do
+      stored = Map.put(@stored, :field_read_grants, %{"post" => ["b", "a"]})
+      params = read_rows([{"post", "only", ["a", "b"]}])
+
+      assert {:ok, %{"field_read_grants" => %{"post" => ["b", "a"]}}} =
+               ScopeParams.normalize(params, stored)
     end
   end
 

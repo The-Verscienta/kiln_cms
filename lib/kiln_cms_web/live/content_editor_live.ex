@@ -39,6 +39,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldDisplay
+  alias KilnCMS.CMS.HiddenFields
   alias KilnCMS.CMS.Mentions
   alias KilnCMS.CMS.PreviewToken
   alias KilnCMS.CMS.ReverseFields
@@ -252,8 +253,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
     actor = socket.assigns.current_user
     org = socket.assigns.current_org
     id = record.id
-    field_definitions = field_definitions(kind, actor, org)
     content_type = ContentTypes.get!(kind, org)
+
+    # A private field the editor's role may not read is not rendered (nor
+    # posted); one it may read but not change renders read-only (#2281).
+    all_definitions = field_definitions(kind, actor, org)
+
+    {field_definitions, read_only_fields} =
+      HiddenFields.console_access(actor, org, content_type, all_definitions)
+
+    hidden_fields =
+      for %{name: name} <- all_definitions -- field_definitions, do: name
 
     topic = Presence.topic(kind, id)
 
@@ -615,6 +625,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:tag_sections_seen, MapSet.new())
     |> assign(:audiences, audience_options())
     |> assign(:field_definitions, field_definitions)
+    |> assign(:read_only_fields, read_only_fields)
+    |> assign(:hidden_fields, hidden_fields)
     # Who a `:user` field may name (#2044); read only when the type has one.
     |> assign(:site_people, site_people(org, field_definitions))
     # Terms already in use on an open-vocabulary multiple select, which its
@@ -5139,7 +5151,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
            record
            |> WorkingCopy.custom_field_changes()
            |> Enum.reject(fn entry ->
-             Enum.any?(definitions, &(&1.name == entry.key and &1.field_type == :computed))
+             entry.key in Map.get(socket.assigns, :hidden_fields, []) or
+               Enum.any?(definitions, &(&1.name == entry.key and &1.field_type == :computed))
            end) do
       diff = %VersionDiff{
         fields: [%VersionDiff.Field{name: :custom_fields, status: :changed, entries: entries}]
@@ -7851,6 +7864,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <KilnCMSWeb.ContentEditor.CustomFieldsPanel.custom_fields_panel
               form={@form}
               field_definitions={@field_definitions}
+              read_only={@read_only_fields}
               localization={@localization}
               kind={@kind}
               media={@media}

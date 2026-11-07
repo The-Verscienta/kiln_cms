@@ -525,6 +525,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # A private field (#2044) is a plain top-level type, and nothing copies
     # its value somewhere public.
     validate KilnCMS.CMS.Validations.PrivateField
+    validate KilnCMS.CMS.Validations.ReadGrantedStaysPrivate, on: :update
   end
 
   # Multi-tenancy (epic #336): a field belongs to the same site as the content

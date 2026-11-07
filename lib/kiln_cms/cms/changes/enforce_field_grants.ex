@@ -27,12 +27,19 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
       (documented in docs/granular-rbac.md).
     * Creates are ungoverned: authoring a *new* document is gated by
       `editable_types`; field grants refine stewardship of existing content.
+      (The exception is `Changes.EnforceCustomFieldGrants`: a grant holding
+      any `custom_fields.*` entry also holds the editor to those keys on a
+      create, and a hidden private field cannot be written on one.)
+    * `custom_fields` is judged here only for the all-or-nothing grant. Once
+      the grant lists a `custom_fields.*` entry, `EnforceCustomFieldGrants`
+      judges the keys the editor actually changed instead (#2281).
     * Admins (and system/actor-less writes) are exempt, mirroring the policy
       bypass.
   """
   use Ash.Resource.Change
 
   alias KilnCMS.Accounts.Scoping
+  alias KilnCMS.CMS.FieldAccess
   alias KilnCMS.CMS.WorkingCopy
 
   @impl true
@@ -72,10 +79,15 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
     |> maybe_block_tree_violation(allowed)
   end
 
+  # Per-custom-field entries (`custom_fields.<name>`, #2281) move the judgement
+  # of `custom_fields` to `Changes.EnforceCustomFieldGrants`, which compares the
+  # keys the editor supplied. Without any, the bare `custom_fields` key is the
+  # all-or-nothing grant it always was.
   defp violation?(changeset, attr, allowed) do
     supplied?(changeset.params, attr) and
       changing?(changeset, attr) and
-      grant_name(attr) not in allowed
+      grant_name(attr) not in allowed and
+      not (attr == :custom_fields and FieldAccess.per_key?(allowed))
   end
 
   # The editing verbs an editor reaches from the editor UI: `:autosave` inherits
@@ -92,7 +104,11 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
   Built from the same `accept` lists and the same `grant_name/1` mapping the
   check above compares against, so a name offered here is one enforcement
   recognizes: `working_title`/`working_blocks` collapse into `title`/`blocks`,
-  and `custom_fields` is a single name (there are no per-custom-field grants).
+  and `custom_fields` is a single name. Per-custom-field entries
+  (`custom_fields.<name>`, `custom_fields.<group>.<sub>`, #2281) are written
+  against the type's `FieldDefinition`s and judged by
+  `Changes.EnforceCustomFieldGrants`; the team UI's picker offers them from the
+  definitions, not from this list.
   `type_definition_id` is left out (a dynamic entry never changes type through
   the editor), and so is `excerpt` for a dynamic type without one. Ordered
   title, blocks, then the rest in accept order.

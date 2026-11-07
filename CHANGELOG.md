@@ -76,7 +76,15 @@ Every summary line below that was shortened links to its own entry there.
   on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
   ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
 
+- **Overlays: run `mix ash.codegen`, commit the migration and run `mix ash.migrate`. Users, memberships and roles gain a `field_read_grants` column.**
+  Additive (`NOT NULL DEFAULT '{}'`). Rolling the pin back is safe for data, but an older release ignores read grants, so a private field you restricted shows to editors again.
+  ([long form](docs/changelog/unreleased.md#custom-field-grants-upgrade))
+
 ### Added
+
+- **Roles and members can be granted individual custom fields, and private custom fields can be hidden from some editors.**
+  New `custom_fields.<name>` grant keys and a `field_read_grants` axis; set both on `/editor/team`. Guide: [docs/granular-rbac.md](docs/granular-rbac.md#per-custom-field-grants-and-read-restrictions).
+  ([long form](docs/changelog/unreleased.md#custom-field-grants))
 
 - **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
   A wrong operand type is a schema error; `contains` and `startsWith` (case-insensitive, literal) also work in `customFilter`.

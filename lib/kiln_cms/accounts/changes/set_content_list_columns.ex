@@ -27,6 +27,7 @@ defmodule KilnCMS.Accounts.Changes.SetContentListColumns do
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.HiddenFields
   alias KilnCMS.CMS.ListFields
   alias KilnCMS.Repo
 
@@ -91,7 +92,12 @@ defmodule KilnCMS.Accounts.Changes.SetContentListColumns do
   defp check_names(actor, org_id, descriptor, names) do
     known =
       actor
-      |> ListFields.readable_fields(org_id, definitions(actor, org_id, descriptor), true)
+      |> HiddenFields.visible_definitions(
+        org_id,
+        descriptor,
+        definitions(actor, org_id, descriptor)
+      )
+      |> then(&ListFields.readable_fields(actor, org_id, &1, true))
       |> MapSet.new(& &1.name)
 
     if Enum.all?(names, &MapSet.member?(known, &1)),
