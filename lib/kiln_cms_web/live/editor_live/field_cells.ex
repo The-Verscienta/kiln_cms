@@ -19,7 +19,9 @@ defmodule KilnCMSWeb.EditorLive.FieldCells do
     * **select** shows the option's label, **media** its alt text or file name,
       **boolean** yes/no; the rest print as stored.
 
-  `labels/5` builds the lookup, `cell/3` reads it. A caller that fetches
+  `labels/5` builds the lookup; `value/3` resolves a cell to a typed value from
+  it, `cell/3` formats that for the screen (shortened, "—" for blank, localised
+  Yes/No) and `csv_value/1` / `json_value/2` for the content export. A caller that fetches
   another page passes the previous lookup so the roster is not read again.
   """
   use Gettext, backend: KilnCMSWeb.Gettext
@@ -100,56 +102,117 @@ defmodule KilnCMSWeb.EditorLive.FieldCells do
 
   def custom_fields(_record), do: nil
 
+  @typedoc """
+  What `value/3` resolves a cell to, before anyone formats it: `nil` (blank),
+  a number, a boolean, a string, `%{id:, label:}` (a reference the actor may
+  read), `%{file:, alt:}` (media), or `:unavailable` (a target, person or file
+  that cannot be shown). The list formats it for the screen (`cell/3`); the
+  content export writes it as CSV or JSON (`csv_value/1`, `json_value/2`).
+  """
+  @type typed ::
+          nil
+          | number()
+          | boolean()
+          | String.t()
+          | :unavailable
+          | %{id: String.t(), label: String.t()}
+          | %{file: String.t() | nil, alt: String.t() | nil}
+
   @doc "The text of `definition`'s cell on a record whose custom fields are `fields`."
   @spec cell(labels(), struct(), map()) :: String.t()
   def cell(labels, definition, fields) do
+    case value(labels, definition, fields) do
+      nil -> "—"
+      typed -> typed |> display(definition) |> truncate()
+    end
+  end
+
+  @doc """
+  The typed value of `definition`'s field on a record whose custom fields are
+  `fields`: the one place that decides what a stored value means, so the list,
+  the CSV and the JSON cannot disagree about who may see a reference target.
+  """
+  @spec value(labels(), struct(), map()) :: typed()
+  def value(labels, definition, fields) do
     case Map.get(fields, definition.name) do
-      value when value in [nil, ""] -> "—"
-      value -> labels |> render(definition, value) |> truncate()
+      value when value in [nil, ""] -> nil
+      value -> resolve(labels, definition, value)
     end
   end
 
-  defp render(labels, %{field_type: :reference}, value) do
-    case value do
-      %{"id" => id} when is_binary(id) -> Map.get(labels.refs, id) || unavailable()
-      _other -> unavailable()
+  defp resolve(labels, %{field_type: :reference}, value) do
+    with %{"id" => id} when is_binary(id) <- value,
+         label when is_binary(label) <- Map.get(labels.refs, id) do
+      %{id: id, label: label}
+    else
+      _other -> :unavailable
     end
   end
 
-  defp render(labels, %{field_type: :user}, value) when is_binary(value),
-    do: Map.get(labels.people || %{}, value) || unavailable()
+  defp resolve(labels, %{field_type: :user}, value) when is_binary(value),
+    do: Map.get(labels.people || %{}, value) || :unavailable
 
-  defp render(_labels, %{field_type: :user}, _value), do: unavailable()
+  defp resolve(_labels, %{field_type: :user}, _value), do: :unavailable
 
-  defp render(_labels, %{field_type: :select} = definition, value) when is_binary(value),
+  defp resolve(_labels, %{field_type: :select}, value) when is_binary(value), do: value
+
+  defp resolve(_labels, %{field_type: :media}, %{"url" => url} = media) do
+    alt = media["alt"]
+    %{file: file_name(url), alt: if(is_binary(alt) and alt != "", do: alt)}
+  end
+
+  defp resolve(_labels, %{field_type: :media}, _value), do: :unavailable
+
+  defp resolve(_labels, _definition, value) when is_binary(value), do: value
+  defp resolve(_labels, _definition, value) when is_number(value), do: value
+  defp resolve(_labels, _definition, value) when is_boolean(value), do: value
+  defp resolve(_labels, _definition, _value), do: nil
+
+  # The screen's text for a typed value.
+  defp display(:unavailable, _definition), do: unavailable()
+  defp display(true, _definition), do: gettext("Yes")
+  defp display(false, _definition), do: gettext("No")
+  defp display(%{id: _id, label: label}, _definition), do: label
+  defp display(%{file: file, alt: alt}, _definition), do: alt || file || unavailable()
+
+  defp display(value, %{field_type: :select} = definition) when is_binary(value),
     do: FieldDefinition.option_label(definition, value)
 
-  defp render(_labels, %{field_type: :boolean}, true), do: gettext("Yes")
-  defp render(_labels, %{field_type: :boolean}, false), do: gettext("No")
+  defp display(value, _definition) when is_binary(value), do: value
+  defp display(value, _definition) when is_number(value), do: to_string(value)
 
-  defp render(_labels, %{field_type: :media}, %{"url" => url} = media) do
-    case media["alt"] do
-      alt when is_binary(alt) and alt != "" -> alt
-      _none -> file_name(url)
-    end
-  end
+  @doc """
+  The typed value as one CSV cell: plain numbers stay numbers (so a negative
+  one is not turned into text by the formula guard), booleans are `true` /
+  `false`, a reference is its readable label, media its file name, and
+  anything that cannot be shown is "Unavailable".
+  """
+  @spec csv_value(typed()) :: nil | number() | boolean() | String.t()
+  def csv_value(%{id: _id, label: label}), do: label
+  def csv_value(%{file: file}), do: file || unavailable()
+  def csv_value(:unavailable), do: unavailable()
+  def csv_value(value), do: value
 
-  defp render(_labels, %{field_type: :media}, _value), do: unavailable()
+  @doc """
+  The typed value for JSON: a reference is `%{id, label}` and one that cannot
+  be shown is `%{id: nil, label: "Unavailable"}` (never the stored snapshot's
+  id), media is its file name, the rest as `csv_value/1`.
+  """
+  @spec json_value(typed(), struct()) :: term()
+  def json_value(:unavailable, %{field_type: :reference}),
+    do: %{id: nil, label: unavailable()}
 
-  defp render(_labels, _definition, value) when is_binary(value), do: value
-  defp render(_labels, _definition, value) when is_number(value), do: to_string(value)
-  defp render(_labels, _definition, true), do: gettext("Yes")
-  defp render(_labels, _definition, false), do: gettext("No")
-  defp render(_labels, _definition, _value), do: "—"
+  def json_value(%{id: _id, label: _label} = reference, _definition), do: reference
+  def json_value(typed, _definition), do: csv_value(typed)
 
   defp file_name(url) when is_binary(url) do
     case url |> URI.parse() |> Map.get(:path) |> to_string() |> Path.basename() do
-      "" -> unavailable()
+      "" -> nil
       name -> name
     end
   end
 
-  defp file_name(_url), do: unavailable()
+  defp file_name(_url), do: nil
 
   defp unavailable, do: gettext("Unavailable")
 

@@ -546,6 +546,164 @@ conditions into the read arguments `custom_filter` / `custom_sort` of
 `count!/2` pass them through the `arguments:` option, and `count!/2` accepts a
 `limit` in `query:` to bound a count.
 
+### Export the content list as CSV or JSON
+
+Editors and admins can download what the content list (`/editor`) shows, for a
+spreadsheet or a script, as CSV or JSON. The download holds the rows the list
+would show for the same filters, so there is nothing new to learn about which
+rows are in it.
+
+1. Open **Content** (`/editor`) and set the list up as you want it: choose a
+   content type, a status, a search, field conditions or a field sort. To
+   include custom-field columns, choose one content type and tick them under
+   **Columns** first (see "Show custom fields on the content list" above).
+2. In the header bar click **Export**. The panel reads *Export 214 matching*
+   (the number of rows the download will hold) and *Exports the columns shown
+   in the list.*
+3. Click **Download CSV** or **Download JSON**. The browser saves
+   `content-<type>-<date>.csv` (or `.json`; `content-all-…` for all types).
+4. To download only some rows, tick them in the list and click **Export
+   selected** in the bar that appears. That file is always CSV.
+
+If the panel reads *More than 10,000 rows — narrow the list first*, add a
+filter; the download would be refused.
+
+**What is in the file.**
+
+- Always, in this order: `id`, `type`, `title`, `slug`, `status`, `locale`,
+  `updated_at` (ISO 8601).
+- Then the custom fields you chose under **Columns** for that content type
+  (the first four, as the list shows them), headed by the field's name. A
+  field named like one of the seven above is headed `fields.<name>`. With
+  "All types" on a site with several types there are no field columns.
+- In JSON the file is one array; each record is an object with the seven keys
+  and a `fields` object holding the field columns.
+- Nothing else is exported: no body, blocks or translations.
+- The columns are your saved ones, never taken from the link, so a link
+  cannot widen what a download holds.
+
+**Which rows.** The types you can author, the same as the list (a type you can
+read but not author is not listed and cannot be exported; asking for it gives
+*You cannot export that content type.*). Every read runs as you, so a record
+you cannot read is absent. With "All types" the types are exported one after
+another, a type at a time, not merged into one order as the list does. The
+list's status, search, locale and other filters, its field conditions (`cf`)
+and its field sort carry over. A `cf` condition on a private field is accepted
+for an editor even when that column is not exported, as in the list.
+
+**Export selected** ignores every filter except the type: a selection made
+before you changed a filter is not narrowed by it. It takes at most 100 rows
+(the ids travel in the address); above that the button is disabled and says
+*Select at most 100 rows to export.* Ids that do not exist, or that you
+cannot read, are simply missing from the file.
+
+**Private fields.** Private fields, and every user field (a user field is
+always private), are left out unless you tick **Include private fields** in
+the Export panel. The box appears only when the type has such a field you
+could show as a column. Ticking it changes the download links; it does not
+change the list.
+
+**What a cell holds.** The file is data, not a copy of the screen, so some
+values differ from the on-screen text:
+
+| Field | CSV | JSON |
+| --- | --- | --- |
+| number | the number | a number |
+| boolean | `true` / `false` (not Yes / No) | `true` / `false` |
+| select | the option's stored value, not its label | the same |
+| media | the file name (not the alt text) | the file name |
+| reference | the target's title as you can read it | `{"id": "…", "label": "…"}` |
+| user | the person's name, never the email | the name |
+| unreadable or deleted target | `Unavailable` | `{"id": null, "label": "Unavailable"}` for a reference; `Unavailable` otherwise |
+| empty | an empty cell | `null` |
+
+The title saved inside a reference field is never written, so a download
+cannot show a title the list would hide. Long values are not cut at 80
+characters.
+
+**Limits.**
+
+- **10,000 rows.** The rows are counted first; over the limit the answer is
+  HTTP 413 with *This export has more than 10,000 rows. Narrow the list with a
+  filter and try again.* Nothing is truncated.
+- **60 seconds.** A download that runs longer is stopped.
+- **10 downloads a minute per account.** Over it the answer is 429 with a
+  `Retry-After` header. A refused request (not an editor, an unknown type, a
+  too-large export) spends one of the ten as well. The count is kept per
+  server node, so a cluster admits ten a minute on each node. A `HEAD` request
+  is answered with headers only and is not counted.
+
+**What can go wrong.**
+
+- *Exporting content needs an editor account.* (403) A viewer, or a request
+  without a session.
+- *You cannot export that content type.* (403) The type is outside the ones
+  you can author.
+- *The selection is not a list of content ids.* (400) `ids` was empty or held
+  something that is not a UUID.
+- *Select at most 100 rows to export.* (400)
+- *This export has more than 10,000 rows…* (413)
+- A download that is cut off. The count and the stream are not one step, so
+  the limits are enforced again while streaming. If rows were added past the
+  limit, the 60 seconds ran out, or the database failed part-way, the server
+  drops the connection **without finishing the response**: a CSV stops
+  mid-file and the browser reports a failed download, and a JSON file never
+  gets its closing `]`, so it does not parse. A file that parses completely is
+  complete. Narrow the list and download again.
+
+**For scripts.** The two URLs take the same query parameters as `/editor`
+(`type`, `status`, `q`, `cf`, `sort`, …) plus `ids` (comma-separated UUIDs)
+and `private=1`, and authenticate with the signed-in browser session; there is
+no API-key access. For example, with a session cookie:
+
+```
+GET /editor/content/export.csv?type=product&cf=price:gte:10&sort=-field:price
+```
+
+```
+HTTP/1.1 200 OK
+content-type: text/csv; charset=utf-8
+content-disposition: attachment; filename="content-product-2026-11-07.csv"
+cache-control: no-store
+
+id,type,title,slug,status,locale,updated_at,price
+2d1c…,product,Saffron,saffron,published,en,2026-11-05T09:12:44Z,12.5
+```
+
+The response is chunked, so there is no `content-length`. CSV starts with a
+UTF-8 byte order mark so Excel opens it as UTF-8 (`KilnCMSWeb.CSV.parse/1`
+strips it). A text value that starts with `=`, `+`, `-`, `@`, a tab or a
+carriage return is prefixed with `'` so a spreadsheet does not run it as a
+formula; real numbers are exempt, so `-5` in a number field stays `-5`, while
+the text `-5` or `=1+1` in an integer field is still guarded. The filename is
+the type name reduced to letters, digits, `-` and `_`.
+
+**Configuration.** Both limits can be changed; the defaults are the ones above.
+
+```elixir
+config :kiln_cms, :content_export,
+  max_rows: 10_000,
+  time_limit_ms: 60_000
+```
+
+**Observing it.** Each download that ends (including one the browser
+abandoned) writes one Logger line, `content export`, and emits
+`[:kiln_cms, :content_export, :stop]` with measurement `%{rows: n}` and
+metadata `user_id`, `org_id`, `type`, `format`, `rows`, `columns` (names) and
+`include_private`. Neither carries a cell value, the filter text or the ids. A
+download that aborts at a limit raises instead and emits no event. There is no
+audit record of who exported what yet (a follow-up), so the Logger line and
+the event are all there is today.
+
+**For code.** `KilnCMSWeb.EditorLive.ListScope` holds the list's scope, shared
+by the screen and the download: `types/2`, `filter_ctx/4`, `column_type/2`,
+`export_count/6` and `export_path/3`. `KilnCMSWeb.ContentExport` reads the pages
+(keyset, 100 rows each, an explicit `select`, references looked up once per
+page) and `KilnCMSWeb.EditorLive.FieldCells.value/3` resolves a cell once for
+the screen, the CSV (`csv_value/1`) and the JSON (`json_value/2`), so they
+cannot disagree about who may see a reference's target. The route handler is
+`KilnCMSWeb.ContentExportController`.
+
 ### Geolocation fields
 
 A `:geolocation` field stores a structured coordinate — `lat` and `lng`, plus

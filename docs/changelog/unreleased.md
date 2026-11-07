@@ -198,6 +198,48 @@ carries the reasoning.
     map, now allowed a `cf` key; rolling the pin back leaves such a view with an
     unknown key an older list ignores.
 
+<a id="content-list-export"></a>
+
+- **The content list can be downloaded as CSV or JSON.** On `/editor`, editors
+  and admins get an **Export** menu in the list's header bar with **Download
+  CSV** and **Download JSON**, and the bulk bar gains **Export selected** (CSV,
+  the ticked rows). This is the third part of #2293, after the Columns picker
+  and field filter and sort.
+  - **What is exported.** The rows the list shows for the same type, status,
+    search, field conditions and field sort, as the person asking (a record
+    they cannot read is absent). Columns are `id,type,title,slug,status,locale,updated_at`
+    plus the person's saved list columns for the type, nothing else; the panel
+    says *Exports the columns shown in the list.* The scope is the types the
+    editor can author, as in the list. With "All types" the types come one
+    after another, not merged into the list's order. Export selected takes at
+    most 100 rows and ignores every filter but the type.
+  - **Private fields.** Left out unless **Include private fields** is ticked
+    (shown when the type has any); every user field counts as private. A `cf`
+    condition on a private field is accepted even when the column is not
+    exported, as in the list.
+  - **Values.** The file is data, not the screen: booleans are `true` / `false`
+    (not Yes / No), media is the file name (not the alt text), select is the
+    stored value, long values are not cut. A reference is its readable title
+    (JSON `{id, label}`); an unreadable or deleted target is `Unavailable`
+    (JSON `{id: null, label: "Unavailable"}`), never the title stored in the
+    field. CSV starts with a UTF-8 byte order mark for Excel.
+  - **Limits.** More than 10,000 rows is HTTP 413 with a message, never a
+    truncated file; a download is stopped after 60 seconds; 10 downloads a
+    minute per account, 429 with `Retry-After`. The rate limit is counted per
+    node, and a refused request also spends it. A download stopped part-way
+    drops the connection unfinished: a CSV ends mid-file and a JSON array is
+    never closed, so a file that parses is complete.
+  - **Operators and developers.** Optional
+    `config :kiln_cms, :content_export, max_rows: 10_000, time_limit_ms: 60_000`.
+    Each download logs `content export` and emits
+    `[:kiln_cms, :content_export, :stop]` (`%{rows: n}`; metadata `user_id`,
+    `org_id`, `type`, `format`, `rows`, `columns`, `include_private`), never a
+    value or filter text. There is no audit trail of exports yet. Routes:
+    `GET /editor/content/export.csv` and `.json`, editor-only, session auth.
+    Guide: [Export the content list as CSV or JSON](../extending-content.md#export-the-content-list-as-csv-or-json).
+  - **Upgrade.** No migration, no required config; rolling the pin back
+    removes the menu and the routes.
+
 <a id="custom-field-native-filter-sort"></a>
 
 - **A custom field can be named like a column in `filter[...]` and `sort=`, and
@@ -471,6 +513,19 @@ carries the reasoning.
   See [Field-level localization](../field-level-localization.md#making-core-block-fields-per-locale-2270).
 
 ## Changed
+
+<a id="csv-numbers-unguarded"></a>
+
+- **A real number in a CSV export is written as itself.** The CSV writer
+  prefixed any value starting with `-` with `'` to stop a spreadsheet running
+  it as a formula, which turned the number -5 into the text `'-5`. A value that
+  is a number (integer, float, decimal) now skips the guard; text is
+  unchanged, so the string `-5` and `=1+1` are still prefixed, even in an
+  integer field. Chosen as Changed rather than Fixed because it alters the
+  bytes a CSV writes for a negative number, wherever `KilnCMSWeb.CSV.line/1`
+  is given one (core exports mostly write counts, which are not negative; an
+  overlay's may). `parse/1` reads
+  both forms back to `-5`.
 
 <a id="team-scope-pickers"></a>
 

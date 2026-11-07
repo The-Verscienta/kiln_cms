@@ -86,6 +86,10 @@ Every summary line below that was shortened links to its own entry there.
   Saved views keep them and flag a field that no longer applies; no migration.
   ([long form](docs/changelog/unreleased.md#content-list-field-filter-sort))
 
+- **Editors can download the content list as CSV or JSON from a new Export menu, or only the ticked rows with Export selected.**
+  Up to 10,000 rows, the saved list columns, private fields only if ticked; no migration.
+  ([long form](docs/changelog/unreleased.md#content-list-export))
+
 - **`custom_filter` equality, `in` and list membership use a new GIN index on `custom_fields`: a selective filter on 100,000 rows drops from about 40 ms to about 3 ms.**
   Range, `not_eq`, `ilike`, `null` and `custom_sort` are unchanged.
   ([#2321](https://github.com/The-Verscienta/kiln_cms/pull/2321) · [long form](docs/changelog/unreleased.md#custom-field-indexes))
@@ -125,6 +129,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#block-field-localization-config))
 
 ### Changed
+
+- **CSV exports write a negative number as `-5`, not `'-5`; text starting with `=`, `+`, `-` or `@` is still prefixed.**
+  Affects any CSV that passes a negative number to `KilnCMSWeb.CSV`; text is unchanged.
+  ([long form](docs/changelog/unreleased.md#csv-numbers-unguarded))
 
 - **On `/editor/team`, a custom role's or member's content types and field grants are picked from the site's types
   and fields instead of typed as a list and JSON; "No fields" stores `[]`, and unrecognized stored names are kept.**
