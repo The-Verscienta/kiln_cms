@@ -4901,6 +4901,11 @@ msgstr "Impossible de déplacer ce document."
 msgid "Couldn't move that task."
 msgstr "Impossible de déplacer cette tâche."
 
+#: lib/kiln_cms_web/content_trash.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't move that to trash. It may already be gone."
+msgstr "Impossible de le placer dans la corbeille. Il a peut-être déjà été supprimé."
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't ping that webhook."
@@ -10095,10 +10100,26 @@ msgstr "Déplacer vers le canevas"
 msgid "Move to top level"
 msgstr "Remonter au premier niveau"
 
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Move to trash"
+msgstr "Placer dans la corbeille"
+
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
 msgid "Move up in %{title}"
 msgstr "Monter dans %{title}"
+
+#: lib/kiln_cms_web/content_trash.ex
+#, elixir-autogen, elixir-format
+msgid "Move “%{title}” to trash? Admins can restore it from Trash for %{days} days."
+msgstr "Placer « %{title} » dans la corbeille ? Les administrateurs peuvent le restaurer depuis la Corbeille pendant %{days} jours."
+
+#: lib/kiln_cms_web/content_trash.ex
+#, elixir-autogen, elixir-format
+msgid "Move “%{title}” to trash? It comes off the live site now. Admins can restore it from Trash for %{days} days, which puts it back on the site."
+msgstr "Placer « %{title} » dans la corbeille ? Il est retiré du site en ligne immédiatement. Les administrateurs peuvent le restaurer depuis la Corbeille pendant %{days} jours, ce qui le remet en ligne."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -10148,6 +10169,11 @@ msgstr "Cet enregistrement a été déplacé dans « %{title} »."
 msgid "Moved “%{title}” to %{date}."
 msgstr "« %{title} » déplacé au %{date}."
 
+#: lib/kiln_cms_web/content_trash.ex
+#, elixir-autogen, elixir-format
+msgid "Moved “%{title}” to trash."
+msgstr "« %{title} » a été placé dans la corbeille."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Moved."
@@ -10162,6 +10188,16 @@ msgstr "Déplacer un document enregistre immédiatement, sans attendre Enregistr
 #, elixir-autogen, elixir-format
 msgid "Moving a record to the trash never changes anything here — restoring it brings everything back. These only apply when it is deleted for good."
 msgstr "Mettre un enregistrement à la corbeille ne change jamais rien ici — le restaurer ramène tout. Ces réglages ne s’appliquent qu’à une suppression définitive."
+
+#: lib/kiln_cms_web/content_trash.ex
+#, elixir-autogen, elixir-format
+msgid "Moving this to trash removes it from the content list. Admins can restore it from Trash for %{days} days."
+msgstr "Le placer dans la corbeille le retire de la liste des contenus. Les administrateurs peuvent le restaurer depuis la Corbeille pendant %{days} jours."
+
+#: lib/kiln_cms_web/content_trash.ex
+#, elixir-autogen, elixir-format
+msgid "Moving this to trash takes it off the live site and out of the content list. Admins can restore it from Trash for %{days} days."
+msgstr "Le placer dans la corbeille le retire du site en ligne et de la liste des contenus. Les administrateurs peuvent le restaurer depuis la Corbeille pendant %{days} jours."
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
@@ -18636,6 +18672,7 @@ msgid "Translations"
 msgstr "Traductions"
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
@@ -19050,6 +19087,7 @@ msgstr "En attendant, la spécification de base décrit chaque route du cœur :"
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#: lib/kiln_cms_web/content_trash.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format

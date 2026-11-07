@@ -277,7 +277,8 @@ does each side learn the ball is in their court without being told out of band?
 1. Add another **user**, or change a user's role to `editor` (`/editor/team`).
 2. Register a **webhook** for a content event (`/editor/webhooks`) and inspect a
    delivery.
-3. Delete a draft, then recover it from **trash** (`/editor/trash`).
+3. Move a draft to the trash (the row's **⋯** menu → **Move to trash**), then
+   recover it from **trash** (`/editor/trash`).
 
 ### Scenario F — Plan a release (editor)
 1. Open **releases** (`/editor/releases`) and create one.

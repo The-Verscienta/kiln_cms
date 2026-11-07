@@ -107,6 +107,10 @@ written as a function component or a raw `class="…"` in a template.
   `popovertarget` (Escape and click-outside close it, no JS), anchored under
   the button where CSS anchor positioning exists. An item that fires a
   `phx-click` also carries `popovertargetaction="hide"` so the menu closes.
+  An item that takes the row away goes last, after an `<hr>` divider, as a
+  labelled `row-menu-item text-error` with its icon and a `data-confirm`: the
+  content list's **Move to trash**, drawn only where the destroy policy allows
+  it ([#2137](https://github.com/The-Verscienta/kiln_cms/issues/2137)).
 - **Fields** — `.field-input`, `.field-select` (full-width, token border, focus
   ring), and `.field-label` for the label above one. The `<.input>` component is the richer, label+error-aware form control;
   these bare classes are for inline filters/toolbars and for markup Kiln does

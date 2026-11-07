@@ -4901,6 +4901,11 @@ msgstr "No se pudo mover ese documento."
 msgid "Couldn't move that task."
 msgstr "No se pudo mover esa tarea."
 
+#: lib/kiln_cms_web/content_trash.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't move that to trash. It may already be gone."
+msgstr "No se pudo mover a la papelera. Puede que ya no exista."
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't ping that webhook."
@@ -10095,10 +10100,26 @@ msgstr "Mover al lienzo"
 msgid "Move to top level"
 msgstr "Mover al primer nivel"
 
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Move to trash"
+msgstr "Mover a la papelera"
+
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
 msgid "Move up in %{title}"
 msgstr "Subir en %{title}"
+
+#: lib/kiln_cms_web/content_trash.ex
+#, elixir-autogen, elixir-format
+msgid "Move “%{title}” to trash? Admins can restore it from Trash for %{days} days."
+msgstr "¿Mover «%{title}» a la papelera? Los administradores pueden restaurarlo desde la Papelera durante %{days} días."
+
+#: lib/kiln_cms_web/content_trash.ex
+#, elixir-autogen, elixir-format
+msgid "Move “%{title}” to trash? It comes off the live site now. Admins can restore it from Trash for %{days} days, which puts it back on the site."
+msgstr "¿Mover «%{title}» a la papelera? Sale del sitio publicado ahora mismo. Los administradores pueden restaurarlo desde la Papelera durante %{days} días, y eso lo vuelve a publicar en el sitio."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -10148,6 +10169,11 @@ msgstr "Se movió este registro en «%{title}»."
 msgid "Moved “%{title}” to %{date}."
 msgstr "“%{title}” movido al %{date}."
 
+#: lib/kiln_cms_web/content_trash.ex
+#, elixir-autogen, elixir-format
+msgid "Moved “%{title}” to trash."
+msgstr "«%{title}» se movió a la papelera."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Moved."
@@ -10162,6 +10188,16 @@ msgstr "Mover un documento se guarda al instante, sin esperar a Guardar."
 #, elixir-autogen, elixir-format
 msgid "Moving a record to the trash never changes anything here — restoring it brings everything back. These only apply when it is deleted for good."
 msgstr "Mover un registro a la papelera nunca cambia nada aquí: al restaurarlo vuelve todo. Esto solo se aplica cuando se elimina definitivamente."
+
+#: lib/kiln_cms_web/content_trash.ex
+#, elixir-autogen, elixir-format
+msgid "Moving this to trash removes it from the content list. Admins can restore it from Trash for %{days} days."
+msgstr "Al moverlo a la papelera desaparece de la lista de contenido. Los administradores pueden restaurarlo desde la Papelera durante %{days} días."
+
+#: lib/kiln_cms_web/content_trash.ex
+#, elixir-autogen, elixir-format
+msgid "Moving this to trash takes it off the live site and out of the content list. Admins can restore it from Trash for %{days} days."
+msgstr "Al moverlo a la papelera sale del sitio publicado y de la lista de contenido. Los administradores pueden restaurarlo desde la Papelera durante %{days} días."
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
@@ -18636,6 +18672,7 @@ msgid "Translations"
 msgstr "Traducciones"
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
@@ -19050,6 +19087,7 @@ msgstr "Mientras tanto, la especificación base describe todas las rutas del nú
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#: lib/kiln_cms_web/content_trash.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
