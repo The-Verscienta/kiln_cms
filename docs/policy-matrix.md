@@ -265,17 +265,22 @@ three, and to any content type a downstream project defines.
 | read (`read`, `search`, `by_slug`, …) | ✅ all | ✅ all | 🔎 published + audience | 🔎 published + `:public` |
 | `create`, `update` | ✅ | ✅ | ❌ | ❌ |
 | `submit_for_review` | ✅ | ✅ | ❌ | ❌ |
-| `unpublish` | ✅ | ✅ | ❌ | ❌ |
-| `archive` | ✅ | ✅ | ❌ | ❌ |
+| `unarchive` | ✅ | ✅ | ❌ | ❌ |
 | `restore_version` | ✅ | ✅ | ❌ | ❌ |
 | `publish`, `publish_scheduled` | ✅ | ⚙️ when the site lets editors publish | ❌ | ❌ |
+| `unpublish`, `unpublish_scheduled` | ✅ | ⚙️ when the site lets editors publish | ❌ | ❌ |
+| `archive` (from any state), `archive_scheduled` | ✅ | ⚙️ when the site lets editors publish | ❌ | ❌ |
 | any action changing `scheduled_at` | ✅ | ⚙️ when the site lets editors publish | ❌ | ❌ |
+| an update changing `unpublish_at` on a record that is published or has `scheduled_at` set | ✅ | ⚙️ when the site lets editors publish | ❌ | ❌ |
+| an update changing `expiry_action` on a record that is published or has `scheduled_at` set | ✅ | ⚙️ when the site lets editors publish | ❌ | ❌ |
 | `return_to_draft` | ✅ | ❌ | ❌ | ❌ |
 | `destroy` (soft-delete), `purge` (hard) | ✅ | ❌ | ❌ | ❌ |
 | `trashed` (read), `restore` (untrash) | ✅ | ❌ | ❌ | ❌ |
 
-`publish_scheduled` is additionally allowed for the **system** AshOban scheduler
-via `bypass AshOban.Checks.AshObanInteraction`.
+`publish_scheduled`, `unpublish_scheduled` and `archive_scheduled` are run by
+the **system** AshOban scheduler, allowed via
+`bypass AshOban.Checks.AshObanInteraction`; no person is checked when they
+fire.
 
 ⚙️ **Editors can publish, per site.** `SiteEditorialSettings.editors_can_publish`
 (`Checks.EditorMayPublish`) lets an org's editors publish directly. `/setup`
@@ -288,6 +293,20 @@ only those.
 Setting, moving or clearing `scheduled_at` takes the same permission as
 `publish`, because the scheduler publishes that date through its bypass with
 nobody checked at go-live.
+
+Taking content down takes the same permission as putting it up (#2134).
+`unpublish` and `archive` sit in the `publish` policy; `archive` is gated from
+every state, so an editor on a site where only admins publish cannot archive
+their own draft. `unarchive` lands on draft and stays editor-level, as does
+`publish_changes` ([The working copy](working-copy.md)). `unpublish_at` and
+`expiry_action` are gated the same way, but only on an update of a record that
+is published or has `scheduled_at` set, as the row was read before the update
+(`Checks.LiveOrScheduled`): on such a record they are a takedown the scheduler
+runs through its bypass. On an unscheduled draft, or a create, they do nothing
+until someone with publish rights publishes or schedules the record, so an
+editor may write them there. Sending the value a record already has is not a
+change and is allowed. The two fields have a policy each, because
+`changing_attributes([a, b])` matches only when both change.
 
 ## Version history — `Page.Version`, `Post.Version`, `Entry.Version` (`KilnCMS.CMS.VersionPolicies`)
 

@@ -3,8 +3,11 @@ defmodule KilnCMS.CMS.Checks.EditorMayPublish do
   Matches an **editor** of the request's org when that site lets editors
   publish (`KilnCMS.CMS.SiteEditorialSettings.editors_can_publish`).
 
-  Sits beside `OrgAdmin` on `:publish` / `:publish_scheduled`, so an admin
-  never depends on the setting and an editor depends on nothing else. The tier
+  Sits beside `OrgAdmin` on `:publish` / `:publish_scheduled`, on the takedowns
+  `:unpublish` / `:archive` and their scheduled twins (#2134), and on changes
+  to `scheduled_at`, and to `unpublish_at` / `expiry_action` on a live or
+  scheduled record (`KilnCMS.CMS.Checks.LiveOrScheduled`), so an admin never
+  depends on the setting and an editor depends on nothing else. The tier
   and the setting are resolved on the same org (`Scoping.subject_org_id/1`), and
   the setting is read uncached through `KilnCMS.CMS.EditorialSettings`, which
   fails closed — this runs inside the publish transaction.

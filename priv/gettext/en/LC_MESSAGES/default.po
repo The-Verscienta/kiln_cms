@@ -12863,12 +12863,32 @@ msgstr ""
 
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
+msgid "Only an admin can archive content on this site."
+msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only an admin can move a publish date on this site."
+msgstr ""
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only an admin can move the unpublish date of a live page on this site."
+msgstr ""
+
+#: lib/kiln_cms_web/workflow_messages.ex
+#, elixir-autogen, elixir-format
 msgid "Only an admin can publish. Submit the draft for review instead."
 msgstr ""
 
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
 msgid "Only an admin can return content to draft."
+msgstr ""
+
+#: lib/kiln_cms_web/workflow_messages.ex
+#, elixir-autogen, elixir-format
+msgid "Only an admin can unpublish content on this site."
 msgstr ""
 
 #: lib/kiln_cms_web/live/release_live.ex
@@ -20774,6 +20794,11 @@ msgstr ""
 msgid "Unpublishes"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Unpublishing needs an admin on this site, so an admin sets the unpublish date of a live or scheduled page."
+msgstr ""
+
 #: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unread"
@@ -22220,6 +22245,7 @@ msgstr ""
 msgid "You don't have permission to delete that."
 msgstr ""
 
+#: lib/kiln_cms_web/live/calendar_live.ex
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to do that."

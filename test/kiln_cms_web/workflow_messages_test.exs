@@ -17,6 +17,13 @@ defmodule KilnCMSWeb.WorkflowMessagesTest do
 
       assert WorkflowMessages.error("return", forbidden) ==
                "Only an admin can return content to draft."
+
+      # Taking content down takes the publish permission (#2134).
+      assert WorkflowMessages.error("unpublish", forbidden) ==
+               "Only an admin can unpublish content on this site."
+
+      assert WorkflowMessages.error("archive", forbidden) ==
+               "Only an admin can archive content on this site."
     end
 
     test "a publish gate's own sentence reaches the admin it refused" do

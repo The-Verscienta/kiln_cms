@@ -313,7 +313,24 @@ defmodule KilnCMSWeb.CalendarLive do
            ) do
       {:ok, moved_message(event, date)}
     else
-      {:error, error} -> {:error, error_message(error)}
+      {:error, error} -> {:error, reschedule_error(event, error)}
+    end
+  end
+
+  # A publish date is a publish, and a live page's unpublish date an unpublish
+  # (#2134): the content policy refuses both to someone who may not publish.
+  # Said in those terms rather than as the raw policy breakdown.
+  defp reschedule_error(event, error) do
+    if forbidden?(error) do
+      case event.kind do
+        :publish ->
+          gettext("Only an admin can move a publish date on this site.")
+
+        _takedown ->
+          gettext("Only an admin can move the unpublish date of a live page on this site.")
+      end
+    else
+      error_message(error)
     end
   end
 
@@ -438,7 +455,17 @@ defmodule KilnCMSWeb.CalendarLive do
   end
 
   defp error_message(message) when is_binary(message), do: message
-  defp error_message(%{} = error), do: Exception.message(error)
+
+  defp error_message(%{} = error) do
+    if forbidden?(error),
+      do: gettext("You don't have permission to do that."),
+      else: Exception.message(error)
+  end
+
+  defp forbidden?(error) when is_exception(error),
+    do: match?(%Ash.Error.Forbidden{}, Ash.Error.to_error_class(error))
+
+  defp forbidden?(_error), do: false
 
   # The screen-reader channel for a change that is otherwise only visible as a
   # chip moving. Assigned rather than flashed for the success case: a toast per

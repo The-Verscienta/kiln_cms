@@ -682,6 +682,36 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       assert DateTime.to_date(CMS.get_page!(page.id, actor: admin).unpublish_at) == target
     end
 
+    # A live page's unpublish date is an unpublish (#2134): an editor on a site
+    # where only admins publish is refused, in words, and nothing moves.
+    test "refuses an editor moving a live page's unpublish date while publishing needs an admin",
+         %{conn: conn} do
+      admin = authed_admin()
+      editor = authed_user(:editor)
+      day = soon()
+      at = DateTime.new!(day, ~T[17:00:00])
+
+      page =
+        %{title: "Embargo #{System.unique_integer([:positive])}", slug: slug()}
+        |> CMS.create_page!(actor: admin)
+        |> CMS.publish_page!(%{}, actor: admin)
+        |> CMS.update_page!(%{unpublish_at: at}, actor: admin)
+
+      {:ok, lv, _html} = open_calendar_on(conn, editor, day, page)
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "unpublish",
+          "date" => Date.to_iso8601(Date.add(day, 2))
+        })
+
+      assert html =~ "Only an admin can move the unpublish date of a live page on this site."
+      refute html =~ "Forbidden"
+      assert DateTime.compare(CMS.get_page!(page.id, actor: admin).unpublish_at, at) == :eq
+    end
+
     test "refuses a move into the past and leaves the record alone", %{conn: conn} do
       admin = authed_admin()
       # An overdue chip on last month's grid, dragged one day further back.

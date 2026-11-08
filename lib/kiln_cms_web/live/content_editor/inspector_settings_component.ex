@@ -36,6 +36,16 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
 
   @impl true
   def render(assigns) do
+    # On a live or scheduled document the unpublish date is an unpublish
+    # (#2134, `Checks.LiveOrScheduled`); see the embargo-end input below.
+    assigns =
+      assign(
+        assigns,
+        :unpublish_locked?,
+        KilnCMS.CMS.Checks.LiveOrScheduled.live_or_scheduled?(assigns.record) and
+          not assigns.may_schedule?
+      )
+
     ~H"""
     <div
       class={["space-y-4", @inspector_tab != :settings && "hidden"]}
@@ -693,9 +703,16 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
             {gettext("Use this date")}
           </button>
         </div>
-        <%!-- The embargo end — same local/UTC input pair as above. --%>
+        <%!-- The embargo end — same local/UTC input pair as above. On a live
+                document the date is an unpublish (the content policy gates
+                `unpublish_at` there like Unpublish, #2134), so it locks for
+                someone who may not publish; the hidden input still carries the
+                current value, so a save leaves it untouched. On a draft it
+                does nothing until a publisher publishes, so it stays open. The
+                lock is in the wrapper's id because `phx-update="ignore"` would
+                otherwise keep a stale `disabled` once the record goes live. --%>
         <div
-          id={"unpublish-at-#{@editor_version}"}
+          id={"unpublish-at-#{@editor_version}#{if @unpublish_locked?, do: "-locked"}"}
           phx-hook="UtcDatetimeInput"
           phx-update="ignore"
         >
@@ -710,7 +727,13 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
             id={"unpublish-at-local-#{@editor_version}"}
             data-local-input
             class="field-input"
+            disabled={@unpublish_locked?}
           />
+          <p :if={@unpublish_locked?} class="mt-1 text-xs text-base-content/70">
+            {gettext(
+              "Unpublishing needs an admin on this site, so an admin sets the unpublish date of a live or scheduled page."
+            )}
+          </p>
           <input
             type="hidden"
             name={@form[:unpublish_at].name}

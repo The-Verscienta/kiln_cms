@@ -417,8 +417,10 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
     >
       {gettext("Awaiting admin approval")}
     </span>
+    <%!-- Taking content down is the same approval step as putting it up
+          (#2134): Unpublish is offered to whoever the Publish button is. --%>
     <button
-      :if={@state == :published and not @pending?}
+      :if={@state == :published and not @pending? and @may_publish?}
       type="button"
       phx-click="workflow"
       data-flush-body
@@ -471,7 +473,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
             {gettext("Discard the changes")}
           </button>
         </li>
-        <li>
+        <li :if={@may_publish?}>
           <button
             type="button"
             phx-click="workflow"

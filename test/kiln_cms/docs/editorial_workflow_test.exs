@@ -44,6 +44,7 @@ defmodule KilnCMS.Docs.EditorialWorkflowTest do
     "Request changes (`return_to_draft`)" => :return_to_draft,
     "Put edits to a live page live (`publish_changes`)" => :publish_changes,
     "Unpublish or archive (`unpublish`, `archive`)" => :unpublish_and_archive,
+    "Set the unpublish date of a live page (`unpublish_at`)" => :unpublish_at,
     "Restore an earlier version (`restore_version`)" => :restore_version,
     "Delete, and restore from the trash (`destroy`, `restore`)" => :destroy_and_restore,
     "Turn the Team → Publishing switch on or off" => :publishing_switch
@@ -92,18 +93,6 @@ defmodule KilnCMS.Docs.EditorialWorkflowTest do
         """)
 
       refute Map.has_key?(@checks, rows |> hd() |> elem(0))
-    end
-
-    test "is followed by the #2134 note on taking content down" do
-      [_, after_table] = String.split(File.read!(@guide), "<!-- role-matrix:end -->")
-
-      note =
-        after_table
-        |> String.split("\n## ", parts: 2)
-        |> hd()
-
-      assert note =~ "Taking content down is not gated like publishing."
-      assert note =~ "https://github.com/The-Verscienta/kiln_cms/issues/2134"
     end
   end
 
@@ -242,9 +231,20 @@ defmodule KilnCMS.Docs.EditorialWorkflowTest do
   defp run(:unpublish_and_archive, actor, ctx) do
     both([
       ctx |> published!() |> CMS.unpublish_page(opts(actor, ctx)),
-      ctx |> published!() |> CMS.archive_page(opts(actor, ctx))
+      ctx |> published!() |> CMS.archive_page(opts(actor, ctx)),
+      # Archive is gated from every state, not only from published (#2134).
+      ctx |> draft!() |> CMS.archive_page(opts(actor, ctx))
     ])
   end
+
+  # A live page's unpublish date is an unpublish (#2134); on a draft it is
+  # anyone's to edit, so the row is about a published record.
+  defp run(:unpublish_at, actor, ctx),
+    do:
+      ctx
+      |> published!()
+      |> CMS.update_page(%{unpublish_at: tomorrow()}, opts(actor, ctx))
+      |> outcome()
 
   defp run(:restore_version, actor, ctx) do
     page = draft!(ctx)

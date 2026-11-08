@@ -111,6 +111,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Breaking
 
+- **Unpublishing and archiving need publish rights (admin, or editor where Team → Publishing allows). Upgraded sites default it off, so editors there lose both, and their `:read_write` keys get 403; an admin can choose Let editors publish.** No migration.
+  ([long form](docs/changelog/unreleased.md#takedown-needs-publish-rights))
+
 - **Overlays: `Accounts.Bootstrap.create_first_admin/1` returns `{:ok, user, notices}`, not `{:ok, user}`.**
   ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-bootstrap-return))
 
