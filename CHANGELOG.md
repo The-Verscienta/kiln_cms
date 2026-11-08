@@ -101,6 +101,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Overlays: `Accounts.Bootstrap.create_first_admin/1` returns `{:ok, user, notices}`, not `{:ok, user}`.**
   ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-bootstrap-return))
 
+- **Registering no longer signs the user in: everyone is told to check their email and sent to `/sign-in`, and an address that already has an account gets no new row.**
+  ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
+
 ### Added
 
 - **Export and import custom-field definitions between environments: `mix kiln.fields.export` / `mix kiln.fields.import`, release `rpc` functions and an admin download at `/editor/fields/export.json`.**
@@ -304,6 +307,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163) · [long form](docs/changelog/unreleased.md#public-muted-text-contrast))
 
 ### Security
+
+- **Sign-in, reset, magic link, registration, newsletter, SSO and passkey answer a known and an unknown address alike; the per-surface matrix is in the threat model.**
+  ([long form](docs/changelog/unreleased.md#account-enumeration-audit))
 
 - **ecto 3.14.3 fixes EEF-CVE-2026-118391 (unbounded query cache growth), and
   ash_sql 0.8.7 replaces the retired 0.8.4 (query cache returned wrong rows).**

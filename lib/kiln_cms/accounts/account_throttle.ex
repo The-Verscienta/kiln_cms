@@ -167,7 +167,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   @second_factor_window :timer.minutes(15)
 
   # Every bucket this module charges, for `forget_all/0`.
-  @buckets ~w(signin 2fa signin:alert 2fa:alert 2fa:settings-alert mail:password_reset mail:magic_link)
+  @buckets ~w(signin 2fa signin:alert 2fa:alert 2fa:settings-alert mail:password_reset mail:magic_link mail:registration_notice)
 
   @mail_budget 5
   @mail_window :timer.hours(1)
@@ -176,7 +176,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   # however long the attack runs.
   @alert_window :timer.hours(6)
 
-  @type purpose :: :password_reset | :magic_link
+  @type purpose :: :password_reset | :magic_link | :registration_notice
 
   @doc """
   Charges one sign-in attempt against this identifier.
@@ -301,7 +301,8 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   attacker probing for accounts).
   """
   @spec allow_mail?(purpose(), String.t()) :: boolean()
-  def allow_mail?(purpose, identifier) when purpose in [:password_reset, :magic_link] do
+  def allow_mail?(purpose, identifier)
+      when purpose in [:password_reset, :magic_link, :registration_notice] do
     case charge("mail:#{purpose}", identifier, mail_window(), mail_budget()) do
       :allow ->
         true
@@ -386,7 +387,11 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   def reset(identifier) do
     forgive(identifier)
     drop("signin:alert", identifier)
-    Enum.each([:password_reset, :magic_link], &drop("mail:#{&1}", identifier))
+
+    Enum.each(
+      [:password_reset, :magic_link, :registration_notice],
+      &drop("mail:#{&1}", identifier)
+    )
   end
 
   @doc """
