@@ -1591,6 +1591,11 @@ msgstr "Une seule ligne : les caractéristiques d’un produit, l’adresse d’
 msgid "A single short text — a name, a code."
 msgstr "Un seul texte court — un nom, un code."
 
+#: lib/kiln_cms/cms/field_types/range.ex
+#, elixir-autogen, elixir-format
+msgid "A span between two numbers or two dates, with either end optional. For a price band, an age bracket or a date window. Cannot be filtered or sorted."
+msgstr "Un intervalle entre deux nombres ou deux dates, chaque borne étant facultative. Pour une fourchette de prix, une tranche d'âge ou une période. Ne peut être ni filtré ni trié."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A start and an end, in a time zone, optionally all day. A content type with one of these is an event and gets a calendar feed."
@@ -1665,6 +1670,11 @@ msgstr "Une version que vous compariez a été remplacée."
 #, elixir-autogen, elixir-format
 msgid "A viewer can read content and manage their own account, but cannot use the editing console."
 msgstr "Un lecteur peut lire le contenu et gérer son propre compte, mais ne peut pas utiliser la console d’édition."
+
+#: lib/kiln_cms/cms/field_types/link.ex
+#, elixir-autogen, elixir-format
+msgid "A web address with an optional label, and whether it opens in a new tab. For a source, a call to action or an external resource. Cannot be filtered or sorted."
+msgstr "Une adresse web avec un libellé facultatif, et s'il s'ouvre dans un nouvel onglet. Pour une source, un appel à l'action ou une ressource externe. Ne peut être ni filtré ni trié."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -2341,6 +2351,11 @@ msgstr "Ajouté au lancement."
 msgid "Added to the working copy — publish changes to make it live"
 msgstr "Ajouté à la copie de travail — publiez les modifications pour la mettre en ligne"
 
+#: lib/kiln_cms/cms/field_types/link.ex
+#, elixir-autogen, elixir-format
+msgid "Address"
+msgstr "Adresse"
+
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "Address blocked."
@@ -2728,6 +2743,11 @@ msgstr "Un lien importé est une ligne avec une URL mais sans fichier dans Kiln 
 #, elixir-autogen, elixir-format
 msgid "An open review task already covers this content."
 msgstr "Une tâche de relecture ouverte couvre déjà ce contenu."
+
+#: lib/kiln_cms/cms/field_types/key_value.ex
+#, elixir-autogen, elixir-format
+msgid "An ordered list of named values, one key=value per line. For specifications or attributes that vary by record. Cannot be filtered or sorted."
+msgstr "Une liste ordonnée de valeurs nommées, une clé=valeur par ligne. Pour des caractéristiques ou attributs qui varient selon l'enregistrement. Ne peut être ni filtré ni trié."
 
 #: lib/kiln_cms_web/controllers/error_html/500.html.heex
 #, elixir-autogen, elixir-format
@@ -5894,6 +5914,7 @@ msgstr "Décimales"
 msgid "Decorative — no alt text needed"
 msgstr "Décorative — aucun texte alternatif nécessaire"
 
+#: lib/kiln_cms/cms/field_types/link.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #, elixir-autogen, elixir-format
 msgid "Default"
@@ -8334,6 +8355,7 @@ msgstr "À jour"
 msgid "Fri"
 msgstr "ven."
 
+#: lib/kiln_cms/cms/field_types/range.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
@@ -9716,6 +9738,7 @@ msgstr "Type"
 msgid "Kind of value"
 msgstr "Type de valeur"
 
+#: lib/kiln_cms/cms/field_types/link.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
@@ -11084,6 +11107,7 @@ msgstr "Nouveaux codes de récupération générés — les anciens ne fonctionn
 msgid "New release"
 msgstr "Nouveau lancement"
 
+#: lib/kiln_cms/cms/field_types/link.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "New tab"
@@ -12717,6 +12741,11 @@ msgstr "Point de terminaison compatible OpenAI"
 msgid "OpenAPI spec (JSON)"
 msgstr "Spécification OpenAPI (JSON)"
 
+#: lib/kiln_cms/cms/field_types/link.ex
+#, elixir-autogen, elixir-format
+msgid "Opens in"
+msgstr "S'ouvre dans"
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
 msgid "Opens the Accessibility panel."
@@ -14272,6 +14301,11 @@ msgstr "Réindexer maintenant"
 msgid "Reindexing this site."
 msgstr "Réindexation de ce site en cours."
 
+#: lib/kiln_cms/cms/field_types/link.ex
+#, elixir-autogen, elixir-format
+msgid "Rel"
+msgstr "Rel"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Related %{kind}s"
@@ -15386,6 +15420,7 @@ msgstr "Les champs de sécurité n’ont pas pu être enregistrés."
 msgid "Safety fields saved."
 msgstr "Champs de sécurité enregistrés."
 
+#: lib/kiln_cms/cms/field_types/link.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Same tab"
@@ -19626,6 +19661,11 @@ msgstr "Titre (A–Z)"
 msgid "Title contains “%{text}”"
 msgstr "Le titre contient « %{text} »"
 
+#: lib/kiln_cms/cms/field_types/range.ex
+#, elixir-autogen, elixir-format
+msgid "To"
+msgstr "À"
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "To (current)"
@@ -22712,6 +22752,11 @@ msgstr "son formulaire d'objectif n'accepte plus de soumissions"
 #, elixir-autogen, elixir-format
 msgid "its goal is one this version cannot check"
 msgstr "son objectif est d'un type que cette version ne sait pas vérifier"
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "key=value, one per line"
+msgstr "clé=valeur, une par ligne"
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format

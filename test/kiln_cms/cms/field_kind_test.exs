@@ -83,7 +83,7 @@ defmodule KilnCMS.CMS.FieldKindTest do
   end
 
   test "the other built-in Kiln.FieldType modules answer :json" do
-    for type <- [:computed, :datetime_range, :recurrence] do
+    for type <- [:computed, :datetime_range, :recurrence, :range, :key_value, :link] do
       assert FieldKind.kind_for(definition(type)) == :json
     end
   end

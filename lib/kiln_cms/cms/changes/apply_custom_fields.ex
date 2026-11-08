@@ -959,6 +959,14 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     end
   end
 
+  # A key/value list (#2278) has no parts: it is empty when it holds no pair,
+  # or only pairs with neither key nor value. Never stored as `[]`.
+  defp blank_for?(%{field_type: :key_value}, value) when is_list(value),
+    do: Enum.all?(value, &blank_pair?/1)
+
+  defp blank_for?(%{field_type: :key_value}, value) when is_map(value) and not is_struct(value),
+    do: map_size(value) == 0
+
   # Blankness, per field type. A **composite** type (one declaring
   # `input_parts/1`, e.g. `:geolocation`) submits a map of parts, and an
   # untouched widget submits a map of blanks — that is the field being empty.
@@ -991,6 +999,11 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     do: Enum.all?(value, &blank?/1)
 
   defp blank_for?(_def, value), do: blank?(value)
+
+  defp blank_pair?(%{} = pair) when not is_struct(pair),
+    do: pair |> Map.values() |> Enum.all?(&blank?/1)
+
+  defp blank_pair?(other), do: blank?(other)
 
   defp composite?(%{field_type: type} = def) do
     case KilnCMS.CMS.FieldTypes.get(type) do

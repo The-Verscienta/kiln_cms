@@ -170,7 +170,7 @@ defmodule KilnCMS.CMS.SearchableFields do
     sorted
   end
 
-  defp field_texts(nil, _definition, value), do: default_texts(value)
+  defp field_texts(nil, definition, value), do: type_texts(definition, value)
 
   defp field_texts(extractor, definition, value) do
     case guarded(
@@ -180,16 +180,36 @@ defmodule KilnCMS.CMS.SearchableFields do
            :default
          ) do
       :default ->
-        default_texts(value)
+        type_texts(definition, value)
 
       texts when is_list(texts) ->
         texts |> Enum.filter(&is_binary/1) |> Enum.flat_map(&default_texts/1)
 
       _other ->
         warn_once(extractor, definition.name, "returned neither a list nor :default")
-        default_texts(value)
+        type_texts(definition, value)
     end
   end
+
+  # What a built-in composite type (#2278) contributes when no extractor
+  # decides: a link its label only (the URL, target and `rel` are not prose),
+  # a key/value list its values (not its keys), a range nothing. Every other
+  # type reads with the generic rule.
+  defp type_texts(%{field_type: :link}, %{"label" => label}) when is_binary(label),
+    do: default_texts(label)
+
+  defp type_texts(%{field_type: :link}, _value), do: []
+  defp type_texts(%{field_type: :range}, _value), do: []
+
+  defp type_texts(%{field_type: :key_value}, pairs) when is_list(pairs) do
+    Enum.flat_map(pairs, fn
+      %{"value" => value} when is_binary(value) -> default_texts(value)
+      _other -> []
+    end)
+  end
+
+  defp type_texts(%{field_type: :key_value}, _value), do: []
+  defp type_texts(_definition, value), do: default_texts(value)
 
   # An extractor runs inside every indexing write: a bug in it — a raise, a
   # throw or an exit — must cost a field's text, never the editor's save.

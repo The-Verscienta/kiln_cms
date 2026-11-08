@@ -262,6 +262,24 @@ defmodule KilnCMSWeb.GraphqlCustomFieldsTest do
       end
     end
 
+    test "range, key_value and link are served as the generic JSON value (#2278)",
+         %{admin: admin} do
+      define!(admin, %{name: "band", field_type: :range})
+      define!(admin, %{name: "specs", field_type: :key_value})
+      define!(admin, %{name: "source", field_type: :link})
+
+      post =
+        post!(admin, %{
+          "band" => %{"min" => "1", "max" => "9"},
+          "specs" => "Weight=2 kg",
+          "source" => %{"url" => "https://example.com", "label" => "Example"}
+        })
+
+      assert %{"fields" => fields} = one(post, ["band", "specs", "source"])
+      assert Enum.map(fields, & &1["name"]) == ["band", "specs", "source"]
+      for field <- fields, do: assert(field["__typename"] =~ "Json")
+    end
+
     test "the format types: strings through customString, json as the generic value (#2278)",
          %{admin: admin} do
       define!(admin, %{name: "contact", field_type: :email})

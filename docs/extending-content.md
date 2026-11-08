@@ -25,9 +25,10 @@ UI" workflow, scoped to fields.
   `private`, `validation`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
   `:select`, `:media`, `:reference`, `:group`, `:user`, `:geolocation`,
-  `:datetime_range`, `:recurrence`, `:computed`, and the six format types
+  `:datetime_range`, `:recurrence`, `:computed`, the six format types
   `:email`, `:telephone`, `:color`, `:slug`, `:time` and `:json` (see
-  "Built-in format types" below) — plus
+  "Built-in format types" below) and the composite `:range`, `:key_value` and
+  `:link` (see "Range and key-value and link fields") — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
 - **Private fields (`private: true`)**: a value for the site's editors and
@@ -471,14 +472,79 @@ admin flags it **searchable**, the strings and numbers nested in the value are
 indexed (not the keys), so flag only a field whose contents are prose worth
 finding.
 
-**Names are reserved.** `email`, `telephone`, `color`, `slug`, `time` and
-`json` can no longer be used for a type an overlay or plugin registers; rename
+**Names are reserved.** `email`, `telephone`, `color`, `slug`, `time`,
+`json`, `range`, `key_value` and `link` can no longer be used for a type an overlay or plugin registers; rename
 it (`mix kiln.plugins.doctor` fails otherwise). A stored field definition
 that already used one of these names as its `field_type` is now cast by the
 built-in type: values that do not pass its check are refused on the next save.
 
-**Not yet:** a key/value or link type, number options (step, prefix, suffix,
-range), a colour palette, and JSON Schema validation of a `:json` value.
+**Not yet:** number options (step, prefix, suffix, slider), a slug
+uniqueness rule, a colour palette, and JSON Schema validation of a `:json`
+value.
+
+### Range and key-value and link fields
+
+Three more built-in types hold a small structured value. Each is stored as
+JSON, checked identically in the editor, the API and imports, and served
+through GraphQL as the generic JSON value. Pick them in `/editor/fields` (an
+admin task) like any type; the editor shows the inputs below.
+
+| Type | Editor input | Stored as |
+| --- | --- | --- |
+| `:range` | two text inputs, "From" and "To" | `{"min": 10, "max": 20}` or `{"min": "2026-01-31", "max": "2026-12-31"}` |
+| `:key_value` | textarea, one `key=value` per line | `[{"key": "Weight", "value": "2 kg"}]` |
+| `:link` | "Address", "Label", an "Opens in" select (Default / Same tab / New tab) and "Rel" | `{"url": "https://example.com", "label": "Source", "target": "_blank", "rel": "noopener noreferrer"}` |
+
+**Range.** Both bounds are numbers or both are `YYYY-MM-DD` dates (the kind is
+read from the values). At least one bound is needed, so a half-open range such
+as `{"min": 18}` is valid; with both, `min` may not exceed `max`. A numeric
+string becomes a number; `NaN`, `Infinity`, date-times and numbers beyond
+±9,007,199,254,740,991 are refused. A range is never indexed for search, even
+if flagged `searchable`. The exported JSON schema only says each bound is a
+number or a string; a number paired with a date is rejected by the check when
+you save.
+
+**Key/value.** Order is kept, which is why the value is a list of pairs and not
+an object. Split at the first `=`, so a value may contain `=`; blank lines are
+skipped. Limits: 100 pairs, a key of 1 to 100 characters, a value of up to
+1,000, 64 KB in all. Keys are unique (case-sensitive), single-line, and may not
+contain `=`. An API client may send a list of `{key, value}` maps, or a plain
+map, which is stored sorted by key. A `searchable` flag indexes the values, not
+the keys.
+
+**Link.** The address (at most 2,048 bytes) is stored only if it passes
+`KilnCMS.HTMLSanitizer.safe_href/1` unchanged, the policy rich-text links use:
+`http(s)`, `mailto:`, a relative path (`/about`) or a `#fragment`. `javascript:`,
+`data:`, `tel:` (use a `:telephone` field) and protocol-relative `//host`
+addresses are refused rather than stored. The label is up to 200 characters.
+`target` is `_blank` or `_self`; `rel` takes any of `noopener`, `noreferrer`,
+`nofollow`, `sponsored`, `ugc`, `external`, and a `_blank` target always adds
+`noopener noreferrer`. A `searchable` flag indexes the label only. This type
+has nothing to do with the "link fields" (edge metadata) of a `:reference`
+field.
+
+```elixir
+KilnCMS.CMS.FieldTypes.Link.cast(
+  %{"url" => "https://example.com", "label" => "Source", "target" => "_blank"},
+  nil
+)
+#=> {:ok, %{"url" => "https://example.com", "label" => "Source",
+#=>         "target" => "_blank", "rel" => "noopener noreferrer"}}
+```
+
+**Lists.** None of the three can be a Columns picker column, be sorted, or be
+a condition source for another field. A `custom_filter` answers only "Empty or
+not" (`null`); any other operator is refused with *custom field "x" (range)
+only supports null*, and a sort with *is not sortable*. `multiple` is cleared
+on these types, and validation constraints (min, max, pattern, unique) are
+refused.
+
+**What can go wrong.** *needs a minimum, a maximum, or both* (an empty range);
+*bounds must both be numbers or both be dates (YYYY-MM-DD)*; *the minimum must
+not be greater than the maximum*; *each line must be key=value*; *every value
+needs a key*; *has a repeated key (x)*; *a key may not contain "="*; *address
+must be an http(s) URL, a mailto: address, a /path or a #fragment*; *rel must be
+one or more of: noopener, noreferrer, nofollow, sponsored, ugc, external*.
 
 ### Filter and sort the content list by custom fields
 

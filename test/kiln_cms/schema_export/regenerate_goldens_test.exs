@@ -51,7 +51,10 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
     {"accent", :color, %{}},
     {"handle", :slug, %{}},
     {"opens_at", :time, %{}},
-    {"extra", :json, %{}}
+    {"extra", :json, %{}},
+    {"price_band", :range, %{}},
+    {"specs", :key_value, %{}},
+    {"source", :link, %{}}
   ]
 
   @tag :regenerate_schema_goldens
