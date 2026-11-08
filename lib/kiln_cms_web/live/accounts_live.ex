@@ -155,7 +155,10 @@ defmodule KilnCMSWeb.AccountsLive do
   def handle_event("save_access", %{"access" => params}, socket) when is_map(params) do
     %{actor: actor, account: account} = socket.assigns
 
-    case Accounts.manage_user_access(account, %{role: params["role"]}, actor: actor) do
+    case Accounts.manage_user_access(account, %{role: params["role"]},
+           actor: actor,
+           context: socket.assigns.security_context
+         ) do
       {:ok, _user} ->
         {:noreply, reload_account(socket, gettext("Access updated."))}
 
@@ -171,7 +174,10 @@ defmodule KilnCMSWeb.AccountsLive do
   def handle_event("save_audiences", %{"audiences" => params}, socket) when is_map(params) do
     %{actor: actor, account: account, current_org: org} = socket.assigns
 
-    case SiteAudiences.set(account, org.id, checked_audiences(params), actor: actor) do
+    case SiteAudiences.set(account, org.id, checked_audiences(params),
+           actor: actor,
+           context: socket.assigns.security_context
+         ) do
       {:ok, :updated} ->
         {:noreply, reload_account(socket, gettext("Audiences updated."))}
 
@@ -200,7 +206,8 @@ defmodule KilnCMSWeb.AccountsLive do
     case Accounts.grant_user_temporary_role(
            account,
            %{granted_role: role, granted_role_expires_at: RoleGrantForm.expiry(grant)},
-           actor: actor
+           actor: actor,
+           context: socket.assigns.security_context
          ) do
       {:ok, user} ->
         {:noreply,
@@ -225,7 +232,8 @@ defmodule KilnCMSWeb.AccountsLive do
     case Accounts.grant_user_temporary_role(
            account,
            %{granted_role: nil, granted_role_expires_at: nil},
-           actor: actor
+           actor: actor,
+           context: socket.assigns.security_context
          ) do
       {:ok, _user} ->
         {:noreply, reload_account(socket, gettext("Temporary role ended."))}

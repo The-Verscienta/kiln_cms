@@ -33,6 +33,8 @@ defmodule KilnCMSWeb.SettingsLive do
      # the Configure hub, and a page titled plain "Settings" invites the search
      # for it here.
      |> assign(:page_title, gettext("Your settings"))
+     # The client and org the credential changes below are logged with (#2241).
+     |> assign(:security_context, KilnCMS.Security.AuthEvents.context(socket))
      |> assign(:form, prefs_form(user))
      |> assign(:profile_form, profile_form(user))
      # A "Saved" line beside the button (#1828), cleared by the next edit: the
@@ -124,7 +126,9 @@ defmodule KilnCMSWeb.SettingsLive do
       challenge ->
         socket = assign(socket, :passkey_challenge, nil)
 
-        case WebAuthn.register_passkey(user, challenge, payload) do
+        case WebAuthn.register_passkey(user, challenge, payload,
+               context: socket.assigns.security_context
+             ) do
           {:ok, _passkey} ->
             message = gettext("Passkey added — you can sign in with it now.")
 
@@ -167,7 +171,11 @@ defmodule KilnCMSWeb.SettingsLive do
 
     socket =
       with {:ok, passkey} <- Accounts.get_passkey(id, actor: user),
-           :ok <- Accounts.remove_passkey(passkey, actor: user) do
+           :ok <-
+             Accounts.remove_passkey(passkey,
+               actor: user,
+               context: socket.assigns.security_context
+             ) do
         socket
         |> assign(:passkeys, WebAuthn.list(user))
         |> assign(:passkey_status, {:ok, gettext("Passkey removed.")})
@@ -292,7 +300,10 @@ defmodule KilnCMSWeb.SettingsLive do
       recovery_login?: socket.assigns.recovery_login?
     }
 
-    case Accounts.confirm_totp(user, args, actor: user) do
+    case Accounts.confirm_totp(user, args,
+           actor: user,
+           context: socket.assigns.security_context
+         ) do
       {:ok, user} ->
         {:noreply,
          socket
@@ -342,7 +353,10 @@ defmodule KilnCMSWeb.SettingsLive do
   def handle_event("disable_totp", %{"code" => code}, socket) when is_binary(code) do
     user = socket.assigns.current_user
 
-    case Accounts.disable_totp(user, %{code: code}, actor: user) do
+    case Accounts.disable_totp(user, %{code: code},
+           actor: user,
+           context: socket.assigns.security_context
+         ) do
       {:ok, user} ->
         {:noreply,
          socket

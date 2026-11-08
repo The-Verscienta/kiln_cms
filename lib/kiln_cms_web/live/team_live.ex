@@ -88,7 +88,8 @@ defmodule KilnCMSWeb.TeamLive do
                role: params["role"] || "viewer",
                role_id: presence(params["role_id"])
              },
-             actor: actor
+             actor: actor,
+             context: socket.assigns.security_context
            ) do
       {:noreply, socket |> load_data() |> put_flash(:info, gettext("Member added to this site."))}
     else
@@ -142,7 +143,11 @@ defmodule KilnCMSWeb.TeamLive do
 
     socket =
       with {:ok, membership} <- get_membership(socket, id),
-           :ok <- Accounts.remove_org_membership(membership, actor: actor) do
+           :ok <-
+             Accounts.remove_org_membership(membership,
+               actor: actor,
+               context: socket.assigns.security_context
+             ) do
         socket |> load_data() |> put_flash(:info, gettext("Member removed."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't remove that member."))
@@ -156,7 +161,11 @@ defmodule KilnCMSWeb.TeamLive do
       {:ok, membership} ->
         form =
           membership
-          |> AshPhoenix.Form.for_update(:update, actor: socket.assigns.actor, as: "member")
+          |> AshPhoenix.Form.for_update(:update,
+            actor: socket.assigns.actor,
+            context: socket.assigns.security_context,
+            as: "member"
+          )
           |> to_form()
 
         {:noreply,
@@ -228,7 +237,8 @@ defmodule KilnCMSWeb.TeamLive do
            Accounts.grant_membership_temporary_role(
              membership,
              %{granted_role: role, granted_role_expires_at: expires_at},
-             actor: actor
+             actor: actor,
+             context: socket.assigns.security_context
            ) do
       {:noreply,
        socket
@@ -260,7 +270,8 @@ defmodule KilnCMSWeb.TeamLive do
              Accounts.grant_membership_temporary_role(
                membership,
                %{granted_role: nil, granted_role_expires_at: nil},
-               actor: actor
+               actor: actor,
+               context: socket.assigns.security_context
              ) do
         socket |> load_data() |> put_flash(:info, gettext("Temporary tier ended."))
       else

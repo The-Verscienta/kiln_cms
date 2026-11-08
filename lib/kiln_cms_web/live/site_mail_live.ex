@@ -69,7 +69,11 @@ defmodule KilnCMSWeb.SiteMailLive do
   end
 
   def handle_event("save", %{"relay" => params}, socket) when is_map(params) do
-    opts = [actor: socket.assigns.current_user, tenant: socket.assigns.current_org]
+    opts = [
+      actor: socket.assigns.current_user,
+      tenant: socket.assigns.current_org,
+      context: socket.assigns.security_context
+    ]
 
     # An existing row is updated, never re-upserted: the upsert leaves the
     # password out of what it overwrites, so a blank-password save through it
@@ -104,7 +108,8 @@ defmodule KilnCMSWeb.SiteMailLive do
       row ->
         CMS.reset_site_mail_relay!(row,
           actor: socket.assigns.current_user,
-          tenant: socket.assigns.current_org
+          tenant: socket.assigns.current_org,
+          context: socket.assigns.security_context
         )
 
         {:noreply,
@@ -145,7 +150,11 @@ defmodule KilnCMSWeb.SiteMailLive do
   end
 
   def handle_event("unsuppress", %{"id" => id}, socket) when is_binary(id) do
-    opts = [actor: socket.assigns.current_user, tenant: socket.assigns.current_org]
+    opts = [
+      actor: socket.assigns.current_user,
+      tenant: socket.assigns.current_org,
+      context: socket.assigns.security_context
+    ]
 
     # Found among what this admin may read on this site, then destroyed under
     # the resource's policy: an id from another site is simply not found.

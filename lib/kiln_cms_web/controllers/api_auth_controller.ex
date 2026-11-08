@@ -85,6 +85,7 @@ defmodule KilnCMSWeb.ApiAuthController do
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.Accounts.SecondFactor
   alias KilnCMS.Accounts.User
+  alias KilnCMS.Security.AuthEvents
   alias KilnCMSWeb.ApiError
 
   @doc """
@@ -115,7 +116,8 @@ defmodule KilnCMSWeb.ApiAuthController do
                "email" => email,
                "password" => password
              },
-             []
+             # The audit hook on the action reads the client and org from here (#2241).
+             context: AuthEvents.context(conn)
            ) do
       if Accounts.totp_enabled?(user) do
         two_factor_required(conn, user)
@@ -143,7 +145,7 @@ defmodule KilnCMSWeb.ApiAuthController do
 
     with :ok <- require_params([{"pending_token", pending}, {"code", code}]),
          {:ok, resolved} <- PendingSignIn.resolve(:encrypted, conn, pending),
-         {:ok, user} <- SecondFactor.check(resolved.user, code),
+         {:ok, user} <- SecondFactor.check(resolved.user, code, context: AuthEvents.context(conn)),
          # Only now, and only on success: a wrong code or a spent budget leaves
          # the blob alive, because neither is a failed authentication and
          # neither should turn "that code isn't valid" into "start over".
@@ -240,6 +242,10 @@ defmodule KilnCMSWeb.ApiAuthController do
   end
 
   defp issue_token(conn, user) do
+    # Both steps (password, or password then code) end here: the sign-in is
+    # complete (#2241).
+    AuthEvents.signed_in(conn, user, "password")
+
     conn
     |> put_status(:created)
     |> json(%{

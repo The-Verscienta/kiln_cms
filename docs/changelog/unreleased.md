@@ -7,6 +7,32 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="security-log-upgrade"></a>
+
+- **Run `mix ash.migrate` for the security log, add `KilnCMS.Security` to an
+  overlay's `:ash_domains`, and decide the retention window (#2441).** Two
+  migrations, both expand-only, creating two new tables and changing no existing
+  data, so rolling the pin back is safe; the tables are simply unused.
+  - **Migrations.** `20261108011355_add_security_events` creates
+    `security_events` (with four indexes) and `20261108012212_add_security_log_retention`
+    creates `site_security_log` (one row per site, created when an admin saves
+    the window).
+  - **Overlays that restate `:ash_domains`.** `KilnCMS.Security` is a new Ash
+    domain. `:ash_domains` replaces rather than merges, so add it to your
+    `config/project.exs` list (next to `KilnCMS.Social`), or the resource sits
+    outside every configured domain and `mix ash.codegen` offers to drop its
+    table. See [the overlay contract](../overlay-contract.md).
+  - **A new daily job is on by default.** `KILN_SECURITY_LOG_PRUNE_CRON`
+    (default `20 3 * * *`) deletes events older than each site's retention
+    window; `false` turns it off. The default window is **365 days**, so the log
+    starts empty and does not delete anything for a year. Set the window per site
+    on `/editor/security-log`; `0` keeps events forever, which also keeps raw IP
+    addresses and user agents indefinitely.
+  - **Privacy.** The log is new personal data (raw IP, user agent, email
+    snapshot). Add it to your records of processing; [data-flows.md](../data-flows.md)
+    lists it, and erasure and the staging scrub already cover it.
+  ([#2441](https://github.com/The-Verscienta/kiln_cms/pull/2441))
+
 <a id="backup-media-parts-upgrade"></a>
 
 - **App-made media backups can now be several `kiln-media-<stamp>.partNN.tar.gz`
@@ -236,6 +262,43 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="security-log"></a>
+
+- **A site's admins get a security log: who signed in, was locked out, changed a
+  second factor, passkey, role, API key or sign-in setting, and from where
+  (#2441).** For admins at **Security log** in the console sidebar
+  (`/editor/security-log`); editors and viewers cannot see it.
+  - **What it records.** Fifteen event types: sign-ins, failed sign-ins,
+    lockouts, second factor added and removed, recovery code used, passkey added
+    and removed, role granted and revoked, temporary elevation, API key created
+    and revoked, single sign-on changes, and a change to any other site setting
+    or blocked-address rule (the setting is named, never its value). Each row has
+    the time, the person, the target, the IP address and the browser. Filter by
+    event, person (email), and a UTC date range, and **Download CSV** of the same
+    filter. The CSV is capped like the content export (10,000 rows; over it, a
+    `413` asks you to narrow the dates) and neutralises spreadsheet formulas.
+  - **Failed sign-ins are sampled** (5 per IP address per 15 minutes) and a
+    lockout is written once per subject and scope per 15 minutes, so an attack
+    cannot fill the log. A failed sign-in for an unknown address stores no email.
+    A request to an unknown host records nothing.
+  - **Append-only.** No one, an admin included, can create, edit or delete an
+    event. Events leave only by the retention prune (default 365 days, per site,
+    `0` keeps forever; daily at `20 3 * * *`, `KILN_SECURITY_LOG_PRUNE_CRON`)
+    or by erasing a user, which clears the actor, target, email, IP, user agent
+    and metadata of every event they touched and keeps the event. The staging
+    scrub deletes the table.
+  - **Not an API.** Absent from JSON:API, GraphQL and MCP; `kiln_reporting_v1` is
+    unchanged. Not recorded: plugin install or enable (plugins are compiled in, no
+    runtime path), remember-me sign-ins, failed magic-link, SSO and passkey
+    sign-ins, and the lapse of a temporary role.
+  - **Developers.** New domain `KilnCMS.Security`, resource
+    `KilnCMS.Security.Event`, change `KilnCMS.Security.Changes.Record`. Event
+    writes that fail are visible only in the log and on the
+    `[:kiln_cms, :security, :event_failed]` and `:event_sampled_out` telemetry
+    events. The full event-to-emit-site matrix is in
+    [the security log guide](../security-events.md).
+  ([#2441](https://github.com/The-Verscienta/kiln_cms/pull/2441))
 
 <a id="field-definition-sync"></a>
 

@@ -118,6 +118,75 @@ defmodule KilnCMS.Accounts.AnonymizeUserTest do
     end
   end
 
+  describe "the security audit log (#2241)" do
+    alias KilnCMS.Security
+    alias KilnCMS.Security.Event
+
+    defp events do
+      Event
+      |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.read!(authorize?: false, tenant: KilnCMS.Accounts.default_org_id())
+    end
+
+    defp record!(attrs) do
+      Security.record!(attrs,
+        actor: Security.system(),
+        tenant: KilnCMS.Accounts.default_org_id()
+      )
+    end
+
+    test "erasing a user scrubs their events, as actor and as target, and keeps the events" do
+      admin = user(:admin)
+      subject = user(:editor)
+
+      acted =
+        record!(%{
+          type: :sign_in,
+          actor_id: subject.id,
+          actor_label: "x@example.com",
+          ip: "192.0.2.7"
+        })
+
+      targeted =
+        record!(%{
+          type: :role_granted,
+          actor_id: admin.id,
+          target_type: "user",
+          target_id: subject.id,
+          ip: "192.0.2.8"
+        })
+
+      assert {:ok, _} = Accounts.anonymize_user(subject, actor: admin)
+
+      rows = Map.new(events(), &{&1.id, &1})
+      assert map_size(rows) == 2
+
+      a = rows[acted.id]
+      assert {a.actor_id, a.actor_label, a.ip} == {nil, nil, nil}
+
+      t = rows[targeted.id]
+      assert t.target_id == nil
+      # The admin who acted keeps their own identity on the event.
+      assert t.actor_id == admin.id and t.ip == "192.0.2.8"
+    end
+
+    test "a failed security-log scrub fails and rolls back the erasure" do
+      admin = user(:admin)
+      subject = user(:editor)
+      acted = record!(%{type: :sign_in, actor_id: subject.id, ip: "192.0.2.7"})
+
+      # The scrub raises inside the erasure's transaction, so the whole erasure
+      # comes back an error and rolls back: no tombstone with a live audit trail.
+      assert {:error, _} =
+               Security.with_actor(nil, fn -> Accounts.anonymize_user(subject, actor: admin) end)
+
+      assert is_nil(Ash.get!(User, subject.id, authorize?: false).anonymized_at)
+
+      assert [%{id: id, actor_id: actor_id}] = events()
+      assert id == acted.id and actor_id == subject.id
+    end
+  end
+
   describe "export_user_data/1" do
     test "returns the account's own profile and notification preferences" do
       u = user(:editor, %{name: "Export Me", notify_on_publish: false})

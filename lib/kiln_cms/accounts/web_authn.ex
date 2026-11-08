@@ -77,9 +77,9 @@ defmodule KilnCMS.Accounts.WebAuthn do
   `payload` carries the browser response, base64url-encoded:
   `"attestation_object"`, `"client_data_json"`, and an optional `"name"`.
   """
-  @spec register_passkey(KilnCMS.Accounts.User.t(), Wax.Challenge.t(), map()) ::
+  @spec register_passkey(KilnCMS.Accounts.User.t(), Wax.Challenge.t(), map(), keyword()) ::
           {:ok, Passkey.t()} | {:error, term()}
-  def register_passkey(user, challenge, payload) do
+  def register_passkey(user, challenge, payload, opts \\ []) do
     with {:ok, attestation} <- decode(payload["attestation_object"]),
          {:ok, client_data} <- decode(payload["client_data_json"]),
          {:ok, {auth_data, _attestation_result}} <-
@@ -99,7 +99,9 @@ defmodule KilnCMS.Accounts.WebAuthn do
         # demo-mode refusal reads the actor
         # (Validations.NotDemoSharedAccount), so the enrolling user rides along.
         actor: user,
-        authorize?: false
+        authorize?: false,
+        # The audit context of the enrolling request (#2241).
+        context: Keyword.get(opts, :context, %{})
       )
     else
       :error -> {:error, :invalid_encoding}

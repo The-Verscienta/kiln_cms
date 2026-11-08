@@ -93,6 +93,15 @@ defmodule KilnCMS.Accounts.ApiKey do
 
       change {AshAuthentication.Strategy.ApiKey.GenerateApiKey,
               prefix: @prefix, hash: :api_key_hash}
+
+      # Audit log (#2241), in the transaction. The name and scope only, never the
+      # key or its hash.
+      change {KilnCMS.Security.Changes.Record,
+              type: :api_key_created,
+              target: fn record, _changeset -> {"api_key", record.id} end,
+              metadata: fn record, _changeset ->
+                %{"name" => record.name, "scope" => record.access}
+              end}
     end
 
     create :rotate do
@@ -113,6 +122,15 @@ defmodule KilnCMS.Accounts.ApiKey do
 
       change {AshAuthentication.Strategy.ApiKey.GenerateApiKey,
               prefix: @prefix, hash: :api_key_hash}
+
+      # Audit log (#2241), in the transaction. The name and scope only, never the
+      # key or its hash.
+      change {KilnCMS.Security.Changes.Record,
+              type: :api_key_created,
+              target: fn record, _changeset -> {"api_key", record.id} end,
+              metadata: fn record, _changeset ->
+                %{"name" => record.name, "scope" => record.access}
+              end}
     end
 
     read :live_in_lineage do
@@ -132,6 +150,14 @@ defmodule KilnCMS.Accounts.ApiKey do
       accept []
       require_atomic? false
       change set_attribute(:revoked_at, &DateTime.utc_now/0)
+
+      # Audit log (#2241), in the transaction; a repeat revoke of a key already
+      # revoked records nothing.
+      change {KilnCMS.Security.Changes.Record,
+              type: :api_key_revoked,
+              when: fn _record, changeset -> is_nil(changeset.data.revoked_at) end,
+              target: fn record, _changeset -> {"api_key", record.id} end,
+              metadata: fn record, _changeset -> %{"name" => record.name} end}
     end
 
     update :revoke do
@@ -152,6 +178,14 @@ defmodule KilnCMS.Accounts.ApiKey do
       # would re-authorize against the still-unrevoked row.
       change {KilnCMS.Accounts.Changes.EvictSessions,
               reason: :api_key_revoked, user_id: :user_id, after_commit?: true}
+
+      # Audit log (#2241), in the transaction; a repeat revoke of a key already
+      # revoked records nothing.
+      change {KilnCMS.Security.Changes.Record,
+              type: :api_key_revoked,
+              when: fn _record, changeset -> is_nil(changeset.data.revoked_at) end,
+              target: fn record, _changeset -> {"api_key", record.id} end,
+              metadata: fn record, _changeset -> %{"name" => record.name} end}
     end
   end
 
