@@ -4305,7 +4305,22 @@ defmodule KilnCMS.CMS.Content do
         # (`SiteEditorialSettings.editors_can_publish`, asked at `/setup`). The
         # `action_type([:create, :update])` policy above still applies, so an
         # editor scoped to some content types can publish only those.
-        policy action([:publish, :publish_scheduled]) do
+        #
+        # Taking content down is the same approval step as putting it up
+        # (#2134): unpublish and archive (from any state — archiving a draft
+        # also takes it out of an admin's review queue), and their scheduled
+        # twins, which only the AshOban scheduler runs, through the bypass.
+        # `:unarchive` lands on draft — nothing goes online or offline — so it
+        # stays with the editor-level policy above, as does `:publish_changes`
+        # (docs/working-copy.md).
+        policy action([
+                 :publish,
+                 :publish_scheduled,
+                 :unpublish,
+                 :unpublish_scheduled,
+                 :archive,
+                 :archive_scheduled
+               ]) do
           authorize_if KilnCMS.CMS.Checks.OrgAdmin
           authorize_if KilnCMS.CMS.Checks.EditorMayPublish
         end
@@ -4317,6 +4332,30 @@ defmodule KilnCMS.CMS.Content do
         # would be one date field away from meaning nothing. (Releases close
         # the same hole on `ContentRelease.:schedule`.)
         policy changing_attributes([:scheduled_at]) do
+          authorize_if KilnCMS.CMS.Checks.OrgAdmin
+          authorize_if KilnCMS.CMS.Checks.EditorMayPublish
+        end
+
+        # An unpublish date on a live record IS an unpublish, for the same
+        # reason (#2134): the scheduler retires whatever `unpublish_at` names,
+        # through the bypass, and `expiry_action` says whether that retirement
+        # unpublishes, archives or only flags. Only while the record is
+        # published or already scheduled to publish (`Checks.LiveOrScheduled`):
+        # a date on a scheduled draft would take it down after the scheduled
+        # publish with nobody approving it. On an unscheduled draft, or a
+        # create, the date does nothing until a publisher publishes (or
+        # schedules) the whole record.
+        #
+        # Two policies, not one: `changing_attributes([a, b])` matches only
+        # when BOTH change, so a combined list would let either change alone
+        # through — and must never be folded into the `scheduled_at` policy
+        # above for the same reason.
+        policy [changing_attributes([:unpublish_at]), KilnCMS.CMS.Checks.LiveOrScheduled] do
+          authorize_if KilnCMS.CMS.Checks.OrgAdmin
+          authorize_if KilnCMS.CMS.Checks.EditorMayPublish
+        end
+
+        policy [changing_attributes([:expiry_action]), KilnCMS.CMS.Checks.LiveOrScheduled] do
           authorize_if KilnCMS.CMS.Checks.OrgAdmin
           authorize_if KilnCMS.CMS.Checks.EditorMayPublish
         end

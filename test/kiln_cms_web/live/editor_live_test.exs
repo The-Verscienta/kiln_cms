@@ -305,7 +305,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "ArchPage"})
       post = draft_post(%{title: "ArchPost"})
 
-      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      # Archive takes the publish permission (#2134), so an admin runs it.
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
 
       lv |> element("input[phx-click='toggle_select_all']") |> render_click()
 

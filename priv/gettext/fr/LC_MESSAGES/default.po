@@ -12863,6 +12863,21 @@ msgstr "Seuls les administrateurs de ce site peuvent l’ouvrir. Votre compte a 
 
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
+msgid "Only an admin can archive content on this site."
+msgstr "Sur ce site, seul un administrateur peut archiver du contenu."
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only an admin can move a publish date on this site."
+msgstr "Sur ce site, seul un administrateur peut déplacer une date de publication."
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only an admin can move the unpublish date of a live page on this site."
+msgstr "Sur ce site, seul un administrateur peut déplacer la date de dépublication d’une page en ligne."
+
+#: lib/kiln_cms_web/workflow_messages.ex
+#, elixir-autogen, elixir-format
 msgid "Only an admin can publish. Submit the draft for review instead."
 msgstr "Seul un administrateur peut publier. Soumettez plutôt le brouillon pour révision."
 
@@ -12870,6 +12885,11 @@ msgstr "Seul un administrateur peut publier. Soumettez plutôt le brouillon pour
 #, elixir-autogen, elixir-format
 msgid "Only an admin can return content to draft."
 msgstr "Seul un administrateur peut renvoyer le contenu en brouillon."
+
+#: lib/kiln_cms_web/workflow_messages.ex
+#, elixir-autogen, elixir-format
+msgid "Only an admin can unpublish content on this site."
+msgstr "Sur ce site, seul un administrateur peut dépublier du contenu."
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -20774,6 +20794,11 @@ msgstr "Retirer à la mise en ligne"
 msgid "Unpublishes"
 msgstr "Dépublication le"
 
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Unpublishing needs an admin on this site, so an admin sets the unpublish date of a live or scheduled page."
+msgstr "Sur ce site, la dépublication nécessite un administrateur : c’est donc un administrateur qui fixe la date de dépublication d’une page en ligne ou programmée."
+
 #: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unread"
@@ -22220,6 +22245,7 @@ msgstr "Vous n'avez pas la permission de supprimer des médias."
 msgid "You don't have permission to delete that."
 msgstr "Vous n'avez pas la permission de supprimer cela."
 
+#: lib/kiln_cms_web/live/calendar_live.ex
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to do that."

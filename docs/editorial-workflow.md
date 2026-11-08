@@ -36,7 +36,8 @@ publishes, and decides whether editors may publish their own work.
 | Propose a publish date (`proposed_publish_at`) | No | Yes | Yes |
 | Request changes (`return_to_draft`) | No | No | Yes |
 | Put edits to a live page live (`publish_changes`) | No | Yes | Yes |
-| Unpublish or archive (`unpublish`, `archive`) | No | Yes | Yes |
+| Unpublish or archive (`unpublish`, `archive`) | No | If editors may publish | Yes |
+| Set the unpublish date of a live page (`unpublish_at`) | No | If editors may publish | Yes |
 | Restore an earlier version (`restore_version`) | No | Yes | Yes |
 | Delete, and restore from the trash (`destroy`, `restore`) | No | No | Yes |
 | Turn the Team → Publishing switch on or off | No | No | Yes |
@@ -47,14 +48,6 @@ The first-run `/setup` asks, and its default lets editors publish; a site that
 never answered (an upgraded install, say) keeps it off. Granular permissions can narrow an editor further,
 for example to some content types only ([Granular RBAC](granular-rbac.md)).
 The [policy matrix](policy-matrix.md) lists every resource and action.
-
-> **Taking content down is not gated like publishing.** Today an editor can
-> unpublish or archive a live page — from its editor page or the content
-> list's bulk bar — even on a site where only admins may publish. Whether that
-> should need an admin is an open question in
-> [#2134](https://github.com/The-Verscienta/kiln_cms/issues/2134); until it is
-> settled Kiln does not enforce it, so agree it as a team rule if your team
-> wants admins to make that call.
 
 The walkthrough below is shot on a site where only admins publish. Where
 editors may publish, an editor also sees **Publish** next to **Submit for
@@ -142,19 +135,26 @@ along with discarding changes and restoring earlier versions.
 
 ## 7. Take it down
 
-**Unpublish** returns a live page to a draft, and **Archive** files it away.
-Both are on the page's editor and in the content list's bulk bar, for editors
-and admins alike (see the note under the table above). Deleting moves a page
-to the trash, and only an admin can delete it or restore it from there
-([Trash and restore](trash.md)).
+**Unpublish** returns a live page to a draft, and **Archive** files a page
+away. Both need publish rights, and Archive does even on a draft. Any editor
+may **Unarchive**, which brings a page back as a draft.
+
+**Unpublish** is on the page's editor (under **More actions** on a
+**Live · draft** page) and in a published row's menu. Tick rows in the
+content list to **Unpublish** or **Archive** them together. On a live or
+scheduled page, **Scheduled unpublish at** in **Settings** is an unpublish
+too, so it is locked for anyone who may not publish.
+
+Deleting moves a page to the trash, and only an admin can delete it or restore
+it from there ([Trash and restore](trash.md)).
 
 ## Who may publish
 
 ![The Team page's Publishing card, where an admin lets editors publish.](images/editorial-workflow/8-team-publishing.webp)
 
-1. **Let editors publish** gives editors the publish and schedule rights in the
-   table above. **Require admin approval** takes them away again. Editors can
-   still submit for review either way.
+1. **Let editors publish** gives editors the publish, schedule and unpublish
+   rights in the table above. **Require admin approval** takes them away
+   again. Editors can still submit for review either way.
 
 Roles are given on the same page; see
 [Account administration](account-administration.md).

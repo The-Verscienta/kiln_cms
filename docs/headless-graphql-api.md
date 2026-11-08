@@ -504,7 +504,7 @@ identical; the dynamic tier shares one generic `*_entry` set):
 | `submitPostForReview(id:)` | `:submit_for_review` | `:read_write` key, editor+ | draft → in_review |
 | `returnPostToDraft(id:)` | `:return_to_draft` | `:read_write` key, **admin** | in_review → draft — the return half of the approve/return pair |
 | `publishPost(id:)` | `:publish` | `:read_write` key, **admin** (or editor where editors may publish) | Publishes and fires artifacts |
-| `unpublishPost(id:)` | `:unpublish` | `:read_write` key, editor+ | Takes content down, purges artifacts |
+| `unpublishPost(id:)` | `:unpublish` | `:read_write` key, **admin** (or editor where editors may publish) | Takes content down, purges artifacts |
 | `deletePost(id:)` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
 | `addPostReferences(id:, field:, targets:, position:)` | `:update` | `:read_write` key, editor+ | Connects records through a `:reference` field ([below](#writing-relationships)) |
 | `removePostReferences(id:, field:, targets:)` | `:update` | `:read_write` key, editor+ | Disconnects records from a `:reference` field |
@@ -513,12 +513,14 @@ identical; the dynamic tier shares one generic `*_entry` set):
 Authorization mirrors `/mcp` exactly: a **read-only key** can run none of these;
 a **`:read_write` key on a `:viewer`** account can run none (the role has no
 authoring rights); a **`:read_write` key on an `:editor`** account can
-create/update/submit and unpublish; **return-to-draft and delete require an
-`:admin`** account, and so does **publish** unless the site lets editors publish
-(Team → Publishing) — an editor submits for review, and deciding the outcome
-(approve or return) is the admin's half. Whether unpublishing should need an
-admin too is an open question in
-[#2134](https://github.com/The-Verscienta/kiln_cms/issues/2134). The hard delete (`:purge`) is **never** exposed as a mutation and is
+create/update/submit; **return-to-draft and delete require an `:admin`**
+account, and so do **publish and unpublish** unless the site lets editors
+publish (Team → Publishing) — an editor submits for review, and deciding the
+outcome (approve or return) is the admin's half, as is taking content down
+(#2134). So is an `update…` that changes `unpublishAt` or `expiryAction` on a
+record that is published or has `scheduledAt` set. A refused mutation returns
+`result: null` and an authorization error in `errors`, and changes nothing.
+The hard delete (`:purge`) is **never** exposed as a mutation and is
 API-key-banned regardless of scope.
 
 A **`:draft_write` key** (#2273) may run `create…` and `update…` on a draft its

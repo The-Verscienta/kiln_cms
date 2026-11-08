@@ -51,6 +51,10 @@ defmodule KilnCMSWeb.WorkflowMessages do
     do: gettext("Only an admin can publish. Submit the draft for review instead.")
 
   def forbidden("return"), do: gettext("Only an admin can return content to draft.")
+
+  # Taking content down needs the publish permission (#2134).
+  def forbidden("unpublish"), do: gettext("Only an admin can unpublish content on this site.")
+  def forbidden("archive"), do: gettext("Only an admin can archive content on this site.")
   def forbidden(_action), do: gettext("You don't have permission to do that.")
 
   defp forbidden?(error), do: match?(%Ash.Error.Forbidden{}, error_class(error))

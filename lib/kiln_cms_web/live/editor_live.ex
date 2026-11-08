@@ -1449,11 +1449,11 @@ defmodule KilnCMSWeb.EditorLive do
     ]
   end
 
+  # Unpublish and Archive take the publish permission (#2134), so someone who
+  # may not publish is offered neither; Unarchive lands on draft and stays.
   defp bulk_actions(_tier, _editors_can_publish) do
     [
       {"submit", gettext("Submit for review")},
-      {"unpublish", gettext("Unpublish")},
-      {"archive", gettext("Archive")},
       {"unarchive", gettext("Unarchive")}
     ]
   end
@@ -2833,7 +2833,7 @@ defmodule KilnCMSWeb.EditorLive do
                     {gettext("Return")}
                   </button>
                   <button
-                    :if={record.state == :published}
+                    :if={record.state == :published and can_publish?}
                     type="button"
                     popovertarget={"row-menu-#{kind}-#{record.id}"}
                     popovertargetaction="hide"

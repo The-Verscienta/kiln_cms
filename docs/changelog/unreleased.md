@@ -306,6 +306,54 @@ carries the reasoning.
 
 ## Breaking
 
+<a id="takedown-needs-publish-rights"></a>
+
+- **Unpublishing and archiving content now need the same permission as
+  publishing: an admin, or an editor on a site where Team → Publishing lets
+  editors publish (#2134).** Before, any editor could take a live page down,
+  or archive anything, even on a site where only admins may publish, so the
+  approval step guarded putting content up but not taking it down.
+  - **Who loses what.** On a site where only admins publish, editors can no
+    longer unpublish or archive, including archiving their own drafts (archive
+    is gated from every state; the trash was already admin-only). Nor can they
+    set, move or clear `unpublish_at`, or change `expiry_action`, on a record
+    that is published or has `scheduled_at` set: there the scheduler takes the
+    record down on that date with nobody checked, so the date is an unpublish.
+    On a draft nobody has scheduled, and on a create, editors may still set
+    both. **Unarchive** and **Publish changes** stay open to every editor.
+    Content releases are unchanged: editors may still add Unpublish items, and
+    only an admin schedules or ships a release.
+  - **Upgraded sites are the ones affected.** `editors_can_publish` defaults to
+    off on a site that never answered the first-run `/setup` question, which
+    is every site upgraded from before the switch existed. To keep the old
+    behaviour for editors, an admin opens **Team** (`/editor/team`) and chooses
+    **Let editors publish** under **Publishing**. That also lets editors
+    publish, which is the point: one switch now decides both directions.
+  - **API keys.** A `:read_write` key owned by an editor on such a site gets
+    `403` on JSON:API `PATCH /api/json/<type>/:id/unpublish`, an authorization
+    error (with `result: null`) on the GraphQL `unpublish<Type>` mutations, and
+    a refusal on any `PATCH` or `update<Type>` that changes `unpublish_at` /
+    `expiry_action` on a published or scheduled record. Archive has no API
+    route, and `/mcp` has no unpublish or archive tool. Mint the key on an
+    admin account, or turn the switch on.
+  - **In the editor.** Editors who may not publish are no longer offered
+    **Unpublish** on the page (nor in the **Live · draft** menu), **Unpublish**
+    in a content-list row's menu, or **Unpublish** and **Archive** in the bulk
+    bar. **Scheduled unpublish at** is locked on a live or scheduled page, with
+    a note saying an admin sets it. A refused action says "Only an admin can
+    unpublish content on this site." or "Only an admin can archive content on
+    this site."; dragging a live page's unpublish chip on the calendar says
+    "Only an admin can move the unpublish date of a live page on this site.",
+    and a publish chip "Only an admin can move a publish date on this site."
+  - **Rolling back** is safe: there is no migration and no data change, and
+    the previous release's policies apply again.
+  - **Guides.** [The editorial workflow](../editorial-workflow.md#7-take-it-down),
+    the [policy matrix](../policy-matrix.md),
+    [content lifecycles](../content-lifecycles.md#authorization),
+    [api.md](../api.md), [json-api.md](../json-api.md),
+    [headless-graphql-api.md](../headless-graphql-api.md) and
+    [beta-testing.md](../beta-testing.md).
+
 <a id="breached-password-bootstrap-return"></a>
 
 - **`KilnCMS.Accounts.Bootstrap.create_first_admin/1` returns `{:ok, user, notices}` (#2240).**
@@ -1778,19 +1826,18 @@ carries the reasoning.
     as a viewer, an editor and an admin, with Team → Publishing off and on,
     and fails when a cell disagrees with the policies. A row the test has no
     check for fails too, so the table cannot gain a claim nobody verifies.
-  - **What the guide says about taking content down.** Editors can unpublish
-    and archive a live page even where only admins may publish. The guide
-    says so in a note under the table and links the open question,
-    [#2134](https://github.com/The-Verscienta/kiln_cms/issues/2134), rather
-    than describe a rule Kiln does not enforce. **Publish changes** by an
-    editor is described as by design, as
+  - **What the guide says about taking content down.** Unpublish and archive
+    follow the same Team → Publishing switch as publishing, as
+    [#2134](https://github.com/The-Verscienta/kiln_cms/issues/2134) decided
+    (see [the Breaking entry](#takedown-needs-publish-rights)); the table has a
+    row for each, and one for a live page's unpublish date. **Publish
+    changes** by an editor is described as by design, as
     [The working copy](../working-copy.md) records.
   - **API docs corrected to match.** [api.md](../api.md),
     [json-api.md](../json-api.md) and
-    [headless-graphql-api.md](../headless-graphql-api.md) said unpublishing
-    needs an admin. They now say an editor may unpublish, that publishing
-    needs an admin unless the site lets editors publish, and link #2134. The
-    policies did not change.
+    [headless-graphql-api.md](../headless-graphql-api.md) disagreed with the
+    policies about who may unpublish. They now say that publish and unpublish
+    need an admin unless the site lets editors publish.
   - **Editor reading track.** The guide is first; Trash and restore leaves
     the track (deleting and restoring are admin-only) and is still linked
     from the guide and listed on the index.
