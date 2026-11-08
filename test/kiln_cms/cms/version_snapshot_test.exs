@@ -185,4 +185,31 @@ defmodule KilnCMS.CMS.VersionSnapshotTest do
     assert current["seo_title"] == nil
     assert current["title"] == "Encodable"
   end
+
+  describe "changed_custom_fields/2 (#2353)" do
+    defp v(id, sec, changes),
+      do: %{
+        id: id,
+        version_inserted_at: DateTime.add(~U[2026-01-01 00:00:00Z], sec),
+        changes: changes
+      }
+
+    test "diffs against the last earlier version that carried custom_fields" do
+      a = v("a", 0, %{"custom_fields" => %{"x" => 1, "y" => 2}})
+      b = v("b", 1, %{"title" => "t"})
+      c = v("c", 2, %{"custom_fields" => %{"x" => 1, "z" => 3}})
+      d = v("d", 3, %{"custom_fields" => %{}})
+      h = [a, b, c, d]
+
+      assert VersionSnapshot.changed_custom_fields(h, a) == ["x", "y"]
+      assert VersionSnapshot.changed_custom_fields(h, b) == []
+      assert VersionSnapshot.changed_custom_fields(h, c) == ["y", "z"]
+      assert VersionSnapshot.changed_custom_fields(h, d) == ["x", "z"]
+    end
+
+    test "a non-map custom_fields entry names nothing" do
+      a = v("a", 0, %{"custom_fields" => nil})
+      assert VersionSnapshot.changed_custom_fields([a], a) == []
+    end
+  end
 end

@@ -109,6 +109,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The single-revision API read carries `changed_custom_fields`, the sorted keys of the custom fields that write changed.**
+  Additive: `changed_fields` still says `custom_fields`; no migration.
+  ([#2353](https://github.com/The-Verscienta/kiln_cms/issues/2353) · [long form](docs/changelog/unreleased.md#revisions-changed-custom-fields))
+
+
 - **Admins get a security log: who signed in, was locked out, or changed a second factor, passkey, role, API key or sign-in setting, and from where.**
   At `/editor/security-log`, with filters, CSV download and a per-site retention window (default 365 days). Guide: [docs/security-events.md](docs/security-events.md).
   ([#2441](https://github.com/The-Verscienta/kiln_cms/pull/2441) · [long form](docs/changelog/unreleased.md#security-log))

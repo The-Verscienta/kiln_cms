@@ -263,6 +263,16 @@ carries the reasoning.
 
 ## Added
 
+<a id="revisions-changed-custom-fields"></a>
+
+- **`GET /api/content/:type/:id/revisions/:version_id` adds `changed_custom_fields` (#2353).**
+  A custom-field edit is one `custom_fields` map, so `changed_fields` could only
+  say `custom_fields`. The new sibling lists the keys added, removed or edited,
+  diffed against the previous revision that carried `custom_fields` (history is
+  changes-only, so not the adjacent row; an empty map before the first).
+  Same-transaction revisions have an arbitrary order. The list endpoint is
+  unchanged. No migration; existing clients are unaffected.
+
 <a id="custom-field-groups-and-mixed-sort"></a>
 
 - **`custom_filter` takes `_or` / `_and` / `_not` groups, a custom sort may precede a built-in one, and reference/media sorts are refused with a reason (#2355, #2356, #2354).**

@@ -618,6 +618,8 @@ export interface RevisionList {
  * version up to it). Values are in their stored JSON shape.
  */
 export interface RevisionDetail extends Revision {
+  /** Sorted keys of the custom fields this write changed (diff against the last revision that carried `custom_fields`). */
+  changed_custom_fields: string[];
   changes: Record<string, unknown>;
   snapshot: Record<string, unknown>;
 }
