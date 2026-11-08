@@ -73,14 +73,19 @@ defmodule KilnCMSWeb.AuthPasswordNoticeTest do
     do: AuthController.success(flash_conn(), activity, user, "token")
 
   describe "after register" do
-    test "the password sign-in shows the warning once" do
+    test "the password sign-in that follows shows the warning once" do
       pw = password()
       enable!(&ok(&1, breached_body(pw, 9)))
       user = register(pw)
 
-      first = sign_in_success(user, {:password, :register})
+      # Registering is not signing in (#2255): it neither shows nor consumes
+      # the note, so the warning waits for the sign-in it belongs to.
+      registered = sign_in_success(user, {:password, :register})
+      assert error_flash(registered) == nil
+      assert Phoenix.Flash.get(registered.assigns.flash, :info)
+
+      first = sign_in_success(user, {:password, :sign_in})
       assert error_flash(first) == warning()
-      assert Phoenix.Flash.get(first.assigns.flash, :info)
 
       second = sign_in_success(user, {:password, :sign_in})
       assert error_flash(second) == nil
