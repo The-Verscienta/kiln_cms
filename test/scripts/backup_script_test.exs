@@ -758,17 +758,99 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       case "$2" in *part02*) echo "upload refused" >&2; exit 1 ;; esac
       """)
 
-      assert {_out, status} =
+      assert {out, status} =
                backup(ctx, "all", [
                  {"BACKUP_MEDIA_PART_MB", "16"},
                  {"BACKUP_RCLONE_REMOTE", "r2:kiln"}
                ])
 
       assert status != 0
+      # An upload failure is not a refusal.
+      refute out =~ "REFUSING"
       assert length(media_parts(ctx)) == 3
       assert [_sidecar] = Path.wildcard(Path.join(ctx.backups, "media/*.sha256"))
       assert {_, 0} = backup(ctx, "verify")
       refute manifest!(ctx)["ok"]
+      # A failed run names no remote: nothing may read its files as off-site.
+      assert manifest!(ctx)["offsite"] == nil
+    end
+
+    test "a part changed while the one before it uploads is refused, and the run stops", ctx do
+      # rclone, copying part01, appends to part02: the real race.
+      stub!(ctx.bin, "rclone", """
+      #!/bin/sh
+      printf '%s %s %s\\n' "$1" "$(basename "$2")" "$3" >> "#{ctx.log}"
+      case "$2" in
+        *part01.tar.gz) printf tampered >> "$(printf '%s' "$2" | sed 's/part01/part02/')" ;;
+      esac
+      """)
+
+      assert {out, status} =
+               backup(ctx, "all", [
+                 {"BACKUP_MEDIA_PART_MB", "16"},
+                 {"BACKUP_RCLONE_REMOTE", "r2:kiln"}
+               ])
+
+      assert status != 0
+      [part02] = Enum.filter(media_parts(ctx), &(&1 =~ ".part02."))
+      assert out =~ "REFUSING off-site copy of #{Path.basename(part02)}: its sha256 changed"
+      assert out =~ "Nothing was uploaded for it"
+
+      # The dump, its sidecar and part01 went; nothing after the refusal did.
+      assert [
+               "copy kiln-db-" <> _,
+               "copy kiln-db-" <> db_sidecar,
+               "copy kiln-media-" <> p1
+             ] = ctx.log |> File.read!() |> String.split("\n", trim: true)
+
+      assert db_sidecar =~ ".sha256 "
+      assert p1 =~ ".part01.tar.gz "
+
+      manifest = manifest!(ctx)
+      refute manifest["ok"]
+      assert manifest["error"] =~ "REFUSING off-site copy of #{Path.basename(part02)}"
+      assert manifest["offsite"] == nil
+
+      # The failure manifest does not call the refused part verified; the rest
+      # still are.
+      verified =
+        Map.new(manifest["artifacts"], &{Path.basename(&1["path"]), &1["verified"]})
+
+      assert verified[Path.basename(part02)] == false
+      assert verified |> Map.delete(Path.basename(part02)) |> Map.values() |> Enum.all?()
+
+      # The set is kept as evidence, and verify says it no longer checks out.
+      assert length(media_parts(ctx)) == 3
+      assert [_sidecar] = Path.wildcard(Path.join(ctx.backups, "media/*.sha256"))
+      assert {_, verify_status} = backup(ctx, "verify")
+      assert verify_status != 0
+    end
+
+    test "a sidecar rewritten during the upload is refused", ctx do
+      stub!(ctx.bin, "rclone", """
+      #!/bin/sh
+      printf '%s %s %s\\n' "$1" "$(basename "$2")" "$3" >> "#{ctx.log}"
+      case "$2" in
+        *part03.tar.gz) for f in "$(dirname "$2")"/kiln-media-*.sha256; do echo >> "$f"; done ;;
+      esac
+      """)
+
+      assert {out, status} =
+               backup(ctx, "all", [
+                 {"BACKUP_MEDIA_PART_MB", "16"},
+                 {"BACKUP_RCLONE_REMOTE", "r2:kiln"}
+               ])
+
+      assert status != 0
+
+      assert out =~
+               ~r/REFUSING off-site copy of kiln-media-\d{8}-\d{6}\.sha256: its sha256 changed/
+
+      refute File.read!(ctx.log) =~ ~r/kiln-media-\d{8}-\d{6}\.sha256 /
+      assert manifest!(ctx)["error"] =~ "REFUSING"
+      assert manifest!(ctx)["offsite"] == nil
+      # Every part was the part it verified.
+      assert Enum.all?(manifest!(ctx)["artifacts"], & &1["verified"])
     end
   end
 
@@ -782,7 +864,24 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     for n <- 1..11,
         do: sparse!(Path.join(ctx.media, "f#{String.pad_leading("#{n}", 2, "0")}.bin"), 9 * @mb)
 
-    assert {_out, 0} = backup(ctx, "all", [{"BACKUP_MEDIA_PART_MB", "16"}], bash)
+    # Off-site too, so every part is re-hashed before its copy under this bash.
+    log = Path.join(ctx.tmp, "rclone-eleven.log")
+
+    stub!(ctx.bin, "rclone", """
+    #!/bin/sh
+    printf '%s\\n' "$(basename "$2")" >> "#{log}"
+    """)
+
+    assert {_out, 0} =
+             backup(
+               ctx,
+               "all",
+               [{"BACKUP_MEDIA_PART_MB", "16"}, {"BACKUP_RCLONE_REMOTE", "r2:kiln"}],
+               bash
+             )
+
+    # dump + its sidecar + 11 parts + the media sidecar
+    assert log |> File.read!() |> String.split("\n", trim: true) |> length() == 14
 
     parts = media_parts(ctx)
     names = Enum.map(parts, &Path.basename/1)

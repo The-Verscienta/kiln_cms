@@ -107,6 +107,102 @@ defmodule KilnCMS.Backups.Checksum do
 
   def verify(_path, _expected), do: {:error, :mismatch}
 
+  @doc """
+  Re-hash the file at `path` and say whether it is still the file a backup
+  verified (#2218): a regular file (not followed through a symlink) of
+  `expected_bytes` (when given) whose SHA-256 is `expected` (hex, either case).
+
+  The worker calls this immediately before each off-site copy, with the digest
+  it recorded when the file was written, so a file changed on disk in between
+  is refused rather than uploaded.
+
+  Returns `:ok`, or `{:error, reason}`: `:no_digest` (nothing on record to
+  compare with, so nothing can be vouched for), `:not_regular`,
+  `{:changed, %{expected, actual, expected_bytes, bytes}}`, or the read error
+  (`:enoent`, …). Not built on `verify/2`, which answers only yes or no: a
+  refusal has to say what was found (digest and size) and why (file type).
+  The digest comparison is constant time, as in `verify/2`.
+  """
+  @spec recheck(Path.t(), hex() | nil, non_neg_integer() | nil) ::
+          :ok
+          | {:error,
+             :no_digest
+             | :not_regular
+             | {:changed,
+                %{
+                  expected: hex(),
+                  actual: hex(),
+                  expected_bytes: non_neg_integer() | nil,
+                  bytes: non_neg_integer()
+                }}
+             | term()}
+  # sobelow_skip ["Traversal.FileModule"]
+  def recheck(path, expected, expected_bytes) when is_binary(expected) do
+    expected = String.downcase(expected)
+
+    with :ok <- regular(path),
+         {:ok, actual, bytes} <- file(path) do
+      if Plug.Crypto.secure_compare(actual, expected) and
+           (is_nil(expected_bytes) or bytes == expected_bytes) do
+        :ok
+      else
+        {:error,
+         {:changed,
+          %{expected: expected, actual: actual, expected_bytes: expected_bytes, bytes: bytes}}}
+      end
+    end
+  end
+
+  def recheck(_path, _expected, _expected_bytes), do: {:error, :no_digest}
+
+  @doc """
+  Check that the sidecar at `path` still says exactly `entries`, a list of
+  `{file_name, hex}` in part order (#2218): the same lines, in the same order,
+  and nothing else. Like `recheck/3`, it runs immediately before the sidecar's
+  off-site copy.
+
+  This compares the PARSED sidecar with what the backup recorded, where
+  `scripts/backup.sh` hashes the sidecar's bytes; both catch a sidecar changed
+  after it was written (the parse ignores only a `sha256sum` binary-mode `*`).
+
+  `:ok`, or `{:error, reason}`: `:no_digest` (an entry with no digest on
+  record), `:not_regular`, `:malformed`, `:sidecar_changed`, or the read error.
+  """
+  @spec check_sidecar(Path.t(), [{String.t(), hex() | nil}]) :: :ok | {:error, term()}
+  def check_sidecar(path, entries) when is_list(entries) do
+    with :ok <- recorded(entries),
+         :ok <- regular(path),
+         {:ok, found} <- parse_sidecar(path) do
+      if same_entries?(found, entries), do: :ok, else: {:error, :sidecar_changed}
+    end
+  end
+
+  defp recorded(entries) do
+    if entries != [] and Enum.all?(entries, &match?({_name, hex} when is_binary(hex), &1)),
+      do: :ok,
+      else: {:error, :no_digest}
+  end
+
+  defp same_entries?(found, entries) do
+    length(found) == length(entries) and
+      found
+      |> Enum.zip(entries)
+      |> Enum.all?(fn {{hex, name}, {expected_name, expected_hex}} ->
+        name == expected_name and Plug.Crypto.secure_compare(hex, String.downcase(expected_hex))
+      end)
+  end
+
+  # `lstat`, so a symlink swapped in for a backup file is refused rather than
+  # followed to whatever it points at.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp regular(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :regular}} -> :ok
+      {:ok, _other} -> {:error, :not_regular}
+      {:error, _} = error -> error
+    end
+  end
+
   # One file, folded into the running whole-set hash as well.
   defp hash_file(path, total) do
     case :file.open(path, [:read, :raw, :binary]) do

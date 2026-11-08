@@ -174,6 +174,119 @@ defmodule KilnCMS.Backups.ChecksumTest do
     end
   end
 
+  describe "recheck/3 (#2218)" do
+    test "the file it recorded passes, in either case of hex", %{tmp_dir: dir} do
+      path = write!(dir, "a.bin", "the bytes it verified")
+      hex = sha("the bytes it verified")
+
+      assert :ok = Checksum.recheck(path, hex, 21)
+      assert :ok = Checksum.recheck(path, String.upcase(hex), 21)
+      assert :ok = Checksum.recheck(path, hex, nil)
+    end
+
+    test "one flipped byte at the same size is caught, with what was found", %{tmp_dir: dir} do
+      path = write!(dir, "a.bin", "abcdef")
+      hex = sha("abcdef")
+      File.write!(path, "abcdeg")
+      found = sha("abcdeg")
+
+      assert {:error, {:changed, %{expected: ^hex, actual: ^found, expected_bytes: 6, bytes: 6}}} =
+               Checksum.recheck(path, hex, 6)
+    end
+
+    test "a truncated or grown file is changed", %{tmp_dir: dir} do
+      path = write!(dir, "a.bin", "abcdef")
+      hex = sha("abcdef")
+
+      File.write!(path, "abc")
+      assert {:error, {:changed, %{bytes: 3, expected_bytes: 6}}} = Checksum.recheck(path, hex, 6)
+
+      File.write!(path, "abcdefg")
+      assert {:error, {:changed, %{bytes: 7}}} = Checksum.recheck(path, hex, 6)
+    end
+
+    test "the right digest at the wrong recorded size is still refused", %{tmp_dir: dir} do
+      path = write!(dir, "a.bin", "abcdef")
+
+      assert {:error, {:changed, %{bytes: 6, expected_bytes: 7}}} =
+               Checksum.recheck(path, sha("abcdef"), 7)
+    end
+
+    test "a missing file is the read error", %{tmp_dir: dir} do
+      assert {:error, :enoent} = Checksum.recheck(Path.join(dir, "gone"), sha("x"), 1)
+    end
+
+    test "a symlink is refused even when its target matches", %{tmp_dir: dir} do
+      target = write!(dir, "real.bin", "abc")
+      link = Path.join(dir, "link.bin")
+      File.ln_s!(target, link)
+
+      assert {:error, :not_regular} = Checksum.recheck(link, sha("abc"), 3)
+    end
+
+    test "no digest on record is refused without reading anything", %{tmp_dir: dir} do
+      path = write!(dir, "a.bin", "abc")
+      assert {:error, :no_digest} = Checksum.recheck(path, nil, 3)
+      assert {:error, :no_digest} = Checksum.recheck(Path.join(dir, "gone"), nil, nil)
+    end
+  end
+
+  describe "check_sidecar/2 (#2218)" do
+    setup %{tmp_dir: dir} do
+      entries = [{"p01.tar.gz", sha("one")}, {"p02.tar.gz", sha("two")}]
+      path = Path.join(dir, "set.sha256")
+      :ok = Checksum.write_sidecar(path, entries)
+      %{path: path, entries: entries}
+    end
+
+    test "the sidecar it wrote passes", %{path: path, entries: entries} do
+      assert :ok = Checksum.check_sidecar(path, entries)
+
+      upper = Enum.map(entries, fn {n, h} -> {n, String.upcase(h)} end)
+      assert :ok = Checksum.check_sidecar(path, upper)
+    end
+
+    test "a changed digest is refused", %{path: path, entries: [{n1, _}, e2] = entries} do
+      File.write!(path, "#{sha("other")}  #{n1}\n#{elem(e2, 1)}  #{elem(e2, 0)}\n")
+      assert {:error, :sidecar_changed} = Checksum.check_sidecar(path, entries)
+    end
+
+    test "swapped lines are refused", %{path: path, entries: [{n1, h1}, {n2, h2}] = entries} do
+      File.write!(path, "#{h2}  #{n2}\n#{h1}  #{n1}\n")
+      assert {:error, :sidecar_changed} = Checksum.check_sidecar(path, entries)
+    end
+
+    test "an extra line is refused", %{path: path, entries: entries} do
+      File.write!(path, File.read!(path) <> "#{sha("three")}  p03.tar.gz\n")
+      assert {:error, :sidecar_changed} = Checksum.check_sidecar(path, entries)
+    end
+
+    test "a missing line is refused", %{path: path, entries: [{n1, h1} | _] = entries} do
+      File.write!(path, "#{h1}  #{n1}\n")
+      assert {:error, :sidecar_changed} = Checksum.check_sidecar(path, entries)
+    end
+
+    test "a truncated digest is malformed", %{path: path, entries: [{n1, h1}, {n2, h2}] = entries} do
+      File.write!(path, "#{h1}  #{n1}\n#{String.slice(h2, 0, 40)}  #{n2}\n")
+      assert {:error, :malformed} = Checksum.check_sidecar(path, entries)
+    end
+
+    test "a missing sidecar is the read error", %{tmp_dir: dir, entries: entries} do
+      assert {:error, :enoent} = Checksum.check_sidecar(Path.join(dir, "gone.sha256"), entries)
+    end
+
+    test "a symlinked sidecar is refused", %{tmp_dir: dir, path: path, entries: entries} do
+      link = Path.join(dir, "link.sha256")
+      File.ln_s!(path, link)
+      assert {:error, :not_regular} = Checksum.check_sidecar(link, entries)
+    end
+
+    test "an entry with no digest on record is refused", %{path: path, entries: [e1, {n2, _}]} do
+      assert {:error, :no_digest} = Checksum.check_sidecar(path, [e1, {n2, nil}])
+      assert {:error, :no_digest} = Checksum.check_sidecar(path, [])
+    end
+  end
+
   describe "bounded memory" do
     # Polls the VM's total memory while `fun` runs and returns the peak growth
     # over the starting level, in bytes. Binary memory is where a whole-file

@@ -385,6 +385,13 @@ defmodule KilnCMS.Backups.Importer do
     end
   end
 
+  # Only a succeeded run's remote vouches for its files (#2218). Before the
+  # fix, `backup.sh` named the remote in its failure manifests too, so one
+  # on disk from an older script would mark a refused or never-sent file as
+  # copied off-site.
+  defp offsite(%Manifest{ok: true, offsite: offsite}), do: offsite
+  defp offsite(_manifest), do: nil
+
   defp trigger(%Manifest{trigger: trigger}) when is_binary(trigger),
     do: String.slice(trigger, 0, @max_trigger)
 
@@ -403,7 +410,7 @@ defmodule KilnCMS.Backups.Importer do
       with %Manifest{} <- manifest,
            %{} = listed <-
              Enum.find(manifest.artifacts, &(Path.basename(&1.path) == file.name)),
-           {:ok, attrs} <- Artifact.from_manifest(listed, manifest.offsite) do
+           {:ok, attrs} <- Artifact.from_manifest(listed, offsite(manifest)) do
         %{attrs | bytes: file.bytes}
       else
         _ -> base

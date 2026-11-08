@@ -109,6 +109,44 @@ defmodule KilnCMS.Backups.ImporterTest do
       refute run.error =~ "pw12345"
     end
 
+    test "a failed manifest's remote does not mark its files as copied off-site (#2218)",
+         %{dir: dir} do
+      # An older backup.sh named the remote in its failure manifests too.
+      put(dir, :db, "20260801-031700")
+
+      manifest!(dir,
+        ok: false,
+        started_at: ~U[2026-08-01 03:17:00Z],
+        error: "REFUSING off-site copy of kiln-media-20260801-031700.part02.tar.gz",
+        offsite: "r2:kiln",
+        artifacts: [
+          %{kind: "db", path: "db/kiln-db-20260801-031700.dump", bytes: 5, verified: true}
+        ]
+      )
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+
+      assert %{status: :failed, artifacts: [db]} = run!("20260801-031700")
+      assert Map.keys(db.destinations) == ["local"]
+    end
+
+    test "a succeeded manifest's remote does mark its files as copied off-site", %{dir: dir} do
+      put(dir, :db, "20260801-031700")
+
+      manifest!(dir,
+        ok: true,
+        started_at: ~U[2026-08-01 03:17:00Z],
+        offsite: "r2:kiln",
+        artifacts: [
+          %{kind: "db", path: "db/kiln-db-20260801-031700.dump", bytes: 5, verified: true}
+        ]
+      )
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert %{artifacts: [db]} = run!("20260801-031700")
+      assert %{"status" => "ok"} = db.destinations["rclone:r2:kiln"]
+    end
+
     test "a failed manifest with no files becomes a failed run keyed by its start", %{dir: dir} do
       manifest!(dir,
         trigger: "cron",

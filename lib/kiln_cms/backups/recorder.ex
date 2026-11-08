@@ -177,6 +177,25 @@ defmodule KilnCMS.Backups.Recorder do
     end
   end
 
+  @doc """
+  Mark the artifact holding the file called `name` as not verified (#2218): a
+  file whose off-site copy was refused because it changed on disk after the
+  backup verified it. `name` is a single-file artifact's name or one part of a
+  media set, which marks the whole set (a set is verified only if every part
+  is). Unknown names change nothing.
+  """
+  @spec put_unverified(t(), String.t()) :: t()
+  def put_unverified(%__MODULE__{} = rec, name) do
+    artifacts =
+      for attrs <- rec.artifacts do
+        if attrs.name == name or name in Artifact.files(attrs),
+          do: %{attrs | verified: false},
+          else: attrs
+      end
+
+    %{rec | artifacts: artifacts}
+  end
+
   @doc "Persist what has happened so far."
   @spec progress(t()) :: t()
   def progress(%__MODULE__{run: nil} = rec), do: rec

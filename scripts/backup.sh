@@ -28,7 +28,9 @@
 #                        removed when the script exits
 #   BACKUP_KEEP_DAYS     local retention in days (default: 14)
 #   BACKUP_RCLONE_REMOTE optional rclone target (e.g. "r2:kiln-backups") —
-#                        each new backup is copied off-site after it verifies
+#                        each new backup is copied off-site after it verifies;
+#                        each file is re-hashed right before its copy and the
+#                        run stops, uploading nothing more, if one changed
 #   BACKUP_PING_URL      optional URL curl'd on success (healthchecks.io-style
 #                        dead-man's switch; the check fires when pings STOP)
 #   BACKUP_TRIGGER       label recorded in the manifest (default: "cron")
@@ -88,13 +90,44 @@ STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 BACKUP_KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 
+# Copy one file off-site — but only the file this run verified (#2218).
+# $1 = file, $2 = the sha256 recorded when it was written. The file is
+# re-hashed immediately before its own copy (not all up front, which would
+# leave the whole upload window open); a missing file, a symlink, or one whose
+# digest changed is REFUSED: never uploaded, never retried, and the run stops
+# here. A failed copy (after rclone's own retries) fails the run too: fail
+# loudly so cron surfaces it — an off-site copy that silently stopped is the
+# classic trap. The app checks the same thing; for a sidecar it compares the
+# parsed lines where this hashes the bytes, and either catches a change.
 offsite() {
-  # $1 = file to copy off-site (best-effort is NOT enough: fail loudly so cron
-  # surfaces it — an off-site copy that silently stopped is the classic trap).
-  if [ -n "${BACKUP_RCLONE_REMOTE:-}" ]; then
-    echo "==> Off-site copy → ${BACKUP_RCLONE_REMOTE}"
-    rclone copy "$1" "${BACKUP_RCLONE_REMOTE}/$(basename "$(dirname "$1")")"
+  [ -n "${BACKUP_RCLONE_REMOTE:-}" ] || return 0
+  local file="$1" expected="${2:-}" found=""
+  if [ -f "$file" ] && [ ! -L "$file" ]; then
+    found="$(sha256_of "$file")" || found=""
   fi
+  if [ -z "$expected" ] || [ "$found" != "$expected" ]; then
+    refuse_offsite "$file" "$expected" "$found"
+  fi
+  echo "==> Off-site copy → ${BACKUP_RCLONE_REMOTE}"
+  rclone copy "$file" "${BACKUP_RCLONE_REMOTE}/$(basename "$(dirname "$file")")"
+}
+
+# $1 = file, $2 = recorded sha256, $3 = what it hashes to now (empty: missing
+# or not a regular file). The failure manifest must not call it verified.
+refuse_offsite() {
+  local name pattern why
+  name="$(basename "$1")"
+  if [ -z "${2:-}" ]; then
+    why="no sha256 was recorded for it"
+  elif [ -z "${3:-}" ]; then
+    why="it is missing or no longer a regular file (expected sha256 $2)"
+  else
+    why="its sha256 changed after this backup verified it (expected $2, found $3)"
+  fi
+  pattern="$(printf '%s' "$(basename "$(dirname "$1")")/${name}" | sed 's/[.[\*^$/]/\\&/g')"
+  MANIFEST_ARTIFACTS="$(printf '%s' "$MANIFEST_ARTIFACTS" |
+    sed "s/\(\"path\":\"${pattern}\",\"bytes\":[0-9]*,\"verified\":\)true/\1false/")"
+  die "REFUSING off-site copy of ${name}: ${why}. Nothing was uploaded for it. Something other than this backup wrote to ${BACKUP_DIR}: check the disk before trusting this backup."
 }
 
 # SHA-256 (lowercase hex) of a file: sha256sum on GNU/Linux, shasum on macOS.
@@ -219,8 +252,12 @@ write_manifest() {
   [ -n "${2:-}" ] && err="\"$(json_escape "$2")\""
   local offsite="null"
   # Escaped too: these are operator-supplied strings, and an unescaped quote
-  # in either silently breaks the whole file.
-  [ -n "${BACKUP_RCLONE_REMOTE:-}" ] && offsite="\"$(json_escape "$BACKUP_RCLONE_REMOTE")\""
+  # in either silently breaks the whole file. Only a run that succeeded names
+  # the remote (#2218), as the app does: a failure manifest's `offsite` would
+  # tell the importer that a refused or never-sent file is safely off-site.
+  if [ "$1" = "true" ] && [ -n "${BACKUP_RCLONE_REMOTE:-}" ]; then
+    offsite="\"$(json_escape "$BACKUP_RCLONE_REMOTE")\""
+  fi
   local trigger
   trigger="$(json_escape "${BACKUP_TRIGGER:-cron}")"
 
@@ -341,12 +378,13 @@ cmd_db() {
   mv "${out}.partial" "$out"
 
   echo "    ok: $(du -h "$out" | cut -f1) $(basename "$out")"
-  local sha sidecar="$BACKUP_DIR/db/kiln-db-${STAMP}.sha256"
+  local sha sidecar_sha sidecar="$BACKUP_DIR/db/kiln-db-${STAMP}.sha256"
   sha="$(sha256_of "$out")"
   write_sidecar "$sidecar" "$(basename "$out")" "$sha"
+  sidecar_sha="$(sha256_of "$sidecar")"
   record_artifact db "$out" "$sha"
-  offsite "$out"
-  offsite "$sidecar"
+  offsite "$out" "$sha"
+  offsite "$sidecar" "$sidecar_sha"
 }
 
 # --- media settings (mirror config/runtime/prod/backups.exs) ---------------
@@ -856,6 +894,8 @@ cmd_media() {
     i=$((i + 1))
   done
   write_sidecar "$sidecar" "${pairs[@]}"
+  local sidecar_sha
+  sidecar_sha="$(sha256_of "$sidecar")"
   # The set is complete: a later failure (off-site copy) keeps it.
   SET_FILES=()
 
@@ -864,10 +904,12 @@ cmd_media() {
     record_artifact media "$dir/${names[$i]}" "${shas[$i]}" "$((i + 1))" "$total"
     i=$((i + 1))
   done
-  for name in "${names[@]}"; do
-    offsite "$dir/$name"
+  i=0
+  while [ "$i" -lt "$total" ]; do
+    offsite "$dir/${names[$i]}" "${shas[$i]}"
+    i=$((i + 1))
   done
-  offsite "$sidecar"
+  offsite "$sidecar" "$sidecar_sha"
   umask "$ORIG_UMASK"
 }
 
