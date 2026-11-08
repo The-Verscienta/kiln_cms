@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **In-app backups whose off-site copy fails now finish `Failed`, and both paths re-hash each file just before its off-site copy and refuse one that changed; check your rclone remote and credentials if backups turn red.** No migration; rolling back is safe.
+  ([long form](docs/changelog/unreleased.md#backup-offsite-rehash-upgrade))
+
 - **`scripts/backup.sh` now splits media into `.partNN.tar.gz` parts like the app (400 MB, no off switch), skips empty folders, honours `BACKUP_MEDIA_EXCLUDE` and needs GNU tar or bsdtar; `restore.sh` refuses a part set with no sidecar unless `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1`.** No migration.
   ([long form](docs/changelog/unreleased.md#backup-sh-media-parts-upgrade))
 

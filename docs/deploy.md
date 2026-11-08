@@ -373,8 +373,10 @@ Postgres is published on the host loopback (`127.0.0.1:5432`) so the cron in
 `backups.md` runs on the host against
 `postgres://kiln:…@127.0.0.1:5432/kiln_prod` and writes `/var/backups/kiln`,
 and that same directory is bind-mounted into the app at `BACKUP_DIR`, so the
-in-app page reads cron's manifest and cron's off-site copy and pruning cover
-what the page writes. One uid has to own that directory and both writers
+in-app page reads cron's manifest and cron's pruning covers what the page
+writes. Cron copies off-site only the files its own run wrote: a backup taken
+from the page goes off-site only if the app image has `rclone` (the official
+one does not; see [Backups](backups.md)). One uid has to own that directory and both writers
 have to be it — the app runs as `nobody` (uid 65534) and makes its
 subdirectories `0700`, so a shared group does not help. Create it **before
 the first `up`** (Docker otherwise auto-creates a bind source root-owned; a

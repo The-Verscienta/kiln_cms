@@ -344,6 +344,230 @@ defmodule KilnCMS.Backups.ResumeTest do
     end
   end
 
+  # -- resuming a run that failed off-site -----------------------------------
+
+  describe "resuming a run that failed off-site (#2218)" do
+    @describetag :pg_tools
+
+    # An rclone that logs each call, fails every call while `fail` exists,
+    # appends to part 2 while it uploads part 1 when `tamper` exists, and
+    # rewrites the media sidecar while it uploads part 3 when `sidecar` exists,
+    # and swaps part 2 for a symlink to its own bytes when `symlink` exists.
+    defp stub_rclone(base, dir) do
+      bin = Path.join(base, "bin")
+      File.mkdir_p!(bin)
+
+      gates =
+        Map.new([:fail, :tamper, :sidecar, :symlink], &{&1, Path.join(base, "rclone.#{&1}")})
+
+      log = Path.join(base, "rclone.log")
+
+      write_exe(bin, "rclone", """
+      echo "$*" >> "#{log}"
+      [ -f "#{gates.fail}" ] && { echo "upload refused" >&2; exit 1; }
+      case "$2" in
+        *part01.tar.gz)
+          p2="$(printf '%s' "$2" | sed 's/part01/part02/')"
+          if [ -f "#{gates.tamper}" ]; then printf tampered >> "$p2"; fi
+          if [ -f "#{gates.symlink}" ]; then
+            mv "$p2" "$p2.moved" && ln -s "$p2.moved" "$p2"
+          fi ;;
+        *part03.tar.gz)
+          if [ -f "#{gates.sidecar}" ]; then
+            for f in "#{dir}"/media/kiln-media-*.sha256; do
+              echo "#{String.duplicate("0", 64)}  kiln-media-x.part04.tar.gz" >> "$f"
+            done
+          fi ;;
+      esac
+      exit 0
+      """)
+
+      path = System.get_env("PATH")
+      unless String.starts_with?(path, bin <> ":"), do: System.put_env("PATH", bin <> ":" <> path)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :rclone_remote, "r2:kiln")
+      )
+
+      Map.put(gates, :log, log)
+    end
+
+    defp gate!(path), do: File.write!(path, "")
+
+    defp rclone_calls(%{log: log}) do
+      case File.read(log) do
+        {:ok, text} -> String.split(text, "\n", trim: true)
+        _ -> []
+      end
+    end
+
+    # A whole local backup that then failed off-site; returns what a resume uses.
+    defp fail_offsite(base, dir, gate) do
+      tools = stub_tools(base)
+      rclone = stub_rclone(base, dir)
+      gate!(Map.fetch!(rclone, gate))
+
+      assert {:error, {:offsite, _}} = Worker.run("manual")
+      File.rm!(Map.fetch!(rclone, gate))
+
+      assert [%{status: :failed} = run] = runs()
+      assert Backups.work_state?(run.stamp)
+      assert {:ok, _} = Backups.resumable_run(run.stamp)
+
+      parts = Enum.map(1..3, &Path.join([dir, "media", Artifact.part_name(run.stamp, &1)]))
+
+      %{
+        tools: tools,
+        rclone: rclone,
+        run: run,
+        dump: Path.join([dir, "db", "kiln-db-#{run.stamp}.dump"]),
+        parts: parts
+      }
+    end
+
+    test "after a failed upload, Resume copies off-site again and rebuilds nothing", %{
+      base: base,
+      dir: dir
+    } do
+      %{tools: tools, rclone: rclone, run: failed, dump: dump, parts: parts} =
+        fail_offsite(base, dir, :fail)
+
+      assert failed.error =~ "Off-site copy FAILED"
+      first_round = length(rclone_calls(rclone))
+      old = Map.new([dump | parts], &{&1, aged(&1)})
+
+      assert :ok = Worker.run("manual", nil, resume: failed.stamp)
+
+      assert dump_count(tools) == 1
+      for {path, mtime} <- old, do: assert(mtime(path) == mtime, "#{path} was rewritten")
+
+      # Every file went again: dump, 3 parts, 2 sidecars.
+      assert length(rclone_calls(rclone)) == first_round + 6
+
+      assert [run] = runs()
+      assert run.id == failed.id
+      assert run.status == :succeeded
+      assert Enum.any?(run.log, &(&1.step == "resume" and &1.message =~ "Reused 3 of 3"))
+      assert Manifest.read(dir).ok
+      assert Manifest.read(dir).offsite == "r2:kiln"
+      refute Backups.work_state?(failed.stamp)
+    end
+
+    test "after a refusal, Resume rebuilds only the file that changed", %{base: base, dir: dir} do
+      %{tools: tools, rclone: rclone, run: failed, dump: dump, parts: [p1, p2, p3]} =
+        fail_offsite(base, dir, :tamper)
+
+      assert failed.error =~ "Off-site copy REFUSED for 1 file: #{Path.basename(p2)}"
+      refute Enum.any?(rclone_calls(rclone), &(&1 =~ Path.basename(p2)))
+      old = Map.new([dump, p1, p3], &{&1, aged(&1)})
+
+      assert :ok = Worker.run("manual", nil, resume: failed.stamp)
+
+      assert dump_count(tools) == 1
+      for {path, mtime} <- old, do: assert(mtime(path) == mtime, "#{path} was rewritten")
+      assert {_, 0} = System.cmd("tar", ["-tzf", p2], stderr_to_stdout: true)
+
+      assert [run] = runs()
+      assert run.status == :succeeded
+      assert Enum.any?(run.log, &(&1.step == "resume" and &1.message =~ "Reused 2 of 3"))
+      assert Enum.any?(rclone_calls(rclone), &(&1 =~ Path.basename(p2)))
+
+      # The rebuilt part is the one the sidecar vouches for.
+      {:ok, entries} =
+        Checksum.parse_sidecar(
+          Path.join([dir, "media", Artifact.sidecar_name(:media, run.stamp)])
+        )
+
+      {hex, _} = Enum.find(entries, fn {_, file} -> file == Path.basename(p2) end)
+      assert :ok = Checksum.verify(p2, hex)
+    end
+
+    test "a part swapped for a symlink to the same bytes is refused, and Resume rebuilds it", %{
+      base: base,
+      dir: dir
+    } do
+      %{tools: tools, run: failed, parts: [p1, p2, p3]} = fail_offsite(base, dir, :symlink)
+
+      assert failed.error =~
+               "Off-site copy REFUSED for 1 file: #{Path.basename(p2)} (it is no longer a regular file)"
+
+      assert {:ok, %File.Stat{type: :symlink}} = File.lstat(p2)
+      old = Map.new([p1, p3], &{&1, aged(&1)})
+
+      # Reuse applies the off-site gate's own check, so the symlink is not reused
+      # (which would be refused again on every Resume) but rebuilt in its place.
+      assert :ok = Worker.run("manual", nil, resume: failed.stamp)
+
+      assert {:ok, %File.Stat{type: :regular}} = File.lstat(p2)
+      for {path, mtime} <- old, do: assert(mtime(path) == mtime, "#{path} was rewritten")
+      assert dump_count(tools) == 1
+      assert [run] = runs()
+      assert run.status == :succeeded
+      assert Enum.any?(run.log, &(&1.step == "resume" and &1.message =~ "Reused 2 of 3"))
+    end
+
+    test "a refusal during a resume fails again, stays resumable, and the next converges", %{
+      base: base,
+      dir: dir
+    } do
+      %{rclone: rclone, run: failed} = fail_offsite(base, dir, :tamper)
+
+      gate!(rclone.tamper)
+
+      assert {:error, {:offsite, %{refused: [_]}}} =
+               Worker.run("manual", nil, resume: failed.stamp)
+
+      assert [%{status: :failed, error: "Off-site copy REFUSED" <> _}] = runs()
+      assert {:ok, _} = Backups.resumable_run(failed.stamp)
+
+      File.rm!(rclone.tamper)
+      assert :ok = Worker.run("manual", nil, resume: failed.stamp)
+      assert [%{status: :succeeded}] = runs()
+    end
+
+    test "a sidecar changed during the upload is rewritten on Resume, nothing rebuilt", %{
+      base: base,
+      dir: dir
+    } do
+      %{tools: tools, run: failed, dump: dump, parts: parts} = fail_offsite(base, dir, :sidecar)
+
+      assert failed.error =~ "Off-site copy REFUSED for 1 file: kiln-media-#{failed.stamp}.sha256"
+      old = Map.new([dump | parts], &{&1, aged(&1)})
+
+      assert :ok = Worker.run("manual", nil, resume: failed.stamp)
+
+      assert dump_count(tools) == 1
+      for {path, mtime} <- old, do: assert(mtime(path) == mtime, "#{path} was rewritten")
+      assert [%{status: :succeeded}] = runs()
+
+      sidecar = Path.join([dir, "media", Artifact.sidecar_name(:media, failed.stamp)])
+      assert {:ok, entries} = Checksum.parse_sidecar(sidecar)
+      assert Enum.map(entries, &elem(&1, 1)) == Enum.map(parts, &Path.basename/1)
+    end
+
+    test "a database-only run that failed off-site has nothing to resume", %{
+      base: base,
+      dir: dir
+    } do
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :media_dir, nil)
+      )
+
+      rclone = stub_rclone(base, dir)
+      gate!(rclone.fail)
+
+      assert {:error, {:offsite, _}} = Worker.run("manual")
+      assert [%{status: :failed} = run] = runs()
+      assert run.error =~ "run a new backup to try the off-site copy again"
+      refute run.error =~ "Resume"
+      assert {:error, :no_state} = Backups.resumable_run(run.stamp)
+    end
+  end
+
   # -- refusals --------------------------------------------------------------
 
   describe "refusals" do

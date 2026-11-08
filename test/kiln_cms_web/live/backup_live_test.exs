@@ -723,6 +723,120 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       assert backup_jobs() == []
     end
+
+    test "a run refused off-site shows the refusal, Not verified, and Resume", %{
+      conn: conn,
+      dir: dir
+    } do
+      stamp = "20261105-101010"
+      archive = "kiln-media-#{stamp}.tar.gz"
+
+      error =
+        "Off-site copy REFUSED for 1 file: #{archive} (changed on disk after this backup " <>
+          "verified it (sha256 expected 3b1f00000000…, found 8c0200000000…)). Something other " <>
+          "than this backup wrote to the backup directory: check the disk and anything with " <>
+          "access to BACKUP_DIR before trusting this backup. The local files are kept; Resume " <>
+          "retries the off-site copy and rebuilds any file that changed."
+
+      run =
+        Backups.start_run!(%{stamp: stamp, trigger: "manual", components: [:db, :media]},
+          actor: Backups.system()
+        )
+
+      artifacts = [
+        %{kind: :db, name: "kiln-db-#{stamp}.dump", bytes: 10, verified: true},
+        %{
+          kind: :media,
+          name: archive,
+          bytes: 10,
+          verified: false,
+          destinations: %{
+            "local" => %{"status" => "ok"},
+            "rclone:r2:kiln" => %{"status" => "failed", "error" => "Refused: changed on disk"}
+          }
+        }
+      ]
+
+      run =
+        Backups.fail_run!(run, %{error: error, artifacts: artifacts}, actor: Backups.system())
+
+      work = WorkState.path(dir, stamp)
+      File.mkdir_p!(work)
+      :ok = WorkState.write(work, WorkState.new(stamp))
+
+      :ok =
+        Manifest.write(dir, %Manifest{
+          started_at: DateTime.utc_now(),
+          finished_at: DateTime.utc_now(),
+          trigger: "manual",
+          ok: false,
+          artifacts: [
+            %{kind: "db", path: "db/kiln-db-#{stamp}.dump", bytes: 10, verified: true},
+            %{kind: "media", path: "media/#{archive}", bytes: 10, verified: false}
+          ],
+          error: error
+        })
+
+      {:ok, lv, html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      # The "Last run failed" box quotes the manifest's error.
+      assert html =~ "Last run failed"
+      assert html =~ "Off-site copy REFUSED for 1 file: #{archive}"
+
+      row = "#backup-run-#{run.id}"
+      assert has_element?(lv, row, "Off-site copy REFUSED")
+      assert has_element?(lv, ~s|#{row} [data-role="verified"]|, "Not verified")
+      assert has_element?(lv, ~s|#{row} [data-role="destination"]|, "failed")
+      assert has_element?(lv, ~s|#{row} button[data-role="resume"]|, "Resume")
+    end
+  end
+
+  describe "an off-site remote with no rclone in the image (#2218)" do
+    setup do
+      original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(original, :rclone_remote, ":s3,secret_access_key=hunter2hunter2:bucket")
+      )
+
+      bin = Path.join(System.tmp_dir!(), "kiln_bklbin_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(bin)
+      path = System.get_env("PATH")
+
+      on_exit(fn ->
+        System.put_env("PATH", path)
+        File.rm_rf!(bin)
+      end)
+
+      %{bin: bin}
+    end
+
+    test "the panel says backups from this page are not copied off-site", %{
+      conn: conn,
+      bin: bin
+    } do
+      # Only an empty directory on PATH: no rclone anywhere.
+      System.put_env("PATH", bin)
+      assert Backups.status().rclone_missing?
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+
+      assert has_element?(lv, "#backup-rclone-missing", "rclone is not installed in this image")
+      refute render(lv) =~ "hunter2hunter2"
+    end
+
+    test "with rclone installed it says nothing of the kind", %{conn: conn, bin: bin} do
+      File.write!(Path.join(bin, "rclone"), "#!/bin/sh\nexit 0\n")
+      File.chmod!(Path.join(bin, "rclone"), 0o755)
+      System.put_env("PATH", bin <> ":" <> System.get_env("PATH"))
+      refute Backups.status().rclone_missing?
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      refute has_element?(lv, "#backup-rclone-missing")
+    end
   end
 
   describe "the overview warning" do

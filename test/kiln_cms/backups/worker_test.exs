@@ -533,7 +533,8 @@ defmodule KilnCMS.Backups.WorkerTest do
     end
 
     @tag :pg_tools
-    test "rclone results are per artifact, with a connection-string remote redacted" do
+    test "a failed off-site copy fails the run; the verified local backup is kept and resumable",
+         %{dir: dir} do
       remote = ":s3,access_key_id=AKIAEXAMPLE1,secret_access_key=SUPERSECRETVAL:bucket"
       set_config(rclone_remote: remote)
 
@@ -542,11 +543,15 @@ defmodule KilnCMS.Backups.WorkerTest do
          ~s|case "$*" in *kiln-media*) echo "Failed secret_access_key=SUPERSECRETVAL ($*)" >&2; exit 1;; esac\nexit 0\n|}
       ])
 
-      assert :ok = Worker.run("manual")
+      assert {:error, {:offsite, %{failed: [_ | _], refused: []}}} = Worker.run("manual")
 
       assert [run] = runs()
-      assert run.status == :succeeded
+      assert run.status == :failed
+      assert run.error =~ "Off-site copy FAILED for 2 files: kiln-media-"
+      assert run.error =~ "Resume retries the off-site copy"
       assert [db, media] = run.artifacts
+      # Nothing changed on disk: both are still the files it verified.
+      assert db.verified and media.verified
 
       assert [key] = db.destinations |> Map.keys() |> Enum.reject(&(&1 == "local"))
       assert String.starts_with?(key, "rclone:")
@@ -554,8 +559,87 @@ defmodule KilnCMS.Backups.WorkerTest do
       assert %{"status" => "failed", "error" => error} = media.destinations[key]
       assert error != ""
 
-      refute inspect(run) =~ "SUPERSECRETVAL"
-      refute inspect(run) =~ "AKIAEXAMPLE1"
+      manifest = Manifest.read(dir)
+      refute manifest.ok
+      assert manifest.offsite == nil
+      assert manifest.error == run.error
+      assert Enum.all?(manifest.artifacts, & &1.verified)
+
+      # The files stay, and so does the state a Resume builds on.
+      for artifact <- manifest.artifacts, do: assert(File.exists?(Path.join(dir, artifact.path)))
+      assert Backups.work_state?(run.stamp)
+
+      for haystack <- [inspect(run), File.read!(Path.join(dir, "manifest.json"))] do
+        refute haystack =~ "SUPERSECRETVAL"
+        refute haystack =~ "AKIAEXAMPLE1"
+      end
+    end
+
+    @tag :pg_tools
+    test "a file changed during the off-site copy is refused and fails the run loudly", %{
+      dir: dir
+    } do
+      log = Path.join(dir, "rclone.log")
+      set_config(rclone_remote: "r2:kiln")
+
+      # While the dump uploads, something appends to the media archive.
+      fake_bin([
+        {"rclone",
+         ~s|echo "$*" >> "#{log}"\ncase "$2" in *kiln-db-*.dump) for f in "#{dir}"/media/kiln-media-*.tar.gz; do printf x >> "$f"; done ;; esac\nexit 0\n|}
+      ])
+
+      {result, output} = ExUnit.CaptureLog.with_log(fn -> Worker.run("manual") end)
+      assert {:error, {:offsite, %{refused: [{archive, {:changed, _}}], failed: []}}} = result
+      assert output =~ "REFUSED"
+      assert output =~ archive
+
+      assert [run] = runs()
+      assert run.status == :failed
+      assert run.error =~ "Off-site copy REFUSED for 1 file: #{archive} (changed on disk"
+      assert run.error =~ "check the disk"
+      assert [db, media] = run.artifacts
+      assert db.verified
+      refute media.verified
+      assert media.destinations["rclone:r2:kiln"]["error"] =~ "Refused: "
+
+      manifest = Manifest.read(dir)
+      refute manifest.ok
+      assert manifest.error == run.error
+
+      assert [%{kind: "db", verified: true}, %{kind: "media", verified: false}] =
+               manifest.artifacts
+
+      # Never uploaded, never retried; everything else was.
+      sent = File.read!(log)
+      refute sent =~ archive
+      assert sent =~ "kiln-media-#{run.stamp}.sha256"
+      assert Backups.work_state?(run.stamp)
+    end
+
+    @tag :pg_tools
+    test "a run that fails off-site still prunes expired sets", %{dir: dir} do
+      old = Path.join([dir, "db", "kiln-db-20200101-000000.dump"])
+      File.mkdir_p!(Path.dirname(old))
+      File.write!(old, "old")
+      File.touch!(old, System.os_time(:second) - 365 * 24 * 3600)
+
+      set_config(rclone_remote: "r2:kiln")
+      fake_bin([{"rclone", "exit 1\n"}])
+
+      assert {:error, {:offsite, _}} = Worker.run("manual")
+      refute File.exists?(old)
+    end
+
+    @tag :pg_tools
+    test "a successful run leaves no work directory behind", %{dir: dir} do
+      set_config(rclone_remote: "r2:kiln")
+      fake_bin([{"rclone", "exit 0\n"}])
+
+      assert :ok = Worker.run("manual")
+      assert [%{status: :succeeded, stamp: stamp}] = runs()
+      refute Backups.work_state?(stamp)
+      refute File.exists?(Path.join([dir, ".work", stamp]))
+      assert Manifest.read(dir).offsite == "r2:kiln"
     end
 
     defp wait_until(fun, tries \\ 200) do

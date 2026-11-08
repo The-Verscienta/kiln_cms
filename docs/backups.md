@@ -74,8 +74,14 @@ Rules that make this a strategy rather than a script:
   file on failure, loudly. Both paths also record a SHA-256 of every file, so a
   copy that was damaged later can be told from one that was never good.
 - **A backup that only lives on the VPS doesn't count.** The threat model is
-  losing the VPS. Set `BACKUP_RCLONE_REMOTE` (R2/B2/S3 — any rclone remote);
-  the off-site copy failing fails the run, so cron surfaces it.
+  losing the VPS. Set `BACKUP_RCLONE_REMOTE` (R2/B2/S3 — any rclone remote).
+  An off-site copy that fails fails the run, in cron and in the app, so it
+  surfaces: cron exits non-zero, and the app marks the run `Failed`.
+- **Only the file that verified leaves the host.** Each file (the dump, every
+  media part, every `.sha256` sidecar) is hashed again immediately before its
+  own off-site copy and compared with the SHA-256 recorded when it verified. A
+  file that changed in between is not uploaded and the run fails
+  ([When an off-site copy is refused](#when-an-off-site-copy-is-refused)).
 - **Silence must be an alarm.** Set `BACKUP_PING_URL` to a
   [healthchecks.io](https://healthchecks.io)-style check: the *absence* of the
   nightly ping alerts you. Cron `MAILTO` alone tells you about loud failures,
@@ -205,8 +211,9 @@ on the row, but nothing is re-checked on import.
 **Interrupted? Resume it.** A failed or killed backup leaves its finished work
 in `<BACKUP_DIR>/.work/<stamp>/`: the file lists and a `state.json` recording
 each finished step and part with its hash. The directory is mode 0700, the
-files 0600, and it is removed when the backup succeeds. A directory older than
-three days is swept automatically.
+files 0600, and it is removed only when the backup and its off-site copy both
+succeed, so a run that failed off-site can be resumed too. A directory older
+than three days is swept automatically, and with it the chance to resume.
 
 1. Open **Backups** (`/editor/backups`) as a platform admin and scroll to
    **History**.
@@ -237,8 +244,120 @@ all finished media parts, plus one part being written, plus the file lists.
 
 **Retention and off-site.** Prune treats one stamp (the dump, every media part
 and the sidecars) as ONE set, aged by its newest member, and deletes it whole,
-so a retention sweep can never leave half a set. Off-site copies each part and
-each sidecar. A failed copy fails the run, as before.
+so a retention sweep can never leave half a set. Off-site copies the dump, each
+part and each sidecar, one `rclone copy` per file, each after its own re-hash.
+A failed copy, of a data file or of a sidecar, fails the run: a part set whose
+sidecar never left the host is one `restore.sh` refuses to restore from the
+remote. There is no retry in Kiln itself; rclone's own retries are the retries
+(`--retries`, 3 by default, settable with `RCLONE_RETRIES` in the environment of
+the app or the cron line). The run is marked failed only after those.
+
+The app prunes before its off-site copy, so expired sets are removed even when
+the off-site copy then fails. Cron prunes only at the end of a run that
+succeeded, off-site copy included. Prune never touches the current stamp.
+
+The re-hash costs one extra sequential read of every file, and only when a
+remote is set. It is far quicker than the upload that follows, and it leaves
+the file in the page cache for rclone's own read.
+
+### When an off-site copy is refused
+
+A refusal means a file changed on disk between the moment this backup verified
+it and the moment it was about to be uploaded. The backup wrote that file
+once, verified it and recorded its SHA-256, and then something else wrote to
+it: a disk fault, a second process with access to `BACKUP_DIR`, a person. The
+file is not uploaded, not retried, and not rebuilt in that run, because a
+changed backup file is the operator's to look at, not the backup's to paper
+over.
+
+**Where it shows (in-app backup).** The run is `Failed`. The error appears in
+the **Last run failed** box on `/editor/backups` and on the History row. The
+row reads **Not verified**, the refused file loses its **Verified** badge in
+the **Artifacts** list, and the overview shows its red backup strip. The error names each file and why, for example (one line,
+wrapped here):
+
+```text
+Off-site copy REFUSED for 1 file: kiln-media-20261108-031700.part02.tar.gz
+(changed on disk after this backup verified it (sha256 expected 3b1f0c9a2e41…,
+found 8c02d7e5b6f1…)). Something other than this backup wrote to the backup
+directory: check the disk and anything with access to BACKUP_DIR before
+trusting this backup. The local files are kept; Resume retries the off-site
+copy and rebuilds any file that changed.
+```
+
+Other reasons in the same place: `it is missing`, `it is no longer a regular
+file` (a symlink or directory swapped in), `the checksum file changed after it
+was written` and `the checksum file is no longer well-formed` (a sidecar). A
+copy that rclone itself failed is listed separately, as `Off-site copy FAILED
+for N files: <name> (rclone exited 1)`. At most five files are named per list,
+then "and N more". The server log has a line per refused file with both full
+digests, and the run's log in the database has the rclone output for a failed
+copy (redacted).
+
+**Where it shows (cron).** `backup.sh` stops at the first refusal, exits
+non-zero (so `MAILTO` and the missing `BACKUP_PING_URL` ping catch it), prints
+the error to stderr after `error: `, and for `backup.sh all` writes it into a
+failure manifest, which the panel shows in **Last run failed** (one line,
+wrapped here):
+
+```text
+REFUSING off-site copy of kiln-media-20261108-031700.part02.tar.gz: its
+sha256 changed after this backup verified it (expected 3b1f…, found 8c02…).
+Nothing was uploaded for it. Something other than this backup wrote to
+/var/backups/kiln: check the disk before trusting this backup.
+```
+
+(The digests in the real message are full length.) A missing file or a
+symlink reads `it is missing or no longer a regular file`. A copy that rclone
+itself failed stops the run the same way; its manifest error is only
+`backup.sh exited <status> - see the backup log`, and rclone's own output is in
+that log.
+
+**What did and did not leave the host.**
+
+- **App:** every other file is still re-hashed and copied, one by one, so the
+  remote has everything except the refused files (and any whose copy failed).
+  A part set missing a part on the remote is not restorable from there:
+  `restore.sh` stops with `<sidecar> lists <file>, which is missing from the
+  set`.
+- **Cron:** files copied before the refusal are on the remote; nothing after it
+  was copied, and for `backup.sh all` a refusal during the database phase means
+  the media set was never built.
+- **Both:** all local files are kept, the changed one included, and the
+  manifest records the refused file as not verified and `"offsite": null`.
+- **The sidecars differ slightly.** Cron hashes a sidecar's bytes, so any edit
+  to it is caught. The app compares the sidecar's parsed lines with the
+  digests and names it recorded, in order: a changed digest, name, line order
+  or an extra line is caught, while a change the parser ignores (a blank line,
+  one space instead of two before the name, `sha256sum`'s `*` binary marker)
+  is not.
+
+**What to check.** Look at the disk (`dmesg`, SMART, filesystem errors) and at
+anything else that can write to `BACKUP_DIR`: a second cron entry or host, a
+sync job pointed the wrong way, a restore unpacked into it. Compare the file
+with the digest the error names (`sha256sum <file>`).
+
+**Then retry.**
+
+1. If you want the changed file as evidence, copy it out of `BACKUP_DIR`
+   first. A resume replaces it.
+2. **App, with a media directory:** open **Backups** as a platform admin and
+   click **Resume** on the failed History row (see [Interrupted? Resume
+   it.](#media-backups-in-parts-2218)). Files that still match `state.json`
+   are reused, and only a file that changed (or was replaced by a symlink or
+   other non-regular file) is rebuilt. A rebuilt dump is a fresh `pg_dump`,
+   taken at resume time. Every file is re-hashed and copied off-site again;
+   rclone skips a file the remote already holds unchanged. The row goes back to
+   `Running` and ends `Succeeded`, or `Failed` again and still resumable.
+3. **App, database only** (S3 media adapter, or no media directory): there is
+   no work directory, so there is no Resume. Click **Back up now** for a new
+   backup; the error says "run a new backup to try the off-site copy again".
+4. **Cron:** run `backup.sh all` again (or wait for the next run). Cron has no
+   resume; the next run is a new stamp.
+
+A copy that failed (rather than was refused) is retried the same way, after
+fixing what rclone reported: usually the remote's name, its credentials in
+`rclone.conf`, or the network.
 
 ### Cron backups in parts
 
@@ -295,8 +414,9 @@ of them cannot write there, so run both as the same user.
 once from a re-checked list first), or the run is interrupted with `HUP`, `INT`
 or `TERM`, the script removes every part it wrote for that stamp, so a partial
 set never looks like a backup. A database dump that already finished is kept.
-A failed off-site copy after the set is complete keeps the set and fails the
-run.
+A failed or [refused](#when-an-off-site-copy-is-refused) off-site copy after
+the set is complete keeps the set and fails the run, and the files after it are
+not copied.
 
 **When a run is killed outright** (`kill -9`, power loss), no cleanup runs. The
 run leaves its finished parts and an in-progress marker,
@@ -406,6 +526,26 @@ alongside your Postgres upgrade.
 Where they are absent, the page says so and the button is disabled rather than
 failing at the point of use. Cron backups on the host are unaffected either
 way.
+
+**The official image does not install `rclone`.** With `BACKUP_RCLONE_REMOTE`
+set in the app's environment and no `rclone` on its `PATH`, an in-app backup
+still runs and succeeds, but copies nothing off-site. That is deliberate: on a
+host that copies the same `BACKUP_DIR` off-site by other means, failing every
+in-app run would be wrong. It is not silent:
+
+- **Where backups go** on `/editor/backups` shows an **Off-site** line with the
+  remote (credentials masked) and "rclone is not installed in this image, so
+  backups taken from this page are not copied off-site."
+- Each run logs a warning, in the server log and in the run's log:
+  "BACKUP_RCLONE_REMOTE is set but rclone is not installed in this image;
+  nothing was copied off-site".
+- The manifest's `offsite` stays `null`.
+
+To copy in-app backups off-site, build your own image on top of Kiln's with
+`rclone` installed and configured for the user the app runs as (`nobody`), or
+copy the directory from the host (`rclone sync` of `BACKUP_DIR`, excluding
+`.work/**`), or snapshot the volume. `backup.sh` copies only the files its own
+run wrote, so a cron entry alone does not carry the app's backups off-site.
 
 ### What it deliberately does not do
 
@@ -576,7 +716,7 @@ configured for cron needs nothing extra for the console.
 | `BACKUP_MEDIA_EXCLUDE` | backup + app | comma-separated globs the media archive leaves out (default none) |
 | `TMPDIR` | backup | where `backup.sh` builds the media file lists (default `/tmp`); removed when it exits |
 | `BACKUP_TRIGGER` | backup | label recorded in the manifest (default `cron`) |
-| `BACKUP_RCLONE_REMOTE` | backup | off-site rclone remote (strongly recommended) |
+| `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused or failed copy fails the run. The app needs `rclone` in its image ([above](#it-needs-the-client-tools-in-the-image)) |
 | `BACKUP_PING_URL` | backup | dead-man's-switch ping on success |
 | `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill` |
 | `RESTORE_MEDIA_DIR` | restore | target uploads root for `media` |

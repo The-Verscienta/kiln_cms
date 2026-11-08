@@ -448,6 +448,25 @@ defmodule KilnCMSWeb.BackupLive do
             <dd :if={@status.manifest && @status.manifest.offsite} class="font-mono text-xs">
               {KilnCMS.Backups.Redact.text(@status.manifest.offsite)}
             </dd>
+            <dt
+              :if={@status.rclone_missing? && !(@status.manifest && @status.manifest.offsite)}
+              class="text-base-content/70"
+            >
+              {gettext("Off-site")}
+            </dt>
+            <dd
+              :if={@status.rclone_missing?}
+              id="backup-rclone-missing"
+              class={[
+                "text-xs text-warning-ink",
+                @status.manifest && @status.manifest.offsite && "col-start-2"
+              ]}
+            >
+              <span class="font-mono">{KilnCMS.Backups.Redact.text(rclone_remote())}</span>
+              — {gettext(
+                "rclone is not installed in this image, so backups taken from this page are not copied off-site."
+              )}
+            </dd>
           </dl>
 
           <p class="mt-4 text-xs text-base-content/60">
@@ -675,4 +694,5 @@ defmodule KilnCMSWeb.BackupLive do
   defp backup_dir, do: Backups.dir()
   defp media_dir, do: Backups.media_dir()
   defp keep_days, do: Backups.keep_days()
+  defp rclone_remote, do: Backups.rclone_remote()
 end

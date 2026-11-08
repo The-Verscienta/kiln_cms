@@ -32,6 +32,21 @@ defmodule KilnCMS.Backups.Worker do
   the reason a failed backup here is loud rather than a truncated file with a
   plausible name.
 
+  ## Nothing leaves the host unverified
+
+  Each file's sha256 is recorded once, right after it verifies (or, on a
+  resume, re-checked against `state.json`). Immediately before each off-site
+  copy (the dump, every media part, every sidecar) the file is read again and
+  compared with that record (`Checksum.recheck/3`, `Checksum.check_sidecar/2`).
+  A file that changed in between is **refused**: not uploaded, never retried
+  and never rebuilt in the same run, because something other than this backup
+  wrote to the backup directory and that is the operator's to look at. The
+  other files are still checked and copied one by one, and the run fails at
+  the end naming every refused and every failed file. A failed `rclone copy`
+  (after rclone's own retries) fails the run too. The work directory is kept
+  until the off-site copy succeeds, so Resume retries it, rebuilding only a
+  file that changed.
+
   ## Uniqueness
 
   Oban `unique` over a short window stops the obvious double-click from
@@ -204,27 +219,11 @@ defmodule KilnCMS.Backups.Worker do
       case artifacts(ctx, rec) do
         {:ok, artifacts, rec} ->
           rec = prune_step(dir, rec)
-          {offsite, rec} = offsite_step(dir, artifacts, rec)
 
-          # The manifest FIRST: it has no database dependency, and cron-era
-          # consumers read it. The run is closed after. On a resume this
-          # overwrites the failed run's manifest with `ok: true` (atomic rename).
-          write_manifest(dir, %Manifest{
-            started_at: started_at,
-            finished_at: DateTime.utc_now(),
-            trigger: trigger,
-            ok: true,
-            artifacts: artifacts,
-            offsite: offsite && Redact.text(offsite),
-            keep_days: Backups.keep_days()
-          })
-
-          rec
-          |> Recorder.log(:info, "done", "Backup complete: #{length(artifacts)} artifact(s)")
-          |> Recorder.finish()
-
-          Logger.info("Backup complete (#{trigger}): #{length(artifacts)} artifact(s) in #{dir}")
-          :ok
+          case offsite_step(dir, artifacts, rec) do
+            {:ok, offsite, rec} -> succeed(ctx, artifacts, offsite, rec)
+            {:error, reason, rec} -> fail_offsite(ctx, artifacts, reason, rec)
+          end
 
         {:error, reason, partial, rec} ->
           Logger.error("Backup FAILED (#{trigger}): #{inspect(reason)}")
@@ -238,6 +237,62 @@ defmodule KilnCMS.Backups.Worker do
     # The importer is total; nothing it does changes the backup's outcome.
     _ = Importer.run()
     result
+  end
+
+  defp succeed(ctx, artifacts, offsite, rec) do
+    %{dir: dir, trigger: trigger} = ctx
+
+    # The manifest FIRST: it has no database dependency, and cron-era
+    # consumers read it. The run is closed after. On a resume this
+    # overwrites the failed run's manifest with `ok: true` (atomic rename).
+    write_manifest(dir, %Manifest{
+      started_at: ctx.started_at,
+      finished_at: DateTime.utc_now(),
+      trigger: trigger,
+      ok: true,
+      artifacts: artifacts,
+      offsite: offsite && Redact.text(offsite),
+      keep_days: Backups.keep_days()
+    })
+
+    rec
+    |> Recorder.log(:info, "done", "Backup complete: #{length(artifacts)} artifact(s)")
+    |> Recorder.finish()
+
+    finish_work(ctx)
+    Logger.info("Backup complete (#{trigger}): #{length(artifacts)} artifact(s) in #{dir}")
+    :ok
+  end
+
+  # The local backup is whole and verified, but it did not all get off the
+  # host (or a file changed before it could). The work directory stays, so
+  # Resume retries the off-site copy; a refused file is no longer the file
+  # `state.json` recorded, so the resume rebuilds exactly that one.
+  defp fail_offsite(ctx, artifacts, reason, rec) do
+    Logger.error("Backup FAILED (#{ctx.trigger}): #{inspect(reason)}")
+    error = describe_offsite(reason, Backups.media_dir() != nil)
+    record_failure(ctx.dir, ctx.trigger, ctx.started_at, error, unverify(artifacts, reason))
+    Recorder.fail(rec, error)
+    {:error, reason}
+  end
+
+  # Last, after the run is closed: a node that dies between the two leaves at
+  # most a stale `.work/<stamp>`, which `sweep_work_dirs/2` removes in time.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp finish_work(ctx) do
+    File.rm_rf(WorkState.path(ctx.dir, ctx.stamp))
+    :ok
+  end
+
+  # The manifest must not call a refused file verified.
+  defp unverify(artifacts, {:offsite, %{refused: refused}}) do
+    names = for {name, _reason} <- refused, do: name
+
+    Enum.map(artifacts, fn artifact ->
+      if Path.basename(artifact.path) in names,
+        do: %{artifact | verified: false},
+        else: artifact
+    end)
   end
 
   # Time-based, not Oban-state-based (`Worker.run/1` may come from a console).
@@ -269,34 +324,176 @@ defmodule KilnCMS.Backups.Worker do
 
   # Per-file outcomes land on the run (a part set's per-part results on its
   # parts, with the artifact-level aggregate worked out by the recorder); the
-  # manifest keeps its all-or-nothing `offsite` (the remote, or nil), exactly as
-  # before. A sidecar is copied with its artifact: its result is logged, not
-  # recorded as a destination, because it is not an artifact.
+  # manifest keeps its all-or-nothing `offsite` (the remote, or nil). A sidecar
+  # is copied with its artifact: its result is logged, not recorded as a
+  # destination, because it is not an artifact — but a sidecar that was refused
+  # or failed fails the step like any other file, since a part set without its
+  # sidecar off-site cannot be restored from there (#2218).
+  #
+  # `{:ok, remote | nil, rec}` when every file arrived (or there is nothing to
+  # do), else `{:error, {:offsite, %{refused: [...], failed: [...]}}, rec}`
+  # listing `{file_name, reason}` for each file that did not.
+  #
+  # A remote set with no `rclone` in this image is NOT an error: the official
+  # image ships without rclone, and a host's cron may be copying these files
+  # off-site perfectly well. It is logged loudly instead, and the panel says so
+  # (`Backups.status/0`).
   @doc false
-  @spec offsite_step(Path.t(), [map()], Recorder.t()) :: {String.t() | nil, Recorder.t()}
+  @spec offsite_step(Path.t(), [map()], Recorder.t()) ::
+          {:ok, String.t() | nil, Recorder.t()} | {:error, term(), Recorder.t()}
   def offsite_step(dir, artifacts, rec) do
     case offsite_results(dir, artifacts) do
       nil ->
-        {nil, rec}
+        {:ok, nil, rec}
+
+      {:missing_rclone, remote} ->
+        message =
+          "BACKUP_RCLONE_REMOTE is set but rclone is not installed in this image; " <>
+            "nothing was copied off-site"
+
+        Logger.warning(message <> " (#{Redact.text(remote)})")
+        {:ok, nil, rec |> Recorder.log(:warn, "offsite", message) |> Recorder.progress()}
 
       {remote, results} ->
         key = "rclone:" <> Redact.text(remote)
-        rec = Enum.reduce(results, rec, &record_offsite(&1, &2, key))
-        {offsite_remote(remote, results), Recorder.progress(rec)}
+        rec = results |> Enum.reduce(rec, &record_offsite(&1, &2, key)) |> Recorder.progress()
+
+        case offsite_problems(results) do
+          %{refused: [], failed: []} -> {:ok, remote, rec}
+          problems -> {:error, {:offsite, problems}, rec}
+        end
     end
   end
 
-  defp record_offsite({file, result}, rec, key) do
-    result = with {:error, reason} <- result, do: {:error, describe(reason)}
-    level = if result == :ok, do: :info, else: :warn
-    name = Path.basename(file.path)
+  defp offsite_problems(results) do
+    problems =
+      Enum.reduce(results, %{refused: [], failed: []}, fn
+        {_file, :ok}, acc ->
+          acc
 
-    rec = if file[:sidecar?], do: rec, else: Recorder.put_destination(rec, name, key, result)
-    Recorder.log(rec, level, "offsite", offsite_message(name, result))
+        {file, {:refused, reason}}, acc ->
+          Map.update!(acc, :refused, &[{Path.basename(file.path), reason} | &1])
+
+        {file, {:error, reason}}, acc ->
+          Map.update!(acc, :failed, &[{Path.basename(file.path), reason} | &1])
+      end)
+
+    Map.new(problems, fn {key, list} -> {key, Enum.reverse(list)} end)
   end
 
-  defp offsite_message(name, :ok), do: "Copied #{name} off-site"
-  defp offsite_message(name, {:error, error}), do: "Off-site copy of #{name} failed: #{error}"
+  defp record_offsite({file, :ok}, rec, key) do
+    name = Path.basename(file.path)
+    rec = if file[:sidecar?], do: rec, else: Recorder.put_destination(rec, name, key, :ok)
+    Recorder.log(rec, :info, "offsite", "Copied #{name} off-site")
+  end
+
+  defp record_offsite({file, {:error, reason}}, rec, key) do
+    name = Path.basename(file.path)
+    error = describe(reason)
+
+    rec =
+      if file[:sidecar?],
+        do: rec,
+        else: Recorder.put_destination(rec, name, key, {:error, error})
+
+    Recorder.log(rec, :error, "offsite", "Off-site copy of #{name} failed: #{error}")
+  end
+
+  # Loud on every surface: the log with both full digests, the Run log, the
+  # destination ("Refused: …", never "ok"), and the artifact's `verified`.
+  defp record_offsite({file, {:refused, reason}}, rec, key) do
+    name = Path.basename(file.path)
+    why = describe_refusal(reason)
+    message = "Off-site copy of #{name} REFUSED: #{why}; it was not uploaded"
+    Logger.error(message)
+
+    rec =
+      if file[:sidecar?],
+        do: rec,
+        else:
+          rec
+          |> Recorder.put_destination(name, key, {:error, "Refused: " <> why})
+          |> Recorder.put_unverified(name)
+
+    Recorder.log(rec, :error, "offsite", message)
+  end
+
+  # Full digests: this is what an operator compares against the file on disk.
+  defp describe_refusal({:changed, %{expected: expected, actual: actual} = found}) do
+    size =
+      if found.expected_bytes != nil and found.expected_bytes != found.bytes,
+        do: ", #{found.expected_bytes} bytes recorded, #{found.bytes} found",
+        else: ""
+
+    "changed on disk after this backup verified it (sha256 expected #{expected}, " <>
+      "found #{actual}#{size})"
+  end
+
+  defp describe_refusal(reason), do: short_refusal(reason)
+
+  defp short_refusal({:changed, %{expected: expected, actual: actual}}),
+    do:
+      "changed on disk after this backup verified it (sha256 expected " <>
+        "#{String.slice(expected, 0, 12)}…, found #{String.slice(actual, 0, 12)}…)"
+
+  defp short_refusal(:no_digest), do: "no sha256 was recorded for it, so it can't be vouched for"
+  defp short_refusal(:not_regular), do: "it is no longer a regular file"
+  defp short_refusal(:enoent), do: "it is missing"
+  defp short_refusal(:sidecar_changed), do: "the checksum file changed after it was written"
+  defp short_refusal(:malformed), do: "the checksum file is no longer well-formed"
+  defp short_refusal(reason), do: "it could not be read (#{inspect(reason)})"
+
+  defp short_failure({:exit_status, executable, status, _output}),
+    do: "#{Path.basename(executable)} exited #{status}"
+
+  defp short_failure({executable, _error}) when is_binary(executable),
+    do: "#{Path.basename(executable)} could not be run"
+
+  defp short_failure(_reason), do: "copy failed"
+
+  @max_named 5
+
+  # The run's (and the failure manifest's) error: names and a short reason per
+  # file, at most five per section. rclone's own output is NOT here — it is in
+  # the per-file Run log line and destination error, redacted and capped.
+  @doc false
+  @spec describe_offsite(term(), boolean()) :: String.t()
+  def describe_offsite({:offsite, %{refused: refused, failed: failed}}, resumable?) do
+    refused_text =
+      if refused != [] do
+        "Off-site copy REFUSED for #{count_files(refused)}: " <>
+          named(refused, &short_refusal/1) <>
+          ". Something other than this backup wrote to the backup directory: check the disk " <>
+          "and anything with access to BACKUP_DIR before trusting this backup."
+      end
+
+    failed_text =
+      if failed != [] do
+        "Off-site copy FAILED for #{count_files(failed)}: " <>
+          named(failed, &short_failure/1) <> "."
+      end
+
+    tail =
+      if resumable?,
+        do:
+          "The local files are kept; Resume retries the off-site copy and rebuilds any file that changed.",
+        else: "The local files are kept; run a new backup to try the off-site copy again."
+
+    [refused_text, failed_text, tail] |> Enum.reject(&is_nil/1) |> Enum.join(" ")
+  end
+
+  defp count_files([_]), do: "1 file"
+  defp count_files(list), do: "#{length(list)} files"
+
+  defp named(list, short) do
+    shown =
+      list |> Enum.take(@max_named) |> Enum.map_join(", ", fn {n, r} -> "#{n} (#{short.(r)})" end)
+
+    case length(list) - @max_named do
+      more when more > 0 -> "#{shown} and #{more} more"
+      _ -> shown
+    end
+  end
 
   # The database always; the media archive only on a Local-adapter deployment.
   # On S3 the bucket is backed up provider-side, and tarring an empty or
@@ -420,8 +617,9 @@ defmodule KilnCMS.Backups.Worker do
     with {:ok, state} <- WorkState.read(work_dir),
          %{"name" => ^name, "bytes" => bytes, "sha256" => sha256} = entry <-
            WorkState.dump(state),
-         :ok <- Checksum.verify(target, sha256),
-         {:ok, %{size: ^bytes}} <- File.stat(target),
+         # The off-site gate's own check, so a file reused here is one the
+         # upload will accept (a symlink is rebuilt, never reused).
+         :ok <- Checksum.recheck(target, sha256, bytes),
          :ok <-
            Checksum.write_sidecar(
              Path.join(Path.dirname(target), Artifact.sidecar_name(:db, ctx.stamp)),
@@ -459,7 +657,7 @@ defmodule KilnCMS.Backups.Worker do
     with {:ok, plan, rec} <- plan_step(ctx, media_dir, work_dir, target_dir, rec),
          {:ok, parts, rec} <- archive_step(ctx, plan, target_dir, work_dir, rec),
          {:ok, set, rec} <- checksum_step(ctx, plan, parts, target_dir, work_dir, rec) do
-      File.rm_rf(work_dir)
+      # The work directory stays until the off-site copy succeeds (`pipeline/2`).
       {:ok, media_entries(parts), record_media(rec, parts, set)}
     else
       {:error, reason, rec} -> {:error, reason, rec}
@@ -597,8 +795,9 @@ defmodule KilnCMS.Backups.Worker do
     with {:ok, state} <- WorkState.read(work_dir),
          %{"name" => ^name, "bytes" => bytes, "sha256" => sha256} = entry <-
            WorkState.part(state, part.index),
-         :ok <- Checksum.verify(path, sha256),
-         {:ok, %{size: ^bytes}} <- File.stat(path) do
+         # The off-site gate's own check, so a file reused here is one the
+         # upload will accept (a symlink is rebuilt, never reused).
+         :ok <- Checksum.recheck(path, sha256, bytes) do
       {:ok,
        %{
          index: part.index,
@@ -784,77 +983,91 @@ defmodule KilnCMS.Backups.Worker do
   remote at all. An admin would have seen a green "backed up" for the one
   backup that wasn't safe from losing the machine.
 
-  Best-effort and never fatal: an off-site copy that failed is worth knowing
-  about, and is not a reason to throw away a verified local backup. A failure
-  logs and reports `nil`, which reads on the panel as "no off-site copy" —
-  the truthful answer.
+  The remote only when every file, sidecars included, was re-verified and
+  copied (#2218); `nil` when there is no remote, no `rclone`, or any file was
+  refused or failed. `offsite_step/3` is what the worker runs: it records each
+  file's outcome and fails the run on any of them.
   """
   @spec copy_offsite(Path.t(), [map()]) :: String.t() | nil
   def copy_offsite(dir, artifacts) do
-    case offsite_results(dir, artifacts) do
-      nil -> nil
-      {remote, results} -> offsite_remote(remote, results)
-    end
-  end
-
-  # All-or-nothing over the artifact files, as `copy_offsite/2` has always
-  # answered. A failed sidecar is logged by `offsite_step/3` but does not take
-  # the remote away: the data it describes did arrive.
-  defp offsite_remote(remote, results) do
-    if Enum.all?(results, fn {file, result} -> file[:sidecar?] == true or result == :ok end) do
+    with {remote, results} when is_binary(remote) <- offsite_results(dir, artifacts),
+         true <- Enum.all?(results, &match?({_file, :ok}, &1)) do
       remote
-    else
-      Logger.error("Off-site copy to #{Redact.text(remote)} FAILED — the local backup is fine")
-      nil
-    end
-  end
-
-  # The per-file truth behind `copy_offsite/2`: `nil` when no remote or no
-  # `rclone` is configured, else the remote and one `:ok | {:error, reason}`
-  # per file: one `rclone copy` for each part of a set (and each single file),
-  # then one for each stamp's checksum sidecar, into the same `db/` or `media/`
-  # subdirectory. An error's rclone output has been through `Redact` (see
-  # `cmd/3`), so it is safe to store and show.
-  @doc false
-  def offsite_results(dir, artifacts) do
-    with remote when is_binary(remote) <- Backups.rclone_remote(),
-         exe when is_binary(exe) <- System.find_executable("rclone") do
-      files = artifacts ++ sidecars(dir, artifacts)
-
-      results =
-        for file <- files do
-          # Mirrors the script's `rclone copy <file> <remote>/<subdir>`.
-          subdir = file.path |> Path.dirname() |> Path.basename()
-          {file, cmd(exe, ["copy", Path.join(dir, file.path), "#{remote}/#{subdir}"])}
-        end
-
-      {remote, results}
     else
       _ -> nil
     end
   end
 
-  # The checksum sidecar of each stamp+kind among `artifacts`, if it is on disk.
-  # sobelow_skip ["Traversal.FileModule"]
-  defp sidecars(dir, artifacts) do
+  # The per-file truth behind `offsite_step/3`: `nil` when no remote is
+  # configured, `{:missing_rclone, remote}` when one is but this image has no
+  # `rclone`, else the remote and one `:ok | {:error, reason} | {:refused,
+  # reason}` per file: one `rclone copy` for each part of a set (and each single
+  # file), then one for each stamp's checksum sidecar, into the same `db/` or
+  # `media/` subdirectory, in that order. Each file is re-checked immediately
+  # before its own copy (not all up front, which would leave the whole upload
+  # window open) and refused, without calling rclone, if it changed. An
+  # error's rclone output has been through `Redact` (see `cmd/3`), so it is
+  # safe to store and show.
+  @doc false
+  def offsite_results(dir, artifacts) do
+    with remote when is_binary(remote) <- Backups.rclone_remote() do
+      case System.find_executable("rclone") do
+        nil ->
+          {:missing_rclone, remote}
+
+        exe ->
+          files = artifacts ++ expected_sidecars(artifacts)
+          {remote, for(file <- files, do: {file, upload(exe, dir, file, remote)})}
+      end
+    end
+  end
+
+  defp upload(exe, dir, file, remote) do
+    path = Path.join(dir, file.path)
+
+    case precheck(path, file) do
+      :ok ->
+        # Mirrors the script's `rclone copy <file> <remote>/<subdir>`.
+        subdir = file.path |> Path.dirname() |> Path.basename()
+        cmd(exe, ["copy", path, "#{remote}/#{subdir}"])
+
+      {:error, reason} ->
+        {:refused, reason}
+    end
+  end
+
+  defp precheck(path, %{sidecar?: true, entries: entries}),
+    do: Checksum.check_sidecar(path, entries)
+
+  defp precheck(path, file), do: Checksum.recheck(path, file[:sha256], file[:bytes])
+
+  # The checksum sidecar of each stamp+kind among `artifacts`, with the lines
+  # it must hold: `{name, sha256}` of that kind+stamp's files in part order,
+  # from the digests recorded when they verified. Kept even when the file is not
+  # on disk, so a missing sidecar is refused (`:enoent`) rather than skipped:
+  # a part set without its sidecar off-site is one restore.sh refuses.
+  defp expected_sidecars(artifacts) do
     artifacts
     |> Enum.flat_map(fn artifact ->
       case Artifact.parse_file(Path.basename(artifact.path)) do
-        {:ok, %{kind: kind, stamp: stamp}} -> [{kind, stamp}]
+        {:ok, %{kind: kind, stamp: stamp, part: part}} -> [{{kind, stamp}, {part || 0, artifact}}]
         :error -> []
       end
     end)
-    |> Enum.uniq()
-    |> Enum.flat_map(fn {kind, stamp} ->
-      path = Path.join(Artifact.subdir(kind), Artifact.sidecar_name(kind, stamp))
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Enum.sort_by(fn {{kind, stamp}, _} -> {kind != :db, stamp} end)
+    |> Enum.map(fn {{kind, stamp}, members} ->
+      entries =
+        members
+        |> Enum.sort_by(&elem(&1, 0))
+        |> Enum.map(fn {_part, artifact} -> {Path.basename(artifact.path), artifact[:sha256]} end)
 
-      case File.lstat(Path.join(dir, path)) do
-        {:ok, %File.Stat{type: :regular}} ->
-          [%{kind: Atom.to_string(kind), path: path, sidecar?: true}]
-
-        _ ->
-          []
-      end
+      %{
+        kind: Atom.to_string(kind),
+        path: Path.join(Artifact.subdir(kind), Artifact.sidecar_name(kind, stamp)),
+        sidecar?: true,
+        entries: entries
+      }
     end)
   end
 

@@ -235,7 +235,8 @@ defmodule KilnCMS.Backups do
           available?: boolean(),
           manifest: Manifest.t() | nil,
           stale?: boolean(),
-          reason: atom() | nil
+          reason: atom() | nil,
+          rclone_missing?: boolean()
         }
 
   @doc """
@@ -339,9 +340,21 @@ defmodule KilnCMS.Backups do
       # `:ok` and the panel would render "ok" as though it were a fault.
       reason: reason(availability),
       manifest: manifest,
-      stale?: stale?(manifest)
+      stale?: stale?(manifest),
+      rclone_missing?: rclone_missing?()
     }
   end
+
+  @doc """
+  Whether `rclone_remote/0` is set but this image has no `rclone` (#2218).
+
+  Not a reason to refuse or fail a backup: the official image ships without
+  rclone, and cron on the host may be copying the same files off-site. It
+  does mean a backup taken from the app is local-only, which the panel says.
+  """
+  @spec rclone_missing?() :: boolean()
+  def rclone_missing?,
+    do: is_binary(rclone_remote()) and is_nil(System.find_executable("rclone"))
 
   defp reason({:error, reason}), do: reason
   defp reason(_ok), do: nil

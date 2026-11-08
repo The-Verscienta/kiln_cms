@@ -7,6 +7,66 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="backup-offsite-rehash-upgrade"></a>
+
+- **An in-app backup whose off-site copy fails now fails, and every file is
+  re-hashed right before its off-site copy, in the app and in
+  `scripts/backup.sh` (#2218).** For anyone with `BACKUP_RCLONE_REMOTE` set. No
+  migration and no new setting.
+  - **Red where it used to be green.** An in-app backup whose `rclone copy`
+    failed, for a data file or a `.sha256` sidecar, used to finish `Succeeded`
+    with no off-site copy. It now finishes `Failed`: `manifest.json` has
+    `"ok": false` and `"offsite": null`, the **Last run failed** box and the
+    History row show the error, and the overview shows its backup alarm. After
+    upgrading, if your backups turn red, check the remote name and its
+    credentials. rclone's own retries (`--retries`, default 3, or
+    `RCLONE_RETRIES`) run before the run is failed; Kiln adds none of its own.
+    Cron already failed on a failed copy.
+  - **A file that changed is refused.** The dump, every media part and every
+    sidecar is read again immediately before its own copy and compared with the
+    SHA-256 recorded when it verified. A file that changed in between is not
+    uploaded, not retried and not rebuilt in that run, and the run fails. The
+    app keeps checking and copying the other files and then names every refused
+    and failed file ("Off-site copy REFUSED for 1 file: …"); the History row
+    reads **Not verified**. `backup.sh` stops at the first refusal
+    with `REFUSING off-site copy of <name>: …` and marks that file not verified
+    in the failure manifest. The app compares a sidecar's parsed lines with
+    what it recorded; cron hashes the sidecar's bytes.
+  - **Resume retries the off-site copy.** A run that failed off-site keeps
+    `.work/<stamp>/` (it is now removed only when the backup and its off-site
+    copy both succeed), so **Resume** on the History row retries the copy,
+    reusing every file that still matches and rebuilding only one that changed.
+    Copy a suspect file aside first if you want it as evidence. A database-only
+    run (S3 media adapter, or no media directory) has no work directory and
+    cannot be resumed: take a new backup.
+  - **No `rclone` in the image is a warning, not a failure.** The official
+    image does not install it. With `BACKUP_RCLONE_REMOTE` set and no `rclone`,
+    an in-app backup succeeds locally, logs a warning, and **Where backups go**
+    on the Backups page says nothing is copied off-site. PaaS deployments that
+    relied on the variable alone were never getting an off-site copy from the
+    app; [deploy-platforms.md](../deploy-platforms.md#backups) now says so.
+  - **Cron failure manifests no longer name the remote.** `backup.sh` writes
+    `"offsite": null` when a run fails, as the app does, and History no longer
+    takes a failed manifest's remote as proof that its files went off-site. A
+    stamp already in History keeps its row; an old failure manifest still on
+    disk imports without the remote.
+  - **Still different between the paths.** The app prunes expired sets before
+    its off-site copy, so it prunes even when that copy fails; cron prunes only
+    after a run that succeeded.
+  - **Cost.** One extra sequential read of each file, only when a remote is
+    set; much faster than the upload it precedes.
+  - **For developers.** New `KilnCMS.Backups.Checksum.recheck/3` and
+    `check_sidecar/2`, `KilnCMS.Backups.Recorder.put_unverified/2`,
+    `KilnCMS.Backups.rclone_missing?/0`, and an `rclone_missing?` key in
+    `KilnCMS.Backups.status/0`. `KilnCMS.Backups.Worker.copy_offsite/2` returns
+    the remote only when every file, sidecars included, was re-verified and
+    copied.
+  - **Rolling the pin back** is safe: nothing is migrated. The previous
+    release goes back to marking a run with a failed off-site copy as
+    succeeded, and to uploading without a re-hash.
+  Guide: [When an off-site copy is refused](../backups.md#when-an-off-site-copy-is-refused).
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))
+
 <a id="backup-sh-media-parts-upgrade"></a>
 
 - **`scripts/backup.sh media` and `all` now split media into parts like the app,
@@ -41,7 +101,8 @@ carries the reasoning.
     run as the same user to share it.
   - **A failed run removes its own parts.** Cron has no resume: a failed or
     signalled (`HUP`, `INT`, `TERM`) run removes the parts it wrote and keeps a
-    finished database dump. A run killed outright leaves its parts and a
+    finished database dump. A failed off-site copy after the set is complete
+    keeps the set. A run killed outright leaves its parts and a
     `kiln-media-<stamp>.sha256.partial` marker: History holds the stamp,
     `backup.sh verify` skips it and says so, and `restore.sh` refuses it. The
     next in-app backup removes a `.partial` older than an hour, after which
