@@ -192,6 +192,8 @@ defmodule KilnCMS.Security.AuthEvents do
   defp member_of(_user, _org), do: nil
 
   defp legacy_member?(user_id, org) do
+    # authorize?: false — the same legacy-account check Scoping makes; the answer
+    # only decides whether the audit event is labelled.
     org == Accounts.default_org_id() and
       match?(
         {:ok, []},
