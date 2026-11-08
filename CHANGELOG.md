@@ -160,6 +160,10 @@ Every summary line below that was shortened links to its own entry there.
   Names reserved; stored as JSON, filterable only for "Empty or not", not sortable. Plugin `input_parts` may now declare a select part.
   ([long form](docs/changelog/unreleased.md#builtin-composite-field-types))
 
+- **`custom_filter` takes `_or` / `_and` / `_not` groups, a custom sort may come before a built-in one, and sorting by a reference or media field says why it is refused.**
+  `filter[or][0][price][gt]=100&filter[or][1][title]=Sale` now works, and `sort=price,title` is one combined order instead of a `400`. Additive; no migration or index.
+  ([#2355](https://github.com/The-Verscienta/kiln_cms/issues/2355) · [#2356](https://github.com/The-Verscienta/kiln_cms/issues/2356) · [#2354](https://github.com/The-Verscienta/kiln_cms/issues/2354) · [long form](docs/changelog/unreleased.md#custom-field-groups-and-mixed-sort))
+
 - **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
   A wrong operand type is a schema error; `contains` and `startsWith` (case-insensitive, literal) also work in `customFilter`.
   ([#2290](https://github.com/The-Verscienta/kiln_cms/issues/2290) · [long form](docs/changelog/unreleased.md#graphql-custom-where))

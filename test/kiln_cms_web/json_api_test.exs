@@ -1187,12 +1187,15 @@ defmodule KilnCMSWeb.JsonApiTest do
       assert [%{} | _] = body["errors"]
     end
 
-    test "a custom sort before a built-in one is the native invalid_sort; other shapes are accepted" do
+    test "a custom sort before a built-in one is one combined order (#2356)" do
       {_admin, price, %{9 => cheap, 10 => mid, 30 => dear}} = priced_posts()
       scope = "filter[#{price}][null]=false"
 
-      assert {400, body} = api_get("/api/json/posts?#{scope}&sort=#{price},title")
-      assert [%{"code" => "invalid_sort"} | _] = body["errors"]
+      assert {200, body} = api_get("/api/json/posts?#{scope}&sort=#{price},title")
+      assert ids(body) == [cheap.id, mid.id, dear.id]
+
+      assert {200, body} = api_get("/api/json/posts?#{scope}&sort=-#{price},-title")
+      assert ids(body) == [dear.id, mid.id, cheap.id]
 
       assert {200, body} = api_get("/api/json/posts?#{scope}&sort=title,#{price}")
       assert ids(body) == [mid.id, cheap.id, dear.id]
@@ -1204,6 +1207,35 @@ defmodule KilnCMSWeb.JsonApiTest do
       # sort and custom_sort together: moved tokens first
       assert {200, body} = api_get("/api/json/posts?#{scope}&sort=-#{price}&custom_sort=#{price}")
       assert ids(body) == [dear.id, mid.id, cheap.id]
+    end
+
+    test "filter[or]/[and]/[not] may name custom fields and built-ins together (#2355)" do
+      {_admin, price, %{9 => cheap, 10 => mid, 30 => dear}} = priced_posts()
+
+      assert {200, body} =
+               api_get(
+                 "/api/json/posts?filter[or][0][#{price}][gt]=20&filter[or][1][title]=Aa mid&sort=title"
+               )
+
+      assert ids(body) == [mid.id, dear.id]
+
+      assert {200, body} =
+               api_get(
+                 "/api/json/posts?filter[#{price}][null]=false&filter[not][#{price}][lt]=10&sort=#{price}"
+               )
+
+      assert ids(body) == [mid.id, dear.id]
+
+      assert {200, body} =
+               api_get(
+                 "/api/json/posts?filter[#{price}][null]=false&filter[and][0][#{price}][lt]=30&filter[and][1][title]=Bb cheap"
+               )
+
+      assert ids(body) == [cheap.id]
+
+      # an unknown name inside a group is the same 400 as outside one
+      assert {400, body} = api_get("/api/json/posts?filter[or][0][nope#{price}]=1")
+      assert [%{"detail" => "unknown custom field" <> _}] = body["errors"]
     end
 
     test "names that are neither built-in nor custom fail like an unknown custom field" do
@@ -1344,8 +1376,16 @@ defmodule KilnCMSWeb.JsonApiTest do
         assert {200, body} = api_get(base <> "&sort=title&custom_sort=#{price}")
         assert ids(body) == [pricey.id, mid.id, cheap.id]
 
-        assert {400, body} = api_get(base <> "&sort=#{price},title")
-        assert [%{"code" => "invalid_sort"} | _] = body["errors"]
+        # a custom token before a built-in one (#2356): one combined order,
+        # and its keyset page 2 walks on from page 1
+        assert {200, body} = api_get(base <> "&sort=#{price},title")
+        assert ids(body) == [cheap.id, mid.id, pricey.id]
+
+        assert {200, page1} = api_get(base <> "&sort=#{price},-title&page[limit]=2")
+        assert ids(page1) == [cheap.id, mid.id]
+        %URI{path: path, query: next_query} = URI.parse(page1["links"]["next"])
+        assert {200, page2} = api_get("#{path}?#{next_query}")
+        assert ids(page2) == [pricey.id]
 
         # keyset page 2 with a jsonb sort key
         assert {200, page1} = api_get(base <> "&sort=#{price}&page[limit]=2")

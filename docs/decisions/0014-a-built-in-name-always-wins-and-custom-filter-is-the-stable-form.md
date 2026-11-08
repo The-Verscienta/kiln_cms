@@ -73,10 +73,12 @@ per-resource types and cannot gain per-site fields; `customFilter` /
 - **The rewrite never answers a request.** `before_dispatch`'s result goes
   straight to the controller with no `halted` check, so wherever a rewrite
   would be refused the parameter is left as written and ash_json_api rejects it
-  natively. A custom sort token before a built-in one (`sort=price,title`)
-  therefore gets the native `invalid_sort`: custom sorts apply after built-in
-  ones, and reordering them silently would invert the result. Relaxing that
-  later is additive; tightening it would not be.
+  natively. *Amended (#2356):* a custom sort token before a built-in one
+  (`sort=price,title`) used to get the native `invalid_sort`, because custom
+  sorts apply after built-in ones. It is now one combined order: the leading
+  built-ins stay in `sort`, the rest move to `custom_sort` with later built-ins
+  spelled `_native:<name>`. Group conditions (`filter[or]` over a custom field,
+  #2355) move to `custom_filter[_or]` the same way.
 - **Custom sorts are always nulls-last;** a native `-x` is plain descending.
 - **Reference and media fields stay unsortable.** A stored snapshot title goes
   stale on target rename and would leak the relative order of masked targets.

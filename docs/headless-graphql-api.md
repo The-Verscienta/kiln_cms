@@ -102,6 +102,13 @@ consumers never need the plain, credential-widened list.
 > "<id>"]}, related_posts: {has_none: ["<id>"]}}`. A target the caller may not
 > read (a draft, for an anonymous caller) neither matches nor counts.
 >
+> `customFilter` also takes boolean groups: `customFilter: {_or: [{price: {gt:
+> 100}}, {color: "red"}]}`, `_and`, `_not: {color: "red"}`, and `_native: {title:
+> "Sale"}` inside a condition for built-in columns (snake_case names) — see
+> [json-api.md](json-api.md) → "Boolean groups". `customSort` may put a built-in
+> after a custom key with `_native:`: `customSort: "-price,_native:title"`. A
+> reference or media field is not sortable; the error says why.
+>
 > `customSort` is also an argument of the keyword and semantic search queries
 > (and their `…Published` twins). Precedence: explicit `sort` > `customSort` >
 > relevance or distance > recency. On semantic search a leading custom sort

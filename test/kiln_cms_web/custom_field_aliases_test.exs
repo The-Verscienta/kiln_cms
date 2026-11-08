@@ -123,6 +123,67 @@ defmodule KilnCMSWeb.CustomFieldAliasesTest do
     end
   end
 
+  describe "filter groups (#2355)" do
+    test "a group of built-ins only stays native" do
+      params = %{"filter" => %{"or" => %{"0" => %{"title" => "a"}, "1" => %{"slug" => "b"}}}}
+      assert rewrite(params) == params
+    end
+
+    test "a group naming a custom field moves, built-ins gather under _native" do
+      params = %{
+        "filter" => %{
+          "or" => %{"0" => %{"price" => %{"gt" => "1"}}, "1" => %{"title" => "a"}},
+          "state" => "published"
+        }
+      }
+
+      assert rewrite(params) == %{
+               "filter" => %{"state" => "published"},
+               "custom_filter" => %{
+                 "_or" => [%{"price" => %{"gt" => "1"}}, %{"_native" => %{"title" => "a"}}]
+               }
+             }
+    end
+
+    test "not, and, nesting, relationship operators" do
+      params = %{
+        "filter" => %{
+          "not" => %{"price" => "1", "title" => "a"},
+          "and" => [%{"or" => [%{"rating" => "2"}, %{"title" => "b"}]}, %{"title" => "c"}]
+        }
+      }
+
+      out = rewrite(params)
+      refute Map.has_key?(out, "filter")
+
+      assert out["custom_filter"] == %{
+               "_not" => %{"price" => "1", "_native" => %{"title" => "a"}},
+               "_and" => [
+                 %{"_or" => [%{"rating" => "2"}, %{"_native" => %{"title" => "b"}}]},
+                 %{"_native" => %{"title" => "c"}}
+               ]
+             }
+
+      tags = %{"filter" => %{"or" => [%{"tags" => %{"has" => "1"}}, %{"title" => "a"}]}}
+
+      assert rewrite(tags)["custom_filter"] == %{
+               "_or" => [%{"tags" => %{"has" => "1"}}, %{"_native" => %{"title" => "a"}}]
+             }
+    end
+
+    test "a clash with an explicit group key, or a malformed group, stays as written" do
+      clash = %{
+        "filter" => %{"or" => [%{"price" => "1"}]},
+        "custom_filter" => %{"_or" => [%{"price" => "2"}]}
+      }
+
+      assert rewrite(clash) == clash
+
+      junk = %{"filter" => %{"or" => "price"}}
+      assert rewrite(junk) == junk
+    end
+  end
+
   describe "sort" do
     test "custom tokens move, order and direction kept" do
       out = rewrite(%{"sort" => "-price, rating"})
@@ -135,9 +196,11 @@ defmodule KilnCMSWeb.CustomFieldAliasesTest do
       assert out == %{"sort" => "-title", "custom_sort" => "price"}
     end
 
-    test "a custom token before a built-in one leaves sort as written" do
-      params = %{"sort" => "price,title"}
-      assert rewrite(params) == params
+    test "a custom token before a built-in one is one combined order (#2356)" do
+      assert rewrite(%{"sort" => "price,title"}) == %{"custom_sort" => "price,_native:title"}
+
+      assert rewrite(%{"sort" => "-title,price,-state,rating"}) ==
+               %{"sort" => "-title", "custom_sort" => "price,-_native:state,rating"}
     end
 
     test "moved tokens go before an explicit custom_sort" do

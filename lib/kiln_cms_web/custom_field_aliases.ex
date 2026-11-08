@@ -40,10 +40,16 @@ defmodule KilnCMSWeb.CustomFieldAliases do
     * `filter[x]` and `custom_filter[x]` together: for a built-in `x` both apply
       (ANDed); otherwise they merge into one `custom_filter[x]`, and a clash on
       an operator leaves `filter[x]` as written (a native 400).
-    * Custom sort tokens apply after the built-in ones. A custom token followed
-      by a built-in one would invert, so `sort` is then left as written (a
-      native `invalid_sort`). Tokens moved out of `sort` go before an explicit
-      `custom_sort`.
+    * Built-in tokens that lead `sort` stay in it; from the first custom token
+      on, every token moves to `custom_sort` in order, a built-in one spelled
+      `_native:<name>` there (#2356), so `sort=price,title` is one order, price
+      then title. Tokens moved out of `sort` go before an explicit `custom_sort`.
+    * `filter[or]` / `[and]` / `[not]` stay native while every name in them is a
+      built-in. When any condition inside names a custom field (at any depth) the
+      whole group moves to `custom_filter[_or]` / `[_and]` / `[_not]`, its
+      built-in names collected under `_native` in each member (#2355). If
+      `custom_filter` already has that group key, `filter` is left as written (a
+      native 400).
 
   `resolve/2` and `builtin_filter_name?/2` / `builtin_sort_name?/2` are the
   reusable half: they classify one name against a resource, with no request in
@@ -161,7 +167,7 @@ defmodule KilnCMSWeb.CustomFieldAliases do
 
     cond do
       name in @logic_keys ->
-        {Map.put(kept, name, value), custom}
+        move_group(resource, name, value, kept, custom)
 
       builtin_filter_name?(resource, name) ->
         move_relation_operators(resource, name, value, kept, custom)
@@ -190,6 +196,131 @@ defmodule KilnCMSWeb.CustomFieldAliases do
 
   defp move_relation_operators(_resource, name, value, kept, custom),
     do: {Map.put(kept, name, value), custom}
+
+  # --- groups (#2355) -----------------------------------------------------------
+
+  defp move_group(resource, name, value, kept, custom) do
+    key = "_" <> name
+
+    with true <- group_moves?(resource, name, value),
+         false <- Map.has_key?(custom, key),
+         {:ok, converted} <- convert_group(resource, name, value) do
+      {kept, Map.put(custom, key, converted)}
+    else
+      _ -> {Map.put(kept, name, value), custom}
+    end
+  end
+
+  # Whether a group names something only `custom_filter` can answer: a custom
+  # field, or a relationship operator (`tags[has]`), at any depth.
+  defp group_moves?(resource, name, value) do
+    case group_members(name, value) do
+      {:ok, members} -> Enum.any?(members, &member_moves?(resource, &1))
+      :error -> false
+    end
+  end
+
+  defp member_moves?(resource, member) do
+    Enum.any?(member, fn {name, value} ->
+      name = to_string(name)
+
+      cond do
+        name in @logic_keys -> group_moves?(resource, name, value)
+        builtin_filter_name?(resource, name) -> relation_operators?(resource, name, value)
+        true -> true
+      end
+    end)
+  end
+
+  defp relation_operators?(resource, name, value) when is_map(value) do
+    match?({_, _}, Relations.builtin(resource, name)) and
+      Enum.any?(Map.keys(value), &(to_string(&1) in @relation_operators))
+  end
+
+  defp relation_operators?(_resource, _name, _value), do: false
+
+  # `or` / `and` take a list of members or a position-keyed map of them; `not`
+  # takes one member.
+  defp group_members("not", value) when is_map(value) and map_size(value) > 0, do: {:ok, [value]}
+
+  defp group_members(name, value) when name in ["or", "and"] and is_list(value),
+    do: if(value != [] and Enum.all?(value, &is_map/1), do: {:ok, value}, else: :error)
+
+  defp group_members(name, value) when name in ["or", "and"] and is_map(value) do
+    ordered =
+      Enum.map(value, fn {key, member} ->
+        case Integer.parse(to_string(key)) do
+          {position, ""} -> {position, member}
+          _ -> :error
+        end
+      end)
+
+    if :error in ordered or ordered == [] do
+      :error
+    else
+      ordered
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.map(&elem(&1, 1))
+      |> then(&group_members(name, &1))
+    end
+  end
+
+  defp group_members(_name, _value), do: :error
+
+  defp convert_group(resource, "not", value) do
+    with {:ok, [member]} <- group_members("not", value), do: convert_member(resource, member)
+  end
+
+  defp convert_group(resource, name, value) do
+    with {:ok, members} <- group_members(name, value) do
+      members
+      |> Enum.reduce_while({:ok, []}, &reduce_member(resource, &1, &2))
+      |> then(fn
+        {:ok, converted} -> {:ok, Enum.reverse(converted)}
+        :error -> :error
+      end)
+    end
+  end
+
+  defp reduce_member(resource, member, {:ok, acc}) do
+    case convert_member(resource, member) do
+      {:ok, converted} -> {:cont, {:ok, [converted | acc]}}
+      :error -> {:halt, :error}
+    end
+  end
+
+  # One member: custom names (and nested groups that hold some) stay as
+  # `custom_filter` conditions, built-in names gather under `_native`.
+  defp convert_member(resource, member) do
+    member
+    |> Enum.reduce_while({:ok, {%{}, %{}}}, &reduce_entry(resource, &1, &2))
+    |> then(fn
+      {:ok, {native, custom}} -> {:ok, put_unless_empty(custom, "_native", native)}
+      :error -> :error
+    end)
+  end
+
+  defp reduce_entry(resource, {name, value}, {:ok, {native, custom}}) do
+    name = to_string(name)
+
+    if name in @logic_keys and group_moves?(resource, name, value) do
+      case convert_group(resource, name, value) do
+        {:ok, converted} -> {:cont, {:ok, {native, Map.put(custom, "_" <> name, converted)}}}
+        :error -> {:halt, :error}
+      end
+    else
+      {:cont, {:ok, move_filter_into_member(resource, name, value, native, custom)}}
+    end
+  end
+
+  # A logic key that holds only built-ins stays native, like any built-in name.
+  defp move_filter_into_member(resource, name, value, native, custom) do
+    if name in @logic_keys do
+      {Map.put(native, name, value), custom}
+    else
+      move_filter(resource, name, value, native, custom)
+    end
+  end
 
   defp put_unless_empty(map, _key, value) when value == %{}, do: map
   defp put_unless_empty(map, key, value), do: Map.put(map, key, value)
@@ -237,16 +368,31 @@ defmodule KilnCMSWeb.CustomFieldAliases do
     end
   end
 
-  # `{built-in tokens, custom tokens}`, or `:keep` when there is nothing to move
-  # or a custom token precedes a built-in one (left for the native 400).
+  # `{built-in tokens, custom tokens}`, or `:keep` when there is nothing to move.
+  # The built-ins that lead stay in `sort`; everything from the first custom
+  # token on moves, a later built-in one marked `_native:` so it keeps its place
+  # in the order (#2356).
   defp split_sort(resource, sort) do
     classified = sort |> String.split(",") |> Enum.map(&{&1, classify_sort_token(resource, &1)})
-    {builtin, custom} = Enum.split_while(classified, fn {_, kind} -> kind == :builtin end)
+    {builtin, rest} = Enum.split_while(classified, fn {_, kind} -> kind == :builtin end)
 
-    if custom == [] or Enum.any?(custom, fn {_, kind} -> kind == :builtin end) do
+    if rest == [] or Enum.any?(rest, fn {token, _} -> blank_token?(token) end) do
       :keep
     else
-      {Enum.map(builtin, &elem(&1, 0)), Enum.map(custom, fn {token, _} -> String.trim(token) end)}
+      {Enum.map(builtin, &elem(&1, 0)), Enum.map(rest, &custom_sort_token/1)}
+    end
+  end
+
+  # A blank token is left for `ash_json_api`'s own error.
+  defp blank_token?(token),
+    do: token |> String.trim() |> String.trim_leading("-") |> String.trim() == ""
+
+  defp custom_sort_token({token, :custom}), do: String.trim(token)
+
+  defp custom_sort_token({token, :builtin}) do
+    case token |> String.trim() |> String.trim_leading() do
+      "-" <> name -> "-_native:" <> String.trim(name)
+      name -> "_native:" <> name
     end
   end
 
