@@ -874,6 +874,92 @@ choosing a host this server sends signed requests and file bodies to:
   is added to that site's own `img-src` and `media-src`
   (`KilnCMSWeb.Plugs.SiteStorageCsp`); never `script-src`, never another site.
 
+## Account enumeration by surface (#2255)
+
+The question for every screen or endpoint that takes an email address or other
+identifier: can a stranger tell, from the response, whether an account exists?
+Each surface below was audited, and where a known and an unknown address
+differed, the difference was removed. Every row has a test under
+`test/**/enumeration_*` that compares the two responses **whole** (status,
+redirect, headers that carry a credential or a challenge, the complete flash and
+the complete body) through `KilnCMS.EnumerationAssertions`. A substring check
+would pass when one side also said "no such account" three lines further down,
+so none is used. The control for each refusal is that the test pins what the
+answer actually says, so "equal" cannot mean "equally empty".
+
+"Indistinguishable" means in the response. The one difference that is
+deliberately left is in the **owner's inbox**: mail goes to the address that
+was named, never to the person who named it.
+
+| Surface | Result | Tested in | Residual |
+| --- | --- | --- | --- |
+| Browser sign-in (form and LiveView submit) | Wrong password for a known address and an unknown address: same page, same redirect, same flash ("Email or password was incorrect"). An unknown address still pays for one bcrypt check. | `enumeration_sign_in_test.exs` | Lockout owner mail (below). |
+| Headless sign-in (`POST /api/auth/sign_in`) | Same generic 401 for both, with the simulated hash for an unknown address. | `enumeration_sign_in_test.exs` | None beyond timing. |
+| Per-account sign-in budget | A known and an unknown address run out at the same attempt and get the same refusal, because the budget keys on the string typed. | `accounts/enumeration_throttle_test.exs` | Lockout owner mail (below). |
+| Password reset request | Form, plain POST and the action answer `:ok` / the same page and flash for both. A spent mail budget (`mail:password_reset`) still answers as for an unknown address. | `enumeration_request_forms_test.exs`, `accounts/enumeration_throttle_test.exs` | Owner-only mail; request-time timing not equalised (below). |
+| Magic link request | As password reset (`mail:magic_link`). | same | Same. |
+| Registration (`register_with_password`, form and POST) | **Changed.** A known and a new address both get "Check your email - we have sent instructions for what to do next." and a redirect to `/sign-in`; neither is signed in. A known address creates no row and its owner is mailed a notice. Both pay for exactly one bcrypt hash. A real validation error (a short password) is still shown, alike for both. | `enumeration_registration_test.exs` | Owner-only mail; concurrent race (below). |
+| Registration with self-registration off | A known and an unknown address are refused with the same error, and nobody is mailed. | `enumeration_registration_test.exs` | None. |
+| Email confirmation link | A made-up token, a used one and one for a deleted account are refused alike; the page the link opens is the same for a real token and a made-up one. | `enumeration_confirmation_test.exs` | None. A token is mailed only to the address it names. |
+| Newsletter subscribe | New, pending, confirmed and unsubscribed addresses get the same page. A malformed address is the one distinct answer and says nothing about anyone. | `enumeration_newsletter_test.exs` | Owner-only mail; pending address can be re-mailed (below). |
+| Site SSO (`/editor/site-sso`) | An existing account, an account with access only on another site, an unconfirmed account and an invite-only refusal share one answer; an existing and a new account are both signed in with the same response. | `enumeration_site_sso_test.exs` | Server logs; `register_with_sso` (below). |
+| `register_with_sso` | Covered by the site SSO test: the caller has already proved, at the provider, that they hold the address. | `enumeration_site_sso_test.exs` | Invite-only refusal (below). |
+| Passkey options and verify | `options` ignores any identifier and offers no credential list. `verify` answers one 401 and one sentence for an unknown credential, one that fails verification, a regressed counter, a malformed payload and a missing challenge. | `enumeration_passkey_test.exs` | An unknown credential skips signature work (below). |
+| API key sign-in | A key that never existed, an expired key and a revoked key are refused with the same status, challenge header and envelope. | `enumeration_api_key_test.exs` | None. A key is a random secret, not an address. |
+| JSON:API, GraphQL, MCP reads | `User` is not a JSON:API resource, a GraphQL type or an MCP tool. A filter or sort through the content's `author` relationship (`filter[author][email]`, `sort=author.email`, an MCP `author.email` filter) answers an anonymous reader, a viewer and an editor the same for a registered and an unregistered address. An admin control proves the question is answerable, so the empty result comes from the read policy. | `enumeration_api_reads_test.exs` | None. |
+| REST and author routes | No route serves accounts by name, address or slug outside the console and the sign-in flow. WebFinger answers a registered and an unregistered `acct:` handle with the same 404. A published post by a known account carries no address on HTML, feeds or the JSON:API. | `enumeration_author_routes_test.exs` | None. |
+| Admin lookups (`get_user_by_email`, `list_users`, `get_user`, admin password reset) | Any actor but an admin, or none, finds nothing for a registered address and for an unregistered one alike; the admin-only reset refuses a non-admin before it looks at the account. | `accounts/enumeration_lookups_test.exs` | Admin-only oracles (below). |
+| Account unlock | There is no unlock flow, so nothing to audit. | not applicable | None. |
+
+### What registration does now
+
+`KilnCMS.Accounts.Changes.RefuseExistingAddress` runs on
+`:register_with_password` **after** the password is hashed, so a known address
+pays for bcrypt like a new one. If the address already has an account the
+action fails with `KilnCMS.Accounts.Errors.AlreadyRegistered` and creates no
+row. `KilnCMSWeb.AuthRegisterForm` and `KilnCMSWeb.AuthController` recognise
+that error and answer exactly as they answer a success. The owner is mailed
+"Someone tried to create a (site name) account with your address" by
+`KilnCMS.Accounts.User.Senders.SendRegistrationNotice`. It carries no token,
+only links to the sign-in and reset pages. The mail is budgeted per address by
+`AccountThrottle` (`mail:registration_notice`, 5 per hour, the same budget as
+reset and magic-link mail) and is dropped silently once spent.
+
+### Residuals
+
+- **Owner-only mail side channel.** A known address receives a reset, magic-link
+  or registration-notice mail that a stranger's does not. The requester never
+  sees it; the owner does. The per-address mail budget bounds how much
+  of it anyone can cause.
+- **Reset and magic-link request time is not equalised.** A known address mints
+  a token, inserts it and enqueues an Oban job; an unknown address performs only
+  a read. The response is identical, the work is not. Mail goes on the `mail`
+  queue and is never sent inline, so the SMTP round trip is on neither path.
+- **Concurrent registration race.** Two simultaneous registrations of the same
+  new address can both pass the lookup; the loser may then see the
+  `:unique_email` identity's "has already been taken".
+- **Admin-only oracles, accepted by decision.** The team page's add-member form
+  says "No account with that email address exists", the accounts console
+  searches by address, and the editor comment `author_label` falls back to an
+  address when the author has no name. All three are for people who may see
+  accounts anyway. `enumeration_lookups_test.exs` pins that the underlying
+  resource calls give nobody else the same answer.
+- **Sign-in lockout owner mail.** When attempts start being refused, the account
+  owner is mailed once per window. A stranger sees the same refusal for a known
+  and an unknown address.
+- **Site SSO refusal reasons in server logs.** The browser gets one sentence;
+  the logs still distinguish why a sign-in was refused.
+- **`register_with_sso` under invite-only.** The refusal is visible only to
+  someone who controls the address at the identity provider.
+- **Newsletter pending address.** An address awaiting confirmation can be mailed
+  the confirmation link again, with no per-address budget.
+- **Passkey unknown credential.** An unknown credential skips the signature
+  check a known one pays for. The credential id is a random value held by the
+  authenticator, not an address a stranger can guess.
+- **Timing was never measured by wall clock.** The tests assert that equal
+  *work* ran (one bcrypt check on each side, via `Bcrypt.no_user_verify/1` and
+  `Bcrypt.verify_pass/2`), not that equal time passed.
+
 ## Residual risks
 
 Known and accepted, in rough order of how much they should worry an operator.

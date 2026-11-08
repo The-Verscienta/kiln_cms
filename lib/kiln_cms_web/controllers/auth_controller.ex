@@ -3,6 +3,7 @@ defmodule KilnCMSWeb.AuthController do
   use AshAuthentication.Phoenix.Controller
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Errors.AlreadyRegistered
   alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMSWeb.SafeRedirect
 
@@ -10,6 +11,11 @@ defmodule KilnCMSWeb.AuthController do
   # honoured alongside `Secure`, and dev/test/e2e serve over plain HTTP.
   @secure_cookies Application.compile_env(:kiln_cms, :secure_session_cookie, false)
   @remember_me_cookie KilnCMSWeb.SessionCookie.remember_me_key(@secure_cookies)
+
+  # Registering is not signing in, whether the address was new or already had
+  # an account (#2255): either way the answer is the same sentence, and the
+  # account's owner learns the rest from their inbox.
+  def success(conn, {:password, :register}, _user, _token), do: registration_requested(conn)
 
   def success(conn, activity, user, token) do
     # If the account has two-factor enabled, the first factor alone must not grant
@@ -205,7 +211,24 @@ defmodule KilnCMSWeb.AuthController do
   defp message_for({:password, :reset}), do: gettext("Your password has successfully been reset")
   defp message_for(_activity), do: gettext("You are now signed in")
 
-  def failure(conn, activity, reason) do
+  def failure(conn, {:password, :register} = activity, reason) do
+    if AlreadyRegistered.in?(reason),
+      do: registration_requested(conn),
+      else: rejected(conn, activity, reason)
+  end
+
+  def failure(conn, activity, reason), do: rejected(conn, activity, reason)
+
+  defp registration_requested(conn) do
+    conn
+    |> put_flash(
+      :info,
+      gettext("Check your email - we have sent instructions for what to do next.")
+    )
+    |> redirect(to: ~p"/sign-in")
+  end
+
+  defp rejected(conn, activity, reason) do
     message =
       case {activity, reason} do
         {_,

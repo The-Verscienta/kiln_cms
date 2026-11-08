@@ -35,6 +35,9 @@ defmodule KilnCMSWeb.AuthRegisterForm do
   import AshAuthentication.Phoenix.Components.Helpers, only: [auth_path: 5]
 
   alias AshAuthentication.Phoenix.Components.Password.Input
+  alias AshAuthentication.Phoenix.Utils.Flash
+  alias AshPhoenix.Form
+  alias KilnCMS.Accounts.Errors.AlreadyRegistered
   alias KilnCMSWeb.{AuthConfirmationFeedback, AuthOverrides, AuthPasswordInput}
 
   # Aliased, not spelled out: the template below names it, and inside `~H` a
@@ -125,5 +128,41 @@ defmodule KilnCMSWeb.AuthRegisterForm do
     {:noreply, assign(socket, form: form)}
   end
 
+  # Submitting is not signing in (#2255). A registration for an address with an
+  # account is refused by the action (`AlreadyRegistered`) and one for a new
+  # address succeeds; the visitor is told the same thing either way and signed
+  # in as neither. Upstream's submit redirects a success to a sign-in-token
+  # URL, which is itself the answer to "was this address new?".
+  def handle_event("submit", params, socket) do
+    params = Map.get(params, socket.assigns.form.name, %{})
+
+    case Form.submit(socket.assigns.form, params: params) do
+      {:ok, _user} ->
+        {:noreply, requested(socket)}
+
+      {:error, form} ->
+        if AlreadyRegistered.in?(form.source) do
+          {:noreply, requested(socket)}
+        else
+          {:noreply,
+           assign(socket, :form, Form.clear_value(form, socket.assigns.strategy.password_field))}
+        end
+    end
+  end
+
   def handle_event(event, params, socket), do: Upstream.handle_event(event, params, socket)
+
+  # A blank form again (the same rebuild `update/2` does) and one fixed sentence.
+  defp requested(socket) do
+    kept = Map.take(socket.assigns, ~w(strategy overrides label gettext_fn current_tenant context
+        auth_routes_prefix inner_block)a)
+
+    {:ok, socket} = update(kept, socket)
+
+    Flash.put_flash!(
+      socket,
+      :info,
+      gettext("Check your email - we have sent instructions for what to do next.")
+    )
+  end
 end

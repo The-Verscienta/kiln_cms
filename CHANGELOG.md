@@ -76,6 +76,11 @@ Every summary line below that was shortened links to its own entry there.
   on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
   ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
 
+### Breaking
+
+- **Registering no longer signs the user in: everyone is told to check their email and sent to `/sign-in`, and an address that already has an account gets no new row.**
+  ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
+
 ### Added
 
 - **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
@@ -217,6 +222,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2214](https://github.com/The-Verscienta/kiln_cms/pull/2214))
 
 ### Security
+
+- **Sign-in, reset, magic link, registration, newsletter, SSO and passkey answer a known and an unknown address alike; the per-surface matrix is in the threat model.**
+  ([long form](docs/changelog/unreleased.md#account-enumeration-audit))
 
 - **ecto 3.14.3 fixes EEF-CVE-2026-118391 (unbounded query cache growth), and
   ash_sql 0.8.7 replaces the retired 0.8.4 (query cache returned wrong rows).**

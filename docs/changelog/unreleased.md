@@ -89,6 +89,31 @@ carries the reasoning.
   the migrations are expand-only: the previous release ignores the columns and
   gets `false` on insert. No re-fire is needed.
 
+## Breaking
+
+<a id="registration-no-enumeration"></a>
+
+- **Registering no longer signs the user in: everyone is told to check their email and sent to `/sign-in`, and an address that already has an account gets no new row (#2255).**
+  Registering an address that already had an account failed with "has already
+  been taken", while a new address succeeded, so the form answered "does this
+  address have an account?" for anyone who asked. Now a new and a known address
+  get the same answer, "Check your email - we have sent instructions for what to
+  do next.", and the same redirect to `/sign-in`. Neither is signed in.
+  - **What happens to a known address.** No row is created. Its owner is mailed
+    "Someone tried to create a (site name) account with your address", with
+    links to the sign-in and reset pages and nothing else. The mail is budgeted
+    per address by `AccountThrottle` (`mail:registration_notice`, 5 per hour,
+    like reset and magic-link mail) and dropped silently when spent.
+  - **Who notices.** Anyone who relied on registering and landing signed in.
+    Code that calls `AshAuthentication.Strategy.action/4` for
+    `:register_with_password` directly now gets an error that satisfies
+    `KilnCMS.Accounts.Errors.AlreadyRegistered.in?/1` for a known address, not
+    the identity's "has already been taken". Show such a caller the same answer
+    a success gets; naming the address as taken reopens the oracle.
+  - **Rolling back** is safe: there is no migration and no data change.
+  - **Rest of the audit.** See the next entry and the matrix in the
+    [threat model](../threat-model.md#account-enumeration-by-surface-2255).
+
 ## Added
 
 <a id="graphql-custom-where"></a>
@@ -957,6 +982,18 @@ carries the reasoning.
   shut; the new one keeps its state across patches it didn't cause.
 
 ## Security
+
+<a id="account-enumeration-audit"></a>
+
+- **Every surface that takes an email address now answers a known and an unknown address alike, and the threat model has the per-surface matrix (#2255).**
+  Sign-in (browser and headless), password reset, magic link, registration,
+  confirmation, newsletter, site SSO, passkey, API key, the JSON:API, GraphQL and
+  MCP reads, author routes and the admin lookups were each audited; only
+  registration differed and was fixed (see Breaking). Each surface has a test
+  under `test/**/enumeration_*` that compares the two responses whole. The
+  residuals that remain (the owner's inbox, request-time timing on reset and
+  magic link, admin-only lookups, a concurrent-registration race) are recorded
+  in the matrix, with the reason each is accepted.
 
 <a id="ecto-query-cache-advisory"></a>
 
