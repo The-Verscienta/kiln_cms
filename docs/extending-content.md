@@ -220,6 +220,10 @@ UI" workflow, scoped to fields.
   `mix kiln.fields.convert` — see
   [Moving JSON-in-text fields to a group](field-conversion.md).
 
+  To move a model's field definitions between environments (staging to
+  production) with a diff and dry run, see
+  [Syncing field definitions](field-sync.md).
+
   Each key is coerced by its sub-field with the usual `required` / `default`
   / `:select` rules; a key no sub-field declares is refused, a row whose
   values are all blank is dropped, and a lone object sent to a `multiple`

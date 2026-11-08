@@ -213,6 +213,30 @@ carries the reasoning.
 
 ## Added
 
+<a id="field-definition-sync"></a>
+
+- **Custom-field definitions can be exported from one environment and imported
+  into another, with a diff and a dry run (#2288).** For admins promoting a model
+  from staging to production. No migration.
+  - **Commands.** `mix kiln.fields.export [--out FILE]` and `mix kiln.fields.import
+    FILE [--apply] [--prune] [--allow-data-loss]`; on a release,
+    `KilnCMS.Release.export_field_definitions/2` and
+    `import_field_definitions/2` through `rpc`. Admins also get a download at
+    `/editor/fields/export.json`. See [field-sync.md](../field-sync.md).
+  - **Complete by construction.** A field carries every attribute the create
+    action accepts, so validation constraints, conditional rules, privacy,
+    localization, delivery and search flags and reference rules travel with it.
+    The list is read from the action; a test fails if an exported field is
+    missing one. Link fields and group sub-fields nest under their parent;
+    dynamic types carry their settings.
+  - **Safe by default.** The dry run applies the import inside a transaction it
+    rolls back, so validation refusals show up before anything is written.
+    `--apply` is one transaction. Re-importing a file changes nothing. A field
+    absent from the file is kept unless `--prune`. A delete, a type change or a
+    list made single over stored values is blocked until `--allow-data-loss`.
+  - **Not included.** Role/membership field grants, content, and the compiled
+    types themselves; types are never deleted by an import.
+
 <a id="backup-media-parts"></a>
 
 - **In-app media backups are written as independent `tar.gz` parts with SHA-256

@@ -1,0 +1,395 @@
+defmodule KilnCMS.CMS.FieldSyncTest do
+  @moduledoc """
+  Config-sync for custom fields (#2288, `KilnCMS.CMS.FieldSync`): the export
+  covers every definition attribute and the link/group nesting, an import
+  plans before it writes, applies in one transaction, is idempotent, refuses
+  changes that drop stored values without a flag, and is admin only.
+  """
+  use KilnCMS.DataCase, async: true
+
+  alias KilnCMS.CMS
+  alias KilnCMS.CMS.FieldSync
+
+  defp user(role) do
+    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+      email: "sync-#{System.unique_integer([:positive])}@example.com",
+      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+      confirmed_at: DateTime.utc_now(),
+      role: role
+    })
+  end
+
+  setup do
+    {:ok, admin: user(:admin)}
+  end
+
+  defp field!(admin, attrs),
+    do: CMS.create_field_definition!(Map.put_new(attrs, :content_type, :post), actor: admin)
+
+  # A model touching every kind of owner and every rule attribute.
+  defp model!(admin) do
+    field!(admin, %{
+      name: "rating",
+      label: "Rating",
+      field_type: :integer,
+      position: 1,
+      validation: %{"min" => 1, "max" => 5}
+    })
+
+    field!(admin, %{
+      name: "kind",
+      label: "Kind",
+      field_type: :select,
+      options: ["a", "b"],
+      option_labels: %{"a" => "Alpha"},
+      position: 2,
+      section: "Identity",
+      help_text: "Pick one",
+      searchable: true
+    })
+
+    field!(admin, %{
+      name: "note",
+      label: "Note",
+      field_type: :text,
+      format: :plain,
+      deliver_plain: true,
+      plain_breaks: true,
+      visible_when: %{"field" => "kind", "op" => "eq", "value" => "a"},
+      required_when: %{"field" => "kind", "op" => "eq", "value" => "b"},
+      position: 3
+    })
+
+    field!(admin, %{
+      name: "secret",
+      label: "Secret",
+      field_type: :string,
+      private: true,
+      localization: :shared,
+      position: 4
+    })
+
+    group =
+      field!(admin, %{name: "doses", label: "Doses", field_type: :group, multiple: true})
+
+    field!(admin, %{
+      content_type: nil,
+      group_of_id: group.id,
+      name: "amount",
+      label: "Amount",
+      field_type: :float
+    })
+
+    type = CMS.create_type_definition!(%{name: "recipe", label: "Recipe"}, actor: admin)
+
+    field!(admin, %{
+      content_type: nil,
+      type_definition_id: type.id,
+      name: "serves",
+      label: "Serves",
+      field_type: :integer
+    })
+
+    ref =
+      field!(admin, %{
+        name: "related",
+        label: "Related",
+        field_type: :reference,
+        target_type: "page"
+      })
+
+    field!(admin, %{
+      content_type: nil,
+      link_of_id: ref.id,
+      name: "qty",
+      label: "Qty",
+      field_type: :integer
+    })
+  end
+
+  defp wipe!(admin) do
+    top =
+      for f <- CMS.list_field_definitions!(actor: admin),
+          is_nil(KilnCMS.CMS.FieldDefinition.parent_id(f)),
+          do: f
+
+    # Fields whose rules read a sibling go first.
+    for f <- Enum.sort_by(top, &is_nil(&1.visible_when)),
+        do: CMS.destroy_field_definition!(f, actor: admin)
+  end
+
+  defp field_count(doc), do: doc["owners"] |> Enum.map(&length(&1["fields"])) |> Enum.sum()
+
+  defp export!(admin) do
+    {:ok, doc} = FieldSync.export(actor: admin)
+    doc
+  end
+
+  defp apply!(doc, admin, opts \\ []),
+    do: FieldSync.import_doc(doc, [actor: admin, apply?: true] ++ opts)
+
+  describe "export" do
+    test "carries every accepted attribute, the nesting and the dynamic type", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin)
+
+      assert %{"format" => "kiln-field-definitions", "version" => 1} = doc
+
+      post = Enum.find(doc["owners"], &(&1["kind"] == "compiled" and &1["type"] == "post"))
+      note = Enum.find(post["fields"], &(&1["name"] == "note"))
+
+      assert Enum.sort(Map.keys(note)) == FieldSync.field_keys()
+      assert note["visible_when"] == %{"field" => "kind", "op" => "eq", "value" => "a"}
+      assert note["deliver_plain"] and note["plain_breaks"]
+
+      doses = Enum.find(post["fields"], &(&1["name"] == "doses"))
+      assert [%{"name" => "amount"}] = doses["group_fields"]
+
+      related = Enum.find(post["fields"], &(&1["name"] == "related"))
+      assert [%{"name" => "qty"}] = related["link_fields"]
+
+      recipe = Enum.find(doc["owners"], &(&1["kind"] == "dynamic"))
+      assert recipe["type"] == "recipe"
+      assert recipe["definition"]["label"] == "Recipe"
+      assert [%{"name" => "serves"}] = recipe["fields"]
+
+      assert {:ok, _json} = Jason.encode(doc)
+    end
+
+    test "every stored definition attribute is exported or deliberately not", %{admin: _admin} do
+      # A new FieldDefinition attribute lands in the document through the create
+      # action's accept list. One that is not accepted would be silently left
+      # out of every sync, so it must be named here as a decision.
+      not_synced =
+        ~w(id org_id inserted_at updated_at content_type type_definition_id link_of_id group_of_id)a
+
+      stored =
+        KilnCMS.CMS.FieldDefinition
+        |> Ash.Resource.Info.attributes()
+        |> Enum.map(&Atom.to_string(&1.name))
+        |> Kernel.--(Enum.map(not_synced, &Atom.to_string/1))
+        |> Enum.sort()
+
+      assert stored == FieldSync.field_keys()
+    end
+
+    test "the export is admin only", %{admin: _admin} do
+      assert {:error, :forbidden} = FieldSync.export(actor: user(:editor))
+      assert {:error, :forbidden} = FieldSync.export(actor: nil)
+    end
+  end
+
+  describe "import" do
+    test "round-trips a model into an empty site, then is idempotent", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin)
+      wipe!(admin)
+      assert field_count(export!(admin)) == 0
+
+      assert {:ok, %{applied?: true} = report} = apply!(doc, admin)
+      assert report.counts[:create] > 0
+      assert export!(admin) == doc
+
+      assert {:ok, again} = apply!(doc, admin)
+      assert Map.keys(again.counts) == [:unchanged]
+      assert export!(admin) == doc
+    end
+
+    test "a dry run writes nothing but plans the diff", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin)
+      wipe!(admin)
+
+      assert {:ok, %{dry_run?: true, applied?: false} = report} =
+               FieldSync.import_doc(doc, actor: admin)
+
+      assert report.counts[:create] > 0
+      assert FieldSync.describe(report) =~ "+ post.rating"
+      assert field_count(export!(admin)) == 0
+    end
+
+    test "a dry run reports a write the apply would refuse, and writes nothing", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin)
+      wipe!(admin)
+
+      bad =
+        update_in(doc, ["owners", Access.all(), "fields", Access.all()], fn f ->
+          if f["name"] == "note",
+            do: Map.put(f, "visible_when", %{"field" => "ghost", "op" => "eq", "value" => "x"}),
+            else: f
+        end)
+
+      assert {:error, %{errors: [%{path: "post.note"} | _]}} =
+               FieldSync.import_doc(bad, actor: admin)
+
+      assert field_count(export!(admin)) == 0
+    end
+
+    test "an update shows only the attributes that differ", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin)
+
+      changed =
+        update_in(doc, ["owners", Access.all(), "fields", Access.all()], fn f ->
+          if f["name"] == "rating", do: Map.put(f, "label", "Score"), else: f
+        end)
+
+      assert {:ok, report} = FieldSync.import_doc(changed, actor: admin)
+
+      assert [%{path: "post.rating", changes: %{"label" => {"Rating", "Score"}} = changes}] =
+               Enum.filter(report.ops, &(&1.op == :update))
+
+      assert map_size(changes) == 1
+    end
+
+    test "a key the file leaves out takes the attribute default", %{admin: admin} do
+      doc = %{
+        "format" => "kiln-field-definitions",
+        "version" => 1,
+        "owners" => [
+          %{
+            "kind" => "compiled",
+            "type" => "post",
+            "fields" => [%{"name" => "tiny", "label" => "Tiny", "field_type" => "string"}]
+          }
+        ]
+      }
+
+      assert {:ok, _} = apply!(doc, admin)
+      [tiny] = CMS.field_definitions_for!(:post, actor: admin)
+      assert tiny.required == false and tiny.format == :rich
+      assert {:ok, again} = apply!(doc, admin)
+      assert Map.keys(again.counts) == [:unchanged]
+    end
+
+    test "refuses an unknown key, a wrong version and a non-document", %{admin: admin} do
+      assert {:error, %{errors: [%{messages: [m]}]}} =
+               FieldSync.import_doc(%{"nope" => 1}, actor: admin)
+
+      assert m =~ "not a kiln-field-definitions document"
+
+      assert {:error, %{errors: [%{messages: [m]}]}} =
+               FieldSync.import_doc(
+                 %{"format" => "kiln-field-definitions", "version" => 99, "owners" => []},
+                 actor: admin
+               )
+
+      assert m =~ "unsupported document version"
+
+      doc = %{
+        "format" => "kiln-field-definitions",
+        "version" => 1,
+        "owners" => [
+          %{
+            "kind" => "compiled",
+            "type" => "post",
+            "fields" => [%{"name" => "x", "label" => "X", "colour" => "red"}]
+          }
+        ]
+      }
+
+      assert {:error, %{errors: [%{messages: [m]}]}} = FieldSync.import_doc(doc, actor: admin)
+      assert m =~ "unknown key(s) colour"
+    end
+
+    test "is admin only", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin)
+      assert {:error, :forbidden} = FieldSync.import_doc(doc, actor: user(:editor), apply?: true)
+      assert {:error, :forbidden} = FieldSync.import_doc(doc, actor: nil)
+    end
+  end
+
+  describe "pruning and data loss" do
+    defp post_with!(admin, key, value),
+      do:
+        CMS.create_post!(
+          %{
+            title: "T",
+            slug: "t-#{System.unique_integer([:positive])}",
+            custom_fields: %{key => value}
+          },
+          actor: admin
+        )
+
+    defp without(doc, name),
+      do:
+        update_in(doc, ["owners", Access.all(), "fields"], fn fs ->
+          Enum.reject(fs, &(&1["name"] == name))
+        end)
+
+    test "a field missing from the file is kept unless pruned", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin) |> without("rating")
+
+      assert {:ok, report} = apply!(doc, admin)
+      assert "post.rating" in report.untouched
+      assert Enum.any?(CMS.field_definitions_for!(:post, actor: admin), &(&1.name == "rating"))
+
+      assert {:ok, _} = apply!(doc, admin, prune?: true)
+      refute Enum.any?(CMS.field_definitions_for!(:post, actor: admin), &(&1.name == "rating"))
+    end
+
+    test "pruning a field that holds data is blocked without the flag", %{admin: admin} do
+      model!(admin)
+      post = post_with!(admin, "rating", 3)
+      doc = export!(admin) |> without("rating")
+
+      assert {:error, %{blocked: [%{path: "post.rating"}]}} = apply!(doc, admin, prune?: true)
+      assert Enum.any?(CMS.field_definitions_for!(:post, actor: admin), &(&1.name == "rating"))
+      assert CMS.get_post!(post.id, actor: admin).custom_fields["rating"] == 3
+
+      assert {:ok, _} = apply!(doc, admin, prune?: true, allow_data_loss?: true)
+      refute Enum.any?(CMS.field_definitions_for!(:post, actor: admin), &(&1.name == "rating"))
+    end
+
+    test "a type change over stored values is blocked; an empty field retypes freely", %{
+      admin: admin
+    } do
+      model!(admin)
+      post_with!(admin, "rating", 3)
+      doc = export!(admin)
+
+      retyped =
+        update_in(doc, ["owners", Access.all(), "fields", Access.all()], fn f ->
+          cond do
+            f["name"] == "rating" ->
+              %{f | "field_type" => "string", "validation" => %{}}
+
+            f["name"] == "secret" ->
+              %{f | "field_type" => "text", "private" => false, "localization" => "localized"}
+
+            true ->
+              f
+          end
+        end)
+
+      assert {:error, %{blocked: [%{path: "post.rating"}]}} =
+               FieldSync.import_doc(retyped, actor: admin)
+    end
+  end
+
+  describe "command line glue" do
+    @tag :tmp_dir
+    test "export_file writes the document and import_file reads it back", %{
+      admin: admin,
+      tmp_dir: dir
+    } do
+      model!(admin)
+      path = Path.join(dir, "fields.json")
+      quiet = fn _ -> :ok end
+
+      assert {:ok, _} = FieldSync.export_file(path, [actor: admin.email], quiet)
+      assert {:ok, report} = FieldSync.import_file(path, [actor: admin.email], quiet)
+      assert report.dry_run?
+      assert Map.keys(report.counts) == [:unchanged]
+
+      assert {:error, message} = FieldSync.import_file(path, [colour: 1], quiet)
+      assert message =~ "Unknown option"
+
+      assert {:error, message} = FieldSync.import_file(Path.join(dir, "nope.json"), [], quiet)
+      assert message =~ "Could not read"
+    end
+  end
+end
