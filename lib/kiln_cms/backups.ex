@@ -24,11 +24,11 @@ defmodule KilnCMS.Backups do
   `kiln-db-<stamp>.dump`, media archives named `kiln-media-<stamp>.tar.gz`
   under the same `db/` and `media/` directories, the same
   `.partial`-then-rename discipline, the same `pg_restore --list` verification.
-  The one layout difference (#2218): a media library bigger than one part is
-  written by this module as independent
-  `kiln-media-<stamp>.partNN.tar.gz` parts (`KilnCMS.Backups.MediaArchive`),
-  while `backup.sh` still writes a single archive. Both are read by
-  `scripts/restore.sh` and by this module, and both write `sha256` sidecars.
+  Media too (#2218): a library bigger than one part is written, by this module
+  (`KilnCMS.Backups.MediaArchive`) and by `backup.sh` alike, as independent
+  `kiln-media-<stamp>.partNN.tar.gz` parts, with the same membership, names,
+  sidecar and manifest entries. Both are read by `scripts/restore.sh` and by
+  this module.
 
   That constraint is why `run/1` shells out to `pg_dump` rather than
   implementing a dump in Elixir. A hand-rolled logical export would be a
@@ -283,7 +283,8 @@ defmodule KilnCMS.Backups do
 
   @doc """
   The target ceiling, in **bytes**, on the input size of one media part
-  (`BACKUP_MEDIA_PART_MB`, default 400 MB; #2218).
+  (`BACKUP_MEDIA_PART_MB`, default 400 MB; #2218). `scripts/backup.sh` reads
+  the same variable the same way.
 
   Bytes internally so tests can use a few KiB. A target, not an exact size: a
   part closes when the next file would push it over, and one file larger than
@@ -295,6 +296,7 @@ defmodule KilnCMS.Backups do
   @doc """
   Glob patterns (relative to `media_dir/0`) the media archive leaves out
   (`BACKUP_MEDIA_EXCLUDE`; #2218). `[]` — the default — excludes nothing.
+  `scripts/backup.sh` reads the same variable and applies the same globs.
   """
   @spec media_exclude() :: [String.t()]
   def media_exclude, do: config(:media_exclude, [])

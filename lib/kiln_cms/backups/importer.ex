@@ -52,8 +52,13 @@ defmodule KilnCMS.Backups.Importer do
   numeric order, `bytes` summed. A set with a gap (`part03` missing) is imported
   as a `failed` run, "incomplete media set: missing part03", because a restore
   from it would silently lack files; so is a stamp carrying both a legacy single
-  archive and parts. A `.partNN…partial` holds the stamp's settle window like
-  any other partial.
+  archive and parts, and so are parts with no media sidecar, "incomplete media
+  set: parts but no sidecar": every part set is written with one, so parts
+  without it are what a run killed mid-set leaves (`restore.sh` and
+  `backup.sh verify` refuse such a set too). A manifest calling the parts
+  verified does not stand in for the sidecar. A legacy single archive without
+  a sidecar (from before checksums) imports as before. A `.partNN…partial`
+  holds the stamp's settle window like any other partial.
 
   `kiln-<kind>-<stamp>.sha256` sidecars are not artifacts and never make a run
   by themselves, but are accounted for by their stamp: a well-formed one
@@ -271,7 +276,7 @@ defmodule KilnCMS.Backups.Importer do
     manifest = if MapSet.member?(covered, stamp), do: manifest
 
     empty? = Enum.any?(files, &(&1.bytes == 0))
-    problem = media_problem(files)
+    problem = media_problem(files, media_sidecar?(sidecars, stamp))
 
     {status, error} = outcome(manifest, problem, empty?)
 
@@ -303,9 +308,15 @@ defmodule KilnCMS.Backups.Importer do
   defp outcome(_manifest, _problem, _empty?), do: {:succeeded, nil}
 
   # What is wrong with the media files of a stamp, or `nil`: parts that don't
-  # run 1..N, or a legacy single archive sitting beside parts. Part numbers are
-  # unique per stamp (one file name each), so there is no duplicate to resolve.
-  defp media_problem(files) do
+  # run 1..N, a legacy single archive sitting beside parts, or parts with no
+  # sidecar. Every part set is written with a sidecar (one part keeps the legacy
+  # name), by the app and by `backup.sh` alike, so parts without one are what a
+  # run killed mid-set leaves once its `.partial` marker is swept; a manifest
+  # does not excuse it, since `restore.sh` refuses such a set too. A legacy
+  # single archive without one is a pre-checksum backup and stays fine. Part
+  # numbers are unique per stamp (one file name each), so there is no duplicate
+  # to resolve.
+  defp media_problem(files, sidecar?) do
     media = Enum.filter(files, &(&1.kind == :media))
     parts = for %{part: part} <- media, is_integer(part), do: part
     singles = Enum.count(media, &is_nil(&1.part))
@@ -320,10 +331,18 @@ defmodule KilnCMS.Backups.Importer do
       singles > 0 ->
         "ambiguous media set: both a single archive and parts"
 
+      not sidecar? ->
+        "incomplete media set: parts but no sidecar"
+
       true ->
         nil
     end
   end
+
+  # Whether the stamp has a media sidecar on disk (well-formed or not: its
+  # presence is what tells a finished set from an interrupted one).
+  defp media_sidecar?(sidecars, stamp),
+    do: sidecars |> Map.get(stamp, []) |> Enum.any?(&match?({:media, _}, &1))
 
   # The first few absent part numbers below the highest present one, lazily (a
   # file named `part99999999` must not cost a hundred million iterations).

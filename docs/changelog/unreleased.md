@@ -7,6 +7,60 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="backup-sh-media-parts-upgrade"></a>
+
+- **`scripts/backup.sh media` and `all` now split media into parts like the app,
+  stop archiving empty folders and folder modes, and need GNU tar or bsdtar;
+  `restore.sh media` refuses a part set with no sidecar (#2218).** For anyone
+  taking backups with cron. No migration; nothing to change in a working cron
+  line.
+  - **Parts by default.** A media library bigger than `BACKUP_MEDIA_PART_MB`
+    (default 400, 16 to 10240; a bad value prints a `warning:` line and uses
+    400) is written as `kiln-media-<stamp>.part01.tar.gz` … `.partNN.tar.gz`,
+    with a multi-line `kiln-media-<stamp>.sha256` and, for `backup.sh all`, one
+    `manifest.json` entry per part with `part` and `parts_total`. One part keeps
+    the old `kiln-media-<stamp>.tar.gz` name. The files and names match what the
+    app writes for the same directory and settings. There is no off switch.
+    Anything of yours that globs `kiln-media-*.tar.gz` must accept the
+    `.partNN` names.
+  - **`BACKUP_MEDIA_EXCLUDE` now applies to cron too.** If you set it for the
+    app, cron archives start leaving those paths out as well. A pattern ending
+    in `/` (`cache/`) excludes nothing on either path; write `cache` or
+    `cache/**`.
+  - **Folders are not archived.** Regular files and symlinks only, as the app
+    already did. Empty folders are lost, and a restore recreates folders owned
+    by the restoring user with that user's default mode (typically
+    `root:root`, `0755`): `chown -R` the media root afterwards.
+  - **Tools.** GNU tar or bsdtar is required; busybox tar is refused before
+    anything is written. The script also uses `stat`, `xargs`, `mktemp`,
+    `head` and `gzip`, and builds its file lists in `TMPDIR` (default `/tmp`).
+    Planning in shell is slower than in the app for a library of many files.
+  - **Permissions.** Parts and the sidecar are 0600 from the first byte. A
+    `media/` directory the script creates is 0700 (an existing one keeps its
+    mode), and the app sets it to 0700 on every run, so cron and the app must
+    run as the same user to share it.
+  - **A failed run removes its own parts.** Cron has no resume: a failed or
+    signalled (`HUP`, `INT`, `TERM`) run removes the parts it wrote and keeps a
+    finished database dump. A run killed outright leaves its parts and a
+    `kiln-media-<stamp>.sha256.partial` marker: History holds the stamp,
+    `backup.sh verify` skips it and says so, and `restore.sh` refuses it. The
+    next in-app backup removes a `.partial` older than an hour, after which
+    History shows the leftover parts as failed ("incomplete media set: parts
+    but no sidecar"); or delete the stamp's files by hand.
+  - **`restore.sh media` refuses a `.partNN` set with no sidecar**, where it
+    used to warn and continue: such a set is most likely from a killed run and
+    would restore with files missing. Set
+    `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1` to restore it anyway. A legacy
+    single archive with no sidecar still restores with a warning. `backup.sh
+    verify` fails on parts with no sidecar, and when no complete media set
+    exists.
+  - **Rolling the pin back** restores the old single-archive script. Part sets
+    cron already wrote stay readable by hand, one `tar -xzf` per part in
+    numeric order; the previous release's History and `restore.sh` handle them
+    as described in [the app-parts note](#backup-media-parts-upgrade).
+  Guide: [Cron backups in parts](../backups.md#cron-backups-in-parts).
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))
+
 <a id="bot-budgets-upgrade"></a>
 
 - **Run `mix ash.migrate` for bot budgets (one new table, `site_bot_budgets`),
@@ -618,8 +672,8 @@ carries the reasoning.
     `kiln-db-<stamp>.sha256` sidecars in `sha256sum -c` format. They are copied
     off-site with their artifact and pruned with their set. `Verified` now needs
     `tar -tzf` to pass, the size to match the hash, and a hash to be recorded.
-    `scripts/backup.sh` (still one archive, no splitting) writes the same keys and
-    sidecars and `verify` checks every file of the newest stamp.
+    `scripts/backup.sh` writes the same parts, keys and sidecars ([below](#backup-sh-media-parts-upgrade))
+    and `verify` checks every file of the newest stamp.
   - **Resume.** Finished steps and parts are kept in
     `<BACKUP_DIR>/.work/<stamp>/` (0700; removed on success; swept after three
     days). A failed or interrupted run shows **Resume** in History for platform
@@ -639,8 +693,9 @@ carries the reasoning.
   - **Prune and disk.** Retention treats a stamp (dump, all parts, sidecars) as
     one set aged by its newest member, in the app and in `backup.sh`. There is
     no free-space check: budget for the dump, the finished parts and one in flight.
-  - **Not here yet.** The automatic Oban job-per-step chain, and splitting in
-    `backup.sh`, are follow-ups; the issue stays open. The runbook is in
+  - **Not here yet.** The automatic Oban job-per-step chain is a follow-up;
+    the issue stays open. Splitting in `backup.sh` followed in a later PR
+    ([upgrade note](#backup-sh-media-parts-upgrade)). The runbook is in
     [backups.md](../backups.md#media-backups-in-parts-2218).
   ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))
 

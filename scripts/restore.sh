@@ -13,13 +13,18 @@
 #   RESTORE_CONFIRM=yes   skip the interactive confirmation (for scripted drills)
 #   RESTORE_REQUIRE_CHECKSUM=1  `media`: abort when no checksum sidecar is found
 #                         (default: warn loudly on stderr and continue)
+#   RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1  `media`: restore a .partNN set that
+#                         has no sidecar (refused by default: every complete
+#                         part set has one, so a set without it is most likely
+#                         what a killed run left behind)
 #
 # `media` takes any of:
-#   * one legacy archive           kiln-media-<stamp>.tar.gz (cron, or a
-#                                  single-part app backup)
-#   * any ONE part of a set        kiln-media-<stamp>.partNN.tar.gz — the other
-#                                  parts with the same stamp in the same
-#                                  directory are discovered
+#   * one legacy archive           kiln-media-<stamp>.tar.gz (a single-part
+#                                  backup, from backup.sh or the app)
+#   * any ONE part of a set        kiln-media-<stamp>.partNN.tar.gz (backup.sh
+#                                  and the app both split media into parts) —
+#                                  the other parts with the same stamp in the
+#                                  same directory are discovered
 #   * several explicit paths       (e.g. a shell glob) — taken as the whole set
 #   * a stamp prefix               /backups/media/kiln-media-<stamp>
 # Parts are ordered by their NUMBER (never by name), must be contiguous from
@@ -30,7 +35,11 @@
 # absolute path or a `..` component, or is a symlink/hardlink whose target is
 # absolute or contains `..` (so even a harmless `d/x -> ../y` link is refused;
 # restore such a set by hand). Nothing is extracted unless every check passed.
-# The manifest is not consulted: the sidecar is the supported record.
+# The manifest is not consulted: the sidecar is the supported record. A set
+# with a `kiln-media-<stamp>.*.partial` beside it (backup.sh's in-progress
+# marker, or a part still being written) is refused: it is being written, or
+# its run was killed. A legacy single archive without a sidecar (backups from
+# before checksums) is restored with a warning, as before.
 #
 # `db` is destructive on the target (--clean drops existing objects first) —
 # it refuses to run without confirmation. `drill` expects a throwaway target
@@ -316,6 +325,16 @@ cmd_media() {
     fi
   fi
 
+  # --- an unfinished set: a run in progress, or one killed outright ---
+  if [ "$kind" != foreign ]; then
+    local f
+    for f in "${MEDIA_DIR_SRC}/kiln-media-${first_stamp}".*.partial; do
+      if [ -e "$f" ]; then
+        die "$(basename -- "$f") is beside the set for ${first_stamp}: it is still being written, or the run that wrote it was interrupted — nothing was extracted"
+      fi
+    done
+  fi
+
   # --- checksums, before anything is extracted ---
   local sidecar="" sidecar_path
   if [ "$kind" != foreign ]; then
@@ -342,6 +361,12 @@ cmd_media() {
     warn_no_checksum "${sidecar:-a kiln-media-<stamp>.sha256 sidecar}"
     if [ "${RESTORE_REQUIRE_CHECKSUM:-}" = "1" ]; then
       die "RESTORE_REQUIRE_CHECKSUM=1 and no checksum was found — nothing was extracted"
+    fi
+    # Every part set is written with a sidecar (one part keeps the legacy
+    # name), so parts without one are most likely the leftovers of a run
+    # killed mid-set: restoring them would silently lack files.
+    if [ "$kind" = parts ] && [ "${RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM:-}" != "1" ]; then
+      die "the part set for ${first_stamp} has no sidecar, so it is probably incomplete (a run killed mid-set); set RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1 to restore these parts anyway — nothing was extracted"
     fi
   fi
 

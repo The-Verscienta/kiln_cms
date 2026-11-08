@@ -117,6 +117,16 @@ defmodule KilnCMS.Scripts.RestoreMediaTest do
       assert tree(ctx.dest) == tree(ctx.media)
     end
 
+    test "without a sidecar it is still restored, with the warning (pre-checksum backups)",
+         ctx do
+      assert [archive] = build_set!(ctx, @stamp, 10_000_000)
+      File.rm!(Path.join(ctx.backups, "kiln-media-#{@stamp}.sha256"))
+
+      assert {out, 0} = restore(ctx, [archive])
+      assert out =~ "WARNING: no checksum found"
+      assert tree(ctx.dest) == tree(ctx.media)
+    end
+
     test "an archive not named by Kiln is accepted, with the no-checksum banner", ctx do
       [archive] = build_set!(ctx, @stamp, 10_000_000)
       odd = Path.join(ctx.backups, "my-uploads.tar.gz")
@@ -216,14 +226,62 @@ defmodule KilnCMS.Scripts.RestoreMediaTest do
       assert nothing_extracted?(ctx)
     end
 
-    test "no sidecar: a loud warning on stderr, and the restore goes ahead", ctx do
+    test "no sidecar: a part set is refused, since every complete set has one", ctx do
       [p1 | _] = build_set!(ctx, @stamp, 700)
       File.rm!(Path.join(ctx.backups, "kiln-media-#{@stamp}.sha256"))
 
-      assert {out, 0} = restore(ctx, [p1])
+      assert {out, status} = restore(ctx, [p1])
+      assert status != 0
+      assert out =~ "WARNING: no checksum found"
+      assert out =~ "has no sidecar, so it is probably incomplete"
+      assert out =~ "RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1"
+      assert nothing_extracted?(ctx)
+    end
+
+    test "no sidecar with RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1: a loud warning, then the restore",
+         ctx do
+      [p1 | _] = build_set!(ctx, @stamp, 700)
+      File.rm!(Path.join(ctx.backups, "kiln-media-#{@stamp}.sha256"))
+
+      assert {out, 0} = restore(ctx, [p1], [{"RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM", "1"}])
       assert out =~ "WARNING: no checksum found"
       assert out =~ "kiln-media-#{@stamp}.sha256"
       assert tree(ctx.dest) == tree(ctx.media)
+    end
+
+    test "what a killed cron run leaves (first parts, the marker, no sidecar) is refused", ctx do
+      [_p1, _p2, p3 | rest] = build_set!(ctx, @stamp, 700)
+      sidecar = Path.join(ctx.backups, "kiln-media-#{@stamp}.sha256")
+      File.rm!(sidecar)
+      for p <- [p3 | rest], do: File.rm!(p)
+      File.write!(sidecar <> ".partial", "")
+
+      assert {out, status} =
+               restore(ctx, [hd(Path.wildcard(Path.join(ctx.backups, "*.part01.*")))], [
+                 {"RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM", "1"}
+               ])
+
+      assert status != 0
+      assert out =~ "kiln-media-#{@stamp}.sha256.partial is beside the set"
+      assert nothing_extracted?(ctx)
+
+      # Once the marker is gone (the app sweeps stale partials after an hour),
+      # the missing sidecar still stops it.
+      File.rm!(sidecar <> ".partial")
+      assert {out, status} = restore(ctx, [Path.join(ctx.backups, "kiln-media-#{@stamp}")])
+      assert status != 0
+      assert out =~ "has no sidecar, so it is probably incomplete"
+      assert nothing_extracted?(ctx)
+    end
+
+    test "a part still being written beside the set is refused", ctx do
+      parts = build_set!(ctx, @stamp, 700)
+      File.write!(List.last(parts) <> ".partial", "in flight")
+
+      assert {out, status} = restore(ctx, [hd(parts)])
+      assert status != 0
+      assert out =~ ".tar.gz.partial is beside the set"
+      assert nothing_extracted?(ctx)
     end
 
     test "no sidecar with RESTORE_REQUIRE_CHECKSUM=1 aborts", ctx do
@@ -295,7 +353,9 @@ defmodule KilnCMS.Scripts.RestoreMediaTest do
       File.write!(p3, binary_part(bytes, 0, div(byte_size(bytes), 2)))
 
       assert {out, status} =
-               restore(ctx, [hd(Path.wildcard(Path.join(ctx.backups, "*.part01.*")))])
+               restore(ctx, [hd(Path.wildcard(Path.join(ctx.backups, "*.part01.*")))], [
+                 {"RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM", "1"}
+               ])
 
       assert status != 0
       assert out =~ "unreadable archive"
@@ -382,7 +442,12 @@ defmodule KilnCMS.Scripts.RestoreMediaTest do
 
   defp restore(ctx, args, env \\ []) do
     System.cmd("bash", [@script, "media" | args],
-      env: [{"RESTORE_MEDIA_DIR", ctx.dest}, {"RESTORE_REQUIRE_CHECKSUM", nil}] ++ env,
+      env:
+        [
+          {"RESTORE_MEDIA_DIR", ctx.dest},
+          {"RESTORE_REQUIRE_CHECKSUM", nil},
+          {"RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM", nil}
+        ] ++ env,
       stderr_to_stdout: true
     )
   end

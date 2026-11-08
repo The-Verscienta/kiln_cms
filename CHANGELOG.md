@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **`scripts/backup.sh` now splits media into `.partNN.tar.gz` parts like the app (400 MB, no off switch), skips empty folders, honours `BACKUP_MEDIA_EXCLUDE` and needs GNU tar or bsdtar; `restore.sh` refuses a part set with no sidecar unless `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1`.** No migration.
+  ([long form](docs/changelog/unreleased.md#backup-sh-media-parts-upgrade))
+
 - **Run `mix ash.migrate` (new table `site_bot_budgets`). Scripts (`curl`, Go, Java, Python) now get 150 public-page requests a minute per address, not 300, and requests with no user agent 60; one count is shared per address.** Rolling the pin back is safe.
   ([#2470](https://github.com/The-Verscienta/kiln_cms/pull/2470) · [long form](docs/changelog/unreleased.md#bot-budgets-upgrade))
 
