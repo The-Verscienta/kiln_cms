@@ -34,6 +34,18 @@
 #
 # Renamed or deleted guides are not unpublished; do that in the editor.
 #
+# Images: the rich-text sanitizer keeps no `<img>`, so a paragraph holding
+# only an image of a repo file (`![alt](images/editorial-workflow/1-x.webp)`)
+# publishes as an image block linked to a media-library item. The file is
+# uploaded once (`POST /api/media`, which needs the same admin key) as
+# `<name>-<12 hex of its sha256>.<ext>` and found by that name on later runs.
+# Every image must exist and have alt text, or the run raises before
+# publishing anything; a changed file under docs/images/ republishes each
+# guide that shows it. A replaced screenshot is a new item: the old one is not
+# deleted, so remove superseded ones in the media library. An image inside a
+# paragraph or a link publishes as its alt text, and one at an external URL as
+# a link to it. --dry-run uploads nothing; its HTML loads images from GitHub.
+#
 # The logic is in scripts/publish/docs.exs (loadable by the tests), the
 # Markdown renderer and the JSON:API client in scripts/publish/common.exs
 # (shared with scripts/publish_releases.exs).

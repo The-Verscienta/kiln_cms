@@ -220,7 +220,10 @@ defmodule KilnCMS.MixProject do
       # The committed API specs (`mix kiln.api.specs`) ship with the docs build,
       # at `api/openapi.json` and `api/schema.graphql` beside the HTML, so a
       # published docs site serves the spec of the version it documents.
-      assets: %{"docs/api" => "api"},
+      # docs/images holds the guides' screenshots (#2158). A guide links them
+      # as `images/...`, relative to docs/, which is where GitHub resolves
+      # them and where ExDoc's flat output puts this copy.
+      assets: %{"docs/api" => "api", "docs/images" => "images"},
       groups_for_extras: groups_for_extras(),
       groups_for_modules: groups_for_modules()
     ]
@@ -280,6 +283,9 @@ defmodule KilnCMS.MixProject do
       "docs/compare/migrating-from-wordpress.md": [],
       "docs/compare/migrating-from-ghost.md": [],
       # Authoring & editorial
+      # Create → review → publish and who may do each, with screenshots (#2158):
+      # the first guide an editor reads.
+      "docs/editorial-workflow.md": [title: "The editorial workflow"],
       "docs/editor-shortcuts.md": [],
       "docs/markdown.md": [],
       "docs/advisories.md": [],
@@ -455,6 +461,7 @@ defmodule KilnCMS.MixProject do
         "docs/compare/migrating-from-ghost.md"
       ],
       "Authoring & editorial": [
+        "docs/editorial-workflow.md",
         "docs/editor-shortcuts.md",
         "docs/markdown.md",
         "docs/advisories.md",

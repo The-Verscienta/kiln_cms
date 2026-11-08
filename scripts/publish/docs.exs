@@ -153,13 +153,61 @@ defmodule PublishDocs do
   # shared with publish_releases.exs); what is guide-specific — titles and the
   # link rewriting to /docs/<slug> — stays here.
 
-  @doc "Renders one guide to `{title, html}`. `slugs` maps repo paths to slugs."
+  @doc """
+  Renders one guide to `{title, blocks}` (`KilnPublish.Markdown.blocks/2`):
+  its prose as HTML, each screenshot as an image block naming its repo file.
+  `slugs` maps repo paths to slugs.
+  """
   def render(doc, markdown, slugs) do
     ast = markdown |> Markdown.strip_front_matter() |> Markdown.parse(doc.path)
     {h1, ast} = Markdown.pop_h1(ast)
 
     {doc.title || h1 || doc.slug,
-     ast |> Markdown.map_ast(&rewrite(&1, doc.path, slugs)) |> Markdown.render()}
+     ast |> Markdown.map_ast(&rewrite(&1, doc.path, slugs)) |> Markdown.blocks(doc.path)}
+  end
+
+  @doc """
+  A guide's blocks as one HTML page, for `--dry-run --out` and the index: an
+  image block becomes a `<figure>` loading the file from GitHub.
+  """
+  def html(blocks) do
+    Enum.map_join(blocks, fn
+      {:html, html} ->
+        html
+
+      {:image, image} ->
+        ~s(<figure><img src="#{Markdown.escape(asset(image.src))}" ) <>
+          ~s(alt="#{Markdown.escape(image.alt)}"></figure>)
+    end)
+  end
+
+  @doc "The repo paths of a guide's image blocks."
+  def image_paths(%{blocks: blocks}), do: for({:image, %{src: src}} <- blocks, do: src)
+
+  @doc """
+  Raises unless every image the guides name is a file with alt text: a
+  screenshot that cannot be uploaded, or that a screen reader would announce
+  as nothing, is a mistake to fail on before any page is touched.
+  """
+  def validate_images!(docs) do
+    problems =
+      for doc <- docs, {:image, image} <- doc.blocks, problem = image_problem(image) do
+        "  #{doc.path}: #{image.src} #{problem}"
+      end
+
+    if problems != [] do
+      raise "guide images that cannot be published:\n" <> Enum.join(problems, "\n")
+    end
+
+    :ok
+  end
+
+  defp image_problem(image) do
+    cond do
+      not File.regular?(image.src) -> "does not exist"
+      String.trim(image.alt) == "" -> "has no alt text"
+      true -> nil
+    end
   end
 
   # Only a guide that names one sends a description. Sending nil for the rest
@@ -169,9 +217,6 @@ defmodule PublishDocs do
 
   defp rewrite({"a", attrs, children, meta}, source, slugs),
     do: {"a", Markdown.update_attr(attrs, "href", &link(&1, source, slugs)), children, meta}
-
-  defp rewrite({"img", attrs, children, meta}, source, _slugs),
-    do: {"img", Markdown.update_attr(attrs, "src", &asset(&1, source)), children, meta}
 
   defp rewrite(node, _source, _slugs), do: node
 
@@ -193,12 +238,7 @@ defmodule PublishDocs do
     end
   end
 
-  defp asset(src, source) do
-    case Markdown.repo_path(src, source) do
-      nil -> src
-      {path, _fragment} -> "#{@raw_url}/#{path}"
-    end
-  end
+  defp asset(repo_path), do: "#{@raw_url}/#{repo_path}"
 
   # The guide the `/docs` index leads with (#1930): what Kiln is for, and the
   # order to read the delivery and governance guides in.
@@ -302,17 +342,21 @@ defmodule PublishDocs do
     end
   end
 
-  @doc "Every guide in `catalogue`, read and rendered: adds `html` and `seo_description`."
+  @doc """
+  Every guide in `catalogue`, read and rendered: adds `blocks`, `html` (the
+  blocks as one page, `html/1`) and `seo_description`.
+  """
   def render_all(catalogue) do
     slugs = Map.new(catalogue, &{&1.path, &1.slug})
 
     Enum.map(catalogue, fn doc ->
       markdown = File.read!(doc.path)
-      {title, html} = render(doc, markdown, slugs)
+      {title, blocks} = render(doc, markdown, slugs)
 
       Map.merge(doc, %{
         title: title,
-        html: html,
+        blocks: blocks,
+        html: html(blocks),
         seo_description: Markdown.seo_description(markdown)
       })
     end)
@@ -320,7 +364,11 @@ defmodule PublishDocs do
 
   # ── CLI ───────────────────────────────────────────────────────────────────
 
-  def main(argv) do
+  @doc """
+  The CLI. `client` builds the API client, and is only called for a real
+  publish — a dry run sends nothing (the tests pass one that records calls).
+  """
+  def main(argv, client \\ &env_client/0) do
     {opts, files} =
       OptionParser.parse!(argv, strict: [all: :boolean, dry_run: :boolean, out: :string])
 
@@ -340,17 +388,30 @@ defmodule PublishDocs do
             ])
         )
 
-    selected = if all?, do: catalogue, else: Enum.filter(catalogue, &(&1.path in files))
-
     rendered = render_all(catalogue)
 
-    to_publish = Enum.filter(rendered, fn doc -> Enum.any?(selected, &(&1.path == doc.path)) end)
+    # A changed screenshot republishes every guide that shows it: the guide's
+    # image block has to point at the new item.
+    to_publish =
+      if all?,
+        do: rendered,
+        else:
+          Enum.filter(rendered, fn doc ->
+            doc.path in files or Enum.any?(image_paths(doc), &(&1 in files))
+          end)
+
     IO.puts("#{length(to_publish)} of #{length(catalogue)} guides selected")
+    validate_images!(to_publish)
 
     if opts[:dry_run],
       do: dry_run(to_publish, rendered, opts[:out]),
-      else: publish_all(to_publish, rendered)
+      else: to_publish |> publish_all(rendered, client.()) |> halt_on_failure()
   end
+
+  defp env_client, do: API.client(API.env!("KILN_URL"), API.env!("KILN_DOCS_API_KEY"))
+
+  defp halt_on_failure(:ok), do: IO.puts("done")
+  defp halt_on_failure(:error), do: System.halt(1)
 
   defp dry_run(to_publish, rendered, out) do
     for doc <- to_publish do
@@ -367,8 +428,13 @@ defmodule PublishDocs do
     File.write!(Path.join(out, slug <> ".html"), "<h1>#{Markdown.escape(title)}</h1>\n" <> html)
   end
 
-  defp publish_all(to_publish, rendered) do
-    req = API.client(API.env!("KILN_URL"), API.env!("KILN_DOCS_API_KEY"))
+  @doc """
+  Publishes `to_publish` and the index through `req`: `:ok`, or `:error` when
+  any page failed. Raises before writing any page when the type lookup or a
+  screenshot upload fails, so a guide is never published pointing at an image
+  that is not there.
+  """
+  def publish_all(to_publish, rendered, req) do
     type_name = System.get_env("KILN_DOCS_TYPE", "doc")
     entries = {"/entries", "entry", [{"type_name", type_name}]}
     pages = {"/pages", "page", []}
@@ -377,6 +443,7 @@ defmodule PublishDocs do
     # a setup mistake worth failing on before any page is touched.
     type_id = type_id(req, type_name)
     create_entry = &%{"slug" => &1, "type_definition_id" => type_id}
+    media = upload_images!(req, to_publish)
 
     results =
       Enum.map(to_publish, fn doc ->
@@ -386,7 +453,7 @@ defmodule PublishDocs do
             req,
             entries,
             doc.slug,
-            Map.merge(body(doc.title, doc.html), seo_attrs(doc)),
+            Map.merge(guide_body(doc, media), seo_attrs(doc)),
             create_entry
           )
         )
@@ -404,11 +471,39 @@ defmodule PublishDocs do
           )
         ]
 
-    failed = Enum.count(results, &(&1 == :error))
-    if failed > 0, do: System.halt(1), else: IO.puts("done")
+    if Enum.any?(results, &(&1 == :error)), do: :error, else: :ok
   end
 
   defp body(title, html), do: %{"title" => title, "block_tree" => API.rich_text_tree(html)}
+
+  defp guide_body(doc, media) do
+    blocks =
+      Enum.map(doc.blocks, fn
+        {:html, _} = block -> block
+        {:image, image} -> {:image, Map.merge(image, Map.fetch!(media, image.src))}
+      end)
+
+    %{"title" => doc.title, "block_tree" => API.block_tree(blocks)}
+  end
+
+  # Each screenshot once, however many guides show it: `%{repo_path => %{media_id,
+  # url}}`. Its alt text on upload is the first guide's; the image block carries
+  # each guide's own.
+  defp upload_images!(req, docs) do
+    docs
+    |> Enum.flat_map(fn doc -> for {:image, image} <- doc.blocks, do: image end)
+    |> Enum.uniq_by(& &1.src)
+    |> Map.new(fn image ->
+      case API.ensure_media(req, image.src, image.alt) do
+        {:ok, outcome, media} ->
+          IO.puts("  #{outcome}  #{image.src}")
+          {image.src, media}
+
+        {:error, message} ->
+          raise "could not upload #{image.src}, so no guide was published: #{message}"
+      end
+    end)
+  end
 
   defp type_id(req, type_name) do
     case System.get_env("KILN_DOCS_TYPE_ID") do

@@ -281,6 +281,10 @@ Every summary line below that was shortened links to its own entry there.
   maintainer pages move to a last "Contributing to Kiln" section. chain-fold-order leaves the site; seven guides are retitled.**
   ([#2456](https://github.com/The-Verscienta/kiln_cms/pull/2456) · [long form](docs/changelog/unreleased.md#docs-index-role-tracks))
 
+- **New guide "The editorial workflow": draft → review → publish in eight annotated screenshots, with a role table a test checks against the policies.
+  It leads the Editor track; two home-page cards link to it; kilncms.dev publishes guide screenshots as media items.**
+  ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
+
 ### Fixed
 
 - **Three dead links in the docs now resolve (the `KilnCMS.Keys` link in Memberships and Ghost's schema in both comparison pages), and a docs test refuses relative `.html` links.** ([#2167](https://github.com/The-Verscienta/kiln_cms/issues/2167))
