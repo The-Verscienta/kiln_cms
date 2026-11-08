@@ -631,6 +631,27 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("Your own identity provider on this site's sign-in page."),
             keywords: ["sso", "oidc", "openid connect", "okta", "entra", "identity provider"]
           },
+          # How long a signed-in browser lasts on this site, and the button that
+          # ends them all (#2246). Beside Single sign-on — both are about how
+          # people sign in here — rather than with Password policy: the
+          # Organization section is at the seven-item cap.
+          %{
+            key: :session_policy,
+            label: gettext("Sessions"),
+            path: ~p"/editor/sessions",
+            icon: "hero-clock",
+            description: gettext("Sign out idle browsers, or everyone signed in to this site."),
+            keywords: [
+              "session",
+              "idle",
+              "timeout",
+              "inactivity",
+              "sign out",
+              "log out",
+              "logout",
+              "security"
+            ]
+          },
           # A site's own Web Push key (#1560), generated rather than entered.
           %{
             key: :site_push,

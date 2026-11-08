@@ -371,6 +371,25 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for a site's resolved session policy (#2246) —
+  `KilnCMS.Accounts.IdleTimeout.policy/1`, read on every signed-in request.
+  """
+  @spec session_policy_key(Ash.UUID.t()) :: String.t()
+  def session_policy_key(org_id), do: "session_policy:#{org_id}"
+
+  @doc """
+  Drop a site's cached session policy after a `SiteSessionPolicy` write.
+  Cluster-wide, like `bust_branding/1`: a node that kept the old policy would
+  go on honouring a timeout the admin just removed, or ignore one just set,
+  and miss a "sign out everyone" for up to the TTL.
+  """
+  @spec bust_session_policy(Ash.UUID.t()) :: :ok
+  def bust_session_policy(org_id) do
+    if enabled?(), do: ClusterBust.broadcast([session_policy_key(org_id)])
+    :ok
+  end
+
+  @doc """
   Cache key for a site's resolved safety-field list (`KilnCMS.CMS.Severity`).
   """
   @spec safety_fields_key(Ash.UUID.t()) :: String.t()

@@ -203,6 +203,7 @@ msgstr[1] ""
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
+#: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} hour"
 msgid_plural "%{count} hours"
@@ -284,6 +285,7 @@ msgstr[1] ""
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
+#: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} minute"
 msgid_plural "%{count} minutes"
@@ -1326,6 +1328,11 @@ msgstr ""
 msgid "A block"
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "A browser that does nothing on this site for this long is signed out, even if it chose “remember me”. Reading a page, clicking or typing counts as activity; a tab left open does not."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A calendar date with no time of day. For a deadline, a birthday or a release date."
@@ -1818,6 +1825,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "API keys"
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "API keys and app tokens keep working. If an account may be compromised, reset its password; a platform admin can also use “Sign out everywhere” on the Accounts page."
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -2496,6 +2508,16 @@ msgstr ""
 msgid "Administrator accounts cannot use a breached password. Block applies to administrators; editors and everyone else are warned instead, so a visitor is never locked out of signing up."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Administrators"
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Administrators can be given a shorter time than everyone else, never a longer one. Turning this on, or shortening it, starts the clock from now: nobody is signed out for time they spent idle before."
+msgstr ""
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Admins can always publish. You can change this later under Team."
@@ -2781,6 +2803,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "An administrator can switch it on."
+msgstr ""
+
+#: lib/kiln_cms_web/idle_session.ex
+#, elixir-autogen, elixir-format
+msgid "An administrator signed everyone out of this site. Sign in again to continue."
 msgstr ""
 
 #: lib/kiln_cms/branding/app_icon.ex
@@ -4328,6 +4355,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "Choose one of the listed options."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose one of the listed times."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -7726,6 +7758,11 @@ msgstr ""
 msgid "Events marked “includes unpublished content” send the full body of drafts and embargoed documents. They are off by default: select them only if this receiver should see content before it is published."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every browser signed in to this site is signed out now, including “remember me” and sign-ins waiting for a two-factor code. Open pages go to the sign-in page. Other sites on this server are not affected."
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every checkpoint has been published to the witness."
@@ -7787,6 +7824,11 @@ msgstr ""
 msgid "Every variant is over the floor and no arm leads outright."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Everyone"
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Everyone registered on this instance, and their access."
@@ -7795,6 +7837,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Everyone registered on this instance. Roles here are the platform role; per-site tiers live on each site's team page."
+msgstr ""
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Everyone signed out"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -9210,6 +9257,11 @@ msgstr ""
 msgid "How it works"
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "How long a browser can sit unused on this site before it is signed out, and a way to sign everyone out at once."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "How many %{type} records can be connected"
@@ -9929,6 +9981,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Keep events for (days)"
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keep me signed in on this browser"
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -11305,6 +11362,11 @@ msgstr ""
 msgid "Network"
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Never"
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Never published or withdrawn."
@@ -11822,6 +11884,11 @@ msgstr ""
 msgid "No headings — there's no outline to navigate by, so the page can only be read start to finish."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "No idle timeout is set: browsers stay signed in until they sign out."
+msgstr ""
+
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "No image backend is selected. New images go to this server's storage."
@@ -12243,6 +12310,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nobody follows this site yet."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody was signed out. Try again."
 msgstr ""
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
@@ -15846,6 +15918,11 @@ msgstr ""
 msgid "Safety fields saved."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Same as everyone"
+msgstr ""
+
 #: lib/kiln_cms/cms/field_types/link.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -15884,6 +15961,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/security_txt_live.ex
+#: lib/kiln_cms_web/live/session_policy_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
@@ -16113,6 +16191,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/security_txt_live.ex
+#: lib/kiln_cms_web/live/session_policy_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
@@ -16690,6 +16769,17 @@ msgstr ""
 msgid "Server setting"
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Session settings saved."
+msgstr ""
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sessions"
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set KILN_CONSOLE_HOST to a host no organization controls, such as console under your main host, point it and every subdomain of it at Kiln in DNS and TLS, and restart. Each organization's console then gets its own host, its slug followed by the console host. Otherwise, grant organization admin only to people you would trust with the console."
@@ -17071,14 +17161,34 @@ msgstr ""
 msgid "Sign out every other browser and device? This one stays signed in."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out everyone"
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out everyone on this site now?"
+msgstr ""
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sign out everywhere"
 msgstr ""
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out idle browsers, or everyone signed in to this site."
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sign out of all other sessions"
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out when idle"
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -17127,6 +17237,18 @@ msgstr ""
 msgid "Signed in with a passkey."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signed out %{count} session on this site."
+msgid_plural "Signed out %{count} sessions on this site."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Signed out after inactivity"
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Signed out of %{count} other session."
@@ -17154,6 +17276,7 @@ msgstr ""
 msgid "Signing key generated. New publishes are signed; re-fire existing content to sign it too."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Signing out…"
@@ -19241,6 +19364,11 @@ msgstr ""
 msgid "The server's operator has turned it off for the whole deployment (BREACHED_PASSWORD_CHECK=false). No password is looked up, and this setting has no effect until they turn it back on."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "The session settings could not be saved."
+msgstr ""
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "The shipped pack deliberately leaves out bare marketing words — \"best\", \"free\", \"proven\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
@@ -19375,6 +19503,11 @@ msgstr ""
 #: lib/kiln_cms/cms/computed.ex
 #, elixir-autogen, elixir-format
 msgid "The text without leading or trailing spaces."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "The time for administrators can't be longer than the time for everyone."
 msgstr ""
 
 #: lib/kiln_cms_web/components/seo_components.ex
@@ -20037,6 +20170,18 @@ msgstr ""
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site sets its own policy. Without it the default would be: %{policy}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site signs a browser out after %{count} minute without activity."
+msgid_plural "This site signs a browser out after %{count} minutes without activity."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site signs idle browsers out."
 msgstr ""
 
 #: lib/kiln_cms_web/live/site_push_live.ex
@@ -22225,6 +22370,11 @@ msgstr ""
 msgid "You don't have permission to change this site's security.txt."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's session settings."
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's single sign-on."
@@ -22254,6 +22404,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to restore media."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to sign everyone out of this site."
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_log_live.ex
@@ -22314,6 +22469,11 @@ msgstr ""
 #: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
 msgid "You were mentioned"
+msgstr ""
+
+#: lib/kiln_cms_web/idle_session.ex
+#, elixir-autogen, elixir-format
+msgid "You were signed out after a period of inactivity."
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex

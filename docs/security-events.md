@@ -128,6 +128,8 @@ a type may carry only the keys below; anything else is dropped.
 | `sso_config_changed` | Single sign-on changed | The site's identity provider or a verified SSO domain was saved, verified or removed | `provider`, `change` |
 | `org_setting_changed` | Site setting changed | Any other site-level setting, or a blocked-address rule, was saved or removed | `setting` |
 | `ip_auto_blocked` | Address blocked automatically | The [scanner guard](ip-blocking.md#block-scanners-automatically) temporarily blocked an address for racking up 404s or probing bait paths. The address is the event's IP; there is no acting person | `reason`, `count`, `window_minutes`, `block_minutes` |
+| `session_idle_expired` | Signed out after inactivity | A browser session (with its remember-me cookie) was signed out by the site's [idle timeout](account-administration.md#sign-people-out-when-idle). The person is the account signed out | `timeout_minutes`, `tier`, `surface` |
+| `all_sessions_revoked` | Everyone signed out | An admin used [Sign out everyone](account-administration.md#sign-everyone-out); the target is the site (target type `organization`) | `count`, `except_self` |
 
 `method` is `password`, `password_reset`, `magic_link`, `sso`, `passkey`,
 `second_factor` or `other`. `reason` is `invalid_credentials` or
@@ -135,6 +137,15 @@ a type may carry only the keys below; anything else is dropped.
 `settings`. `change` is `created`, `updated` or `removed`; `provider` is
 `site_oidc` or `site_sso_domain`. `setting` is the settings resource's short
 name, for example `site_mail_relay`; it names the setting and never its value.
+
+For `session_idle_expired`, `timeout_minutes` is the timeout that applied,
+`tier` is `admin` when it was the administrators' own timeout and `member` when
+it was everyone's, and `surface` is where it was noticed: `http` (a request),
+`live` (an open page) or `remember_me` (a remember-me cookie that sat unused too
+long). For `all_sessions_revoked`, `count` is the number of browser sessions
+signed out (remember-me cookies and two-factor holds are not counted) and
+`except_self` is `true` when the admin kept their own browser. Saving the idle
+timeout itself is `org_setting_changed` with `setting` `site_session_policy`.
 
 For `ip_auto_blocked`, `reason` is `miss_threshold` or `bait_path`, `count` is
 the threshold that was crossed, and `window_minutes` and `block_minutes` are the
@@ -207,6 +218,8 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sso_config_changed` | `CMS.SiteSsoProvider` (every write, via the `audit: :sso_config` option of `use KilnCMS.CMS.OrgSettings`, `lib/kiln_cms/cms/site_sso_provider.ex`), and `CMS.SiteSsoDomain` `:add`, `:verify`, `:remove` (`lib/kiln_cms/cms/site_sso_domain.ex`) | in txn; never the issuer, client id, secret or domain |
 | `org_setting_changed` | `lib/kiln_cms/cms/org_settings.ex`: the `use KilnCMS.CMS.OrgSettings` macro adds `Changes.RecordOrgSetting` to every write of every settings resource, and `CMS.IpBlockRule` `:create`, `:destroy` (`lib/kiln_cms/cms/ip_block_rule.ex`) | in txn; names the setting, never a value. The retention setting itself is one of them |
 | `ip_auto_blocked` | `lib/kiln_cms/security/scanner_guard.ex`, after the guard's `CMS.IpBlockRule` `:create` succeeds, via `Recorder.record_after_commit/2` | outside the transaction, off the request path; skipped when the guard is off, the cap is reached or a recent sign-in from the address exists |
+| `session_idle_expired` | `lib/kiln_cms/accounts/idle_timeout.ex`: `check/3`, once the expiring UPDATE matched the row (a racing tab that kept the session awake records nothing). Reached from `KilnCMSWeb.Plugs.IdleTimeout` (requests, remember-me) and `KilnCMSWeb.IdleSession` (open pages) | after commit; tenant is the site the request was on; target type `session`, no target id |
+| `all_sessions_revoked` | `lib/kiln_cms/accounts/sign_out_all.ex`: `run/3`, the `:sign_out_all` action of `CMS.SiteSessionPolicy` | in txn, with the revocation and the watermark: if the event cannot be written nothing is signed out |
 
 `org_setting_changed` covers every resource built with `use
 KilnCMS.CMS.OrgSettings`, so a new settings resource cannot forget it:
@@ -214,7 +227,7 @@ KilnCMS.CMS.OrgSettings`, so a new settings resource cannot forget it:
 `SiteCodeInjection`, `SiteCompliance`, `SiteEditorialSettings`,
 `SiteEmbedSettings`, `SiteLinkCheck`, `SiteLocaleSettings`, `SiteMailRelay`,
 `SiteMeilisearch`, `SitePasswordPolicy`, `SiteSafetyFields`, `SiteSecurityLog`,
-`SiteSecurityTxt`, `SiteStorage`, `SiteVapidKey` and
+`SiteSecurityTxt`, `SiteSessionPolicy`, `SiteStorage`, `SiteVapidKey` and
 `Federation.SiteFederation`. (`SiteSsoProvider` is the exception that records
 `sso_config_changed` instead.)
 
@@ -237,6 +250,8 @@ recorded as long as it names a user actor and a tenant.
 | Erasing a user | Not recorded as an event | `User` `:anonymize` forces the role through a different action and writes no event, and the recorder refuses any event whose acting user is the one being erased. The erasure scrubs the log instead (below). |
 | Changing a member's audiences or type scopes | Not recorded | Only a changed role is. `SiteAudiences.set/4` and an `OrgMembership` `:update` that leaves `role` alone write nothing. |
 | An invitation used up, or pruned | Not recorded | Accepting destroys the row through `Invitation` `:consume`; the `role_granted` of the membership it became is the record. The daily `:prune_expired` sweep removes rows long past expiry, which no one decided. |
+| A session signed out by an earlier "sign out everyone" when it is next used | Not recorded | A session that recorded no site (signed in before #2246) is caught later, on its next use on the site. `all_sessions_revoked` already records the decision; the late catch is its consequence. |
+| A session used on another site's host | Not recorded | The cookie was copied; it is served signed out there and nothing is written to it. |
 | Unknown host | Not recorded | No site to attribute it to; the event is skipped. |
 | Anything that is not a person's write to a settings resource | Not recorded | See above. |
 

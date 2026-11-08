@@ -110,6 +110,11 @@ defmodule KilnCMSWeb.Router do
     # header it widens.
     plug KilnCMSWeb.Plugs.SiteStorageCsp
     plug :load_from_session
+    # The site's idle timeout and "sign out everyone" (#2246): a session that
+    # is no longer good is served signed out. After `load_from_session`, whose
+    # user it judges, and writing no session or cookie — this pipeline serves
+    # public pages a shared cache may store (#699).
+    plug KilnCMSWeb.Plugs.IdleTimeout, :session
   end
 
   # Dev-only browser tooling (AshAdmin, LiveDashboard, API explorers) ships its
@@ -257,8 +262,18 @@ defmodule KilnCMSWeb.Router do
     # Ahead of `load_from_session` so the sign-in is resolved within the same
     # request. Safe there because the plug is a no-op when the session already
     # names a user, so it cannot swap a live session for a stale cookie.
+    #
+    # The idle timeout (#2246) is judged first: an idle remember-me cookie, or
+    # one older than the site's last "sign out everyone", does not sign in.
+    plug KilnCMSWeb.Plugs.IdleTimeout, :remember_me
     plug :sign_in_with_remember_me
+    # Says why, when the session names a token revoked for inactivity or by
+    # "sign out everyone" — read before `load_from_session` drops it (#2246).
+    plug KilnCMSWeb.Plugs.IdleTimeout, :notice
     plug :load_from_session
+    # As on `:browser`, and this pipeline may write: the token leaves the
+    # session and the remember-me cookie is deleted (#2246).
+    plug KilnCMSWeb.Plugs.IdleTimeout, {:session, writes_session?: true}
     # After the two above, because it needs whichever of them resolved the user
     # — and it covers the remember-me path, which never reaches
     # `AuthController.complete_sign_in/3` (#675).
@@ -306,6 +321,9 @@ defmodule KilnCMSWeb.Router do
     plug :protect_from_forgery
     plug :load_from_session
     plug :read_only_session
+    # A session no longer good under the site's idle timeout or "sign out
+    # everyone" (#2246) is served as anonymous. Reads only.
+    plug KilnCMSWeb.Plugs.IdleTimeout, :read_only
   end
 
   pipeline :delivery do
@@ -571,6 +589,10 @@ defmodule KilnCMSWeb.Router do
       # and admin-only: it decides whether the site's administrators can be
       # refused a password.
       live "/editor/password-policy", PasswordPolicyLive, :index
+      # The site's idle timeout and "sign out everyone" (#2246). Org-scoped and
+      # admin-only by the tier gate AND the resource policy; enforcement is
+      # `KilnCMSWeb.Plugs.IdleTimeout` and `KilnCMSWeb.IdleSession`.
+      live "/editor/sessions", SessionPolicyLive, :index
       # Per-site custom head/footer HTML for the DELIVERY site (#490). Admin-only
       # by the live session's tier gate AND the resource policy; the snippet is
       # rendered only by the `:delivery` pipeline, never here.
