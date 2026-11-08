@@ -279,7 +279,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **kilncms.dev `/docs` opens with one "Start here": the wedge guide, Editor/Developer/Operator reading paths, then site search;
   maintainer pages move to a last "Contributing to Kiln" section. chain-fold-order leaves the site; seven guides are retitled.**
-  ([#2157](https://github.com/The-Verscienta/kiln_cms/issues/2157) · [long form](docs/changelog/unreleased.md#docs-index-role-tracks))
+  ([#2456](https://github.com/The-Verscienta/kiln_cms/pull/2456) · [long form](docs/changelog/unreleased.md#docs-index-role-tracks))
 
 ### Fixed
 
