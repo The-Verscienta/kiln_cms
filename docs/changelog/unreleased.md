@@ -386,6 +386,22 @@ carries the reasoning.
     `kiln_cms.ip_block.refused.count`, tagged `surface`, never the address.
   See [ip-blocking.md](../ip-blocking.md).
 
+<a id="dynamic-field-defaults"></a>
+
+- **A custom field can default to today, now, the creating user, the site locale or another field (#2286).**
+  A new `default_source` (and, for a copy, `default_field`) on a field
+  definition replaces the fixed `default` with one of a closed set — `today`,
+  `now`, `current_user`, `site_locale`, `copy_of` — chosen under **Default comes
+  from** in `/editor/fields`. It applies on create only, where the payload
+  leaves the field blank; a supplied value wins and later edits never re-default.
+  `today` is the day a computed formula's `today()` sees. A field hidden by
+  its `visible_when` rule is not defaulted; a field the editor's grants do not
+  cover still receives its default, and the grant check does not count it as the
+  editor's change. Two new nullable columns on `field_definitions`
+  (additive migration); `default_source` / `default_field` read back on the
+  field-definition JSON:API resource and in the OpenAPI document. See
+  [extending-content.md](../extending-content.md#give-a-field-a-dynamic-default).
+
 <a id="conditional-custom-fields"></a>
 
 - **A custom field can be shown only when another field has a given value, and required only then (#2277).**
