@@ -85,28 +85,35 @@ declarative, so the module *is* the specification.
 
 ## 3. Find the right guide
 
+[Right, everywhere, provably](right-everywhere-provably.md) says what Kiln is
+for: corrections that reach every consumer in seconds, with a signed record of
+what readers saw. For what to read first as an editor, a developer building on
+Kiln's APIs, or an operator running a site, follow
+[Reading paths by role](reading-paths.md). It is the one list of those, and
+the kilncms.dev `/docs` index shows the same tracks.
+
+Working on Kiln itself needs a few more:
+
 | You want to… | Read |
 |--------------|------|
-| Know what Kiln is for | [Right, everywhere, provably](right-everywhere-provably.md) — corrections that reach every consumer in seconds, with a signed record of what readers saw |
-| Use the editor | [Editor shortcuts](editor-shortcuts.md), [Editorial advisories](advisories.md), [Claim checking](compliance.md) |
-| Model new content | [Extending the content model](extending-content.md) |
-| Overlay the core with your own project | [The overlay contract](overlay-contract.md) — what you may rely on across releases; [Downstream projects](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md) for the mechanics |
-| Understand who can do what | [Authorization policy matrix](policy-matrix.md), [Granular RBAC](granular-rbac.md) |
-| Run several sites from one install | [Multi-tenancy](multi-tenancy.md) |
-| Consume the content headlessly | [Headless consumer guide](headless-consumer-guide.md) — it routes you to [JSON:API](json-api.md), [GraphQL](headless-graphql-api.md), [MCP](mcp.md) or [RAG](rag.md) |
-| Wire up an external front end | [Visual-editing bridge](visual-editing-bridge.md), [Static export](static-export.md) |
-| Style the admin UI | [Design language](design-language.md), [Design system](design-system.md) |
-| Write a plugin | [Runtime extensibility](plugin-extensibility.md) |
-| Configure an install | [Environment variables](environment-variables.md) |
-| Deploy it | [Deploy](deploy.md) — required environment, image, boot, health endpoints, first admin, backups, optional infrastructure |
-| Operate it in production | [Backups](backups.md), [Observability](observability.md), [Performance](performance.md), [Resilient delivery](resilient-delivery.md) |
+| Know the workflow and the rules | [Contributing](../CONTRIBUTING.md) |
+| Understand who can do what | [Authorization policy matrix](policy-matrix.md) — the rule behind every resource policy |
+| Style the admin UI | [Design language](design-language.md), [Design system](design-system.md), [Frontend assets](frontend-assets.md) |
 | Cut a release | [Releasing Kiln](releasing.md) |
 | Assess its security posture | [Threat model](threat-model.md), [Data flows & retention](data-flows.md) |
 
-Everything else is in the sidebar, grouped the same way. Two groups are archives
-rather than guidance: **Design notes & decision records** holds the plans behind
-shipped features, and **Audits & release checklists** holds point-in-time
-material that was true on its date and is kept for the record.
+Everything else is in the sidebar, grouped by subject. The **Contributing to
+Kiln** group holds the pages above that are about working on Kiln rather than
+using it (Contributing, Releasing, Beta testing, the design language and
+system, Frontend assets); kilncms.dev publishes it as the last section of
+`/docs`. Five groups are archives rather than guidance, and stay off
+kilncms.dev: **Design notes & decision records** holds the plans behind
+shipped features and design notes such as the governance chain's fold order;
+**Architecture decisions** holds the decision records; **Audits & release
+checklists** holds point-in-time material that was true on its date and is
+kept for the record; **Release history** holds the long-form release notes;
+and **Project history** holds the changelog, the original project plans and
+the example, project and client READMEs.
 
 ## 4. Make a change
 

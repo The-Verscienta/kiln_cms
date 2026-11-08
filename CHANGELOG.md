@@ -277,6 +277,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The Essentials sidebar now says where Forms, Webhooks, API keys and Trash went and how to list them.**
   ([#2144](https://github.com/The-Verscienta/kiln_cms/issues/2144) · [long form](docs/changelog/unreleased.md#essentials-hidden-screens-hint))
 
+- **kilncms.dev `/docs` opens with one "Start here": the wedge guide, Editor/Developer/Operator reading paths, then site search;
+  maintainer pages move to a last "Contributing to Kiln" section. chain-fold-order leaves the site; seven guides are retitled.**
+  ([#2157](https://github.com/The-Verscienta/kiln_cms/issues/2157) · [long form](docs/changelog/unreleased.md#docs-index-role-tracks))
+
 ### Fixed
 
 - **Three dead links in the docs now resolve (the `KilnCMS.Keys` link in Memberships and Ghost's schema in both comparison pages), and a docs test refuses relative `.html` links.** ([#2167](https://github.com/The-Verscienta/kiln_cms/issues/2167))

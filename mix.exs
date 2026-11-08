@@ -266,7 +266,9 @@ defmodule KilnCMS.MixProject do
       # The wedge's entry point (#1930): orders the six delivery and
       # governance guides below and the 1.3–1.7 features between them.
       "docs/right-everywhere-provably.md": [],
-      "CONTRIBUTING.md": [],
+      # The role tracks the /docs index inlines (#2157): the one list of which
+      # guides an editor, a developer and an operator read first.
+      "docs/reading-paths.md": [],
       # Compare & migrate — public "Kiln vs X" pages (#1876). Their facts are
       # dated and sourced; see docs/compare/how-kiln-compares.md for the rules.
       "docs/compare/how-kiln-compares.md": [],
@@ -293,8 +295,8 @@ defmodule KilnCMS.MixProject do
       "docs/ai-assist.md": [],
       "docs/geo.md": [],
       "docs/multiplayer-preview.md": [],
-      "docs/editorial-consent.md": [],
-      "docs/governance-dashboard.md": [],
+      "docs/editorial-consent.md": [title: "Editorial consent linking"],
+      "docs/governance-dashboard.md": [title: "Governance dashboard"],
       "docs/localization-workflows.md": [],
       "docs/navigation-menus.md": [],
       "docs/public-theming.md": [],
@@ -303,9 +305,8 @@ defmodule KilnCMS.MixProject do
       "docs/memberships.md": [title: "Paid memberships"],
       "docs/provenance.md": [],
       "docs/federation.md": [],
-      "docs/chain-fold-order.md": [],
       "docs/social-posting.md": [],
-      "docs/point-in-time.md": [],
+      "docs/point-in-time.md": [title: "Point-in-time content API"],
       # Modeling & extending
       "docs/overlay-contract.md": [title: "The overlay contract"],
       "docs/extending-content.md": [],
@@ -313,10 +314,7 @@ defmodule KilnCMS.MixProject do
       "docs/field-sync.md": [title: "Syncing field definitions between environments"],
       "docs/events.md": [title: "Events"],
       "docs/author-profiles.md": [],
-      "docs/design-language.md": [],
-      "docs/design-system.md": [],
       "docs/plugin-extensibility.md": [],
-      "docs/frontend-assets.md": [],
       # APIs & headless
       "docs/api.md": [],
       "docs/headless-consumer-guide.md": [],
@@ -329,8 +327,6 @@ defmodule KilnCMS.MixProject do
       "docs/static-export.md": [],
       "docs/resilient-delivery.md": [],
       "docs/webhooks.md": [],
-      # Search
-      "docs/meilisearch.md": [title: "Meilisearch backend"],
       # Operations & deployment
       "docs/deploy.md": [],
       "docs/deploy-platforms.md": [title: "One-click deploy platforms"],
@@ -340,18 +336,17 @@ defmodule KilnCMS.MixProject do
       "docs/reporting.md": [title: "SQL reporting views"],
       "docs/observability.md": [],
       "docs/performance.md": [],
-      "docs/benchmarks.md": [title: "v1.0 success metrics"],
-      "docs/releasing.md": [],
-      "docs/beta-testing.md": [],
+      "docs/benchmarks.md": [title: "Benchmarks"],
       "docs/staging-environments.md": [],
       "docs/demo-mode.md": [],
       "docs/media-pipeline.md": [],
       "docs/content-portability.md": [],
       "docs/direct-email-delivery.md": [],
       "docs/data-flows.md": [],
+      "docs/meilisearch.md": [title: "Meilisearch backend"],
       # Security & access
       "docs/policy-matrix.md": [],
-      "docs/code-injection.md": [],
+      "docs/code-injection.md": [title: "Code injection"],
       "docs/granular-rbac.md": [],
       "docs/account-administration.md": [],
       "docs/multi-tenancy.md": [],
@@ -362,6 +357,14 @@ defmodule KilnCMS.MixProject do
       "docs/ip-blocking.md": [title: "Blocking addresses"],
       "docs/security-events.md": [title: "The security log"],
       "docs/secrets-rotation.md": [],
+      # Contributing to Kiln — for people working on Kiln itself. Published
+      # under their own heading, last on the /docs index (#2157).
+      "CONTRIBUTING.md": [],
+      "docs/releasing.md": [],
+      "docs/beta-testing.md": [],
+      "docs/design-language.md": [title: "Design language"],
+      "docs/design-system.md": [title: "Design system"],
+      "docs/frontend-assets.md": [],
       # Design notes & decision records
       "docs/advanced-analytics-plan.md": [],
       "docs/collaborative-editing-spike.md": [],
@@ -387,6 +390,7 @@ defmodule KilnCMS.MixProject do
       "docs/p3-plan.md": [],
       "docs/roadmap-1.0.md": [title: "Roadmap to 1.0"],
       "docs/path-forward.md": [title: "Path forward"],
+      "docs/chain-fold-order.md": [],
       # Audits & release checklists
       "docs/audit-2026-07-full-surface.md": [],
       "docs/audit-2026-07-performance-usability.md": [],
@@ -438,7 +442,7 @@ defmodule KilnCMS.MixProject do
         "docs/getting-started.md",
         "README.md",
         "docs/right-everywhere-provably.md",
-        "CONTRIBUTING.md"
+        "docs/reading-paths.md"
       ],
       "Compare & migrate": [
         "docs/compare/how-kiln-compares.md",
@@ -478,8 +482,7 @@ defmodule KilnCMS.MixProject do
         "docs/provenance.md",
         "docs/federation.md",
         "docs/social-posting.md",
-        "docs/point-in-time.md",
-        "docs/chain-fold-order.md"
+        "docs/point-in-time.md"
       ],
       "Modeling & extending": [
         "docs/overlay-contract.md",
@@ -488,10 +491,7 @@ defmodule KilnCMS.MixProject do
         "docs/field-sync.md",
         "docs/events.md",
         "docs/author-profiles.md",
-        "docs/design-language.md",
-        "docs/design-system.md",
-        "docs/plugin-extensibility.md",
-        "docs/frontend-assets.md"
+        "docs/plugin-extensibility.md"
       ],
       "APIs & headless": [
         "docs/api.md",
@@ -506,7 +506,6 @@ defmodule KilnCMS.MixProject do
         "docs/resilient-delivery.md",
         "docs/webhooks.md"
       ],
-      Search: ["docs/meilisearch.md"],
       "Operations & deployment": [
         "docs/deploy.md",
         "docs/deploy-platforms.md",
@@ -517,14 +516,13 @@ defmodule KilnCMS.MixProject do
         "docs/observability.md",
         "docs/performance.md",
         "docs/benchmarks.md",
-        "docs/releasing.md",
-        "docs/beta-testing.md",
         "docs/staging-environments.md",
         "docs/demo-mode.md",
         "docs/media-pipeline.md",
         "docs/content-portability.md",
         "docs/direct-email-delivery.md",
-        "docs/data-flows.md"
+        "docs/data-flows.md",
+        "docs/meilisearch.md"
       ],
       "Security & access": [
         "docs/policy-matrix.md",
@@ -538,6 +536,14 @@ defmodule KilnCMS.MixProject do
         "docs/ip-blocking.md",
         "docs/security-events.md",
         "docs/secrets-rotation.md"
+      ],
+      "Contributing to Kiln": [
+        "CONTRIBUTING.md",
+        "docs/releasing.md",
+        "docs/beta-testing.md",
+        "docs/design-language.md",
+        "docs/design-system.md",
+        "docs/frontend-assets.md"
       ],
       "Design notes & decision records": [
         "docs/advanced-analytics-plan.md",
@@ -563,7 +569,8 @@ defmodule KilnCMS.MixProject do
         "docs/cms-comparison.md",
         "docs/p3-plan.md",
         "docs/roadmap-1.0.md",
-        "docs/path-forward.md"
+        "docs/path-forward.md",
+        "docs/chain-fold-order.md"
       ],
       "Audits & release checklists": [
         "docs/audit-2026-07-full-surface.md",

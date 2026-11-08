@@ -1,0 +1,271 @@
+Code.require_file("../../scripts/publish/docs.exs", __DIR__)
+
+defmodule KilnCMS.Scripts.PublishDocsTest do
+  @moduledoc """
+  `scripts/publish_docs.exs` publishes the guides to kilncms.dev/docs, and
+  builds the /docs index from mix.exs's ExDoc groups (#2157). It runs in CI
+  without the application compiled, so its logic lives in
+  `scripts/publish/docs.exs` and is loaded here directly. These tests read the
+  real mix.exs and docs/, so a curation change that would put a plan, an
+  audit or a maintainer page in the wrong place fails here rather than on the
+  live site after the merge.
+  """
+  use ExUnit.Case, async: true
+
+  alias KilnCMS.HTMLSanitizer
+
+  @public_groups [
+    "Getting started",
+    "Compare & migrate",
+    "Authoring & editorial",
+    "Modeling & extending",
+    "APIs & headless",
+    "Operations & deployment",
+    "Security & access"
+  ]
+  @contributing "Contributing to Kiln"
+  @maintainer_pages [
+    "CONTRIBUTING.md",
+    "docs/releasing.md",
+    "docs/beta-testing.md",
+    "docs/design-language.md",
+    "docs/design-system.md",
+    "docs/frontend-assets.md"
+  ]
+
+  setup_all do
+    catalogue = PublishDocs.catalogue()
+
+    %{
+      catalogue: catalogue,
+      index: catalogue |> PublishDocs.render_all() |> PublishDocs.index_html()
+    }
+  end
+
+  describe "catalogue/1" do
+    test "publishes only the public groups and Contributing to Kiln", %{catalogue: catalogue} do
+      groups = catalogue |> Enum.map(& &1.group) |> Enum.uniq()
+
+      assert groups == @public_groups ++ [@contributing]
+    end
+
+    test "puts the maintainer pages under Contributing to Kiln, and nothing else", %{
+      catalogue: catalogue
+    } do
+      contributing = for doc <- catalogue, doc.group == @contributing, do: doc.path
+
+      assert contributing == @maintainer_pages
+      assert Enum.count(catalogue, &(&1.path in @maintainer_pages)) == length(@maintainer_pages)
+    end
+
+    test "keeps benchmarks public under its own title, and chain-fold-order off the site", %{
+      catalogue: catalogue
+    } do
+      assert %{group: "Operations & deployment", title: "Benchmarks"} =
+               Enum.find(catalogue, &(&1.path == "docs/benchmarks.md"))
+
+      refute Enum.any?(catalogue, &(&1.path == "docs/chain-fold-order.md"))
+    end
+
+    test "publishes no plan, spike, audit, deploy checklist, archive or decision record", %{
+      catalogue: catalogue
+    } do
+      internal =
+        for %{path: path} <- catalogue,
+            Path.basename(path) =~ ~r/(-plan|-spike)\.md$|^audit-|^deploy-p[0-9]/ or
+              String.starts_with?(path, ["docs/changelog/", "docs/decisions/"]),
+            do: path
+
+      assert internal == []
+    end
+
+    test "every mix.exs group is classified, and every extra is in a group" do
+      grouped = Enum.flat_map(PublishDocs.groups(), &elem(&1, 1))
+
+      assert PublishDocs.extras() -- grouped == []
+    end
+
+    @tag :tmp_dir
+    test "raises on a group it has not been told about", %{tmp_dir: dir} do
+      mix_exs = Path.join(dir, "mix.exs")
+
+      File.write!(mix_exs, """
+      defmodule Fixture.MixProject do
+        defp extras, do: ["docs/deploy.md": [], "docs/new.md": []]
+
+        defp groups_for_extras do
+          ["Operations & deployment": ["docs/deploy.md"], "Brand new": ["docs/new.md"]]
+        end
+      end
+      """)
+
+      assert_raise RuntimeError, ~r/"Brand new"/, fn -> PublishDocs.catalogue(mix_exs) end
+    end
+  end
+
+  describe "docs/reading-paths.md" do
+    setup %{catalogue: catalogue} do
+      ast =
+        "docs/reading-paths.md"
+        |> File.read!()
+        |> KilnPublish.Markdown.parse("docs/reading-paths.md")
+
+      %{tracks: tracks(ast), slugs: Map.new(catalogue, &{&1.path, &1.slug})}
+    end
+
+    test "has exactly the Editor, Developer and Operator tracks", %{tracks: tracks} do
+      assert Enum.map(tracks, &elem(&1, 0)) == ["Editor", "Developer", "Operator"]
+    end
+
+    test "lists four to eight guides per track", %{tracks: tracks} do
+      for {role, nodes} <- tracks do
+        items = for {list, _, items, _} <- nodes, list in ["ol", "ul"], item <- items, do: item
+
+        assert length(items) in 4..8, "#{role} lists #{length(items)} guides"
+      end
+    end
+
+    test "links only to published guides, each once", %{tracks: tracks, slugs: slugs} do
+      paths =
+        for {_role, nodes} <- tracks,
+            href <- hrefs(nodes),
+            do: repo_path(href)
+
+      assert paths -- Map.keys(slugs) == []
+      assert paths -- Enum.uniq(paths) == []
+    end
+  end
+
+  # Resolved the way `PublishDocs.link/3` resolves it. An absolute or external
+  # href stays as it is, so it fails the "published guides only" assertion.
+  defp repo_path(href) do
+    case KilnPublish.Markdown.repo_path(href, "docs/reading-paths.md") do
+      {path, _fragment} -> path
+      nil -> href
+    end
+  end
+
+  describe "index_html/1" do
+    test "leads with one Start here: the wedge, then the role tracks, then search", %{
+      index: index
+    } do
+      assert length(String.split(index, "<h2>Start here</h2>")) == 2
+
+      order =
+        Enum.map(
+          [
+            "<h2>Start here</h2>",
+            ~s(<a href="/docs/right-everywhere-provably">),
+            "<h3>Editor</h3>",
+            "<h3>Developer</h3>",
+            "<h3>Operator</h3>",
+            ~s(<a href="/search">Search kilncms.dev</a>),
+            "<h2>Getting started</h2>"
+          ],
+          &position(index, &1)
+        )
+
+      assert order == Enum.sort(order)
+      refute index =~ "/search?"
+    end
+
+    test "lists the reading paths only once, inlined, not as a Getting started link", %{
+      index: index
+    } do
+      refute index =~ ~s(href="/docs/reading-paths")
+      refute index =~ "<h2>Editor</h2>"
+    end
+
+    test "ends with Contributing to Kiln, after a rule", %{index: index} do
+      [public, contributing] = String.split(index, "<hr>")
+
+      assert contributing =~
+               ~r{^<h2>Contributing to Kiln</h2><p>For people working on Kiln itself}
+
+      assert contributing =~ ~s(href="/docs/releasing")
+      refute public =~ ~s(href="/docs/releasing")
+      refute public =~ ~s(href="/docs/contributing")
+      assert public =~ ~s(href="/docs/releasing#updating-a-project-to-a-release")
+      refute contributing =~ "<h2>Security"
+    end
+
+    test "drops Start here when neither guide is in the catalogue", %{catalogue: catalogue} do
+      index =
+        catalogue
+        |> Enum.reject(
+          &(&1.path in ["docs/right-everywhere-provably.md", "docs/reading-paths.md"])
+        )
+        |> PublishDocs.render_all()
+        |> PublishDocs.index_html()
+
+      refute index =~ "Start here"
+      refute index =~ "<h3>"
+      assert index =~ "<h2>Getting started</h2>"
+    end
+
+    test "keeps the role tracks when the wedge guide is gone", %{catalogue: catalogue} do
+      index =
+        catalogue
+        |> Enum.reject(&(&1.path == "docs/right-everywhere-provably.md"))
+        |> PublishDocs.render_all()
+        |> PublishDocs.index_html()
+
+      assert index =~ "<h2>Start here</h2><h3>Editor</h3>"
+    end
+
+    # The site stores the body through the rich-text cast, which sanitizes it
+    # (K6): what the index relies on has to survive that, as it does live.
+    test "survives the rich-text sanitizer the site applies", %{index: index} do
+      clean = HTMLSanitizer.sanitize_rich_text(index)
+
+      for tag <- ["<h2>Start here</h2>", "<h3>Editor</h3>", "<h3>Operator</h3>", "<hr", "<ol>"] do
+        assert clean =~ tag, "sanitizer dropped #{tag}"
+      end
+
+      for href <- [
+            "/search",
+            "/docs/editor-shortcuts",
+            "/docs/releasing#updating-a-project-to-a-release",
+            "/docs/contributing"
+          ] do
+        assert clean =~ ~s(href="#{href}"), "sanitizer dropped the link to #{href}"
+      end
+    end
+  end
+
+  # `[{role, nodes}]`: each `##` heading and the nodes under it.
+  defp tracks(ast) do
+    ast
+    |> Enum.drop_while(&(not match?({"h2", _, _, _}, &1)))
+    |> Enum.chunk_while(
+      nil,
+      fn
+        {"h2", _, title, _}, nil ->
+          {:cont, {KilnPublish.Markdown.plain_text(title), []}}
+
+        {"h2", _, title, _}, {role, nodes} ->
+          {:cont, {role, Enum.reverse(nodes)}, {KilnPublish.Markdown.plain_text(title), []}}
+
+        node, {role, nodes} ->
+          {:cont, {role, [node | nodes]}}
+      end,
+      fn {role, nodes} -> {:cont, {role, Enum.reverse(nodes)}, nil} end
+    )
+  end
+
+  defp hrefs(nodes) when is_list(nodes), do: Enum.flat_map(nodes, &hrefs/1)
+
+  defp hrefs({"a", attrs, children, _}) do
+    for({"href", href} <- attrs, do: href) ++ hrefs(children)
+  end
+
+  defp hrefs({_tag, _attrs, children, _}), do: hrefs(children)
+  defp hrefs(_text), do: []
+
+  defp position(haystack, needle) do
+    case :binary.match(haystack, needle) do
+      {at, _} -> at
+      :nomatch -> flunk("index has no #{needle}")
+    end
+  end
+end

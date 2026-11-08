@@ -1589,6 +1589,67 @@ carries the reasoning.
   migration or setting; the hint is hidden when the sidebar rail is collapsed.
   Nothing to do on upgrade.
 
+<a id="docs-index-role-tracks"></a>
+
+- **The kilncms.dev `/docs` index starts with one "Start here" that sends an
+  editor, a developer and an operator to their own first guides, and moves
+  the pages for people working on Kiln itself to a last section (#2157).**
+  The index was one long column of about 75 guides with no place to begin,
+  and it mixed editor guides with maintainer pages such as "Releasing Kiln".
+  It changes no code path in the app; what changed is `mix.exs`'s guide
+  lists and the publisher, `scripts/publish_docs.exs`.
+
+  - **Start here.** One section at the top of `/docs`: the
+    [Right, everywhere, provably](../right-everywhere-provably.md) pointer
+    from #1930 first, then three tracks, Editor, Developer and Operator, then
+    a "Search kilncms.dev" link to the site's ordinary `/search`. It searches
+    every page on the site, not only the guides: a docs-only search would
+    need a new public search argument, and kilncms.dev is frozen until 2.0
+    (`docs/path-forward.md`).
+  - **Reading paths.** The tracks come from a new guide,
+    [Reading paths by role](../reading-paths.md), which also publishes as
+    `/docs/reading-paths` and sits in the docs sidebar under Getting started.
+    It is the one list of which guides each role reads first: the index
+    inlines its `##` sections, and the "Find the right guide" table in
+    [Getting started](../getting-started.md) now points to it instead of
+    keeping a second list.
+  - **Contributing to Kiln.** A new docs group, last on the index after a
+    rule and the line "For people working on Kiln itself, not using it.":
+    `CONTRIBUTING.md` (moved out of Getting started), Releasing, Beta
+    testing, Design language, Design system and Frontend assets (moved out of
+    Operations & deployment and Modeling & extending). They stay published,
+    so links into them keep working, for example
+    `/docs/releasing#updating-a-project-to-a-release`.
+  - **Off the site.** `docs/chain-fold-order.md` moves to Design notes &
+    decision records, so the publisher stops sending it. The publisher never
+    unpublishes, so `/docs/chain-fold-order` stays live until an admin on
+    kilncms.dev moves it to the trash.
+  - **Titles.** Five guides drop internal labels from their titles: "Code
+    injection" (was "Code injection (#490)"), "Editorial consent linking",
+    "Governance dashboard" and "Point-in-time content API" (each was suffixed
+    "(compliance cluster)"), and "Design language" (was "KilnCMS — Design
+    Language"). "KilnCMS design system" is now "Design system", and "v1.0
+    success metrics" is now "Benchmarks"; Benchmarks stays public, under
+    Operations & deployment. The titles are `title:` overrides in `mix.exs`,
+    so the slugs, and every `/docs/<slug>` URL, are unchanged.
+  - **Sidebar.** The single-guide Search group is gone: "Meilisearch backend"
+    is now under Operations & deployment, in the ExDoc sidebar and on the
+    index.
+  - **For contributors.** Every group in `groups_for_extras/0` must be listed
+    in `scripts/publish/docs.exs` as public (`@public_groups`), contributing
+    (`@contributing_group`) or internal (`@internal_groups`), or the publish
+    run raises and names the group. A new group therefore never reaches
+    `/docs` by accident. `test/scripts/publish_docs_test.exs` and CI's
+    publisher dry run both fail on an unclassified group, so it shows up on
+    the pull request rather than after the merge. The publisher's logic now
+    lives in `scripts/publish/docs.exs`, so the tests can load it;
+    `scripts/publish_docs.exs` keeps the `Mix.install` and the `main/1`
+    call, and a change to either file republishes every guide.
+  - **Upgrade.** Nothing to do on a Kiln install. On kilncms.dev, the first
+    publish after the merge resends every guide (because `mix.exs` changed),
+    which picks up the new titles and the new index; the one manual step is
+    trashing `/docs/chain-fold-order`.
+
 ## Fixed
 
 <a id="custom-sort-json-null-last"></a>
