@@ -618,6 +618,10 @@ defmodule KilnCMS.Accounts.User do
       # Hashes the provided password
       change AshAuthentication.Strategy.Password.HashPasswordChange
 
+      # No row for an address that already has an account, and its owner is
+      # mailed (#2255). AFTER the hash, so a known address pays for bcrypt too.
+      change KilnCMS.Accounts.Changes.RefuseExistingAddress
+
       # Generates an authentication token for the user
       change AshAuthentication.GenerateTokenChange
 

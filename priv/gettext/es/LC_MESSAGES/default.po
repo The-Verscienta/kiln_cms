@@ -4014,6 +4014,12 @@ msgstr "Revisa esa dirección"
 msgid "Check the contacts are still read, then move the date forward and save."
 msgstr "Compruebe que los contactos se siguen leyendo, luego adelante la fecha y guarde."
 
+#: lib/kiln_cms_web/controllers/auth_controller.ex
+#: lib/kiln_cms_web/live/auth_register_form.ex
+#, elixir-autogen, elixir-format
+msgid "Check your email - we have sent instructions for what to do next."
+msgstr "Revisa tu correo: te hemos enviado las instrucciones para continuar."
+
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Check your inbox for a confirmation link. You won't receive anything until you click it."
