@@ -43,8 +43,19 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   equality filter; unscoped queries fall back to *all* dynamic-type fields and
   reject names whose type differs across owners rather than guess.
 
+  `custom_filter` also takes boolean groups (#2355): `_or` / `_and` (a list of
+  conditions, or a position-keyed map) and `_not` (one condition), nesting up to
+  four deep. A condition's keys are custom field names, nested groups, and
+  `_native` — a map of built-in `filter[...]` conditions handed to
+  `Ash.Filter.parse_input/2`, so only public fields. Every name resolves through
+  the same privacy-filtered definitions as a top-level one. A `custom_sort` token
+  `_native:<name>` sorts by a built-in column (#2356) so it can follow a custom
+  key.
+
   `media`/`reference` fields filter by their snapshot's stable `id`
-  (equality-shaped operators only) and are not sortable. On a `multiple` one
+  (equality-shaped operators only) and are not sortable (#2354): the stored
+  label can lag the target's title, and an order over unreadable targets would
+  leak where they sit. On a `multiple` one
   (a gallery, a list of references) `eq` means "contains this id", `not_eq`
   "does not", and `in` "contains any of them" — and a multiple `select` or
   `string` reads the same way for its items
@@ -79,6 +90,13 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Relations
 
   @operators ~w(eq not_eq gt gte lt lte in ilike contains starts_with null is_nil)
+
+  # `custom_filter` groups (#2355).
+  @max_group_depth 4
+  @max_group_members 50
+
+  # A built-in column in a `custom_sort` (#2356): `_native:title`, `-_native:title`.
+  @native_sort_prefix "_native:"
 
   # `custom_where`: the condition's kind keys, and the operators of each.
   @kind_keys [:string, :int, :float, :boolean, :date, :date_time]
@@ -250,21 +268,151 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # --- filtering ---------------------------------------------------------------
 
   defp apply_filter(query, filter, defs, ctx) when is_map(filter) do
-    Enum.reduce(filter, query, fn {name, condition}, query ->
-      name = to_string(name)
-
-      with {:ok, target} <- resolve_target(defs, name, ctx),
-           {:ok, exprs} <- conditions(target, condition, ctx) do
-        Enum.reduce(exprs, query, &Ash.Query.do_filter(&2, &1))
-      else
-        {:error, message} -> invalid(query, :custom_filter, message)
-      end
-    end)
+    with :ok <- check_groups(filter),
+         {:ok, exprs} <- filter_exprs(filter, defs, ctx) do
+      Enum.reduce(exprs, query, &Ash.Query.do_filter(&2, &1))
+    else
+      {:error, message} -> invalid(query, :custom_filter, message)
+    end
   end
 
   defp apply_filter(query, _filter, _defs, _ctx) do
     invalid(query, :custom_filter, "must be a map of custom field names to conditions")
   end
+
+  # The expressions (to be ANDed) one condition map stands for: each key is a
+  # custom field name, or one of the reserved group keys (#2355) — no field can
+  # be named like them, since a name starts with a letter.
+  defp filter_exprs(map, defs, ctx) do
+    Enum.reduce_while(map, {:ok, []}, fn {name, condition}, {:ok, acc} ->
+      case entry_exprs(to_string(name), condition, defs, ctx) do
+        {:ok, exprs} -> {:cont, {:ok, exprs ++ acc}}
+        {:error, _message} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp entry_exprs(group, condition, defs, ctx) when group in ~w(_or _and) do
+    with {:ok, members} <- group_members(group, condition),
+         {:ok, exprs} <- member_exprs(members, defs, ctx) do
+      join = if group == "_or", do: &expr(^&2 or ^&1), else: &expr(^&2 and ^&1)
+      {:ok, [Enum.reduce(exprs, join)]}
+    end
+  end
+
+  defp entry_exprs("_not", condition, defs, ctx) when is_map(condition) do
+    with {:ok, exprs} <- filter_exprs(condition, defs, ctx) do
+      {:ok, [expr(not (^and_all(exprs)))]}
+    end
+  end
+
+  defp entry_exprs("_not", _condition, _defs, _ctx),
+    do: {:error, "_not must hold a condition (a map of custom field names to conditions)"}
+
+  defp entry_exprs("_native", condition, _defs, ctx), do: native_exprs(condition, ctx)
+
+  defp entry_exprs(name, condition, defs, ctx) do
+    with {:ok, target} <- resolve_target(defs, name, ctx) do
+      conditions(target, condition, ctx)
+    end
+  end
+
+  defp and_all([]), do: expr(true)
+  defp and_all(exprs), do: Enum.reduce(exprs, &expr(^&2 and ^&1))
+
+  defp member_exprs(members, defs, ctx) do
+    members
+    |> Enum.reduce_while({:ok, []}, fn member, {:ok, acc} ->
+      case filter_exprs(member, defs, ctx) do
+        {:ok, exprs} -> {:cont, {:ok, [and_all(exprs) | acc]}}
+        {:error, _message} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, exprs} -> {:ok, Enum.reverse(exprs)}
+      error -> error
+    end
+  end
+
+  # A list of condition maps, or — as a query string spells a list — a map keyed
+  # by position (`custom_filter[_or][0][price]=1`), as `Ash.Filter` reads it.
+  defp group_members(group, members) when is_list(members) do
+    if members != [] and Enum.all?(members, &is_map/1),
+      do: {:ok, members},
+      else: {:error, "#{group} must be a non-empty list of conditions"}
+  end
+
+  defp group_members(group, members) when is_map(members) and map_size(members) > 0 do
+    ordered =
+      Enum.map(members, fn {key, value} ->
+        case Integer.parse(to_string(key)) do
+          {position, ""} -> {position, value}
+          _ -> :error
+        end
+      end)
+
+    if :error in ordered do
+      {:error, "#{group} must be a non-empty list of conditions"}
+    else
+      ordered
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.map(&elem(&1, 1))
+      |> then(&group_members(group, &1))
+    end
+  end
+
+  defp group_members(group, _members),
+    do: {:error, "#{group} must be a non-empty list of conditions"}
+
+  # Built-in columns inside a group, parsed by Ash exactly as `filter[...]` is:
+  # public fields only, the same operators. A custom field is never named here.
+  defp native_exprs(condition, ctx) when is_map(condition) do
+    case Ash.Filter.parse_input(ctx.resource, condition) do
+      {:ok, %Ash.Filter{expression: nil}} -> {:ok, []}
+      {:ok, %Ash.Filter{expression: expression}} -> {:ok, [expression]}
+      {:error, error} -> {:error, "invalid _native filter: " <> Exception.message(error)}
+    end
+  end
+
+  defp native_exprs(_condition, _ctx),
+    do: {:error, "_native must be a map of built-in field filters"}
+
+  # Groups are bounded: they nest at most `@max_group_depth` deep and hold at
+  # most `@max_group_members` members in all (a field list has no such cap).
+  defp check_groups(filter) do
+    {depth, members} = group_stats(filter)
+
+    cond do
+      depth > @max_group_depth ->
+        {:error, "_or / _and / _not nest at most #{@max_group_depth} deep"}
+
+      members > @max_group_members ->
+        {:error, "_or / _and hold at most #{@max_group_members} conditions in all"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp group_stats(map) when is_map(map) do
+    Enum.reduce(map, {0, 0}, fn
+      {key, value}, {depth, members} when key in ~w(_or _and _not) ->
+        children = if is_map(value) and key == "_not", do: [value], else: member_list(value)
+        {d, m} = children |> Enum.map(&group_stats/1) |> Enum.reduce({0, 0}, &merge_stats/2)
+        {max(depth, d + 1), members + length(children) + m}
+
+      _other, acc ->
+        acc
+    end)
+  end
+
+  defp group_stats(_other), do: {0, 0}
+
+  defp merge_stats({d1, m1}, {d2, m2}), do: {max(d1, d2), m1 + m2}
+
+  defp member_list(list) when is_list(list), do: list
+  defp member_list(map) when is_map(map), do: Map.values(map)
+  defp member_list(_other), do: []
 
   # A custom field wins a name it shares with a built-in relationship, so a
   # site's existing `custom_filter[tags]` keeps its meaning; otherwise
@@ -890,28 +1038,76 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
           name -> {:asc_nils_last, name}
         end
 
-      case resolve(defs, name) do
-        # Composite values are jsonb objects. Sorting them orders by key count
-        # then key/value text, which is meaningless for a coordinate or a
-        # snapshot — refuse rather than return a 200 in nonsense order.
-        {:ok, %{field_type: type}}
-        when type in [:media, :reference, :geolocation, :group, :json, :range, :key_value, :link] ->
-          invalid(query, :custom_sort, "custom field #{inspect(name)} (#{type}) is not sortable")
-
-        {:ok, %{field_type: type, multiple: true}} when type in [:select, :string] ->
-          invalid(query, :custom_sort, "custom field #{inspect(name)} (a list) is not sortable")
-
-        {:ok, definition} ->
-          Ash.Query.sort(query, [{sort_expr(definition), direction}])
-
-        {:error, message} ->
-          invalid(query, :custom_sort, message)
+      case name do
+        @native_sort_prefix <> builtin -> native_sort(query, builtin, direction)
+        _ -> custom_sort(query, name, direction, defs)
       end
     end)
   end
 
   defp apply_sort(query, _sort, _defs) do
     invalid(query, :custom_sort, "must be a comma-separated string of custom field names")
+  end
+
+  defp custom_sort(query, name, direction, defs) do
+    case resolve(defs, name) do
+      # A reference or media snapshot is a stored copy of the target's label:
+      # sorting by it would disagree with what a read shows (reads relabel it
+      # from the target as it is now) and, where the target is unreadable to the
+      # caller, would reveal the relative order of records they cannot see (#2354).
+      {:ok, %{field_type: :reference}} ->
+        invalid(
+          query,
+          :custom_sort,
+          "custom field #{inspect(name)} (reference) is not sortable: its stored label " <>
+            "can differ from the target's current title, and an order over targets the caller " <>
+            "cannot read would reveal where they sit; sort by a built-in or custom text field"
+        )
+
+      {:ok, %{field_type: :media}} ->
+        invalid(
+          query,
+          :custom_sort,
+          "custom field #{inspect(name)} (media) is not sortable: its stored label can " <>
+            "differ from the file's current name and an order over files the caller cannot " <>
+            "read would reveal where they sit; sort by a built-in or custom text field"
+        )
+
+      # Composite values are jsonb objects. Sorting them orders by key count
+      # then key/value text, which is meaningless for a coordinate or a
+      # snapshot — refuse rather than return a 200 in nonsense order.
+      {:ok, %{field_type: type}}
+      when type in [:geolocation, :group, :json, :range, :key_value, :link] ->
+        invalid(query, :custom_sort, "custom field #{inspect(name)} (#{type}) is not sortable")
+
+      {:ok, %{field_type: type, multiple: true}} when type in [:select, :string] ->
+        invalid(query, :custom_sort, "custom field #{inspect(name)} (a list) is not sortable")
+
+      {:ok, definition} ->
+        Ash.Query.sort(query, [{sort_expr(definition), direction}])
+
+      {:error, message} ->
+        invalid(query, :custom_sort, message)
+    end
+  end
+
+  # A built-in column inside a mixed order (#2356): `_native:title` sorts by the
+  # public attribute, calculation or aggregate, parsed by Ash as `sort=` is, so
+  # it keeps its place among the custom tokens.
+  defp native_sort(query, name, direction) do
+    statement = if direction == :desc_nils_last, do: "-" <> name, else: name
+
+    case Ash.Sort.parse_input(query.resource, statement) do
+      {:ok, sort} ->
+        Ash.Query.sort(query, sort)
+
+      {:error, error} ->
+        invalid(
+          query,
+          :custom_sort,
+          "cannot sort by #{inspect(name)}: " <> Exception.message(error)
+        )
+    end
   end
 
   # --- typed expressions --------------------------------------------------------
