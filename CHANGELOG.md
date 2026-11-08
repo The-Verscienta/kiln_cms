@@ -103,6 +103,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The single-revision API read carries `changed_custom_fields`, the sorted keys of the custom fields that write changed.**
+  Additive: `changed_fields` still says `custom_fields`; no migration.
+  ([#2353](https://github.com/The-Verscienta/kiln_cms/issues/2353) · [long form](docs/changelog/unreleased.md#revisions-changed-custom-fields))
+
 - **Export and import custom-field definitions between environments: `mix kiln.fields.export` / `mix kiln.fields.import`, release `rpc` functions and an admin download at `/editor/fields/export.json`.**
   One versioned JSON file carries every field attribute, link fields, group sub-fields and dynamic types; the import prints a diff, dry-runs in a rolled-back transaction, applies all-or-nothing, is idempotent, and blocks changes that drop stored values unless `--allow-data-loss`. Admin only; no migration, no DDL.
   ([#2288](https://github.com/The-Verscienta/kiln_cms/issues/2288) · [long form](docs/changelog/unreleased.md#field-definition-sync))

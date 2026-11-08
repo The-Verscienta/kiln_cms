@@ -704,6 +704,17 @@ curl -s "http://localhost:4000/api/content/post/$POST_ID/revisions?limit=10" \
   is stored as *changes only*, so the snapshot is folded from every version up
   to that one: the same fold a restore writes back and the editor's compare view
   diffs. Values are in their stored JSON shape (the block tree as typed blocks).
+- **Which custom fields changed.** Custom fields share one `custom_fields`
+  map, so `changed_fields` reports an edit to any of them as the single name
+  `custom_fields` (unchanged), and `changes["custom_fields"]` is the whole new
+  map. The single-revision read adds `changed_custom_fields`: the sorted *keys*
+  whose value was added, removed or edited, found by diffing against the
+  previous revision that carried `custom_fields` (not simply the adjacent row,
+  and an empty map for the first). A revision that did not touch them has `[]`.
+  Revisions written in one transaction share an instant and have random ids, so
+  which counts as the earlier of two is arbitrary. The list does not carry it.
+  Only editors and admins can read history, and they see private fields, so
+  nothing is filtered by caller.
 - **The acting user is an id.** User records are not exposed over the API (PII,
   #183); `user_id` is `null` when the write had no actor.
 - **Pagination** is newest first: `?limit=` (1–100, default 20) and an opaque

@@ -214,6 +214,16 @@ carries the reasoning.
 
 ## Added
 
+<a id="revisions-changed-custom-fields"></a>
+
+- **`GET /api/content/:type/:id/revisions/:version_id` adds `changed_custom_fields` (#2353).**
+  A custom-field edit is one `custom_fields` map, so `changed_fields` could only
+  say `custom_fields`. The new sibling lists the keys added, removed or edited,
+  diffed against the previous revision that carried `custom_fields` (history is
+  changes-only, so not the adjacent row; an empty map before the first).
+  Same-transaction revisions have an arbitrary order. The list endpoint is
+  unchanged. No migration; existing clients are unaffected.
+
 <a id="field-definition-sync"></a>
 
 - **Custom-field definitions can be exported from one environment and imported
