@@ -103,6 +103,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Export and import custom-field definitions between environments: `mix kiln.fields.export` / `mix kiln.fields.import`, release `rpc` functions and an admin download at `/editor/fields/export.json`.**
+  One versioned JSON file carries every field attribute, link fields, group sub-fields and dynamic types; the import prints a diff, dry-runs in a rolled-back transaction, applies all-or-nothing, is idempotent, and blocks changes that drop stored values unless `--allow-data-loss`. Admin only; no migration, no DDL.
+  ([#2288](https://github.com/The-Verscienta/kiln_cms/issues/2288) · [long form](docs/changelog/unreleased.md#field-definition-sync))
+
 - **In-app media backups are split into independent `tar.gz` parts with SHA-256 sidecars, a Resume button for failed runs, and a multi-part `restore.sh media`.**
   Settings `BACKUP_MEDIA_PART_MB` and `BACKUP_MEDIA_EXCLUDE`; no migration.
   ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218) · [long form](docs/changelog/unreleased.md#backup-media-parts))
