@@ -38,6 +38,7 @@ your deployment.
 | Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry; for a session, browser and OS family and last use. See [Auth tokens](#auth-token-retention-218). |
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
 | Security log | `security_events` | Yes | Admin-only audit log (#2241): the acting user's id and an **email snapshot** (known accounts only), the target, the **raw IP address** and **user agent** of the request, and a short allowlisted metadata map with no secrets. Kept 365 days by default (per-site setting, `0` keeps forever; then raw IPs are kept indefinitely). Scrubbed on erasure, purged on retention and by the staging scrub. See [Security log](security-events.md). |
+| Site invitations | `invitations` | Yes | One row per address a platform admin invited to a site (#2135): the **email address**, the site, the tier and custom role, who sent it, when it expires and how often it was sent, and the SHA-256 of the link's token (never the token). The person may have no account. Removed when the invitation is accepted or revoked; otherwise usable for 7 days and deleted by the daily prune 30 days after that, so an address is kept at most about 37 days. Not touched by erasure (see below); deleted by the staging scrub. |
 | Recorded search queries | `search_queries` | Possibly | Query text only — **no** actor/IP. See *Search query retention (#213) + disclosure (#220)* below. |
 | Consumer audiences | `users.audiences`, `org_memberships.audiences` | No | Which gated content a reader may see. Granted by an admin or by an active paid membership. Cleared on erasure. |
 | Paid memberships | `billing_memberships` | Pseudonymous | Status, period end, and the payment provider's customer/subscription ids. See [Paid memberships](memberships.md). |
@@ -98,7 +99,12 @@ authorization — anyone with the link can view that draft until it expires. The
 
 Two kinds of email leave the system via the configured Swoosh adapter:
 
-- **Auth email** — confirmation, password reset, magic-link sign-in.
+- **Auth email** — confirmation, password reset, magic-link sign-in, and a
+  site invitation or "you were added to a site" notice (#2135). An invitation
+  goes to an address an admin typed, which may belong to someone with no
+  account. The invitation mail names the site, the tier and the inviting
+  admin's display name ("An administrator" if they have none, never their
+  email).
 - **Workflow email** — review-requested / published / changes-requested
   notifications to the relevant admins or author.
 
@@ -128,7 +134,7 @@ rather than relying on leaving something unset.
 
 ## Retention & automated purge
 
-All five retention jobs are AshOban triggers wired through the Oban `Cron`
+The retention jobs in this table are AshOban triggers wired through the Oban `Cron`
 plugin; they run as trusted system jobs (no actor).
 
 | Data | Default retention | Trigger (cron) | Config key |
@@ -139,6 +145,7 @@ plugin; they run as trusted system jobs (no actor).
 | Daily referrer buckets | 400 days since first recorded | `ReferrerDay` `:purge_expired` (`30 3 * * *`) | `config :kiln_cms, :view_analytics, retention_days: 400` (shared with view buckets) |
 | Recorded 404 paths | 30 days since last hit | `MissedPath` `:purge_expired` (`40 3 * * *`) | `config :kiln_cms, :missed_paths, retention_days: 30` |
 | Trashed (soft-deleted) content | 30 days | `Page`/`Post` `:purge_trashed` (`0 3 * * *`) | `config :kiln_cms, :trash, retention_days: 30` |
+| Site invitations | 30 days past expiry (expiry is 7 days after the last send) | `Invitation` `:prune_expired` (`35 4 * * *`) | — (fixed, `KilnCMS.Accounts.Invitations.prune_after_days/0`) |
 
 View buckets keep a longer window than search queries on purpose: a bucket is
 `(content type, id, UTC day, count)` with no query text and no visitor data, so
@@ -146,6 +153,14 @@ the limit is a capacity choice rather than a privacy one, and 400 days is the
 smallest window in which year-over-year comparisons always resolve. The all-time
 `content_views` counter is never purged, so totals stay correct as buckets age
 out — which is also why the two will not sum to the same number.
+
+### Mail job retention
+
+Every mail is queued as an Oban job whose args hold the rendered message,
+recipient included. Oban's Pruner deletes finished jobs after 7 days
+(`config/config.exs`). Until then the job holds any link the mail carried: a
+magic link, a password reset, or a site invitation (#2135), whose token is
+otherwise stored only as a hash. Backups taken in that window hold them too.
 
 ### Security log retention (#2241)
 
@@ -287,6 +302,12 @@ It:
     it nulls `target_id`; and it empties `metadata` on every event it touches. The
     event itself (type and time) stays. If any site's sweep fails, the erasure
     raises so it can be retried. See [Security log](security-events.md#privacy-ip-addresses-erasure-and-staging).
+
+Erasure works on an account, and an invitation is not one: an invitation to
+the person's address is left as it is. To remove one, revoke it on **Team**
+(`/editor/team`) on the invited site, or let it expire and be pruned. An
+invitation the erased user *sent* keeps pointing at their (now anonymous)
+account, and an admin-tier one can no longer be accepted.
 
 The account **row is retained** (with no personal data) so authorship links and
 referential integrity in content/version history are preserved. Membership rows

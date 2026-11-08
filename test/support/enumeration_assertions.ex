@@ -20,8 +20,8 @@ defmodule KilnCMS.EnumerationAssertions do
   The addresses themselves (`:emails`, plain and HTML-escaped), because a form
   that echoes what was typed is not a disclosure — the caller typed it — and
   the per-render noise that differs between *any* two renders of the same page:
-  CSRF tokens and LiveView's session/static/id attributes. Everything else is
-  compared byte for byte.
+  CSRF tokens, the per-response CSP script nonce, and LiveView's
+  session/static/id attributes. Everything else is compared byte for byte.
 
   ## What this cannot see
 
@@ -169,6 +169,7 @@ defmodule KilnCMS.EnumerationAssertions do
     |> String.replace(~r/data-phx-(session|static|main|root-id|parent-id)="[^"]*"/, "")
     |> String.replace(~r/ id="phx-[\w\-]+"/, "")
     |> String.replace(~r/ data-phx-[a-z\-]+="[^"]*"/, "")
+    |> String.replace(~r/ nonce="[^"]*"/, ~s( nonce="<NONCE>"))
   end
 
   defp scrub(map, emails) when is_map(map) and not is_struct(map),

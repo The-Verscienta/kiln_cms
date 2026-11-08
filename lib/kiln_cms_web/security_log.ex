@@ -146,6 +146,8 @@ defmodule KilnCMSWeb.SecurityLog do
   def type_label(:passkey_removed), do: gettext("Passkey removed")
   def type_label(:role_granted), do: gettext("Role granted")
   def type_label(:role_revoked), do: gettext("Role revoked")
+  def type_label(:member_invited), do: gettext("Member invited")
+  def type_label(:invitation_revoked), do: gettext("Invitation revoked")
   def type_label(:elevation_granted), do: gettext("Temporary elevation granted")
   def type_label(:api_key_created), do: gettext("API key created")
   def type_label(:api_key_revoked), do: gettext("API key revoked")

@@ -7,7 +7,10 @@ defmodule KilnCMSWeb.TeamLive do
   every other console page):
 
     * **Members** — the org's memberships: capability tier, assigned custom
-      role, and per-member overrides of the scope axes.
+      role, and per-member overrides of the scope axes. "Add or invite" adds
+      an address with a confirmed account and emails an invitation to any
+      other (#2135, `KilnCMS.Accounts.Invitations.AddOrInvite`); **Pending
+      invitations** lists this org's invitations to resend or revoke.
     * **Roles** — the org's custom roles: named bundles of `editable_types` /
       `readable_types` / `field_grants` / `field_read_grants` (see docs/granular-rbac.md).
 
@@ -35,6 +38,8 @@ defmodule KilnCMSWeb.TeamLive do
   require Ash.Expr
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Errors.InvitationRefused
+  alias KilnCMS.Accounts.Invitations
   alias KilnCMS.Accounts.Role
   alias KilnCMS.Accounts.RoleGrant
   alias KilnCMSWeb.RoleDisplay
@@ -74,38 +79,94 @@ defmodule KilnCMSWeb.TeamLive do
 
   # --- members ---------------------------------------------------------------
 
+  # "Add or invite" (#2135): an address with a confirmed account is added now;
+  # any other is emailed an invitation. `Invitation.:add_or_invite` runs every
+  # read and write as the actor, so the policies decide.
   @impl true
   def handle_event("add_member", %{"member" => %{"email" => email} = params}, socket)
       when is_binary(email) do
     %{actor: actor, current_org: org} = socket.assigns
 
-    with {:ok, user} <- find_user(email, actor),
-         {:ok, _} <-
-           Accounts.create_org_membership(
-             %{
-               user_id: user.id,
-               organization_id: org.id,
-               role: params["role"] || "viewer",
-               role_id: presence(params["role_id"])
-             },
-             actor: actor,
-             context: socket.assigns.security_context
-           ) do
-      {:noreply, socket |> load_data() |> put_flash(:info, gettext("Member added to this site."))}
-    else
-      {:error, :not_found} ->
-        {:noreply,
-         put_flash(socket, :error, gettext("No account with that email address exists."))}
+    result =
+      Accounts.add_or_invite_member(
+        %{
+          organization_id: org.id,
+          email: String.trim(email),
+          role: text(params["role"]) || "viewer",
+          role_id: presence(text(params["role_id"]))
+        },
+        actor: actor,
+        context: socket.assigns.security_context
+      )
 
-      {:error, _error} ->
+    case result do
+      {:ok, %{outcome: :added}} ->
         {:noreply,
-         put_flash(
-           socket,
-           :error,
-           gettext("Couldn't add that member — are they already on this site?")
-         )}
+         socket |> load_data() |> put_flash(:info, gettext("Member added to this site."))}
+
+      {:ok, %{outcome: outcome}} when outcome in [:invited, :reinvited] ->
+        {:noreply,
+         socket
+         |> load_data()
+         |> put_flash(:info, gettext("Invitation sent to %{email}.", email: String.trim(email)))}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, add_error_message(error))}
     end
   end
+
+  # A pushed payload is client-chosen; give the guarded head above somewhere to
+  # fall (#764).
+  def handle_event("add_member", _params, socket), do: {:noreply, socket}
+
+  # Pending invitations (#2135). Looked up in the loaded `@invitations` — this
+  # org's rows only — so a crafted id from another site matches nothing.
+  def handle_event("resend_invitation", %{"id" => id}, socket) when is_binary(id) do
+    %{actor: actor} = socket.assigns
+
+    socket =
+      with {:ok, invitation} <- get_invitation(socket, id),
+           {:ok, _resent} <-
+             Accounts.resend_invitation(invitation, %{},
+               actor: actor,
+               context: socket.assigns.security_context
+             ) do
+        socket
+        |> load_data()
+        |> put_flash(
+          :info,
+          gettext("Invitation sent again to %{email}.", email: invitation.email)
+        )
+      else
+        {:error, :not_found} -> socket
+        {:error, error} -> put_flash(socket, :error, add_error_message(error))
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("revoke_invitation", %{"id" => id}, socket) when is_binary(id) do
+    %{actor: actor} = socket.assigns
+
+    socket =
+      with {:ok, invitation} <- get_invitation(socket, id),
+           :ok <-
+             Accounts.revoke_invitation(invitation,
+               actor: actor,
+               context: socket.assigns.security_context
+             ) do
+        socket |> load_data() |> put_flash(:info, gettext("Invitation revoked."))
+      else
+        {:error, :not_found} -> socket
+        _error -> put_flash(socket, :error, gettext("Couldn't revoke that invitation."))
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event(event, _params, socket)
+      when event in ["resend_invitation", "revoke_invitation"],
+      do: {:noreply, socket}
 
   # Who can publish on this site (`SiteEditorialSettings.editors_can_publish`).
   # Here because it is a statement about what a tier may do, beside the tiers
@@ -410,6 +471,9 @@ defmodule KilnCMSWeb.TeamLive do
     roles =
       Accounts.list_roles_for_org!(org.id, actor: actor, query: [sort: [name: :asc]])
 
+    invitations =
+      Accounts.list_invitations_for_org!(org.id, actor: actor, load: [:custom_role, :invited_by])
+
     site_admins = site_admins_without_membership(actor, org.id)
 
     socket
@@ -421,6 +485,7 @@ defmodule KilnCMSWeb.TeamLive do
     # memo, so the row shows what a save or a revoke left.
     |> assign(:access, access(members, site_admins, org))
     |> assign(:roles, roles)
+    |> assign(:invitations, invitations)
   end
 
   # Platform admins — `User.role == :admin`, or a live admin grant — reach every
@@ -458,12 +523,50 @@ defmodule KilnCMSWeb.TeamLive do
     end
   end
 
-  defp find_user(email, actor) do
-    case Accounts.get_user_by_email(String.trim(to_string(email)), actor: actor) do
-      {:ok, %{} = user} -> {:ok, user}
-      _ -> {:error, :not_found}
+  defp get_invitation(socket, id) do
+    case Enum.find(socket.assigns.invitations, &(&1.id == id)) do
+      nil -> {:error, :not_found}
+      invitation -> {:ok, invitation}
     end
   end
+
+  # What the admin is told when an address could not be added or invited.
+  defp add_error_message(error) do
+    case InvitationRefused.reason(error) do
+      :already_member ->
+        gettext("That person is already on this site.")
+
+      :already_invited ->
+        gettext("That address is already invited — resend it from Pending invitations.")
+
+      :suppressed ->
+        gettext(
+          "That address is on the mail suppression list, so the invitation would not arrive. Clear it under Mail first."
+        )
+
+      :mail_budget ->
+        gettext(
+          "That address has been sent too many invitations in the last hour. Try again later."
+        )
+
+      _other ->
+        ash_error_message(error,
+          fallback: gettext("Couldn't add or invite that address.")
+        )
+    end
+  end
+
+  defp invitation_status(invitation) do
+    if Invitations.live?(invitation),
+      do: gettext("Expires %{when}", when: RoleGrantForm.format(invitation.expires_at)),
+      else: gettext("Expired")
+  end
+
+  defp inviter(%{invited_by: %{} = user}), do: user.name || to_string(user.email)
+  defp inviter(_invitation), do: nil
+
+  defp text(value) when is_binary(value), do: value
+  defp text(_value), do: nil
 
   defp role_form(actor) do
     Role
@@ -676,11 +779,71 @@ defmodule KilnCMSWeb.TeamLive do
               />
             </div>
             <p class="text-xs text-base-content/60">
-              {gettext("The account must already exist — invite people via sign-up or SSO first.")}
+              {gettext(
+                "No account yet, or not confirmed? They'll get an email invitation. A confirmed account is added straight away."
+              )}
               {tier_hint()}
             </p>
-            <.button type="submit" variant="primary">{gettext("Add member")}</.button>
+            <.button type="submit" variant="primary">{gettext("Add or invite")}</.button>
           </form>
+
+          <section
+            :if={@invitations != []}
+            id="team-invitations"
+            class="space-y-2"
+            aria-labelledby="team-invitations-heading"
+          >
+            <h3 id="team-invitations-heading" class="text-sm font-medium">
+              {gettext("Pending invitations")} ({length(@invitations)})
+            </h3>
+            <ul class="card divide-y divide-base-content/10 overflow-hidden">
+              <li
+                :for={invitation <- @invitations}
+                id={"invitation-#{invitation.id}"}
+                class="flex items-start justify-between gap-4 p-4"
+              >
+                <div class="min-w-0 space-y-1">
+                  <span class="font-medium">{invitation.email}</span>
+                  <p class="flex flex-wrap items-center gap-1 text-xs text-base-content/70">
+                    <.badge variant="outline">{role_label(invitation.role)}</.badge>
+                    <span :if={invitation.custom_role}>{gettext("Custom role:")}</span>
+                    <.badge :if={invitation.custom_role} variant="outline">
+                      {invitation.custom_role.name}
+                    </.badge>
+                  </p>
+                  <p class="text-xs text-base-content/70">
+                    <span :if={inviter(invitation)}>
+                      {gettext("Invited by %{name}.", name: inviter(invitation))}
+                    </span>
+                    <span class={!Invitations.live?(invitation) && "text-warning"}>
+                      {invitation_status(invitation)}
+                    </span>
+                  </p>
+                </div>
+                <div class="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    phx-click="resend_invitation"
+                    phx-value-id={invitation.id}
+                    aria-label={gettext("Resend the invitation to %{email}", email: invitation.email)}
+                    class="btn btn-sm btn-default"
+                  >
+                    {gettext("Resend")}
+                  </button>
+                  <button
+                    type="button"
+                    phx-click="revoke_invitation"
+                    phx-value-id={invitation.id}
+                    data-confirm={gettext("Revoke this invitation? Its link will stop working.")}
+                    aria-label={gettext("Revoke the invitation to %{email}", email: invitation.email)}
+                    class="btn btn-sm btn-ghost text-base-content/70 hover:text-error"
+                  >
+                    <.icon name="hero-x-mark" class="size-4" />
+                  </button>
+                </div>
+              </li>
+            </ul>
+          </section>
 
           <.empty_state
             :if={@members == [] and @site_admins == []}

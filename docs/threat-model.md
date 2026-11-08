@@ -782,7 +782,9 @@ password leaves the server.
   stay on the node. The provider learns that *someone* on this IP set a
   password whose hash starts with that prefix, and nothing more.
 - **Where it applies.** Self-registration, change password, password reset by
-  token and the first-run wizard. **Not** sign-in: a breached password that was
+  token, the first-run wizard and accepting a site invitation with a password
+  (#2135; judged by the *invited* site's policy for the *invited* tier, not the
+  host the link was opened on). **Not** sign-in: a breached password that was
   set before this shipped is not noticed. Follow-up.
 - **Exempt paths, deliberately.** The admin-sent reset *mail* is checked when
   its token is used (it is `reset_password_with_token`), but these set or
@@ -810,6 +812,80 @@ password leaves the server.
   corpus.
 - **Telemetry.** `[:kiln_cms, :password, :breach_check]`; see
   [observability.md](observability.md#breached-password-checks).
+
+### Site invitations (`/auth/invite/:invite_token`, #2135)
+
+A platform admin invites an address to a site from `/editor/team`; the invitee
+opens the mailed link and sets up an account, or adds the site to the account
+they have. The link is the only credential, so this is a bearer token that
+creates an account and grants a site tier.
+
+- **The token.** 32 random bytes, URL-safe base64, mailed once. Only its SHA-256
+  is stored (`invitations.token_hash`), so a database read or a backup cannot
+  rebuild a link. Single use: accepting destroys the row in the same
+  transaction as the account and membership, and both accepts re-read the row
+  by token under `FOR UPDATE`, so two submits of one link serialize and the
+  second finds nothing. A resend rotates the token and revoking destroys the
+  row; either way the old link names nothing. Usable for 7 days.
+- **Opening is not accepting.** The page only peeks at the token on `GET` and on
+  the socket mount; nothing is written until a button is pressed. A mail
+  scanner or link previewer that follows the link changes nothing.
+- **Every write is system-only.** `User` `:register_with_invitation` and
+  `:accept_invitation_with_password`, and `Invitation` `:by_token`, `:consume`
+  and `:accept_existing`, are `forbid_if always()` and refuse any actor-carrying
+  call in their own change or preparation, because the platform-admin bypass
+  would otherwise pass them ([policy-matrix.md](policy-matrix.md)). The email
+  of a new account is taken from the invitation row, never from input.
+- **Pre-registered accounts (pre-hijack).** Anyone can register an unconfirmed
+  account for any address. So an unconfirmed account is never added to a site
+  directly: the Team page invites it instead, and accepting sets a new
+  password, confirms the account, revokes every token it held, signs out its
+  sessions and clears a display name the first registrant chose. Only a
+  confirmed account accepts with one click and keeps its password. An erased
+  account cannot accept.
+- **Who can send, and for how long it counts.** Only a standing platform admin
+  can invite or resend (`StandingAdminOnly`): a temporary admin's invitation
+  would outlast the grant. An `:admin` invitation is honoured at accept time
+  only while its sender is still a standing platform admin, not erased and not
+  deleted.
+- **Mail as a weapon.** The admin names any address. Invitation mail is budgeted
+  per address (`mail:invitation`, the shared mail budget, 5 per hour by
+  default), and a spent budget or a suppressed address is refused by name, so
+  the admin is not told "sent" for mail that will not arrive. The "you were
+  added" notice to a confirmed account has its own budget
+  (`mail:membership_notice`) and is dropped silently when spent. The mail
+  carries no free text from the inviter (that would be a phishing channel from
+  this instance's address), and the site and inviter names are HTML-escaped.
+- **Submit flooding.** Both password accepts and the one-click accept charge the
+  per-client registration budget (`ThrottleRegistration`, the `:register`
+  bucket), because they arrive over `/live`, past every router plug.
+- **The right host.** The link is built on the invited site's host for the
+  invited tier (`ConsoleHost.tier_url/3`: the public site host for a viewer,
+  the console host for an editor or admin when `KILN_CONSOLE_HOST` is set). The
+  page redirects to it if opened elsewhere, so the account and the first
+  sign-in happen on the site it was made for.
+- **Invite-only sites.** Accepting deliberately skips the `:registration_enabled`
+  check: on an invite-only site this is how accounts arrive. The admin's
+  choice to invite is the control.
+- **Residuals.** (1) *The token is in the request path*, and Phoenix logs the
+  path: `invite_token` is in `:filter_parameters`, which filters the logged
+  params map only. The same holds for `/magic_link/…` and `/password-reset/…`.
+  Whoever can read request logs within the 7 days can accept the invitation.
+  (2) *The plaintext link sits in the mail job's args* in `oban_jobs`, and so
+  in any backup taken meanwhile, until Oban's Pruner deletes the finished job 7
+  days later, as for reset and magic-link mail. (3) *Whoever holds the mail
+  holds the invitation.* A forwarded or intercepted link is accepted by
+  whoever opens it first; the account it creates has the invited address,
+  and an admin can remove the membership from Team. (4) *Accepting through single sign-on is not supported*, so an
+  invitee whose organisation signs in by SSO must still accept with a password
+  or an existing account first. (5) *An existing membership wins.* If the
+  invitee is already a member when they accept (they joined through the site's
+  own SSO in between, say), the membership is left as it is and the
+  invitation is used up; the invited tier is not applied. (6) Taking over an
+  unconfirmed account replaces its password and ends its sessions, but does not
+  remove a second factor, passkey or linked SSO identity the account may hold.
+  A self-registered account is a `:viewer` and cannot reach `/editor/settings`,
+  where those are enrolled, so this needs another route to them to matter.
 
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;
@@ -994,7 +1070,8 @@ was named, never to the person who named it.
 | API key sign-in | A key that never existed, an expired key and a revoked key are refused with the same status, challenge header and envelope. | `enumeration_api_key_test.exs` | None. A key is a random secret, not an address. |
 | JSON:API, GraphQL, MCP reads | `User` is not a JSON:API resource, a GraphQL type or an MCP tool. A filter or sort through the content's `author` relationship (`filter[author][email]`, `sort=author.email`, an MCP `author.email` filter) answers an anonymous reader, a viewer and an editor the same for a registered and an unregistered address. An admin control proves the question is answerable, so the empty result comes from the read policy. | `enumeration_api_reads_test.exs` | None. |
 | REST and author routes | No route serves accounts by name, address or slug outside the console and the sign-in flow. WebFinger answers a registered and an unregistered `acct:` handle with the same 404. A published post by a known account carries no address on HTML, feeds or the JSON:API. | `enumeration_author_routes_test.exs` | None. |
-| Admin lookups (`get_user_by_email`, `list_users`, `get_user`, admin password reset) | Any actor but an admin, or none, finds nothing for a registered address and for an unregistered one alike; the admin-only reset refuses a non-admin before it looks at the account. | `accounts/enumeration_lookups_test.exs` | Admin-only oracles (below). |
+| Site invitation link (`/auth/invite/:invite_token`, #2135) | A made-up, expired, revoked and used token open the same page, "This invitation is no longer valid", on the dead render and the connected one. A token is mailed only to the address it names. | `enumeration_invitation_test.exs` | An admin-tier invitation whose sender lost the role gets the same page. |
+| Admin lookups (`get_user_by_email`, `list_users`, `get_user`, admin password reset, add-or-invite) | Any actor but an admin, or none, finds nothing for a registered address and for an unregistered one alike; the admin-only reset and add-or-invite (#2135) refuse a non-admin before they look at the account. | `accounts/enumeration_lookups_test.exs` | Admin-only oracles (below). |
 | Account unlock | There is no unlock flow, so nothing to audit. | not applicable | None. |
 
 ### What registration does now
@@ -1024,8 +1101,10 @@ reset and magic-link mail) and is dropped silently once spent.
 - **Concurrent registration race.** Two simultaneous registrations of the same
   new address can both pass the lookup; the loser may then see the
   `:unique_email` identity's "has already been taken".
-- **Admin-only oracles, accepted by decision.** The team page's add-member form
-  says "No account with that email address exists", the accounts console
+- **Admin-only oracles, accepted by decision.** The team page's "Add or
+  invite" form says "Member added to this site." for an address with a
+  confirmed account and "Invitation sent to (address)." for any other (#2135),
+  the accounts console
   searches by address, and the editor comment `author_label` falls back to an
   address when the author has no name. All three are for people who may see
   accounts anyway. `enumeration_lookups_test.exs` pins that the underlying

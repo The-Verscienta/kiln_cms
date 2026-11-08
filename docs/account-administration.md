@@ -15,7 +15,7 @@ because they are about different objects:
 | Lists | `OrgMembership` rows for **this site** | every `User` on the **instance** |
 | Answers | who may author what *here* | who has registered at all |
 | Sets | site tier, custom role, per-member scope axes | platform role, temporary role, audiences on this site |
-| Can do | add an existing account to this site | create nothing — accounts arrive by sign-up, SSO or the first-run wizard |
+| Can do | add an existing account to this site, or [invite an address by email](#invite-someone-to-a-site) | create nothing — accounts arrive by sign-up, SSO, an accepted invitation or the first-run wizard |
 | Also | publishing policy for the site | password resets, session revocation, account removal |
 
 Both offer **temporary tiers** — the team page for the site tier, this page for
@@ -251,6 +251,148 @@ for a membership-less account edited from another site, are in
 
 An audience a billing tier has ever claimed is billing's to grant: a tick there
 lasts until the next entitlement recompute. Comp a membership instead.
+
+## Invite someone to a site
+
+Bring a person onto one site with the tier they should have there, whether or
+not they have an account yet. You need the platform admin role, and it must be
+your **standing** role: a temporary admin can open Team but cannot invite or
+resend, because an accepted invitation would outlast the grant.
+
+Invitations work on an invite-only site (`:registration_enabled` false) too:
+that is what they are for there.
+
+1. Open the console on the host of the site you are inviting them to, then
+   **Team** under **Operations** in the sidebar (`/editor/team`). Team acts on
+   the site the console is showing.
+2. Under **Members**, enter the address in **Email**. Pick a **Site tier**
+   (*Viewer* is the default) and, if the site has custom roles, a **Custom
+   role**.
+3. Click **Add or invite**. You see one of two results:
+   - "Invitation sent to (address)." The address now appears under **Pending
+     invitations (n)** with its tier, its custom role, "Invited by (you)." and
+     "Expires (date and time, UTC)".
+   - "Member added to this site." The address already had a confirmed account,
+     so it is in the member list now. Its owner is mailed "You were added to
+     (site)" with a sign-in link. There is nothing more to do.
+4. The invitee receives "You've been invited to (site)". The mail names you,
+   the site and the tier, and carries an **Accept the invitation** link that
+   works once and expires in 7 days.
+5. They open the link. The page reads "Join (site)" and "You've been invited to
+   (site) as (tier), at (address)." What they do next depends on the address:
+   - **No account:** they fill in **Display name (optional)**, **Password** and
+     **Password (again)**, and click **Set up my account**. They get a confirmed
+     account with the invited tier on this site.
+   - **A confirmed account:** they click **Accept invitation**. Nothing else
+     about the account changes.
+   - **An account that was registered but never confirmed:** they see the
+     password form, with a note that an unconfirmed account was already started
+     with this address. Choosing a password takes the account over: the old
+     password stops working, every session the account held is signed out, and
+     a display name the first registrant chose is cleared unless they enter one.
+     Anyone can register an unconfirmed account for any address, so its old
+     password proves nothing about who holds the mailbox.
+6. They are sent to the sign-in page with "Your account is ready — sign in to
+   (site)." or "You've joined (site) — sign in to continue." They sign in as
+   usual; a second factor still applies. On **Team** they are in the member
+   list, and their invitation is gone from **Pending invitations**.
+
+The link opens on the invited site, whichever host you were on when you sent it.
+A viewer's link uses the site's public host. An editor's or admin's link uses
+the console host when `KILN_CONSOLE_HOST` is set, and the site's own host if it
+is not ([Serving the console from its own host](multi-tenancy.md#serving-the-console-from-its-own-host)).
+Opening the link changes nothing until a button is pressed, so a mail scanner
+that follows it does no harm.
+
+### Resend or revoke an invitation
+
+Both buttons are on the invitation's row under **Pending invitations**.
+
+- **Resend** mails a new link and restarts the 7 days. The previous link stops
+  working. You see "Invitation sent again to (address)." A standing platform
+  admin only, as for inviting.
+- The **×** button ("Revoke the invitation to (address)") asks "Revoke this
+  invitation? Its link will stop working." Confirm, and you see "Invitation
+  revoked." The row is gone.
+
+An expired invitation stays listed as *Expired* until it is 30 days past its
+expiry, when a daily job deletes it. Entering the same address in **Add or
+invite** while it is expired resends it with the tier and custom role you
+picked this time.
+
+### Invite from code
+
+The Team page calls `KilnCMS.Accounts.add_or_invite_member/2`, which adds an
+address with a confirmed account and invites any other. From a release shell
+(`bin/kiln_cms remote`), as a standing platform admin:
+
+```elixir
+alias KilnCMS.Accounts
+
+admin = Accounts.get_user_by_email!("you@example.com", authorize?: false)
+
+Accounts.add_or_invite_member(
+  %{organization_id: Accounts.default_org_id(), email: "new.editor@example.com", role: :editor},
+  actor: admin
+)
+#=> {:ok, %{outcome: :invited, invitation: %KilnCMS.Accounts.Invitation{role: :editor, ...}}}
+```
+
+`outcome` is `:added` (with `membership:`), `:invited` or `:reinvited` (an
+expired invitation sent again, with `invitation:`). A refusal is
+`{:error, %Ash.Error.Invalid{}}` carrying a
+`KilnCMS.Accounts.Errors.InvitationRefused`;
+`InvitationRefused.reason/1` returns `:already_member`, `:already_invited`,
+`:suppressed` or `:mail_budget`. Every read and write runs as `actor`, so an
+editor, a viewer or no actor gets `Ash.Error.Forbidden` before the address is
+looked up. `invite_to_org/2`, `resend_invitation/3`, `revoke_invitation/2` and
+`list_invitations_for_org/2` are the single steps. The accept actions are
+system-only; only the invitation page calls them.
+
+### When an invitation does not go through
+
+On the Team page:
+
+- **"That person is already on this site."** The address belongs to a member.
+  Change their tier from their row instead.
+- **"That address is already invited — resend it from Pending invitations."**
+  A live invitation exists. Use **Resend**, or revoke it and invite again with a
+  different tier.
+- **"That address is on the mail suppression list, so the invitation would not
+  arrive. Clear it under Mail first."** The address hard-bounced before. Remove
+  it from the suppression list on **Mail** (`/editor/mail`, instance-wide) or
+  the site's outgoing mail page (`/editor/site-mail`), then invite again.
+- **"That address has been sent too many invitations in the last hour. Try
+  again later."** Each address has a mail budget (5 invitations per hour by
+  default), so the form cannot be used to flood someone's inbox.
+- **An error ending "must be a valid email address".** The address has no `@`,
+  more than one, a space in the domain, or is over 254 characters.
+- **An error saying the tier "can only be granted by a standing admin".** Your
+  admin role is temporary. Ask a standing platform admin to send it.
+
+On the invitation page:
+
+- **"This invitation is no longer valid"** with "Ask a site admin to send you a
+  new one." The link was made up, has expired, was revoked, was already used,
+  or was replaced by a resend. An admin-tier invitation also shows this once
+  the admin who sent it is no longer a standing platform admin. The page does
+  not say which, on purpose. Send a new invitation.
+- **"An account with this address already exists — accept the invitation with
+  it."** An account was created for the address after the page opened, by
+  sign-up or single sign-on. Nothing was set; the page now offers the branch
+  that fits that account.
+- **"Too many attempts from this address — try again shortly."** The same
+  per-network budget as registration was spent.
+- **"This password has appeared in a known data breach. Choose a different
+  one."** The site's [breached-password policy](#breached-passwords) blocks it
+  for the invited tier (blocking applies to administrators).
+- **The invitee joined, but with a lower tier than you invited them at.** They
+  were already a member of the site when they accepted (for example, they
+  signed in through the site's own single sign-on first). Accepting leaves an
+  existing membership as it is. Change their tier on their row.
+
+Accepting *through* single sign-on is not supported: the invitee accepts with a
+password or with an account they already have.
 
 ## Password resets
 

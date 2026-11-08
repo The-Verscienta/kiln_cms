@@ -3,9 +3,10 @@ defmodule KilnCMS.Accounts.EnumerationLookupsTest do
   The lookups behind the admin screens answer a non-admin as if every account
   were absent (#2255, surface 7 and the admin-only lookups).
 
-  `TeamLive`'s add-member form says "No account with that email address
-  exists", and `AccountsLive` searches accounts: both are platform-admin pages,
-  an accepted residual because an admin may see every account anyway. What
+  `TeamLive`'s "Add or invite" form tells its admin whether an address was
+  added (it has a confirmed account) or invited (#2135), and `AccountsLive`
+  searches accounts: both are platform-admin pages, an accepted residual
+  because an admin may see every account anyway. What
   keeps that residual an admin's alone is not the page but the resource: the
   same `get_user_by_email`, `list_users` and `get_user` calls, made with any
   other actor or none, find nothing, and say the same thing about a registered
@@ -117,6 +118,28 @@ defmodule KilnCMS.Accounts.EnumerationLookupsTest do
         assert_indistinguishable(
           fn -> shape(Accounts.send_user_password_reset(ctx.target.id, actor: actor)) end,
           fn -> shape(Accounts.send_user_password_reset(Ecto.UUID.generate(), actor: actor)) end,
+          ctx.emails
+        )
+
+      assert {:error, [{Ash.Error.Forbidden.Policy, _}]} = seen
+    end
+  end
+
+  test "add-or-invite refuses a non-admin before it looks the address up", ctx do
+    for actor <- [nil, ctx.viewer, ctx.editor] do
+      attempt = fn email ->
+        shape(
+          Accounts.add_or_invite_member(
+            %{organization_id: Accounts.default_org_id(), email: email},
+            actor: actor
+          )
+        )
+      end
+
+      seen =
+        assert_indistinguishable(
+          fn -> attempt.(ctx.known) end,
+          fn -> attempt.(ctx.unknown) end,
           ctx.emails
         )
 

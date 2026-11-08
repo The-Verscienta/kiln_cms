@@ -288,7 +288,8 @@ tier, and the built-ins therefore need no seeded rows: a membership without a
 custom role simply has no extra restriction bundle.
 
 **Team UI.** `/editor/team` (admin-only) manages the current org's members —
-add by existing account email, set tier / custom role / per-member scope
+add by email (an address with a confirmed account is added, any other is
+[invited](account-administration.md#invite-someone-to-a-site)), set tier / custom role / per-member scope
 overrides, grant a temporary tier, remove — and its custom roles. The three
 scope axes are set with pickers (#2141): content types are ticked from the
 site's own list, and each content type's field grant is a choice between no

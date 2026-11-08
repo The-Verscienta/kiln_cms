@@ -111,6 +111,27 @@ defmodule KilnCMS.Accounts do
       define :expire_membership_role_grant, action: :expire_role_grant
     end
 
+    # Site invitations by email (#2135) — see `KilnCMS.Accounts.Invitations`.
+    # Inviting, resending, revoking and listing are platform-admin actions: pass
+    # `actor: admin`. The Team page goes through `add_or_invite_member`, which
+    # adds an address that already has a confirmed account and invites any
+    # other.
+    resource KilnCMS.Accounts.Invitation do
+      define :add_or_invite_member, action: :add_or_invite
+      define :invite_to_org, action: :invite
+      define :resend_invitation, action: :resend
+      define :revoke_invitation, action: :revoke
+      define :list_invitations_for_org, action: :for_org, args: [:organization_id]
+      define :list_invitations, action: :read
+      # System-only (`forbid_if always()` above the admin bypass): the accept
+      # page passes `authorize?: false`, holding the emailed token.
+      define :get_invitation_by_token, action: :by_token, args: [:token]
+      define :accept_invitation_for_existing_account, action: :accept_existing, args: [:token]
+      define :consume_invitation, action: :consume
+      # The daily sweep's write (AshOban trigger on the resource).
+      define :prune_expired_invitations, action: :prune_expired
+    end
+
     # Custom roles (#332 slice 4) — named bundles of the grant axes, assigned
     # to memberships via `role_id`. Admin-managed from /editor/team.
     resource KilnCMS.Accounts.Role do
@@ -192,6 +213,12 @@ defmodule KilnCMS.Accounts do
       # the ID token, the verified domain and the cross-site rule all passed).
       define :complete_site_sso_sign_in, action: :sign_in_with_site_sso, args: [:user_id]
       define :register_with_site_sso, action: :register_with_site_sso
+      # Accepting a site invitation (#2135) — both system-only
+      # (`authorize?: false` from `KilnCMSWeb.InviteLive`; the token is the
+      # credential): a new account, or a new password over an unconfirmed one.
+      define :register_with_invitation, action: :register_with_invitation
+
+      define :accept_invitation_with_password, action: :accept_invitation_with_password
       # Admin-only: assign role + consumer audiences; pass `actor: admin`.
       define :manage_user_access, action: :manage_access
       # Time-boxed elevation above the standing role (KilnCMS.Accounts.RoleGrant).

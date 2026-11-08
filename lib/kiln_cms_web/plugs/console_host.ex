@@ -177,6 +177,33 @@ defmodule KilnCMSWeb.Plugs.ConsoleHost do
   def console_url(path, org \\ nil), do: url_on(console_host_for(org), path)
 
   @doc """
+  The URL of `path` on the host `org`'s own people use: its console host while
+  the gate is on (`console_url/2`), otherwise its site host — its
+  `custom_domain`, else the base host for the default org and
+  `<slug>.<base host>` for any other, as `site_url/1` names it. For a link
+  mailed on a site's behalf (an invitation, #2135), which must open on a host
+  that resolves to that site whichever host the sender was on.
+  """
+  @spec org_url(String.t(), Accounts.Organization.t() | nil) :: String.t()
+  def org_url(path, org) do
+    case console_host() do
+      nil -> url_on(site_host(org), path)
+      _console -> console_url(path, org)
+    end
+  end
+
+  @doc """
+  The URL of `path` for a person who will hold `tier` on `org` (#2135): a
+  `:viewer` reads the site, so their link opens on its public site host (its
+  `custom_domain`, else the base host or `<slug>.<base host>`, whether or not
+  the console gate is on); an `:editor` or `:admin` works in the console, so
+  theirs opens where `org_url/2` says.
+  """
+  @spec tier_url(String.t(), Accounts.Organization.t() | nil, atom()) :: String.t()
+  def tier_url(path, org, :viewer), do: url_on(site_host(org), path)
+  def tier_url(path, org, _editor_or_admin), do: org_url(path, org)
+
+  @doc """
   Whether passkeys can work on the console hosts. The browser accepts the
   deployment's RP ID — the `PHX_HOST` host, see `KilnCMS.Accounts.WebAuthn` —
   only on an origin whose host is it or ends in `.<it>`, so a console host

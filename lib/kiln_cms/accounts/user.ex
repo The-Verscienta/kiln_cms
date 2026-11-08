@@ -55,6 +55,11 @@ defmodule KilnCMS.Accounts.User do
           # the site proved by DNS that it controls the address's domain
           # (`KilnCMS.Accounts.SiteSso.Admission`).
           :register_with_site_sso,
+          # A site invitation accepted (#2135): the click on the token mailed to
+          # the address proved it. The update is the unconfirmed-account case,
+          # which also replaces the password and revokes every token.
+          :register_with_invitation,
+          :accept_invitation_with_password,
           # First-run bootstrap (#1317): the operator creating the instance's
           # first admin cannot receive a confirmation mail — SMTP is one of the
           # things they have not configured yet — and the account is created
@@ -774,6 +779,119 @@ defmodule KilnCMS.Accounts.User do
       change KilnCMS.Accounts.Changes.RegisterWithSiteSso
     end
 
+    # Accepting a site invitation (#2135) when the address has no account: the
+    # invitee chooses a password and gets a confirmed account (`:viewer`, the
+    # default) holding the invited tier on the invited site. System-only — only
+    # `KilnCMSWeb.InviteLive` calls it (`authorize?: false`); the emailed token
+    # is the credential and `AcceptInvitation` refuses an actor-carrying call.
+    #
+    # Deliberately NOT gated by `Validations.RegistrationEnabled`: an
+    # invite-only site is exactly where invitations are how accounts arrive.
+    # It mints no session token either: the invitee signs in through the normal
+    # password flow afterwards, second factors and all (as `/setup` does).
+    create :register_with_invitation do
+      description "Create an account from a site invitation (system-only)."
+      accept []
+
+      argument :token, :string, allow_nil?: false, sensitive?: true
+      argument :name, :string, constraints: [max_length: KilnCMS.Limits.line()]
+
+      argument :password, :string do
+        allow_nil? false
+        constraints min_length: 8
+        sensitive? true
+      end
+
+      argument :password_confirmation, :string do
+        allow_nil? false
+        sensitive? true
+      end
+
+      # Bounded per client address like registration (#724): the form submits
+      # over `/live`, where no router pipeline charges anything.
+      change KilnCMS.Accounts.Changes.ThrottleRegistration
+
+      # Sets `email` from the invitation row (never from input), and in the
+      # transaction adds the membership and consumes the invitation.
+      change KilnCMS.Accounts.Changes.AcceptInvitation
+
+      change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
+
+      validate {AshAuthentication.Strategy.Password.PasswordConfirmationValidation,
+                strategy_name: :password}
+
+      # Breached-password lookup (#2240), against the invited site's policy for
+      # the invited tier.
+      change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :invite}
+
+      change set_attribute(:name, arg(:name))
+
+      metadata :password_breach, :map do
+        description "Set to `%{status: :breached}` when the password is in a known breach and the site's policy allows it with a warning."
+      end
+    end
+
+    # Accepting a site invitation (#2135) when the address has an UNCONFIRMED
+    # account. Anyone can register an unconfirmed account for any address, so
+    # its password may be a stranger's: the invitee sets a new one, the account
+    # is confirmed (the click proved the address), and every token it held is
+    # revoked before the membership is added. System-only, like the create
+    # above. A confirmed account accepts with one click instead
+    # (`Invitation.:accept_existing`) and keeps its password.
+    update :accept_invitation_with_password do
+      description "Accept a site invitation over an unconfirmed account (system-only)."
+      accept []
+      require_atomic? false
+
+      argument :token, :string, allow_nil?: false, sensitive?: true
+      argument :name, :string, constraints: [max_length: KilnCMS.Limits.line()]
+
+      argument :password, :string do
+        allow_nil? false
+        constraints min_length: 8
+        sensitive? true
+      end
+
+      argument :password_confirmation, :string do
+        allow_nil? false
+        sensitive? true
+      end
+
+      change KilnCMS.Accounts.Changes.ThrottleRegistration
+      change KilnCMS.Accounts.Changes.AcceptInvitation
+      change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
+
+      validate {AshAuthentication.Strategy.Password.PasswordConfirmationValidation,
+                strategy_name: :password}
+
+      change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :invite}
+
+      # Whoever registered the address first may hold a session or a
+      # remember-me cookie; the password they chose stops working with the
+      # hash above, and this ends everything they already hold (#734).
+      change KilnCMS.Accounts.Changes.RevokeAllTokens
+
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :password_reset, after_commit?: true}
+
+      # The display name is the invitee's too: whatever the account's first
+      # registrant chose is cleared when no name is given, never kept — it
+      # would be shown as the invitee's byline.
+      change fn changeset, _context ->
+        case Ash.Changeset.get_argument(changeset, :name) do
+          name when is_binary(name) and name != "" ->
+            Ash.Changeset.change_attribute(changeset, :name, name)
+
+          _none ->
+            Ash.Changeset.force_change_attribute(changeset, :name, nil)
+        end
+      end
+
+      metadata :password_breach, :map do
+        description "Set to `%{status: :breached}` when the new password is in a known breach and the site's policy allows it with a warning."
+      end
+    end
+
     update :reset_password_with_token do
       # `ForgiveSignInThrottle` runs an `after_action` hook (it needs the saved
       # record's email), which an atomic update has no place to put.
@@ -1091,6 +1209,15 @@ defmodule KilnCMS.Accounts.User do
     # the token preparation and `Changes.RegisterWithSiteSso` refuse any
     # actor-carrying call themselves.
     policy action([:sign_in_with_site_sso, :register_with_site_sso]) do
+      forbid_if always()
+    end
+
+    # A site invitation's accepts (#2135): the same shape. Forbidden to every
+    # authorized caller; `Changes.AcceptInvitation` refuses an actor-carrying
+    # call itself, since the admin bypass above would pass this. Only
+    # `KilnCMSWeb.InviteLive` calls them (`authorize?: false`), and the emailed
+    # token is the credential.
+    policy action([:register_with_invitation, :accept_invitation_with_password]) do
       forbid_if always()
     end
 
