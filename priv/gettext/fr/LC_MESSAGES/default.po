@@ -640,10 +640,35 @@ msgstr "%{field} %{op} %{value}"
 msgid "%{field} has a value"
 msgstr "%{field} a une valeur"
 
+#: lib/kiln_cms/cms/validations/default_source.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} has no simple value to copy"
+msgstr "%{field} n'a pas de valeur simple à copier"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{field} is empty"
 msgstr "%{field} est vide"
+
+#: lib/kiln_cms/cms/validations/default_source.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} is not a field beside this one"
+msgstr "%{field} n'est pas un champ voisin de celui-ci"
+
+#: lib/kiln_cms/cms/validations/default_source.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} is not a single %{type} field"
+msgstr "%{field} n'est pas un champ unique de type %{type}"
+
+#: lib/kiln_cms/cms/validations/default_source.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} is private; a public field can't copy it"
+msgstr "%{field} est privé ; un champ public ne peut pas le copier"
+
+#: lib/kiln_cms/cms/validations/default_source.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} itself copies another field"
+msgstr "%{field} copie déjà un autre champ"
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
@@ -1307,6 +1332,11 @@ msgstr "Une modification d’un champ listé d’un contenu publié doit avoir u
 msgid "A content item stores a reference, so its URL follows the record. Items pointing at unpublished content are omitted from the API."
 msgstr "Un élément de contenu enregistre une référence, donc son URL suit l'enregistrement. Les éléments pointant vers du contenu non publié sont omis de l'API."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A copy of another field"
+msgstr "Une copie d'un autre champ"
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "A custom role bundles granular scope — define \"Blog editor\" once, assign it to any member. A member's own scope overrides their role per axis."
@@ -1336,6 +1366,11 @@ msgstr "Un flux est récupéré par des lecteurs anonymes, des agrégateurs et d
 #, elixir-autogen, elixir-format
 msgid "A few things stay with the operator"
 msgstr "Certaines choses restent du ressort de l'opérateur"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A fixed value"
+msgstr "Une valeur fixe"
 
 #: lib/kiln_cms_web/components/compliance_components.ex
 #, elixir-autogen, elixir-format
@@ -2924,6 +2959,11 @@ msgstr "Mot de passe d'application ou jeton d'accès"
 #, elixir-autogen, elixir-format
 msgid "Applied"
 msgstr "Appliqué"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Applied when a new record leaves this field empty — never on later edits."
+msgstr "S'applique quand un nouvel enregistrement laisse ce champ vide, jamais lors des modifications ultérieures."
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
@@ -5909,6 +5949,11 @@ msgstr "Description SEO par défaut (facultative)"
 msgid "Default SEO title (optional)"
 msgstr "Titre SEO par défaut (facultatif)"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Default comes from"
+msgstr "La valeur par défaut provient de"
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Default social image"
@@ -7910,6 +7955,11 @@ msgstr "Autorisations de champs"
 #, elixir-autogen, elixir-format
 msgid "Field settings"
 msgstr "Paramètres du champ"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Field to copy"
+msgstr "Champ à copier"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -18191,6 +18241,11 @@ msgstr "La console partage une origine avec le site de chaque organisation"
 msgid "The control won — the document already reads that way; nothing to promote."
 msgstr "Le contrôle a gagné — le document se lit déjà ainsi ; rien à promouvoir."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "The current date and time"
+msgstr "La date et l'heure actuelles"
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "The database and uploaded media, and when they were last saved."
@@ -18660,6 +18715,11 @@ msgstr "Le niveau du site détermine les capacités de ce membre sur CE site (le
 msgid "The site's background embedding allowance is used up for now — it is shared with automation rules. The per-document panel in the editor still works. Continue later."
 msgstr "L'allocation d'embeddings en arrière-plan du site est épuisée pour l'instant — elle est partagée avec les règles d'automatisation. Le panneau par document de l'éditeur fonctionne toujours. Continuez plus tard."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "The site's default language"
+msgstr "La langue par défaut du site"
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "The slug doesn't contain the focus keyphrase — clear the slug field to re-derive it."
@@ -18775,6 +18835,11 @@ msgstr "Le titre fait environ %{pixels}px de large, au-delà des %{max}px affich
 #, elixir-autogen, elixir-format
 msgid "The update check is misconfigured: KILN_UPDATE_REPO must be owner/name, and KILN_UPDATE_RELEASES_URL a full http(s) URL. No check was made."
 msgstr "La vérification des mises à jour est mal configurée : KILN_UPDATE_REPO doit être au format propriétaire/nom et KILN_UPDATE_RELEASES_URL une URL http(s) complète. Aucune vérification n'a été effectuée."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "The user creating the record"
+msgstr "L'utilisateur qui crée l'enregistrement"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -19670,6 +19735,11 @@ msgstr "Pour montrer un libellé aux éditeurs, écrivez-le après une barre :"
 #, elixir-autogen, elixir-format
 msgid "Today"
 msgstr "Aujourd'hui"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Today's date"
+msgstr "La date du jour"
 
 #: lib/kiln_cms/cms/computed.ex
 #, elixir-autogen, elixir-format
@@ -22065,6 +22135,11 @@ msgstr "ne peut pas être stocké : la suppression des métadonnées vidéo et a
 msgid "can't compare %{field} with greater/less than: it is not a number or a date"
 msgstr "ne peut pas comparer %{field} avec supérieur/inférieur à : ce n'est ni un nombre ni une date"
 
+#: lib/kiln_cms/cms/validations/default_source.ex
+#, elixir-autogen, elixir-format
+msgid "can't copy the field itself"
+msgstr "ne peut pas copier le champ lui-même"
+
 #: lib/kiln_cms/cms/validations/field_condition.ex
 #, elixir-autogen, elixir-format
 msgid "can't depend on %{field}, a private field"
@@ -22793,6 +22868,11 @@ msgstr "plus de conversions que d'impressions — ces compteurs ne sont pas fiab
 #, elixir-autogen, elixir-format
 msgid "names %{field}, which is not a field beside this one"
 msgstr "nomme %{field}, qui n'est pas un champ voisin de celui-ci"
+
+#: lib/kiln_cms/cms/validations/default_source.ex
+#, elixir-autogen, elixir-format
+msgid "needs the field to copy"
+msgstr "nécessite le champ à copier"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -23594,6 +23674,11 @@ msgstr "· sans alt"
 #, elixir-autogen, elixir-format
 msgid "—"
 msgstr "—"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "— Choose a field —"
+msgstr "— Choisissez un champ —"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format

@@ -101,17 +101,7 @@ defmodule KilnCMS.CMS.DynamicDefaults do
     hidden = Conditions.effective(definitions, ctx.supplied)
     by_name = Map.new(definitions, &{&1.name, &1})
 
-    settled =
-      Enum.map(definitions, fn definition ->
-        if dynamic?(definition) do
-          value =
-            if hidden[definition.name].hidden?, do: nil, else: value(definition, ctx, by_name)
-
-          %{definition | default: value}
-        else
-          definition
-        end
-      end)
+    settled = Enum.map(definitions, &settle_one(&1, ctx, hidden, by_name))
 
     defaulted =
       for %{name: name, default: default} = definition <- settled,
@@ -121,6 +111,14 @@ defmodule KilnCMS.CMS.DynamicDefaults do
           do: name
 
     {settled, defaulted}
+  end
+
+  defp settle_one(definition, ctx, hidden, by_name) do
+    cond do
+      not dynamic?(definition) -> definition
+      hidden[definition.name].hidden? -> %{definition | default: nil}
+      true -> %{definition | default: value(definition, ctx, by_name)}
+    end
   end
 
   # A dynamic source stands in for `default`; with no create to default, none.
