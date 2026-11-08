@@ -636,6 +636,52 @@ An admin (#2242) can refuse an address or range per site from `/editor/ip-blocks
 - **Limits.** Matching is per source address: it does not stop a distributed
   source, and a visitor can change address. Expired rules are not swept.
 
+### Scanner 404 blocking (#2253)
+
+An opt-in control on top of the block list above: `KilnCMS.Security.ScannerGuard`
+adds a temporary `IpBlockRule` for an address that racks up delivery 404s or
+probes bait paths. Off unless `KILN_SCANNER_BLOCKING` is on; see
+[ip-blocking.md](ip-blocking.md#block-scanners-automatically).
+
+- **What it is for.** Slowing automated probing (credential-file and CMS-plugin
+  scans) and cutting its load. It is not a defence against a determined or
+  distributed attacker: matching is per address, an attacker can rotate
+  addresses (an IPv6 host is counted per `/64`), and blocks expire.
+- **Turning it against others.** The main hazard is a hostile page or email that
+  makes visitors' browsers request missing paths on our site so the visitors are
+  blocked. Browser-like requests (`Sec-Fetch-Mode`, `Sec-Fetch-Dest`, or a
+  `Sec-Fetch-Site` other than `none` / `same-origin`) are never counted, and a
+  signed-in visitor is never counted. Header absence is not proof of a scanner, so
+  the threshold stays the real control, and a recent sign-in from the address
+  (24 hours) prevents a block. Addresses that are private, loopback,
+  link-local, CGNAT or in `TRUSTED_PROXIES` are never counted, and a forwarded
+  request with no trusted proxy is never counted, so a shared proxy or office
+  NAT is not blocked as one scanner.
+- **Spoofable good-bot exemption.** A `User-Agent` naming a known crawler skips
+  the miss threshold only, never the bait threshold. No reverse DNS is done, so a
+  scanner that claims to be Googlebot can make misses without being blocked
+  by volume, but not probe bait paths.
+- **Bounded blast radius.** One rule per address, always with an expiry (60 minutes
+  by default), so a false positive heals itself; an admin can remove one at any
+  time. At most 300 automatic rules per site, so spreading a scan over many
+  addresses cannot grow the list or the matcher's cache without bound. At the
+  cap a new trip is skipped and logged.
+- **Least privilege.** The guard acts as the `:scanner_guard` system actor, which
+  can `create` an `IpBlockRule` and read one kind of security event (a recent
+  `sign_in` from an address) and nothing else. It cannot list or remove rules.
+  See the [policy matrix](policy-matrix.md).
+- **Fails open.** A dropped count, a database fault or a failed sign-in lookup
+  never blocks the 404 from rendering. The counting runs off the request path.
+  A failed sign-in lookup at the moment of a trip leans toward not blocking.
+- **A skipped trip is not retried.** A trip is claimed once per block window, so a
+  trip skipped for the cap, a recent sign-in or a database error is not retried
+  until the window rolls over. The window itself is fixed, not sliding, so a burst
+  split across a boundary may not trip.
+- **No address or path in logs or metrics.** The counter
+  `kiln_cms.scanner_guard.blocked.count` is tagged by reason only. The
+  `ip_auto_blocked` security event carries the address (as the event IP, subject
+  to the log's retention and erasure) and never the attacker-controlled path.
+
 ### Public forms
 - **CSRF** — deliberately absent: forms are meant to be posted from third-party
   pages. Abuse is bounded by the `:form` bucket and a honeypot field, and a

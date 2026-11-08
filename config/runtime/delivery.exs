@@ -91,3 +91,30 @@ end
 with {:ok, reject?} <- Env.fetch("KILN_API_REJECT_INVALID_BEARER") do
   config :kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth, reject_invalid_bearer: reject?
 end
+
+# ## Smart 404 blocking (KilnCMS.Security.ScannerGuard, #2253)
+#
+# Off by default. KILN_SCANNER_BLOCKING=1 temporarily blocks an address that
+# racks up delivery 404s (THRESHOLD per WINDOW_MINUTES) or probes bait paths
+# (BAIT_THRESHOLD per window), for BLOCK_MINUTES. Only a recognized spelling or
+# an in-range integer writes config, so an unset var keeps the default; a bad
+# value warns and is ignored rather than being interpreted.
+with {:ok, enabled?} <- Env.fetch("KILN_SCANNER_BLOCKING") do
+  config :kiln_cms, :scanner_blocking, enabled: enabled?
+end
+
+with {:ok, threshold} <- Env.integer_in("KILN_SCANNER_BLOCKING_THRESHOLD", 5, 100_000) do
+  config :kiln_cms, :scanner_blocking, threshold: threshold
+end
+
+with {:ok, threshold} <- Env.integer_in("KILN_SCANNER_BLOCKING_BAIT_THRESHOLD", 1, 1_000) do
+  config :kiln_cms, :scanner_blocking, bait_threshold: threshold
+end
+
+with {:ok, minutes} <- Env.integer_in("KILN_SCANNER_BLOCKING_WINDOW_MINUTES", 1, 1_440) do
+  config :kiln_cms, :scanner_blocking, window_ms: :timer.minutes(minutes)
+end
+
+with {:ok, minutes} <- Env.integer_in("KILN_SCANNER_BLOCKING_BLOCK_MINUTES", 1, 10_080) do
+  config :kiln_cms, :scanner_blocking, block_ms: :timer.minutes(minutes)
+end

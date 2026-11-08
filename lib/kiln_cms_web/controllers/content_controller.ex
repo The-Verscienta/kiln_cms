@@ -1449,6 +1449,10 @@ defmodule KilnCMSWeb.ContentController do
     # else would list a path whose one-click redirect could never fire.
     KilnCMSWeb.MissedPathTracking.track(path, locale(conn), current_org_id(conn))
 
+    # Probe-shaped 404s feed the scanner guard (#2253). Off unless configured;
+    # delivery 404s only, and it never raises into this render.
+    KilnCMS.Security.ScannerGuard.record_miss(conn, path)
+
     conn
     # A 404 may be an unpublished/draft slug — never let a CDN or browser cache
     # it (it would mask the page once published).

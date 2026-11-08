@@ -74,7 +74,14 @@ happening and where, not who. The underlying telemetry event is
 `[:kiln_cms, :ip_block, :refused]` (measurement `count`, metadata `surface`).
 
 Useful Grafana panel: `sum(rate(kiln_cms_ip_block_refused_count[5m])) by (surface)`.
-A rise right after you add a rule is expected. A rise on `http` with no rule
+`kiln_cms.scanner_guard.blocked.count` counts addresses the scanner guard
+blocked by itself ([ip-blocking.md](ip-blocking.md#block-scanners-automatically),
+#2253), tagged `reason`: `miss_threshold` or `bait_path`. The underlying event is
+`[:kiln_cms, :scanner_guard, :blocked]` (measurement `count`, metadata `reason`).
+The address is not a tag. A block that is skipped (rule cap, database fault) logs a
+warning, `ScannerGuard: block skipped, ...`, without an address.
+
+A rise in the refused counter right after you add a rule is expected. A rise on `http` with no rule
 change, or a rule that suddenly matches everyone (a proxy not declared in
 `TRUSTED_PROXIES`), is worth a look.
 

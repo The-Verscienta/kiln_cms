@@ -150,6 +150,51 @@ defmodule KilnCMS.Security.IpBlockRuleTest do
     test "any other system actor is refused" do
       assert_read_refused(KilnCMS.SystemActor.new(:search))
     end
+
+    test "the :scanner_guard system actor creates a rule and does nothing else (#2253)" do
+      guard = KilnCMS.SystemActor.new(:scanner_guard)
+      future = DateTime.add(DateTime.utc_now(), 3600, :second)
+
+      rule =
+        CMS.create_ip_block_rule!(
+          %{cidr: "203.0.113.20", expires_at: future, confirm_self_block: true},
+          actor: guard,
+          tenant: org_id()
+        )
+
+      assert rule.cidr == "203.0.113.20/32"
+
+      assert_read_refused(guard)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.destroy_ip_block_rule(rule, actor: guard, tenant: org_id())
+    end
+
+    test "the :operator system actor lists and removes but cannot create (#2253)" do
+      operator = KilnCMS.SystemActor.new(:operator)
+      rule = add!("203.0.113.21")
+
+      assert [%{id: id}] =
+               CMS.list_ip_block_rules!(actor: operator, tenant: org_id(), authorize_with: :error)
+
+      assert id == rule.id
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.create_ip_block_rule(%{cidr: "203.0.113.22", confirm_self_block: true},
+                 actor: operator,
+                 tenant: org_id()
+               )
+
+      assert :ok = CMS.destroy_ip_block_rule(rule, actor: operator, tenant: org_id())
+    end
+
+    test "the :ip_block system actor still cannot create (#2253)" do
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.create_ip_block_rule(%{cidr: "203.0.113.23", confirm_self_block: true},
+                 actor: KilnCMS.SystemActor.new(:ip_block),
+                 tenant: org_id()
+               )
+    end
   end
 
   describe "re-adding a lapsed range" do

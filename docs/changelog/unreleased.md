@@ -263,6 +263,16 @@ carries the reasoning.
 
 ## Added
 
+<a id="scanner-404-blocking"></a>
+
+- **Smart 404 blocking: an address that racks up delivery 404s, or probes bait paths such as `/wp-login.php`, is blocked for a while (#2253).**
+  Off by default, so nothing changes until an operator sets `KILN_SCANNER_BLOCKING=1`. No migration; rolling the pin back is safe, and any automatic rules already written simply expire (they are ordinary `ip_block_rules` rows with an expiry).
+  - **What trips it.** Delivery 404s from one address (an IPv6 `/64`) past `KILN_SCANNER_BLOCKING_THRESHOLD` (default 60) in `KILN_SCANNER_BLOCKING_WINDOW_MINUTES` (default 10), or past `KILN_SCANNER_BLOCKING_BAIT_THRESHOLD` (default 5) on a bait path. The window is fixed and clock-aligned, not sliding. The address then gets an `IpBlockRule` with the note "Automatic: scanner 404s" for `KILN_SCANNER_BLOCKING_BLOCK_MINUTES` (default 60), visible and removable on `/editor/ip-blocks`. Bait paths are config-only (`config :kiln_cms, :scanner_blocking, bait_paths: [...]`, replacing the built-in list), as is the cap of 300 automatic rules per site (`max_auto_rules`).
+  - **What never counts.** Non-`GET`/`HEAD` requests, signed-in visitors, browser-like requests (`Sec-Fetch-*` headers), private, loopback, link-local and CGNAT addresses and `TRUSTED_PROXIES` ranges, and a forwarded request while no proxy is trusted. A claimed crawler user agent skips the miss threshold but not bait paths (it is spoofable; there is no reverse DNS). A successful sign-in from the address in the last 24 hours prevents the block.
+  - **Fails open and is not retried.** Counting runs off the request path; a dropped count or database error never changes the 404. A trip is claimed once per block window, so a trip skipped for the rule cap, a recent sign-in or a database error is not retried until the window rolls over. At the cap a new trip is skipped and logged.
+  - **Security log, metric, policy.** A new security event type `ip_auto_blocked` ("Address blocked automatically") and a counter `kiln_cms.scanner_guard.blocked.count` (tag `reason`). The guard acts as a new `:scanner_guard` system actor that may only create an `IpBlockRule` and read recent sign-in events.
+  - **If it blocks someone it should not,** the block ends by itself after the block time, or an admin selects **Remove** beside it on `/editor/ip-blocks`. Guide: [docs/ip-blocking.md](../ip-blocking.md#block-scanners-automatically); variables: [environment-variables.md](../environment-variables.md#smart-404-blocking-2253).
+
 <a id="custom-field-groups-and-mixed-sort"></a>
 
 - **`custom_filter` takes `_or` / `_and` / `_not` groups, a custom sort may precede a built-in one, and reference/media sorts are refused with a reason (#2355, #2356, #2354).**

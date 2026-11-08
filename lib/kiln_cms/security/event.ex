@@ -43,7 +43,8 @@ defmodule KilnCMS.Security.Event do
     :api_key_created,
     :api_key_revoked,
     :sso_config_changed,
-    :org_setting_changed
+    :org_setting_changed,
+    :ip_auto_blocked
   ]
 
   # The only metadata keys each type may carry. None names a person: who is in
@@ -63,7 +64,8 @@ defmodule KilnCMS.Security.Event do
     api_key_created: ~w(name scope),
     api_key_revoked: ~w(name),
     sso_config_changed: ~w(provider change),
-    org_setting_changed: ~w(setting)
+    org_setting_changed: ~w(setting),
+    ip_auto_blocked: ~w(reason count window_minutes block_minutes)
   }
 
   @max_metadata_keys 8
@@ -124,6 +126,14 @@ defmodule KilnCMS.Security.Event do
       pagination keyset?: true, required?: false
     end
 
+    # Has this address signed in on this site since `since`? The scanner guard's
+    # one read (#2253), so it never blocks an address a person signed in from.
+    read :sign_in_from_ip do
+      argument :ip, :string, allow_nil?: false
+      argument :since, :utc_datetime_usec, allow_nil?: false
+      filter expr(type == :sign_in and ip == ^arg(:ip) and inserted_at >= ^arg(:since))
+    end
+
     # The retention prune's read: events strictly older than the cutoff.
     read :older_than do
       argument :cutoff, :utc_datetime_usec, allow_nil?: false
@@ -167,8 +177,13 @@ defmodule KilnCMS.Security.Event do
     # reads the maintenance sweeps need, never to the plain `read` / `list`.
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
-      forbid_unless action([:by_actor, :older_than])
-      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :security}
+      forbid_unless action([:by_actor, :older_than, :sign_in_from_ip])
+
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: :security, action: [:by_actor, :older_than]}
+
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: :scanner_guard, action: :sign_in_from_ip}
     end
 
     # Writes are the `:security` system actor's, by action name. No person,

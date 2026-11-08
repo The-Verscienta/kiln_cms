@@ -243,6 +243,12 @@ defmodule KilnCMSWeb.Telemetry do
             "(#2242), tagged http / live / gql / collab / bridge. The address is " <>
             "deliberately not a tag or a log field."
       ),
+      counter("kiln_cms.scanner_guard.blocked.count",
+        tags: [:reason],
+        description:
+          "Addresses temporarily blocked by the scanner guard (#2253), tagged " <>
+            "miss_threshold / bait_path. The address is deliberately not a tag."
+      ),
 
       # Oban job Metrics (emitted by Oban) — queue throughput, latency, failures
       distribution("oban.job.stop.duration",

@@ -35,6 +35,7 @@ defmodule KilnCMS.Security do
       define :list_events, action: :list
       define :events_by_actor, action: :by_actor, args: [:user_id]
       define :events_older_than, action: :older_than, args: [:cutoff]
+      define :sign_in_events_from_ip, action: :sign_in_from_ip, args: [:ip, :since]
       define :get_event, action: :read, get_by: [:id]
     end
   end

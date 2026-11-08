@@ -151,6 +151,7 @@ defmodule KilnCMSWeb.SecurityLog do
   def type_label(:api_key_revoked), do: gettext("API key revoked")
   def type_label(:sso_config_changed), do: gettext("Single sign-on changed")
   def type_label(:org_setting_changed), do: gettext("Site setting changed")
+  def type_label(:ip_auto_blocked), do: gettext("Address blocked automatically")
   def type_label(other), do: to_string(other)
 
   @doc "`{label, value}` options for the type filter, in `Event.types/0` order."
