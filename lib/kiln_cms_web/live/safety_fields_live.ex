@@ -49,7 +49,8 @@ defmodule KilnCMSWeb.SafetyFieldsLive do
     if CMS.can_save_site_safety_fields?(actor, %{fields: %{}}, tenant: org) do
       case CMS.save_site_safety_fields(%{fields: build_fields(socket, params)},
              actor: actor,
-             tenant: org
+             tenant: org,
+             context: socket.assigns.security_context
            ) do
         {:ok, _row} ->
           {:noreply,

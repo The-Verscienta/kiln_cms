@@ -36,7 +36,8 @@ defmodule KilnCMSWeb.PasswordPolicyLive do
     case CMS.save_site_password_policy(
            %{breached_password_policy: String.to_existing_atom(value)},
            actor: socket.assigns.current_user,
-           tenant: socket.assigns.current_org
+           tenant: socket.assigns.current_org,
+           context: socket.assigns.security_context
          ) do
       {:ok, _row} ->
         {:noreply,
@@ -59,7 +60,8 @@ defmodule KilnCMSWeb.PasswordPolicyLive do
       row ->
         case CMS.reset_site_password_policy(row,
                actor: socket.assigns.current_user,
-               tenant: socket.assigns.current_org
+               tenant: socket.assigns.current_org,
+               context: socket.assigns.security_context
              ) do
           {:error, error} ->
             {:noreply, socket |> put_flash(:error, error_message(error)) |> load_settings()}

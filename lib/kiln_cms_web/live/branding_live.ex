@@ -105,7 +105,8 @@ defmodule KilnCMSWeb.BrandingLive do
 
     case CMS.save_site_branding(Map.put(attrs, "app_icon_size", icon_size),
            actor: socket.assigns.current_user,
-           tenant: socket.assigns.current_org
+           tenant: socket.assigns.current_org,
+           context: socket.assigns.security_context
          ) do
       # A full reload, not a re-render: the colour, logo and favicon live in
       # the root layout, which only a fresh page load re-renders (#1810).
@@ -134,7 +135,8 @@ defmodule KilnCMSWeb.BrandingLive do
       row ->
         CMS.reset_site_branding!(row,
           actor: socket.assigns.current_user,
-          tenant: socket.assigns.current_org
+          tenant: socket.assigns.current_org,
+          context: socket.assigns.security_context
         )
 
         {:noreply,

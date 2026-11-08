@@ -79,7 +79,16 @@ defmodule KilnCMS.Accounts.Changes.RotateDraftWriteKey do
          # authorize?: false — locking re-read of the key this action already authorized
          true <- RotatableDraftWriteKey.rotatable?(row, DateTime.utc_now()),
          # authorize?: false — the presenting key retiring itself inside its authorized rotation
-         {:ok, _revoked} <- Accounts.retire_rotated_api_key(row, authorize?: false) do
+         {:ok, _revoked} <-
+           Accounts.retire_rotated_api_key(row,
+             authorize?: false,
+             actor: changeset.context[:private][:actor],
+             context:
+               Map.take(changeset.context, [
+                 KilnCMS.Security.Recorder.context_key(),
+                 KilnCMS.Security.Recorder.tenant_key()
+               ])
+           ) do
       changeset
     else
       _ ->

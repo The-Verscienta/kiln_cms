@@ -98,7 +98,12 @@ defmodule KilnCMSWeb.SitePushLive do
     end
   end
 
-  defp opts(socket), do: [actor: socket.assigns.current_user, tenant: socket.assigns.current_org]
+  defp opts(socket),
+    do: [
+      actor: socket.assigns.current_user,
+      tenant: socket.assigns.current_org,
+      context: socket.assigns.security_context
+    ]
 
   defp load(socket) do
     row = current_row(socket)

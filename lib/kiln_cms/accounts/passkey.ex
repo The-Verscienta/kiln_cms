@@ -48,7 +48,16 @@ defmodule KilnCMS.Accounts.Passkey do
     # (docs/demo-mode.md). Admins pass.
     destroy :destroy do
       primary? true
+      # The audit change below reads the destroyed record.
+      require_atomic? false
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
+
+      # Audit log (#2241), in the transaction. Whoever removes it is the actor
+      # (the owner, or a platform admin); the owner is the target.
+      change {KilnCMS.Security.Changes.Record,
+              type: :passkey_removed,
+              target: fn record, _changeset -> {"user", record.user_id} end,
+              metadata: fn record, _changeset -> %{"name" => record.name} end}
     end
 
     # Called by KilnCMS.Accounts.WebAuthn after Wax verified the attestation —
@@ -57,6 +66,13 @@ defmodule KilnCMS.Accounts.Passkey do
     create :register do
       accept [:user_id, :name, :credential_id, :public_key, :sign_count]
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
+
+      # Audit log (#2241), in the transaction: the credential and its event
+      # commit together. The enrolling user is the actor.
+      change {KilnCMS.Security.Changes.Record,
+              type: :passkey_added,
+              target: fn record, _changeset -> {"user", record.user_id} end,
+              metadata: fn record, _changeset -> %{"name" => record.name} end}
     end
 
     # Post-authentication bookkeeping (clone-detection counter + last use).

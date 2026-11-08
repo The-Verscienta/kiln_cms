@@ -57,7 +57,11 @@ defmodule KilnCMSWeb.SiteStorageLive do
   end
 
   def handle_event("save", %{"storage" => params}, socket) when is_map(params) do
-    opts = [actor: socket.assigns.current_user, tenant: socket.assigns.current_org]
+    opts = [
+      actor: socket.assigns.current_user,
+      tenant: socket.assigns.current_org,
+      context: socket.assigns.security_context
+    ]
 
     # An existing row is updated, never re-upserted — the same rule as the other
     # integrations' pages, so a create race cannot drop a new secret.
@@ -91,7 +95,8 @@ defmodule KilnCMSWeb.SiteStorageLive do
       row ->
         CMS.reset_site_storage!(row,
           actor: socket.assigns.current_user,
-          tenant: socket.assigns.current_org
+          tenant: socket.assigns.current_org,
+          context: socket.assigns.security_context
         )
 
         {:noreply,

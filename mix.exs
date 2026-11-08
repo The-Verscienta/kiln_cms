@@ -360,6 +360,7 @@ defmodule KilnCMS.MixProject do
       "docs/sso.md": [],
       "docs/threat-model.md": [],
       "docs/ip-blocking.md": [title: "Blocking addresses"],
+      "docs/security-events.md": [title: "The security log"],
       "docs/secrets-rotation.md": [],
       # Design notes & decision records
       "docs/advanced-analytics-plan.md": [],
@@ -535,6 +536,7 @@ defmodule KilnCMS.MixProject do
         "docs/sso.md",
         "docs/threat-model.md",
         "docs/ip-blocking.md",
+        "docs/security-events.md",
         "docs/secrets-rotation.md"
       ],
       "Design notes & decision records": [

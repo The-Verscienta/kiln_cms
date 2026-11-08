@@ -112,6 +112,20 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert Repo.aggregate(KilnCMS.Backups.Run, :count) == 0
     end
 
+    test "purges the security audit log (raw IPs and email snapshots)" do
+      KilnCMS.Security.record!(%{type: :sign_in, ip: "203.0.113.5"},
+        actor: KilnCMS.Security.system(),
+        tenant: KilnCMS.Accounts.default_org_id()
+      )
+
+      assert Repo.aggregate(KilnCMS.Security.Event, :count) >= 1
+
+      summary = Scrub.run([])
+
+      assert summary.security_events_purged >= 1
+      assert Repo.aggregate(KilnCMS.Security.Event, :count) == 0
+    end
+
     test "provisions one usable pre-confirmed admin when credentials are given" do
       _real = admin()
 

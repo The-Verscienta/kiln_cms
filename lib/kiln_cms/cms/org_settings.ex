@@ -52,6 +52,11 @@ defmodule KilnCMS.CMS.OrgSettings do
       `AshAdmin.Resource` extension and its `admin` block are emitted.
     * `:extensions` — further Ash extensions (`AshOban`, `AshPaperTrail.Resource`).
     * `:domain` — defaults to `KilnCMS.CMS`.
+    * `:audit` — the security audit event (#2241) every person's write to the row
+      records, in the transaction: `:org_setting` (the default;
+      `org_setting_changed`, naming the setting and no value) or `:sso_config`
+      (`sso_config_changed`, for the site's identity provider). See
+      `KilnCMS.Security.Changes.RecordOrgSetting`.
     * `:system_actions` — actions `KilnCMS.SystemActor` may run (#1659), each
       with the subsystem(s) whose code calls it (#1747), as a keyword list:
       `[read: [:federation, :operator], record_delivery: :federation]`.
@@ -159,6 +164,27 @@ defmodule KilnCMS.CMS.OrgSettings do
     extra_extensions = Keyword.get(opts, :extensions, [])
     domain = Keyword.get(opts, :domain, KilnCMS.CMS)
     system_actions = opts |> Keyword.get(:system_actions, []) |> system_grants!()
+    audit = Keyword.get(opts, :audit, :org_setting)
+
+    unless audit in [:org_setting, :sso_config] do
+      raise ArgumentError,
+            "OrgSettings :audit must be :org_setting or :sso_config, got #{inspect(audit)}"
+    end
+
+    # The audit event of every write (#2241): one choke point for all of them.
+    audit_decl =
+      case audit do
+        :org_setting ->
+          quote do
+            change KilnCMS.Security.Changes.RecordOrgSetting
+          end
+
+        :sso_config ->
+          quote do
+            change {KilnCMS.Security.Changes.RecordOrgSetting,
+                    type: :sso_config_changed, provider: "site_oidc"}
+          end
+      end
 
     unless read in [:public, :editor, :admin] do
       raise ArgumentError,
@@ -219,6 +245,7 @@ defmodule KilnCMS.CMS.OrgSettings do
             require_atomic? false
             unquote_splicing(argument_decls)
             unquote_splicing(change_decls)
+            unquote(audit_decl)
           end
         end
       end
@@ -252,6 +279,7 @@ defmodule KilnCMS.CMS.OrgSettings do
           upsert_fields unquote(upsert_fields)
           unquote_splicing(argument_decls)
           unquote_splicing(change_decls)
+          unquote(audit_decl)
         end
 
         unquote(update_action)
@@ -259,6 +287,7 @@ defmodule KilnCMS.CMS.OrgSettings do
         destroy :destroy do
           primary? true
           require_atomic? false
+          unquote(audit_decl)
         end
       end
 

@@ -3,14 +3,21 @@ defmodule KilnCMSWeb.AuthController do
   use AshAuthentication.Phoenix.Controller
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Errors.AlreadyRegistered
   alias KilnCMS.Accounts.PasswordNotice
   alias KilnCMS.Accounts.PendingSignIn
+  alias KilnCMS.Security.AuthEvents
   alias KilnCMSWeb.SafeRedirect
 
   # Same flag the session cookie rides, for the same reason: `__Host-` is only
   # honoured alongside `Secure`, and dev/test/e2e serve over plain HTTP.
   @secure_cookies Application.compile_env(:kiln_cms, :secure_session_cookie, false)
   @remember_me_cookie KilnCMSWeb.SessionCookie.remember_me_key(@secure_cookies)
+
+  # Registering is not signing in, whether the address was new or already had
+  # an account (#2255): either way the answer is the same sentence, and the
+  # account's owner learns the rest from their inbox.
+  def success(conn, {:password, :register}, _user, _token), do: registration_requested(conn)
 
   def success(conn, activity, user, token) do
     conn = carry_password_notice(conn, activity, user)
@@ -33,9 +40,12 @@ defmodule KilnCMSWeb.AuthController do
           remember_me?: remember_me?
         )
       )
+      # How the first factor was passed, for the sign-in event the code prompt
+      # completes (#2241).
+      |> put_session(:sign_in_method, AuthEvents.method(activity))
       |> redirect(to: ~p"/sign-in/verify")
     else
-      complete_sign_in(conn, user, message_for(activity))
+      complete_sign_in(conn, user, message_for(activity), AuthEvents.method(activity))
     end
   end
 
@@ -124,11 +134,22 @@ defmodule KilnCMSWeb.AuthController do
   Establish the session for `user` and redirect to their destination. Shared by
   the no-2FA path here and by `TwoFactorController` once the code is verified.
   """
-  def complete_sign_in(conn, user, message) do
+  def complete_sign_in(conn, user, message),
+    do: complete_sign_in(conn, user, message, get_session(conn, :sign_in_method) || "password")
+
+  @doc """
+  `complete_sign_in/3` for a caller that knows how the sign-in was made. Records
+  the `:sign_in` security event (#2241) with `method`: this is where every
+  password, magic-link, SSO and post-second-factor sign-in completes.
+  """
+  def complete_sign_in(conn, user, message, method) do
     return_to = sign_in_destination(conn, user)
     notice? = get_session(conn, :password_breach_notice) == true
 
+    AuthEvents.signed_in(conn, user, method)
+
     conn
+    |> delete_session(:sign_in_method)
     |> delete_session(:return_to)
     |> delete_session(:password_breach_notice)
     |> delete_session(:pending_2fa)
@@ -236,7 +257,24 @@ defmodule KilnCMSWeb.AuthController do
   defp message_for({:password, :reset}), do: gettext("Your password has successfully been reset")
   defp message_for(_activity), do: gettext("You are now signed in")
 
-  def failure(conn, activity, reason) do
+  def failure(conn, {:password, :register} = activity, reason) do
+    if AlreadyRegistered.in?(reason),
+      do: registration_requested(conn),
+      else: rejected(conn, activity, reason)
+  end
+
+  def failure(conn, activity, reason), do: rejected(conn, activity, reason)
+
+  defp registration_requested(conn) do
+    conn
+    |> put_flash(
+      :info,
+      gettext("Check your email - we have sent instructions for what to do next.")
+    )
+    |> redirect(to: ~p"/sign-in")
+  end
+
+  defp rejected(conn, activity, reason) do
     message =
       case {activity, reason} do
         {_,
