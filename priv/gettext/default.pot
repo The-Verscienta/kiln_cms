@@ -1506,6 +1506,11 @@ msgstr ""
 msgid "A publishing calendar"
 msgstr ""
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "A range must not include loopback (127.0.0.0/8 or ::1)."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A regular expression the whole value must match."
@@ -7334,6 +7339,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "Enter a whole number."
+msgstr ""
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Enter an IP address or a range like 203.0.113.0/24."
 msgstr ""
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
@@ -17948,6 +17958,16 @@ msgstr ""
 msgid "That post is members-only. It can only be sent to the segment of a membership tier that grants the same audience."
 msgstr ""
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "That range is already blocked."
+msgstr ""
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "That range is too broad: use at least /8 for IPv4 or /16 for IPv6."
+msgstr ""
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "That release can't be deleted."
@@ -18279,6 +18299,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "The expiry is not a valid date and time."
+msgstr ""
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "The expiry must be in the future."
 msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex

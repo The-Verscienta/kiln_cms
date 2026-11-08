@@ -1506,6 +1506,11 @@ msgstr "Una vista previa. No se envía, publica ni guarda nada."
 msgid "A publishing calendar"
 msgstr "Un calendario de publicación"
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "A range must not include loopback (127.0.0.0/8 or ::1)."
+msgstr "Un rango no debe incluir el bucle local (127.0.0.0/8 o ::1)."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A regular expression the whole value must match."
@@ -7335,6 +7340,11 @@ msgstr "Introduce una fecha y hora de publicación válidas."
 #, elixir-autogen, elixir-format
 msgid "Enter a whole number."
 msgstr "Introduce un número entero."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Enter an IP address or a range like 203.0.113.0/24."
+msgstr "Introduzca una dirección IP o un rango como 203.0.113.0/24."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -17948,6 +17958,16 @@ msgstr "Esa entrada aún no ha terminado de publicarse: vuelva a publicarla e in
 msgid "That post is members-only. It can only be sent to the segment of a membership tier that grants the same audience."
 msgstr "Ese texto es solo para miembros. Solo puede enviarse al segmento de un nivel de suscripción que conceda la misma audiencia."
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "That range is already blocked."
+msgstr "Ese rango ya está bloqueado."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "That range is too broad: use at least /8 for IPv4 or /16 for IPv6."
+msgstr "Ese rango es demasiado amplio: use al menos /8 para IPv4 o /16 para IPv6."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "That release can't be deleted."
@@ -18280,6 +18300,11 @@ msgstr "El límite de entradas es para todo el despliegue y no se configura por 
 #, elixir-autogen, elixir-format
 msgid "The expiry is not a valid date and time."
 msgstr "La caducidad no es una fecha y hora válidas."
+
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "The expiry must be in the future."
+msgstr "La caducidad debe estar en el futuro."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format

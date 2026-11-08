@@ -95,6 +95,25 @@ defmodule KilnCMSWeb.IpBlockLiveTest do
       refute render(lv) =~ "Address blocked."
     end
 
+    test "validation messages are shown in the console language", ctx do
+      {lv, _admin} = mount_as_admin(ctx)
+
+      assert lv |> form("#ip-block-form", rule: %{cidr: "0.0.0.0/0"}) |> render_submit() =~
+               "That range is too broad"
+
+      assert lv |> form("#ip-block-form", rule: %{cidr: "127.0.0.1"}) |> render_submit() =~
+               "must not include loopback"
+
+      conn = ctx.conn |> org_conn(ctx.org) |> log_in(authed_user(:admin))
+      conn = Plug.Conn.put_session(conn, "locale", "fr")
+      {:ok, fr, _html} = live(conn, ~p"/editor/ip-blocks")
+
+      html = fr |> form("#ip-block-form", rule: %{cidr: "0.0.0.0/0"}) |> render_submit()
+
+      assert html =~ "trop large"
+      refute html =~ "too broad"
+    end
+
     test "an unparseable expiry is refused before anything is stored", ctx do
       {lv, _admin} = mount_as_admin(ctx)
 

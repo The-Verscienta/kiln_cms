@@ -44,13 +44,15 @@ see "Block removed." A rule cannot be edited: remove it and add another.
 
 ### Rules the form refuses
 
+The messages are shown in the console language (English, Spanish, French).
+
 | Message | Meaning |
 |---|---|
-| must be an IP address or a range like 203.0.113.0/24 | Not an address. Leading zeros in an octet (`010.0.0.1`) and spaces inside are refused. |
-| is too broad: use at least /8 for IPv4 or /16 for IPv6 | One keystroke must not block most of the internet. `0.0.0.0/0` and `::/0` land here. |
-| must not include loopback (127.0.0.0/8 or ::1) | Probes and local tooling arrive from loopback. |
-| is already blocked | The same range is already on the list (see below). |
-| must be in the future | The expiry is not later than now. |
+| Enter an IP address or a range like 203.0.113.0/24. | Not an address. Leading zeros in an octet (`010.0.0.1`) and spaces inside are refused. |
+| That range is too broad: use at least /8 for IPv4 or /16 for IPv6. | One keystroke must not block most of the internet. `0.0.0.0/0` and `::/0` land here. |
+| A range must not include loopback (127.0.0.0/8 or ::1). | Probes and local tooling arrive from loopback. |
+| That range is already blocked. | The same range is already on the list (see below). |
+| The expiry must be in the future. | The expiry is not later than now. |
 | The expiry is not a valid date and time. | The expiry could not be read. |
 
 Every rule is stored in one spelling: host bits are cleared (`10.1.2.3/8` becomes
