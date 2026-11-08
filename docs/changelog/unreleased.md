@@ -10,7 +10,7 @@ carries the reasoning.
 <a id="security-log-upgrade"></a>
 
 - **Run `mix ash.migrate` for the security log, add `KilnCMS.Security` to an
-  overlay's `:ash_domains`, and decide the retention window (#2241).** Two
+  overlay's `:ash_domains`, and decide the retention window (#2441).** Two
   migrations, both expand-only, creating two new tables and changing no existing
   data, so rolling the pin back is safe; the tables are simply unused.
   - **Migrations.** `20261108011355_add_security_events` creates
@@ -31,7 +31,7 @@ carries the reasoning.
   - **Privacy.** The log is new personal data (raw IP, user agent, email
     snapshot). Add it to your records of processing; [data-flows.md](../data-flows.md)
     lists it, and erasure and the staging scrub already cover it.
-  ([#2241](https://github.com/The-Verscienta/kiln_cms/issues/2241))
+  ([#2441](https://github.com/The-Verscienta/kiln_cms/pull/2441))
 
 <a id="backup-media-parts-upgrade"></a>
 
@@ -243,7 +243,7 @@ carries the reasoning.
 
 - **A site's admins get a security log: who signed in, was locked out, changed a
   second factor, passkey, role, API key or sign-in setting, and from where
-  (#2241).** For admins at **Security log** in the console sidebar
+  (#2441).** For admins at **Security log** in the console sidebar
   (`/editor/security-log`); editors and viewers cannot see it.
   - **What it records.** Fifteen event types: sign-ins, failed sign-ins,
     lockouts, second factor added and removed, recovery code used, passkey added
@@ -274,7 +274,7 @@ carries the reasoning.
     `[:kiln_cms, :security, :event_failed]` and `:event_sampled_out` telemetry
     events. The full event-to-emit-site matrix is in
     [the security log guide](../security-events.md).
-  ([#2241](https://github.com/The-Verscienta/kiln_cms/issues/2241))
+  ([#2441](https://github.com/The-Verscienta/kiln_cms/pull/2441))
 
 <a id="backup-media-parts"></a>
 
