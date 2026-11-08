@@ -33,6 +33,7 @@ defmodule KilnCMS.CMS.CustomFieldSerializersTest do
       lib/kiln_cms/cms/field_access.ex
       lib/kiln_cms/cms/field_conversion.ex
       lib/kiln_cms/cms/field_definition.ex
+      lib/kiln_cms/cms/field_sync.ex
       lib/kiln_cms/cms/field_types.ex
       lib/kiln_cms/cms/field_types/computed.ex
       lib/kiln_cms/cms/field_types/geolocation.ex
