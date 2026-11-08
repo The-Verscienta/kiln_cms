@@ -214,6 +214,14 @@ carries the reasoning.
 
 ## Added
 
+<a id="custom-field-groups-and-mixed-sort"></a>
+
+- **`custom_filter` takes `_or` / `_and` / `_not` groups, a custom sort may precede a built-in one, and reference/media sorts are refused with a reason (#2355, #2356, #2354).**
+  Follow-ups to #2292. All additive; no migration or index.
+  - **Groups.** `custom_filter` takes the reserved keys `_or`, `_and` and `_not` (a field name starts with a letter, so none collides; `custom_filter[or]` still means a field named `or`). Each holds conditions of custom field names, nested groups, and `_native`: built-in `filter[...]` conditions parsed by Ash exactly as `filter[...]` is. `filter[or]` / `[and]` / `[not]` that name a custom field anywhere inside are rewritten to this form, so the native spelling works. Visibility, tenant scoping and the private-field rule are the existing resolution: a private field inside a group is the same unknown-field `400`. At most 4 deep and 50 conditions. GraphQL `customFilter` takes the same keys; `customWhere` has no groups.
+  - **Mixed order.** `sort=price,title` is no longer a `400`. Built-ins that lead stay in `sort`; from the first custom token on the tokens move to `custom_sort` in order, a built-in one as `_native:<name>` (parsed by `Ash.Sort.parse_input/2`: public, sortable fields only). Same preparation as `custom_sort`, so keyset pagination behaves the same.
+  - **Reference and media sorts.** Still refused, now with the reason: the stored label can lag the target's current title, and an order over unreadable targets would leak where they sit. Supporting it needs a readability-aware key joined per target table, which belongs with the JSONB index work ([#2359](https://github.com/The-Verscienta/kiln_cms/issues/2359)).
+
 <a id="field-definition-sync"></a>
 
 - **Custom-field definitions can be exported from one environment and imported

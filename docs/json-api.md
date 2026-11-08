@@ -381,8 +381,39 @@ comma-separated for multi-key. Records lacking the field always sort last, as do
 `null`, array or object under it (read as no value).
 `custom_sort` composes with `sort=`: explicit `sort` keys take precedence, but
 `custom_sort` outranks an action's *default* order (e.g. `/posts/published`'s
-`-published_at`). `media`/`reference` fields are not sortable (a follow-up may
-add it).
+`-published_at`). `media`/`reference` fields are not sortable: the `400` says
+why. Their stored label can lag the target's current title (a read relabels it
+from the target as it is now), and an order over targets the caller may not read
+would reveal where they sit, so a reference or media sort is refused rather than
+ordered by a stale or leaky key. Sort by a built-in or a text custom field instead.
+
+A built-in column can follow a custom one in the same order by spelling it
+`_native:<name>` in `custom_sort`: `custom_sort=price,_native:title` or
+`custom_sort=-price,-_native:title`. You rarely write this by hand: `sort=price,title`
+is rewritten to it (see below). It takes any public attribute, calculation or
+aggregate that `sort=` takes.
+
+**Boolean groups** — `custom_filter` conditions are ANDed. To OR them, negate
+them or mix them with built-in columns, use the group keys `_or`, `_and` and
+`_not` (they start with `_`, so no field name can collide with them):
+
+```
+GET /api/json/posts?custom_filter[_or][0][price][gt]=100&custom_filter[_or][1][color]=red
+GET /api/json/posts?custom_filter[_not][color]=red
+GET /api/json/posts?custom_filter[_or][0][price][lt]=10&custom_filter[_or][1][_native][title]=Sale
+```
+
+`_or` / `_and` hold a list of conditions (a map keyed `0`, `1`, … in a query
+string); `_not` holds one condition. A condition is a map of custom field names
+to the operators above, may itself hold `_or` / `_and` / `_not`, and may hold
+`_native`: a map of built-in `filter[...]` conditions (`title`, `state`,
+`tags[slug]`, …) parsed exactly as `filter[...]` is. Keys of one condition are
+ANDed. Groups nest at most 4 deep and hold at most 50 conditions in all.
+Everything else is unchanged inside a group: an unknown or private field is the
+same `400` as outside one, definitions are read for the requesting site only,
+and `not` follows SQL, so `_not` of a comparison leaves out records lacking the
+field. GraphQL takes the same keys in `customFilter` (built-in names there are
+snake_case); `customWhere` has no groups.
 
 Custom sorts are always **nulls last**, ascending or descending. A native
 `sort=-x` is plain `desc`, which in Postgres puts nulls first.
@@ -406,10 +437,17 @@ GET /api/json/posts?filter[tags][has_none][]=<tag id>
   adds a built-in with your field's name, `filter[x]` silently starts meaning
   the built-in. Programmatic consumers should keep sending `custom_*`; the
   official clients do.
-- **Custom sorts come last in `sort`.** `sort=title,price` and
-  `sort=title&custom_sort=price` work. `sort=price,title` is a `400`
-  `invalid_sort`. Custom tokens found in `sort` run before an explicit
-  `custom_sort`.
+- **Tokens keep the order you wrote.** `sort=title,price`, `sort=price,title`
+  and `sort=title&custom_sort=price` all work. Built-in tokens that lead stay in
+  `sort`; from the first custom token on, every token moves to `custom_sort`, a
+  built-in one as `_native:<name>`. Tokens found in `sort` run before an explicit
+  `custom_sort`. (Before, `sort=price,title` was a `400` `invalid_sort`.)
+- **Groups in `filter[or]` / `[and]` / `[not]`.** While every name inside is a
+  built-in the group is native. When any condition inside names a custom field
+  (`filter[or][0][price][gt]=100&filter[or][1][title]=Sale`) the whole group moves
+  to `custom_filter[_or]` with its built-ins under `_native`, so the two spellings
+  mean the same. If `custom_filter` already holds that group key, `filter` is left
+  as written (a native `400`).
 - **Both spellings together.** `filter[x]` and `custom_filter[x]` for the same
   custom field merge into one condition. A built-in `x` applies both (ANDed). The same
   operator on both is a `400`.
