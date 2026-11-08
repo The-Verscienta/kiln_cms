@@ -16,6 +16,8 @@ defmodule KilnCMS.CMS.IpBlockRule do
       (`Changes.NormalizeIpBlockCidr`).
     * `expires_at` — optional; a rule stops matching at that instant (evaluated
       at match time, the row is not swept) and must be in the future when set.
+      Adding a range whose earlier rule has expired replaces that row
+      (`Changes.ReplaceExpiredIpBlock`); an active duplicate is still refused.
     * No update: a rule is replaced by deleting it and adding another.
 
   ## Who
@@ -84,6 +86,7 @@ defmodule KilnCMS.CMS.IpBlockRule do
   changes do
     change KilnCMS.CMS.Changes.NormalizeIpBlockCidr, on: [:create]
     change KilnCMS.CMS.Changes.RefuseIpSelfBlock, on: [:create]
+    change KilnCMS.CMS.Changes.ReplaceExpiredIpBlock, on: [:create]
     change KilnCMS.CMS.Changes.BustIpBlocklist, on: [:create, :destroy]
   end
 
