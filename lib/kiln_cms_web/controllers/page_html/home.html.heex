@@ -195,7 +195,13 @@
         <span class="text-xs font-medium text-base-content/70">POST /gql</span>
         <span class="text-xs text-base-content/70">GraphQL</span>
       </div>
-      <pre class="overflow-x-auto p-4 text-[13px] leading-6" phx-no-curly-interpolation><code>query {
+      <pre
+        class="overflow-x-auto p-4 text-[13px] leading-6"
+        tabindex="0"
+        role="group"
+        aria-label={gettext("Code sample")}
+        phx-no-curly-interpolation
+      ><code>query {
   publishedPosts(limit: 3) {
     count
     results {

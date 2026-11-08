@@ -100,6 +100,52 @@ class, an inline style, a different token), and it does not cover templates
 authored outside this repo, such as a plugin's. Check those by eye in both
 themes.
 
+### Scrolling code blocks
+
+A `<pre>` that scrolls sideways (`overflow-x-auto`) must take keyboard focus.
+A scroll container with nothing focusable inside can only be scrolled with a
+mouse or touch, so without it a keyboard user cannot read the end of a long
+line (axe's `scrollable-region-focusable`,
+[#2164](https://github.com/The-Verscienta/kiln_cms/issues/2164)). Give it
+three attributes:
+
+```heex
+<pre
+  class="mt-2 rounded bg-base-200 p-3 text-xs overflow-x-auto"
+  tabindex="0"
+  role="group"
+  aria-label={gettext("Update command")}
+><code>{@update_command}</code></pre>
+```
+
+- `tabindex="0"` puts it in the Tab order, and the arrow keys then scroll it.
+- `role="group"`, because ARIA does not allow `aria-label` on a bare `pre`. Not
+  `region`: that is a landmark, and a page of code samples would bury the
+  page's real landmarks under a row of same-named ones.
+- An `aria-label` that says what the block holds ("Update command",
+  "security.txt as served"), or "Code sample" when nothing more specific fits.
+  Translate it with `gettext`, and leave the language name out.
+
+Content code blocks get the same attributes from the rich-text renderer, so
+there is nothing to add in a block template.
+
+The focus ring is shared: `pre[tabindex="0"]:focus-visible` in `app.css`
+draws a 2px solid `--color-primary-ink` outline with `outline-offset: -2px`.
+It is inset so that a parent's `overflow-x: clip` (the `monograph` preset's)
+cannot cut it off. That puts it on the block's own `base-200` fill, where
+plain `primary` falls under WCAG 1.4.11's 3:1 in the light theme, so it uses
+the ink token. Don't add another outline to a `<pre>`, and don't set
+`outline: none` on one.
+
+`test/kiln_cms_web/scrollable_code_focus_test.exs` enforces this. It reads
+every `<pre>` start tag in `lib/**/*.ex` and `lib/**/*.heex`, including tags
+split over several lines, and fails on one whose classes include
+`overflow-x-auto` without `tabindex="0"`, `role="group"` and an `aria-label`.
+A `<pre>` that also has `whitespace-pre-wrap` never overflows and is exempt.
+Limits: the scan reads source, not rendered pages, so it misses a scrolling
+`<pre>` styled another way (a custom class, an inline style), and it does not
+see templates outside this repo, such as a plugin's.
+
 ## Component kit (`@layer components` in `app.css`)
 
 These are plain, token-driven CSS classes so a control looks identical whether

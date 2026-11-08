@@ -566,8 +566,14 @@ defmodule KilnCMS.Firing.Engine do
 
   # ── per-surface composition (whole-doc artifact of per-block fragments, A1) ──
 
-  defp compose(_document, typed, _custom, :web) do
-    html = typed |> Enum.map(&Blocks.render(&1, :web)) |> IO.iodata_to_binary()
+  # In the document's locale, not the worker's: the renderers write a few
+  # reader-facing strings into the HTML (a code block's label, #2164).
+  defp compose(document, typed, _custom, :web) do
+    html =
+      KilnCMS.CodeBlocks.with_content_locale(Map.get(document, :locale), fn ->
+        typed |> Enum.map(&Blocks.render(&1, :web)) |> IO.iodata_to_binary()
+      end)
+
     %{"html" => html}
   end
 

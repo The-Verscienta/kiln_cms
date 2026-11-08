@@ -13,6 +13,11 @@ defmodule KilnCMS.HTMLSanitizer.RichText do
   PT, rendered by `KilnCMS.Blocks.PortableText.to_html/1` and sanitized at cast
   time instead. Link hrefs on both paths now go through the same
   `KilnCMS.HTMLSanitizer.safe_href/1`.
+
+  A `<pre>` keeps only `class="highlight"` here. The `tabindex`, `role` and
+  `aria-label` it carries on delivery are added after this pass, by
+  `KilnCMS.CodeBlocks.focusable/2` in the `:web` renderer (#2164), so an
+  author cannot set them.
   """
 
   use HtmlSanitizeEx, extend: :strip_tags

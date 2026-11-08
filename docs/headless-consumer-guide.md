@@ -213,6 +213,81 @@ published page.
 See [api.md → Preview tokens](api.md#preview-tokens) for the response shape and
 who may mint.
 
+## Code blocks in rendered HTML
+
+A code block with a line wider than your column scrolls sideways, and a
+keyboard user can scroll it only if the block itself takes focus
+([#2164](https://github.com/The-Verscienta/kiln_cms/issues/2164)). Kiln marks
+up its code blocks for that on the `web` surface. On the `json` surface you
+add the markup yourself.
+
+### On the `web` surface
+
+Every code block in a rich-text block carries `tabindex="0"`, `role="group"`
+and an `aria-label`:
+
+```bash
+curl 'http://localhost:4000/api/content/page/install?surface=web'
+```
+
+```json
+{
+  "html": "<p>Run:</p><pre class=\"highlight\" tabindex=\"0\" role=\"group\" aria-label=\"Code sample\"><code class=\"language-elixir\">…</code></pre>"
+}
+```
+
+- A block Kiln highlighted is `<pre class="highlight" …>`; one with no
+  language, or a language Kiln has no highlighter for, is a plain
+  `<pre tabindex="0" …>`.
+- The label is translated into the document's locale: "Code sample",
+  "Exemple de code" (`fr`), "Ejemplo de código" (`es`). It follows the
+  document, not the request, so an English document served as a fallback for
+  `?locale=fr` keeps "Code sample".
+- Authors cannot set these attributes. The sanitizer strips them from stored
+  HTML and Kiln adds them afterwards, so the values above are the only ones
+  you will see.
+- Code inside a plugin's own block is whatever the plugin renders, and may
+  not carry them.
+
+Kiln's stylesheet does not travel with the HTML, so **style the focus ring
+yourself**. Without one, a keyboard reader can't see which block has focus.
+Kiln's own pages use:
+
+```css
+pre[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--your-accent);
+  outline-offset: -2px; /* inside the block, so an overflow: hidden parent can't trim it */
+}
+```
+
+Pick a colour with 3:1 contrast against the code block's background (WCAG
+1.4.11). Keep the attributes if you post-process the HTML: a sanitizer on
+your side that drops `tabindex` or `aria-label` undoes this.
+
+### On the `json` surface
+
+The `json` surface is data, and its rich-text blocks are the stored prose
+unchanged: a Portable Text block with `"style": "code"` in `body`, or sanitized
+HTML in `legacy_html` (a plain `<pre>` or `<pre class="highlight">`, with no
+`tabindex`). The guides at kilncms.dev `/docs` are stored as `legacy_html`.
+If you render either one, add `tabindex="0"`, `role="group"` and a translated
+`aria-label` to each `<pre>` and the focus ring above.
+
+### After a Kiln upgrade
+
+The attributes arrived in a release without a `format_version` change, so an
+artifact fired before that release keeps its old markup until the document is
+next published or edited. A read does not re-fire it. An operator can rewrite
+every artifact at once with `mix kiln.refire_all`, but that sends no `updated`
+webhook and no CDN purge, and the artifact's `ETag` (built from the document,
+locale, surface and publish time, not from the body) stays the same. A CDN or
+client that revalidates with `If-None-Match` therefore gets `304` and keeps
+the old HTML; one that re-reads without a validator gets the new markup.
+[#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463) tracks
+closing that gap. Until then, if you need the new markup now, re-read
+without `If-None-Match`, or add the attributes on your side as you would
+for the `json` surface, skipping any `<pre>` that already has `tabindex`.
+
 ## Images: sizes, crops and formats on request
 
 A `media_item` (JSON:API `/api/json/media-items`, GraphQL `featuredImage`)
@@ -494,9 +569,13 @@ What that means for a front end:
   which age out). Static builds and ISR should still
   rebuild from [webhooks](webhooks.md); the purge only covers the CDN in front of
   Kiln.
-* **Don't build your own ETag from fields.** Kiln's is a digest of the response
-  body, so it already changes whenever anything in the body does — keying on
-  `updatedAt` or an id misses changes that do not touch them.
+* **Don't build your own ETag from fields.** On JSON:API, GraphQL and search,
+  Kiln's is a digest of the response body, so it already changes whenever
+  anything in the body does — keying on `updatedAt` or an id misses changes
+  that do not touch them. A fired artifact's names the document, locale,
+  surface and publish time instead (a `?fields=` response's is a body
+  digest), so a Kiln upgrade that changes rendered markup does not move it
+  ([After a Kiln upgrade](#after-a-kiln-upgrade)).
 ## Analytics: your fetches are what get counted
 
 A successful `GET /api/content/:type/:slug` records a view against that
