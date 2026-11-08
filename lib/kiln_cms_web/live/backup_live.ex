@@ -29,6 +29,27 @@ defmodule KilnCMSWeb.BackupLive do
   runs would show "never" on precisely the deployments that are backing up
   correctly — the most dangerous wrong answer this screen could give.
 
+  ## History
+
+  Below the panels, `Backups.Run` rows (#2217) list every attempt: the app's own
+  and, via `Backups.Importer`, cron's. The importer (and the stale-run sweep it
+  starts with) runs once per CONNECTED mount, for a platform admin only, in
+  `start_async` - never on the disconnected render, where it would run twice and
+  for whoever the request was. The page param is parsed as `AccountsLive` does;
+  the rows themselves page with the `:history` read's own offset pagination.
+  Whether each run's files are still on disk is computed for the visible page
+  only (`Backups.Presence`).
+
+  ## Resume (#2218)
+
+  A failed or interrupted in-app run whose `.work/<stamp>/state.json` still
+  exists gets a **Resume** button (platform admin only, computed for the visible
+  page and bounded by its 25 rows). The `resume_run` handler re-checks
+  `platform_admin?`, takes only the run's **id** from the client, looks the run
+  up itself and passes ITS stamp to `Backups.enqueue(resume: stamp)`, which
+  refuses anything that is not resumable (a succeeded or still-running run, a
+  forged id, a run whose files are gone). The page never sends or trusts a stamp.
+
   ## Restore is not here
 
   Deliberately, and the page says so rather than leaving an admin hunting for
@@ -37,12 +58,14 @@ defmodule KilnCMSWeb.BackupLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.Manifest
+  alias KilnCMS.Backups.{Importer, Manifest, Presence}
+  alias KilnCMSWeb.Params
 
   # A backup takes minutes; 200 polls at 3s is ten of them, comfortably past
   # any real run and finite when a run never reports back at all.
   @poll_interval_ms 3_000
   @max_polls 200
+  @per_page 25
 
   @impl true
   def mount(_params, _session, socket) do
@@ -52,7 +75,11 @@ defmodule KilnCMSWeb.BackupLive do
        |> assign(:page_title, gettext("Backups"))
        |> assign(:running?, false)
        |> assign(:polls_left, @max_polls)
-       |> load_status()}
+       |> assign(:page, 1)
+       |> assign(:runs, [])
+       |> assign(:run_count, 0)
+       |> load_status()
+       |> start_import()}
     else
       # Platform-only, which the `:live_admin_required` hook (any site admin)
       # does not enforce. `push_navigate` to the access-denied page (#2143): it
@@ -65,6 +92,27 @@ defmodule KilnCMSWeb.BackupLive do
     end
   end
 
+  # The route's `?page=`. Re-checked here because `handle_params/3` runs on
+  # every patch, long after the mount guard was evaluated.
+  @impl true
+  def handle_params(params, _uri, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      page = Params.integer(params, "page", 1, 1..100_000)
+      socket = socket |> assign(:page, page) |> load_history()
+
+      # Past the last page: land on the last one rather than an empty table.
+      case last_page(socket.assigns.run_count) do
+        last when page > last ->
+          {:noreply, push_patch(socket, to: history_path(last))}
+
+        _ ->
+          {:noreply, socket}
+      end
+    else
+      {:noreply, push_navigate(socket, to: KilnCMSWeb.AccessDenied.path(:platform))}
+    end
+  end
+
   @impl true
   def handle_event("backup_now", _params, socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
@@ -74,29 +122,80 @@ defmodule KilnCMSWeb.BackupLive do
     end
   end
 
+  # A pushed payload is client-chosen: a non-admin gets nothing, and a mangled
+  # one is a no-op (#764).
+  def handle_event("page", %{"to" => to}, socket) when is_binary(to) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      page = Params.integer(%{"page" => to}, "page", 1, 1..100_000)
+      {:noreply, push_patch(socket, to: history_path(page))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("page", _params, socket), do: {:noreply, socket}
+
+  # Resume: the client names a run by id; the stamp is read from the server's
+  # own record of that run, and `Backups.enqueue/1` decides whether it may be
+  # resumed. A non-admin, a mangled payload or an unknown id gets nothing.
+  def handle_event("resume_run", %{"id" => id}, socket) when is_binary(id) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      resume_backup(socket, id)
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("resume_run", _params, socket), do: {:noreply, socket}
+
   defp start_backup(socket) do
     case Backups.enqueue(trigger: :manual) do
       {:ok, _job} ->
-        # `running?` is optimistic and local to this session: the job is on a
-        # queue with a concurrency of one, and the manifest is the source of
-        # truth once it lands. A spinner that lies for a few seconds is
-        # better than a button that looks like it did nothing for a minute.
-        {:noreply,
-         socket
-         |> assign(:running?, true)
-         # Captured HERE, not at mount: on a page left open for an hour, a
-         # cron backup that landed in the meantime would otherwise satisfy
-         # `finished_since?/2` on the first tick and be reported as the result
-         # of this click.
-         |> assign(:since, DateTime.utc_now())
-         |> assign(:polls_left, @max_polls)
-         |> put_flash(:info, gettext("Backup started — this page updates when it finishes."))
-         |> schedule_refresh()}
+        {:noreply, watch(socket, gettext("Backup started — this page updates when it finishes."))}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, unavailable_message(reason))}
     end
   end
+
+  defp resume_backup(socket, id) do
+    with {:ok, %{stamp: stamp}} <- Backups.get_run(id, actor: socket.assigns.current_user),
+         {:ok, _job} <- Backups.enqueue(trigger: :manual, resume: stamp) do
+      {:noreply, watch(socket, gettext("Backup resumed — this page updates when it finishes."))}
+    else
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, resume_message(reason))}
+    end
+  end
+
+  # `running?` is optimistic and local to this session: the job is on a queue
+  # with a concurrency of one, and the manifest is the source of truth once it
+  # lands. A spinner that lies for a few seconds is better than a button that
+  # looks like it did nothing for a minute.
+  defp watch(socket, message) do
+    socket
+    |> assign(:running?, true)
+    # Captured HERE, not at mount: on a page left open for an hour, a cron
+    # backup that landed in the meantime would otherwise satisfy
+    # `finished_since?/2` on the first tick and be reported as the result of
+    # this click.
+    |> assign(:since, DateTime.utc_now())
+    |> assign(:polls_left, @max_polls)
+    |> put_flash(:info, message)
+    |> schedule_refresh()
+  end
+
+  defp resume_message({:not_resumable, _status}),
+    do: gettext("That backup can't be resumed: only a failed or interrupted backup can.")
+
+  defp resume_message(reason) when reason in [:no_state, :no_such_run],
+    do: gettext("That backup can't be resumed: the files it had written are gone.")
+
+  defp resume_message(reason)
+       when reason in [:disabled, :no_database_url, :no_pg_dump, :no_pg_restore],
+       do: unavailable_message(reason)
+
+  defp resume_message(_reason), do: gettext("That backup can't be resumed.")
 
   @impl true
   def handle_info(:refresh, socket) do
@@ -117,8 +216,69 @@ defmodule KilnCMSWeb.BackupLive do
       |> assign(:running?, running?)
       |> assign(:polls_left, polls_left)
 
+    # The history follows the poll: the new run appears as `running`, then
+    # settles, without a reload.
+    socket = load_history(socket)
+
     {:noreply, if(running?, do: schedule_refresh(socket), else: socket)}
   end
+
+  # The import (and the stale sweep inside it) finished: show what it found.
+  @impl true
+  def handle_async(:import, {:ok, _result}, socket), do: {:noreply, load_history(socket)}
+
+  def handle_async(:import, {:exit, _reason}, socket), do: {:noreply, socket}
+
+  # CONNECTED mounts only: the disconnected render is a throwaway GET that
+  # would run the scan a second time. `Importer.run/0` reconciles stale runs
+  # itself, never raises, and writes as `Backups.system/0`.
+  defp start_import(socket) do
+    if connected?(socket),
+      do: start_async(socket, :import, fn -> Importer.run() end),
+      else: socket
+  end
+
+  defp load_history(socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
+      do: read_history(socket),
+      else: socket
+  end
+
+  defp read_history(socket) do
+    %{page: page, current_user: user} = socket.assigns
+
+    case Backups.run_history(
+           actor: user,
+           page: [limit: @per_page, offset: (page - 1) * @per_page, count: true]
+         ) do
+      {:ok, result} ->
+        socket
+        |> assign(:runs, with_presence(result.results))
+        |> assign(:run_count, result.count || 0)
+
+      {:error, _error} ->
+        socket
+        |> assign(:runs, [])
+        |> assign(:run_count, 0)
+        |> put_flash(:error, gettext("Couldn't load the backup history."))
+    end
+  end
+
+  # Stat'ed for the visible page only (<= @per_page rows).
+  defp with_presence(runs) do
+    {dir, now} = {backup_dir(), DateTime.utc_now()}
+    for run <- runs, do: {run, Presence.for(run, dir, keep_days(), now), resumable?(run, now)}
+  end
+
+  # A cheap status check first, so the one `stat` per row is only paid by the
+  # (few) failed or running rows of the page.
+  defp resumable?(run, now),
+    do: Backups.run_resumable?(run, now) and Backups.work_state?(run.stamp)
+
+  defp last_page(count), do: max(div(count + @per_page - 1, @per_page), 1)
+
+  defp history_path(1), do: ~p"/editor/backups"
+  defp history_path(page), do: ~p"/editor/backups?#{%{page: page}}"
 
   defp load_status(socket) do
     socket
@@ -286,7 +446,7 @@ defmodule KilnCMSWeb.BackupLive do
               {gettext("Off-site")}
             </dt>
             <dd :if={@status.manifest && @status.manifest.offsite} class="font-mono text-xs">
-              {@status.manifest.offsite}
+              {KilnCMS.Backups.Redact.text(@status.manifest.offsite)}
             </dd>
           </dl>
 
@@ -296,10 +456,187 @@ defmodule KilnCMSWeb.BackupLive do
             )}
           </p>
         </section>
+
+        <.history runs={@runs} page={@page} run_count={@run_count} running?={@running?} />
       </div>
     </Layouts.console>
     """
   end
+
+  attr :runs, :list, required: true
+  attr :page, :integer, required: true
+  attr :run_count, :integer, required: true
+  attr :running?, :boolean, default: false
+
+  defp history(assigns) do
+    assigns = assign(assigns, :last_page, last_page(assigns.run_count))
+
+    ~H"""
+    <section id="backup-history" class="rounded-lg border border-base-content/10 p-4">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
+        {gettext("History")}
+      </h2>
+
+      <p :if={@runs == []} id="backup-history-empty" class="mt-3 text-sm text-base-content/70">
+        {gettext("No backups have been recorded yet.")}
+      </p>
+
+      <ul :if={@runs != []} class="mt-3 divide-y divide-base-content/10">
+        <li
+          :for={{run, presence, resumable?} <- @runs}
+          id={"backup-run-#{run.id}"}
+          class="space-y-1.5 py-3 text-sm"
+        >
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span class="font-medium tabular-nums">
+              {Calendar.strftime(run.started_at, "%Y-%m-%d %H:%M UTC")}
+            </span>
+            <span class="text-xs text-base-content/70">{run.trigger}</span>
+            <span
+              data-role="status"
+              class={[
+                "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase",
+                status_class(run.status)
+              ]}
+            >
+              {status_label(run.status)}
+            </span>
+            <span
+              :for={component <- run.components}
+              data-role="component"
+              class="rounded bg-base-content/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-base-content/70"
+            >
+              {component_label(component)}
+            </span>
+            <span class="ml-auto tabular-nums text-base-content/70">
+              {humanize_bytes(total_bytes(run))}
+            </span>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/70">
+            <span data-role="verified">{verified_label(run)}</span>
+            <span :for={count <- part_counts(run)} data-role="parts">
+              {ngettext("%{count} part", "%{count} parts", count)}
+            </span>
+            <span
+              :for={{label, status} <- destination_chips(run)}
+              data-role="destination"
+              class="rounded border border-base-content/20 px-1.5 py-0.5 font-mono"
+            >
+              {label} · {destination_status_label(status)}
+            </span>
+            <span :if={presence != :none} data-role="presence" data-presence={presence}>
+              {presence_label(presence)}
+            </span>
+            <button
+              :if={resumable?}
+              type="button"
+              phx-click="resume_run"
+              phx-value-id={run.id}
+              disabled={@running?}
+              data-role="resume"
+              title={gettext("Continue this backup from the files it already wrote")}
+              class="btn btn-sm btn-default ml-auto"
+            >
+              <.icon name="hero-arrow-path" class="mr-1 size-4" />
+              {gettext("Resume")}
+            </button>
+          </div>
+
+          <pre
+            :if={run.error}
+            class="overflow-x-auto whitespace-pre-wrap break-words text-xs text-base-content/80"
+          >{run.error}</pre>
+        </li>
+      </ul>
+
+      <div :if={@page > 1 || @page < @last_page} class="mt-4 flex items-center justify-between">
+        <button
+          type="button"
+          phx-click="page"
+          phx-value-to={@page - 1}
+          disabled={@page == 1}
+          class="btn btn-sm btn-default disabled:opacity-40"
+        >
+          {gettext("Previous")}
+        </button>
+        <span class="text-sm text-base-content/70">
+          {gettext("Page %{page} of %{last}", page: @page, last: @last_page)}
+        </span>
+        <button
+          type="button"
+          phx-click="page"
+          phx-value-to={@page + 1}
+          disabled={@page >= @last_page}
+          class="btn btn-sm btn-default disabled:opacity-40"
+        >
+          {gettext("Next")}
+        </button>
+      </div>
+    </section>
+    """
+  end
+
+  # The artifact's bytes are already the sum of its parts (#2218).
+  defp total_bytes(run), do: Enum.reduce(run.artifacts, 0, &(&1.bytes + &2))
+
+  # One entry per media set written in several parts.
+  defp part_counts(run) do
+    for %{parts: [_, _ | _] = parts} <- run.artifacts, do: length(parts)
+  end
+
+  defp status_class(:succeeded), do: "bg-success/15 text-success-ink"
+  defp status_class(:failed), do: "bg-error/15 text-error-ink"
+  defp status_class(:running), do: "bg-info/15 text-info-ink"
+  defp status_class(:skipped), do: "bg-warning/15 text-warning-ink"
+
+  defp status_label(:succeeded), do: gettext("Succeeded")
+  defp status_label(:failed), do: gettext("Failed")
+  defp status_label(:running), do: gettext("Running")
+  defp status_label(:skipped), do: gettext("Skipped")
+
+  defp component_label(:db), do: gettext("Database")
+  defp component_label(:media), do: gettext("Media")
+
+  defp verified_label(%{artifacts: []}), do: "—"
+
+  defp verified_label(%{artifacts: artifacts, origin: origin}) do
+    cond do
+      Enum.all?(artifacts, & &1.verified) -> gettext("Verified")
+      origin == :imported -> gettext("unverified (imported)")
+      true -> gettext("Not verified")
+    end
+  end
+
+  # One chip per destination across the run's artifacts, worst status wins, so
+  # a single failed copy is not hidden behind the others' success.
+  defp destination_chips(run) do
+    run.artifacts
+    |> Enum.flat_map(&Enum.map(&1.destinations, fn {key, value} -> {key, value["status"]} end))
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Enum.sort_by(fn {key, _} -> {key != "local", key} end)
+    |> Enum.map(fn {key, statuses} -> {destination_label(key), worst(statuses)} end)
+  end
+
+  defp destination_label("local"), do: gettext("Local")
+  defp destination_label("rclone:" <> remote), do: remote
+  defp destination_label(other), do: other
+
+  defp worst(statuses) do
+    Enum.find(["failed", "pending", "pruned"], &(&1 in statuses)) || "ok"
+  end
+
+  defp destination_status_label("ok"), do: gettext("ok")
+  defp destination_status_label("failed"), do: gettext("failed")
+  defp destination_status_label("pending"), do: gettext("pending")
+  defp destination_status_label("pruned"), do: gettext("pruned")
+  defp destination_status_label(_other), do: "—"
+
+  defp presence_label(:present), do: gettext("on disk")
+  defp presence_label(:missing), do: gettext("missing")
+  defp presence_label(:pruned), do: gettext("pruned (retention)")
+  defp presence_label(:expired), do: gettext("expired")
+  defp presence_label(:off_site_only), do: gettext("off-site only")
 
   # NOT just `stale?`. A backup that failed a minute ago is not stale — it is
   # recent and it is worthless — and tone driven by age alone rendered "The

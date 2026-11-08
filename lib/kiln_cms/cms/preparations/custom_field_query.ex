@@ -144,10 +144,46 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         defs
 
       actor ->
-        if KilnCMS.Accounts.Scoping.effective_tier(actor, query) in [:editor, :admin],
-          do: defs,
-          else: Enum.reject(defs, &(Map.get(&1, :private) == true))
+        case KilnCMS.Accounts.Scoping.effective_tier(actor, query) do
+          :admin -> defs
+          :editor -> reject_hidden(defs, actor, query, context)
+          _below_editor -> Enum.reject(defs, &(Map.get(&1, :private) == true))
+        end
     end
+  end
+
+  # An editor under a read restriction (#2281) cannot probe the private fields
+  # it hides either: their names are unknown here, like a missing field.
+  #
+  # authorize?: false — a match on the read's own flag, not a bypass: such a
+  # read is internal plumbing and keeps every definition.
+  defp reject_hidden(defs, _actor, _query, %{authorize?: false}), do: defs
+
+  defp reject_hidden(defs, actor, query, _context) do
+    org_id = KilnCMS.Accounts.org_id(query.to_tenant || query.tenant)
+    resource = query.resource
+
+    # The definitions are one compiled type's, or — on the entry tier, with no
+    # type named — several dynamic types'. A name hidden under any of them is
+    # unknown here: a query across types would otherwise match the rows of the
+    # type that hides it.
+    hidden =
+      defs
+      |> Enum.map(&Map.get(&1, :type_definition_id))
+      |> Enum.uniq()
+      |> Enum.flat_map(fn
+        nil ->
+          scope = KilnCMS.CMS.ContentTypes.type_atom(resource)
+          type = KilnCMS.CMS.ContentTypes.type_name(resource)
+          KilnCMS.CMS.HiddenFields.names_for_scope(actor, org_id, scope, type)
+
+        definition_id ->
+          probe = struct(resource, type_definition_id: definition_id, org_id: org_id)
+          type = KilnCMS.CMS.ContentTypes.type_name_for(probe)
+          KilnCMS.CMS.HiddenFields.names_for_scope(actor, org_id, definition_id, type)
+      end)
+
+    Enum.reject(defs, &(Map.get(&1, :name) in hidden))
   end
 
   # As the system, with `authorize_with: :error`: a refusal is an error, never
@@ -426,6 +462,11 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # sort path does.
   defp condition(%{field_type: :geolocation, name: name}, _op, _raw),
     do: {:error, "custom field #{inspect(name)} (geolocation) is not filterable"}
+
+  # A JSON field (#2278) holds an arbitrary object or array, so there is no
+  # scalar to compare either: `null` above is the one question it answers.
+  defp condition(%{field_type: :json, name: name}, _op, _raw),
+    do: {:error, "custom field #{inspect(name)} (json) only supports null"}
 
   # A group is an object or a list of them, for the same reason: `null` above
   # is the one question its value answers as a whole.
@@ -847,7 +888,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         # Composite values are jsonb objects. Sorting them orders by key count
         # then key/value text, which is meaningless for a coordinate or a
         # snapshot — refuse rather than return a 200 in nonsense order.
-        {:ok, %{field_type: type}} when type in [:media, :reference, :geolocation, :group] ->
+        {:ok, %{field_type: type}} when type in [:media, :reference, :geolocation, :group, :json] ->
           invalid(query, :custom_sort, "custom field #{inspect(name)} (#{type}) is not sortable")
 
         {:ok, %{field_type: type, multiple: true}} when type in [:select, :string] ->

@@ -127,9 +127,11 @@ defmodule Kiln.FieldType do
 
   ## Built-in types
 
-  `:geolocation` and `:computed` ship in-tree and are implemented against this
-  very contract rather than special-cased in the host — they're the reference
-  implementations, and they register through
+  `:geolocation`, `:computed`, `:datetime_range`, `:recurrence` and the format
+  types `:email`, `:telephone`, `:color`, `:slug`, `:time` and `:json` ship
+  in-tree and are implemented against this very contract rather than
+  special-cased in the host — they're the reference implementations, and they
+  register through
   `KilnCMS.CMS.FieldTypes.builtin/0` exactly as a plugin's do through
   `c:Kiln.Plugin.field_types/0`. Their names are reserved: a plugin may not
   reuse them (`mix kiln.plugins.doctor`).

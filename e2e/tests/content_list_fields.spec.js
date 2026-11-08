@@ -10,6 +10,7 @@
 // The seeds define only page and post, so the spec defines two types of its
 // own (one with two string fields) to cross the New menu's threshold, and
 // removes everything again afterwards.
+const fs = require("node:fs");
 const { test, expect, signInAsAdmin, waitForLiveConnected, newDraftContent, saveDraft } = require("./fixtures");
 
 test.describe("content list field columns", () => {
@@ -363,5 +364,165 @@ test.describe("content list field filter and sort", () => {
     await page.locator("#content-status-filter").selectOption("draft");
     await expect(page).toHaveURL(/sort=-field/);
     await expect(page.locator("#content-sort")).toHaveValue(`-field:${fieldName}`);
+  });
+});
+
+// Exporting the list (#2293). The type, its integer field, an API key and four
+// entries are this describe's own, in ONE test so the entries are written once
+// (the API allows 120 writes a minute per address, and the field filter and sort
+// describe above already spends ~110 of them); the downloads are read off disk and their
+// rows asserted, so the filter and the selection are proven to reach the file.
+test.describe("content list export", () => {
+  /** @type {string} */
+  let stamp;
+  /** @type {string} */
+  let typeName;
+  /** @type {string} */
+  let fieldName;
+  /** Rank per entry, in creation order. */
+  const ranks = [1, 5, 5, 9];
+
+  /** @param {import("@playwright/test").Download} download */
+  async function csvRows(download) {
+    const path = await download.path();
+    const text = fs.readFileSync(path, "utf8").replace(/^\uFEFF/, "");
+    const [header, ...rows] = text.trim().split(/\r?\n/);
+    const columns = header.split(",");
+    return rows.map(line => Object.fromEntries(line.split(",").map((value, index) => [columns[index], value])));
+  }
+
+  test.beforeEach(async ({ page }) => {
+    stamp = String(Date.now());
+    typeName = `e2e_exp_${stamp}`;
+    fieldName = `rank_${stamp}`;
+    await signInAsAdmin(page);
+
+    await page.goto("/editor/types");
+    await page.fill('#new-type-form input[name="type_definition[label]"]', `Exp ${typeName}`);
+    await page.fill('#new-type-form input[name="type_definition[plural_label]"]', `Exp ${typeName}s`);
+    await page.fill('#new-type-form input[name="type_definition[name]"]', typeName);
+    await page.locator("#new-type-form").getByRole("button", { name: "Create content type" }).click();
+    await expect(page.locator("#flash-info")).toContainText("Content type created.");
+
+    await page.goto("/editor/fields");
+    await page.locator("#new-field-form").getByRole("checkbox", { name: `Exp ${typeName}`, exact: true }).check();
+    await page.selectOption('#new-field-form select[name="field_definition[field_type]"]', "integer");
+    await page.fill('#new-field-form input[name="field_definition[label]"]', "Rank");
+    await page.fill('#new-field-form input[name="field_definition[name]"]', fieldName);
+    await page.locator("#new-field-form button[type=submit]").click();
+    await expect(page.locator("#flash-info")).toContainText("Field added.");
+
+    await page.goto("/editor/api-keys");
+    await page.fill('#new-api-key-form input[name="name"]', `e2e-exp-${stamp}`);
+    await page.selectOption('#new-api-key-form select[name="access"]', "read_write");
+    await page.locator("#new-api-key-form button[type=submit]").click();
+    const key = (await page.locator("#new-key-banner code").textContent())?.trim() ?? "";
+    expect(key).not.toBe("");
+
+    const headers = {
+      authorization: `Bearer ${key}`,
+      accept: "application/vnd.api+json",
+      "content-type": "application/vnd.api+json",
+    };
+    const typeRes = await page.request.get(`/api/json/type-definitions/by-name/${typeName}`, { headers });
+    expect(typeRes.status(), await typeRes.text()).toBe(200);
+    const typeId = (await typeRes.json()).data.id;
+
+    for (const [n, rank] of ranks.entries()) {
+      const res = await page.request.post("/api/json/entries", {
+        headers,
+        data: {
+          data: {
+            type: "entry",
+            attributes: {
+              title: `Exp ${stamp} r${rank} n${n}`,
+              slug: `e2e-exp-${stamp}-${n}`,
+              type_definition_id: typeId,
+              custom_fields: { [fieldName]: rank },
+            },
+          },
+        },
+      });
+      expect(res.status(), await res.text()).toBe(201);
+    }
+  });
+
+  test.afterEach(async ({ page }) => {
+    await page.goto(`/editor?type=${typeName}`);
+    await waitForLiveConnected(page);
+    const rows = page.locator(`li[id^="${typeName}-"]`);
+    while (await rows.count()) {
+      await page.getByLabel("Select all").check();
+      await page.locator('button[phx-click="bulk"][phx-value-action="delete"]').click();
+      await page.locator('button[phx-click="confirm_bulk"]').click();
+      await expect(page.locator("#flash-info, #flash-error").first()).toBeVisible();
+      await page.goto(`/editor?type=${typeName}`);
+      await waitForLiveConnected(page);
+    }
+
+    await page.goto("/editor/fields");
+    const field = page.locator('li[id^="field-"]').filter({ has: page.locator(`code:text-is("${fieldName}")`) });
+    if (await field.count()) {
+      page.once("dialog", dialog => dialog.accept());
+      await field.getByRole("button", { name: "Delete field" }).click();
+      await expect(field).toHaveCount(0);
+    }
+
+    await page.goto("/editor/types");
+    const type = page.locator("li[id^='type-']").filter({ hasText: typeName });
+    if (await type.count()) {
+      page.once("dialog", dialog => dialog.accept());
+      await type.getByRole("button", { name: "Archive content type" }).click();
+      await expect(type).toHaveCount(0);
+    }
+  });
+
+  test("a CSV honours a field filter and a column; Export selected sends only the selected ids", async ({
+    page,
+  }) => {
+    await page.goto(`/editor?type=${typeName}`);
+    await waitForLiveConnected(page);
+
+    // The saved list columns are what the export's field columns are.
+    await page.locator("#content-columns-toggle").click();
+    await page.locator("#content-columns-panel").getByRole("checkbox", { name: "Rank" }).check();
+
+    await page.locator("#toggle-filters").click();
+    await page.locator("#field-filter-op").selectOption("gte");
+    await page.locator("#field-filter-value").fill("5");
+    await page.locator("#field-filter-add").click();
+    await expect(page.locator("#field-filter-chip-0")).toContainText("Rank ≥ 5");
+
+    await page.locator("#content-export-toggle").click();
+    await expect(page.locator("#export-summary")).toContainText(`Export ${ranks.filter(rank => rank >= 5).length} matching`);
+
+    const [download] = await Promise.all([page.waitForEvent("download"), page.locator("#export-csv").click()]);
+    expect(download.suggestedFilename()).toMatch(/\.csv$/);
+
+    const rows = await csvRows(download);
+    expect(rows).toHaveLength(ranks.filter(rank => rank >= 5).length);
+    expect(rows.every(row => Number(row[fieldName]) >= 5)).toBe(true);
+    expect(rows.every(row => row.title.startsWith(`Exp ${stamp} `))).toBe(true);
+
+    // Export selected: back to the whole list, two rows ticked.
+    await page.locator("#field-filter-chip-0").click();
+    await expect(page.locator("#field-filter-chip-0")).toHaveCount(0);
+
+    const listed = page.locator(`li[id^="${typeName}-"]`);
+    await expect(listed).toHaveCount(ranks.length);
+    const picked = [await listed.nth(0).getAttribute("id"), await listed.nth(2).getAttribute("id")];
+    const pickedIds = picked.map(id => String(id).slice(typeName.length + 1));
+
+    await listed.nth(0).getByRole("checkbox").first().check();
+    await listed.nth(2).getByRole("checkbox").first().check();
+    await expect(page.locator("#content-selected-count")).toContainText("2 selected");
+
+    const [selectedDownload] = await Promise.all([
+      page.waitForEvent("download"),
+      page.locator("#bulk-export-selected").click(),
+    ]);
+    const selectedRows = await csvRows(selectedDownload);
+
+    expect(selectedRows.map(row => row.id).sort()).toEqual([...pickedIds].sort());
   });
 });

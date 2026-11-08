@@ -193,7 +193,10 @@ config :kiln_cms, KilnCMSWeb.RateLimit,
     # for its own tests.
     gql_join: {1_000_000, :timer.minutes(1)},
     bridge_join: {1_000_000, :timer.minutes(1)},
-    collab_join: {1_000_000, :timer.minutes(1)}
+    collab_join: {1_000_000, :timer.minutes(1)},
+    # The export suite downloads many times as the same seeded actors
+    # (#2293); `ContentExportControllerTest` lowers it back for its 429 test.
+    export: {1_000_000, :timer.minutes(1)}
   }
 
 # Per-account auth budgets (#478). The whole suite signs in as seeded users and
@@ -393,3 +396,8 @@ config :kiln_cms, :embed_origins_locked, false
 # key in the developer's shell or a generated one left in the test database; the
 # provenance tests turn it on and supply a key themselves.
 config :kiln_cms, KilnCMS.Provenance, enabled: false
+
+# Breached-password check (#2240): off in the suite, so no test calls a third
+# party; the tests that exercise it switch it on with a stub for their own
+# duration (`KilnCMS.BreachedPasswordFixtures`).
+config :kiln_cms, KilnCMS.Accounts.BreachedPassword, enabled: false

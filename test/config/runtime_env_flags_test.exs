@@ -55,7 +55,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
             KILN_PROVENANCE_ENABLED TENANT_STRICT_HOST API_DOCS_ENABLED
             GRAPHQL_INTROSPECTION_ENABLED KILN_API_REJECT_INVALID_BEARER
-            BACKUP_ENABLED OEMBED_ENABLED
+            BACKUP_ENABLED OEMBED_ENABLED BACKUP_MEDIA_PART_MB BACKUP_MEDIA_EXCLUDE
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
             BRAND_PRIMARY_COLOR ASK_RERANK SEARCH_CHUNK_LONG_DOCUMENTS
@@ -64,6 +64,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             SEARCH_KEYWORD_ANY_IDF_COVERAGE SEARCH_TERM_GATE SEARCH_TERM_GATE_MIN_SHARE
             KILN_DEMO_RESET KILN_DEMO_RESET_CRON KILN_DEMO_GOLDEN_PATH
             KILN_FEDERATION_ENABLED
+            BREACHED_PASSWORD_CHECK BREACHED_PASSWORD_POLICY
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
             AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
             KILN_IMAGE_TRANSFORM_KEY KILN_IMAGE_TRANSFORM_UNSIGNED
@@ -963,6 +964,53 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
     end
   end
 
+  describe "media archive parts and exclusions (#2218)" do
+    @part_path [:kiln_cms, KilnCMS.Backups, :media_part_bytes]
+    @exclude_path [:kiln_cms, KilnCMS.Backups, :media_exclude]
+
+    test "BACKUP_MEDIA_PART_MB is read in MB and stored in bytes" do
+      assert get_in(eval(%{"BACKUP_MEDIA_PART_MB" => " 64 "}), @part_path) == 64 * 1_048_576
+      assert get_in(eval(%{"BACKUP_MEDIA_PART_MB" => "16"}), @part_path) == 16 * 1_048_576
+      assert get_in(eval(%{"BACKUP_MEDIA_PART_MB" => "10240"}), @part_path) == 10_240 * 1_048_576
+    end
+
+    test "unset or blank writes nothing, so the 400 MB default stands, silently" do
+      for value <- [nil, "", "  "] do
+        {config, stderr} = eval_io(%{"BACKUP_MEDIA_PART_MB" => value}, :prod)
+        assert get_in(config, @part_path) == nil
+        refute stderr =~ "BACKUP_MEDIA_PART_MB"
+      end
+    end
+
+    test "out of range or unparseable values keep the default and warn naming the range" do
+      for value <- ["0", "5", "15", "10241", "999999", "seven", "3.5", "64 MB"] do
+        {config, stderr} = eval_io(%{"BACKUP_MEDIA_PART_MB" => value}, :prod)
+
+        assert get_in(config, @part_path) == nil,
+               "BACKUP_MEDIA_PART_MB=#{inspect(value)} must be refused, not clamped"
+
+        assert stderr =~ "BACKUP_MEDIA_PART_MB"
+        assert stderr =~ "from 16 to 10240"
+
+        assert {"BACKUP_MEDIA_PART_MB", ^value, {:integer_in, 16, 10_240}} =
+                 config
+                 |> get_in([:kiln_cms, :config_warnings])
+                 |> Enum.find(&(elem(&1, 0) == "BACKUP_MEDIA_PART_MB"))
+      end
+    end
+
+    test "BACKUP_MEDIA_EXCLUDE splits on commas, trims and drops blanks" do
+      assert get_in(eval(%{"BACKUP_MEDIA_EXCLUDE" => " tmp/** , ,cache/*.bin,"}), @exclude_path) ==
+               ["tmp/**", "cache/*.bin"]
+    end
+
+    test "BACKUP_MEDIA_EXCLUDE unset, blank or only separators leaves exclusions off" do
+      for value <- [nil, "", "  ", " , ,"] do
+        assert get_in(eval(%{"BACKUP_MEDIA_EXCLUDE" => value}), @exclude_path) == nil
+      end
+    end
+  end
+
   # #1089: this used to be validated only in `KilnCMS.Branding`, whose rejection
   # is a bare `Logger.warning` — dropped by `Sentry.LoggerHandler`'s defaults, so
   # container stdout and nowhere else, for a value that changes what every page
@@ -1325,6 +1373,52 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
       # config.exs, so the key is simply absent from what it returns.
       assert public_base_url(%{"PUBLIC_BASE_URL" => "https://cms.example.com"}, :test) == nil
       assert Application.get_env(:kiln_cms, :public_base_url) == "http://localhost:4000"
+    end
+  end
+
+  describe "BREACHED_PASSWORD_* (#2240)" do
+    defp breach_config(vars, env \\ :prod),
+      do:
+        vars
+        |> eval(env)
+        |> get_in([:kiln_cms, KilnCMS.Accounts.BreachedPassword])
+        |> Kernel.||([])
+
+    test "unset writes nothing, leaving the check on with the :warn default" do
+      assert breach_config(%{}) == []
+    end
+
+    test "BREACHED_PASSWORD_CHECK=false is the kill switch, in any spelling" do
+      for value <- ["false", "FALSE", "0", "off", " no "] do
+        assert breach_config(%{"BREACHED_PASSWORD_CHECK" => value})[:enabled] == false
+      end
+    end
+
+    test "an explicit true, or a value it cannot read, never turns anything on or off" do
+      assert breach_config(%{"BREACHED_PASSWORD_CHECK" => "true"})[:enabled] == nil
+
+      {config, stderr} =
+        eval_io(%{"BREACHED_PASSWORD_CHECK" => "maybe"}, :prod)
+
+      assert get_in(config, [:kiln_cms, KilnCMS.Accounts.BreachedPassword]) in [nil, []]
+      assert stderr =~ "BREACHED_PASSWORD_CHECK"
+    end
+
+    test "BREACHED_PASSWORD_POLICY sets the operator default" do
+      for {value, policy} <- [{"off", :off}, {"WARN", :warn}, {" block ", :block}] do
+        assert breach_config(%{"BREACHED_PASSWORD_POLICY" => value})[:default_policy] == policy
+      end
+    end
+
+    test "an unrecognized policy keeps the default and warns" do
+      {config, stderr} = eval_io(%{"BREACHED_PASSWORD_POLICY" => "strict"}, :prod)
+      assert get_in(config, [:kiln_cms, KilnCMS.Accounts.BreachedPassword]) in [nil, []]
+      assert stderr =~ "BREACHED_PASSWORD_POLICY"
+    end
+
+    test "the policy is not read in the test env, so an exported value cannot change the suite" do
+      assert breach_config(%{"BREACHED_PASSWORD_POLICY" => "block"}, :test)[:default_policy] ==
+               nil
     end
   end
 end

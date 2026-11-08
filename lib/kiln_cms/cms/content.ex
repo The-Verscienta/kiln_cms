@@ -2820,6 +2820,9 @@ defmodule KilnCMS.CMS.Content do
           # leading indentation is a code block, not noise.
           argument :body_markdown, :string, constraints: [trim?: false, allow_empty?: true]
           change KilnCMS.CMS.Changes.ApplyBlocksInput
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.ApplyCustomFields
           # AFTER `ApplyCustomFields`: the schedule this reads is the coerced
           # value that changeset writes, not the editor's raw parts (#766).
@@ -2887,6 +2890,9 @@ defmodule KilnCMS.CMS.Content do
           argument :block_tree, {:array, :map}
           argument :body_markdown, :string, constraints: [trim?: false, allow_empty?: true]
           change KilnCMS.CMS.Changes.ApplyBlocksInput
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.ApplyCustomFields
           # AFTER `ApplyCustomFields` — see `:create` (#766).
           change KilnCMS.CMS.Changes.SetNextOccurrence
@@ -3011,6 +3017,9 @@ defmodule KilnCMS.CMS.Content do
           unquote_splicing(merge_changes.())
           unquote_splicing(merge_validations.())
 
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.ApplyCustomFields
           # AFTER `ApplyCustomFields` — see `:create` (#766).
           change KilnCMS.CMS.Changes.SetNextOccurrence
@@ -3091,6 +3100,9 @@ defmodule KilnCMS.CMS.Content do
           argument :fields, :map
           change filter(expr(^ref(:state) == :published))
           change optimistic_lock(:lock_version)
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.StageWorkingFields
           change KilnCMS.CMS.Changes.StampWorkingCopy
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
@@ -3129,6 +3141,9 @@ defmodule KilnCMS.CMS.Content do
 
           change filter(expr(^ref(:state) == :published and not is_nil(^ref(:working_copy_at))))
 
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.PromoteWorkingCopy
           # A held rename leaves its 301 now, when the new address goes live.
           change KilnCMS.CMS.Changes.RecordSlugRedirect
@@ -3287,6 +3302,9 @@ defmodule KilnCMS.CMS.Content do
           # Wednesday must not store Monday's `days_between(today(), …)` while
           # its artifact says Wednesday's. Never touches an editable value —
           # this is `ApplyCustomFields`' computed-only refresh path.
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
@@ -3336,6 +3354,9 @@ defmodule KilnCMS.CMS.Content do
           # Wednesday must not store Monday's `days_between(today(), …)` while
           # its artifact says Wednesday's. Never touches an editable value —
           # this is `ApplyCustomFields`' computed-only refresh path.
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
@@ -3609,6 +3630,11 @@ defmodule KilnCMS.CMS.Content do
           require_atomic? false
           change set_attribute(:archived_at, nil)
 
+          # While it sat in the trash another record may have taken a
+          # `unique` custom-field value (#2276): the lookup ignores trashed
+          # records, so the restore re-checks.
+          change KilnCMS.CMS.Changes.CheckUniqueFields
+
           # Trashing is a soft delete: `:destroy` runs `DeleteArtifacts`, which
           # purges the fired artifacts AND enqueues a Meilisearch removal — but
           # it does not change `state`, so a trashed published document is still
@@ -3871,6 +3897,9 @@ defmodule KilnCMS.CMS.Content do
           require_atomic? false
           accept []
           change KilnCMS.CMS.Changes.UnchangedSinceRead
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.KeepUpdatedAt
           # The fire carries the pinned date (`Changes.FireArtifacts`), so the
@@ -3985,6 +4014,14 @@ defmodule KilnCMS.CMS.Content do
         # pass untouched; admins are exempt (see the change module).
         change KilnCMS.CMS.Changes.EnforceFieldGrants, on: [:update]
 
+        # Per-custom-field grants and read restrictions (#2281). Global
+        # changes run AFTER an action's own, so this judges the coerced map
+        # `ApplyCustomFields` wrote, against the keys the editor supplied. On
+        # create too: a hidden key cannot be written, nor one outside a
+        # per-key grant. (`RestoreHiddenFields` is the action-level change
+        # that runs BEFORE `ApplyCustomFields` and `PromoteWorkingCopy`.)
+        change KilnCMS.CMS.Changes.EnforceCustomFieldGrants, on: [:create, :update]
+
         # A proposed publish date (#1812) is answered by a real one: setting
         # `scheduled_at`, or publishing, clears the proposal.
         change KilnCMS.CMS.Changes.ClearProposedPublishAt, on: [:update]
@@ -4027,6 +4064,12 @@ defmodule KilnCMS.CMS.Content do
         # others wrote — `PromoteWorkingCopy`'s promoted values included — and
         # decides in a `before_action` hook, after `RestoreVersion`'s fold.
         change KilnCMS.CMS.Changes.RecordChangeSeverity, on: [:update]
+
+        # What a read restriction hides from an editor (#2281) is left out of
+        # the record a write RETURNS too (JSON:API, GraphQL, MCP and the
+        # console all serialize it). After the commit, and registered last, so
+        # no other hook, version or notification sees the masked record.
+        change KilnCMS.CMS.Changes.MaskHiddenFields, on: [:create, :update]
       end
 
       validations do

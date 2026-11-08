@@ -80,6 +80,10 @@ defmodule KilnCMS.Application do
       # Host→org resolution, on its own eviction schedule and the only cache
       # that remembers a miss (#659).
       KilnCMS.Cache.Hosts,
+      # Per-org IP block rules, compiled, for the edge check (#2242). Its own
+      # instance so a content bust never empties it and a flood of orgs cannot
+      # evict published pages.
+      KilnCMS.Security.IpBlocklist,
       # Content-addressed embedding vectors for the compute-on-demand path
       # (#852). Its OWN instance so an editing session cannot evict the
       # published records `Firing.Delivery` serves from during a DB outage
@@ -92,6 +96,12 @@ defmodule KilnCMS.Application do
       # start with a duplicate-id error.
       Supervisor.child_spec({Cachex, [name: KilnCMS.Accounts.WebAuthn.challenge_cache()]},
         id: KilnCMS.Accounts.WebAuthn.challenge_cache()
+      ),
+      # One-shot "breached password" notes between setting a password and the
+      # sign-in that follows it (#2240) — TTL-only, node-local, best-effort, and
+      # apart from the content cache so eviction pressure cannot drop one.
+      Supervisor.child_spec({Cachex, [name: KilnCMS.Accounts.PasswordNotice.cache()]},
+        id: KilnCMS.Accounts.PasswordNotice.cache()
       ),
       # Bounded LRW cache of remote ActivityPub actor documents (#966), so an
       # inbound activity that needs one does not re-fetch it per request. Its

@@ -281,6 +281,7 @@ defmodule KilnCMS.Billing.PrivacyTest do
       for key <- [
             :billing_settings_purged,
             :billing_events_purged,
+            :backup_runs_purged,
             :memberships_scrubbed,
             :tiers_deactivated
           ] do

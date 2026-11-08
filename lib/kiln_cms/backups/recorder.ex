@@ -1,0 +1,306 @@
+defmodule KilnCMS.Backups.Recorder do
+  @moduledoc """
+  The worker's side of a `KilnCMS.Backups.Run` (#2217): an explicit accumulator
+  of what a backup has done so far, and the best-effort writes that persist it.
+
+  The worker threads one `%Recorder{}` through its steps (no process
+  dictionary): `log/4` and `add_artifact/2` only change the struct, while
+  `progress/1`, `finish/1` and `fail/2` write it.
+
+  ## Best-effort, always
+
+  A backup is the product; its history row is a record of it. Every write here
+  runs inside a boundary that turns a refusal, an error or a raise into a
+  warning and carries on with the last row it had, so a failed Run write — a
+  revoked grant, a lost connection, the row deleted by a database restore mid-run —
+  never fails a good backup, and never deletes one. With no row (`run: nil`,
+  after a stamp collision or a failed start) every call is a no-op.
+  """
+  alias KilnCMS.Backups
+  alias KilnCMS.Backups.{Artifact, Redact}
+
+  require Logger
+
+  @type t :: %__MODULE__{
+          run: KilnCMS.Backups.Run.t() | nil,
+          components: [:db | :media],
+          artifacts: [map()],
+          log: [map()]
+        }
+
+  defstruct run: nil, components: [], artifacts: [], log: []
+
+  @doc """
+  Open the run for an attempt. On a stamp collision or any write error the
+  attempt proceeds without a row.
+  """
+  @spec open(String.t(), String.t(), DateTime.t(), [:db | :media], integer() | nil) :: t()
+  def open(stamp, trigger, started_at, components, job_id) do
+    attrs = %{
+      stamp: stamp,
+      trigger: trigger,
+      components: components,
+      started_at: started_at,
+      oban_job_id: job_id
+    }
+
+    case safely("open", fn -> Backups.start_run(attrs, actor: Backups.system()) end) do
+      {:ok, run} -> %__MODULE__{run: run, components: components}
+      _ -> %__MODULE__{components: components}
+    end
+  end
+
+  @doc """
+  Re-open the run for `stamp` as `running` (#2218), through its `:resume` action:
+  a failed (or stale-running) in-app run goes back to work with its old outcome
+  cleared, and the accumulator starts from the run's existing log so the history
+  keeps the first attempt's lines and gains the resume.
+
+  Unlike every other call here this one reports `{:error, reason}`: the caller
+  must refuse the resume when the run can't be re-opened (it is no longer
+  failed, the grant is revoked, the row is gone), not carry on without a row.
+  """
+  @spec reopen(String.t()) :: {:ok, t()} | {:error, term()}
+  def reopen(stamp) do
+    result =
+      safely("reopen", fn ->
+        with {:ok, %{} = run} <- Backups.get_run_by_stamp(stamp, actor: Backups.system()) do
+          Backups.resume_run(run, %{}, actor: Backups.system())
+        end
+      end)
+
+    case result do
+      {:ok, %{} = run} ->
+        log = Enum.map(run.log, &Map.take(&1, [:at, :level, :step, :message]))
+        {:ok, %__MODULE__{run: run, components: run.components, artifacts: [], log: log}}
+
+      _ ->
+        {:error, :not_resumable}
+    end
+  end
+
+  @doc """
+  Record a refused attempt (no `pg_dump`, backups disabled) as a `skipped` run.
+  The manifest is not touched by the caller.
+  """
+  @spec skip(String.t(), String.t(), DateTime.t(), [:db | :media], String.t()) :: :ok
+  def skip(stamp, trigger, started_at, components, reason) do
+    attrs = %{
+      stamp: stamp,
+      trigger: trigger,
+      components: components,
+      started_at: started_at,
+      error: reason
+    }
+
+    safely("skip", fn -> Backups.skip_run(attrs, actor: Backups.system()) end)
+    :ok
+  end
+
+  @doc "Append a log line. Redaction and the length bound happen when it is written."
+  @spec log(t(), :info | :warn | :error, String.t(), term()) :: t()
+  def log(%__MODULE__{} = rec, level, step, message) do
+    entry = %{at: DateTime.utc_now(), level: level, step: step, message: to_string(message)}
+    %{rec | log: rec.log ++ [entry]}
+  end
+
+  @doc "Add a landed artifact, given as the worker's `%{kind, path, bytes, verified}` map."
+  @spec add_artifact(t(), map()) :: t()
+  def add_artifact(%__MODULE__{} = rec, artifact) do
+    case Artifact.from_manifest(artifact) do
+      {:ok, attrs} -> %{rec | artifacts: rec.artifacts ++ [attrs]}
+      :error -> rec
+    end
+  end
+
+  @doc """
+  Set the status of one destination (`"rclone:<remote>"`) for the file called
+  `name`. `error` is redacted and capped here.
+
+  `name` is a single-file artifact's name, or the name of one PART of a media
+  set (the artifact itself is the logical `kiln-media-<stamp>`; see
+  `Artifact.files/1`). A part's result lands on the part, and the artifact's own
+  destination is re-derived from all its parts, as `Artifact.group_files/1`
+  does: `ok` only when every part reached the destination, else the first part
+  that did not (a part not attempted yet leaves it `pending`).
+  """
+  @spec put_destination(t(), String.t(), String.t(), :ok | {:error, term()}) :: t()
+  def put_destination(%__MODULE__{} = rec, name, key, result) do
+    entry =
+      case result do
+        :ok ->
+          %{"status" => "ok", "at" => now()}
+
+        {:error, error} ->
+          %{"status" => "failed", "at" => now(), "error" => Redact.text(error, [], 500)}
+      end
+
+    artifacts =
+      for attrs <- rec.artifacts do
+        cond do
+          attrs.name == name ->
+            %{attrs | destinations: Map.put(attrs.destinations, key, entry)}
+
+          Map.get(attrs, :parts, []) != [] and name in Artifact.files(attrs) ->
+            put_part_destination(attrs, name, key, entry)
+
+          true ->
+            attrs
+        end
+      end
+
+    %{rec | artifacts: artifacts}
+  end
+
+  defp put_part_destination(attrs, name, key, entry) do
+    parts =
+      Enum.map(attrs.parts, fn part ->
+        if part["name"] == name,
+          do: Map.update(part, "destinations", %{key => entry}, &Map.put(&1, key, entry)),
+          else: part
+      end)
+
+    %{
+      attrs
+      | parts: parts,
+        destinations: Map.put(attrs.destinations, key, aggregate(parts, key))
+    }
+  end
+
+  defp aggregate(parts, key) do
+    entries = for part <- parts, entry = get_in(part, ["destinations", key]), do: entry
+
+    cond do
+      failing = Enum.find(entries, &(&1["status"] != "ok")) -> failing
+      length(entries) == length(parts) -> List.last(entries)
+      true -> %{"status" => "pending"}
+    end
+  end
+
+  @doc "Persist what has happened so far."
+  @spec progress(t()) :: t()
+  def progress(%__MODULE__{run: nil} = rec), do: rec
+
+  def progress(%__MODULE__{} = rec),
+    do: write(rec, "progress", &Backups.record_run_progress/3)
+
+  @doc "Close the run as succeeded."
+  @spec finish(t()) :: t()
+  def finish(%__MODULE__{run: nil} = rec), do: rec
+  def finish(%__MODULE__{} = rec), do: write(rec, "finish", &Backups.finish_run/3)
+
+  @doc "Close the run as failed. `error` is redacted and capped when written."
+  @spec fail(t(), String.t()) :: t()
+  def fail(%__MODULE__{run: nil} = rec, _error), do: rec
+
+  def fail(%__MODULE__{} = rec, error),
+    do: write(rec, "fail", &Backups.fail_run/3, %{error: error})
+
+  @doc """
+  Mark `local` as `pruned` on the artifacts of OTHER runs whose files the
+  retention sweep just deleted (`names` are file names). Best-effort per run.
+
+  A media set's parts are one artifact: each deleted part is marked, and the
+  artifact itself once none of its files is left to mark. Names that are not
+  artifacts (a checksum sidecar) are ignored.
+  """
+  @spec mark_pruned([String.t()]) :: :ok
+  def mark_pruned(names) do
+    at = now()
+
+    names
+    |> Enum.group_by(fn name ->
+      with {:ok, %{stamp: stamp}} <- Artifact.parse_file(name), do: stamp
+    end)
+    |> Enum.each(fn
+      {stamp, stamp_names} when is_binary(stamp) -> mark_run_pruned(stamp, stamp_names, at)
+      _unparsed -> :ok
+    end)
+  end
+
+  defp mark_run_pruned(stamp, names, at) do
+    safely("prune", fn ->
+      with {:ok, %{} = run} <- Backups.get_run_by_stamp(stamp, actor: Backups.system()) do
+        artifacts = Enum.map(run.artifacts, &prune_artifact(&1, names, at))
+        Backups.record_run_progress(run, %{artifacts: artifacts}, actor: Backups.system())
+      end
+    end)
+
+    :ok
+  end
+
+  @artifact_fields [:kind, :name, :bytes, :sha256, :verified, :parts, :encrypted?, :destinations]
+
+  defp prune_artifact(artifact, names, at) do
+    attrs = Map.take(artifact, @artifact_fields)
+    pruned = %{"status" => "pruned", "at" => at}
+
+    case attrs.parts do
+      [] ->
+        if artifact.name in names, do: put_local(attrs, pruned), else: attrs
+
+      parts ->
+        prune_parts(attrs, parts, names, pruned)
+    end
+  end
+
+  defp prune_parts(attrs, parts, names, pruned) do
+    parts =
+      Enum.map(parts, fn part ->
+        if part["name"] in names, do: put_local_part(part, pruned), else: part
+      end)
+
+    attrs = %{attrs | parts: parts}
+    if Enum.all?(parts, &local_pruned?/1), do: put_local(attrs, pruned), else: attrs
+  end
+
+  defp put_local(attrs, pruned),
+    do: %{attrs | destinations: Map.put(attrs.destinations, "local", pruned)}
+
+  defp put_local_part(part, pruned) do
+    Map.update(part, "destinations", %{"local" => pruned}, &Map.put(&1, "local", pruned))
+  end
+
+  defp local_pruned?(part), do: get_in(part, ["destinations", "local", "status"]) == "pruned"
+
+  defp write(rec, label, fun, extra \\ %{}) do
+    params =
+      Map.merge(%{components: rec.components, artifacts: rec.artifacts, log: rec.log}, extra)
+
+    case safely(label, fn -> fun.(rec.run, params, actor: Backups.system()) end) do
+      {:ok, run} -> %{rec | run: run}
+      _ -> rec
+    end
+  end
+
+  # The boundary: a write that is refused, errors or raises is a warning, and
+  # the caller carries on. Returns the write's result, or `{:error, _}`.
+  defp safely(label, fun) do
+    case fun.() do
+      {:error, error} = result ->
+        warn(label, error)
+        result
+
+      result ->
+        result
+    end
+  rescue
+    error ->
+      warn(label, error)
+      {:error, error}
+  catch
+    kind, reason ->
+      warn(label, {kind, reason})
+      {:error, {kind, reason}}
+  end
+
+  defp warn(label, error) do
+    detail = error |> inspect(limit: 5, printable_limit: 300) |> Redact.text([], 300)
+
+    Logger.warning(
+      "Backup run record (#{label}) not written — the backup itself is unaffected: #{detail}"
+    )
+  end
+
+  defp now, do: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+end

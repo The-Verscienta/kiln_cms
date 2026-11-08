@@ -19,6 +19,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     only: [blank_to_nil: 1, selected_tag_ids: 2, user_label: 1, with_counts: 2]
 
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMSWeb.ContentEditor.Conditional
   alias KilnCMSWeb.ContentEditor.GroupRows
 
   require Logger
@@ -1020,6 +1021,37 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       else: group_input(assign(assigns, :row, GroupRows.row(assigns.value)))
   end
 
+  # A `:json` field (#2278): a monospace textarea, with the stored structure
+  # pretty-printed. After a failed save the value is what was posted, so the
+  # editor sees their own text (and the parse error beside it), not a
+  # normalised copy.
+  def custom_field_input(%{definition: %{field_type: :json}} = assigns) do
+    assigns = assign(assigns, :json_text, json_text(assigns.value))
+
+    ~H"""
+    <div>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
+      <textarea
+        id={cf_id(@definition)}
+        name={@name}
+        rows="8"
+        spellcheck="false"
+        placeholder={@placeholder}
+        required={@definition.required}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        class="field-input font-mono text-xs"
+      >{@json_text}</textarea>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/70">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
   # Everything else is registry-driven. A composite field type
   # (`Kiln.FieldType` declaring `input_parts/1`, e.g. `:geolocation`) renders a
   # labelled input per part; anything else renders a single `<input>`.
@@ -1121,6 +1153,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
             :for={sub <- @subs}
             group={@definition}
             sub={sub}
+            subs={@subs}
+            row={@row}
             index={nil}
             name={"#{@name}[#{sub.name}]"}
             value={Map.get(@row, sub.name)}
@@ -1252,6 +1286,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
                 :for={sub <- @subs}
                 group={@definition}
                 sub={sub}
+                subs={@subs}
+                row={row}
                 index={index}
                 name={"#{@name}[#{index}][#{sub.name}]"}
                 value={Map.get(row, sub.name)}
@@ -1306,10 +1342,45 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
 
   attr :group, :map, required: true
   attr :sub, :map, required: true
+  # The group's sub-fields and this row's values, for `visible_when` (#2277).
+  attr :subs, :list, required: true
+  attr :row, :map, required: true
   attr :index, :any, required: true
   attr :name, :string, required: true
   attr :value, :any, required: true
   attr :errors, :list, required: true
+
+  # A sub-field with a `visible_when` rule sits in the conditional wrapper
+  # (its rule reads same-row siblings); `required_when` is left to the save,
+  # as `required` is.
+  defp group_cell(assigns) do
+    state = Conditional.effective(assigns.subs, &Map.get(assigns.row, &1))[assigns.sub.name]
+
+    assigns =
+      assigns
+      |> assign(:state, state)
+      |> assign(:cond_id, "cf-cond-" <> group_cell_key(assigns.group, assigns.index, assigns.sub))
+      |> assign(:prefix, String.replace_suffix(assigns.name, "[#{assigns.sub.name}]", ""))
+
+    ~H"""
+    <Conditional.conditional
+      id={@cond_id}
+      definition={@sub}
+      prefix={@prefix}
+      state={@state}
+      required={false}
+    >
+      <.group_cell_input
+        group={@group}
+        sub={@sub}
+        index={@index}
+        name={@name}
+        value={@value}
+        errors={@errors}
+      />
+    </Conditional.conditional>
+    """
+  end
 
   # One sub-field of one row, through the same inputs a top-level field gets,
   # under an id of its own (`custom-field-<group>-<row>-<sub>`). The browser's
@@ -1319,7 +1390,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # A checkbox posts nothing when cleared — no hidden `"false"` — because a
   # posted `"false"` is not blank, and would turn every untouched row into a
   # filled-in one that its other required sub-fields then refuse.
-  defp group_cell(%{sub: %{field_type: :boolean}} = assigns) do
+  defp group_cell_input(%{sub: %{field_type: :boolean}} = assigns) do
     assigns = assign(assigns, :id, group_cell_id(assigns.group, assigns.index, assigns.sub))
 
     ~H"""
@@ -1343,7 +1414,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
-  defp group_cell(assigns) do
+  defp group_cell_input(assigns) do
     definition = %{
       assigns.sub
       | name: group_cell_key(assigns.group, assigns.index, assigns.sub),
@@ -1601,6 +1672,13 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   defp list_items(["" | items]), do: Enum.map(items, &to_string/1)
   defp list_items(items) when is_list(items), do: Enum.map(items, &to_string/1)
   defp list_items(value), do: select_terms(value)
+
+  defp json_text(value) when is_binary(value), do: value
+
+  defp json_text(value) when is_map(value) or is_list(value),
+    do: Jason.encode!(value, pretty: true)
+
+  defp json_text(_value), do: ""
 
   defp full?(%{max_items: max}, count) when is_integer(max), do: count >= max
   defp full?(_definition, _count), do: false

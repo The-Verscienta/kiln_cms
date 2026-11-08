@@ -100,6 +100,14 @@ that counting as a major.
   class names, and the `/editor/...` admin paths themselves.
 - **`KilnCMS.*` internals not named above** — changes, calculations, workers,
   firing internals, and anything marked `@doc false`.
+- **Which image the built-in logo and the home page screenshots are served
+  as.** Core renders the stock logo through `KilnCMSWeb.Layouts.brand_mark/1`
+  as a right-sized WebP/PNG pair, and the home page screenshots as WebP
+  `srcset`s (#2165). A custom `logo_url` is rendered as given. An overlay that
+  overrides `home.html.heex`, or renders `brand.logo_url` in its own `<img>`,
+  keeps its own markup and does not get these; call `brand_mark/1` to opt in
+  (it is `KilnCMSWeb.*`, so its shape is not promised). The `logo_url` value
+  in the branding API is unchanged.
 - **The console's own `side-*` classes and admin design tokens.** Those are the
   admin skin, and they are re-cut whenever the console is redesigned. Only the
   `public-*` classes on delivery pages are contract.
@@ -131,7 +139,9 @@ that counting as a major.
   compiled by the core's `:test` env; your overlay is not, and has its own
   test suite. What does transfer is the mechanic: `:plugins` replaces, exactly
   as `:ash_domains` and `:content_domains` do, so every core entry you want
-  kept has to be restated — and re-synced when you bump the pin.
+  kept has to be restated — and re-synced when you bump the pin. A core module that becomes a domain
+  (`KilnCMS.Backups`, #2217) must be added to your list on that bump, or
+  `mix ash.codegen` offers to drop its table.
 - **`to_markdown/1` on a block module.** `KilnCMS.Blocks.to_markdown/1` calls
   it for the `llm` fired surface when a block module exports it, and falls
   back to the block's `search_text/1` otherwise. It is probed with

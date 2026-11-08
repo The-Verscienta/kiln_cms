@@ -21,6 +21,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
 
   import KilnCMSWeb.ContentEditor.Shared, only: [custom_field_errors: 2, custom_field_value: 2]
 
+  alias KilnCMSWeb.ContentEditor.Conditional
   alias KilnCMSWeb.ContentEditor.GroupRows
   alias KilnCMSWeb.ContentEditor.Localization
 
@@ -38,9 +39,13 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   attr :broken_references, :list, required: true
   attr :record, :any, default: nil
   attr :reverse_fields, :list, default: []
+  # Names of the top-level fields the editor's role may read but not change
+  # (`KilnCMS.CMS.HiddenFields.console_access/4`, #2281).
+  attr :read_only, :list, default: []
 
   # What every field row needs from the panel.
   @row_assigns [
+    :read_only,
     :form,
     :localization,
     :kind,
@@ -49,11 +54,18 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
     :select_terms,
     :actor,
     :tenant,
-    :record
+    :record,
+    :conditions
   ]
 
   def custom_fields_panel(assigns) do
-    assigns = assign(assigns, :sections, sections(assigns.field_definitions))
+    assigns =
+      assigns
+      |> assign(:sections, sections(assigns.field_definitions))
+      |> assign(
+        :conditions,
+        Conditional.effective(assigns.field_definitions, &custom_field_value(assigns.form, &1))
+      )
 
     ~H"""
     <section
@@ -158,6 +170,9 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   attr :actor, :any, required: true
   attr :tenant, :any, required: true
   attr :record, :any, required: true
+  attr :read_only, :list, default: []
+  # `Conditional.effective/2` for the panel's fields (#2277): hidden / required now.
+  attr :conditions, :map, required: true
 
   # One field's input, its localization note, and — a shared field on a
   # translation (#1327) — the disabled fieldset that keeps it out of the
@@ -165,44 +180,69 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   # from the params keeps its stored value, the one the source variant's
   # publish copied in.
   defp field_row(assigns) do
+    state = Map.get(assigns.conditions, assigns.definition.name)
+
+    assigns =
+      assigns
+      |> assign(:state, state)
+      |> assign(:input_definition, Conditional.seed(assigns.definition, state))
+
     ~H"""
-    <fieldset
-      disabled={Localization.locked?(@localization, {:custom, @definition.name})}
-      class="contents"
+    <Conditional.conditional
+      id={"cf-cond-#{@definition.name}"}
+      definition={@definition}
+      prefix={"#{@form.name}[custom_fields]"}
+      state={@state}
     >
-      <%!-- A reference searches its target type as the editor (R9), so it
+      <fieldset
+        disabled={
+          Localization.locked?(@localization, {:custom, @definition.name}) or
+            @definition.name in @read_only
+        }
+        class="contents"
+      >
+        <%!-- A reference searches its target type as the editor (R9), so it
             is a component with its own search state; the value still lives
             in this form. --%>
-      <.live_component
-        :if={@definition.field_type == :reference}
-        module={KilnCMSWeb.ContentEditor.ReferencePicker}
-        id={"reference-picker-#{@definition.name}"}
-        definition={@definition}
-        name={"#{@form.name}[custom_fields][#{@definition.name}]"}
-        link_name={"#{@form.name}[_kiln_ref_link][#{@definition.name}]"}
-        value={custom_field_value(@form, @definition.name)}
-        errors={custom_field_errors(@form, @definition.name)}
-        locked={Localization.locked?(@localization, {:custom, @definition.name})}
-        actor={@actor}
-        tenant={@tenant}
-        source={%{id: @record && @record.id, type: to_string(@kind)}}
-      />
-      <.custom_field_input
-        :if={@definition.field_type != :reference}
-        definition={@definition}
-        name={"#{@form.name}[custom_fields][#{@definition.name}]"}
-        value={input_value(@form, @definition)}
-        errors={custom_field_errors(@form, @definition.name)}
-        options={field_options(@definition, assigns)}
-        placeholder={Localization.placeholder(@localization, {:custom, @definition.name})}
-      />
-      <Localization.localization_note
-        localization={@localization}
-        field={{:custom, @definition.name}}
-        kind={@kind}
-        inherited={Localization.inherited(@localization, {:custom, @definition.name})}
-      />
-    </fieldset>
+        <.live_component
+          :if={@definition.field_type == :reference}
+          module={KilnCMSWeb.ContentEditor.ReferencePicker}
+          id={"reference-picker-#{@definition.name}"}
+          definition={@definition}
+          name={"#{@form.name}[custom_fields][#{@definition.name}]"}
+          link_name={"#{@form.name}[_kiln_ref_link][#{@definition.name}]"}
+          value={custom_field_value(@form, @definition.name)}
+          errors={custom_field_errors(@form, @definition.name)}
+          locked={Localization.locked?(@localization, {:custom, @definition.name})}
+          actor={@actor}
+          tenant={@tenant}
+          source={%{id: @record && @record.id, type: to_string(@kind)}}
+        />
+        <.custom_field_input
+          :if={@definition.field_type != :reference}
+          definition={@input_definition}
+          name={"#{@form.name}[custom_fields][#{@definition.name}]"}
+          value={input_value(@form, @definition)}
+          errors={custom_field_errors(@form, @definition.name)}
+          options={field_options(@definition, assigns)}
+          placeholder={Localization.placeholder(@localization, {:custom, @definition.name})}
+        />
+        <Localization.localization_note
+          localization={@localization}
+          field={{:custom, @definition.name}}
+          kind={@kind}
+          inherited={Localization.inherited(@localization, {:custom, @definition.name})}
+        />
+        <p
+          :if={@definition.name in @read_only}
+          id={"cf-read-only-#{@definition.name}"}
+          class="-mt-2 flex items-center gap-1 text-xs text-base-content/70"
+        >
+          <.icon name="hero-lock-closed" class="size-3.5" />
+          {gettext("Your role can see this field but not change it.")}
+        </p>
+      </fieldset>
+    </Conditional.conditional>
     """
   end
 

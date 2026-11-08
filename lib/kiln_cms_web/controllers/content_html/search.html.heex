@@ -33,14 +33,14 @@
       @query != "" and @results.posts == [] and @results.pages == [] and
         @results.entries == []
     }
-    class="mt-8 text-base-content/60"
+    class="mt-8 text-base-content/70"
   >
     {gettext("No results for “%{query}”.", query: @query)}
   </p>
 
   <%!-- Shown for sparse results too — the fuzzy leg may have rescued hits
        from a typo, and this names the corrected term. --%>
-  <p :if={@suggestion} class="mt-4 text-base-content/60">
+  <p :if={@suggestion} class="mt-4 text-base-content/70">
     <a
       href={KilnCMS.I18n.localized_path(@locale, "/search") <> "?q=" <> URI.encode_www_form(@suggestion)}
       class="text-primary-ink hover:underline"
@@ -76,7 +76,7 @@
             )
           ]}
         >
-          {facet.name} <span class="text-base-content/60">({facet.count})</span>
+          {facet.name} <span class="text-base-content/70">({facet.count})</span>
         </a>
       </li>
     </ul>
@@ -134,7 +134,7 @@
       <li :for={entry <- @results.entries}>
         <a href={KilnCMS.I18n.localized_path(@locale, entry.path)} class="group block">
           <span class="font-medium group-hover:underline">{entry.title}</span>
-          <span class="ml-2 text-xs uppercase tracking-wide text-base-content/50">
+          <span class="ml-2 text-xs uppercase tracking-wide text-base-content/70">
             {entry.type_label}
           </span>
           <p :if={entry.excerpt} class="mt-1 text-sm text-base-content/70">{entry.excerpt}</p>

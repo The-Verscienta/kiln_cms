@@ -246,6 +246,43 @@ defmodule KilnCMS.Config.EnvTest do
     end
   end
 
+  describe "integer_in/3" do
+    # `BACKUP_MEDIA_PART_MB` (#2218): a whole number within bounds, refused
+    # (never clamped) outside them.
+
+    test "a whole number in range is returned, trimmed, bounds inclusive" do
+      for {value, parsed} <- [{"400", 400}, {" 400 ", 400}, {"16", 16}, {"10240", 10_240}] do
+        put(value)
+        assert Env.integer_in(@var, 16, 10_240) == {:ok, parsed}, inspect(value)
+      end
+    end
+
+    test "unset, blank and whitespace-only are :unset" do
+      for value <- [nil, "", " ", "\t\n"] do
+        put(value)
+        assert Env.integer_in(@var, 16, 10_240) == :unset, inspect(value)
+      end
+    end
+
+    test "out of range or not a whole number is refused" do
+      for value <- ["0", "5", "15", "10241", "999999", "-20", "seven", "3.5", "64 MB"] do
+        put(value)
+
+        assert quietly(fn -> Env.integer_in(@var, 16, 10_240) end) == :unrecognized,
+               inspect(value)
+      end
+    end
+
+    test "a refused value warns with the bounds and is recorded" do
+      Env.take_collected()
+      put("5")
+      stderr = capture_io(:stderr, fn -> Env.integer_in(@var, 16, 10_240) end)
+
+      assert stderr =~ "from 16 to 10240"
+      assert Env.collected() == [{@var, "5", {:integer_in, 16, 10_240}}]
+    end
+  end
+
   describe "float_in/4" do
     # `SEARCH_SEMANTIC_MAX_DISTANCE` and `SEARCH_KEYWORD_ANY_IDF_COVERAGE`
     # (#1936). Zero is a value for the first — the model-swap window — and a
@@ -651,7 +688,7 @@ defmodule KilnCMS.Config.EnvTest do
     # A literal list, so `covers every collecting reader` below fails when the
     # module grows one that is not here — which is how `positive_integer/1` and
     # then `one_of/2` each arrived after the guard was written.
-    @collecting_readers ~w(flag fetch truthy? positive_integer one_of float_in list_of record_unusable)
+    @collecting_readers ~w(flag fetch truthy? positive_integer one_of float_in integer_in list_of record_unusable)
 
     test "the guard below covers every reader on the module" do
       exported =

@@ -37,6 +37,23 @@ defmodule KilnCMS.Backups.Manifest do
   Paths are **relative to the backup directory**, so a manifest stays true
   when the directory is moved or read from a different mount.
 
+  ## Checksums and parts (#2218)
+
+  An entry may also carry `"sha256"` (hex of that file's bytes), and a media
+  entry written in parts carries `"part"` (1-based) and `"parts_total"`. Each
+  part is its own flat entry, in part order:
+
+  ```json
+  {"kind": "media", "path": "media/kiln-media-20260805-031700.part01.tar.gz",
+   "bytes": 419430400, "verified": true, "sha256": "3b1f…",
+   "part": 1, "parts_total": 2}
+  ```
+
+  The keys are additive and the version stays 1: a manifest without them reads
+  exactly as before (the keys are absent from the parsed entry, not `nil`), and
+  a reader that doesn't know them ignores them. `total_bytes/1` and
+  `verified?/1` count every part.
+
   ## Reading is total
 
   `read/1` never raises. A missing file, a truncated write, a manifest from a
@@ -46,10 +63,13 @@ defmodule KilnCMS.Backups.Manifest do
   """
 
   @type artifact :: %{
-          kind: String.t(),
-          path: String.t(),
-          bytes: non_neg_integer(),
-          verified: boolean()
+          required(:kind) => String.t(),
+          required(:path) => String.t(),
+          required(:bytes) => non_neg_integer(),
+          required(:verified) => boolean(),
+          optional(:sha256) => String.t(),
+          optional(:part) => pos_integer(),
+          optional(:parts_total) => pos_integer()
         }
 
   @type t :: %__MODULE__{
@@ -161,6 +181,9 @@ defmodule KilnCMS.Backups.Manifest do
       "artifacts" =>
         Enum.map(m.artifacts, fn a ->
           %{"kind" => a.kind, "path" => a.path, "bytes" => a.bytes, "verified" => a.verified}
+          |> put_present("sha256", Map.get(a, :sha256))
+          |> put_present("part", Map.get(a, :part))
+          |> put_present("parts_total", Map.get(a, :parts_total))
         end),
       "offsite" => m.offsite,
       "keep_days" => m.keep_days,
@@ -193,10 +216,25 @@ defmodule KilnCMS.Backups.Manifest do
         bytes: integer(entry["bytes"]) || 0,
         verified: entry["verified"] == true
       }
+      |> put_present(:sha256, sha256(entry["sha256"]))
+      |> put_present(:part, positive(entry["part"]))
+      |> put_present(:parts_total, positive(entry["parts_total"]))
     end
   end
 
   defp artifacts(_other), do: []
+
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
+
+  defp sha256(value) when is_binary(value) do
+    if value =~ ~r/\A[0-9a-fA-F]{64}\z/, do: String.downcase(value), else: nil
+  end
+
+  defp sha256(_value), do: nil
+
+  defp positive(value) when is_integer(value) and value >= 1, do: value
+  defp positive(_value), do: nil
 
   defp iso(nil), do: nil
   defp iso(%DateTime{} = dt), do: dt |> DateTime.truncate(:second) |> DateTime.to_iso8601()

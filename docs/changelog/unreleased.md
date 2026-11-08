@@ -7,6 +7,90 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="backup-media-parts-upgrade"></a>
+
+- **App-made media backups can now be several `kiln-media-<stamp>.partNN.tar.gz`
+  files; anything that globs `kiln-media-*.tar.gz` must accept them, and a
+  rollback hides them from History (#2218).** No migration and no setting to
+  change.
+  - **Naming.** A media library bigger than `BACKUP_MEDIA_PART_MB` (default 400)
+    is written as `kiln-media-<stamp>.part01.tar.gz`, `.part02.tar.gz`, and so
+    on (two digits, widening past 99). A library that fits in one part keeps the
+    legacy `kiln-media-<stamp>.tar.gz`. Check any rclone filter, monitoring or
+    retention script of your own that matches the old name; `scripts/restore.sh`
+    and `scripts/backup.sh verify`/`prune` already understand both.
+  - **Rolling the pin back is safe for the data but not for the view.** The
+    previous release's Importer and Presence ignore `.partNN` names, so part sets
+    do not show in History (and read as missing), while its prune glob
+    `kiln-*` would still age them out by file. The files are ordinary
+    `tar.gz` and restore by hand, one `tar -xzf` per part in numeric order. Nothing
+    is lost, nothing is migrated back.
+  - **Copying `$BACKUP_DIR` off-host with `rclone sync`?** Exclude `.work/**`:
+    the new resume state in `.work/<stamp>/` holds lists of media file names and
+    is removed when a backup succeeds.
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))
+
+<a id="builtin-field-type-names-upgrade"></a>
+
+- **The field type names `email`, `telephone`, `color`, `slug`, `time` and `json` are reserved (#2278).**
+  Kiln now ships a built-in type under each name (see
+  [Built-in format types](../extending-content.md#built-in-format-types)), and
+  a name can be registered only once.
+  - **Overlays and plugins.** A `Kiln.FieldType` that registers one of these
+    names must be renamed, in the module's `name/0` and in any stored
+    `FieldDefinition.field_type`. `mix kiln.plugins.doctor` fails with *collides
+    with a built-in field type* until you do.
+  - **Stored definitions.** A `FieldDefinition` whose `field_type` already
+    holds one of these names is now cast by the built-in type, not yours.
+    Values that do not pass its check (a malformed address, a domestic phone
+    number) are refused the next time that record is saved; stored values are
+    not rewritten. If the data matters, rename your type and migrate the
+    definitions before upgrading.
+  - **Rolling back.** No migration. Rolling the pin back restores the old
+    type; values saved meanwhile in the built-in's tidied form (a lowercased
+    domain, `+442079460958`) stay as stored.
+
+<a id="backup-history-upgrade"></a>
+
+- **Run `mix ash.migrate` for the backup history, and add `KilnCMS.Backups` to
+  an overlay's `:ash_domains` (#2217).** The migration
+  (`20261107205448_add_backup_runs`) creates one table, `backup_runs`. It is
+  expand-only and changes no existing data, so rolling the pin back is safe;
+  the table is simply unused.
+  - **Overlays that restate `:ash_domains`.** `KilnCMS.Backups` is now an Ash
+    domain (it was a plain module). `:ash_domains` replaces rather than merges,
+    so an overlay's `config/project.exs` that lists the core domains must add
+    `KilnCMS.Backups` (next to `KilnCMS.Billing`), as
+    `projects/example/project.exs` now does. Without it the resource sits
+    outside every configured domain and `mix ash.codegen` offers to drop the
+    `backup_runs` table. See [the overlay contract](../overlay-contract.md).
+  - **Nothing else to set.** No new environment variables; `manifest.json`,
+    `Backups.status/0` and the overview strip are unchanged, so cron-based
+    deployments keep working untouched.
+  ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217))
+
+<a id="breached-password-upgrade"></a>
+
+- **Run `mix ash.migrate` for the breached-password check, and decide whether
+  your deployment may call a third party (#2240).** The migration
+  (`20261107194057_add_site_password_policy`) creates one table,
+  `site_password_policy` (one row per organization, created lazily when an
+  admin saves the setting). It is expand-only and changes no existing data, so
+  rolling the pin back is safe; the table is simply unused.
+  - **New outbound call, on by default.** Setting a password (register, change,
+    reset, first-run setup) now sends the first five characters of the
+    password's SHA-1 hash to `api.pwnedpasswords.com`. The password, the full
+    hash and the account never leave the server. If the service is slow or
+    down, the password is accepted.
+  - **Air-gapped or no-egress deployments.** Set `BREACHED_PASSWORD_CHECK=false`
+    to make no call at all. Firewalls that allow only listed hosts should allow
+    `api.pwnedpasswords.com:443` instead, or the check quietly does nothing
+    (it fails open, logging a warning and emitting the telemetry event).
+  - **Overlays.** Run `mix ash.codegen` only if your overlay adds its own
+    resources; core's migration ships the table. See also the Breaking entry
+    for `Bootstrap.create_first_admin/1`.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240))
+
 <a id="reject-invalid-bearer-default-on"></a>
 
 - **An unverifiable bearer token is a `401` by default (#2161).** The
@@ -34,6 +118,12 @@ carries the reasoning.
     to buy time while you fix the client.
   - Unset now means on. Nothing to migrate and no config to change if your
     clients send valid tokens or none.
+  - **Counting them.** Each such request, refused or not, emits
+    `[:kiln_cms, :api, :invalid_bearer]` (`count: 1`; metadata `enforced`,
+    `surface`, `read?` and `reason: :expired | :malformed | :invalid`, read from
+    the unverified token and never sent to the client). Attach a handler to see
+    which clients still send a stale token before the escape hatch goes. See
+    [ADR 0017](../decisions/0017-an-unverifiable-bearer-flips-on-a-minor-with-a-breaking-note-and-is-counted-first.md).
 
 <a id="search-name-lexemes-upgrade"></a>
 
@@ -62,7 +152,6 @@ carries the reasoning.
   yet; when you create one (`mix kiln.reporting.sql`), re-run its `GRANT` lines
   after every upgrade that adds views, and after a demo reset.
 
-
 <a id="custom-fields-gin-upgrade"></a>
 
 - **Content tables gain a GIN index on `custom_fields`, built concurrently;
@@ -89,7 +178,38 @@ carries the reasoning.
   the migrations are expand-only: the previous release ignores the columns and
   gets `false` on insert. No re-fire is needed.
 
+<a id="custom-field-grants-upgrade"></a>
+
+- **Users, memberships and roles gain a `field_read_grants` column; overlays
+  run `mix ash.codegen`, commit the migration and run `mix ash.migrate`.** The
+  column is `map NOT NULL DEFAULT '{}'` on `users`, `org_memberships` and
+  `roles`, so the migration is expand-only and nothing is rewritten in a way
+  the previous release trips over. Rolling the pin back is safe, with two
+  effects to know first. A role that uses the new `custom_fields.<name>`
+  write keys is read by the older release as holding unknown field names, and
+  fails closed: those editors can change fewer fields, not more. The older
+  release also ignores `field_read_grants`, so a private custom field you had
+  hidden from some editors is visible to them again until you upgrade. Core's
+  own table is migrated by core's migration; the new column does not touch the
+  `kiln_reporting_v1` views.
+<a id="field-validation-upgrade"></a>
+
+- **Field definitions gain a `validation` column (#2276).** `field_definitions.validation` is `jsonb NOT NULL DEFAULT '{}'`: additive, instant, and every existing field starts with no constraints, so nothing about stored data or writes changes until an admin sets one. Rolling the pin back is safe (the old release ignores the column). Overlays that carry their own migrations run `mix ash.codegen` and commit the result.
+  - **Unique is not a database constraint.** Once an admin marks a field `unique`, the write path enforces it; raw SQL and a database restore bypass it. Run `mix kiln.fields.duplicates` (read-only, exits non-zero on repeats) after bulk imports or restores.
+
 ## Breaking
+
+<a id="breached-password-bootstrap-return"></a>
+
+- **`KilnCMS.Accounts.Bootstrap.create_first_admin/1` returns `{:ok, user, notices}` (#2240).**
+  `notices` is `[:password_breach]` when the typed password is in a known
+  breach and the site's policy allowed it, `[]` otherwise. Before it returned
+  `{:ok, user}`. The core `/setup` wizard is updated; an overlay or script that
+  matches `{:ok, user}` on this call must match the three-tuple. The error
+  returns (`{:error, :already_bootstrapped}`, `{:error, changeset_error}`)
+  are unchanged. The breach lookup now happens before the advisory-locked
+  transaction, so the lock is never held while waiting on the third party.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240))
 
 <a id="registration-no-enumeration"></a>
 
@@ -115,6 +235,299 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="backup-media-parts"></a>
+
+- **In-app media backups are written as independent `tar.gz` parts with SHA-256
+  checksums, and a failed backup can be resumed (#2218).** For platform admins at
+  `/editor/backups`, operators and anyone restoring.
+  - **Parts.** The media directory is split by file set, not by bytes, so every
+    `kiln-media-<stamp>.partNN.tar.gz` is a complete archive of its own that can
+    be listed, hashed, copied and restored alone. `BACKUP_MEDIA_PART_MB` (default
+    400; 16 to 10240, otherwise the default plus a boot warning) is a ceiling on
+    each part's uncompressed input, not an exact size; a file bigger than the cap
+    is its own part. `BACKUP_MEDIA_EXCLUDE` (for example `tmp/**,cache/**`) leaves
+    paths out. Empty directories and directory timestamps are not preserved; a
+    file created after the backup started is in the next one, and one deleted
+    meanwhile is dropped with a log line.
+  - **Checksums.** A SHA-256 per part and per set is recorded in
+    `manifest.json` (additive keys `sha256`, `part`, `parts_total`; `version`
+    stays 1), on the History row, and in `kiln-media-<stamp>.sha256` and
+    `kiln-db-<stamp>.sha256` sidecars in `sha256sum -c` format. They are copied
+    off-site with their artifact and pruned with their set. `Verified` now needs
+    `tar -tzf` to pass, the size to match the hash, and a hash to be recorded.
+    `scripts/backup.sh` (still one archive, no splitting) writes the same keys and
+    sidecars and `verify` checks every file of the newest stamp.
+  - **Resume.** Finished steps and parts are kept in
+    `<BACKUP_DIR>/.work/<stamp>/` (0700; removed on success; swept after three
+    days). A failed or interrupted run shows **Resume** in History for platform
+    admins; it reuses only parts whose recorded hash still verifies, so a resumed
+    set can mix times (the Run log says so) and a very large library converges over
+    repeated resumes. Console form: `Backups.enqueue(resume: stamp)`, or
+    `Worker.run(trigger, job_id, resume: stamp)`. The one write policy change is
+    `:resume` on `Backups.Run`, system actor only. A stuck run is now failed when
+    it has been quiet for 2h15m, measured from its last update, not its start.
+  - **Restore.** `scripts/restore.sh media` takes a legacy archive, any one part
+    (the siblings are found), several paths, or a stamp prefix. Before it
+    extracts anything it verifies the sidecar, requires parts `01..N` with no gap
+    or duplicate, lists every part, and refuses absolute or `..` member names and
+    links that point absolute or upward. No sidecar is a loud warning, or an abort
+    with `RESTORE_REQUIRE_CHECKSUM=1`. Importing a part set into History with a gap
+    marks it failed ("incomplete media set").
+  - **Prune and disk.** Retention treats a stamp (dump, all parts, sidecars) as
+    one set aged by its newest member, in the app and in `backup.sh`. There is
+    no free-space check: budget for the dump, the finished parts and one in flight.
+  - **Not here yet.** The automatic Oban job-per-step chain, and splitting in
+    `backup.sh`, are follow-ups; the issue stays open. The runbook is in
+    [backups.md](../backups.md#media-backups-in-parts-2218).
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))
+
+
+<a id="builtin-format-field-types"></a>
+
+- **Six built-in custom field types check and tidy a value: `:email`, `:telephone`, `:color`, `:slug`, `:time` and `:json` (#2278).**
+  An editor can no longer save a malformed address, colour or time, and an
+  API client or import gets the same check. Admins pick them in the fields
+  admin like any type. Guide: [Built-in format types](../extending-content.md#built-in-format-types).
+  - `:email`: shape check, domain lowercased. `:telephone`: a *format* check
+    only, stored as E.164; it requires a leading `+` (or `00`) and refuses
+    domestic numbers and extensions. `:color`: `#rgb`/`#rrggbb`, stored
+    lowercase `#rrggbb`; a text input rather than `type="color"`, so an
+    optional field can stay empty. `:slug`: slugified text, with no uniqueness
+    check and no auto-fill (use `:computed`; uniqueness waits on #2276).
+    `:time`: `HH:MM`, no date or zone.
+  - **Lists.** Email, telephone, color, slug and time fields appear in the
+    content list's Columns picker, filter (email/telephone/slug: Is, Contains,
+    Empty or not; color: Is, Empty or not; time: Is, From, Until, Empty or not)
+    and sort. Condition values are tidied the way the field tidies a saved
+    value.
+  - **`:json`.** An object or array, edited in a monospace textarea. It is
+    filterable only for "Empty or not", not sortable, and not in the Columns
+    picker, but a `searchable` flag indexes the strings and numbers nested in
+    it (not the keys). Limits: 256 KB of input, 64 KB re-encoded, depth 32,
+    5,000 values; NUL is refused.
+  - **Not yet.** A key/value or link type, number options (step, prefix,
+    suffix, range), a colour palette, JSON Schema validation.
+  - The six names are reserved; see the upgrade note
+    [above](#builtin-field-type-names-upgrade).
+
+<a id="custom-field-grants"></a>
+
+- **Roles and members can be granted individual custom fields, and private
+  custom fields can be hidden from some editors (#2281).** Until now
+  `custom_fields` was one grant for all of them. A `field_grants` list can now
+  hold `custom_fields.<name>`, `custom_fields.<group>` (rows included) and
+  `custom_fields.<group>.<sub>`, and a new `field_read_grants` map names the
+  private fields an editor may see. On `/editor/team` the field-grant picker
+  lists the individual custom fields, indented under their group, and a new
+  **Custom fields they can read** picker sets the read axis.
+  - **Rules.** A write grant implies reading. Only top-level `private: true`
+    fields can be hidden (a public field is world-readable anyway), and a
+    field named in a read grant cannot be made public until it is removed from
+    the grant. A role holding any `custom_fields.*` key is held to those keys
+    on a create too; roles with only the bare `custom_fields` key keep the old
+    rule. Admins are exempt.
+  - **What a restricted editor sees.** Hidden fields are absent from the
+    editor, the content list (columns, filter, sort, CSV/JSON export), version
+    history and diffs, JSON:API, GraphQL and MCP responses (mutation results
+    too), and filtering on one answers like an unknown field. Hidden values
+    survive their saves untouched. Restoring a version is refused for an
+    editor with a field grant or a read restriction on the type. Copies,
+    translations and imports carry only the fields the actor may write.
+  - **Visible change for existing roles.** An editor holding a whole-attribute
+    grant that omits `custom_fields` now sees the custom fields read-only in
+    the editor instead of editable-looking inputs that the save would refuse.
+  - **Limits.** A hidden `required` private field makes that editor's create,
+    copy or import of the type fail. Read grants do not apply to actor-less
+    surfaces (fired artifacts, webhooks, change feed, RSS, the
+    `kiln_reporting_v1` views); those already drop every private field.
+  See [Per-custom-field grants and read restrictions](../granular-rbac.md#per-custom-field-grants-and-read-restrictions).
+
+<a id="backup-history"></a>
+
+- **Backups has a History: every backup attempt, app-made and cron-made, with
+  its outcome and whether its files are still on disk (#2217).** `/editor/backups`
+  (platform admins) lists runs newest first, 25 to a page, each with trigger,
+  status (Succeeded, Failed, Running, Skipped), Database and Media badges, size,
+  `Verified` / `Not verified` / `unverified (imported)`, destinations and the
+  local state of its files: `on disk`, `missing`, `pruned (retention)`,
+  `expired` or `off-site only`.
+  - **Worker.** Each attempt writes a run; a failed run write never fails the
+    backup. A refused attempt (no `pg_dump`) is a `skipped` run and still leaves
+    `manifest.json` untouched. A job that was killed mid-run is marked failed
+    ("Interrupted") by a sweep once it is 2h15m old.
+  - **Cron's backups.** `KilnCMS.Backups.Importer.run/0` records
+    `kiln-db-<stamp>` / `kiln-media-<stamp>` files found under `BACKUP_DIR` that
+    have no run: when a platform admin opens the page, at the end of each worker
+    run, and from `bin/kiln eval "KilnCMS.Backups.Importer.run()"`. It is
+    idempotent by stamp, waits until a stamp's newest file is 10 minutes old and
+    has no `.partial`, and never hashes or verifies a file, hence "unverified
+    (imported)". `backup.sh db` and `backup.sh media` as separate cron entries
+    have different stamps and appear as two runs.
+  - **Missing is computed on read**, for the visible page only. `BACKUP_DIR` is
+    host-local: on a multi-node deployment a run recorded by another node reads
+    `missing`. `expired` is a heuristic for imported runs older than the
+    retention window plus a day (cron records no prune).
+  - **Secrets.** Text stored in a run goes through `KilnCMS.Backups.Redact`
+    (URL userinfo, `key=value` credentials, rclone connection-string remotes).
+    The status panel's off-site remote and `manifest.json`'s `offsite` are now
+    redacted too.
+  - **Access.** `KilnCMS.Backups.Run` is read-only for platform admins and
+    written only by the `:backups` system actor (worker, importer, stale sweep).
+    `Worker.run/1` still works; it is now `run(trigger, job_id \\ nil)`.
+    `Staging.Scrub` purges runs (`backup_runs_purged`).
+  - **Reserved** for the rest of the epic (#2216): `parts` and `sha256` (#2218),
+    `destinations` (#2220), `encrypted?` (#2224).
+  ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217))
+
+<a id="ip-block-rules"></a>
+
+- **Site admins can block an IP address or range from `/editor/ip-blocks`
+  ("Blocked addresses") (#2242).** A blocked address gets an empty `403` on
+  every dynamic route and is refused on the `/live`, `/ws/gql`, `/ws/collab`
+  and `/ws/bridge` sockets. Rules take an IPv4 or IPv6 address or CIDR range,
+  an optional note and an optional expiry, and belong to one site. Guard rails:
+  loopback is never blocked, `/up` and `/ready` are exempt, ranges wider than
+  `/8` (IPv4) or `/16` (IPv6) are refused, and a rule that includes the admin's
+  own address asks for confirmation. Rules are cached for a minute per node and
+  cleared on every node when one is added or removed; if the list cannot be
+  read, requests pass.
+  - **Limits.** Static assets and `/uploads/*` are served before the site is
+    known and are not covered: refuse those at a CDN or proxy. Behind a reverse
+    proxy, set `TRUSTED_PROXIES` (or `CLIENT_IP_HEADER`) first, or a rule
+    matches the proxy's address and blocks every visitor.
+  - **Operators.** One new table, `ip_block_rules`, additive; rolling back
+    leaves it unused. No new environment variables. If an admin locks
+    themselves out, `bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(remove: true)'`
+    lists (without `remove: true`) or lifts the site's rules and clears every
+    node's cache at once; SQL still works within the one-minute cache. Expired rules are not swept and still
+    hold their slot until removed in the console.
+  - **Developers.** The resource, `KilnCMS.CMS.IpBlockRule`, is org-admin only
+    and deliberately absent from JSON:API, GraphQL and MCP. The request path
+    reads it as the `:ip_block` system actor. New counter
+    `kiln_cms.ip_block.refused.count`, tagged `surface`, never the address.
+  See [ip-blocking.md](../ip-blocking.md).
+
+<a id="conditional-custom-fields"></a>
+
+- **A custom field can be shown only when another field has a given value, and required only then (#2277).**
+  Open a field in `/editor/fields` (admins), expand **Conditions**, and set
+  **Show when** and/or **Required when**: one or more tests on a field beside
+  it ("Kind is one of Event, Talk"), joined by "All of these are true" or "Any
+  of these is true". In the content editor the field appears and disappears as
+  the editor changes the other value, with no round trip to the server, and
+  a **Required when** field blocks the save only while its rule holds. The
+  same fields work on a group's sub-fields, where a sub-field reads the other
+  sub-fields of the same row. The how-to is in
+  [extending-content.md](../extending-content.md#make-a-field-conditional).
+  - **For developers.** `field_definition` gains two attributes,
+    `visible_when` and `required_when`: plain JSON (`{"field", "op", "value"}`
+    leaves under `{"all": [...]}` / `{"any": [...]}`; ops `eq`, `neq`, `in`,
+    `empty`, `not_empty`, `gt`, `lt`; at most 3 levels and 10 nodes). They
+    show up in `?include=field_definitions`, the OpenAPI document and the
+    `read_field_definitions` MCP tool; creating or updating a definition is
+    still admin-only and goes through the `CMS.create_field_definition` /
+    `CMS.update_field_definition` code interfaces. The rule logic is
+    `KilnCMS.CMS.Conditions`; the editor runs a JavaScript twin
+    (`assets/js/conditions.js`) held to the same fixture
+    (`test/support/fixtures/conditions_cases.json`).
+  - **Hidden is an editor concept, not a privacy control.** A hidden field
+    keeps its stored value, and that value is still delivered by the JSON:API,
+    GraphQL, search and computed fields. Use **Private** for a value that
+    must not be public. A value written through the API to a hidden field is
+    still checked and stored.
+  - **How it is enforced.** On a normal write, a hidden field is never
+    required and a **Required when** field is required while its rule
+    holds, judged on the merged view (what the request sends over what is
+    stored). A restore, and a copy that drops custom fields, skip
+    **Required when**, and a record saved before a rule existed is not
+    rechecked by an unrelated write. There is no cascade: a field hidden by
+    its own rule still counts with its stored value when another rule reads
+    it, on the server and in the browser alike.
+  - **Keeping rules consistent.** A rule can read only a plain value field
+    (text, number, date, yes/no, choice) in the same scope, not itself, not a
+    private field, and without a cycle. Deleting a field other rules read is
+    refused, naming them; changing its type or making it private is refused
+    when a rule would stop being valid; renaming it rewrites the rules that
+    read it in the same transaction.
+  - **Limits.** `gt` / `lt` compare numbers and ISO dates or datetimes, and
+    are false when a side can't be read as one. A datetime needs seconds
+    (`2026-11-07T10:00:00`): the browser's `datetime-local` input posts none,
+    so a `gt` / `lt` test on such a field never holds, in the editor and on the
+    server. A rule nested beyond one level (possible only through the code
+    interface) is shown read-only in the admin UI until you remove it.
+    Link fields, computed fields and a group as a whole carry no conditions.
+  - **Upgrade.** Run migrations: two nullable columns are added to
+    `field_definitions`, nothing is backfilled and the `kiln_reporting_v1`
+    views are untouched. The change is expand-only, so rolling the pin back is
+    safe (the older release ignores the columns). Overlays: run
+    `mix ash.codegen` and commit the migration if you carry a copy of the
+    resource. CI gains a step, `npm test --prefix assets`, that runs the
+    JavaScript evaluator against the shared fixture.
+
+<a id="breached-password-check"></a>
+
+- **Admins choose what happens when a new password is in a known breach (#2240).**
+  A new page, **Organization → Password policy** (`/editor/password-policy`, admins
+  only), sets one of three stances for the site: **Off** (no warning),
+  **Warn** (the default: accept the password and say so) or **Block** (refuse
+  it for administrators; editors and viewers are still only warned).
+  Passwords are checked when someone registers, changes their password, resets
+  it, or when the first-run wizard creates the first admin. Sign-in is not
+  checked.
+  - **How a password is checked.** Kiln hashes the password with SHA-1 and
+    sends only the first five characters to `api.pwnedpasswords.com` (the
+    k-anonymity range API, with `Add-Padding`), through `KilnCMS.SafeFetch`.
+    The match is made locally. Nothing is cached and no password, hash or
+    address is logged.
+  - **Fails open.** A timeout (3 s overall), an error status or a malformed
+    answer accepts the password, logs a warning and emits
+    `[:kiln_cms, :password, :breach_check]` with `result: :error` and a
+    `reason`. An outage at a third party never stops anyone setting a password.
+  - **Who counts as an administrator.** The stricter of the account's role
+    (including a temporary role) and its membership tier on the site being
+    used. `Block` is evaluated against the site the request is on.
+  - **What people see.** Blocked: a field error on the password, "This password
+    has appeared in a known data breach. Choose a different one." Warned after
+    a password change or first-run setup: the message appears with the redirect
+    to sign-in. Warned after registering or resetting: shown after the next
+    password sign-in (a one-time note kept for ten minutes on that node, so on a
+    multi-node deployment without sticky routing it can be missed).
+  - **Operators.** `BREACHED_PASSWORD_CHECK=false` turns the check off for the
+    whole deployment; `BREACHED_PASSWORD_POLICY=off|warn|block` sets the default
+    for sites that have not saved a choice. See
+    [Environment variables](../environment-variables.md#breached-password-check-2240).
+  - **Not covered.** Admin-triggered password resets, magic links, SSO and
+    passkey sign-up, account anonymization, seeds, the beta round and the
+    staging scrub do not check. See the [threat model](../threat-model.md#breached-passwords).
+  - **Developers.** `SitePasswordPolicy` is a new org-scoped resource
+    (`CMS.list_site_password_policy/1`, `save_site_password_policy/2`,
+    `reset_site_password_policy/2`); the four password actions on `User` carry
+    a `:password_breach` metadata key. See `KilnCMS.Accounts.PasswordPolicy`
+    and `KilnCMS.Accounts.BreachedPassword`.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240))
+
+<a id="webhook-rotate-secret"></a>
+
+- **Admins can rotate a webhook endpoint's signing secret (#2347).** Each row
+  on `/editor/webhooks` has a **Rotate secret** button (admin only, with a
+  confirmation). It replaces the secret and reveals the new one so you can
+  copy it into the receiver. Before this, the only way to change a secret was
+  to delete the endpoint and add it again, which also lost its settings.
+  Rotation takes effect immediately and there is no dual-secret window: it is
+  the remedy for a leaked secret, so the old one must stop working. Queued and
+  retried deliveries sign at send time and use the new secret; one attempt
+  already in flight can fail and is retried. Health counters
+  (`consecutive_failures`, `auto_disabled_at`) are not touched, so an endpoint
+  near the auto-disable limit can tip over while the receiver still holds the
+  old secret. The old ciphertext is never decrypted, so an endpoint whose
+  secret is unreadable after `SECRET_KEY_BASE` was lost can be rotated back to
+  health; the unreadable-secret message now points at the button. Rotation
+  logs `webhook secret rotated endpoint_id=… org_id=… actor_id=…` at info
+  level (never the secret) and leaves no other audit trail. Over code it is
+  `KilnCMS.CMS.rotate_webhook_secret/2`. No migration, no env var, no upgrade
+  step; rolling the pin back is safe. See
+  [Rotate a webhook signing secret](../webhooks.md#rotate-a-webhook-signing-secret).
 
 <a id="graphql-custom-where"></a>
 
@@ -258,6 +671,48 @@ carries the reasoning.
   - **Upgrade.** No migration, no config. `saved_views.params` is an existing
     map, now allowed a `cf` key; rolling the pin back leaves such a view with an
     unknown key an older list ignores.
+
+<a id="content-list-export"></a>
+
+- **The content list can be downloaded as CSV or JSON.** On `/editor`, editors
+  and admins get an **Export** menu in the list's header bar with **Download
+  CSV** and **Download JSON**, and the bulk bar gains **Export selected** (CSV,
+  the ticked rows). This is the third part of #2293, after the Columns picker
+  and field filter and sort.
+  - **What is exported.** The rows the list shows for the same type, status,
+    search, field conditions and field sort, as the person asking (a record
+    they cannot read is absent). Columns are `id,type,title,slug,status,locale,updated_at`
+    plus the person's saved list columns for the type, nothing else; the panel
+    says *Exports the columns shown in the list.* The scope is the types the
+    editor can author, as in the list. With "All types" the types come one
+    after another, not merged into the list's order. Export selected takes at
+    most 100 rows and ignores every filter but the type.
+  - **Private fields.** Left out unless **Include private fields** is ticked
+    (shown when the type has any); every user field counts as private. A `cf`
+    condition on a private field is accepted even when the column is not
+    exported, as in the list.
+  - **Values.** The file is data, not the screen: booleans are `true` / `false`
+    (not Yes / No), media is the file name (not the alt text), select is the
+    stored value, long values are not cut. A reference is its readable title
+    (JSON `{id, label}`); an unreadable or deleted target is `Unavailable`
+    (JSON `{id: null, label: "Unavailable"}`), never the title stored in the
+    field. CSV starts with a UTF-8 byte order mark for Excel.
+  - **Limits.** More than 10,000 rows is HTTP 413 with a message, never a
+    truncated file; a download is stopped after 60 seconds; 10 downloads a
+    minute per account, 429 with `Retry-After`. The rate limit is counted per
+    node, and a refused request also spends it. A download stopped part-way
+    drops the connection unfinished: a CSV ends mid-file and a JSON array is
+    never closed, so a file that parses is complete.
+  - **Operators and developers.** Optional
+    `config :kiln_cms, :content_export, max_rows: 10_000, time_limit_ms: 60_000`.
+    Each download logs `content export` and emits
+    `[:kiln_cms, :content_export, :stop]` (`%{rows: n}`; metadata `user_id`,
+    `org_id`, `type`, `format`, `rows`, `columns`, `include_private`), never a
+    value or filter text. There is no audit trail of exports yet. Routes:
+    `GET /editor/content/export.csv` and `.json`, editor-only, session auth.
+    Guide: [Export the content list as CSV or JSON](../extending-content.md#export-the-content-list-as-csv-or-json).
+  - **Upgrade.** No migration, no required config; rolling the pin back
+    removes the menu and the routes.
 
 <a id="custom-field-native-filter-sort"></a>
 
@@ -559,7 +1014,59 @@ carries the reasoning.
   setting) for new documents only. An advisory warns when a published page
   linked from an enabled menu item is set to noindex.
 
+<a id="field-validation"></a>
+
+- **Admins can constrain a custom field's values: a range, a length, a pattern, or "unique" (#2276).** In `/editor/fields`, a field's form has a **Validation (optional)** group with the controls its type takes. Numbers get `min`/`max`; `:string`, `:url` and plain `:text` get `min_length`/`max_length` and a whole-value `pattern` with an optional `pattern_message`; `:string`, `:url`, numbers and dates can be `unique`. The rules are stored in the new `validation` attribute of the field definition and checked on every write path (editor, JSON:API, GraphQL, MCP, importers), so an editor and an API client see the same error, naming the field (`SKU (sku) doesn't match the required format`).
+  - **Existing data is left alone.** A value equal to the stored one is never re-checked, so tightening a rule does not block unrelated edits. Version restore, type promotion and content copy skip the value rules (they carry values that were valid when written); `unique` is still enforced for restores, and a duplicated document starts with its unique fields blank.
+  - **Unique is enforced by the write path, not the database.** An advisory lock plus an in-transaction check makes two racing saves safe; matching is exact and case-sensitive, within the organization, content type and locale, ignoring the trash. A working copy only stages a value: the check runs when it reaches live `custom_fields`. Turning `unique` on is refused while values already repeat. Raw SQL and a database restore bypass it, so `mix kiln.fields.duplicates` audits for repeats.
+  - **Patterns are safe to run.** The pattern must match the whole value, is at most 200 characters, and runs with match limits; a value over 2,000 characters or a runaway pattern counts as not matching.
+  - **API and export.** Field definitions carry `validation` on JSON:API (and in `docs/api/openapi.json`). The schema export adds `x-kiln-minimum`, `x-kiln-maximum`, `x-kiln-min-length`, `x-kiln-max-length`, `x-kiln-pattern` and `x-kiln-unique` as annotations rather than JSON Schema assertions, since stored values may predate a rule; `pattern_message` is not exported.
+  - Guide: [Constrain the values of a field](../extending-content.md#constrain-the-values-of-a-field).
+
 ## Changed
+
+<a id="public-image-weight"></a>
+
+- **The signed-out home page and the built-in logo no longer ship oversized
+  images (#2165).** The home page loaded about 1,030 KB of images: four 2880x1800
+  console screenshots, and a 278x379 PNG logo shown at 20 to 40 pixels. It now
+  loads about 102 KB on a browser that takes WebP (about 63 KB on a small
+  1x screen), and about 570 KB on the JPEG-only fallback.
+  - **Screenshots.** Each is a `<picture>` with a WebP `srcset` and a 1440-wide
+    JPEG fallback. The hero (the editor shot) is offered at 720, 1440 and 2880
+    pixels wide, loads eagerly and with `fetchpriority="high"`, since it is
+    the likely largest paint. The three tour shots are offered at 720 and 1440
+    and load lazily.
+  - **Logo.** When the brand's logo is the built-in one
+    (`KilnCMS.Branding.default_logo_url/0`), the header, footer and
+    sign-in brand render it through `KilnCMSWeb.Layouts.brand_mark/1` as a
+    `<picture>` of `logo-mark-sm.webp` (6 KB) over `logo-mark-sm.png` (14 KB),
+    88x120 with explicit width and height. A custom `logo_url` is rendered
+    exactly as given. `logo-mark.png` is unchanged and is still the default
+    `logo_url`, so the branding values in the headless and API responses are
+    the same as before.
+  - **Contributors.** Raw captures from `e2e/screenshots/home.spec.js` now go
+    to the gitignored `e2e/screenshots/raw/`. `scripts/optimize_home_images.sh`
+    is the only way to produce the files the page serves, and a new test
+    (`home_image_weight_test.exs`) fails if the committed files go over a byte
+    budget. See *Refreshing the home page screenshots* in `CONTRIBUTING.md`.
+  - **Overlays.** An overlay that replaces `home.html.heex`, or renders
+    `brand.logo_url` in its own `<img>`, does not get the right-sized images;
+    it keeps what it renders today. To get them, call `Layouts.brand_mark/1`.
+    Nothing to set, no migration, and rolling the pin back is safe.
+
+<a id="csv-numbers-unguarded"></a>
+
+- **A real number in a CSV export is written as itself.** The CSV writer
+  prefixed any value starting with `-` with `'` to stop a spreadsheet running
+  it as a formula, which turned the number -5 into the text `'-5`. A value that
+  is a number (integer, float, decimal) now skips the guard; text is
+  unchanged, so the string `-5` and `=1+1` are still prefixed, even in an
+  integer field. Chosen as Changed rather than Fixed because it alters the
+  bytes a CSV writes for a negative number, wherever `KilnCMSWeb.CSV.line/1`
+  is given one (core exports mostly write counts, which are not negative; an
+  overlay's may). `parse/1` reads
+  both forms back to `-5`.
 
 <a id="access-denied-page"></a>
 
@@ -827,6 +1334,43 @@ carries the reasoning.
 
 <a id="custom-sort-json-null-last"></a>
 
+<a id="auth-pages-landmarks-autocomplete"></a>
+
+- **The sign-in, register and reset pages now have a header landmark, one `h1`,
+  and `autocomplete` on their email and password boxes (#2162).** An
+  accessibility audit found auth content outside any landmark, no `h1`, and
+  fields a password manager had to guess at.
+  - **Landmarks and heading.** The environment banner and logo row are a
+    `<header>`, and the flash toast sits inside `<main id="main">`. The page
+    carries one screen-reader-only `h1` holding the page title (the tab title
+    the page already had), so it follows sign-in, register and reset as the
+    view changes. Each view keeps its visible heading, which stays an `h2`.
+    The two-factor prompt at `/sign-in/verify` follows the same rule: its
+    visible "Two-factor authentication" heading is now an `h2`, under the
+    hidden `h1`. Nothing looks different.
+  - **`autocomplete`.** The email box on sign-in, register and the
+    reset-request form has `autocomplete="email"`. The password box has
+    `current-password` on sign-in and `new-password` on register and on the
+    reset-token form, as do the confirmation boxes, so a password manager
+    offers to save a new password and does not fill a saved one into a "choose
+    a password" box (WCAG 1.3.5).
+  - **Not covered.** The email box on the magic-link request form still has no
+    `autocomplete`: it is rendered inside the library's component, and
+    changing it would mean copying that whole component.
+  - **For overlay authors.** Two more library renders are now Kiln copies:
+    `KilnCMSWeb.AuthIdentityInput` (the email box) and
+    `KilnCMSWeb.AuthResetRequestForm` (the `/reset` request form), next to
+    `AuthSignInForm`, `AuthRegisterForm`, `AuthResetForm` and
+    `AuthPasswordInput`. `KilnCMSWeb.AuthOverridesTest` renders the sign-in,
+    register and reset-token forms against upstream's and fails if they differ
+    by more than the `autocomplete` attribute, so re-run it when bumping
+    `ash_authentication_phoenix`; the `/reset` request form is not in that
+    comparison, so re-read `AuthResetRequestForm` against upstream's
+    `Password.ResetForm` by hand.
+    `AuthPasswordInput.password_field/1` and `password_confirmation_field/1`
+    now require an `autocomplete` attribute; an overlay that calls them must
+    pass one. No configuration, migration or upgrade step.
+
 - **`custom_sort` treats a stored JSON `null`, array or object as no value, and
   page 2 of a keyset-paged `custom_sort` no longer fails on one.** On the
   JSON:API and GraphQL reads, a record whose custom field was stored as a JSON
@@ -980,6 +1524,36 @@ carries the reasoning.
   modal keeps its focus. The old `<details>` also lost its `open` state on
   every LiveView patch, so a list refresh behind an open menu snapped it
   shut; the new one keeps its state across patches it didn't cause.
+
+<a id="public-muted-text-contrast"></a>
+
+- **Secondary text on public pages and in the shared form components moves from 50-60% to 70% opacity, so it clears WCAG 1.4.3 (4.5:1).**
+  Muted text is `text-base-content` at reduced opacity, and nothing renders
+  wrong when the opacity is too low. Measured against the theme tokens in
+  `assets/css/app.css`, `/60` is 4.12:1 on the light theme's page background
+  and `/50` is 3.09:1; `/70` is about 5.1:1 or better on every surface in both
+  themes. The public templates (blog and event indexes, search, newsletter
+  confirmation, the home page), the release preview, the setup wizard, public
+  forms, the block components, form field hints, the empty-state text, the
+  password show/hide toggle and the flash close icon (`opacity-40` to
+  `opacity-70`) now use `/70`. Overlays and plugins that copy these classes
+  are unaffected; nothing changes in markup structure or in any API.
+  - **A guard keeps it that way.** `test/kiln_cms_web/muted_text_contrast_test.exs`
+    scans `lib/kiln_cms_web` for `text-base-content/N` (and bare `opacity-N`)
+    below 70. Public paths must be at zero. The console is a ratchet against
+    `test/kiln_cms_web/muted_text_console_baseline.txt`: a file may not gain
+    offenders, and the count only goes down. A non-text use (an icon glyph, a
+    disabled control) is exempted with a `contrast-ok: <why>` comment on the
+    same line or the line above.
+  - **What the guard does not do.** It reads class names, not rendered
+    contrast: it does not run axe (there is none in the repo), and it does not
+    see templates authored outside this repo, such as a plugin's. The
+    authenticated console still has muted text below the floor; it is counted
+    in the baseline and lowered as files are touched.
+  - **Contributors.** After lowering a console count, regenerate the baseline
+    with `KILN_UPDATE_CONTRAST_BASELINE=1 mix test test/kiln_cms_web/muted_text_contrast_test.exs`
+    and commit the file. See [Muted text](../design-language.md#muted-text).
+  ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163))
 
 ## Security
 

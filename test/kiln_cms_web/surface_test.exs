@@ -26,15 +26,16 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/analytics/export.json /editor/api-keys /editor/automation /editor/backups
     /editor/billing /editor/branding /editor/calendar /editor/code-injection
     /editor/compliance /editor/configure /editor/content/:type/:id /editor/content/:type/new
+    /editor/content/export.csv /editor/content/export.json
     /editor/experiments
     /editor/experiments/:id
     /editor/federation /editor/feeds /editor/fields /editor/forms
     /editor/forms/:id /editor/forms/:id/entries/export.csv /editor/forms/settings
     /editor/funnels /editor/funnels/:id /editor/governance /editor/governance/:type/:id
     /editor/governance/:type/:id/export.csv /editor/governance/:type/:id/export.json
-    /editor/governance/health.csv /editor/inbox
+    /editor/governance/health.csv /editor/inbox /editor/ip-blocks
     /editor/links /editor/locales /editor/mail /editor/menus /editor/menus/:id /editor/newsletter /editor/organize
-    /editor/overview /editor/pages/:id /editor/posts/:id /editor/presentation/:type/:slug
+    /editor/overview /editor/pages/:id /editor/password-policy /editor/posts/:id /editor/presentation/:type/:slug
     /editor/preview/:kind/:id /editor/redirects /editor/releases /editor/releases/:id /editor/safety-fields
     /editor/search /editor/search-synonyms /editor/security-txt /editor/settings /editor/site-ai /editor/site-mail /editor/site-push
     /editor/site-search /editor/site-sso /editor/site/:type/:slug /editor/slugs

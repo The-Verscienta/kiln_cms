@@ -39,7 +39,7 @@ defmodule KilnCMSWeb.SettingsLive do
      # flash alone was easy to miss on a long page.
      |> assign(:profile_saved?, false)
      |> assign_access(user)
-     |> assign(:password_form, password_form(user))
+     |> assign(:password_form, password_form(user, socket.assigns.current_org))
      # Demo mode (docs/demo-mode.md): the shared account's password, 2FA and
      # passkeys are fixed, so their forms give way to a note saying why. The
      # actions refuse regardless — this only spares a visitor the attempt.
@@ -439,7 +439,7 @@ defmodule KilnCMSWeb.SettingsLive do
 
   def handle_event("save_password", %{"user" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.password_form, params: params) do
-      {:ok, _user} ->
+      {:ok, user} ->
         # The change revoked every stored token the account had, this
         # session's included (#734) — see `:change_password` for why this
         # device is not exempt — so there is nothing left to stay signed in
@@ -452,6 +452,7 @@ defmodule KilnCMSWeb.SettingsLive do
            :info,
            gettext("Password changed. Sign in again with your new password.")
          )
+         |> put_breach_warning(user)
          |> redirect(to: ~p"/sign-in")}
 
       {:error, form} ->
@@ -612,9 +613,23 @@ defmodule KilnCMSWeb.SettingsLive do
     |> to_form()
   end
 
-  defp password_form(user) do
+  # The warning rides the same redirect as the "sign in again" note, as an
+  # `:error` flash (the info one dismisses itself).
+  defp put_breach_warning(socket, user) do
+    case user.__metadata__ do
+      %{password_breach: %{status: :breached}} ->
+        put_flash(socket, :error, KilnCMS.Accounts.PasswordNotice.message())
+
+      _none ->
+        socket
+    end
+  end
+
+  # The request org's breached-password policy applies (#2240), so the action
+  # needs the tenant.
+  defp password_form(user, org) do
     user
-    |> AshPhoenix.Form.for_update(:change_password, actor: user, as: "user")
+    |> AshPhoenix.Form.for_update(:change_password, actor: user, tenant: org, as: "user")
     |> to_form()
   end
 

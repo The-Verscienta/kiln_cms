@@ -33,6 +33,7 @@ defmodule KilnCMS.Staging.Scrub do
           missed_paths_purged: non_neg_integer(),
           billing_settings_purged: non_neg_integer(),
           billing_events_purged: non_neg_integer(),
+          backup_runs_purged: non_neg_integer(),
           memberships_scrubbed: non_neg_integer(),
           tiers_deactivated: non_neg_integer(),
           admin_provisioned: String.t() | nil
@@ -86,6 +87,11 @@ defmodule KilnCMS.Staging.Scrub do
     # and amounts — so they are personal data, not just diagnostics.
     {billing_events_purged, _} = Repo.delete_all(KilnCMS.Billing.WebhookEvent)
 
+    # Backup history (#2217) records where this instance's backups go
+    # (rclone destinations, operator triggers, errors): a prod clone must not
+    # carry it, and the staging host's own backups start a history of their own.
+    {backup_runs_purged, _} = Repo.delete_all(KilnCMS.Backups.Run)
+
     # Memberships are SCRUBBED, not deleted: `billing_membership_events`
     # references them, and the entitlement trail should stay referentially intact
     # (the same audit-retention decision #219 made for content history). What
@@ -129,6 +135,7 @@ defmodule KilnCMS.Staging.Scrub do
       missed_paths_purged: missed_paths_purged,
       billing_settings_purged: billing_settings_purged,
       billing_events_purged: billing_events_purged,
+      backup_runs_purged: backup_runs_purged,
       memberships_scrubbed: memberships_scrubbed,
       tiers_deactivated: tiers_deactivated,
       admin_provisioned: admin_provisioned

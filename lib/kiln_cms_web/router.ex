@@ -565,10 +565,17 @@ defmodule KilnCMSWeb.Router do
       # The site's `/.well-known/security.txt` (RFC 9116, #1873). Org-scoped and
       # admin-only: a security contact is a statement on the whole site's behalf.
       live "/editor/security-txt", SecurityTxtLive, :index
+      # What happens when a new password is in a known breach (#2240). Org-scoped
+      # and admin-only: it decides whether the site's administrators can be
+      # refused a password.
+      live "/editor/password-policy", PasswordPolicyLive, :index
       # Per-site custom head/footer HTML for the DELIVERY site (#490). Admin-only
       # by the live session's tier gate AND the resource policy; the snippet is
       # rendered only by the `:delivery` pipeline, never here.
       live "/editor/code-injection", CodeInjectionLive, :index
+      # The site's IP/CIDR block list (#2242). Admin-only by the tier gate AND the
+      # resource policy; enforcement is `KilnCMSWeb.Plugs.IpBlock` and the sockets.
+      live "/editor/ip-blocks", IpBlockLive, :index
       # In-app backups (#484) — status, "back up now", retention. Admin-only:
       # the artifact list names the database dump, and an editor has no action
       # to take on it. Restore stays a documented ops procedure.
@@ -659,6 +666,12 @@ defmodule KilnCMSWeb.Router do
     # to be reachable as a controller download while keeping the same tier).
     get "/editor/analytics/export.json", AnalyticsExportController, :export
     get "/editor/analytics/export.csv", AnalyticsExportController, :export_csv
+
+    # The content list as a download (#2293): what `/editor` shows for the same
+    # filters, or a selection of its rows. Editor-gated in the controller, which
+    # also charges the `:export` budget and answers 413 over the row cap.
+    get "/editor/content/export.csv", ContentExportController, :export_csv
+    get "/editor/content/export.json", ContentExportController, :export_json
 
     # XLIFF export for translation vendors (#502) — a file download, so a
     # controller route; editor-gated in the controller for the same reason as

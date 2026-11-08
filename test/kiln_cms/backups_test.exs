@@ -48,6 +48,26 @@ defmodule KilnCMS.BackupsTest do
     )
   end
 
+  describe "media part size and exclusions (#2218)" do
+    test "the accessors read the configured values; the defaults are 400 MB and none" do
+      original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+      defaults = Keyword.drop(original, [:media_part_bytes, :media_exclude])
+      Application.put_env(:kiln_cms, KilnCMS.Backups, defaults)
+
+      assert Backups.media_part_bytes() == 400 * 1_048_576
+      assert Backups.media_exclude() == []
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.merge(original, media_part_bytes: 65_536, media_exclude: ["tmp/**"])
+      )
+
+      assert Backups.media_part_bytes() == 65_536
+      assert Backups.media_exclude() == ["tmp/**"]
+    end
+  end
+
   describe "reading a manifest is total" do
     test "a missing file is nil, not an error", %{dir: dir} do
       assert Manifest.read(dir) == nil

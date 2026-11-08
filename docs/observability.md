@@ -64,6 +64,47 @@ not on this event: they read the stored analytics tables, not the telemetry
 stream. Referrer attribution is off by default (`KILN_ANALYTICS_REFERRERS`).
 See [`advanced-analytics-plan.md`](./advanced-analytics-plan.md).
 
+## Blocked addresses
+
+`kiln_cms.ip_block.refused.count` counts requests and socket connects refused by
+a site's IP block list ([ip-blocking.md](ip-blocking.md), #2242). It is tagged by
+`surface`: `http`, `live`, `gql`, `collab` or `bridge`. The address is deliberately
+not a tag, a metadata field or a log line, so the counter says that blocking is
+happening and where, not who. The underlying telemetry event is
+`[:kiln_cms, :ip_block, :refused]` (measurement `count`, metadata `surface`).
+
+Useful Grafana panel: `sum(rate(kiln_cms_ip_block_refused_count[5m])) by (surface)`.
+A rise right after you add a rule is expected. A rise on `http` with no rule
+change, or a rule that suddenly matches everyone (a proxy not declared in
+`TRUSTED_PROXIES`), is worth a look.
+
+## Breached-password checks
+
+Every lookup the breached-password check makes (#2240) emits one event,
+`[:kiln_cms, :password, :breach_check]`, from
+`KilnCMS.Accounts.Changes.CheckBreachedPassword`. Nothing is emitted when the
+policy resolves to off (including `BREACHED_PASSWORD_CHECK=false`), and nothing
+identifying the password, its hash, the account or the org is ever in the event.
+
+| Event | Fired by | Metadata |
+|-------|----------|----------|
+| `[:kiln_cms, :password, :breach_check]` | a register, change-password, reset or first-run-setup action, once per lookup | `result`, `action`, `policy`, `enforcement`, `reason` |
+
+- **Measurements:** `:duration` (native units) and `:count` (always `1`).
+- `:result` -- `:clean`, `:breached`, or `:error` (could not tell).
+- `:action` -- `:register`, `:change`, `:reset` or `:bootstrap`.
+- `:policy` -- the policy applied to this account: `:warn` or `:block`.
+- `:enforcement` -- `:blocked`, `:warned`, or `:allowed` (clean, or an error: the check fails open).
+- `:reason` -- on `:error` only: `:timeout`, `:http_status`, `:transport`,
+  `:blocked` or `:malformed`; otherwise `nil`.
+
+A rising share of `result: :error` means the node cannot reach
+`api.pwnedpasswords.com` (egress firewall, outage) and passwords are being
+accepted unchecked. The counter `kiln_cms.password.breach_check.count`
+(tags `result`, `action`, `enforcement`) is defined in
+[`KilnCMSWeb.Telemetry.metrics/0`](../lib/kiln_cms_web/telemetry.ex); alert on
+the `result="error"` share.
+
 ## Where the metrics go
 
 The matching `Telemetry.Metrics` definitions live in

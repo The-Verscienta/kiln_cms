@@ -67,7 +67,10 @@ A field appears only while a live field definition of that record's own site
 and type names it, and the definition is not `private`, not a `user` field,
 and not a link field or a group sub-field. The list is read live: flipping a
 field to private, renaming, retyping or deleting it changes the next query.
-Keys with no definition (orphans) are dropped. Reference values are reduced
+Keys with no definition (orphans) are dropped. A per-role read restriction
+on private custom fields ([granular-rbac.md](granular-rbac.md#per-custom-field-grants-and-read-restrictions))
+changes nothing here: the views read as a Postgres role with no Kiln user, and
+already leave out every private field. Reference values are reduced
 to `{"id", "type"}`; see the limits below.
 
 ## Set up a read-only role

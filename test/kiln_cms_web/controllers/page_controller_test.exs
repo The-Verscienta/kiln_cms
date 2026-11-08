@@ -122,16 +122,23 @@ defmodule KilnCMSWeb.PageControllerTest do
     end
   end
 
-  # The screenshots are static files captured by e2e/screenshots/home.spec.js;
-  # a renamed capture would otherwise ship as a row of broken images.
-  test "every screenshot the home page shows exists", %{conn: conn} do
+  # The shipped screenshots are variants derived by
+  # scripts/optimize_home_images.sh; a renamed or missing one would otherwise
+  # ship as a broken image. Weight and markup are asserted in
+  # KilnCMSWeb.HomeImageWeightTest.
+  test "every image and srcset candidate the home page shows exists", %{conn: conn} do
     html = conn |> get(~p"/") |> html_response(200)
-    srcs = Regex.scan(~r{src="(/images/home/[^"]+)"}, html, capture: :all_but_first)
 
-    assert length(srcs) == 4
+    urls =
+      for [_, value] <- Regex.scan(~r{(?:src|srcset)="([^"]*/images/home/[^"]+)"}, html),
+          url <- String.split(value, ","),
+          [path | _] = String.split(String.trim(url)),
+          do: path
 
-    for [src] <- srcs do
-      assert File.exists?(Path.join(:code.priv_dir(:kiln_cms), "static" <> src)), src
+    assert length(urls) >= 4
+
+    for path <- urls do
+      assert File.exists?(Path.join(:code.priv_dir(:kiln_cms), "static" <> path)), path
     end
   end
 

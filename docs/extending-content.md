@@ -22,10 +22,12 @@ UI" workflow, scoped to fields.
   `max_sources`, `on_target_delete`, `inverse_label`, `inverse_name`,
   `schema_org_property`,
   `link_of_id`, `group_of_id`, `help_text`, `position`, `default`, `compute`,
-  `private`). Field types: `:string`,
+  `private`, `validation`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
   `:select`, `:media`, `:reference`, `:group`, `:user`, `:geolocation`,
-  `:datetime_range`, `:recurrence`, `:computed` — plus
+  `:datetime_range`, `:recurrence`, `:computed`, and the six format types
+  `:email`, `:telephone`, `:color`, `:slug`, `:time` and `:json` (see
+  "Built-in format types" below) — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
 - **Private fields (`private: true`)**: a value for the site's editors and
@@ -408,9 +410,9 @@ type), not the order you ticked them in. Ticks beyond four are kept but not
 shown.
 
 Fields offered: string, text, integer, float, boolean, date, datetime, url,
-select, reference, user and media, if they hold one value. Groups,
-geolocation, date ranges, recurrence, computed fields and multi-valued fields
-are not offered. Private fields are offered, as editors already see them in
+select, reference, user, media, email, telephone, color, slug and time, if
+they hold one value. Groups, geolocation, JSON, date ranges, recurrence,
+computed fields and multi-valued fields are not offered. Private fields are offered, as editors already see them in
 the content editor.
 
 What a cell shows:
@@ -438,6 +440,45 @@ For code: the choice is `User.content_list_columns`, a nullable map
 per type, and merged into the stored map under a row lock. Which definitions
 may be offered is decided by `KilnCMS.CMS.ListFields.readable_fields/4`; cell
 text comes from `KilnCMSWeb.EditorLive.FieldCells`.
+
+### Built-in format types
+
+Six field types check and tidy a value so a malformed one cannot be saved.
+Pick them in the fields admin like any other type; the editor, the API and an
+import all run the same check, and the stored value is the tidied one.
+
+| Type | Editor input | Stored as | Notes |
+| --- | --- | --- | --- |
+| `:email` | email input | `Ada@example.com` (domain lowercased, local part keeps its case) | Shape check only: one `@`, a dotted domain, at most 254 characters. It cannot tell whether the mailbox exists. |
+| `:telephone` | telephone input | E.164, `+442079460958` | A format check only: spaces, dashes, dots and brackets are stripped and a leading `00` becomes `+`; what is left must be `+`, a non-zero digit and 6 to 14 more digits. Kiln has no numbering-plan data, so a real number cannot be told from a plausible one. A domestic number (`020 7946 0958`) or one with an extension is refused: include the country code. |
+| `:color` | text input with a pattern | lowercase `#rrggbb` (`#F80` becomes `#ff8800`) | Named colours, `rgb()` and alpha are refused. It is a text input, not `type="color"`, because a colour picker cannot be empty and would fill every optional colour field with `#000000` on save. |
+| `:slug` | text input with a pattern | `cafe-menu` | Typed text is slugified (`Café Menu!` becomes `cafe-menu`), at most 128 characters; input with nothing left is refused. Not unique, and not filled from another field: to derive a slug, use a `:computed` field. Uniqueness is waiting on [#2276](https://github.com/The-Verscienta/kiln_cms/issues/2276). |
+| `:time` | time input | `"09:30"` (24-hour, zero-padded, no date or zone) | Accepts `H:MM`, `HH:MM`, `HH:MM:SS`; seconds are dropped. |
+| `:json` | monospace textarea, pretty-printed | the object or array itself | See below. |
+
+In the API, `:email`, `:telephone`, `:color`, `:slug` and `:time` are strings;
+`:json` is the generic JSON value. The schema export describes the formats
+(`format: "email"` or a `pattern`).
+
+**JSON fields.** The value must be an object or an array (a bare number or
+string is refused). Limits: 256 KB of input text, 64 KB once re-encoded, 32
+levels deep and 5,000 values; a string or key containing a NUL character is
+refused (Postgres `jsonb` cannot store it). Filtering answers only "Empty or
+not" (`custom_filter` with `null`; any other operator is refused with *custom
+field "x" (json) only supports null*), a JSON field cannot be sorted (the
+refusal reads *is not sortable*), and it is not in the Columns picker. If an
+admin flags it **searchable**, the strings and numbers nested in the value are
+indexed (not the keys), so flag only a field whose contents are prose worth
+finding.
+
+**Names are reserved.** `email`, `telephone`, `color`, `slug`, `time` and
+`json` can no longer be used for a type an overlay or plugin registers; rename
+it (`mix kiln.plugins.doctor` fails otherwise). A stored field definition
+that already used one of these names as its `field_type` is now cast by the
+built-in type: values that do not pass its check are refused on the next save.
+
+**Not yet:** a key/value or link type, number options (step, prefix, suffix,
+range), a colour palette, and JSON Schema validation of a `:json` value.
 
 ### Filter and sort the content list by custom fields
 
@@ -480,15 +521,22 @@ What each field type offers (the **Condition** menu):
 | datetime | From, Until, Empty or not (whole days, both ends included) |
 | select | Is (one of its options), Empty or not |
 | reference, user, media | Is (the target's id, a UUID), Empty or not |
+| email, telephone, slug | Is, Contains, Empty or not |
+| color | Is, Empty or not |
+| time | Is, From, Until, Empty or not |
 
 "Contains" is a case-insensitive substring match; `%` and `_` in the value
 mean themselves. "Empty or not" asks *Empty* or *Has a value*. A value is at most
 100 characters; longer is refused.
 
-Only single-valued string, text, integer, float, boolean, date, datetime, url
-and select fields can be sorted by; the **Field** group lists just those. Fields
-the Columns picker does not offer (groups, geolocation, date ranges,
-recurrence, computed and multi-valued fields) cannot be filtered either.
+Only single-valued string, text, integer, float, boolean, date, datetime, url,
+select, email, telephone, color, slug and time fields can be sorted by; the
+**Field** group lists just those. Fields the Columns picker does not offer
+(groups, geolocation, JSON, date ranges, recurrence, computed and multi-valued
+fields) cannot be filtered either. A value typed into a condition on an email,
+telephone, color, slug or time field is cleaned the way the field cleans what
+an editor saves (a colour's case, a time's padding), so `#FF8800` finds
+`#ff8800`; "Contains" is matched as typed.
 Private fields are offered, because editors already see them in the content
 editor; the list is editor-only, and a person without read access to a field
 cannot filter or sort by it (a link naming it simply ignores that condition).
@@ -505,7 +553,11 @@ no longer applies.*) and opening it says *The view "…" named a field that no
 longer applies, so that condition was left out.* The remaining conditions still
 apply.
 
-**What can go wrong.**
+**What can go wrong.** When you click a download in the list, a refusal sends you back
+to the list (with the same filters, except what the refusal was about) and shows the
+message at the top. A script, or anything that does not ask for HTML, gets the status
+code below with a JSON body `{error, message}`; a person without an editor account gets
+the JSON 403 either way.
 
 - *That field filter is not valid here.* The field, condition or value is not
   one the type offers (for example text typed into a number, or a select value
@@ -545,6 +597,270 @@ conditions into the read arguments `custom_filter` / `custom_sort` of
 `CustomFieldQuery` (see [JSON:API](json-api.md)); `ContentTypes.list!/2` and
 `count!/2` pass them through the `arguments:` option, and `count!/2` accepts a
 `limit` in `query:` to bound a count.
+
+### Export the content list as CSV or JSON
+
+Editors and admins can download what the content list (`/editor`) shows, for a
+spreadsheet or a script, as CSV or JSON. The download holds the rows the list
+would show for the same filters, so there is nothing new to learn about which
+rows are in it.
+
+1. Open **Content** (`/editor`) and set the list up as you want it: choose a
+   content type, a status, a search, field conditions or a field sort. To
+   include custom-field columns, choose one content type and tick them under
+   **Columns** first (see "Show custom fields on the content list" above).
+2. In the header bar click **Export**. The panel reads *Export 214 matching*
+   (the number of rows the download will hold) and *Exports the columns shown
+   in the list.*
+3. Click **Download CSV** or **Download JSON**. The browser saves
+   `content-<type>-<date>.csv` (or `.json`; `content-all-…` for all types).
+4. To download only some rows, tick them in the list and click **Export
+   selected** in the bar that appears. That file is always CSV.
+
+If the panel reads *More than 10,000 rows — narrow the list first*, add a
+filter; the download would be refused.
+
+**What is in the file.**
+
+- Always, in this order: `id`, `type`, `title`, `slug`, `status`, `locale`,
+  `updated_at` (ISO 8601).
+- Then the custom fields you chose under **Columns** for that content type
+  (the first four, as the list shows them), headed by the field's name. A
+  field named like one of the seven above is headed `fields.<name>`. With
+  "All types" on a site with several types there are no field columns.
+- In JSON the file is one array; each record is an object with the seven keys
+  and a `fields` object holding the field columns.
+- Nothing else is exported: no body, blocks or translations.
+- The columns are your saved ones, never taken from the link, so a link
+  cannot widen what a download holds.
+
+**Which rows.** The types you can author, the same as the list (a type you can
+read but not author is not listed and cannot be exported; asking for it gives
+*You cannot export that content type.*). Every read runs as you, so a record
+you cannot read is absent. With "All types" the types are exported one after
+another, a type at a time, not merged into one order as the list does. The
+list's status, search, locale and other filters, its field conditions (`cf`)
+and its field sort carry over. A `cf` condition on a private field is accepted
+for an editor even when that column is not exported, as in the list.
+
+**Export selected** ignores every filter except the type: a selection made
+before you changed a filter is not narrowed by it. It takes at most 100 rows
+(the ids travel in the address); above that the button is disabled and says
+*Select at most 100 rows to export.* Ids that do not exist, or that you
+cannot read, are simply missing from the file.
+
+**Private fields.** Private fields, and every user field (a user field is
+always private), are left out unless you tick **Include private fields** in
+the Export panel. The box appears only when the type has such a field you
+could show as a column. Ticking it changes the download links; it does not
+change the list. A private field your role hides from you
+([granular-rbac.md](granular-rbac.md#per-custom-field-grants-and-read-restrictions))
+is never exported, with or without the box, and `private=1` does not bypass it.
+
+**What a cell holds.** The file is data, not a copy of the screen, so some
+values differ from the on-screen text:
+
+| Field | CSV | JSON |
+| --- | --- | --- |
+| number | the number | a number |
+| boolean | `true` / `false` (not Yes / No) | `true` / `false` |
+| select | the option's stored value, not its label | the same |
+| media | the file name (not the alt text) | the file name |
+| reference | the target's title as you can read it | `{"id": "…", "label": "…"}` |
+| user | the person's name, never the email | the name |
+| unreadable or deleted target | `Unavailable` | `{"id": null, "label": "Unavailable"}` for a reference; `Unavailable` otherwise |
+| empty | an empty cell | `null` |
+
+The title saved inside a reference field is never written, so a download
+cannot show a title the list would hide. Long values are not cut at 80
+characters.
+
+**Limits.**
+
+- **10,000 rows.** The rows are counted first; over the limit the answer is
+  HTTP 413 with *This export has more than 10,000 rows. Narrow the list with a
+  filter and try again.* Nothing is truncated.
+- **60 seconds.** A download that runs longer is stopped.
+- **10 downloads a minute per account.** Over it the answer is 429 with a
+  `Retry-After` header. A refused request (not an editor, an unknown type, a
+  too-large export) spends one of the ten as well. The count is kept per
+  server node, so a cluster admits ten a minute on each node. A `HEAD` request
+  is answered with headers only and is not counted.
+
+**What can go wrong.**
+
+- *Exporting content needs an editor account.* (403) A viewer, or a request
+  without a session. Always JSON.
+- *You cannot export that content type.* (403) The type is outside the ones
+  you can author.
+- *The selection is not a list of content ids.* (400) `ids` was empty or held
+  something that is not a UUID.
+- *Select at most 100 rows to export.* (400)
+- *This export has more than 10,000 rows…* (413)
+- A download that is cut off. The count and the stream are not one step, so
+  the limits are enforced again while streaming. If rows were added past the
+  limit, the 60 seconds ran out, or the database failed part-way, the server
+  drops the connection **without finishing the response**: a CSV stops
+  mid-file and the browser reports a failed download, and a JSON file never
+  gets its closing `]`, so it does not parse. A file that parses completely is
+  complete. Narrow the list and download again.
+
+**For scripts.** The two URLs take the same query parameters as `/editor`
+(`type`, `status`, `q`, `cf`, `sort`, …) plus `ids` (comma-separated UUIDs)
+and `private=1`, and authenticate with the signed-in browser session; there is
+no API-key access. For example, with a session cookie:
+
+```
+GET /editor/content/export.csv?type=product&cf=price:gte:10&sort=-field:price
+```
+
+```
+HTTP/1.1 200 OK
+content-type: text/csv; charset=utf-8
+content-disposition: attachment; filename="content-product-2026-11-07.csv"
+cache-control: no-store
+
+id,type,title,slug,status,locale,updated_at,price
+2d1c…,product,Saffron,saffron,published,en,2026-11-05T09:12:44Z,12.5
+```
+
+The response is chunked, so there is no `content-length`. CSV starts with a
+UTF-8 byte order mark so Excel opens it as UTF-8 (`KilnCMSWeb.CSV.parse/1`
+strips it). A text value that starts with `=`, `+`, `-`, `@`, a tab or a
+carriage return is prefixed with `'` so a spreadsheet does not run it as a
+formula; real numbers are exempt, so `-5` in a number field stays `-5`, while
+the text `-5` or `=1+1` in an integer field is still guarded. The filename is
+the type name reduced to letters, digits, `-` and `_`.
+
+**Configuration.** Both limits can be changed; the defaults are the ones above.
+
+```elixir
+config :kiln_cms, :content_export,
+  max_rows: 10_000,
+  time_limit_ms: 60_000
+```
+
+**Observing it.** Each download that ends (including one the browser
+abandoned) writes one Logger line, `content export`, and emits
+`[:kiln_cms, :content_export, :stop]` with measurement `%{rows: n}` and
+metadata `user_id`, `org_id`, `type`, `format`, `rows`, `columns` (names) and
+`include_private`. Neither carries a cell value, the filter text or the ids. A
+download that aborts at a limit raises instead and emits no event. There is no
+audit record of who exported what yet (a follow-up), so the Logger line and
+the event are all there is today.
+
+**For code.** `KilnCMSWeb.EditorLive.ListScope` holds the list's scope, shared
+by the screen and the download: `types/2`, `filter_ctx/4`, `column_type/2`,
+`export_count/6` and `export_path/3`. `KilnCMSWeb.ContentExport` reads the pages
+(keyset, 100 rows each, an explicit `select`, references looked up once per
+page) and `KilnCMSWeb.EditorLive.FieldCells.value/3` resolves a cell once for
+the screen, the CSV (`csv_value/1`) and the JSON (`json_value/2`), so they
+cannot disagree about who may see a reference's target. The route handler is
+`KilnCMSWeb.ContentExportController`.
+
+### Constrain the values of a field
+
+A field can refuse values that are out of range, too long, in the wrong shape
+or already taken. The rules live in the field's `validation` map, are checked
+on **every** write (the editor, JSON:API, GraphQL, MCP, importers), and an
+editor sees the failure as an error under the field, naming it.
+
+| Constraint | Applies to | Meaning |
+|---|---|---|
+| `min`, `max` | `:integer` (whole numbers), `:float` | Inclusive bounds |
+| `min_length`, `max_length` | `:string`, `:url`, plain `:text` (`format: :plain`) | Length in characters (graphemes) |
+| `pattern` | the same text types | A regular expression the **whole** value must match |
+| `pattern_message` | with `pattern` | The sentence an editor reads when it does not match |
+| `unique` | `:string`, `:url`, `:integer`, `:float`, `:date`, `:datetime` | No other document may hold the same value |
+
+A rich `:text` field takes no constraints (its value is HTML, so its length
+means nothing), nor do the other types. Constraints a type does not take are
+refused when the definition is saved, as are unknown keys, `min` above `max`,
+a default value that breaks the field's own rules, and a pattern that is not a
+valid regular expression.
+
+**Set them** in `/editor/fields` (admin only): open or create a field, and the
+form shows a **Validation (optional)** group with only the controls its type
+takes (*Minimum value*, *Maximum value*, *Minimum length*, *Maximum length*,
+*Pattern*, *Message when it doesn't match*, *Unique*). Or send `validation` on
+the field definition (it is a public attribute, so it appears in the JSON:API
+field-definition payload and the OpenAPI document):
+
+```json
+{"field_type": "string", "name": "sku", "label": "SKU",
+ "validation": {"pattern": "[A-Z]{3}-[0-9]{4}", "pattern_message": "Use three capitals, a dash and four digits.", "unique": true}}
+```
+
+Saving `{"sku": "abc"}` on a record of that type then fails with
+`SKU (sku): Use three capitals, a dash and four digits.`. Without a
+`pattern_message` it reads `SKU (sku) doesn't match the required format`.
+The other messages are `… must be at least 3`, `… must be at most 10`,
+`… must be at least 2 characters long`, `… must be at most 5 characters long`.
+
+How the rules behave:
+
+- **Blank values are not checked.** A blank optional field is simply empty;
+  `required` is what makes it mandatory.
+- **A `multiple` string field is checked per item**, reported as `tags[1]`. A
+  `:group` field checks each row's sub-fields against their own `validation`
+  (`dosages[2].unit`).
+- **A pattern must match the whole value.** `[0-9]+` accepts `123`, not
+  `a123`; you do not write `^…$`. A pattern is at most 200 characters (so is
+  its message), is unicode-aware, and runs with match limits: a value over
+  2,000 characters, or a pattern that backtracks without end, counts as *not
+  matching* instead of hanging the save.
+- **Stored values are grandfathered.** A value equal to what the record
+  already holds is not re-checked, so tightening a rule never blocks an edit
+  to some other field; it applies once that field's value changes. Adding a
+  tag to a list that holds one now-too-long tag still saves. Existing data is
+  not rewritten or reported.
+- **Restore, promote and copy skip the value rules.** A version restore, a
+  dynamic type's promotion and a content copy carry values that were valid
+  when written, so a rule tightened since does not fail them; it applies on
+  the next edit. `unique` is the exception: it is still enforced for a
+  restore (from versions or from the trash). A duplicated document starts with
+  its unique fields **blank**, so the copy does not claim the original's value.
+
+#### Unique values
+
+A custom field has no column of its own, so there is no database index behind
+`unique`. The write path enforces it instead (`KilnCMS.CMS.UniqueValues`): a
+lookup while the editor validates, then a transaction-scoped advisory lock on
+the value and a second lookup in the transaction, so two saves racing for the
+same value cannot both win. The loser gets `SKU (sku) is already in use` (the
+message never names the other record, which the writer may not be allowed to
+read), or `… is being changed by another save at the same time. Try again`.
+
+- The match is **exact and case-sensitive** on the trimmed value, within the
+  same organization, content type and **locale**: translations of one document
+  may share a value.
+- Trashed records are ignored; drafts and archived records count.
+- A working copy only stages a value. The check runs when it reaches the live
+  `custom_fields` (publish, or the fold on unpublish); the check while staging
+  is advisory.
+- `unique` is refused on a `multiple` field, a field inside a group or a
+  relationship, a field shared between locales, and a field with a default.
+- **Turning `unique` on is refused while the data already repeats**: the save
+  fails with `can't require unique values yet: 2 values are shared by several
+  records (…). Make them distinct first`. Fix the records, then save again.
+- **There is no database backstop.** Raw SQL, `update_all` and a database
+  restore bypass the check, and a field made unique while an older node was
+  still writing can lag. Audit with the read-only task below.
+
+```bash
+mix kiln.fields.duplicates                       # every type of the default org
+mix kiln.fields.duplicates --org acme --type herb --samples 20
+```
+
+It lists, per content type and field, the repeated values (scoped exactly like
+the runtime check), writes nothing, and **exits non-zero** when it finds any,
+so it can gate a deploy.
+
+The schema export reports a field's rules as annotations, not as JSON Schema
+assertions, because a stored value may predate a rule: `x-kiln-minimum`,
+`x-kiln-maximum`, `x-kiln-min-length`, `x-kiln-max-length`, `x-kiln-pattern`
+and `x-kiln-unique`. `pattern_message` is not exported. On a `multiple`
+string field the text rules apply to each item.
 
 ### Geolocation fields
 
@@ -708,6 +1024,92 @@ editor-owned fields. A field that is core, needs a DB constraint/index, or is
 filtered/sorted on every request still belongs as a hand-declared Ash attribute
 on the resource (with a `mix ash.codegen` migration). Custom fields are jsonb —
 queryable via `custom_filter`/`custom_sort`, but never index-backed.
+
+### Make a field conditional
+
+A field can appear only when another field has a certain value, and be
+required only then: a "Reason" that shows up when "Kind" is "Other", a "Venue"
+that is required for events. You need the admin role. Rules are per field and
+read the fields beside it (the same content type or dynamic type, or, for a
+group's sub-field, the same row).
+
+1. Open `/editor/fields`, find the field and choose **Edit** (or fill in the
+   **Add a field** form for a new one).
+2. Expand **Conditions**. It lists **Show when** and **Required when**. If it
+   says there are no other fields to test yet, the type has no text, number,
+   date, yes/no or choice field to read.
+3. Under **Show when**, choose **Add a condition**. Pick the field, the test
+   (**is**, **is not**, **is one of**, **is empty**, **is not empty**, and
+   **is greater than** / **is less than** for number and date fields) and the
+   value. For **is one of**, type the values separated by commas.
+4. Add more tests if you need them. With two or more, a selector appears:
+   **All of these are true** or **Any of these is true**.
+5. Do the same under **Required when** if the field should be mandatory only
+   in some cases.
+6. Save (**Add field** or **Save**). The Conditions heading now shows how many
+   conditions the field has.
+7. Open a document of that type. Change the field the rule reads: the
+   conditional field appears or disappears at once, and saving is blocked
+   with "is required" while a **Required when** rule holds and the field is
+   empty.
+
+The same rule, as a code interface call:
+
+```elixir
+CMS.create_field_definition!(%{
+  content_type: :post, name: "reason", label: "Reason",
+  field_type: :string,
+  visible_when: %{"field" => "kind", "op" => "eq", "value" => "other"},
+  required_when: %{"all" => [
+    %{"field" => "kind", "op" => "eq", "value" => "other"},
+    %{"field" => "reviewed", "op" => "eq", "value" => true}
+  ]}
+}, actor: admin)
+```
+
+A rule is a leaf (`field`, `op`, `value`; `empty` and `not_empty` take no
+`value`, `in` takes a list of 1 to 50) or an `all` / `any` list of rules,
+nested at most 3 levels with at most 10 tests. The same attributes read back as
+`visible_when` / `required_when` on a field definition in
+`?include=field_definitions` ([json-api.md](json-api.md)) and in the OpenAPI
+document; JSON:API and GraphQL do not create or edit definitions.
+
+What to know before relying on it:
+
+- **Hidden is not private.** A hidden field keeps its stored value, and the
+  JSON:API, GraphQL, search and computed fields still see it. Mark the field
+  **Private** to keep a value out of public reads.
+- **The server enforces it on a normal write.** A hidden field is never
+  required. A value sent for a hidden field is still checked and stored. A
+  restore and a copy that drops custom fields skip **Required when**, and a
+  record saved before the rule existed is not rechecked by an unrelated
+  write.
+- **No cascade.** A rule reads the stored or submitted value of the field it
+  names even if that field is itself hidden.
+- **Dates and times.** `is greater than` / `is less than` compare numbers and
+  ISO dates or datetimes with seconds, and are false when a value can't be read
+  as one. The browser's `datetime-local` input sends no seconds, so on a
+  datetime field these two tests never hold; use a date field, or `is empty`
+  / `is not empty`.
+- **Renaming and removing.** Renaming a field rewrites the rules that read it.
+
+If saving a definition fails, the message appears under **Conditions**:
+
+| Message | Meaning |
+|---|---|
+| `is not a valid condition: it …` | The rule has a bad shape, an unknown operator, a missing value, or exceeds the depth or size limit. |
+| `names X, which is not a field beside this one` | The field was removed or sits in another type or group. |
+| `can't depend on the field itself` / `would depend on itself through other conditions` | A self reference or a cycle. |
+| `can't depend on X, a private field` | A private value may not steer what a viewer sees. |
+| `can't depend on X: a … field has no simple value to test` | Only text, number, date, yes/no and choice fields can be read. |
+| `can't compare X with greater/less than: it is not a number or a date` | `gt` / `lt` on another type. |
+| `is not available for a link field` / `… for a computed field` / `… for a group field` | These carry no conditions. |
+| `is used in the conditions of …; remove those conditions first` | Deleting a field other rules read. |
+| `… reads this field in its condition: …` | Changing the type of, or making private, a field another rule reads. |
+
+A rule nested beyond one level (set through the code interface) is shown in
+the admin UI with a note and a **Remove condition** button; it is left as it is
+until removed.
 
 ## 2. Relations that carry data
 

@@ -239,7 +239,10 @@ route, see "Sorting" under "Custom fields" below.
 A **private** custom field (`private: true`, see
 [extending-content.md](extending-content.md)) is not in `custom_fields` for a
 caller below editor, and naming it in `custom_filter` or `custom_sort` is a
-`400` for them, as for a field that does not exist.
+`400` for them, as for a field that does not exist. The same holds for an
+editor whose role hides that private field from them (a read restriction,
+see [granular-rbac.md](granular-rbac.md#per-custom-field-grants-and-read-restrictions)),
+and a create or update response omits it too.
 
 Admin-defined custom fields (see
 [extending-content.md](extending-content.md)) live in one `custom_fields`
@@ -862,7 +865,14 @@ Each row carries `name` (the permanent machine key), `label`, `plural_label`,
 `default_review_after_days`. Add `?include=field_definitions` to get the type's
 custom-field schema (`name`, `label`, `field_type`, `required`, `options`,
 `default`, `help_text`, `position`, …) — the keys an entry's `custom_fields`
-map takes. `?include=field_definitions.group_fields` adds the sub-fields of
+map takes, `validation`: the field's value constraints (`min`, `max`,
+`min_length`, `max_length`, `pattern`, `pattern_message`, `unique`; `{}` when
+none), which a write to `custom_fields` is checked against — see
+[Constrain the values of a field](extending-content.md#constrain-the-values-of-a-field) —
+and `visible_when` / `required_when`, the field's conditional rules (or `null`); see
+[extending-content.md](extending-content.md#make-a-field-conditional). A hidden
+field is an editor concept: its value is still in every read.
+`?include=field_definitions.group_fields` adds the sub-fields of
 each `:group` field — the keys each of its rows takes; a sub-field names its
 group in `group_of_id`.
 

@@ -104,6 +104,7 @@ config :kiln_cms,
     KilnCMS.Newsletter,
     KilnCMS.Automation,
     KilnCMS.Billing,
+    KilnCMS.Backups,
     KilnCMS.Federation,
     KilnCMS.Experiments,
     KilnCMS.Social
@@ -162,7 +163,11 @@ config :kiln_cms, KilnCMS.Backups,
   dir: "/var/backups/kiln",
   media_dir: nil,
   keep_days: 14,
-  stale_after_hours: 36
+  stale_after_hours: 36,
+  # Target ceiling on one media part's input bytes (400 MB) and the exclusion
+  # globs (#2218). Overridden by BACKUP_MEDIA_PART_MB / BACKUP_MEDIA_EXCLUDE.
+  media_part_bytes: 400 * 1_048_576,
+  media_exclude: []
 
 # Media blob storage. Swap the adapter for S3/MinIO in production (configure
 # the bucket/endpoint/credentials in runtime.exs).

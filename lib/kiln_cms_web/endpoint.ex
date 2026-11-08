@@ -191,6 +191,10 @@ defmodule KilnCMSWeb.Endpoint do
     json_decoder: Phoenix.json_library()
 
   plug Plug.MethodOverride
+  # `Plug.Head` below rewrites HEAD into GET, so a controller could not tell the
+  # two apart. A download that must not do its work for a HEAD (the content
+  # export bills a rate limit and streams) reads `conn.private[:kiln_head?]`.
+  plug :remember_head
   plug Plug.Head
   plug Plug.Session, @session_options
   # Strip a `/<locale>/…` prefix and set the locale before routing.
@@ -200,6 +204,11 @@ defmodule KilnCMSWeb.Endpoint do
   # (epic #336), so every pipeline — delivery controllers, GraphQL, JSON:API — is
   # scoped to the right site. Bare-host/localhost requests resolve to the default org.
   plug KilnCMSWeb.Plugs.SetTenant
+
+  # The operator's IP block list (#2242). Per-org, so it needs the tenant and
+  # sits straight after it; dynamic routes only (static files and uploads are
+  # served above and are not tenant-scoped). The sockets check it themselves.
+  plug KilnCMSWeb.Plugs.IpBlock
 
   # Attach request context (method, path, scrubbed headers/params) to any Sentry
   # event raised while handling this request. No-op without a configured DSN. On
@@ -244,4 +253,7 @@ defmodule KilnCMSWeb.Endpoint do
   end
 
   defp secure_upload_headers(conn, _opts), do: conn
+
+  defp remember_head(conn, _opts),
+    do: Plug.Conn.put_private(conn, :kiln_head?, conn.method == "HEAD")
 end

@@ -101,7 +101,11 @@ test.describe("CSP connect-src 'self' (#1615)", () => {
     // re-join `/live`.
     await page.goto("/editor");
     await expect(page.locator("[data-phx-main].phx-connected")).toHaveCount(1);
-    const editLink = page.locator('a[href^="/editor/content/"]').first();
+    // Not the export links (`/editor/content/export.csv|json`, #2293): those
+    // are downloads, and `page.goto` on one aborts with "Download is starting".
+    const editLink = page
+      .locator('a[href^="/editor/content/"]:not([href*="/export."])')
+      .first();
     const href = await editLink.getAttribute("href");
     expect(href).toBeTruthy();
     await page.goto(/** @type {string} */ (href));

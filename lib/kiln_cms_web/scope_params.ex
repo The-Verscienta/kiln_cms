@@ -2,7 +2,8 @@ defmodule KilnCMSWeb.ScopeParams do
   @moduledoc """
   Turns the team page's scope pickers (`KilnCMSWeb.ScopePickers`) into the
   three granular-RBAC attributes a custom role or a membership stores —
-  `editable_types`, `readable_types` and `field_grants` (#2141).
+  `editable_types`, `readable_types` and `field_grants` (#2141), and the
+  fourth, `field_read_grants` (#2281).
 
   The pickers post *modes*, not attribute values, because the stored shapes
   give two different meanings to things a checkbox list cannot tell apart:
@@ -28,6 +29,12 @@ defmodule KilnCMSWeb.ScopeParams do
   and a param shape from an older page (or a replayed form recovery) can never
   overwrite a value it does not carry a mode for.
 
+  The read picker of a grant row (`grant_read_mode[3]`, `grant_read_fields[3][]`,
+  keyed by the same `grant_type[3]`) has the same three modes, stored in
+  `field_read_grants`: `"any"` deletes the type's key (every private custom
+  field stays visible), `"only"` stores the checked list (refused when empty),
+  `"none"` stores `[]` (every private field hidden).
+
   Grant rows are posted by **position** — `grant_mode[3]`, `grant_type[3]` (the
   key, as a value) and `grant_fields[3][]` — so a stored key, which may be
   anything an earlier JSON editor accepted, never becomes part of a param name.
@@ -37,18 +44,23 @@ defmodule KilnCMSWeb.ScopeParams do
   @type stored :: %{
           editable_types: [String.t()],
           readable_types: [String.t()],
-          field_grants: %{optional(String.t()) => [String.t()]}
+          field_grants: %{optional(String.t()) => [String.t()]},
+          field_read_grants: %{optional(String.t()) => [String.t()]}
         }
   @type pick :: %{mode: String.t(), values: [String.t()] | nil}
   @type picks :: %{
           editable_types: pick() | nil,
           readable_types: pick() | nil,
-          field_grants: %{optional(String.t()) => pick()}
+          field_grants: %{optional(String.t()) => pick()},
+          field_read_grants: %{optional(String.t()) => pick()}
         }
-  @type errors :: %{optional(axis() | {:grant, String.t()}) => :none_picked}
+  @type errors :: %{
+          optional(axis() | {:grant, String.t()} | {:read_grant, String.t()}) => :none_picked
+        }
 
-  @picker_keys ~w(editable_mode readable_mode grant_mode grant_type grant_fields)
-  @attribute_keys ~w(editable_types readable_types field_grants)
+  @picker_keys ~w(editable_mode readable_mode grant_mode grant_type grant_fields
+                  grant_read_mode grant_read_fields)
+  @attribute_keys ~w(editable_types readable_types field_grants field_read_grants)
 
   @axis_params %{
     editable_types: {"editable_mode", "editable_types"},
@@ -60,15 +72,17 @@ defmodule KilnCMSWeb.ScopeParams do
 
   @doc "The stored value of a create form: every axis unrestricted."
   @spec blank() :: stored()
-  def blank, do: %{editable_types: [], readable_types: [], field_grants: %{}}
+  def blank,
+    do: %{editable_types: [], readable_types: [], field_grants: %{}, field_read_grants: %{}}
 
-  @doc "The three scope attributes of a role, membership or user."
+  @doc "The scope attributes of a role, membership or user."
   @spec stored(map()) :: stored()
   def stored(%{} = record) do
     %{
       editable_types: Map.get(record, :editable_types) || [],
       readable_types: Map.get(record, :readable_types) || [],
-      field_grants: Map.get(record, :field_grants) || %{}
+      field_grants: Map.get(record, :field_grants) || %{},
+      field_read_grants: Map.get(record, :field_read_grants) || %{}
     }
   end
 
@@ -87,13 +101,17 @@ defmodule KilnCMSWeb.ScopeParams do
     {readable, errors} = axis(picks, stored, :readable_types, errors)
     {grants, errors} = grants(picks.field_grants, stored.field_grants, errors)
 
+    {read_grants, errors} =
+      read_grants(picks.field_read_grants, Map.get(stored, :field_read_grants, %{}), errors)
+
     if errors == %{} do
       {:ok,
        params
        |> strip()
        |> Map.put("editable_types", editable)
        |> Map.put("readable_types", readable)
-       |> Map.put("field_grants", grants)}
+       |> Map.put("field_grants", grants)
+       |> Map.put("field_read_grants", read_grants)}
     else
       {:error, errors}
     end
@@ -116,7 +134,8 @@ defmodule KilnCMSWeb.ScopeParams do
     %{
       editable_types: axis_pick(params, :editable_types),
       readable_types: axis_pick(params, :readable_types),
-      field_grants: grant_picks(params)
+      field_grants: grant_picks(params, "grant_mode", "grant_fields"),
+      field_read_grants: grant_picks(params, "grant_read_mode", "grant_read_fields")
     }
   end
 
@@ -167,10 +186,10 @@ defmodule KilnCMSWeb.ScopeParams do
 
   # --- field grants ------------------------------------------------------------
 
-  defp grant_picks(params) do
-    modes = map_param(params, "grant_mode")
+  defp grant_picks(params, mode_key, fields_key) do
+    modes = map_param(params, mode_key)
     types = map_param(params, "grant_type")
-    fields = map_param(params, "grant_fields")
+    fields = map_param(params, fields_key)
 
     modes
     |> Enum.sort_by(fn {index, _mode} -> {String.length(to_string(index)), index} end)
@@ -191,6 +210,16 @@ defmodule KilnCMSWeb.ScopeParams do
         :delete -> {Map.delete(grants, key), errors}
         {:ok, fields} -> {Map.put(grants, key, fields), errors}
         :none_picked -> {grants, Map.put(errors, {:grant, key}, :none_picked)}
+      end
+    end)
+  end
+
+  defp read_grants(picks, stored, errors) do
+    Enum.reduce(picks, {stored, errors}, fn {key, pick}, {grants, errors} ->
+      case grant(pick, Map.get(stored, key)) do
+        :delete -> {Map.delete(grants, key), errors}
+        {:ok, fields} -> {Map.put(grants, key, fields), errors}
+        :none_picked -> {grants, Map.put(errors, {:read_grant, key}, :none_picked)}
       end
     end)
   end

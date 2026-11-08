@@ -80,7 +80,7 @@ the router so preflights are answered before route matching).
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |
 | Media bytes | `/media/:id/download`, `/media/:id/stream` | session (a gated item needs its audience) | `:delivery` |
 | Image transforms | `/media/:id/t/:ops` | session (same read as the download); unsigned URLs allowlisted, signed ones HMAC-checked | `:media_transform` per request + `:media_render` per cache miss, plus a per-node render gate |
-| Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
+| Media blobs | `/uploads/*` (`Plug.Static`) | none | none (and not covered by the IP block list) |
 | Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / preview token (one document, re-verified until it expires) or API key + per-document read | `/live` root joins `:live_join` per address (#1183); every frame on a `/ws/collab` connection `:collab_event` per account (#1305); otherwise none (except the sign-in submit, above) |
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
 
@@ -335,6 +335,20 @@ build if a resource is ever registered without that authorizer.
   the resulting cookie then signs the user in later *without* a code is the
   deliberate part — it is a "this device completed every factor" credential, and
   that is what remember-me is for on a 2FA account.
+- **Breached-password check (#2240)** — when a password is set (register,
+  change, reset, first-run setup) `KilnCMS.Accounts.Changes.CheckBreachedPassword`
+  looks it up against the Have I Been Pwned range API by k-anonymity: SHA-1
+  here, only the 5-character prefix out (`Add-Padding: true`), the match made
+  locally, through `KilnCMS.SafeFetch` with no redirects, a 128 KB cap and a 3 s
+  deadline. The site's stance is `CMS.SitePasswordPolicy` (off / warn / block,
+  `/editor/password-policy`, admin-only), then `BREACHED_PASSWORD_POLICY`, then
+  warn; `block` refuses only an account whose tier is admin (the stricter of its
+  global role and its tier on the request's org), and the tier is the
+  *target's*, never the actor's. `BREACHED_PASSWORD_CHECK=false` makes no call.
+  The lookup runs once per submitted action (a `before_transaction` hook, so
+  not per keystroke and holding no connection), after the validations and the
+  registration throttle, and nothing identifying the password, hash, prefix,
+  account or org is logged or put in telemetry. See *Breached passwords* below.
 - **SSRF protection on outbound calls** — `KilnCMS.Webhooks.SafeUrl`: HTTPS
   required in prod, private/loopback/link-local/metadata ranges rejected for
   both IPv4 and IPv6, DNS resolved with an all-or-nothing rule and a hard
@@ -593,6 +607,35 @@ build if a resource is ever registered without that authorizer.
   reach the same end state, just via a moment where 2FA visibly dropped) and is
   tracked separately rather than folded into this fix.
 
+### Blocked addresses
+
+An admin (#2242) can refuse an address or range per site from `/editor/ip-blocks`; see
+[ip-blocking.md](ip-blocking.md).
+
+- **What it stops.** Every dynamic route, via `KilnCMSWeb.Plugs.IpBlock` straight
+  after tenant resolution, and the sockets (`/live`, `/ws/gql`, `/ws/collab`,
+  `/ws/bridge`), which check the same list on connect. The answer is an empty
+  `403`; nothing says a list exists.
+- **What it does not.** `Plug.Static` assets and `/uploads/*` are served above the
+  tenant lookup and cannot be scoped to a site, so a block does not cover them
+  (see "Media" below): refuse those at a CDN or proxy. Loopback is never blocked,
+  and `/up` and `/ready` are exempt.
+- **The address is only as good as the proxy config.** The rule matches the
+  address `KilnCMSWeb.Plugs.ClientIp` resolves. Behind a proxy with
+  `TRUSTED_PROXIES` unset that is the proxy, so a rule would block every visitor.
+  The console page warns when it sees that state.
+- **It cannot lock the operator out silently or wholesale.** Ranges wider than
+  `/8` (IPv4) or `/16` (IPv6) and anything overlapping loopback are refused on
+  write; a rule containing the admin's own address needs confirmation.
+- **It fails open.** An unreadable list lets requests through rather than taking
+  the site down with the database. Nothing is cached from a failed read.
+- **Who can edit.** Organization admins only, every action including the read; no
+  API surface exposes it, so a leaked API key cannot lock a site out.
+- **No address in logs.** The refusal counter `kiln_cms.ip_block.refused.count`
+  carries the surface only.
+- **Limits.** Matching is per source address: it does not stop a distributed
+  source, and a visitor can change address. Expired rules are not swept.
+
 ### Public forms
 - **CSRF** — deliberately absent: forms are meant to be posted from third-party
   pages. Abuse is bounded by the `:form` bucket and a honeypot field, and a
@@ -727,13 +770,56 @@ a credential, so the operator's trust assumptions do not carry over:
   page's text, a block and the editor's instruction, or published passages and
   an anonymous visitor's question. It is the site's choice and the page says so.
 
+### Breached passwords
+
+`KilnCMS.Accounts.BreachedPassword`, #2240. The one place a derivative of a
+password leaves the server.
+
+- **What leaves.** The first five hex characters of the password's SHA-1, as the
+  path of `GET /range/<prefix>`, with `Add-Padding: true` so the response length
+  does not reveal how many real hits the prefix has (padding lines carry count
+  `0` and are never read as hits). The suffix, the password and the account
+  stay on the node. The provider learns that *someone* on this IP set a
+  password whose hash starts with that prefix, and nothing more.
+- **Where it applies.** Self-registration, change password, password reset by
+  token and the first-run wizard. **Not** sign-in: a breached password that was
+  set before this shipped is not noticed. Follow-up.
+- **Exempt paths, deliberately.** The admin-sent reset *mail* is checked when
+  its token is used (it is `reset_password_with_token`), but these set or
+  create a credential without a lookup: `AdminPasswordReset` (the admin
+  triggers a mail, not a password), magic links, SSO and passkey registration
+  (no password is set), `AnonymizeUser` (account erasure), seeds,
+  `Beta.Round` and `Staging.Scrub` (operator-run scripts).
+- **Fails open.** A timeout, a non-200, a transport or malformed answer, an
+  unreadable policy row, or an exception resolving the tier accepts the
+  password, logs one warning without detail, and emits the telemetry event
+  with `result: :error`. This is the right trade for an advisory control: the
+  alternative is an attacker, or an outage at a third party, deciding whether
+  anyone can change a password. An attacker who can block egress from the
+  server (or poison its DNS, which `SafeUrl` pins against) can therefore turn
+  the check off; they already hold the network position to do worse.
+- **Residual risks.** (1) Fail-open, above. (2) The policy is the *request's*
+  org and the tier is the account's tier the stricter of global role and that
+  org's membership: an admin of org A with `block`, changing their password on
+  org B's host, is judged by B's policy and B's tier for them. (3) No check at
+  sign-in. (4) The warning after register or reset is a best-effort note held
+  in a node-local cache for ten minutes; on a multi-node deployment without
+  sticky routing, or after a restart, the person may never see it. The password
+  was accepted either way. (5) `warn` is advisory; only an administrator's
+  password can be refused. (6) The check is only as complete as the public
+  corpus.
+- **Telemetry.** `[:kiln_cms, :password, :breach_check]`; see
+  [observability.md](observability.md#breached-password-checks).
+
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;
 admin-triggered, and the feed's `links.next` is followed only on its own
 origin),
 Meilisearch (the operator's instance — a site's own is below), S3/MinIO, the
 mailer, and the LLM providers behind `/api/ask` and
-SEO drafting all make outbound requests to *operator-configured or fixed*
+SEO drafting, and the breached-password check (`api.pwnedpasswords.com`, a
+fixed host, 5-character hash prefix only, through `SafeFetch`; below),
+all make outbound requests to *operator-configured or fixed*
 endpoints, not user-supplied ones — so they are not SSRF vectors in the way
 webhooks are. The exceptions are a site's own SMTP relay (#1322) and AI
 endpoint (above), which are tenant-chosen and SSRF-checked, and

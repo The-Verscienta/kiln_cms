@@ -89,6 +89,13 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
       context
       |> Ash.Context.to_opts()
       |> Keyword.merge(tenant: record.org_id, authorize_with: :error)
+      # These rows are merged and written back: a read restriction's mask
+      # (`Preparations.MaskVersionFields`, #2281) must not reach them.
+      |> Keyword.update(
+        :context,
+        %{kiln_raw_versions: true},
+        &Map.put(&1, :kiln_raw_versions, true)
+      )
 
     case coalescible_versions(version_module, record, read_opts) do
       # Nothing to collapse: a single (or zero) unanchored trailing autosave.

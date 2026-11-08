@@ -182,7 +182,12 @@ defmodule KilnCMS.CMS.Duplication do
   defp create_opts(opts) do
     opts
     |> ContentCopy.create_opts()
-    |> Keyword.update!(:context, &Map.merge(&1, AfterCommit.context()))
+    # A duplicate is a new record: it must not claim the source's unique
+    # field values (#2276).
+    |> Keyword.update!(
+      :context,
+      &Map.merge(&1, Map.put(AfterCommit.context(), :custom_fields_unique, :blank))
+    )
   end
 
   defp id(%{id: id}), do: id
@@ -192,10 +197,12 @@ defmodule KilnCMS.CMS.Duplication do
     grant = ContentCopy.field_grant(source, opts)
     {copied, dropped} = ContentCopy.permitted(copyable_attrs(), grant, @grant_exempt_attrs)
     {blocks, reset_fields} = blocks(source, grant, opts)
+    {custom_fields, custom_withheld} = ContentCopy.custom_fields(source, grant, opts)
 
     attrs =
       source
       |> ContentCopy.take(copied)
+      |> put_custom_fields(custom_fields)
       |> Map.put(:title, copy_title(source.title))
       |> Map.put(:locale, source.locale)
       |> Map.put(:blocks, blocks)
@@ -207,11 +214,15 @@ defmodule KilnCMS.CMS.Duplication do
     # because they were not withheld; the previous version derived this list
     # from `copyable_attrs()` without subtracting them, so an editor was told
     # `audience` had not been copied while the copy carried it (#1157 review).
-    {attrs, dropped ++ reset_fields}
+    {attrs, dropped ++ custom_withheld ++ reset_fields}
   end
 
+  defp put_custom_fields(attrs, nil), do: attrs
+  defp put_custom_fields(attrs, values), do: Map.put(attrs, :custom_fields, values)
+
   # The focus keyphrase stays with the source — see the module doc.
-  defp copyable_attrs, do: ContentCopy.content_attrs() -- [:seo_keywords]
+  # `custom_fields` is carried key by key (`ContentCopy.custom_fields/3`, #2281).
+  defp copyable_attrs, do: ContentCopy.content_attrs() -- [:seo_keywords, :custom_fields]
 
   # The acting tier decides which block fields survive: a value this role could
   # not have set is reset to its declared default rather than refused (#890).

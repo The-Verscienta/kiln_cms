@@ -566,7 +566,7 @@ defmodule KilnCMSWeb.BlockComponents do
       <span class="sr-only">{gettext("Error:")}</span>
       {form_error_message(@error)}
     </p>
-    <p :if={@field.help_text} id={@help_id} class="mt-1 text-xs text-base-content/60">
+    <p :if={@field.help_text} id={@help_id} class="mt-1 text-xs text-base-content/70">
       {@field.help_text}
     </p>
     """

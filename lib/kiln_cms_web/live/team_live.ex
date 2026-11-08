@@ -9,7 +9,7 @@ defmodule KilnCMSWeb.TeamLive do
     * **Members** — the org's memberships: capability tier, assigned custom
       role, and per-member overrides of the scope axes.
     * **Roles** — the org's custom roles: named bundles of `editable_types` /
-      `readable_types` / `field_grants` (see docs/granular-rbac.md).
+      `readable_types` / `field_grants` / `field_read_grants` (see docs/granular-rbac.md).
 
   The scope axes are picked, not typed (#2141): `KilnCMSWeb.ScopePickers`
   renders them for the role forms and the member form alike, and
@@ -402,7 +402,7 @@ defmodule KilnCMSWeb.TeamLive do
     site_admins = site_admins_without_membership(actor, org.id)
 
     socket
-    |> assign(:catalog, ScopePickers.catalog(org))
+    |> assign(:catalog, ScopePickers.catalog(org, actor))
     |> assign(:members, members)
     |> assign(:site_admins, site_admins)
     # Each person's tier on this site through the decision the policies make,
@@ -537,7 +537,8 @@ defmodule KilnCMSWeb.TeamLive do
       same_text?(Map.get(params, "description", role.description || ""), role.description) and
       params["editable_types"] == role.editable_types and
       params["readable_types"] == role.readable_types and
-      params["field_grants"] == role.field_grants
+      params["field_grants"] == role.field_grants and
+      params["field_read_grants"] == (role.field_read_grants || %{})
   end
 
   # As the `:string` attribute casts it: trimmed, and blank is nil.
@@ -573,7 +574,8 @@ defmodule KilnCMSWeb.TeamLive do
     [
       scope_part(gettext("edit"), record.editable_types),
       scope_part(gettext("read"), record.readable_types),
-      ScopePickers.grants_summary(record.field_grants, catalog)
+      ScopePickers.grants_summary(record.field_grants, catalog),
+      ScopePickers.read_grants_summary(record.field_read_grants, catalog)
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(" · ")

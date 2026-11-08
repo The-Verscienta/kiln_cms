@@ -56,6 +56,15 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **App-made media backups may be several `kiln-media-<stamp>.partNN.tar.gz` files: update any script that globs `kiln-media-*.tar.gz`; after a rollback they do not show in History.** No migration.
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218) · [long form](docs/changelog/unreleased.md#backup-media-parts-upgrade))
+- **Run `mix ash.migrate` (new table `backup_runs`); overlays that restate `:ash_domains` must add `KilnCMS.Backups`.** Rolling the pin back is safe.
+  ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217) · [long form](docs/changelog/unreleased.md#backup-history-upgrade))
+
+- **Run `mix ash.migrate` (new table `site_password_policy`, no data change). Password changes now call the Have I Been Pwned range API by
+  default; air-gapped deployments set `BREACHED_PASSWORD_CHECK=false`.** Rolling the pin back is safe.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-upgrade))
+
 - **API consumers: a stale, expired or garbled `Authorization: Bearer` JWT is now a 401 (`invalid_token`), not anonymous
   data. Fix the client; `KILN_API_REJECT_INVALID_BEARER=false` restores the old fallback for this release only.**
   ([#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161) · [long form](docs/changelog/unreleased.md#reject-invalid-bearer-default-on))
@@ -76,12 +85,58 @@ Every summary line below that was shortened links to its own entry there.
   on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
   ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
 
+- **Overlays and plugins: the field type names `email`, `telephone`, `color`, `slug`, `time` and `json` are now built in. Rename a type that uses one; stored definitions with that name get the new strict check.**
+  ([long form](docs/changelog/unreleased.md#builtin-field-type-names-upgrade))
+
+- **Overlays: run `mix ash.codegen`, commit the migration and run `mix ash.migrate`. Users, memberships and roles gain a `field_read_grants` column.**
+  Additive (`NOT NULL DEFAULT '{}'`). Rolling the pin back is safe for data, but an older release ignores read grants, so a private field you restricted shows to editors again.
+  ([long form](docs/changelog/unreleased.md#custom-field-grants-upgrade))
+
+- **Field definitions gain a `validation` column (`NOT NULL DEFAULT '{}'`, additive, safe to roll back). Overlays: run `mix ash.codegen`.
+  `unique` fields have no database backstop; audit with `mix kiln.fields.duplicates`.**
+  ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation-upgrade))
+
 ### Breaking
+
+- **Overlays: `Accounts.Bootstrap.create_first_admin/1` returns `{:ok, user, notices}`, not `{:ok, user}`.**
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-bootstrap-return))
 
 - **Registering no longer signs the user in: everyone is told to check their email and sent to `/sign-in`, and an address that already has an account gets no new row.**
   ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
 
 ### Added
+
+- **In-app media backups are split into independent `tar.gz` parts with SHA-256 sidecars, a Resume button for failed runs, and a multi-part `restore.sh media`.**
+  Settings `BACKUP_MEDIA_PART_MB` and `BACKUP_MEDIA_EXCLUDE`; no migration.
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218) · [long form](docs/changelog/unreleased.md#backup-media-parts))
+
+- **Roles and members can be granted individual custom fields, and private custom fields can be hidden from some editors.**
+  New `custom_fields.<name>` grant keys and a `field_read_grants` axis; set both on `/editor/team`. Guide: [docs/granular-rbac.md](docs/granular-rbac.md#per-custom-field-grants-and-read-restrictions).
+  ([long form](docs/changelog/unreleased.md#custom-field-grants))
+
+- **Backups gains a History of every attempt, app- and cron-made, with verified state and whether files are still on disk.**
+  Platform admins, at `/editor/backups`; no new settings.
+  ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217) · [long form](docs/changelog/unreleased.md#backup-history))
+
+- **Site admins can block an IP address or range at `/editor/ip-blocks` ("Blocked addresses"): an empty 403 on dynamic routes and sockets.
+  Static assets and `/uploads` are not covered; behind a proxy set `TRUSTED_PROXIES` first.
+  If an admin blocks their own network, `bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(remove: true)'` lifts the blocks.**
+  ([#2242](https://github.com/The-Verscienta/kiln_cms/issues/2242) · [long form](docs/changelog/unreleased.md#ip-block-rules))
+- **Custom fields can be shown or required only when another field has a given value (Conditions in `/editor/fields`).**
+  Hidden values are kept and still served by the API; new `visible_when` / `required_when` attributes; additive migration, nothing else to run.
+  ([long form](docs/changelog/unreleased.md#conditional-custom-fields))
+- **Admins choose what happens to a breached password at Organization → Password policy: off, warn (default) or block for administrators.**
+  Checked on register, change, reset and first-run setup, by k-anonymity.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-check))
+- **Admins can constrain a custom field: `min`/`max`, length, a whole-value `pattern`, or `unique`, enforced on every write path.**
+  Set in `/editor/fields` or via the `validation` attribute; stored values are grandfathered. Audit with `mix kiln.fields.duplicates`.
+  ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation))
+- **Admins can replace a webhook's signing secret with Rotate secret on `/editor/webhooks`; it works even when the old secret is unreadable.**
+  ([#2347](https://github.com/The-Verscienta/kiln_cms/issues/2347) · [long form](docs/changelog/unreleased.md#webhook-rotate-secret))
+
+- **Six built-in custom field types check and tidy a value: `:email`, `:telephone` (E.164), `:color`, `:slug`, `:time` and `:json`.**
+  Those six names are now reserved: rename an overlay or plugin type that uses one (`mix kiln.plugins.doctor` fails).
+  ([long form](docs/changelog/unreleased.md#builtin-format-field-types))
 
 - **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
   A wrong operand type is a schema error; `contains` and `startsWith` (case-insensitive, literal) also work in `customFilter`.
@@ -98,6 +153,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The content list can be filtered by up to four custom-field conditions and sorted by one field once one content type is listed; the count reads "1000+" past 1000.**
   Saved views keep them and flag a field that no longer applies; no migration.
   ([long form](docs/changelog/unreleased.md#content-list-field-filter-sort))
+
+- **Editors can download the content list as CSV or JSON from a new Export menu, or only the ticked rows with Export selected.**
+  Up to 10,000 rows, the saved list columns, private fields only if ticked; no migration.
+  ([long form](docs/changelog/unreleased.md#content-list-export))
 
 - **`custom_filter` equality, `in` and list membership use a new GIN index on `custom_fields`: a selective filter on 100,000 rows drops from about 40 ms to about 3 ms.**
   Range, `not_eq`, `ilike`, `null` and `custom_sort` are unchanged.
@@ -144,6 +203,13 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **The signed-out home page and the default logo ship right-sized images: page image weight drops from about 1,030 KB to about 100 KB (WebP).**
+  ([#2165](https://github.com/The-Verscienta/kiln_cms/issues/2165) · [long form](docs/changelog/unreleased.md#public-image-weight))
+
+- **CSV exports write a negative number as `-5`, not `'-5`; text starting with `=`, `+`, `-` or `@` is still prefixed.**
+  Affects any CSV that passes a negative number to `KilnCMSWeb.CSV`; text is unchanged.
+  ([long form](docs/changelog/unreleased.md#csv-numbers-unguarded))
+
 - **A console page you lack the role for now lands on a 403 `/access-denied` page naming the role it needs, instead of home with a toast; `access-denied` is now a reserved root slug.**
   ([#2143](https://github.com/The-Verscienta/kiln_cms/issues/2143) · [long form](docs/changelog/unreleased.md#access-denied-page))
 
@@ -179,6 +245,11 @@ Every summary line below that was shortened links to its own entry there.
   ([#2144](https://github.com/The-Verscienta/kiln_cms/issues/2144) · [long form](docs/changelog/unreleased.md#essentials-hidden-screens-hint))
 
 ### Fixed
+
+- **Three dead links in the docs now resolve (the `KilnCMS.Keys` link in Memberships and Ghost's schema in both comparison pages), and a docs test refuses relative `.html` links.** ([#2167](https://github.com/The-Verscienta/kiln_cms/issues/2167))
+
+- **The sign-in, register and reset pages now have a header landmark, one `h1`, and `autocomplete` on their email and password boxes.**
+  ([#2162](https://github.com/The-Verscienta/kiln_cms/issues/2162) · [long form](docs/changelog/unreleased.md#auth-pages-landmarks-autocomplete))
 
 - **`custom_sort` ranks a stored JSON `null`, array or object as no value (last in either direction), and page 2 of a keyset-paged sort no longer fails on one.**
   ([long form](docs/changelog/unreleased.md#custom-sort-json-null-last))
@@ -220,6 +291,9 @@ Every summary line below that was shortened links to its own entry there.
   (`內`, many other CJK characters) saves again: line splitting reads Unicode, not bytes, so
   the character is no longer cut in two and refused.**
   ([#2214](https://github.com/The-Verscienta/kiln_cms/pull/2214))
+
+- **Muted text on public pages and shared form components is now readable: `text-base-content/70`, 4.5:1 or better on every surface.**
+  ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163) · [long form](docs/changelog/unreleased.md#public-muted-text-contrast))
 
 ### Security
 

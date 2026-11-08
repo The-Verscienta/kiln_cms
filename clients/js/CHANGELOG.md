@@ -5,7 +5,7 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `client-js-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
-## Unreleased
+## 0.4.0
 
 - `textSearch` / `semanticSearch` take `customSort` (kiln_cms#2292). The server
   also accepts a custom field's bare name in `filter` / `sort`, but this client

@@ -19,13 +19,16 @@ defmodule KilnCMS.Backups do
   ## The shell scripts stay canonical
 
   `scripts/backup.sh` and `scripts/restore.sh` remain the documented ops path,
-  and this module deliberately produces **byte-identical artifacts**: the same
-  `pg_dump --format=custom --no-owner --no-privileges`, the same
-  `kiln-db-<stamp>.dump` / `kiln-media-<stamp>.tar.gz` names under the same
-  `db/` and `media/` directories, the same `.partial`-then-rename discipline,
-  the same `pg_restore --list` verification. `scripts/restore.sh` restores an
-  app-made backup and this module reports on a cron-made one, because there is
-  one format and one directory layout, not two.
+  and this module produces the same format: the same
+  `pg_dump --format=custom --no-owner --no-privileges` dump named
+  `kiln-db-<stamp>.dump`, media archives named `kiln-media-<stamp>.tar.gz`
+  under the same `db/` and `media/` directories, the same
+  `.partial`-then-rename discipline, the same `pg_restore --list` verification.
+  The one layout difference (#2218): a media library bigger than one part is
+  written by this module as independent
+  `kiln-media-<stamp>.partNN.tar.gz` parts (`KilnCMS.Backups.MediaArchive`),
+  while `backup.sh` still writes a single archive. Both are read by
+  `scripts/restore.sh` and by this module, and both write `sha256` sidecars.
 
   That constraint is why `run/1` shells out to `pg_dump` rather than
   implementing a dump in Elixir. A hand-rolled logical export would be a
@@ -40,7 +43,192 @@ defmodule KilnCMS.Backups do
   documented drill in `docs/backups.md` is the supported path.
   """
 
-  alias KilnCMS.Backups.Manifest
+  use Ash.Domain
+
+  alias KilnCMS.Backups.{Manifest, Run, WorkState}
+
+  resources do
+    resource KilnCMS.Backups.Run do
+      # Every write is the `:backups` system actor's (`system/0`): the worker,
+      # the importer and `reconcile_stale_runs/0`. The history page reads
+      # `run_history` as a platform admin.
+      define :start_run, action: :start
+      define :skip_run, action: :skip
+      define :record_run_progress, action: :record_progress
+      define :finish_run, action: :finish
+      define :fail_run, action: :fail
+      define :resume_run, action: :resume
+      define :import_run, action: :import
+      define :list_runs, action: :read
+      define :run_history, action: :history
+      define :get_run, action: :read, get_by: [:id]
+      define :get_run_by_stamp, action: :by_stamp, args: [:stamp], not_found_error?: false
+      define :list_running_runs, action: :running
+    end
+  end
+
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor the backup pipeline runs as (#2217): the worker that records a run,
+  the importer that turns cron-made backups into rows, and
+  `reconcile_stale_runs/0`.
+
+  A `KilnCMS.SystemActor` labelled `:backups`, admitted by name on
+  `KilnCMS.Backups.Run` for exactly the actions those callers use (see
+  `docs/policy-matrix.md`, "The system actor") rather than `authorize?: false`.
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(:backups)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam, as `KilnCMS.Billing.with_actor/2`: run `fun` with `system/0`
+  # answering `actor` in this process, so a test can take the grant away and
+  # prove the importer and the stale sweep fail CLOSED. Process-local; nothing
+  # on a request path calls it.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
+
+  # How long past the worker's own timeout a `running` run may sit before it is
+  # presumed dead: slack for a slow final write, and for a node whose clock
+  # lags the one that started the run.
+  @stale_grace_minutes 15
+
+  @doc """
+  Fail every `running` run that can no longer be running (#2217), and return how
+  many.
+
+  **Time-based, not Oban-state-based**: `Worker.run/1` may be called from a
+  console with no job behind it, so a run is stale when nothing has touched it
+  for longer than `Worker.timeout/1` plus #{@stale_grace_minutes} minutes before
+  `now`, whatever Oban says (see `run_stale?/2`). The job was killed or the node
+  stopped; the run says so.
+
+  Reads and writes as `system/0` and fails closed: a revoked grant raises
+  instead of reporting "nothing stale". Callers on a request or job tail wrap it.
+  """
+  @spec reconcile_stale_runs(DateTime.t()) :: non_neg_integer()
+  def reconcile_stale_runs(now \\ DateTime.utc_now()) do
+    # One stale row failing to update must not strand the rest as `running`.
+    for run <- list_running_runs!(actor: system(), authorize_with: :error),
+        run_stale?(run, now),
+        match?(
+          {:ok, _},
+          fail_run(
+            run,
+            %{error: "Interrupted: the job was killed or the node stopped"},
+            actor: system()
+          )
+        ) do
+      run
+    end
+    |> length()
+  end
+
+  @doc """
+  Whether a `running` run has shown no sign of life for longer than the worker's
+  timeout plus grace.
+
+  Measured from the LATER of `started_at` and `updated_at`. A resumed run keeps
+  the original attempt's `started_at` (possibly days old) and every progress
+  write bumps `updated_at`, so going by `started_at` alone would fail a resumed
+  run that is working, seconds after it began.
+  """
+  @spec run_stale?(Run.t(), DateTime.t()) :: boolean()
+  def run_stale?(%Run{} = run, now \\ DateTime.utc_now()) do
+    cutoff = DateTime.add(now, -stale_after_ms(), :millisecond)
+
+    # No timestamp at all (a bare struct) is not evidence of anything: not stale.
+    case Enum.filter([run.started_at, run.updated_at], &match?(%DateTime{}, &1)) do
+      [] -> false
+      times -> DateTime.compare(Enum.max(times, DateTime), cutoff) == :lt
+    end
+  end
+
+  defp stale_after_ms do
+    KilnCMS.Backups.Worker.timeout(nil) + :timer.minutes(@stale_grace_minutes)
+  end
+
+  @doc """
+  Whether `run` is one a resume may re-open (#2218): an in-app run that `failed`,
+  or one that is `running` and `run_stale?/2`. Succeeded, skipped and imported
+  runs, and a `running` one that is still being written to, are not.
+  """
+  @spec run_resumable?(Run.t(), DateTime.t()) :: boolean()
+  def run_resumable?(run, now \\ DateTime.utc_now())
+
+  def run_resumable?(%Run{origin: :app, status: :failed}, _now), do: true
+  def run_resumable?(%Run{origin: :app, status: :running} = run, now), do: run_stale?(run, now)
+  def run_resumable?(_run, _now), do: false
+
+  @doc """
+  The run a resume of `stamp` would re-open, or why there is none (#2218).
+
+  Order matters and is the point: the stamp is checked against
+  `\\A\\d{8}-\\d{6}\\z` BEFORE a path is built or a row is read, then a run for
+  that stamp must exist and be resumable (`run_resumable?/2`), and only then is
+  the filesystem consulted for `.work/<stamp>/state.json`. Every refusal is an
+  `{:error, reason}`; nothing falls back to a fresh backup.
+
+  Reasons: `:invalid_stamp`, `:no_such_run`, `{:not_resumable, status}` (a
+  succeeded run, or one still running), `:no_state`.
+  """
+  @spec resumable_run(term(), DateTime.t()) :: {:ok, Run.t()} | {:error, term()}
+  def resumable_run(stamp, now \\ DateTime.utc_now()) do
+    with :ok <- check_stamp(stamp),
+         {:ok, run} <- fetch_run(stamp),
+         :ok <- check_resumable(run, now),
+         :ok <- check_state(stamp) do
+      {:ok, run}
+    end
+  end
+
+  defp check_stamp(stamp),
+    do: if(WorkState.valid_stamp?(stamp), do: :ok, else: {:error, :invalid_stamp})
+
+  defp fetch_run(stamp) do
+    case get_run_by_stamp(stamp, actor: system()) do
+      {:ok, %Run{} = run} -> {:ok, run}
+      {:ok, nil} -> {:error, :no_such_run}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp check_resumable(run, now),
+    do: if(run_resumable?(run, now), do: :ok, else: {:error, {:not_resumable, run.status}})
+
+  defp check_state(stamp),
+    do: if(work_state?(stamp), do: :ok, else: {:error, :no_state})
+
+  @doc """
+  Whether `<dir>/.work/<stamp>/state.json` exists - the files a resume would
+  build on. `false` for a stamp that is not a real stamp.
+  """
+  @spec work_state?(term()) :: boolean()
+  def work_state?(stamp) do
+    WorkState.valid_stamp?(stamp) and stamp |> work_dir() |> WorkState.exists?()
+  end
+
+  @doc "The work directory of a (valid) stamp. Raises for any other."
+  @spec work_dir(String.t()) :: Path.t()
+  def work_dir(stamp), do: WorkState.path(dir(), stamp)
 
   @type status :: %{
           configured?: boolean(),
@@ -92,6 +280,24 @@ defmodule KilnCMS.Backups do
   """
   @spec stale_after_hours() :: pos_integer()
   def stale_after_hours, do: config(:stale_after_hours, 36)
+
+  @doc """
+  The target ceiling, in **bytes**, on the input size of one media part
+  (`BACKUP_MEDIA_PART_MB`, default 400 MB; #2218).
+
+  Bytes internally so tests can use a few KiB. A target, not an exact size: a
+  part closes when the next file would push it over, and one file larger than
+  the cap becomes its own oversize part.
+  """
+  @spec media_part_bytes() :: pos_integer()
+  def media_part_bytes, do: config(:media_part_bytes, 400 * 1_048_576)
+
+  @doc """
+  Glob patterns (relative to `media_dir/0`) the media archive leaves out
+  (`BACKUP_MEDIA_EXCLUDE`; #2218). `[]` — the default — excludes nothing.
+  """
+  @spec media_exclude() :: [String.t()]
+  def media_exclude, do: config(:media_exclude, [])
 
   @doc """
   Whether running a backup **from the app** is possible here.
@@ -158,13 +364,31 @@ defmodule KilnCMS.Backups do
   Enqueue a backup. Returns `{:error, reason}` when `availability/0` says this
   deployment can't run one, so the caller can explain rather than queue a job
   that is certain to fail.
+
+  `resume: stamp` (#2218) enqueues a resume of that failed or interrupted
+  backup instead (job args `"resume" => stamp`, so the `unique` window does not
+  mistake it for a plain backup). It is refused with `{:error, reason}` - see
+  `resumable_run/2` - rather than ever becoming a fresh run. Callers: the
+  platform admin's "Resume" button (`KilnCMSWeb.BackupLive`, which re-checks
+  `platform_admin?` in its handler) and a release console.
   """
   @spec enqueue(keyword()) :: {:ok, Oban.Job.t()} | {:error, term()}
   def enqueue(opts \\ []) do
-    with :ok <- availability() do
-      %{"trigger" => to_string(Keyword.get(opts, :trigger, :manual))}
-      |> KilnCMS.Backups.Worker.new()
-      |> Oban.insert()
+    trigger = to_string(Keyword.get(opts, :trigger, :manual))
+
+    if Keyword.has_key?(opts, :resume) do
+      with {:ok, run} <- resumable_run(Keyword.get(opts, :resume)),
+           :ok <- availability() do
+        %{"trigger" => trigger, "resume" => run.stamp}
+        |> KilnCMS.Backups.Worker.new()
+        |> Oban.insert()
+      end
+    else
+      with :ok <- availability() do
+        %{"trigger" => trigger}
+        |> KilnCMS.Backups.Worker.new()
+        |> Oban.insert()
+      end
     end
   end
 

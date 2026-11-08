@@ -20,6 +20,9 @@ defmodule KilnCMS.CMS.ListFieldQuery do
   | `datetime` | `gte`, `lte`, `null` (whole days, inclusive) |
   | `select` | `eq`, `null` |
   | `reference`, `user`, `media` | `eq` (an id), `null` |
+  | `email`, `telephone`, `slug` | `eq`, `contains`, `null` |
+  | `color` | `eq`, `null` |
+  | `time` | `eq`, `gte`, `lte`, `null` |
 
   `contains` is a case-insensitive substring match: the value is wrapped in
   `%…%` here with `\\`, `%` and `_` escaped, so `50%` finds "50%" and not
@@ -32,15 +35,18 @@ defmodule KilnCMS.CMS.ListFieldQuery do
   `lte` runs up to the start of the next day.
 
   `sortable?/1` says which fields the list can order by: a single-valued
-  `string`, `text`, `integer`, `float`, `boolean`, `date`, `datetime`, `url` or
-  `select`. The sort is passed as `custom_sort` (`name`, or `-name` for
+  `string`, `text`, `integer`, `float`, `boolean`, `date`, `datetime`, `url`, `select`,
+  `email`, `telephone`, `color`, `slug` or `time`. The sort is passed as `custom_sort` (`name`, or `-name` for
   descending), and rows without a value come last either way.
 
   The URL and saved-view spelling of these conditions (`cf`, `sort=field:…`)
   is `KilnCMSWeb.EditorLive.Filters`.
   """
 
+  alias KilnCMS.CMS.FieldTypes
+
   @max_value_length 100
+  @format_types [:email, :telephone, :color, :slug, :time]
 
   @ops %{
     string: ~w(eq contains null),
@@ -54,12 +60,17 @@ defmodule KilnCMS.CMS.ListFieldQuery do
     select: ~w(eq null),
     reference: ~w(eq null),
     user: ~w(eq null),
-    media: ~w(eq null)
+    media: ~w(eq null),
+    email: ~w(eq contains null),
+    telephone: ~w(eq contains null),
+    color: ~w(eq null),
+    slug: ~w(eq contains null),
+    time: ~w(eq gte lte null)
   }
 
   # What a sort can order by one short scalar. `user` is an id, so its order
   # means nothing to an editor; the rest are refused by the preparation.
-  @sortable ~w(string text integer float boolean date datetime url select)a
+  @sortable ~w(string text integer float boolean date datetime url select email telephone color slug time)a
 
   @typedoc "One condition: a field name, an op from `ops/1`, a canonical value."
   @type condition :: %{field: String.t(), op: String.t(), value: String.t()}
@@ -94,6 +105,7 @@ defmodule KilnCMS.CMS.ListFieldQuery do
       op not in ops(type) -> :error
       raw == "" or String.length(raw) > @max_value_length -> :error
       op == "null" -> if raw in ~w(true false), do: {:ok, raw}, else: :error
+      op == "contains" -> {:ok, raw}
       true -> cast_value(type, definition, raw)
     end
   end
@@ -102,6 +114,15 @@ defmodule KilnCMS.CMS.ListFieldQuery do
 
   defp cast_value(type, _definition, raw) when type in [:string, :text, :url],
     do: {:ok, raw}
+
+  # A format type's own `cast/2` is the canonical spelling (a colour's case, a
+  # time's padding, an email's domain), so a condition matches what is stored.
+  defp cast_value(type, definition, raw) when type in @format_types do
+    case FieldTypes.get(type).cast(raw, definition) do
+      {:ok, value} when is_binary(value) -> {:ok, value}
+      _ -> :error
+    end
+  end
 
   defp cast_value(:integer, _definition, raw) do
     case Integer.parse(raw) do
