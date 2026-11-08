@@ -1167,6 +1167,21 @@ defmodule KilnCMSWeb.Router do
     get "/auth/site-sso", SiteSsoController, :request
     get "/auth/site-sso/callback", SiteSsoController, :callback
 
+    # A site invitation's link (#2135). Under `/auth` so it can never shadow a
+    # site's content (`auth` is already a reserved path segment), and before
+    # `auth_routes` for the same reason as the routes above. Anonymous by
+    # necessity — the invitee may have no account yet; the emailed token is the
+    # credential, and every write the page makes is a system-only action that
+    # checks it. Opening the page only peeks at the token; nothing is consumed
+    # until a button is pressed. `invite_token` is in `:filter_parameters`,
+    # which keeps it out of the logged params map only: the request path, token
+    # included, is still logged, as for `/magic_link` and `/password-reset`.
+    live_session :invitation,
+      layout: {KilnCMSWeb.Layouts, :auth},
+      on_mount: [{KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}] do
+      live "/auth/invite/:invite_token", InviteLive, :show
+    end
+
     auth_routes AuthController, KilnCMS.Accounts.User, path: "/auth"
     # Two routes, not one: a `DELETE` to the controller *and* a `live` route in
     # its own `live_session`. The second is easy to miss and is joinable at the

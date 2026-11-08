@@ -254,6 +254,76 @@ defmodule KilnCMS.Security.AdministrationEventsTest do
     end
   end
 
+  describe "member_invited / invitation_revoked (#2135)" do
+    test "an invitation, a resend and a revoke, in the invited site's log, never the address" do
+      other = org("adm-invite")
+      admin = user(:admin)
+      email = "adm-invitee-#{uniq()}@example.com"
+
+      invitation =
+        Accounts.invite_to_org!(
+          %{organization_id: other.id, email: email, role: :editor},
+          actor: admin,
+          context: ctx(default_org())
+        )
+
+      assert [invited] = events(other.id, :member_invited)
+      assert invited.target_type == "invitation"
+      assert invited.target_id == invitation.id
+      assert invited.metadata == %{"role" => "editor", "resent" => false}
+      assert_request(invited)
+
+      Accounts.resend_invitation!(invitation, %{}, actor: admin, context: ctx(default_org()))
+      assert [_, resent] = events(other.id, :member_invited)
+      assert resent.metadata == %{"role" => "editor", "resent" => true}
+
+      :ok = Accounts.revoke_invitation(invitation, actor: admin, context: ctx(default_org()))
+      assert [revoked] = events(other.id, :invitation_revoked)
+      assert revoked.metadata == %{"role" => "editor"}
+
+      refute other.id |> events() |> inspect() |> String.contains?(email)
+      assert events(default_org()) == []
+    end
+
+    test "an editor refused the invitation records nothing" do
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Accounts.invite_to_org(
+                 %{organization_id: default_org(), email: "adm-refused-#{uniq()}@example.com"},
+                 actor: user(:editor),
+                 context: ctx()
+               )
+
+      assert events() == []
+    end
+
+    test "accepting records the role grant, with no person behind it" do
+      admin = user(:admin)
+      other = org("adm-accept")
+
+      invitation =
+        Accounts.invite_to_org!(
+          %{organization_id: other.id, email: "adm-accept-#{uniq()}@example.com", role: :viewer},
+          actor: admin
+        )
+
+      {:ok, user} =
+        Accounts.register_with_invitation(
+          %{
+            token: invitation.__metadata__.token,
+            password: "password123456",
+            password_confirmation: "password123456"
+          },
+          authorize?: false,
+          context: ctx(other.id)
+        )
+
+      assert [granted] = events(other.id, :role_granted)
+      assert granted.target_id == user.id
+      assert granted.actor_id == nil
+      assert granted.metadata == %{"role" => "viewer"}
+    end
+  end
+
   describe "elevation_granted" do
     test "a time-boxed grant on the account records the role and the minutes" do
       admin = user(:admin)

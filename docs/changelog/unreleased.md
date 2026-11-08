@@ -7,6 +7,33 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="team-invitations-upgrade"></a>
+
+- **Run `mix ash.migrate` for site invitations: one new table, `invitations`,
+  and a new daily prune job (#2135).** The migration
+  `20261108053325_add_invitations` only creates a table, so it is expand-only
+  and changes no existing data. Rolling the pin back is safe for the data:
+  the previous release ignores the table. Any invitation still pending then
+  stops working, because the previous release has no `/auth/invite/…` page.
+  Its row is untouched, so the link works again once you upgrade again, if it
+  has not expired.
+  - **The prune job.** The AshOban trigger `Invitation` `:prune_expired` runs
+    daily at `35 4 * * *` on the `default` queue and deletes invitations more
+    than 30 days past their expiry. It has no setting and no environment
+    variable. Overlays that restate `:ash_domains` need no change: the
+    resource is in `KilnCMS.Accounts`.
+  - **Privacy.** Each row holds an invited email address, so the table is new
+    personal data. It holds an address for at most about 37 days (7 days
+    usable, then 30 until the prune). The `oban_jobs` row of each invitation
+    mail holds the plaintext link until Oban's Pruner deletes the job, 7 days
+    after it finishes. [data-flows.md](../data-flows.md) lists both, and the
+    staging scrub deletes the table.
+  - **Logs.** `invite_token` is added to `:filter_parameters`. That keeps the
+    token out of the logged params map. Phoenix still logs the request path,
+    and the path contains the token, as it already does for `/magic_link/…`
+    and `/password-reset/…` links. If you ship request logs somewhere with
+    wider access, treat them as holding live invitation links for up to 7 days.
+
 <a id="security-log-upgrade"></a>
 
 - **Run `mix ash.migrate` for the security log, add `KilnCMS.Security` to an
@@ -262,6 +289,75 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="team-invitations"></a>
+
+- **Platform admins can invite someone with no account to a site by email,
+  from Team (#2135).** On **Team** (`/editor/team`) the member form's button is
+  now **Add or invite**. Before this, the form needed an account that already
+  existed, and said "invite people via sign-up or SSO first". An invite-only
+  site (`:registration_enabled` false) had no way for an admin to bring
+  someone in except creating the account from a release shell.
+  - **What the form does with an address.** If the address has a *confirmed*
+    account that is not on this site, that account is added straight away
+    (as before) and its owner gets a "You were added to (site)" mail. Any other
+    address gets an invitation by email with the tier and custom role you
+    picked, and the flash reads "Invitation sent to (address)." That includes
+    an address with an *unconfirmed* account. Before this change, an
+    unconfirmed account was added directly. Anyone can register an unconfirmed
+    account for any address, so adding it could give a site role to whoever
+    registered it. An address already on the site is refused ("That person is
+    already on this site."). So is one with a live invitation ("That address is
+    already invited — resend it from Pending invitations.").
+  - **Pending invitations.** A **Pending invitations (n)** list under the form
+    shows each address, its tier, its custom role, who invited it, and
+    "Expires (UTC time)" or "Expired". **Resend** mails a new link: the old
+    link stops working and the 7 days start again. The **×** button revokes
+    the invitation and its link stops working. Inviting an address whose
+    invitation has expired resends it with the tier you picked this time.
+  - **The invitee.** The link opens `/auth/invite/(token)` on the invited site.
+    A viewer's link uses the site's public host. An editor's or admin's link
+    uses the console host if `KILN_CONSOLE_HOST` is set, and the site's own
+    host if not. Opening the link changes nothing, so a mail scanner that
+    follows it does no harm. With no account, the invitee chooses a password
+    (and an optional display name) and gets a confirmed account with the
+    invited tier on that site. With a confirmed account, they press **Accept
+    invitation**, and nothing else about the account changes. With an
+    unconfirmed account, they choose a new password. The old password and every
+    session the account held stop working, and a display name the first
+    registrant chose is cleared unless the invitee enters one. In every case
+    the invitee is sent to `/sign-in` and signs in as usual, second factor
+    included. A link that is made up, expired, revoked or already used shows
+    one page: "This invitation is no longer valid".
+  - **Rules.** Invitations last 7 days. Invitation mail is charged to the
+    existing per-address mail budget (5 per address per hour by default), in a
+    bucket of its own. When it is spent, or the address is on a mail
+    suppression list, nothing is sent and the admin is told why. The "added"
+    notice has its own bucket of the same size and is dropped silently when it
+    is spent: the membership is what the admin asked for, so they still see
+    "Member added to this site." Only a *standing* platform admin can invite or
+    resend: a temporary admin cannot, because an accepted invitation would
+    outlast the grant. An admin-tier invitation is honoured only while the
+    admin who sent it is still a standing platform admin. Accepting does not
+    depend on open registration, so invite-only sites can use it. Accepting
+    *through* single sign-on is not supported: the invitee accepts with a
+    password, or with an account they already have.
+  - **Audit.** Two new security-log types: `member_invited` (Member invited;
+    metadata `role`, `resent`) and `invitation_revoked` (Invitation revoked;
+    `role`). Both target the invitation, never the address. Accepting records
+    the existing `role_granted` with no acting person.
+  - **Developers.** New resource `KilnCMS.Accounts.Invitation` (no JSON:API,
+    GraphQL or MCP exposure) with code interfaces `add_or_invite_member`,
+    `invite_to_org`, `resend_invitation`, `revoke_invitation` and
+    `list_invitations_for_org` (platform admins). The interfaces
+    `get_invitation_by_token`, `accept_invitation_for_existing_account`,
+    `consume_invitation`, `register_with_invitation` and
+    `accept_invitation_with_password` are system-only. The token is 32 random
+    bytes; only its SHA-256 is stored. The new mail purposes
+    `:invitation` and `:membership_notice` share `AccountThrottle`'s
+    mail budget, and `KilnCMS.Mail.valid_address?/1` is now public. No new
+    configuration. The how-to is
+    [Invite someone to a site](../account-administration.md#invite-someone-to-a-site).
 
 <a id="revisions-changed-custom-fields"></a>
 

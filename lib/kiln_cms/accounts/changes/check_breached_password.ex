@@ -1,10 +1,16 @@
 defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
   @moduledoc """
   Looks the new password up in the breach corpus before an account's password
-  is set (#2240). On all four password-setting actions of `User`:
+  is set (#2240). On every password-setting action of `User`:
   `:register_with_password` (`action: :register`), `:change_password`
-  (`:change`), `:reset_password_with_token` (`:reset`) and `:bootstrap_admin`
-  (`:bootstrap`).
+  (`:change`), `:reset_password_with_token` (`:reset`), `:bootstrap_admin`
+  (`:bootstrap`), and the two invitation accepts (#2135),
+  `:register_with_invitation` and `:accept_invitation_with_password`
+  (`:invite`).
+
+  An invitation is checked against the **invited** site's policy for the
+  **invited** tier — the invitation `KilnCMS.Accounts.Changes.AcceptInvitation`
+  put in the changeset context — not the host the link was opened on.
 
   ## From a `before_transaction` hook, not the change body
 
@@ -71,8 +77,11 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
   @impl true
   def init(opts) do
     case Keyword.fetch(opts, :action) do
-      {:ok, action} when action in [:register, :change, :reset, :bootstrap] -> {:ok, opts}
-      _other -> {:error, "action: must be :register, :change, :reset or :bootstrap"}
+      {:ok, action} when action in [:register, :change, :reset, :bootstrap, :invite] ->
+        {:ok, opts}
+
+      _other ->
+        {:error, "action: must be :register, :change, :reset, :bootstrap or :invite"}
     end
   end
 
@@ -98,7 +107,7 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
   # (`KilnCMS.Accounts.PasswordNotice`). After the transaction, so a rolled-back
   # action leaves nothing behind. Change and bootstrap show theirs directly.
   defp leave_notice(_changeset, {:ok, record} = result, action)
-       when action in [:register, :reset] do
+       when action in [:register, :reset, :invite] do
     case record.__metadata__ do
       %{password_breach: %{status: :breached}} -> PasswordNotice.put(record.id)
       _none -> :ok
@@ -132,7 +141,7 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
   defp lookup_for(changeset, action) do
     case Ash.Changeset.get_argument(changeset, :password) do
       password when is_binary(password) and password != "" ->
-        org = Accounts.org_id(changeset.tenant)
+        org = target_org(changeset, action)
         with_tier(changeset, action, org, &lookup(password, action, org, &1))
 
       _none ->
@@ -153,6 +162,10 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
       nil
   end
 
+  defp target_org(%{context: %{invitation: %{organization_id: org_id}}}, :invite), do: org_id
+  defp target_org(changeset, _action), do: Accounts.org_id(changeset.tenant)
+
+  defp target_tier(%{context: %{invitation: %{role: role}}}, :invite, _org), do: role
   defp target_tier(_changeset, :register, _org), do: :viewer
   defp target_tier(_changeset, :bootstrap, _org), do: :admin
   defp target_tier(changeset, _action, org), do: PasswordPolicy.target_tier(changeset.data, org)

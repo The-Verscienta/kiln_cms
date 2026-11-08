@@ -101,7 +101,9 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   ## Mail-triggering requests get their own budget
 
   Password-reset and magic-link requests aren't a credential-stuffing vector —
-  they're a mailbomb. A flat per-address budget, enforced at the senders, which
+  they're a mailbomb. So are a site's invitations and "you were added to a site"
+  notices (#2135): an admin names the address, and the mail lands on whoever
+  owns it. A flat per-address budget, enforced at the senders, which
   are the outbound boundary every entry point passes through.
 
   This one cuts both ways and the trade is deliberate: an attacker who spends a
@@ -167,7 +169,8 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   @second_factor_window :timer.minutes(15)
 
   # Every bucket this module charges, for `forget_all/0`.
-  @buckets ~w(signin 2fa signin:alert 2fa:alert 2fa:settings-alert mail:password_reset mail:magic_link mail:registration_notice)
+  @buckets ~w(signin 2fa signin:alert 2fa:alert 2fa:settings-alert mail:password_reset mail:magic_link mail:registration_notice
+               mail:invitation mail:membership_notice)
 
   @mail_budget 5
   @mail_window :timer.hours(1)
@@ -176,7 +179,8 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   # however long the attack runs.
   @alert_window :timer.hours(6)
 
-  @type purpose :: :password_reset | :magic_link | :registration_notice
+  @type purpose ::
+          :password_reset | :magic_link | :registration_notice | :invitation | :membership_notice
 
   @doc """
   Charges one sign-in attempt against this identifier.
@@ -302,7 +306,13 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   """
   @spec allow_mail?(purpose(), String.t()) :: boolean()
   def allow_mail?(purpose, identifier)
-      when purpose in [:password_reset, :magic_link, :registration_notice] do
+      when purpose in [
+             :password_reset,
+             :magic_link,
+             :registration_notice,
+             :invitation,
+             :membership_notice
+           ] do
     case charge("mail:#{purpose}", identifier, mail_window(), mail_budget()) do
       :allow ->
         true
@@ -389,7 +399,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
     drop("signin:alert", identifier)
 
     Enum.each(
-      [:password_reset, :magic_link, :registration_notice],
+      [:password_reset, :magic_link, :registration_notice, :invitation, :membership_notice],
       &drop("mail:#{&1}", identifier)
     )
   end

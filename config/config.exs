@@ -905,7 +905,17 @@ config :phoenix, :json_library, Jason
 # Kept out of the request log: a passphrase, and the bearer grants that ride in
 # a query string for a caller that cannot set headers — a preview token
 # (`?preview_token=`, #1887) and a passphrase grant (`?unlock=`, #496).
-config :phoenix, :filter_parameters, ["password", "passphrase", "preview_token", "unlock"]
+# `invite_token` (#2135): the site-invitation link's path parameter, which
+# accepts the invitation for whoever holds it. This filters the logged params
+# map only; Phoenix.Logger still logs the request path, token included, as it
+# does for `/magic_link` and `/password-reset` tokens.
+config :phoenix, :filter_parameters, [
+  "password",
+  "passphrase",
+  "preview_token",
+  "unlock",
+  "invite_token"
+]
 
 # Error tracking (Sentry). The DSN is only set in config/runtime.exs from the
 # SENTRY_DSN env var, so with no DSN every capture is a no-op — dev, test, and

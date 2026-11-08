@@ -989,18 +989,22 @@ defmodule KilnCMS.Mail do
 
   defp message_domain(_email), do: sending_domain() || "localhost"
 
-  # A minimally-valid address has exactly one "@" with non-empty local and
-  # domain parts. Guards against a malformed recipient becoming the SMTP relay
-  # in DirectMX (where the whole string would be MX-looked-up and retried for
-  # hours as a "transient" DNS failure).
-  defp valid_address?(address) when is_binary(address) do
+  @doc """
+  Whether `address` passes the recipient check `enqueue!/2` applies: exactly one
+  "@" with non-empty local and domain parts, and no space in the domain. Guards
+  against a malformed recipient becoming the SMTP relay in DirectMX (where the
+  whole string would be MX-looked-up and retried for hours as a "transient" DNS
+  failure). Public so a form can refuse an address `enqueue!/2` would raise on.
+  """
+  @spec valid_address?(term()) :: boolean()
+  def valid_address?(address) when is_binary(address) do
     case String.split(address, "@") do
       [local, domain] -> local != "" and domain != "" and not String.contains?(domain, " ")
       _ -> false
     end
   end
 
-  defp valid_address?(_address), do: false
+  def valid_address?(_address), do: false
 
   # Scrub anything address-shaped from an inspected error term so recipient
   # PII in 5xx reject texts doesn't leak into telemetry, logs, or the stored

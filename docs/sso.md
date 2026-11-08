@@ -55,6 +55,13 @@ The sign-in page then offers "Sign in with Sso" alongside password/magic-link.
   afterwards.
 - **Invite-only respected.** With `:registration_enabled` false, SSO signs in
   existing accounts only; unknown emails are refused, not auto-provisioned.
+  To let a new person in, a platform admin invites their address from **Team**
+  (`/editor/team`, see
+  [Invite someone to a site](account-administration.md#invite-someone-to-a-site)).
+  A pending invitation does not admit anyone through SSO: the invitee accepts
+  it first, by setting a password on the invitation page. The account that
+  creates is confirmed, so from then on SSO signs it in as an existing
+  account, under the verified-email rule above.
 - **No password backdoor.** SSO-provisioned accounts store an unguessable
   random hash; password sign-in works only after an explicit password reset.
 - **2FA still applies.** SSO completes through the same
@@ -103,7 +110,12 @@ not trusted for everything it asserts:
   is refused rather than handed to the provider's user.
 - **New people** get an account (`:viewer`) and a `:viewer` membership on this
   site only — unless open registration is off, in which case only existing
-  accounts can sign in.
+  accounts can sign in. On an invite-only site, invite new people from **Team**
+  instead. A pending invitation does not admit its address through the site's
+  provider: the invitee accepts it with a password first. With open
+  registration on, someone who signs in through the provider *before*
+  accepting is already a `:viewer` member when they accept, and accepting leaves
+  that membership as it is, so raise their tier on Team.
 - **A second factor still applies.**
 - **`RS256` ID tokens only**, from the keys at the provider's `jwks_uri`. Every
   request Kiln makes to the provider goes through the same SSRF guard as

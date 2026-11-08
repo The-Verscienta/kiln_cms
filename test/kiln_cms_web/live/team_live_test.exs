@@ -192,15 +192,138 @@ defmodule KilnCMSWeb.TeamLiveTest do
       assert length(rows) == 1
     end
 
-    test "adding an unknown email flashes an error", %{conn: conn} do
+    test "an unknown address is invited and listed as pending (#2135)", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      email = "newcomer-#{System.unique_integer([:positive])}@example.com"
+
+      html =
+        view
+        |> form("#add-member-form", %{"member" => %{"email" => email, "role" => "editor"}})
+        |> render_submit()
+
+      assert html =~ "Invitation sent to #{email}"
+
+      [invitation] =
+        Accounts.list_invitations_for_org!(Accounts.default_org_id(), authorize?: false)
+        |> Enum.filter(&(to_string(&1.email) == email))
+
+      assert invitation.role == :editor
+      assert has_element?(view, "#invitation-#{invitation.id}", email)
+      assert has_element?(view, "#team-invitations-heading", "Pending invitations")
+    end
+
+    test "an address already on the site is refused by name", %{conn: conn} do
+      colleague = authed_user(:viewer)
+
+      Accounts.create_org_membership!(
+        %{user_id: colleague.id, organization_id: Accounts.default_org_id(), role: :viewer},
+        authorize?: false
+      )
+
       {:ok, view, _html} = live(conn, ~p"/editor/team")
 
       html =
         view
-        |> form("#add-member-form", %{"member" => %{"email" => "nobody@example.com"}})
+        |> form("#add-member-form", %{"member" => %{"email" => to_string(colleague.email)}})
         |> render_submit()
 
-      assert html =~ "No account with that email"
+      assert html =~ "already on this site"
+    end
+
+    test "an address the mail queue would refuse is a message, not a crash", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+
+      html =
+        view
+        |> form("#add-member-form", %{"member" => %{"email" => "two@@example.com"}})
+        |> render_submit()
+
+      assert html =~ "must be a valid email address"
+      refute has_element?(view, "#team-invitations")
+    end
+
+    test "a pending invitation can be resent and revoked", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      email = "pending-#{System.unique_integer([:positive])}@example.com"
+
+      view
+      |> form("#add-member-form", %{"member" => %{"email" => email}})
+      |> render_submit()
+
+      [invitation] =
+        Accounts.list_invitations_for_org!(Accounts.default_org_id(), authorize?: false)
+        |> Enum.filter(&(to_string(&1.email) == email))
+
+      html = render_click(view, "resend_invitation", %{"id" => invitation.id})
+      assert html =~ "Invitation sent again to #{email}"
+
+      resent = Accounts.list_invitations!(authorize?: false, query: [filter: [id: invitation.id]])
+      assert [%{sent_count: 2}] = resent
+      refute hd(resent).token_hash == invitation.token_hash
+
+      html = render_click(view, "revoke_invitation", %{"id" => invitation.id})
+      assert html =~ "Invitation revoked"
+      refute has_element?(view, "#invitation-#{invitation.id}")
+
+      assert Accounts.list_invitations!(authorize?: false, query: [filter: [id: invitation.id]]) ==
+               []
+    end
+
+    test "another site's invitation id does nothing", %{conn: conn} do
+      admin = authed_user(:admin)
+      other = KilnCMS.OrgFixtures.org("other-site")
+
+      foreign =
+        Accounts.invite_to_org!(
+          %{
+            organization_id: other.id,
+            email: "foreign-#{System.unique_integer([:positive])}@example.com"
+          },
+          actor: admin
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+
+      render_click(view, "revoke_invitation", %{"id" => foreign.id})
+      render_click(view, "resend_invitation", %{"id" => foreign.id})
+      render_click(view, "revoke_invitation", %{"id" => ["not", "a", "string"]})
+
+      assert [%{sent_count: 1}] =
+               Accounts.list_invitations!(authorize?: false, query: [filter: [id: foreign.id]])
+    end
+
+    test "each invitation's actions name the address they act on", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      emails =
+        for _ <- 1..2 do
+          email = "named-#{System.unique_integer([:positive])}@example.com"
+
+          Accounts.invite_to_org!(%{organization_id: Accounts.default_org_id(), email: email},
+            actor: admin
+          )
+
+          email
+        end
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      html = render(view)
+
+      for invitation <-
+            Accounts.list_invitations_for_org!(Accounts.default_org_id(), authorize?: false),
+          to_string(invitation.email) in emails do
+        assert AccessibleNames.name(
+                 html,
+                 "#invitation-#{invitation.id} button[phx-click='resend_invitation']"
+               ) == "Resend the invitation to #{invitation.email}"
+
+        assert AccessibleNames.name(
+                 html,
+                 "#invitation-#{invitation.id} button[phx-click='revoke_invitation']"
+               ) == "Revoke the invitation to #{invitation.email}"
+      end
+
+      assert AccessibleNames.repeated(html, "li a, li button") == []
     end
 
     test "assigns a custom role to a member", %{conn: conn} do
