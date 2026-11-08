@@ -9,6 +9,9 @@ defmodule KilnCMS.Backups.MediaArchive do
   subset of the files, so each can be listed, hashed, uploaded and restored on
   its own. (Byte-splitting one gzip stream gives pieces that are none of those.)
 
+  `scripts/backup.sh` mirrors this planner (walk order, exclusion globs, part
+  assignment, names, `tar` flags, retry): keep the two in step.
+
   ## Planning
 
   `plan/3` walks the media directory lazily (`File.ls/1` and `File.lstat/2` with

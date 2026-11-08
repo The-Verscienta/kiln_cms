@@ -33,7 +33,7 @@ data or capability:
 | What | Where it lives | How it's backed up |
 |---|---|---|
 | **Database** | Postgres (`DATABASE_URL`) — all content, versions, the event log, fired artifacts, Oban jobs, orgs/users, form submissions, webhook config, mail settings incl. the **encrypted DKIM private key** | `backup.sh db` → verified `pg_dump -Fc` |
-| **Media** | Local adapter: the uploads root (originals + variants). S3 adapter (`S3_BUCKET` set): the bucket | Local: `backup.sh media` → one `tar.gz`; the in-app **Back up now** → several independent `tar.gz` parts ([below](#media-backups-in-parts-2218)). S3/R2: provider-side (below) |
+| **Media** | Local adapter: the uploads root (originals + variants). S3 adapter (`S3_BUCKET` set): the bucket | Local: `backup.sh media` and the in-app **Back up now** both → one `tar.gz`, or several independent `tar.gz` parts for a library bigger than 400 MB ([below](#media-backups-in-parts-2218)). S3/R2: provider-side (below) |
 | **Secrets/env** | Coolify environment variables — above all **`SECRET_KEY_BASE`**, plus `DATABASE_URL`, S3 creds, OIDC/SMTP config | Manual: keep a copy in your password manager, refreshed whenever an env var changes |
 
 > **`SECRET_KEY_BASE` is part of the backup.** `KilnCMS.Keys.Vault` encrypts
@@ -113,15 +113,20 @@ the same `pg_restore --list` / `tar -tzf`. `backup.sh verify` and `restore.sh`
 work on an app-made backup, and this page reports on a cron-made one, because
 the formats are the same family, not two.
 
-**Media is where the two now differ in layout, not in kind.** `backup.sh media`
-still writes ONE `media/kiln-media-<stamp>.tar.gz`. The app writes a set of
-independent `tar.gz` parts, `kiln-media-<stamp>.partNN.tar.gz`, when the media
-is bigger than one part ([below](#media-backups-in-parts-2218)); a library that
-fits in one part keeps the single `kiln-media-<stamp>.tar.gz` name. Every part
-is a complete archive, so `tar -tzf` works on each and `restore.sh media`
-accepts either shape. Splitting in `backup.sh` is a follow-up. Anything of
-yours that globs `kiln-media-*.tar.gz` (a rclone filter, a monitoring script,
-a retention job) must accept the `.partNN` names too.
+**Media is split the same way by both.** `backup.sh media` (and `all`) and the
+app write a set of independent `tar.gz` parts,
+`kiln-media-<stamp>.partNN.tar.gz`, when the media is bigger than one part
+([below](#media-backups-in-parts-2218)); a library that fits in one part keeps
+the single `kiln-media-<stamp>.tar.gz` name. Given the same media directory and
+settings, both put the same files in the same parts under the same names. Every
+part is a complete archive, so `tar -tzf` works on each and `restore.sh media`
+accepts either shape. Anything of yours that globs `kiln-media-*.tar.gz` (a
+rclone filter, a monitoring script, a retention job) must accept the `.partNN`
+names too.
+
+The one difference is recovery. A failed in-app backup keeps its finished parts
+so it can be [resumed](#media-backups-in-parts-2218); a failed cron run removes
+the parts it wrote and keeps nothing to resume ([below](#cron-backups-in-parts)).
 
 That constraint is why the worker shells out to `pg_dump` and `tar` rather than
 implementing them in Elixir: a hand-rolled export would be a second format
@@ -131,19 +136,19 @@ earns its keep.
 ### Media backups in parts (#2218)
 
 A large media library as one archive is one multi-gigabyte file to write,
-verify, upload and, after a failure, rebuild from nothing. The app splits the
-**set of files** instead. Each part is an ordinary `tar.gz` holding a disjoint
+verify, upload and, after a failure, rebuild from nothing. The app and
+`backup.sh` split the **set of files** instead. Each part is an ordinary `tar.gz` holding a disjoint
 share of the files, so it can be listed, hashed, copied off-site and restored
 on its own. (A byte-split of one gzip stream would give pieces that are none of
 those.)
 
-**Settings** (in-app path only; both are optional, see
-[environment-variables.md](environment-variables.md)):
+**Settings** (read by the app and by `backup.sh`, by the same names; both are
+optional, see [environment-variables.md](environment-variables.md)):
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BACKUP_MEDIA_PART_MB` | `400` | Target ceiling on one part, 16 to 10240. It counts the uncompressed **input** bytes, so the archive on disk is usually smaller. A target, not an exact size: a part closes when the next file would pass it, and a single file bigger than the cap becomes a part of its own. Out of range or not a whole number keeps 400 and logs a boot warning. |
-| `BACKUP_MEDIA_EXCLUDE` | unset | Comma-separated globs, relative to the media directory, to leave out. `*` and `?` stay within one path segment, `**` crosses segments, and a pattern with no `/` matches a file or directory name at any depth. Example: `tmp/**,cache/**`. |
+| `BACKUP_MEDIA_PART_MB` | `400` | Target ceiling on one part, 16 to 10240. It counts the uncompressed **input** bytes, so the archive on disk is usually smaller. A target, not an exact size: a part closes when the next file would pass it, and a single file bigger than the cap becomes a part of its own. Out of range or not a whole number keeps 400 and warns: a boot warning in the app, a `warning:` line on stderr from `backup.sh`. There is no setting that turns splitting off; 10240 is the largest part. |
+| `BACKUP_MEDIA_EXCLUDE` | unset | Comma-separated globs, relative to the media directory, to leave out. `*` and `?` stay within one path segment, `**` crosses segments, and a pattern with no `/` matches a file or directory name at any depth. Example: `tmp/**,cache/**`. A pattern ending in `/` (`cache/`) matches nothing: write `cache` (that name at any depth) or `cache/**`. |
 
 **Names.** A set of two or more parts is `kiln-media-<stamp>.part01.tar.gz`,
 `.part02.tar.gz`, and so on: two digits, widening to three past 99. A set that
@@ -158,15 +163,20 @@ needs only one part keeps the legacy `kiln-media-<stamp>.tar.gz`.
   the run's log (and in the server log), with up to five examples, so an
   operator can see that files are missing from the backup. (`plan.json` carries
   the two additive keys `unreadable_names` and `unreadable_examples`.)
-- **Empty directories and directory timestamps are not preserved.** Restoring
-  recreates directories as it extracts files into them.
+- **Empty directories and directory modes, owners and timestamps are not
+  preserved.** Restoring recreates directories as it extracts files into them,
+  owned by the user running the restore with that user's default mode
+  (typically `root:root`, `0755`). Restoring as root? `chown -R` the media root
+  to the user the app runs as afterwards.
 - The file list is fixed when the backup starts. A file uploaded after that is
   in the next backup, not this one. A file deleted before its part is written is
-  dropped, and the Run's log says how many.
+  dropped, and the Run's log (`backup.sh`: a `warning:` line on stderr) says how
+  many.
 
 **Checksums.** Every part has a SHA-256, and so does the set (the SHA-256 of
 all the parts' bytes joined in order, what `cat part* | sha256sum` prints). They
-are recorded three ways:
+are recorded three ways (`backup.sh` records the per-part hashes, in the
+manifest and the sidecar; the set's hash is the app's alone):
 
 - in `manifest.json`, one flat entry per part with the additive keys `sha256`,
   `part` and `parts_total` (the manifest `version` stays 1):
@@ -230,6 +240,78 @@ and the sidecars) as ONE set, aged by its newest member, and deletes it whole,
 so a retention sweep can never leave half a set. Off-site copies each part and
 each sidecar. A failed copy fails the run, as before.
 
+### Cron backups in parts
+
+`backup.sh media` and `backup.sh all` split media exactly as the app does, with
+the same two settings. Nothing needs to change in an existing cron line; to try
+it on a host:
+
+1. Optionally add `BACKUP_MEDIA_PART_MB` and `BACKUP_MEDIA_EXCLUDE` to the cron
+   environment, beside `MEDIA_DIR` in the cron entry at the top of this page.
+   Unset means 400 MB parts and nothing excluded.
+2. Run the media phase by hand as the cron user. This is a real backup (no
+   manifest, since only `all` writes one); History shows it as a media-only row.
+
+   ```bash
+   MEDIA_DIR=/data/kiln/uploads BACKUP_DIR=/var/backups/kiln \
+     BACKUP_MEDIA_EXCLUDE=cache \
+     ./scripts/backup.sh media
+   ```
+
+   It plans first, then writes one part at a time:
+
+   ```text
+   ==> Planning media archive of /data/kiln/uploads
+   ==> Planned 48211 file(s) in 3 part(s) (cap 400 MB), 112 excluded by BACKUP_MEDIA_EXCLUDE
+   ==> Archiving media part 1 of 3 → /var/backups/kiln/media/kiln-media-20261108-031700.part01.tar.gz
+       ok: 371M kiln-media-20261108-031700.part01.tar.gz
+   …
+   ```
+
+3. Look in `$BACKUP_DIR/media/`. A library that fits in one part is one
+   `kiln-media-<stamp>.tar.gz`, as before. A bigger one is
+   `kiln-media-<stamp>.part01.tar.gz` … `.partNN.tar.gz` plus one
+   `kiln-media-<stamp>.sha256` with a line per part. Every file is mode 0600.
+4. `backup.sh all` also writes one `manifest.json` entry per part, with `part`
+   and `parts_total`, and the run shows as one row in
+   [History](#backup-history-2217) with "N parts".
+
+**What it needs.** GNU tar or bsdtar: every part is built from a NUL-separated
+file list (`--null -T`), and a tar that cannot read one (busybox) is refused
+before anything is written: "tar cannot read a NUL-separated file list". Also
+`stat` (GNU or BSD), `xargs`, `mktemp`, `head`, `gzip`, and `sha256sum` or
+`shasum`; bash 3.2 or later. `iconv` is used when present to keep error text in
+the manifest valid UTF-8. The file lists are built in `TMPDIR` (default `/tmp`)
+and removed when the script exits. Planning a very large library in shell takes
+longer than the app does, and grows with the number of files.
+
+**Permissions.** Parts and the sidecar are 0600 from their first byte (the
+media phase runs under `umask 077`). If the script creates `$BACKUP_DIR/media`,
+it creates it 0700; an existing directory keeps its mode. The app sets the same
+directory to 0700 on every run. If cron and the app run as different users, one
+of them cannot write there, so run both as the same user.
+
+**When a run fails.** Cron has no resume. If any part fails (`tar` is retried
+once from a re-checked list first), or the run is interrupted with `HUP`, `INT`
+or `TERM`, the script removes every part it wrote for that stamp, so a partial
+set never looks like a backup. A database dump that already finished is kept.
+A failed off-site copy after the set is complete keeps the set and fails the
+run.
+
+**When a run is killed outright** (`kill -9`, power loss), no cleanup runs. The
+run leaves its finished parts and an in-progress marker,
+`media/kiln-media-<stamp>.sha256.partial`. While the marker is there, History
+does not import the stamp, `backup.sh verify` skips it, and `restore.sh media`
+refuses it. The next in-app backup removes a `.partial` file older than an hour;
+after that, History imports the leftover parts as failed ("incomplete media
+set: parts but no sidecar"). Delete the stamp's `kiln-media-<stamp>*` files by
+hand to tidy up sooner.
+
+**`backup.sh verify`** checks the newest media stamp that has no `.partial`
+beside it, and names any newer one it skipped ("Skipping media set <stamp>:
+still being written, or interrupted"). It fails on parts with no sidecar, and
+fails when every media stamp it found is unfinished.
+
 ### Backup history (#2217)
 
 **Back up now** is not the only thing the page remembers. Below the status panel,
@@ -290,7 +372,11 @@ It scans `$BACKUP_DIR/db` and `$BACKUP_DIR/media` for `kiln-db-<stamp>` and
 media set become one artifact. A gap (say `part03` missing) imports the run as
 `failed` with "incomplete media set", and a legacy single archive sitting beside
 parts of the same stamp is "ambiguous media set", because a restore from either
-would silently lack files. Sidecars are not rows; they supply the per-file
+would silently lack files. Parts with no media sidecar import as `failed`
+with "incomplete media set: parts but no sidecar": every part set is written
+with one, so parts without it are what a run killed mid-set leaves (a manifest
+calling them verified does not excuse it). A legacy single archive without a
+sidecar, from before checksums, imports as before. Sidecars are not rows; they supply the per-file
 SHA-256 shown on an imported row. It is safe to repeat
 (idempotent by stamp, never touching a row the application owns), waits until a
 stamp's newest file is 10 minutes old and has no `.partial` sibling (`pending`
@@ -408,10 +494,18 @@ What the script checks **before it extracts anything** (a failure stops with
   contains `..`. That last rule also refuses a harmless `d/x -> ../y` link:
   extract such a set by hand once you have looked at it.
 
-Missing sidecar: the script prints a loud warning and continues, because
-backups from before checksums have none. Set `RESTORE_REQUIRE_CHECKSUM=1` to
-abort instead. It never falls back to the hashes in `manifest.json`; the
-sidecar is the supported record.
+It also refuses a set with a `kiln-media-<stamp>.*.partial` file beside it: a
+backup is still writing that stamp, or was killed while writing it.
+
+Missing sidecar on a legacy single archive: the script prints a loud warning
+and continues, because backups from before checksums have none. Set
+`RESTORE_REQUIRE_CHECKSUM=1` to abort instead. Missing sidecar on a `.partNN`
+set: the script warns and stops, because every complete part set has a sidecar,
+so one without is most likely what a killed run left behind and would restore
+with files missing. If you know the set is whole (you removed the sidecar
+yourself, say), set `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1` to restore it
+anyway. It never falls back to the hashes in `manifest.json`; the sidecar is the
+supported record.
 
 **By hand** (no script): check the sidecar, then extract in numeric order.
 
@@ -437,7 +531,9 @@ What can go wrong:
 | `checksum verification FAILED` | A part is damaged or was altered. Re-fetch it, or use another copy. |
 | `… has a missing or malformed checksum line` | The sidecar is truncated or edited. |
 | `contains an absolute or '..' path, or a link pointing outside the tree` | Refused for safety, see above. |
-| `RESTORE_REQUIRE_CHECKSUM=1 and no checksum was found` | No sidecar next to the parts. |
+| `RESTORE_REQUIRE_CHECKSUM=1 and no checksum was found` | No sidecar next to the archive or parts, and you asked for one. |
+| `the part set for <stamp> has no sidecar, so it is probably incomplete` | Parts with no `kiln-media-<stamp>.sha256`. Fetch the sidecar if it exists; otherwise the set is probably from a killed run. `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1` restores it anyway. |
+| `kiln-media-<stamp>.sha256.partial is beside the set for <stamp>` | A backup is writing this stamp, or was killed while writing it. Wait for a running backup to finish, or pick another stamp; a leftover from a killed run is [removed](#cron-backups-in-parts) by the next in-app backup after an hour, or delete it and the set by hand. |
 
 ## Restore drill (quarterly)
 
@@ -476,12 +572,14 @@ configured for cron needs nothing extra for the console.
 | `BACKUP_KEEP_DAYS` | backup + app | local retention (default 14) |
 | `BACKUP_ENABLED` | app | set false to disable the in-app path only; cron is unaffected (default true) |
 | `BACKUP_STALE_AFTER_HOURS` | app | how old before the console warns (default 36) |
-| `BACKUP_MEDIA_PART_MB` | app | target ceiling on one media part's input size, 16 to 10240 (default 400) |
-| `BACKUP_MEDIA_EXCLUDE` | app | comma-separated globs the media archive leaves out (default none) |
+| `BACKUP_MEDIA_PART_MB` | backup + app | target ceiling on one media part's input size, 16 to 10240 (default 400) |
+| `BACKUP_MEDIA_EXCLUDE` | backup + app | comma-separated globs the media archive leaves out (default none) |
+| `TMPDIR` | backup | where `backup.sh` builds the media file lists (default `/tmp`); removed when it exits |
 | `BACKUP_TRIGGER` | backup | label recorded in the manifest (default `cron`) |
 | `BACKUP_RCLONE_REMOTE` | backup | off-site rclone remote (strongly recommended) |
 | `BACKUP_PING_URL` | backup | dead-man's-switch ping on success |
 | `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill` |
 | `RESTORE_MEDIA_DIR` | restore | target uploads root for `media` |
 | `RESTORE_CONFIRM=yes` | restore | skip the interactive confirmation |
-| `RESTORE_REQUIRE_CHECKSUM=1` | restore | `media`: abort when there is no checksum sidecar (default: warn and continue) |
+| `RESTORE_REQUIRE_CHECKSUM=1` | restore | `media`: abort when there is no checksum sidecar (default: warn and continue for a legacy single archive) |
+| `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1` | restore | `media`: restore a `.partNN` set that has no sidecar (default: refuse, since a set without one is most likely from a killed run) |

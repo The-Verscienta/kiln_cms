@@ -325,10 +325,21 @@ defmodule KilnCMS.Backups.ImporterTest do
       path
     end
 
+    # The sidecar every finished part set is written with.
+    defp put_set_sidecar(dir, stamp, parts) do
+      put_sidecar(
+        dir,
+        :media,
+        stamp,
+        Enum.map_join(parts, &"#{@hex_a}  #{Artifact.part_name(stamp, &1)}\n")
+      )
+    end
+
     test "the parts of a stamp import as ONE media artifact, in numeric order", %{dir: dir} do
       # past part99, where lexicographic order is wrong
       for n <- [100, 2, 1, 99, 3], do: put_part(dir, @set, n, size: n)
       for n <- 4..98, do: put_part(dir, @set, n, size: n)
+      put_set_sidecar(dir, @set, 1..100)
 
       assert {:ok, %{imported: 1}} = Importer.run()
 
@@ -397,6 +408,7 @@ defmodule KilnCMS.Backups.ImporterTest do
 
       File.rm!(partial)
       put_part(dir, @set, 3)
+      put_set_sidecar(dir, @set, 1..3)
       assert {:ok, %{imported: 1}} = Importer.run()
       assert %{status: :succeeded} = run!(@set)
     end
@@ -412,6 +424,7 @@ defmodule KilnCMS.Backups.ImporterTest do
     test "mixed db and parts under one stamp are one run with both artifacts", %{dir: dir} do
       put(dir, :db, @set)
       for n <- [1, 2, 3], do: put_part(dir, @set, n)
+      put_set_sidecar(dir, @set, 1..3)
 
       assert {:ok, %{imported: 1}} = Importer.run()
 
@@ -421,6 +434,55 @@ defmodule KilnCMS.Backups.ImporterTest do
       assert db.kind == :db
       assert media.name == "kiln-media-#{@set}"
       assert length(media.parts) == 3
+    end
+
+    test "contiguous parts with no sidecar (a killed run, its marker swept) fail the run",
+         %{dir: dir} do
+      put(dir, :db, @set)
+      for n <- [1, 2], do: put_part(dir, @set, n, age: 90)
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+
+      assert %{status: :failed, error: "incomplete media set: parts but no sidecar"} =
+               run!(@set)
+
+      # what is on disk is still shown
+      assert [%{kind: :db}, %{parts: [_, _]}] = run!(@set).artifacts
+    end
+
+    test "a manifest saying the parts verified does not stand in for the sidecar", %{dir: dir} do
+      for n <- [1, 2], do: put_part(dir, @set, n)
+
+      manifest!(dir,
+        ok: true,
+        started_at: ~U[2026-08-01 03:17:00Z],
+        finished_at: ~U[2026-08-01 03:18:42Z],
+        artifacts:
+          for n <- [1, 2] do
+            %{
+              kind: "media",
+              path: "media/#{Artifact.part_name(@set, n)}",
+              bytes: 100,
+              verified: true,
+              sha256: @hex_a,
+              part: n,
+              parts_total: 2
+            }
+          end
+      )
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+
+      assert %{status: :failed, error: "incomplete media set: parts but no sidecar"} =
+               run!(@set)
+    end
+
+    test "a legacy single archive without a sidecar still succeeds", %{dir: dir} do
+      put(dir, :db, @set)
+      put(dir, :media, @set)
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert %{status: :succeeded} = run!(@set)
     end
 
     test "a sidecar alone is not an artifact and makes no run", %{dir: dir} do

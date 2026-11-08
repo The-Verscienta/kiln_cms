@@ -4,12 +4,14 @@ defmodule KilnCMS.Backups.Worker do
   wants a backup taken from inside the application.
 
   Produces what `scripts/backup.sh` produces: same directory layout, same
-  database dump name, `pg_dump` flags and verification, same manifest. The one
-  difference is media (#2218): a library larger than `Backups.media_part_bytes/0`
+  database dump name, `pg_dump` flags and verification, same manifest, and the
+  same media parts (#2218): a library larger than `Backups.media_part_bytes/0`
   becomes several independent `kiln-media-<stamp>.partNN.tar.gz` parts
-  (`KilnCMS.Backups.MediaArchive`) where the script writes one archive, and both
-  write `sha256` sidecars. Work in flight lives in `<BACKUP_DIR>/.work/<stamp>/`
-  (`KilnCMS.Backups.WorkState`) so a failed run can be resumed; see `run/3`. See
+  (`KilnCMS.Backups.MediaArchive`, which the script mirrors), with `sha256`
+  sidecars. The difference is recovery: work in flight lives in
+  `<BACKUP_DIR>/.work/<stamp>/` (`KilnCMS.Backups.WorkState`) so a failed run
+  can be resumed (see `run/3`), where a failed cron run removes its unfinished
+  set. See
   `KilnCMS.Backups` for why one shared format is a requirement rather than a
   nicety.
 
