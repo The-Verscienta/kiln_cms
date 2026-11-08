@@ -1177,6 +1177,61 @@ A rule nested beyond one level (set through the code interface) is shown in
 the admin UI with a note and a **Remove condition** button; it is left as it is
 until removed.
 
+### Give a field a dynamic default
+
+A field's **Default value** is fixed text. For dates, owners and locales the
+useful default is computed when the record is created. In `/editor/fields`
+(admins), the **Default comes from** select on a new or existing field offers,
+for the field's type:
+
+| Source | Value | Field types |
+|---|---|---|
+| **Today's date** (`today`) | the site's current day, the same one `today()` answers in a computed formula | date |
+| **The current date and time** (`now`) | the moment of creation, UTC, to the second | date and time |
+| **The user creating the record** (`current_user`) | the writing person, when they are on the site | person |
+| **The site's default language** (`site_locale`) | `KilnCMS.I18n.default_locale/0` (for a choice field, only when it is one of the options) | text line, choice |
+| **A copy of another field** (`copy_of`) | the value the same create supplies for the field named under **Field to copy** | any single-valued text, number, date, yes/no, choice or person field, copying a field of the same type |
+
+1. Open **Fields**, add or edit a field of one of those types.
+2. Under **Default comes from**, pick a source. For a copy, pick the **Field to
+   copy**. The fixed-value input steps aside: a source replaces the fixed
+   default.
+3. Save. Create a record of that type (in the editor, **New**): the field is
+   already filled in.
+
+As a code interface call:
+
+```elixir
+CMS.create_field_definition!(%{
+  content_type: :post, name: "opened_on", label: "Opened on",
+  field_type: :date, default_source: :today
+}, actor: admin)
+```
+
+What to know before relying on it:
+
+- **Create only.** A value you type always wins. Clearing the field on a later
+  edit leaves it empty (a fixed default would put itself back); a field added
+  after a record exists is not back-filled. A copy or a restore of a record
+  carries its values and defaults nothing.
+- **The editor's New button starts from a title-only draft**, so **copy of**
+  has nothing to copy there. It works for creates that carry values (the
+  JSON:API, imports, forms).
+- **Conditions.** A field hidden by its **Show when** rule on the new record's
+  values is not defaulted.
+- **Field grants.** The default is the system's value, not the editor's edit:
+  an editor whose `field_grants` do not cover the field still gets it on
+  create, and the grant check ignores it while the payload left the field
+  blank. A value the editor supplies for an uncovered field is refused as
+  ever.
+- **No fit, no value.** No acting user, a locale that is not one of the
+  options, or a blank source leaves the field empty; **Required** then reports
+  it like any empty field.
+- **Rules.** A source the type cannot take is dropped on save, and a source
+  clears the fixed default. A copy must name another top-level, single-valued
+  field of the same type that does not itself copy, and a private field can
+  only be copied into another private one.
+
 ## 2. Relations that carry data
 
 `KilnCMS.CMS.ContentLink` links any two content records by id with a named

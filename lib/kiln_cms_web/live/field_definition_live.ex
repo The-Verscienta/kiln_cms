@@ -56,6 +56,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Computed
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.DynamicDefaults
   alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.Validations.FieldCondition
@@ -1152,6 +1153,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> Map.put("options", options)
     |> Map.put("option_labels", labels)
     |> Map.put("default", default)
+    |> blank_source()
     |> unpack_validation()
     |> unpack_targets()
     |> unpack_sources_limit()
@@ -3036,6 +3038,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   end
 
   attr :form, :any, required: true
+  attr :siblings, :list, default: []
+  attr :dynamic, :boolean, default: false
 
   # The default value, for the types that take one (#1820), in the input that
   # fits the type: a checkbox for yes-or-no, a number box for numbers, a date
@@ -3047,7 +3051,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> assign(:hint, gettext("Used when an editor leaves this field empty."))
 
     ~H"""
-    <div :if={default?(@form)} class={@type == "boolean" && "self-end"}>
+    <.default_source_field
+      :if={@dynamic and source_choices(@type) != []}
+      form={@form}
+      type={@type}
+      siblings={@siblings}
+    />
+    <div
+      :if={default?(@form) and not dynamic_default?(@form)}
+      class={@type == "boolean" && "self-end"}
+    >
       <label :if={@type == "boolean"} class="flex items-center gap-2 text-sm">
         <input type="hidden" name={@form[:default].name} value="" />
         <input
@@ -3079,6 +3092,73 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       />
     </div>
     """
+  end
+
+  attr :form, :any, required: true
+  attr :type, :string, required: true
+  attr :siblings, :list, required: true
+
+  # Where a new record's value comes from (#2286): a fixed value (the input
+  # below), or one of the closed set of dynamic sources the type can take.
+  defp default_source_field(assigns) do
+    assigns =
+      assigns
+      |> assign(:choices, source_choices(assigns.type))
+      |> assign(:copyable, copyable(assigns.siblings, assigns.type, assigns.form))
+
+    ~H"""
+    <div class="grid gap-3 sm:col-span-2 sm:grid-cols-2">
+      <.input
+        field={@form[:default_source]}
+        type="select"
+        label={gettext("Default comes from")}
+        options={[{gettext("A fixed value"), ""} | @choices]}
+        hint={gettext("Applied when a new record leaves this field empty — never on later edits.")}
+      />
+      <.input
+        :if={to_string(@form[:default_source].value) == "copy_of"}
+        field={@form[:default_field]}
+        type="select"
+        label={gettext("Field to copy")}
+        options={@copyable}
+        prompt={gettext("— Choose a field —")}
+      />
+    </div>
+    """
+  end
+
+  defp blank_source(%{"default_source" => ""} = params),
+    do: Map.put(params, "default_source", nil)
+
+  defp blank_source(params), do: params
+
+  defp dynamic_default?(form), do: to_string(form[:default_source].value) not in ["", "nil"]
+
+  defp source_choices(type) do
+    type
+    |> safe_type()
+    |> DynamicDefaults.sources_for()
+    |> Enum.map(&{source_label(&1), to_string(&1)})
+  end
+
+  defp safe_type(type) do
+    Enum.find(DynamicDefaults.copy_types(), &(to_string(&1) == type))
+  end
+
+  defp source_label(:today), do: gettext("Today's date")
+  defp source_label(:now), do: gettext("The current date and time")
+  defp source_label(:current_user), do: gettext("The user creating the record")
+  defp source_label(:site_locale), do: gettext("The site's default language")
+  defp source_label(:copy_of), do: gettext("A copy of another field")
+
+  # The siblings a `:copy_of` may name: the same single-valued type, not
+  # itself a copy.
+  defp copyable(siblings, type, _form) do
+    for s <- siblings,
+        to_string(s.field_type) == type,
+        not s.multiple,
+        s.default_source != :copy_of,
+        do: {s.label, s.name}
   end
 
   defp default_input_type("integer"), do: "number"
@@ -3255,7 +3335,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <.section_input field={@form[:section]} names={@section_names} />
             <.localization_input field={@form[:localization]} />
             <.options_field form={@form} id="new-field-options" />
-            <.default_field form={@form} />
+            <.default_field form={@form} siblings={@cond_siblings} dynamic />
             <.text_format_field form={@form} id="new-field-format" />
             <.deliver_plain_field form={@form} id="new-field-deliver-plain" />
             <.deliver_portable_field form={@form} id="new-field-deliver-portable" />
@@ -3634,7 +3714,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   <.section_input field={@edit.form[:section]} names={@section_names} />
                   <.localization_input field={@edit.form[:localization]} />
                   <.options_field form={@edit.form} id={"edit-field-options-#{@edit.id}"} />
-                  <.default_field form={@edit.form} />
+                  <.default_field form={@edit.form} siblings={@edit.cond_siblings} dynamic />
                   <.text_format_field form={@edit.form} id={"edit-field-format-#{@edit.id}"} />
                   <.deliver_plain_field
                     form={@edit.form}
