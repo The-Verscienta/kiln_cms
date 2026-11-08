@@ -283,7 +283,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **New guide "The editorial workflow": draft → review → publish in eight annotated screenshots, with a role table a test checks against the policies.
   It leads the Editor track; two home-page cards link to it; kilncms.dev publishes guide screenshots as media items.**
-  ([long form](docs/changelog/unreleased.md#editorial-workflow-guide))
+  ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
 
 ### Fixed
 
