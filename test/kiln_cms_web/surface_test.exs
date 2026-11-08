@@ -24,7 +24,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor /editor/account/export.json /editor/accounts /editor/accounts/:id
     /editor/analytics /editor/analytics/export.csv
     /editor/analytics/export.json /editor/api-keys /editor/automation /editor/backups
-    /editor/billing /editor/branding /editor/calendar /editor/code-injection
+    /editor/billing /editor/bot-budgets /editor/branding /editor/calendar /editor/code-injection
     /editor/compliance /editor/configure /editor/content/:type/:id /editor/content/:type/new
     /editor/content/export.csv /editor/content/export.json
     /editor/experiments
@@ -57,7 +57,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /api/menus/:key /api/provenance/:type/:slug /api/provenance/:type/:slug/verify
     /api/provenance/public-key /api/provenance/verify/:type/:slug /api/resolve /api/schema /api/search /api/sync
     /api/visual-editing/:type/:slug /auth /auth/passkey/options /auth/passkey/verify
-    /auth/site-sso /auth/site-sso/callback
+    /auth/invite/:invite_token /auth/site-sso /auth/site-sso/callback
     /confirm_new_user/:token /gql /locale/:locale /magic_link/:token /manifest.webmanifest /mcp
     /media/:id/download /media/:id/stream /offline.html /password-reset/:token /preview/:token
     /preview/:token/live /preview/release/:token /ready /register /reset /sign-in /sign-in/verify

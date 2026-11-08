@@ -136,6 +136,7 @@ defmodule KilnCMS.OrgSettingsTest do
       KilnCMS.CMS.FeedSettings,
       KilnCMS.CMS.FormSpamSettings,
       KilnCMS.CMS.SiteAiProvider,
+      KilnCMS.CMS.SiteBotBudgets,
       KilnCMS.CMS.SiteBranding,
       KilnCMS.CMS.SiteCodeInjection,
       KilnCMS.CMS.SiteCompliance,

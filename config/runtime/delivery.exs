@@ -118,3 +118,32 @@ end
 with {:ok, minutes} <- Env.integer_in("KILN_SCANNER_BLOCKING_BLOCK_MINUTES", 1, 10_080) do
   config :kiln_cms, :scanner_blocking, block_ms: :timer.minutes(minutes)
 end
+
+# ## Per-class delivery ceilings by user agent (#2243, KilnCMS.BotBudgets)
+#
+# Each is a percentage of the `:delivery` limit (the browser ceiling), 1-1000,
+# for search engines, AI crawlers, declared bots and clients with no user
+# agent. Unset keeps the built-in default (100, 100, 50, 20); a value out of
+# range or not an integer keeps it too, and warns. A site may lower a class
+# below these from /editor/bot-budgets, never raise it above. See
+# docs/bot-budgets.md.
+#
+# Skipped under :test, like the gates in feature_gates.exs: the suite's limits
+# are pinned by `KilnCMS.RateLimitHelpers.assert_test_limits!/0` against the
+# compiled config, so a value exported in a developer's shell must not reach it.
+if config_env() != :test do
+  bot_budgets =
+    for {class, var} <- [
+          search_engine: "KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT",
+          ai_crawler: "KILN_BOT_BUDGET_AI_CRAWLER_PERCENT",
+          declared_bot: "KILN_BOT_BUDGET_DECLARED_BOT_PERCENT",
+          empty: "KILN_BOT_BUDGET_EMPTY_UA_PERCENT"
+        ],
+        {:ok, percent} <- [Env.integer_in(var, 1, 1000)],
+        into: %{},
+        do: {class, percent}
+
+  if bot_budgets != %{} do
+    config :kiln_cms, KilnCMSWeb.RateLimit, delivery_classes: bot_budgets
+  end
+end

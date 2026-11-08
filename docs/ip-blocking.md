@@ -280,5 +280,8 @@ never blocked.
 - **Upgrading** adds a table, `ip_block_rules`; nothing existing changes. Rolling
   back leaves the table in place and unused.
 
+To slow a client down rather than refuse it, by what its user agent says it is
+(a crawler, a script, no user agent), see [Bot budgets](bot-budgets.md).
+
 See also the [threat model](threat-model.md#blocked-addresses) and the
 [policy matrix](policy-matrix.md).

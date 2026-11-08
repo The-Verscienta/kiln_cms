@@ -41,6 +41,14 @@ defmodule KilnCMSWeb.RevisionController do
   only come back from the single-revision read, which adds that version's own
   raw `changes` and the full `snapshot` of the document at that version.
 
+  The single-revision read also carries `changed_custom_fields` — the sorted
+  *keys* of the custom fields that write changed, found by diffing its
+  `custom_fields` map against the previous version that carried one
+  (`KilnCMS.CMS.VersionSnapshot.changed_custom_fields/2`). `changed_fields` is
+  unchanged and still says just `custom_fields`. The list endpoint does not
+  carry it: it would cost a history fold per page. The version rows are read as the
+  caller (`MaskVersionFields`), so keys the caller may not see are never named.
+
   History is stored `:changes_only`, so no version row holds the whole document;
   the snapshot is the fold `KilnCMS.CMS.VersionSnapshot.at/4` computes — the
   same fold restore and the compare view use, so what this endpoint says a
@@ -92,13 +100,23 @@ defmodule KilnCMSWeb.RevisionController do
   def show(conn, %{"type" => type, "id" => id, "version_id" => version_id}) do
     with {:ok, scope} <- authorize(conn, type, id),
          {:ok, version} <- fetch_version(scope, version_id),
-         {:ok, snapshot} <-
-           VersionSnapshot.at(scope.version_module, scope.record.id, version, scope.opts) do
+         history =
+           VersionSnapshot.history(
+             scope.version_module,
+             scope.record.id,
+             version.version_inserted_at,
+             scope.opts
+           ),
+         {:ok, snapshot} <- VersionSnapshot.fold_through(history, version) do
       json(conn, %{
         data:
           version
           |> summary(scope)
-          |> Map.merge(%{changes: stringify(version.changes), snapshot: snapshot})
+          |> Map.merge(%{
+            changed_custom_fields: VersionSnapshot.changed_custom_fields(history, version),
+            changes: stringify(version.changes),
+            snapshot: snapshot
+          })
       })
     else
       # `VersionSnapshot.at/4`'s membership miss: the version is not in this

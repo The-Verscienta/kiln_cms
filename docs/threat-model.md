@@ -127,7 +127,11 @@ build if a resource is ever registered without that authorizer.
   buckets; limits in `lib/kiln_cms_web/rate_limit.ex`. The credential buckets
   (`:auth`, `:register`, `:unlock`) and every `AccountThrottle` budget count in
   Postgres (`KilnCMS.Accounts.ThrottleStore`, #1619), so they hold across nodes
-  and restarts; the rest are flood ceilings counted per node in ETS. **The credential forms
+  and restarts; the rest are flood ceilings counted per node in ETS. Inside
+  `:delivery`, a request whose `User-Agent` claims to be a search engine, an AI
+  crawler, another bot or nothing at all is refused at its own share of the same
+  per-address count (#2243, see [Bot budgets](#bot-budgets)); browsers are
+  unchanged. **The credential forms
   submit where no plug can reach them:** each is an AshAuthentication
   LiveComponent calling `AshPhoenix.Form.submit/2` in-process, so the
   credentials arrive as a `/live` event and pass no pipeline. (`auth_routes`
@@ -386,7 +390,11 @@ build if a resource is ever registered without that authorizer.
   (`public, max-age=60`) would otherwise let a shared cache serve one member's
   gated render to every anonymous visitor.
 - **Scraping / enumeration** — content is public and the sitemap is intentional.
-  The `:delivery` bucket caps volume; front with a CDN to absorb load.
+  The `:delivery` bucket caps volume per address, and since #2243 a client that
+  declares itself a script or bot, or sends no user agent, is capped lower than a
+  browser ([bot-budgets.md](bot-budgets.md)). *Residual:* the class comes from the
+  `User-Agent` header, so a scraper that claims to be a browser gets a browser's
+  ceiling; this is cost control, not a defence. Front with a CDN to absorb load.
 
 ### Image transforms (`/media/:id/t/:ops`)
 - **Resource exhaustion** — every distinct parameter set is a decode, a resize
@@ -682,6 +690,35 @@ probes bait paths. Off unless `KILN_SCANNER_BLOCKING` is on; see
   `ip_auto_blocked` security event carries the address (as the event IP, subject
   to the log's retention and erasure) and never the attacker-controlled path.
 
+### Bot budgets
+
+Each `:delivery` request is put in a class by its `User-Agent` (#2243,
+`KilnCMS.BotClass`): browser, search engine, AI crawler, other bot, or no user
+agent. Each class is refused at its own percentage of the `:delivery` limit;
+see [bot-budgets.md](bot-budgets.md).
+
+- **What it stops.** Volume from clients that say what they are: a runaway
+  `curl` loop, a crawler with no user agent, an over-eager SEO tool. Defaults
+  are 50% of the browser limit for other bots and 20% for no user agent.
+- **What it does not.** Anything that lies. The user agent is spoofable, so a
+  class grants nothing: search engines and AI crawlers default to 100%, the same
+  as a browser, precisely so that typing "Googlebot" earns no more than a
+  browser does. Raising either class by environment raises it for every spoofer
+  too. Verifying a crawler by reverse DNS is #2254.
+- **Switching user agents gains nothing.** Every class charges the one
+  per-address counter, so an address never gets past the highest single class
+  ceiling. The cost of sharing is that a browser-heavy shared address (an office
+  NAT) uses up a script's smaller ceiling.
+- **A site cannot widen it.** A site admin may lower a class but not raise it
+  above the operator's value: refused on write, clamped on read
+  ([ADR 0018](decisions/0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md)).
+  An unreadable site row is answered with the operator's values, never looser.
+- **Never classified.** `:probe` routes (`robots.txt`, `llms.txt`, sitemaps,
+  feeds, `/up`, `/ready`) and `/live`, so crawlers can always read the files
+  that tell them what to do and probes are never throttled by class.
+- **No user agent, address or org in the metric.** The counter
+  `kiln_cms.delivery.client_class.count` carries only `class` and `result`.
+
 ### Public forms
 - **CSRF** — deliberately absent: forms are meant to be posted from third-party
   pages. Abuse is bounded by the `:form` bucket and a honeypot field, and a
@@ -828,7 +865,9 @@ password leaves the server.
   stay on the node. The provider learns that *someone* on this IP set a
   password whose hash starts with that prefix, and nothing more.
 - **Where it applies.** Self-registration, change password, password reset by
-  token and the first-run wizard. **Not** sign-in: a breached password that was
+  token, the first-run wizard and accepting a site invitation with a password
+  (#2135; judged by the *invited* site's policy for the *invited* tier, not the
+  host the link was opened on). **Not** sign-in: a breached password that was
   set before this shipped is not noticed. Follow-up.
 - **Exempt paths, deliberately.** The admin-sent reset *mail* is checked when
   its token is used (it is `reset_password_with_token`), but these set or
@@ -856,6 +895,80 @@ password leaves the server.
   corpus.
 - **Telemetry.** `[:kiln_cms, :password, :breach_check]`; see
   [observability.md](observability.md#breached-password-checks).
+
+### Site invitations (`/auth/invite/:invite_token`, #2135)
+
+A platform admin invites an address to a site from `/editor/team`; the invitee
+opens the mailed link and sets up an account, or adds the site to the account
+they have. The link is the only credential, so this is a bearer token that
+creates an account and grants a site tier.
+
+- **The token.** 32 random bytes, URL-safe base64, mailed once. Only its SHA-256
+  is stored (`invitations.token_hash`), so a database read or a backup cannot
+  rebuild a link. Single use: accepting destroys the row in the same
+  transaction as the account and membership, and both accepts re-read the row
+  by token under `FOR UPDATE`, so two submits of one link serialize and the
+  second finds nothing. A resend rotates the token and revoking destroys the
+  row; either way the old link names nothing. Usable for 7 days.
+- **Opening is not accepting.** The page only peeks at the token on `GET` and on
+  the socket mount; nothing is written until a button is pressed. A mail
+  scanner or link previewer that follows the link changes nothing.
+- **Every write is system-only.** `User` `:register_with_invitation` and
+  `:accept_invitation_with_password`, and `Invitation` `:by_token`, `:consume`
+  and `:accept_existing`, are `forbid_if always()` and refuse any actor-carrying
+  call in their own change or preparation, because the platform-admin bypass
+  would otherwise pass them ([policy-matrix.md](policy-matrix.md)). The email
+  of a new account is taken from the invitation row, never from input.
+- **Pre-registered accounts (pre-hijack).** Anyone can register an unconfirmed
+  account for any address. So an unconfirmed account is never added to a site
+  directly: the Team page invites it instead, and accepting sets a new
+  password, confirms the account, revokes every token it held, signs out its
+  sessions and clears a display name the first registrant chose. Only a
+  confirmed account accepts with one click and keeps its password. An erased
+  account cannot accept.
+- **Who can send, and for how long it counts.** Only a standing platform admin
+  can invite or resend (`StandingAdminOnly`): a temporary admin's invitation
+  would outlast the grant. An `:admin` invitation is honoured at accept time
+  only while its sender is still a standing platform admin, not erased and not
+  deleted.
+- **Mail as a weapon.** The admin names any address. Invitation mail is budgeted
+  per address (`mail:invitation`, the shared mail budget, 5 per hour by
+  default), and a spent budget or a suppressed address is refused by name, so
+  the admin is not told "sent" for mail that will not arrive. The "you were
+  added" notice to a confirmed account has its own budget
+  (`mail:membership_notice`) and is dropped silently when spent. The mail
+  carries no free text from the inviter (that would be a phishing channel from
+  this instance's address), and the site and inviter names are HTML-escaped.
+- **Submit flooding.** Both password accepts and the one-click accept charge the
+  per-client registration budget (`ThrottleRegistration`, the `:register`
+  bucket), because they arrive over `/live`, past every router plug.
+- **The right host.** The link is built on the invited site's host for the
+  invited tier (`ConsoleHost.tier_url/3`: the public site host for a viewer,
+  the console host for an editor or admin when `KILN_CONSOLE_HOST` is set). The
+  page redirects to it if opened elsewhere, so the account and the first
+  sign-in happen on the site it was made for.
+- **Invite-only sites.** Accepting deliberately skips the `:registration_enabled`
+  check: on an invite-only site this is how accounts arrive. The admin's
+  choice to invite is the control.
+- **Residuals.** (1) *The token is in the request path*, and Phoenix logs the
+  path: `invite_token` is in `:filter_parameters`, which filters the logged
+  params map only. The same holds for `/magic_link/…` and `/password-reset/…`.
+  Whoever can read request logs within the 7 days can accept the invitation.
+  (2) *The plaintext link sits in the mail job's args* in `oban_jobs`, and so
+  in any backup taken meanwhile, until Oban's Pruner deletes the finished job 7
+  days later, as for reset and magic-link mail. (3) *Whoever holds the mail
+  holds the invitation.* A forwarded or intercepted link is accepted by
+  whoever opens it first; the account it creates has the invited address,
+  and an admin can remove the membership from Team. (4) *Accepting through single sign-on is not supported*, so an
+  invitee whose organisation signs in by SSO must still accept with a password
+  or an existing account first. (5) *An existing membership wins.* If the
+  invitee is already a member when they accept (they joined through the site's
+  own SSO in between, say), the membership is left as it is and the
+  invitation is used up; the invited tier is not applied. (6) Taking over an
+  unconfirmed account replaces its password and ends its sessions, but does not
+  remove a second factor, passkey or linked SSO identity the account may hold.
+  A self-registered account is a `:viewer` and cannot reach `/editor/settings`,
+  where those are enrolled, so this needs another route to them to matter.
 
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;
@@ -1040,7 +1153,8 @@ was named, never to the person who named it.
 | API key sign-in | A key that never existed, an expired key and a revoked key are refused with the same status, challenge header and envelope. | `enumeration_api_key_test.exs` | None. A key is a random secret, not an address. |
 | JSON:API, GraphQL, MCP reads | `User` is not a JSON:API resource, a GraphQL type or an MCP tool. A filter or sort through the content's `author` relationship (`filter[author][email]`, `sort=author.email`, an MCP `author.email` filter) answers an anonymous reader, a viewer and an editor the same for a registered and an unregistered address. An admin control proves the question is answerable, so the empty result comes from the read policy. | `enumeration_api_reads_test.exs` | None. |
 | REST and author routes | No route serves accounts by name, address or slug outside the console and the sign-in flow. WebFinger answers a registered and an unregistered `acct:` handle with the same 404. A published post by a known account carries no address on HTML, feeds or the JSON:API. | `enumeration_author_routes_test.exs` | None. |
-| Admin lookups (`get_user_by_email`, `list_users`, `get_user`, admin password reset) | Any actor but an admin, or none, finds nothing for a registered address and for an unregistered one alike; the admin-only reset refuses a non-admin before it looks at the account. | `accounts/enumeration_lookups_test.exs` | Admin-only oracles (below). |
+| Site invitation link (`/auth/invite/:invite_token`, #2135) | A made-up, expired, revoked and used token open the same page, "This invitation is no longer valid", on the dead render and the connected one. A token is mailed only to the address it names. | `enumeration_invitation_test.exs` | An admin-tier invitation whose sender lost the role gets the same page. |
+| Admin lookups (`get_user_by_email`, `list_users`, `get_user`, admin password reset, add-or-invite) | Any actor but an admin, or none, finds nothing for a registered address and for an unregistered one alike; the admin-only reset and add-or-invite (#2135) refuse a non-admin before they look at the account. | `accounts/enumeration_lookups_test.exs` | Admin-only oracles (below). |
 | Account unlock | There is no unlock flow, so nothing to audit. | not applicable | None. |
 
 ### What registration does now
@@ -1070,8 +1184,10 @@ reset and magic-link mail) and is dropped silently once spent.
 - **Concurrent registration race.** Two simultaneous registrations of the same
   new address can both pass the lookup; the loser may then see the
   `:unique_email` identity's "has already been taken".
-- **Admin-only oracles, accepted by decision.** The team page's add-member form
-  says "No account with that email address exists", the accounts console
+- **Admin-only oracles, accepted by decision.** The team page's "Add or
+  invite" form says "Member added to this site." for an address with a
+  confirmed account and "Invitation sent to (address)." for any other (#2135),
+  the accounts console
   searches by address, and the editor comment `author_label` falls back to an
   address when the author has no name. All three are for people who may see
   accounts anyway. `enumeration_lookups_test.exs` pins that the underlying

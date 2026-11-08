@@ -120,6 +120,8 @@ a type may carry only the keys below; anything else is dropped.
 | `passkey_removed` | Passkey removed | A passkey was deleted | `name` |
 | `role_granted` | Role granted | A membership was created, or a role was raised | `role`, `previous_role` |
 | `role_revoked` | Role revoked | A role was lowered, a membership removed, or a temporary elevation ended early | `role` |
+| `member_invited` | Member invited | An admin invited an address to the site, or resent an invitation | `role`, `resent` |
+| `invitation_revoked` | Invitation revoked | An admin revoked a pending invitation | `role` |
 | `elevation_granted` | Temporary elevation granted | A time-boxed role was granted | `role`, `minutes` |
 | `api_key_created` | API key created | A key was minted, or a draft-write key was rotated into a new one | `name`, `scope` |
 | `api_key_revoked` | API key revoked | A key was revoked (a repeat revoke records nothing) | `name` |
@@ -141,6 +143,13 @@ recorded. The rule the guard stores is created by a system actor, and
 `org_setting_changed` is only written for a person's change, so an automatic
 block produces `ip_auto_blocked` alone.
 
+`resent` is `true` for a resend, and for inviting an address whose invitation
+had expired. The two invitation events target the invitation (target type
+`invitation`), never the invited address, which is not stored in the log. When
+the invitee accepts, the membership that creates is recorded as `role_granted`
+with no person, because nobody signed in did it; the target is the new or
+existing account.
+
 ### Failed sign-ins are sampled, lockouts are not
 
 A password-guessing flood must not fill the log, so at most **5 failed
@@ -158,7 +167,8 @@ labels the account only if it belongs to that site (a membership on it, or the
 legacy no-membership account on the default site); an account of another site
 appears as an unknown address. A role change is written to the log of the
 membership's own site, whichever site the admin was viewing; a user's global
-role is written to the site the request ran on.
+role is written to the site the request ran on. Invitation events likewise go to
+the invited site's log.
 
 ## Event matrix: where each event comes from
 
@@ -189,6 +199,8 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `passkey_added` | `Accounts.Passkey` `:register` (`lib/kiln_cms/accounts/passkey.ex`) | in txn; `name` |
 | `passkey_removed` | `Accounts.Passkey` `:destroy` | in txn; `name`; target is the owner |
 | `role_granted` / `role_revoked` | `lib/kiln_cms/security/changes/record_role_change.ex`, on `User` `:manage_access` and `OrgMembership` `:create`, `:update`, `:destroy` (`lib/kiln_cms/accounts/org_membership.ex`) | in txn; an edit that leaves the role alone (audiences, type scopes) writes nothing |
+| `member_invited` | `Accounts.Invitation` `:invite` and `:resend` (`lib/kiln_cms/accounts/invitation.ex`), also reached through `:add_or_invite` | in txn; `role`, `resent`; tenant is the invitation's site |
+| `invitation_revoked` | `Accounts.Invitation` `:revoke` | in txn; `role` |
 | `elevation_granted`, and `role_revoked` when cleared early | `lib/kiln_cms/security/changes/record_elevation.ex`, on `User` and `OrgMembership` `:grant_temporary_role` | in txn; `minutes` until it lapses |
 | `api_key_created` | `Accounts.ApiKey` `:create` and `:rotate` (`lib/kiln_cms/accounts/api_key.ex`) | in txn; `name`, `scope` (the key's `access`); never the key or its hash |
 | `api_key_revoked` | `Accounts.ApiKey` `:revoke` and `:retire_rotated` | in txn; only when the key was not already revoked |
@@ -198,7 +210,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 
 `org_setting_changed` covers every resource built with `use
 KilnCMS.CMS.OrgSettings`, so a new settings resource cannot forget it:
-`CMS.FeedSettings`, `FormSpamSettings`, `SiteAiProvider`, `SiteBranding`,
+`CMS.FeedSettings`, `FormSpamSettings`, `SiteAiProvider`, `SiteBotBudgets`, `SiteBranding`,
 `SiteCodeInjection`, `SiteCompliance`, `SiteEditorialSettings`,
 `SiteEmbedSettings`, `SiteLinkCheck`, `SiteLocaleSettings`, `SiteMailRelay`,
 `SiteMeilisearch`, `SitePasswordPolicy`, `SiteSafetyFields`, `SiteSecurityLog`,
@@ -224,6 +236,7 @@ recorded as long as it names a user actor and a tenant.
 | Temporary elevation lapsing | Not recorded | `OrgMembership` `:expire_role_grant` and `User` `:expire_role_grant` clear a dead column. Expiry is a comparison, not an act; `elevation_granted` already carried the end time (`minutes`). |
 | Erasing a user | Not recorded as an event | `User` `:anonymize` forces the role through a different action and writes no event, and the recorder refuses any event whose acting user is the one being erased. The erasure scrubs the log instead (below). |
 | Changing a member's audiences or type scopes | Not recorded | Only a changed role is. `SiteAudiences.set/4` and an `OrgMembership` `:update` that leaves `role` alone write nothing. |
+| An invitation used up, or pruned | Not recorded | Accepting destroys the row through `Invitation` `:consume`; the `role_granted` of the membership it became is the record. The daily `:prune_expired` sweep removes rows long past expiry, which no one decided. |
 | Unknown host | Not recorded | No site to attribute it to; the event is skipped. |
 | Anything that is not a person's write to a settings resource | Not recorded | See above. |
 

@@ -10,7 +10,7 @@ genuinely large — but almost none of it is something you have to decide.
    production release refuses to start. There are three.
 2. **[Common (10)](#common-10)** — not required, but what a real deployment
    usually sets. A short list, with a one-line reason for each.
-3. **[Everything else](#everything-else)** — the other 156, grouped by the
+3. **[Everything else](#everything-else)** — the other 160, grouped by the
    feature they configure. Every one is optional and has a default, so you can
    skip a whole section by not using the feature it configures.
 
@@ -42,7 +42,7 @@ into whichever one holds the read.
 > `BREACHED_PASSWORD_POLICY`, `KILN_ENV_LABEL` / `KILN_ENV_COLOR`, `EMBED_ORIGINS` / `EMBED_ORIGINS_LOCKED`,
 > `KILN_AUDIT_ANCHORS_ENABLED`, `KILN_AUDIT_ANCHOR_EVERY_WRITE`, the
 > `KILN_GOVERNANCE_WITNESS*` group (plus `KILN_GOVERNANCE_CHECKPOINT_CRON`), and
-> the `KILN_PROVENANCE_*` group, and the `KILN_DEMO_*` group. `MIX_TEST_PARTITION` and `KILN_STRICT_TEST`
+> the `KILN_PROVENANCE_*` group, the `KILN_DEMO_*` group, and the `KILN_BOT_BUDGET_*` group. `MIX_TEST_PARTITION` and `KILN_STRICT_TEST`
 > are the reverse — test-only. `KILN_ML` is neither: it is read at **build** time, by
 > `mix.exs` itself.
 
@@ -192,6 +192,24 @@ environment.
 | `KILN_SCANNER_BLOCKING_BAIT_THRESHOLD` | `5` | Bait-path 404s allowed per window before the block. Integer, 1 to 1000. | [`config/runtime/delivery.exs:110`](../config/runtime/delivery.exs#L110) |
 | `KILN_SCANNER_BLOCKING_WINDOW_MINUTES` | `10` | Length of the fixed, clock-aligned counting window, in minutes. Integer, 1 to 1440. | [`config/runtime/delivery.exs:114`](../config/runtime/delivery.exs#L114) |
 | `KILN_SCANNER_BLOCKING_BLOCK_MINUTES` | `60` | How long an automatic block lasts, in minutes; it also bounds how soon the same address can be blocked again. Integer, 1 to 10080. | [`config/runtime/delivery.exs:118`](../config/runtime/delivery.exs#L118) |
+
+### bot budgets (#2243)
+
+Public delivery is rate-limited per address at the `:delivery` limit (300 a
+minute). A request whose `User-Agent` says it is a search engine, an AI crawler,
+another bot or script, or nothing at all is refused at its own **percentage** of
+that limit, on the same per-address count; browsers always get 100%. These set
+the percentage for each class and are the most any site may set. The user agent
+is spoofable, so a higher value is higher for anyone who claims the class. Read
+in every environment except `:test`. See [bot-budgets.md](bot-budgets.md).
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT` | `100` | Search engines (`Googlebot`, `bingbot`, `DuckDuckBot`, …): 100 is the browser limit, the same as before #2243. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:137`](../config/runtime/delivery.exs#L137) |
+| `KILN_BOT_BUDGET_AI_CRAWLER_PERCENT` | `100` | AI crawlers (`GPTBot`, `ClaudeBot`, `CCBot`, `PerplexityBot`, …). Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:138`](../config/runtime/delivery.exs#L138) |
+| `KILN_BOT_BUDGET_DECLARED_BOT_PERCENT` | `50` | Other bots and scripts: `curl`, `wget`, Go, Java and Python HTTP clients, headless browsers, link-preview fetchers, and any product name ending in `bot`, `crawler`, `spider` or `scraper`. 50 is 150 requests a minute. Raise it if a headless consumer of `/media/:id/stream` or `/media/:id/download` cannot send its own user agent. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:139`](../config/runtime/delivery.exs#L139) |
+| `KILN_BOT_BUDGET_EMPTY_UA_PERCENT` | `20` | Requests with no `User-Agent`, or an empty one. 20 is 60 requests a minute. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:140`](../config/runtime/delivery.exs#L140) |
+
 
 ### multi-tenancy (#336)
 

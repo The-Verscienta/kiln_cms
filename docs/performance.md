@@ -232,6 +232,13 @@ Two things make a single-machine load test measure the wrong thing:
   the run measured the limiter, not delivery. For a benchmark run, raise the limits on
   the node under test:
   `Application.put_env(:kiln_cms, KilnCMSWeb.RateLimit, limits: %{api: {100_000_000, 60_000}, delivery: {100_000_000, 60_000}})`.
+  Every client class inside `:delivery` is a percentage of that limit
+  ([bot-budgets.md](bot-budgets.md)), so raising it raises them all. Two things to
+  know: `curl` counts as another bot (150 a minute at the shipped limit, half a
+  browser's), while `hey`, `oha`, `k6` and `ab` count as browsers; and this
+  `put_env` replaces the whole `KilnCMSWeb.RateLimit` config, which drops the
+  `delivery_classes` key the `KILN_BOT_BUDGET_*_PERCENT` variables write, so the
+  built-in class defaults apply on that node until it restarts.
 - **The `Host` header.** Send the canonical `PHX_HOST`. A host that names no org (such as
   `127.0.0.1` when `PHX_HOST=localhost`) falls back to the default org through a database
   read on every request. Under load that read queues on the pool behind the view-tracking

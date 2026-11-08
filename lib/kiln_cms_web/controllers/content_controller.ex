@@ -1254,8 +1254,14 @@ defmodule KilnCMSWeb.ContentController do
     # renders live from the block tree rather than from the fired artifact, so
     # the expansion has to happen on this path too. `audiences` is the reader's,
     # and the payload cache is already keyed on it.
+    #
+    # Rendered in the record's locale, not the request's (#2164): the payload
+    # cache builds this in another process, which has no request locale, and
+    # the renderers write reader-facing labels (a code block's) into the HTML.
     tree =
-      record |> expand_fragments(org_id, audiences) |> KilnCMSWeb.BlockComponents.view_blocks()
+      KilnCMS.CodeBlocks.with_content_locale(record.locale, fn ->
+        record |> expand_fragments(org_id, audiences) |> KilnCMSWeb.BlockComponents.view_blocks()
+      end)
 
     flat = flatten_block_tree(tree)
 

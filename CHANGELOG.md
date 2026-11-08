@@ -56,6 +56,12 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (new table `site_bot_budgets`). Scripts (`curl`, Go, Java, Python) now get 150 public-page requests a minute per address, not 300, and requests with no user agent 60; one count is shared per address.** Rolling the pin back is safe.
+  ([#2470](https://github.com/The-Verscienta/kiln_cms/pull/2470) · [long form](docs/changelog/unreleased.md#bot-budgets-upgrade))
+
+- **Run `mix ash.migrate` (new table `invitations`). A new daily job prunes invitations 30 days past expiry; no setting.** Rolling the pin back is safe; pending invitation links stop working until you upgrade again.
+  ([#2448](https://github.com/The-Verscienta/kiln_cms/pull/2448) · [long form](docs/changelog/unreleased.md#team-invitations-upgrade))
+
 - **Run `mix ash.migrate` (new tables `security_events` and `site_security_log`); overlays that restate `:ash_domains` must add `KilnCMS.Security`. A new daily prune job is on by default (`KILN_SECURITY_LOG_PRUNE_CRON`, 365-day window).** Rolling the pin back is safe.
   ([#2441](https://github.com/The-Verscienta/kiln_cms/pull/2441) · [long form](docs/changelog/unreleased.md#security-log-upgrade))
 
@@ -99,6 +105,10 @@ Every summary line below that was shortened links to its own entry there.
   `unique` fields have no database backstop; audit with `mix kiln.fields.duplicates`.**
   ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation-upgrade))
 
+- **Optional: `mix kiln.refire_all` after deploying puts the new code-block focus attributes into `:web` artifacts fired before the upgrade.**
+  It sends no webhook or cache purge and `ETag`s don't change, so revalidating clients may keep the old HTML (#2463). No migration.
+  ([#2467](https://github.com/The-Verscienta/kiln_cms/pull/2467) · [long form](docs/changelog/unreleased.md#focusable-code-blocks-upgrade))
+
 ### Breaking
 
 - **Overlays: `Accounts.Bootstrap.create_first_admin/1` returns `{:ok, user, notices}`, not `{:ok, user}`.**
@@ -112,6 +122,20 @@ Every summary line below that was shortened links to its own entry there.
 - **Optional smart 404 blocking: an address that racks up delivery 404s or probes `/wp-login.php`-style bait paths is blocked for an hour.**
   Off by default; turn on with `KILN_SCANNER_BLOCKING=1`. Guide: [docs/ip-blocking.md](docs/ip-blocking.md#block-scanners-automatically).
   ([#2471](https://github.com/The-Verscienta/kiln_cms/pull/2471) · [long form](docs/changelog/unreleased.md#scanner-404-blocking))
+
+- **Public delivery throttles by user-agent class: scripts and clients with no user agent are refused sooner than browsers; admins can lower each class at Organization → Bot budgets.**
+  Operators set the ceilings with `KILN_BOT_BUDGET_*_PERCENT`; a site may only lower them. Cost control, not security. Guide: [docs/bot-budgets.md](docs/bot-budgets.md).
+  ([#2470](https://github.com/The-Verscienta/kiln_cms/pull/2470) · [long form](docs/changelog/unreleased.md#bot-budgets))
+
+- **Platform admins can invite someone with no account to a site by email: Team → Add or invite, with Pending invitations to resend or revoke.**
+  Links last 7 days and work on invite-only sites; an unconfirmed account is now invited, not added. Guide: [docs/account-administration.md](docs/account-administration.md#invite-someone-to-a-site).
+  ([#2448](https://github.com/The-Verscienta/kiln_cms/pull/2448) · [long form](docs/changelog/unreleased.md#team-invitations))
+
+- **The single-revision API read carries `changed_custom_fields`, the sorted keys of the custom fields that write changed.**
+  Additive: `changed_fields` still says `custom_fields`; no migration.
+  ([#2353](https://github.com/The-Verscienta/kiln_cms/issues/2353) · [long form](docs/changelog/unreleased.md#revisions-changed-custom-fields))
+
+
 - **Admins get a security log: who signed in, was locked out, or changed a second factor, passkey, role, API key or sign-in setting, and from where.**
   At `/editor/security-log`, with filters, CSV download and a per-site retention window (default 365 days). Guide: [docs/security-events.md](docs/security-events.md).
   ([#2441](https://github.com/The-Verscienta/kiln_cms/pull/2441) · [long form](docs/changelog/unreleased.md#security-log))
@@ -268,6 +292,14 @@ Every summary line below that was shortened links to its own entry there.
 - **The Essentials sidebar now says where Forms, Webhooks, API keys and Trash went and how to list them.**
   ([#2144](https://github.com/The-Verscienta/kiln_cms/issues/2144) · [long form](docs/changelog/unreleased.md#essentials-hidden-screens-hint))
 
+- **kilncms.dev `/docs` opens with one "Start here": the wedge guide, Editor/Developer/Operator reading paths, then site search;
+  maintainer pages move to a last "Contributing to Kiln" section. chain-fold-order leaves the site; seven guides are retitled.**
+  ([#2456](https://github.com/The-Verscienta/kiln_cms/pull/2456) · [long form](docs/changelog/unreleased.md#docs-index-role-tracks))
+
+- **New guide "The editorial workflow": draft → review → publish in eight annotated screenshots, with a role table a test checks against the policies.
+  It leads the Editor track; two home-page cards link to it; kilncms.dev publishes guide screenshots as media items.**
+  ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
+
 ### Fixed
 
 - **Three dead links in the docs now resolve (the `KilnCMS.Keys` link in Memberships and Ghost's schema in both comparison pages), and a docs test refuses relative `.html` links.** ([#2167](https://github.com/The-Verscienta/kiln_cms/issues/2167))
@@ -318,6 +350,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Muted text on public pages and shared form components is now readable: `text-base-content/70`, 4.5:1 or better on every surface.**
   ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163) · [long form](docs/changelog/unreleased.md#public-muted-text-contrast))
+
+- **Code blocks take keyboard focus and a name ("Code sample", translated), with a visible focus ring, so the arrow keys can scroll a line wider than the column.**
+  ([#2467](https://github.com/The-Verscienta/kiln_cms/pull/2467) · [long form](docs/changelog/unreleased.md#focusable-code-blocks))
 
 ### Security
 

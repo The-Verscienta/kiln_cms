@@ -85,6 +85,29 @@ A rise in the refused counter right after you add a rule is expected. A rise on 
 change, or a rule that suddenly matches everyone (a proxy not declared in
 `TRUSTED_PROXIES`), is worth a look.
 
+## Delivery client classes
+
+Every request on the `:delivery` rate limit (public pages, `/search`, media
+downloads and streams) emits `[:kiln_cms, :delivery, :client_class]` from
+`KilnCMSWeb.Plugs.RateLimit`, with measurement `count` (always `1`) and two
+metadata fields ([bot-budgets.md](bot-budgets.md), #2243):
+
+- `:class` -- what the request's `User-Agent` claims: `:browser`,
+  `:search_engine`, `:ai_crawler`, `:declared_bot` or `:empty`.
+- `:result` -- `:allowed`, or `:throttled` when that class's ceiling refused it.
+
+The user agent, the address and the org are deliberately not in the event. It is
+exported as the counter `kiln_cms.delivery.client_class.count` (Prometheus:
+`kiln_cms_delivery_client_class_count`), tagged `class` and `result`: at most ten
+series.
+
+Useful Grafana panel: `sum(rate(kiln_cms_delivery_client_class_count[5m])) by (class, result)`.
+It shows the traffic mix, and which classes are being refused. A steady
+`declared_bot` or `empty` throttle rate is the feature working. A `search_engine`
+throttle rate after a site lowered that class can slow indexing. A sudden
+`browser` throttle rate is ordinary flood limiting, as before. Because the class
+is only a claim, read the split as "what clients say they are".
+
 ## Breached-password checks
 
 Every lookup the breached-password check makes (#2240) emits one event,
@@ -204,7 +227,7 @@ Every label is bounded:
 - **`route`** is the router pattern (`/api/content/:type/:slug`), never the
   request path.
 - **`queue` and `worker`** are Oban's.
-- **`result`, `status`, `surface`, `mode`, `action` and `event`** are small
+- **`result`, `status`, `surface`, `mode`, `action`, `event` and `class`** are small
   enumerations.
 - **The content-type label (`type`, `kind`)** keeps a compiled type's name but
   folds every admin-defined type into `dynamic`. Admin-defined types are

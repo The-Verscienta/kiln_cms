@@ -7,6 +7,67 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="bot-budgets-upgrade"></a>
+
+- **Run `mix ash.migrate` for bot budgets (one new table, `site_bot_budgets`),
+  and check scripts that fetch public pages: `curl`, Go, Java and Python clients
+  now get 150 requests a minute per address instead of 300, and requests with no
+  user agent get 60 (#2243).** Browsers, search engines and AI crawlers keep
+  300.
+  - **Migration.** `20261108120718_add_site_bot_budgets` only creates a table, one
+    row per site, written when an admin first saves `/editor/bot-budgets`. It is
+    expand-only and changes no existing data. Rolling the pin back is safe: the
+    previous release ignores the table, and every client is back to 300 a minute.
+    Overlays that restate `:ash_domains` need no change: the resource is in
+    `KilnCMS.CMS`.
+  - **Who gets less.** On every `:delivery` route (public pages, `/search`,
+    `/forms/:slug/embed`, and `/media/:id/download` and `/media/:id/stream`), a
+    `User-Agent` that names a scripting tool, a headless browser, a link-preview
+    fetcher or a product ending in `bot`, `crawler`, `spider` or `scraper` is
+    refused past 50% of the `:delivery` limit, and one that is missing or empty
+    past 20%. The full list is in [bot-budgets.md](../bot-budgets.md).
+  - **One count per address.** Every class spends the same per-address counter,
+    so browsers and scripts behind one address share it. An office uptime check
+    sent by `curl` is refused once the office's browsers pass 150 requests in a
+    minute. Point load-balancer and uptime checks at `/up`, which is never
+    charged by class.
+  - **Headless media consumers.** A server or app that fetches
+    `/media/:id/stream` or `/media/:id/download` with a library's default user
+    agent (`python-requests`, `Go-http-client`, `curl`) now gets 150 a minute.
+    Send a user agent of your own, or raise the class with
+    `KILN_BOT_BUDGET_DECLARED_BOT_PERCENT`. Native mobile HTTP stacks
+    (`okhttp`, `CFNetwork`, `Dalvik`) and media players count as browsers.
+  - **Benchmarks.** `Application.put_env/3` of the whole `KilnCMSWeb.RateLimit`
+    config drops the `delivery_classes` key the new variables write; see
+    [performance.md](../performance.md#running-a-basic-load-check).
+
+<a id="team-invitations-upgrade"></a>
+
+- **Run `mix ash.migrate` for site invitations: one new table, `invitations`,
+  and a new daily prune job (#2135).** The migration
+  `20261108053325_add_invitations` only creates a table, so it is expand-only
+  and changes no existing data. Rolling the pin back is safe for the data:
+  the previous release ignores the table. Any invitation still pending then
+  stops working, because the previous release has no `/auth/invite/…` page.
+  Its row is untouched, so the link works again once you upgrade again, if it
+  has not expired.
+  - **The prune job.** The AshOban trigger `Invitation` `:prune_expired` runs
+    daily at `35 4 * * *` on the `default` queue and deletes invitations more
+    than 30 days past their expiry. It has no setting and no environment
+    variable. Overlays that restate `:ash_domains` need no change: the
+    resource is in `KilnCMS.Accounts`.
+  - **Privacy.** Each row holds an invited email address, so the table is new
+    personal data. It holds an address for at most about 37 days (7 days
+    usable, then 30 until the prune). The `oban_jobs` row of each invitation
+    mail holds the plaintext link until Oban's Pruner deletes the job, 7 days
+    after it finishes. [data-flows.md](../data-flows.md) lists both, and the
+    staging scrub deletes the table.
+  - **Logs.** `invite_token` is added to `:filter_parameters`. That keeps the
+    token out of the logged params map. Phoenix still logs the request path,
+    and the path contains the token, as it already does for `/magic_link/…`
+    and `/password-reset/…` links. If you ship request logs somewhere with
+    wider access, treat them as holding live invitation links for up to 7 days.
+
 <a id="security-log-upgrade"></a>
 
 - **Run `mix ash.migrate` for the security log, add `KilnCMS.Security` to an
@@ -224,6 +285,25 @@ carries the reasoning.
 - **Field definitions gain a `validation` column (#2276).** `field_definitions.validation` is `jsonb NOT NULL DEFAULT '{}'`: additive, instant, and every existing field starts with no constraints, so nothing about stored data or writes changes until an admin sets one. Rolling the pin back is safe (the old release ignores the column). Overlays that carry their own migrations run `mix ash.codegen` and commit the result.
   - **Unique is not a database constraint.** Once an admin marks a field `unique`, the write path enforces it; raw SQL and a database restore bypass it. Run `mix kiln.fields.duplicates` (read-only, exits non-zero on repeats) after bulk imports or restores.
 
+<a id="focusable-code-blocks-upgrade"></a>
+
+- **Optional: run `mix kiln.refire_all` after deploying to put the new
+  code-block attributes into fired `:web` artifacts published before the
+  upgrade (#2164).** No migration and no setting. Public pages rendered by Kiln
+  itself pick the change up as soon as the deploy lands. A fired `:web`
+  artifact keeps its old markup until its document is next published or
+  edited: `format_version` does not change, so a read does not re-fire it.
+  `mix kiln.refire_all` (on a release,
+  `/app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`) rewrites every
+  published document's artifacts now. It sends no `updated` webhook and busts
+  no cache, and the artifact `ETag` does not change. A headless consumer, CDN
+  or browser that revalidates with `If-None-Match` can therefore keep the old
+  HTML until the document is next edited; a consumer that re-reads without a
+  validator gets the new markup. The same `ETag` gap applies to Kiln's own
+  public HTML pages behind a CDN or in a browser cache that revalidates
+  (#2463). Rolling the pin back is safe: the extra attributes are inert to the
+  previous release.
+
 ## Breaking
 
 <a id="breached-password-bootstrap-return"></a>
@@ -272,6 +352,134 @@ carries the reasoning.
   - **Fails open and is not retried.** Counting runs off the request path; a dropped count or database error never changes the 404. A trip is claimed once per block window, so a trip skipped for the rule cap, a recent sign-in or a database error is not retried until the window rolls over. At the cap a new trip is skipped and logged.
   - **Security log, metric, policy.** A new security event type `ip_auto_blocked` ("Address blocked automatically") and a counter `kiln_cms.scanner_guard.blocked.count` (tag `reason`). The guard acts as a new `:scanner_guard` system actor that may only create an `IpBlockRule` and read recent sign-in events.
   - **If it blocks someone it should not,** the block ends by itself after the block time, or an admin selects **Remove** beside it on `/editor/ip-blocks`. Guide: [docs/ip-blocking.md](../ip-blocking.md#block-scanners-automatically); variables: [environment-variables.md](../environment-variables.md#smart-404-blocking-2253).
+
+<a id="bot-budgets"></a>
+
+- **Public delivery throttles requests by what their user agent says they are:
+  scripts and clients with no user agent are refused sooner than browsers, and a
+  site admin can lower each class at Organization → Bot budgets (#2243).**
+  The single per-address `:delivery` rate limit (300 a minute) used to treat a
+  browser, Googlebot, a `curl` loop and a request with no user agent alike.
+  - **Five classes.** `KilnCMS.BotClass` puts each `:delivery` request in one
+    of `browser`, `search_engine`, `ai_crawler`, `declared_bot` or `empty` from
+    its `User-Agent`, by curated name lists. An unknown non-empty user agent is a
+    browser: media players, native app HTTP stacks and old browsers send strings
+    no list keeps up with, and they are usually a person.
+  - **One counter, a ceiling per class.** Every class charges the same
+    `delivery:<ip>` counter, each refused at its own percentage of the
+    `:delivery` limit: search engines and AI crawlers 100%, declared bots 50%,
+    no user agent 20%. Browsers are unchanged. Switching user agents earns
+    nothing, because the count is shared. A refusal is the same `429` as before
+    and does not name the class.
+  - **Who sets it.** Built-in defaults, then the operator
+    (`KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT`, `_AI_CRAWLER_`, `_DECLARED_BOT_`,
+    `_EMPTY_UA_`, each 1-1000), then the site, which can only lower a class.
+    A site value above the operator's is refused when it is changed and clamped
+    when it is read, following the `EmbedCeiling` precedent (#1133) rather than
+    the password policy's "site wins": the operator owns capacity. See
+    [ADR 0018](../decisions/0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md).
+    There is no 0 and no unlimited: to keep a crawler out use robots.txt or
+    Blocked addresses (#2242).
+  - **The console page.** `/editor/bot-budgets`, admin only, under Organization
+    next to Blocked addresses. Each class shows the percentage in force, what it
+    comes to in requests a minute, where it comes from, and the most the site may
+    set. Saves and resets are recorded in the security log as
+    `org_setting_changed`. The setting is not on JSON:API, GraphQL or MCP.
+  - **Not security.** The user agent is spoofable, so this is cost control: a
+    higher ceiling for a class is a higher ceiling for anyone who claims it. That
+    is why search engines and AI crawlers default to 100%, not more. Higher
+    limits for verified crawlers belong to reverse-DNS verification (#2254).
+  - **Never classified.** robots.txt, llms.txt, sitemaps, feeds and the health
+    probes (`/up`, `/ready`, `/live`) are not on `:delivery`.
+  - **Telemetry.** `[:kiln_cms, :delivery, :client_class]` with `class` and
+    `result`, exported as `kiln_cms_delivery_client_class_count{class,result}`;
+    no user agent, address or org. Panel:
+    `sum(rate(kiln_cms_delivery_client_class_count[5m])) by (class, result)`.
+  - **"Configurable allowlist"** from the issue is delivered as configurable
+    budgets: which names belong to each class is curated in code, with a test
+    row per name. Known gaps: some browser-shaped crawlers not on the lists
+    (`GoogleOther`, `AdsBot-Google`) count as browsers, and `SeznamBot` and
+    `Qwantbot` count as declared bots.
+  - Guide: [bot-budgets.md](../bot-budgets.md).
+
+<a id="team-invitations"></a>
+
+- **Platform admins can invite someone with no account to a site by email,
+  from Team (#2135).** On **Team** (`/editor/team`) the member form's button is
+  now **Add or invite**. Before this, the form needed an account that already
+  existed, and said "invite people via sign-up or SSO first". An invite-only
+  site (`:registration_enabled` false) had no way for an admin to bring
+  someone in except creating the account from a release shell.
+  - **What the form does with an address.** If the address has a *confirmed*
+    account that is not on this site, that account is added straight away
+    (as before) and its owner gets a "You were added to (site)" mail. Any other
+    address gets an invitation by email with the tier and custom role you
+    picked, and the flash reads "Invitation sent to (address)." That includes
+    an address with an *unconfirmed* account. Before this change, an
+    unconfirmed account was added directly. Anyone can register an unconfirmed
+    account for any address, so adding it could give a site role to whoever
+    registered it. An address already on the site is refused ("That person is
+    already on this site."). So is one with a live invitation ("That address is
+    already invited — resend it from Pending invitations.").
+  - **Pending invitations.** A **Pending invitations (n)** list under the form
+    shows each address, its tier, its custom role, who invited it, and
+    "Expires (UTC time)" or "Expired". **Resend** mails a new link: the old
+    link stops working and the 7 days start again. The **×** button revokes
+    the invitation and its link stops working. Inviting an address whose
+    invitation has expired resends it with the tier you picked this time.
+  - **The invitee.** The link opens `/auth/invite/(token)` on the invited site.
+    A viewer's link uses the site's public host. An editor's or admin's link
+    uses the console host if `KILN_CONSOLE_HOST` is set, and the site's own
+    host if not. Opening the link changes nothing, so a mail scanner that
+    follows it does no harm. With no account, the invitee chooses a password
+    (and an optional display name) and gets a confirmed account with the
+    invited tier on that site. With a confirmed account, they press **Accept
+    invitation**, and nothing else about the account changes. With an
+    unconfirmed account, they choose a new password. The old password and every
+    session the account held stop working, and a display name the first
+    registrant chose is cleared unless the invitee enters one. In every case
+    the invitee is sent to `/sign-in` and signs in as usual, second factor
+    included. A link that is made up, expired, revoked or already used shows
+    one page: "This invitation is no longer valid".
+  - **Rules.** Invitations last 7 days. Invitation mail is charged to the
+    existing per-address mail budget (5 per address per hour by default), in a
+    bucket of its own. When it is spent, or the address is on a mail
+    suppression list, nothing is sent and the admin is told why. The "added"
+    notice has its own bucket of the same size and is dropped silently when it
+    is spent: the membership is what the admin asked for, so they still see
+    "Member added to this site." Only a *standing* platform admin can invite or
+    resend: a temporary admin cannot, because an accepted invitation would
+    outlast the grant. An admin-tier invitation is honoured only while the
+    admin who sent it is still a standing platform admin. Accepting does not
+    depend on open registration, so invite-only sites can use it. Accepting
+    *through* single sign-on is not supported: the invitee accepts with a
+    password, or with an account they already have.
+  - **Audit.** Two new security-log types: `member_invited` (Member invited;
+    metadata `role`, `resent`) and `invitation_revoked` (Invitation revoked;
+    `role`). Both target the invitation, never the address. Accepting records
+    the existing `role_granted` with no acting person.
+  - **Developers.** New resource `KilnCMS.Accounts.Invitation` (no JSON:API,
+    GraphQL or MCP exposure) with code interfaces `add_or_invite_member`,
+    `invite_to_org`, `resend_invitation`, `revoke_invitation` and
+    `list_invitations_for_org` (platform admins). The interfaces
+    `get_invitation_by_token`, `accept_invitation_for_existing_account`,
+    `consume_invitation`, `register_with_invitation` and
+    `accept_invitation_with_password` are system-only. The token is 32 random
+    bytes; only its SHA-256 is stored. The new mail purposes
+    `:invitation` and `:membership_notice` share `AccountThrottle`'s
+    mail budget, and `KilnCMS.Mail.valid_address?/1` is now public. No new
+    configuration. The how-to is
+    [Invite someone to a site](../account-administration.md#invite-someone-to-a-site).
+
+<a id="revisions-changed-custom-fields"></a>
+
+- **`GET /api/content/:type/:id/revisions/:version_id` adds `changed_custom_fields` (#2353).**
+  A custom-field edit is one `custom_fields` map, so `changed_fields` could only
+  say `custom_fields`. The new sibling lists the keys added, removed or edited,
+  diffed against the previous revision that carried `custom_fields` (history is
+  changes-only, so not the adjacent row; an empty map before the first).
+  Same-transaction revisions have an arbitrary order. The list endpoint is
+  unchanged. No migration; existing clients are unaffected.
 
 <a id="custom-field-groups-and-mixed-sort"></a>
 
@@ -1493,6 +1701,142 @@ carries the reasoning.
   migration or setting; the hint is hidden when the sidebar rail is collapsed.
   Nothing to do on upgrade.
 
+<a id="docs-index-role-tracks"></a>
+
+- **The kilncms.dev `/docs` index starts with one "Start here" that sends an
+  editor, a developer and an operator to their own first guides, and moves
+  the pages for people working on Kiln itself to a last section (#2157).**
+  The index was one long column of about 75 guides with no place to begin,
+  and it mixed editor guides with maintainer pages such as "Releasing Kiln".
+  It changes no code path in the app; what changed is `mix.exs`'s guide
+  lists and the publisher, `scripts/publish_docs.exs`.
+
+  - **Start here.** One section at the top of `/docs`: the
+    [Right, everywhere, provably](../right-everywhere-provably.md) pointer
+    from #1930 first, then three tracks, Editor, Developer and Operator, then
+    a "Search kilncms.dev" link to the site's ordinary `/search`. It searches
+    every page on the site, not only the guides: a docs-only search would
+    need a new public search argument, and kilncms.dev is frozen until 2.0
+    (`docs/path-forward.md`).
+  - **Reading paths.** The tracks come from a new guide,
+    [Reading paths by role](../reading-paths.md), which also publishes as
+    `/docs/reading-paths` and sits in the docs sidebar under Getting started.
+    It is the one list of which guides each role reads first: the index
+    inlines its `##` sections, and the "Find the right guide" table in
+    [Getting started](../getting-started.md) now points to it instead of
+    keeping a second list.
+  - **Contributing to Kiln.** A new docs group, last on the index after a
+    rule and the line "For people working on Kiln itself, not using it.":
+    `CONTRIBUTING.md` (moved out of Getting started), Releasing, Beta
+    testing, Design language, Design system and Frontend assets (moved out of
+    Operations & deployment and Modeling & extending). They stay published,
+    so links into them keep working, for example
+    `/docs/releasing#updating-a-project-to-a-release`.
+  - **Off the site.** `docs/chain-fold-order.md` moves to Design notes &
+    decision records, so the publisher stops sending it. The publisher never
+    unpublishes, so `/docs/chain-fold-order` stays live until an admin on
+    kilncms.dev moves it to the trash.
+  - **Titles.** Five guides drop internal labels from their titles: "Code
+    injection" (was "Code injection (#490)"), "Editorial consent linking",
+    "Governance dashboard" and "Point-in-time content API" (each was suffixed
+    "(compliance cluster)"), and "Design language" (was "KilnCMS — Design
+    Language"). "KilnCMS design system" is now "Design system", and "v1.0
+    success metrics" is now "Benchmarks"; Benchmarks stays public, under
+    Operations & deployment. The titles are `title:` overrides in `mix.exs`,
+    so the slugs, and every `/docs/<slug>` URL, are unchanged.
+  - **Sidebar.** The single-guide Search group is gone: "Meilisearch backend"
+    is now under Operations & deployment, in the ExDoc sidebar and on the
+    index.
+  - **For contributors.** Every group in `groups_for_extras/0` must be listed
+    in `scripts/publish/docs.exs` as public (`@public_groups`), contributing
+    (`@contributing_group`) or internal (`@internal_groups`), or the publish
+    run raises and names the group. A new group therefore never reaches
+    `/docs` by accident. `test/scripts/publish_docs_test.exs` and CI's
+    publisher dry run both fail on an unclassified group, so it shows up on
+    the pull request rather than after the merge. The publisher's logic now
+    lives in `scripts/publish/docs.exs`, so the tests can load it;
+    `scripts/publish_docs.exs` keeps the `Mix.install` and the `main/1`
+    call, and a change to either file republishes every guide.
+  - **Upgrade.** Nothing to do on a Kiln install. On kilncms.dev, the first
+    publish after the merge resends every guide (because `mix.exs` changed),
+    which picks up the new titles and the new index; the one manual step is
+    trashing `/docs/chain-fold-order`.
+
+<a id="editorial-workflow-guide"></a>
+
+- **A new guide, [The editorial workflow](../editorial-workflow.md), follows
+  one page from draft to review to published in about five minutes, with
+  eight annotated screenshots and a table of what viewers, editors and admins
+  can each do (#2158).** Before this, the workflow was spread across the
+  working-copy, releases, lifecycles and policy-matrix guides, and nothing
+  showed an editor the screens. The guide leads the Authoring & editorial
+  section and the Editor reading track.
+
+  - **The role table is tested.** It sits between
+    `<!-- role-matrix:start -->` and `<!-- role-matrix:end -->`, and
+    `test/kiln_cms/docs/editorial_workflow_test.exs` runs each row's action
+    as a viewer, an editor and an admin, with Team → Publishing off and on,
+    and fails when a cell disagrees with the policies. A row the test has no
+    check for fails too, so the table cannot gain a claim nobody verifies.
+  - **What the guide says about taking content down.** Editors can unpublish
+    and archive a live page even where only admins may publish. The guide
+    says so in a note under the table and links the open question,
+    [#2134](https://github.com/The-Verscienta/kiln_cms/issues/2134), rather
+    than describe a rule Kiln does not enforce. **Publish changes** by an
+    editor is described as by design, as
+    [The working copy](../working-copy.md) records.
+  - **API docs corrected to match.** [api.md](../api.md),
+    [json-api.md](../json-api.md) and
+    [headless-graphql-api.md](../headless-graphql-api.md) said unpublishing
+    needs an admin. They now say an editor may unpublish, that publishing
+    needs an admin unless the site lets editors publish, and link #2134. The
+    policies did not change.
+  - **Editor reading track.** The guide is first; Trash and restore leaves
+    the track (deleting and restoring are admin-only) and is still linked
+    from the guide and listed on the index.
+  - **Home page.** On the stock home page, which ships to every install, the
+    "Editorial workflow" card now links "Walk through the workflow" and the
+    "Roles and permissions" card "See who can do what", both to the guide on
+    GitHub (`main`), the same way the "How it works" button links out. A
+    relative `/docs` link would 404 on an install that does not publish the
+    guides. The two labels are translated in `es` and `fr`. A site whose home
+    page is a published `home` page does not show this page.
+  - **Screenshots on kilncms.dev.** The rich-text sanitizer keeps no `<img>`,
+    so until now an image in a guide published as nothing. The publisher
+    (`scripts/publish_docs.exs`) now sends a paragraph that holds only an
+    image of a repo file as an image block, linked to a media-library item.
+    It uploads each file once through `POST /api/media`, with the same
+    `KILN_DOCS_API_KEY`, named `<basename>-<first 12 hex of its
+    sha256>.<ext>`, and finds it by that filename on later runs. A run checks
+    every image of the guides it publishes first: a missing file or empty alt
+    text raises before any page or media item is written, and so does a
+    failed upload. A change to a file under `docs/images/` republishes every
+    guide that shows it. A guide with no images publishes exactly the single
+    rich-text block it did before.
+  - **Other images in guides.** An image inside a paragraph or a link now
+    publishes as its alt text, so the "Deploy to Render" button in
+    [One-click deploy platforms](../deploy-platforms.md) publishes as a
+    labelled link instead of an empty one. A standalone image at an external `http(s)` URL
+    publishes as a link to it, labelled with its alt text, because the
+    site's `img-src` policy would block it. `--dry-run --out` renders images
+    as `<figure>`s loading the files from GitHub and uploads nothing.
+  - **ExDoc.** `docs/images/` is copied into the docs build as `images/`
+    (`assets:` in `mix.exs`), so the same relative `images/...` path works
+    in ExDoc and on GitHub.
+  - **For contributors.** The screenshots come from
+    `e2e/screenshots/editorial-workflow.spec.js`, with numbered callouts
+    drawn by `e2e/screenshots/annotate.js`, and are derived to WebP by
+    `scripts/optimize_home_images.sh docs`. The test above holds them to 90
+    KB per image, 600 KB for the guide and eight images, each referenced and
+    with alt text. CONTRIBUTING.md → "Adding screenshots to a guide" has the
+    steps.
+  - **Upgrade.** Nothing to do on a Kiln install. On kilncms.dev, the first
+    publish after the merge resends every guide (`mix.exs` and the publisher
+    changed) and uploads the eight screenshots to the media library, so the
+    docs key's account must be allowed to upload media. A screenshot that is
+    later replaced leaves its old media item behind, because the new file
+    has a new name; delete superseded items in the media library.
+
 ## Fixed
 
 <a id="custom-sort-json-null-last"></a>
@@ -1717,6 +2061,66 @@ carries the reasoning.
     with `KILN_UPDATE_CONTRAST_BASELINE=1 mix test test/kiln_cms_web/muted_text_contrast_test.exs`
     and commit the file. See [Muted text](../design-language.md#muted-text).
   ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163))
+
+<a id="focusable-code-blocks"></a>
+
+- **A code block that scrolls sideways can now be reached and scrolled from
+  the keyboard (#2164).** A code block with a line wider than the column
+  scrolls horizontally, and a scroll container with nothing focusable in it
+  can only be scrolled with a mouse or touch, so a keyboard user could not
+  read the end of a long line (axe's `scrollable-region-focusable`, WCAG
+  2.1.1). Every code block in a rich-text block now renders as
+  `<pre tabindex="0" role="group" aria-label="Code sample">` (a highlighted
+  one keeps `class="highlight"` first). Tab stops on it, the arrow keys scroll
+  it, and a screen reader announces "Code sample". Whether a block overflows
+  depends on the reader's screen, which the server cannot know, so every code
+  block is focusable, not only the long ones.
+  - **Where.** It is added once, at the end of the rich-text block's `:web`
+    render, so it reaches public pages (columns and fragments included), every
+    editor preview, fired `:web` artifacts, and through them feeds,
+    newsletter email and the static export.
+  - **Label language.** The label is translated (French "Exemple de code",
+    Spanish "Ejemplo de código") and follows the content's locale, not the
+    request's: on a live page, including a cached second hit, and in a fired
+    artifact. An English page served under `/fr/` because it has no French
+    translation keeps the English label. Editor previews follow the editor's
+    interface language.
+  - **Focus ring.** `pre[tabindex="0"]:focus-visible` draws a 2px solid
+    `--color-primary-ink` outline, inset by 2px so a parent's
+    `overflow-x: clip` (the `monograph` preset) cannot cut it off, and in the
+    ink shade because plain `primary` on the block's `base-200` fill falls
+    under the 3:1 non-text contrast of WCAG 1.4.11 in the light theme. A site's
+    custom CSS should leave that outline in place
+    ([Custom CSS](../public-theming.md#custom-css)).
+  - **Authors cannot set or remove them.** The rich-text sanitizer still
+    strips every attribute but `class="highlight"` from a stored `<pre>`, so a
+    pasted `tabindex="-1"` cannot take a block out of the Tab order; the
+    attributes are added after it. The editor's own copy of the prose and the
+    `:json` artifact are unchanged.
+  - **The console's own code blocks too.** The update command on System, the
+    security.txt preview, the image-backend adopt commands, and the code
+    samples on `/developers` and the home page carry the same attributes, each
+    with its own label ("Update command", "security.txt as served", "Commands
+    for a release", "Commands for Mix", "Code sample").
+    `test/kiln_cms_web/scrollable_code_focus_test.exs` fails if a `<pre>` in
+    `lib/` with `overflow-x-auto` lacks them; see
+    [Scrolling code blocks](../design-language.md#scrolling-code-blocks).
+  - **Headless consumers.** The `:web` artifact's HTML gains the three
+    attributes; nothing is removed and `format_version` is unchanged. An
+    artifact fired before the upgrade keeps the old markup until its document
+    is next published or edited (see the
+    [upgrade note](#focusable-code-blocks-upgrade) for `mix kiln.refire_all`
+    and why revalidating clients may still keep the old HTML). The `:json`
+    artifact stays plain: a front end that renders `legacy_html` or Portable
+    Text from it adds the attributes and a focus ring itself
+    ([Code blocks in rendered HTML](../headless-consumer-guide.md#code-blocks-in-rendered-html)).
+  - **One side effect.** A fired `:web` artifact is now rendered in its
+    document's locale, so a newsletter signup block's labels ("Email",
+    "Subscribe") in that artifact are in the document's language rather than
+    in English, the firing worker's default. Live pages render them in the
+    reader's language, as before.
+  - **Not covered.** Code inside a plugin block's `:web` output, and wide
+    tables, which have the same problem (#2464).
 
 ## Security
 

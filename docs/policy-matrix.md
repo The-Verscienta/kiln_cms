@@ -247,6 +247,7 @@ everyone, the anonymous visitor included (published `:public` content, a
 | `CMS.FeedSettings` | `read` **only** | `read`: `:feeds` | `KilnCMS.Feeds` resolves a site's syndication policy for anonymous feed readers (#1659). A refused read would be "no row", the operator config, cached for the TTL, which can turn full content on for a site that switched it off, so the read fails closed to `Feeds.unavailable/0`, uncached. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
 | `CMS.SiteCompliance` | `read` **only** | `read`: `:compliance` | `Compliance.Settings` resolves a site's claim-checking rules and publish gate for the editor panel and the publish path (#1659). Fails closed to `Settings.unavailable/0`, uncached, for the same reason as `FeedSettings`. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
 | `CMS.SitePasswordPolicy` | `read` **only** | `read`: `:accounts` | The breached-password check (`Accounts.PasswordPolicy`, #2240) reads the site's off / warn / block stance while a registration, a reset or a first-run setup is under way, none of which has an admin actor. A refused read is `authorize_with: :error`, so it fails open to `warn` and is logged, rather than reading as "no row" and handing the decision to the operator default. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
+| `CMS.SiteBotBudgets` | `read` **only** | `read`: `:bot_budgets` | The delivery rate limiter (`BotBudgets`, #2243) reads a site's per-class ceilings while answering an anonymous public request, which has no admin actor. A refused read is `authorize_with: :error`, so it is logged and answered with the operator's values (never wider than the operator allowed), reused for 20 seconds, rather than cached for five minutes as "no row". Browser requests never read it. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
 | `CMS.SiteSecurityLog` | `read` **only** | `read`: `:security` | `Security.PruneWorker` reads each site's security-log retention window (#2241) through `Security.retention_days/1`, with no admin actor. A refused or failed read answers `0` (keep everything) and is logged, so a lost grant never deletes on a window nobody confirmed. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
 | `CMS.SearchSynonym` | `read` **only** | `read`: `:search` | `Search.Synonyms` reads a site's synonym rules for every search, usually an anonymous visitor's (A7). Fails closed (`authorize_with: :error`): a refused read raises rather than caching "no synonyms" for the TTL. Writing a rule stays an editor's; deleting one an admin's. |
 | `Analytics.SearchQuery` | `record` **only** | `record`: `:search` | `Search.record_query/3` counts a search, usually an anonymous visitor's (#1659). No person may record one (an admin still can, through the admin bypass above the policy), and the system may not read or purge the counters; the nightly purge is the AshOban trigger's own. |
@@ -506,13 +507,14 @@ field policies cover only public fields, which is why they are not listed beside
 is allowed to see is always the standing one.
 
 The three admin levers above are the account console's
-([`account-administration.md`](account-administration.md)). Two are refused for
+([`account-administration.md`](account-administration.md)). Four are refused for
 everyone, admins included:
 
 | Action | Why nobody may call it |
 |---|---|
 | `:sign_in_with_passkey` | Mints a session token; only the verified WebAuthn ceremony reaches it (`authorize?: false`), and the preparation refuses any actor-carrying call — so not even an admin can mint a token for another account |
 | `:sync_billing_audiences` | Entitlements are recomputed by `KilnCMS.Billing.Entitlements` alone; the change module refuses an actor-carrying call, so no authorized path grants an audience by hand |
+| `:register_with_invitation`, `:accept_invitation_with_password` | Accepting a site invitation (#2135): the first creates a confirmed account, the second sets a new password over an unconfirmed one and revokes its tokens. The emailed token is the credential, so only `KilnCMSWeb.InviteLive` calls them (`authorize?: false`), and `Changes.AcceptInvitation` refuses any actor-carrying call, since the admin bypass would pass `forbid_if always()`. Neither checks `:registration_enabled`: an invite-only site is where invitations are how accounts arrive |
 
 `NotLastAdmin` sits on `:manage_access` and `:anonymize` as a **validation**, not
 a policy: admins bypass `User`'s policies wholesale, so a `forbid_if` would never
@@ -641,6 +643,32 @@ Sign-in looks the key up through the AshAuthentication interaction bypass.
 
 `register` and `bump_usage` are `forbid_if always()` — the WebAuthn ceremony
 code writes them as the system.
+
+`Invitation` (#2135, `lib/kiln_cms/accounts/invitation.ex`) — a pending
+invitation to a site by email. Global like `OrgMembership`: the Team page reads
+one org's rows by `organization_id`.
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| `read`, `for_org`, `invite`, `resend`, `revoke`, `add_or_invite` | ✅ | ❌ | ❌ | ❌ |
+| `by_token`, `consume`, `accept_existing` | ⚙️ | ⚙️ | ⚙️ | ⚙️ |
+| `prune_expired` | ✅ | ❌ | ❌ | ❌ (⚙️ AshOban sweep) |
+
+"admin" is `KilnCMS.Accounts.Checks.PlatformAdmin`, as for memberships: a site
+admin who is not a platform admin cannot invite. `:invite` and `:resend` also
+carry `Validations.StandingAdminOnly`, so a temporary platform admin is refused
+there (an accepted invitation would outlast the grant); `:revoke` and the reads
+are open to them. `:add_or_invite` runs every read and write as the calling
+actor, so `User`'s, `OrgMembership`'s and `Invitation`'s own policies decide.
+
+The three system-only actions are `forbid_if always()` declared **above** the
+platform-admin bypass, because a passing bypass skips every policy below it.
+They are reached only with `authorize?: false`, by `KilnCMS.Accounts.Invitations`,
+`Invitations.AcceptExisting`, `Invitations.AddOrInvite` (retiring an invitation a
+direct add superseded) and `Changes.AcceptInvitation`, once the token is in hand.
+`:by_token`'s preparation and `:accept_existing`'s implementation also refuse any
+actor-carrying call. The AshOban bypass is unconditional and first, as on
+`OrgMembership`, because the scheduler reads before its worker destroys.
 
 `UserIdentity` — every action is forbidden to every role; only
 AshAuthentication's own OAuth machinery passes, via its interaction bypass.

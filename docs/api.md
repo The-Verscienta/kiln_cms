@@ -265,9 +265,11 @@ curl -s 'http://localhost:4000/api/json/posts' \
   - **Read + write**: may additionally author content over **all three
     key-authenticated surfaces** — JSON:API (`POST`/`PATCH`/`DELETE`), GraphQL
     (mutations), and MCP (`/mcp`) — as its owning user, within that user's role.
-    An **editor** creates/updates/submits drafts; **return-to-draft, publish,
-    unpublish and (soft-)delete require an admin** — an editor submits for
-    review, and deciding the outcome is the admin's half; the hard delete
+    An **editor** creates/updates/submits drafts, and may also unpublish and
+    archive; **return-to-draft and (soft-)delete require an admin**, and so
+    does **publish** unless the site lets editors publish (Team → Publishing).
+    Whether unpublishing should need an admin too is an open question in
+    [#2134](https://github.com/The-Verscienta/kiln_cms/issues/2134). The hard delete
     (`:purge`) is never exposed to any key. `/mcp` additionally exposes no publish/delete tools at all (LLM
     authoring is draft-only). See [json-api.md](json-api.md) → "Writing",
     [headless-graphql-api.md](headless-graphql-api.md) → "Mutations", and
@@ -704,6 +706,17 @@ curl -s "http://localhost:4000/api/content/post/$POST_ID/revisions?limit=10" \
   is stored as *changes only*, so the snapshot is folded from every version up
   to that one: the same fold a restore writes back and the editor's compare view
   diffs. Values are in their stored JSON shape (the block tree as typed blocks).
+- **Which custom fields changed.** Custom fields share one `custom_fields`
+  map, so `changed_fields` reports an edit to any of them as the single name
+  `custom_fields` (unchanged), and `changes["custom_fields"]` is the whole new
+  map. The single-revision read adds `changed_custom_fields`: the sorted *keys*
+  whose value was added, removed or edited, found by diffing against the
+  previous revision that carried `custom_fields` (not simply the adjacent row,
+  and an empty map for the first). A revision that did not touch them has `[]`.
+  Revisions written in one transaction share an instant and have random ids, so
+  which counts as the earlier of two is arbitrary. The list does not carry it.
+  The version reads are masked for the caller (private and field-grant-hidden
+  keys are absent), so a key the caller may not see is never named.
 - **The acting user is an id.** User records are not exposed over the API (PII,
   #183); `user_id` is `null` when the write had no actor.
 - **Pagination** is newest first: `?limit=` (1–100, default 20) and an opaque

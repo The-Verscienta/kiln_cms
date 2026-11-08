@@ -301,6 +301,9 @@ defmodule KilnCMSWeb.SecurityTxtLive do
         </p>
         <pre
           id="security-txt-preview"
+          tabindex="0"
+          role="group"
+          aria-label={gettext("security.txt as served")}
           class="mt-3 overflow-x-auto rounded-lg bg-base-200 p-4 font-mono text-xs"
         >{@preview}</pre>
       </section>

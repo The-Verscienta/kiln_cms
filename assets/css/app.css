@@ -1646,6 +1646,15 @@
   border-radius: 0.3rem;
   overflow-x: auto;
 }
+/* A scrolling code block takes keyboard focus so the arrow keys can scroll it
+   (#2164: `KilnCMS.CodeBlocks` for content, `tabindex="0"` on the app's own
+   `<pre>`s). Inset, so a parent's `overflow-x: clip` (monograph) can't trim
+   the ring — which puts it on the block's own `base-200` fill, where plain
+   `primary` misses WCAG 1.4.11's 3:1 in light mode; the ink token clears it. */
+pre[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--color-primary-ink);
+  outline-offset: -2px;
+}
 .kiln-block pre code {
   background: none;
   padding: 0;

@@ -169,6 +169,20 @@ longer exists, a `` `Module.fun/2` `` that was renamed or changed arity. Adding
 a new guide means adding it to both `extras` and `groups_for_extras` in
 `mix.exs`; an unlisted guide is silently invisible in the generated sidebar.
 
+The group also decides whether the guide is published to kilncms.dev's `/docs`,
+which `scripts/publish_docs.exs` builds from the same two lists. Each group is
+classified in `scripts/publish/docs.exs` as public (a section of the index),
+contributing (the last section, **Contributing to Kiln**, for pages about
+working on Kiln rather than using it) or internal (plans, audits and records,
+never published). A new group has to be added to one of those three lists, or
+the publisher raises; `test/scripts/publish_docs_test.exs` and CI's publisher
+dry run catch it on the pull request. If the guide is one an editor, a
+developer or an operator should read first, add it to that role's list in
+[Reading paths by role](docs/reading-paths.md), the one place the role tracks
+are curated; the index inlines them. Each track holds four to eight guides,
+each a published guide linked once, and the same test enforces that, so a
+full track means swapping a guide out rather than adding one.
+
 "View Source" links resolve against the release tag matching `mix.exs`'s
 version, so in a local build they point at the last release rather than at your
 branch. That only matters if you are checking the links themselves; pin them to
@@ -209,6 +223,16 @@ the docs uses the old anchor — by rewording the heading so both slugs agree
 document also has a phase table, the header summarizes the table and changes in
 the same commit as it. A header that says "design only" above a table of
 "done" rows is the drift this rule exists to stop.
+
+**A screenshot in a guide is a WebP file under `docs/images/`.** Link it
+relative to `docs/` (`![alt](images/editorial-workflow/2-draft.webp)`), on a
+paragraph of its own, with alt text that describes the whole screen. That one
+path works on GitHub, in ExDoc (which copies `docs/images/` as `images/`), and
+on kilncms.dev, where the publisher uploads the file to the media library and
+publishes it as an image block. Captions are not shown on kilncms.dev, so put
+what the reader should notice in the text under the image. How to capture,
+annotate and size one is under *Browser E2E (Playwright)* below, in
+"Adding screenshots to a guide".
 
 `docs/` is the published guide tree. Agent work-plans and scratch specs don't
 belong in it; the PR description is where a finished plan lives.
@@ -329,6 +353,64 @@ serves the raw captures (#2165):
 4. Commit the files under `priv/static/images/home/`. CI does not run the
    script; `test/kiln_cms_web/home_image_weight_test.exs` checks the committed
    sizes, so copying a raw capture into `priv/static` fails the test.
+
+`npx playwright test -c screenshots.config.js` with no file filter runs every
+spec in `e2e/screenshots/`, so it also recaptures the guide screenshots below.
+Pass a spec name to run one.
+
+#### Adding screenshots to a guide
+
+A guide's screenshots are captured by a Playwright spec, never by hand, so
+they can be retaken when the screen changes. The guide that has them today
+is [The editorial workflow](docs/editorial-workflow.md) (#2158); its spec is
+the one to copy.
+
+To recapture its eight images after a console change:
+
+1. Capture: `cd e2e && npm ci && npx playwright test -c screenshots.config.js
+   editorial-workflow`. Like the suite, it starts the e2e server on `:4002`
+   or reuses one already running there. The spec signs in as the seeded
+   editor and admin, checks that the editor sees **Submit for review** and no
+   **Publish** (Team → Publishing off), and fails rather than photograph a
+   site set up differently. The JPEGs land in
+   `e2e/screenshots/raw/workflow-*.jpg` (gitignored), and the spec deletes
+   its draft, from the trash too, when it ends.
+2. Derive: `scripts/optimize_home_images.sh docs` from the repo root writes
+   `docs/images/editorial-workflow/<n>-<name>.webp`, at most 1440 pixels
+   wide, at `WEBP_QUALITY` (default 80). It needs `cwebp` and either `sips`
+   or ImageMagick, as for the home page.
+3. Check: `mix test test/kiln_cms/docs/editorial_workflow_test.exs` fails
+   when an image is over 90 KB, the guide's images total over 600 KB, there
+   are more than eight, one has no alt text or is not a WebP, or a file in
+   the folder is not referenced by the guide.
+4. Commit the WebP files. Never commit the raw captures.
+
+To add screenshots to another guide:
+
+- **Write the capture spec** under `e2e/screenshots/`, beside
+  `editorial-workflow.spec.js`. Sign in with the fixtures from
+  `e2e/tests/fixtures.js`, assert the starting state you mean to photograph,
+  and wait on what the page renders, never on a timeout (see
+  `e2e/README.md`). Name the raw files with a prefix of the guide's own.
+- **Number what the reader should look at** with
+  `annotate(page, markers, shot)` from `e2e/screenshots/annotate.js`. It
+  draws a ring and a numbered badge on each marked element (at most three
+  per shot), takes the screenshot, and removes the overlay. Under each image
+  in the guide, write a numbered list whose items match the badges; the
+  picture itself carries no text.
+- **Derive and budget the files.** The `docs` target of
+  `scripts/optimize_home_images.sh` only knows `raw/workflow-*.jpg`, so add
+  a target for the new prefix, and copy the screenshot checks from
+  `editorial_workflow_test.exs` into a test for your guide.
+- **Publishing.** Nothing to set up. The publisher uploads each image as
+  `<basename>-<first 12 hex of its sha256>.<ext>` and reuses an upload with
+  that name on later runs, and a changed image republishes every guide that
+  shows it. A run fails before writing anything when a linked image is
+  missing or has no alt text. A replaced screenshot is a new media item, and
+  the old one stays in kilncms.dev's media library until someone deletes it.
+- **Images the publisher cannot show.** An image inside a sentence or a link
+  publishes as its alt text, and a standalone image at an `http(s)` URL as a
+  link to it. Keep screenshots as files in the repo, each on its own line.
 
 ## Commits & pull requests
 

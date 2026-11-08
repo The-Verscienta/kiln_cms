@@ -94,6 +94,11 @@ msgstr "está reservado"
 msgid "is still associated with this entry"
 msgstr "todavía está asociado a esta entrada"
 
+#: lib/kiln_cms/cms/validations/bot_budget_ceiling.ex
+#, elixir-autogen, elixir-format
+msgid "may not be more than %{ceiling}%: this server's operator caps it there. Ask them to raise it, or choose a lower value."
+msgstr "no puede ser más de %{ceiling}%: el operador de este servidor lo limita ahí. Pídele que lo suba, o elige un valor más bajo."
+
 ## From KilnCMS.Accounts.OrgSlug.message/1 (#1710)
 msgid "must be 1 to 63 lowercase letters, digits or hyphens, and cannot start or end with a hyphen"
 msgstr "debe tener de 1 a 63 letras minúsculas, dígitos o guiones, y no puede empezar ni terminar con un guion"

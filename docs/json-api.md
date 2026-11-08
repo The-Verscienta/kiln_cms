@@ -828,8 +828,8 @@ Use the JSON:API media type on both `Accept` and `Content-Type`:
 | `PATCH /api/json/posts/:id` | `:update` | `:read_write` key, editor+ | Edits content; **re-fires** if already published |
 | `PATCH /api/json/posts/:id/submit-for-review` | `:submit_for_review` | `:read_write` key, editor+ | draft → in_review |
 | `PATCH /api/json/posts/:id/return-to-draft` | `:return_to_draft` | `:read_write` key, **admin** | in_review → draft — the return half of the approve/return pair |
-| `PATCH /api/json/posts/:id/publish` | `:publish` | `:read_write` key, **admin** | Publishes and fires artifacts |
-| `PATCH /api/json/posts/:id/unpublish` | `:unpublish` | `:read_write` key, **admin** | Takes content down, purges artifacts |
+| `PATCH /api/json/posts/:id/publish` | `:publish` | `:read_write` key, **admin** (or editor where editors may publish) | Publishes and fires artifacts |
+| `PATCH /api/json/posts/:id/unpublish` | `:unpublish` | `:read_write` key, editor+ | Takes content down, purges artifacts |
 | `DELETE /api/json/posts/:id` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
 
 Pages expose the identical set; the dynamic tier is `/api/json/entries` (a
@@ -840,9 +840,12 @@ Pages expose the identical set; the dynamic tier is `/api/json/entries` (a
 
 **Authorization** mirrors `/mcp`: a **read-only key** can run none of these; a
 **`:read_write` key on a `:viewer`** account can run none; a **`:read_write` key
-on an `:editor`** can create/update/submit; **return-to-draft, publish, unpublish
-and delete require an `:admin`** account. An editor submits for review; deciding
-the outcome — approve or return — is the admin's half. Hard delete (`:purge`) is **never** routed and is
+on an `:editor`** can create/update/submit and unpublish; **return-to-draft and
+delete require an `:admin`** account, and so does **publish** unless the site
+lets editors publish (Team → Publishing; see `scheduled_at` below). An editor
+submits for review; deciding the outcome — approve or return — is the admin's
+half. Whether unpublishing should need an admin too is an open question in
+[#2134](https://github.com/The-Verscienta/kiln_cms/issues/2134). Hard delete (`:purge`) is **never** routed and is
 API-key-banned regardless of scope — `DELETE` is the reversible soft-delete.
 
 A **`:draft_write` key** (#2273) may `POST` a create and `PATCH` a draft its

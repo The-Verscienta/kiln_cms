@@ -871,6 +871,19 @@ defmodule KilnCMS.CMS do
       define :reset_site_password_policy, action: :destroy
     end
 
+    # Per-class delivery ceilings by user agent (#2243). Delivery reads the row
+    # through `KilnCMS.BotBudgets` (cached); this interface is for the settings
+    # page and tests.
+    resource KilnCMS.CMS.SiteBotBudgets do
+      define :list_site_bot_budgets, action: :read
+      define :save_site_bot_budgets, action: :save
+      # An existing row is updated rather than upserted, so a column the admin
+      # left as it was is not "changing" and is not held to a ceiling the
+      # operator lowered since (`Validations.BotBudgetCeiling`).
+      define :update_site_bot_budgets, action: :update
+      define :reset_site_bot_budgets, action: :destroy
+    end
+
     # Per-org retention window of the security audit log (#2241). Read through
     # `KilnCMS.Security.retention_days/1`, written through
     # `KilnCMS.Security.set_retention_days/3`.

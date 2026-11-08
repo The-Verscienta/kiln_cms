@@ -126,6 +126,23 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert Repo.aggregate(KilnCMS.Security.Event, :count) == 0
     end
 
+    test "purges pending site invitations (production addresses, live links)" do
+      KilnCMS.Accounts.invite_to_org!(
+        %{
+          organization_id: KilnCMS.Accounts.default_org_id(),
+          email: "scrub-invitee-#{System.unique_integer([:positive])}@example.com"
+        },
+        actor: admin()
+      )
+
+      assert Repo.aggregate(KilnCMS.Accounts.Invitation, :count) >= 1
+
+      summary = Scrub.run([])
+
+      assert summary.invitations_purged >= 1
+      assert Repo.aggregate(KilnCMS.Accounts.Invitation, :count) == 0
+    end
+
     test "provisions one usable pre-confirmed admin when credentials are given" do
       _real = admin()
 

@@ -431,5 +431,42 @@ defmodule KilnCMSWeb.RevisionControllerTest do
       assert data["changed_fields"] == ["custom_fields"]
       assert data["snapshot"]["custom_fields"] == %{"price" => "12", "sku" => "a"}
     end
+
+    test "changed_custom_fields names the edited keys, against the last version that touched them",
+         %{admin: admin} do
+      for name <- ~w(price sku) do
+        CMS.create_field_definition!(
+          %{content_type: :page, name: name, label: String.capitalize(name)},
+          actor: admin
+        )
+      end
+
+      page =
+        CMS.create_page!(
+          %{title: "CF", slug: slug(), custom_fields: %{"price" => "9", "sku" => "a"}},
+          actor: admin
+        )
+
+      page =
+        CMS.update_page!(page, %{custom_fields: %{"price" => "12", "sku" => "a"}}, actor: admin)
+
+      # A silent row between: touches no custom field.
+      page = CMS.update_page!(page, %{title: "Retitled"}, actor: admin)
+      CMS.update_page!(page, %{custom_fields: %{"price" => "12", "sku" => "b"}}, actor: admin)
+
+      [create, price, title, sku] = versions(page, admin)
+      key = mint(user(:editor), :read)
+
+      changed = fn v ->
+        {200, %{"data" => data}, _} = req(:get, "#{rev_path(:page, page.id)}/#{v.id}", key: key)
+        assert is_list(data["changed_fields"])
+        data["changed_custom_fields"]
+      end
+
+      assert changed.(create) == ["price", "sku"]
+      assert changed.(price) == ["price"]
+      assert changed.(title) == []
+      assert changed.(sku) == ["sku"]
+    end
   end
 end

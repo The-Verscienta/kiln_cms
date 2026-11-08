@@ -286,7 +286,10 @@ registered user with authorization bypassed — once, and only for the first one
 1. Register your own account at `https://<PHX_HOST>/register`. (Want
    invite-only sign-up afterwards? `config :kiln_cms, :registration_enabled,
    false` is **compile-time** — set it in `config/config.exs` or a project
-   overlay and rebuild the image; there is no environment variable for it.)
+   overlay and rebuild the image; there is no environment variable for it.
+   People then join by invitation: a platform admin enters their address on
+   **Team** (`/editor/team`) and they set up an account from the emailed link.
+   See [Invite someone to a site](account-administration.md#invite-someone-to-a-site).)
 2. Attach to the **running** node and promote it:
 
    ```bash
@@ -540,7 +543,9 @@ is the canonical list; in deploy order:
   is the checklist for turning that on).
 - Registration closed once the first admin exists, unless the site is meant
   to be open — `config :kiln_cms, :registration_enabled, false` is compile-time
-  config, so this is a rebuild, not an env change.
+  config, so this is a rebuild, not an env change. Bring people in afterwards
+  by [inviting them from Team](account-administration.md#invite-someone-to-a-site);
+  invitations are mailed, so outgoing mail must work first.
 - Backups scheduled and a restore rehearsed ([`backups.md`](backups.md#restore-drill-quarterly)).
 - Error tracking / tracing (`SENTRY_DSN`, OpenTelemetry) — env-gated no-ops
   until set ([`observability.md`](observability.md)).

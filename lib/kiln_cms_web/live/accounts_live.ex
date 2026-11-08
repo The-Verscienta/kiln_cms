@@ -6,9 +6,9 @@ defmodule KilnCMSWeb.AccountsLive do
   ## Why this is not `/editor/team`
 
   `KilnCMSWeb.TeamLive` answers a question about *one site*: who may author what
-  here, and through which custom role. It lists `OrgMembership` rows, and it can
-  only add people who already have an account — "invite people via sign-up or
-  SSO first", as it says.
+  here, and through which custom role. It lists `OrgMembership` rows, adds people
+  who already have an account, and invites anyone else by email (#2135); an
+  invitee's account appears here once they accept.
 
   This page answers the question that was missing: who has signed up at all.
   It lists `KilnCMS.Accounts.User`, spans every site, and carries the levers that
