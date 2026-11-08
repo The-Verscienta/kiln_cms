@@ -292,6 +292,33 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
+  `mix kiln.fields.import` for a release (#2288): plan, or with `apply: true`
+  write, a custom-field definitions document in the **running** node.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.import_field_definitions("/data/fields.json")'
+      bin/kiln_cms rpc '{:ok, _} = KilnCMS.Release.import_field_definitions("/data/fields.json", apply: true)'
+
+  A dry run is the default. Options are the task's flags as a keyword list
+  (`apply:`, `prune:`, `allow_data_loss:`, `actor: "email"`, `org: "slug"`).
+  Runs through `rpc` for the reason `import_wordpress/2` does.
+  """
+  @spec import_field_definitions(Path.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
+  def import_field_definitions(path, opts \\ []) do
+    run_import(&KilnCMS.CMS.FieldSync.import_file/3, path, opts)
+  end
+
+  @doc """
+  `mix kiln.fields.export` for a release (#2288): write the running node's
+  custom-field definitions to `path`.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.export_field_definitions("/data/fields.json")'
+  """
+  @spec export_field_definitions(Path.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
+  def export_field_definitions(path, opts \\ []) do
+    run_import(&KilnCMS.CMS.FieldSync.export_file/3, path, opts)
+  end
+
+  @doc """
   `mix kiln.media.adopt_image_backend` for a release (#1955): hand the active
   image backend the imported rows whose images it already holds, in the
   **running** node.

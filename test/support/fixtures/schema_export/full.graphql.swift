@@ -1132,6 +1132,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
         /// Links to: `post`.
         public let parent: [String: JSONValue]?
         public let phone: String?
+        public let priceBand: PriceBand?
         /// The chosen terms, in the order the editor arranged them.
         public let properties: [String]?
         public let publishedAt: String?
@@ -1142,6 +1143,8 @@ public struct PostDocument: Codable, Hashable, Sendable {
         /// Links to: `post`.
         public let related: [RelatedItem]?
         public let seo: Seo?
+        public let source: Source?
+        public let specs: [SpecsItem]?
         public let subtitle: String?
         public let summary: String?
         /// The items, in the order the editor arranged them.
@@ -1149,7 +1152,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public let tier: String?
         public let `where`: Where?
 
-        public init(accent: String? = nil, codeSample: String? = nil, contactEmail: String? = nil, dosages: [DosagesItem]? = nil, extra: JSONValue? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, handle: String? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, opensAt: String? = nil, parent: [String: JSONValue]? = nil, phone: String? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, seo: Seo? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
+        public init(accent: String? = nil, codeSample: String? = nil, contactEmail: String? = nil, dosages: [DosagesItem]? = nil, extra: JSONValue? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, handle: String? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, opensAt: String? = nil, parent: [String: JSONValue]? = nil, phone: String? = nil, priceBand: PriceBand? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, seo: Seo? = nil, source: Source? = nil, specs: [SpecsItem]? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
             self.accent = accent
             self.codeSample = codeSample
             self.contactEmail = contactEmail
@@ -1164,12 +1167,15 @@ public struct PostDocument: Codable, Hashable, Sendable {
             self.opensAt = opensAt
             self.parent = parent
             self.phone = phone
+            self.priceBand = priceBand
             self.properties = properties
             self.publishedAt = publishedAt
             self.rating = rating
             self.readTime = readTime
             self.related = related
             self.seo = seo
+            self.source = source
+            self.specs = specs
             self.subtitle = subtitle
             self.summary = summary
             self.synonyms = synonyms
@@ -1192,12 +1198,15 @@ public struct PostDocument: Codable, Hashable, Sendable {
             case opensAt = "opens_at"
             case parent
             case phone
+            case priceBand = "price_band"
             case properties
             case publishedAt = "published_at"
             case rating
             case readTime = "read_time"
             case related
             case seo
+            case source
+            case specs
             case subtitle
             case summary
             case synonyms
@@ -1214,6 +1223,18 @@ public struct PostDocument: Codable, Hashable, Sendable {
                 self.amount = amount
                 self.form = form
                 self.unit = unit
+            }
+        }
+
+        public struct PriceBand: Codable, Hashable, Sendable {
+            /// A number, or an ISO-8601 date (YYYY-MM-DD); both bounds are the same kind.
+            public let max: JSONValue?
+            /// A number, or an ISO-8601 date (YYYY-MM-DD); both bounds are the same kind.
+            public let min: JSONValue?
+
+            public init(max: JSONValue? = nil, min: JSONValue? = nil) {
+                self.max = max
+                self.min = min
             }
         }
 
@@ -1243,6 +1264,62 @@ public struct PostDocument: Codable, Hashable, Sendable {
             enum CodingKeys: String, CodingKey {
                 case noIndex = "no_index"
                 case title
+            }
+        }
+
+        public struct Source: Codable, Hashable, Sendable {
+            public let label: String?
+            public let rel: String?
+            public let target: Target?
+            public let url: String
+
+            public init(label: String? = nil, rel: String? = nil, target: Target? = nil, url: String) {
+                self.label = label
+                self.rel = rel
+                self.target = target
+                self.url = url
+            }
+
+            public enum Target: RawRepresentable, Codable, Hashable, Sendable {
+                case blank
+                case self_
+                /// A value this schema does not list — an option added since it was generated.
+                case unknown(String)
+
+                public init(rawValue: String) {
+                    switch rawValue {
+                    case "_blank": self = .blank
+                    case "_self": self = .self_
+                    default: self = .unknown(rawValue)
+                    }
+                }
+
+                public var rawValue: String {
+                    switch self {
+                    case .blank: return "_blank"
+                    case .self_: return "_self"
+                    case .unknown(let value): return value
+                    }
+                }
+
+                public init(from decoder: Decoder) throws {
+                    self.init(rawValue: try decoder.singleValueContainer().decode(String.self))
+                }
+
+                public func encode(to encoder: Encoder) throws {
+                    var container = encoder.singleValueContainer()
+                    try container.encode(rawValue)
+                }
+            }
+        }
+
+        public struct SpecsItem: Codable, Hashable, Sendable {
+            public let key: String
+            public let value: String
+
+            public init(key: String, value: String) {
+                self.key = key
+                self.value = value
             }
         }
 
@@ -1616,7 +1693,7 @@ public struct PostCustomFields: Codable, Hashable, Sendable {
           subtitle: customString(name: "subtitle")
           summary: customString(name: "summary")
           tier: customString(name: "tier")
-          fields(names: ["dosages", "extra", "gallery", "parent", "properties", "related", "seo", "synonyms", "where"]) {
+          fields(names: ["dosages", "extra", "gallery", "parent", "price_band", "properties", "related", "seo", "source", "specs", "synonyms", "where"]) {
             __typename
             name
             ... on StringValue { asString: value }

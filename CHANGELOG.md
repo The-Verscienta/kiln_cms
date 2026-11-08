@@ -88,7 +88,7 @@ Every summary line below that was shortened links to its own entry there.
   on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
   ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
 
-- **Overlays and plugins: the field type names `email`, `telephone`, `color`, `slug`, `time` and `json` are now built in. Rename a type that uses one; stored definitions with that name get the new strict check.**
+- **Overlays and plugins: the field type names `email`, `telephone`, `color`, `slug`, `time`, `json`, `range`, `key_value` and `link` are now built in. Rename a type that uses one; stored definitions with that name get the new strict check.**
   ([long form](docs/changelog/unreleased.md#builtin-field-type-names-upgrade))
 
 - **Overlays: run `mix ash.codegen`, commit the migration and run `mix ash.migrate`. Users, memberships and roles gain a `field_read_grants` column.**
@@ -109,6 +109,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Admins get a security log: who signed in, was locked out, or changed a second factor, passkey, role, API key or sign-in setting, and from where.**
   At `/editor/security-log`, with filters, CSV download and a per-site retention window (default 365 days). Guide: [docs/security-events.md](docs/security-events.md).
   ([#2441](https://github.com/The-Verscienta/kiln_cms/pull/2441) · [long form](docs/changelog/unreleased.md#security-log))
+- **Export and import custom-field definitions between environments: `mix kiln.fields.export` / `mix kiln.fields.import`, release `rpc` functions and an admin download at `/editor/fields/export.json`.**
+  One versioned JSON file carries every field attribute, link fields, group sub-fields and dynamic types; the import prints a diff, dry-runs in a rolled-back transaction, applies all-or-nothing, is idempotent, and blocks changes that drop stored values unless `--allow-data-loss`. Admin only; no migration, no DDL.
+  ([#2288](https://github.com/The-Verscienta/kiln_cms/issues/2288) · [long form](docs/changelog/unreleased.md#field-definition-sync))
 
 - **In-app media backups are split into independent `tar.gz` parts with SHA-256 sidecars, a Resume button for failed runs, and a multi-part `restore.sh media`.**
   Settings `BACKUP_MEDIA_PART_MB` and `BACKUP_MEDIA_EXCLUDE`; no migration.
@@ -129,6 +132,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Custom fields can be shown or required only when another field has a given value (Conditions in `/editor/fields`).**
   Hidden values are kept and still served by the API; new `visible_when` / `required_when` attributes; additive migration, nothing else to run.
   ([long form](docs/changelog/unreleased.md#conditional-custom-fields))
+- **A custom field can default to today, now, the creating user, the site locale or another field (Default comes from in `/editor/fields`).**
+  Create-only, a supplied value wins; new `default_source` / `default_field` attributes; additive migration, nothing else to run.
+  ([#2286](https://github.com/The-Verscienta/kiln_cms/issues/2286) · [long form](docs/changelog/unreleased.md#dynamic-field-defaults))
 - **Admins choose what happens to a breached password at Organization → Password policy: off, warn (default) or block for administrators.**
   Checked on register, change, reset and first-run setup, by k-anonymity.
   ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-check))
@@ -141,6 +147,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Six built-in custom field types check and tidy a value: `:email`, `:telephone` (E.164), `:color`, `:slug`, `:time` and `:json`.**
   Those six names are now reserved: rename an overlay or plugin type that uses one (`mix kiln.plugins.doctor` fails).
   ([long form](docs/changelog/unreleased.md#builtin-format-field-types))
+
+- **Three more built-in custom field types: `:range` (two numbers or two dates), `:key_value` (ordered `key=value` pairs) and `:link` (URL, label, target, rel).**
+  Names reserved; stored as JSON, filterable only for "Empty or not", not sortable. Plugin `input_parts` may now declare a select part.
+  ([long form](docs/changelog/unreleased.md#builtin-composite-field-types))
 
 - **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
   A wrong operand type is a schema error; `contains` and `startsWith` (case-insensitive, literal) also work in `customFilter`.

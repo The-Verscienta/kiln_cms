@@ -4021,6 +4021,37 @@
                 ],
                 "description": "Field included by default."
               },
+              "default_field": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
+              "default_source": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "today",
+                      "now",
+                      "current_user",
+                      "site_locale",
+                      "copy_of"
+                    ],
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
               "deliver_plain": {
                 "description": "Field included by default.",
                 "type": "boolean"
@@ -4500,6 +4531,12 @@
           "default": {
             "$ref": "#/components/schemas/field_definition-filter-default"
           },
+          "default_field": {
+            "$ref": "#/components/schemas/field_definition-filter-default_field"
+          },
+          "default_source": {
+            "$ref": "#/components/schemas/field_definition-filter-default_source"
+          },
           "deliver_plain": {
             "$ref": "#/components/schemas/field_definition-filter-deliver_plain"
           },
@@ -4805,6 +4842,141 @@
             "type": "string"
           },
           "string_starts_with": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-default_field": {
+        "additionalProperties": false,
+        "properties": {
+          "contains": {
+            "type": "string"
+          },
+          "eq": {
+            "type": "string"
+          },
+          "greater_than": {
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "type": "string"
+          },
+          "ilike": {
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "type": "string"
+          },
+          "like": {
+            "type": "string"
+          },
+          "not_eq": {
+            "type": "string"
+          },
+          "string_ends_with": {
+            "type": "string"
+          },
+          "string_starts_with": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-default_source": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "enum": [
+              "today",
+              "now",
+              "current_user",
+              "site_locale",
+              "copy_of"
+            ],
+            "type": "string"
+          },
+          "greater_than": {
+            "enum": [
+              "today",
+              "now",
+              "current_user",
+              "site_locale",
+              "copy_of"
+            ],
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "enum": [
+              "today",
+              "now",
+              "current_user",
+              "site_locale",
+              "copy_of"
+            ],
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "enum": [
+              "today",
+              "now",
+              "current_user",
+              "site_locale",
+              "copy_of"
+            ],
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "enum": [
+              "today",
+              "now",
+              "current_user",
+              "site_locale",
+              "copy_of"
+            ],
+            "type": "string"
+          },
+          "not_eq": {
+            "enum": [
+              "today",
+              "now",
+              "current_user",
+              "site_locale",
+              "copy_of"
+            ],
             "type": "string"
           }
         },

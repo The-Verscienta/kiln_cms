@@ -33,6 +33,7 @@ defmodule KilnCMS.CMS.CustomFieldSerializersTest do
       lib/kiln_cms/cms/field_access.ex
       lib/kiln_cms/cms/field_conversion.ex
       lib/kiln_cms/cms/field_definition.ex
+      lib/kiln_cms/cms/field_sync.ex
       lib/kiln_cms/cms/field_types.ex
       lib/kiln_cms/cms/field_types/computed.ex
       lib/kiln_cms/cms/field_types/geolocation.ex
@@ -83,6 +84,7 @@ defmodule KilnCMS.CMS.CustomFieldSerializersTest do
       lib/kiln_cms_web/graphql/custom_fields.ex
     ),
     write_path: ~w(
+      lib/kiln_cms/cms/dynamic_defaults.ex
       lib/kiln_cms/cms/unique_values.ex
       lib/kiln_cms/cms/changes/apply_custom_fields.ex
       lib/kiln_cms/cms/changes/clear_reference_target.ex

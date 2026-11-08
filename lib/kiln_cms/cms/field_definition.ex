@@ -306,6 +306,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :position,
       :section,
       :default,
+      :default_source,
+      :default_field,
       :compute,
       :names_record,
       :searchable,
@@ -428,6 +430,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # so switching an existing computed field away isn't a dead end (#429).
     change KilnCMS.CMS.Changes.ClearCompute
 
+    # A dynamic default (#2286) must fit the field's type, replaces the static
+    # `default`, and names a sibling only for `:copy_of`.
+    change KilnCMS.CMS.Changes.ClearDefaultSource
+
     # Same for `multiple`: only a `:media` field (a gallery), a `:reference`
     # field (a list of references), a `:group` (repeating rows) or a
     # top-level `:select` (several terms) can hold a list, so the flag — and
@@ -524,6 +530,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # A :computed field must carry a `compute` formula that parses — and no
     # other type may carry one.
     validate KilnCMS.CMS.Validations.ComputeExpression
+
+    # `copy_of` names a sibling of the same type (#2286).
+    validate KilnCMS.CMS.Validations.DefaultSource
 
     # A private field (#2044) is a plain top-level type, and nothing copies
     # its value somewhere public.
@@ -839,6 +848,22 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # Optional default value (stored as a string, coerced to the field type when
     # an editor leaves the input blank).
     attribute :default, :string, public?: true, constraints: [max_length: KilnCMS.Limits.line()]
+
+    # A dynamic default (#2286): where a new record's value comes from when
+    # the writer leaves the field blank, instead of the static `default`.
+    # A closed set — `:today`, `:now`, `:current_user`, `:site_locale` and
+    # `:copy_of` (another field of the same record, named by `default_field`);
+    # no expression strings. Create-only (`Changes.ApplyCustomFields`); nil —
+    # the static `default`, if any — is what every field had before.
+    # `Changes.ClearDefaultSource` keeps it consistent with the type and with
+    # `default`; `Validations.DefaultSource` judges `default_field`.
+    attribute :default_source, :atom,
+      public?: true,
+      constraints: [one_of: [:today, :now, :current_user, :site_locale, :copy_of]]
+
+    attribute :default_field, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # The formula behind a `:computed` field (#429) — a `KilnCMS.CMS.Computed`
     # template like `"{{ reading_time(body) }} min read"`, parsed and validated

@@ -58,9 +58,10 @@ carries the reasoning.
 
 <a id="builtin-field-type-names-upgrade"></a>
 
-- **The field type names `email`, `telephone`, `color`, `slug`, `time` and `json` are reserved (#2278).**
+- **The field type names `email`, `telephone`, `color`, `slug`, `time`, `json`, `range`, `key_value` and `link` are reserved (#2278).**
   Kiln now ships a built-in type under each name (see
-  [Built-in format types](../extending-content.md#built-in-format-types)), and
+  [Built-in format types](../extending-content.md#built-in-format-types) and
+  [Range and key-value and link fields](../extending-content.md#range-and-key-value-and-link-fields)), and
   a name can be registered only once.
   - **Overlays and plugins.** A `Kiln.FieldType` that registers one of these
     names must be renamed, in the module's `name/0` and in any stored
@@ -276,6 +277,30 @@ carries the reasoning.
     [the security log guide](../security-events.md).
   ([#2441](https://github.com/The-Verscienta/kiln_cms/pull/2441))
 
+<a id="field-definition-sync"></a>
+
+- **Custom-field definitions can be exported from one environment and imported
+  into another, with a diff and a dry run (#2288).** For admins promoting a model
+  from staging to production. No migration.
+  - **Commands.** `mix kiln.fields.export [--out FILE]` and `mix kiln.fields.import
+    FILE [--apply] [--prune] [--allow-data-loss]`; on a release,
+    `KilnCMS.Release.export_field_definitions/2` and
+    `import_field_definitions/2` through `rpc`. Admins also get a download at
+    `/editor/fields/export.json`. See [field-sync.md](../field-sync.md).
+  - **Complete by construction.** A field carries every attribute the create
+    action accepts, so validation constraints, conditional rules, privacy,
+    localization, delivery and search flags and reference rules travel with it.
+    The list is read from the action; a test fails if an exported field is
+    missing one. Link fields and group sub-fields nest under their parent;
+    dynamic types carry their settings.
+  - **Safe by default.** The dry run applies the import inside a transaction it
+    rolls back, so validation refusals show up before anything is written.
+    `--apply` is one transaction. Re-importing a file changes nothing. A field
+    absent from the file is kept unless `--prune`. A delete, a type change or a
+    list made single over stored values is blocked until `--allow-data-loss`.
+  - **Not included.** Role/membership field grants, content, and the compiled
+    types themselves; types are never deleted by an import.
+
 <a id="backup-media-parts"></a>
 
 - **In-app media backups are written as independent `tar.gz` parts with SHA-256
@@ -346,10 +371,50 @@ carries the reasoning.
     picker, but a `searchable` flag indexes the strings and numbers nested in
     it (not the keys). Limits: 256 KB of input, 64 KB re-encoded, depth 32,
     5,000 values; NUL is refused.
-  - **Not yet.** A key/value or link type, number options (step, prefix,
-    suffix, range), a colour palette, JSON Schema validation.
+  - **Not yet.** Number options (step, prefix, suffix, slider), a slug
+    uniqueness rule, a colour palette, JSON Schema validation.
   - The six names are reserved; see the upgrade note
     [above](#builtin-field-type-names-upgrade).
+
+<a id="builtin-composite-field-types"></a>
+
+- **Three more built-in custom field types: `:range`, `:key_value` and `:link` (#2278).**
+  Admins pick them in `/editor/fields` like any type. Each is stored as JSON,
+  checked the same way in the editor, the API and imports, and served through
+  GraphQL and the client schema export as the generic JSON value. Guide:
+  [Range and key-value and link fields](../extending-content.md#range-and-key-value-and-link-fields).
+  - `:range`: `{"min": ..., "max": ...}`, both bounds numbers or both
+    `YYYY-MM-DD` dates. At least one bound is required (a half-open range is
+    allowed) and `min` may not exceed `max`. Edited as two text inputs, "From"
+    and "To". Never indexed for search, even if flagged `searchable`. The
+    published schema says each bound is a number or a string; the check, not
+    the schema, rejects a number paired with a date.
+  - `:key_value`: an ordered list of `{"key": ..., "value": ...}` pairs, edited
+    as a textarea with one `key=value` per line (split at the first `=`).
+    At most 100 pairs, values up to 1,000 characters, 64 KB in all; keys are
+    unique (case-sensitive), single-line and contain no `=`. A plain map from
+    an API client is accepted and stored sorted by key. A `searchable` flag
+    indexes the values, not the keys.
+  - `:link`: `{"url": ..., "label": ..., "target": ..., "rel": ...}`. The URL
+    (at most 2,048 bytes) must pass the same `safe_href` policy as rich-text
+    links unchanged: `http(s)`, `mailto:`, a relative `/path` or a `#fragment`
+    are stored; `javascript:`, `data:`, `tel:` and protocol-relative `//host`
+    are refused with an error. Label up to 200 characters; target `_blank` or
+    `_self`; `rel` from a fixed list, and a `_blank` target always adds
+    `noopener noreferrer`. A `searchable` flag indexes the label only. This
+    type is unrelated to the "link fields" (edge metadata) of a `:reference`
+    field.
+  - **Lists and queries.** None of the three is a Columns picker column, a list
+    sort, or usable as a condition source. A `custom_filter` on them answers
+    only "Empty or not" (`null`); any other operator is refused with *custom
+    field "x" (range) only supports null*, and a sort with *is not sortable*.
+    `multiple` is cleared and validation constraints (`min`, `pattern`,
+    `unique`, ...) are refused on them.
+  - **Plugin authors.** `Kiln.FieldType` `input_parts/1` entries may carry an
+    optional `options: [{value, label}]` list for a `type: "select"` part
+    (additive; the editor renders a `<select>`, put the blank choice first).
+  - **Upgrade.** No migration. The names `range`, `key_value` and `link` are
+    reserved; see the upgrade note [above](#builtin-field-type-names-upgrade).
 
 <a id="custom-field-grants"></a>
 
@@ -440,13 +505,30 @@ carries the reasoning.
     leaves it unused. No new environment variables. If an admin locks
     themselves out, `bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(remove: true)'`
     lists (without `remove: true`) or lifts the site's rules and clears every
-    node's cache at once; SQL still works within the one-minute cache. Expired rules are not swept and still
-    hold their slot until removed in the console.
+    node's cache at once; SQL still works within the one-minute cache. Expired
+    rules are not swept, but adding the same range again replaces the expired
+    row; an active rule still refuses a duplicate.
   - **Developers.** The resource, `KilnCMS.CMS.IpBlockRule`, is org-admin only
     and deliberately absent from JSON:API, GraphQL and MCP. The request path
     reads it as the `:ip_block` system actor. New counter
     `kiln_cms.ip_block.refused.count`, tagged `surface`, never the address.
   See [ip-blocking.md](../ip-blocking.md).
+
+<a id="dynamic-field-defaults"></a>
+
+- **A custom field can default to today, now, the creating user, the site locale or another field (#2286).**
+  A new `default_source` (and, for a copy, `default_field`) on a field
+  definition replaces the fixed `default` with one of a closed set — `today`,
+  `now`, `current_user`, `site_locale`, `copy_of` — chosen under **Default comes
+  from** in `/editor/fields`. It applies on create only, where the payload
+  leaves the field blank; a supplied value wins and later edits never re-default.
+  `today` is the day a computed formula's `today()` sees. A field hidden by
+  its `visible_when` rule is not defaulted; a field the editor's grants do not
+  cover still receives its default, and the grant check does not count it as the
+  editor's change. Two new nullable columns on `field_definitions`
+  (additive migration); `default_source` / `default_field` read back on the
+  field-definition JSON:API resource and in the OpenAPI document. See
+  [extending-content.md](../extending-content.md#give-a-field-a-dynamic-default).
 
 <a id="conditional-custom-fields"></a>
 

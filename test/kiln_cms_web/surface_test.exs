@@ -29,7 +29,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/content/export.csv /editor/content/export.json
     /editor/experiments
     /editor/experiments/:id
-    /editor/federation /editor/feeds /editor/fields /editor/forms
+    /editor/federation /editor/feeds /editor/fields /editor/fields/export.json /editor/forms
     /editor/forms/:id /editor/forms/:id/entries/export.csv /editor/forms/settings
     /editor/funnels /editor/funnels/:id /editor/governance /editor/governance/:type/:id
     /editor/governance/:type/:id/export.csv /editor/governance/:type/:id/export.json

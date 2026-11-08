@@ -56,6 +56,9 @@ defmodule KilnCMS.CMS.ListFieldsTest do
         do: assert(ListFields.pickable?(def_("x", type)))
 
     refute ListFields.pickable?(def_("x", :json))
+
+    for type <- [:range, :key_value, :link],
+        do: refute(ListFields.pickable?(def_("x", type)))
   end
 
   test "types the picker does not offer, and multiple-valued fields, are dropped", %{defs: defs} do

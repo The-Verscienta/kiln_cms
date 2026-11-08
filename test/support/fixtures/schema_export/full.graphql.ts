@@ -290,7 +290,7 @@ export interface PageDocument {
 /** A published `Post` as fired to the `:json` surface. */
 export interface PostDocument {
   blocks: Array<KilnBlock>;
-  custom_fields: { accent?: string | null; code_sample?: string | null; contact_email?: string | null; dosages?: Array<{ amount?: number | null; form?: string | null; unit?: string | null }> | null; extra?: Record<string, unknown> | Array<unknown> | null; featured?: boolean | null; gallery?: Array<MediaSnapshot> | null; handle?: string | null; hero?: MediaSnapshot | null; homepage?: string | null; launch_date?: string | null; opens_at?: string | null; parent?: /* links to: "post" */ Record<string, unknown> | null; phone?: string | null; properties?: Array<string> | null; published_at?: string | null; rating?: number | null; read_time?: number | null; related?: /* links to: "post" */ Array<{ id: string; slug?: string | null; title?: string | null; type: string }> | null; seo?: { no_index?: boolean | null; title?: string | null } | null; subtitle?: string | null; summary?: string | null; synonyms?: Array<string> | null; tier?: string | null; where?: { label?: string; lat?: number; lng?: number; zoom?: number } | null };
+  custom_fields: { accent?: string | null; code_sample?: string | null; contact_email?: string | null; dosages?: Array<{ amount?: number | null; form?: string | null; unit?: string | null }> | null; extra?: Record<string, unknown> | Array<unknown> | null; featured?: boolean | null; gallery?: Array<MediaSnapshot> | null; handle?: string | null; hero?: MediaSnapshot | null; homepage?: string | null; launch_date?: string | null; opens_at?: string | null; parent?: /* links to: "post" */ Record<string, unknown> | null; phone?: string | null; price_band?: { max?: number | string; min?: number | string } | null; properties?: Array<string> | null; published_at?: string | null; rating?: number | null; read_time?: number | null; related?: /* links to: "post" */ Array<{ id: string; slug?: string | null; title?: string | null; type: string }> | null; seo?: { no_index?: boolean | null; title?: string | null } | null; source?: { label?: string; rel?: string; target?: "_blank" | "_self"; url: string } | null; specs?: Array<{ key: string; value: string }> | null; subtitle?: string | null; summary?: string | null; synonyms?: Array<string> | null; tier?: string | null; where?: { label?: string; lat?: number; lng?: number; zoom?: number } | null };
   custom_fields_plain?: { summary?: string | null };
   id: string;
   inherited_fields?: Record<string, unknown>;
@@ -411,7 +411,7 @@ fragment PostCustomFields on Post {
   subtitle: customString(name: "subtitle")
   summary: customString(name: "summary")
   tier: customString(name: "tier")
-  fields(names: ["dosages", "extra", "gallery", "parent", "properties", "related", "seo", "synonyms", "where"]) {
+  fields(names: ["dosages", "extra", "gallery", "parent", "price_band", "properties", "related", "seo", "source", "specs", "synonyms", "where"]) {
     __typename
     name
     ... on StringValue { asString: value }

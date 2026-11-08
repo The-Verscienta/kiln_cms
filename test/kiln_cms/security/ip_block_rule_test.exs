@@ -152,6 +152,57 @@ defmodule KilnCMS.Security.IpBlockRuleTest do
     end
   end
 
+  describe "re-adding a lapsed range" do
+    defp seed_expired!(cidr, org) do
+      Ash.Seed.seed!(IpBlockRule, %{
+        cidr: cidr,
+        org_id: org,
+        expires_at: DateTime.add(DateTime.utc_now(), -60, :second) |> DateTime.truncate(:second)
+      })
+    end
+
+    defp rules(org), do: CMS.list_ip_block_rules!(actor: user(:admin), tenant: org)
+
+    test "an expired rule no longer holds the range" do
+      old = seed_expired!("198.51.100.0/24", org_id())
+
+      assert %{id: id} = add!("198.51.100.77/24")
+      refute id == old.id
+
+      assert [%{id: ^id, expires_at: nil}] =
+               Enum.filter(rules(org_id()), &(&1.cidr == "198.51.100.0/24"))
+    end
+
+    test "an active rule still refuses a duplicate" do
+      future = DateTime.add(DateTime.utc_now(), 3600, :second)
+      add!("198.51.100.0/24", %{expires_at: future})
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.create_ip_block_rule(%{cidr: "198.51.100.0/24"},
+                 actor: user(:admin),
+                 tenant: org_id(),
+                 context: %{client_ip: {192, 0, 2, 1}}
+               )
+
+      assert Exception.message(error) =~ "already blocked"
+    end
+
+    test "a different range's expired rule is left alone" do
+      other = seed_expired!("203.0.113.0/24", org_id())
+      add!("198.51.100.0/24")
+      assert Enum.any?(rules(org_id()), &(&1.id == other.id))
+    end
+
+    test "another org's expired rule is left alone" do
+      theirs = KilnCMS.OrgFixtures.org("ipb-lapsed")
+      stale = seed_expired!("198.51.100.0/24", theirs.id)
+
+      add!("198.51.100.0/24")
+      assert [%{id: id}] = rules(theirs.id)
+      assert id == stale.id
+    end
+  end
+
   describe "tenancy" do
     test "a rule is invisible and undeletable from another org" do
       admin = user(:admin)

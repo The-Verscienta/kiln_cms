@@ -138,6 +138,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   alias Ash.Error.Changes.InvalidAttribute
   alias KilnCMS.CMS.Conditions
+  alias KilnCMS.CMS.DynamicDefaults
   alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.PrivateFields
@@ -384,6 +385,19 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         do: Enum.reject(editable, &UniqueValues.unique_def?/1),
         else: editable
 
+    # Dynamic defaults (#2286) settle first: on an ordinary create each stands
+    # in for its field's `default`; on any other write none does.
+    {editable, defaulted} =
+      DynamicDefaults.settle(editable, %{
+        create?:
+          changeset.action_type == :create and
+            changeset.context[:custom_fields_constraints] != :skip,
+        today: DynamicDefaults.today(changeset),
+        actor: context.actor,
+        tenant: changeset.to_tenant,
+        supplied: supplied
+      })
+
     # Conditional rules (#2277) read the merged view; they only adjust `required`.
     editable =
       Conditions.apply_to(editable, Map.merge(existing, supplied), required_when: required_when?)
@@ -404,6 +418,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
     |> stash(defs)
     |> stash_supplied(supplied)
+    |> stash_defaulted(defaulted)
     |> note_dropped(dropped)
     |> then(fn cs -> Enum.reduce(errors, cs, &Ash.Changeset.add_error(&2, &1)) end)
     |> UniqueValues.register(defs)
@@ -620,6 +635,17 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   """
   @spec supplied_keys(Ash.Changeset.t()) :: [String.t()] | nil
   def supplied_keys(changeset), do: changeset.context[:kiln_custom_fields_supplied]
+
+  defp stash_defaulted(changeset, names),
+    do: Ash.Changeset.set_context(changeset, %{kiln_custom_fields_defaulted: names})
+
+  @doc """
+  The keys a dynamic default (#2286) stands in for on this write: the payload
+  left them blank or absent. A field grant does not count them as the editor's
+  change.
+  """
+  @spec defaulted_keys(Ash.Changeset.t()) :: [String.t()]
+  def defaulted_keys(changeset), do: changeset.context[:kiln_custom_fields_defaulted] || []
 
   # Resolve one definition's value and fold it into the {cleaned, errors} acc.
   # Three-way per key: a field the caller *supplied* is coerced/cleared; a field
@@ -959,6 +985,14 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     end
   end
 
+  # A key/value list (#2278) has no parts: it is empty when it holds no pair,
+  # or only pairs with neither key nor value. Never stored as `[]`.
+  defp blank_for?(%{field_type: :key_value}, value) when is_list(value),
+    do: Enum.all?(value, &blank_pair?/1)
+
+  defp blank_for?(%{field_type: :key_value}, value) when is_map(value) and not is_struct(value),
+    do: map_size(value) == 0
+
   # Blankness, per field type. A **composite** type (one declaring
   # `input_parts/1`, e.g. `:geolocation`) submits a map of parts, and an
   # untouched widget submits a map of blanks — that is the field being empty.
@@ -991,6 +1025,11 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     do: Enum.all?(value, &blank?/1)
 
   defp blank_for?(_def, value), do: blank?(value)
+
+  defp blank_pair?(%{} = pair) when not is_struct(pair),
+    do: pair |> Map.values() |> Enum.all?(&blank?/1)
+
+  defp blank_pair?(other), do: blank?(other)
 
   defp composite?(%{field_type: type} = def) do
     case KilnCMS.CMS.FieldTypes.get(type) do
@@ -1066,7 +1105,8 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     end
   end
 
-  defp site_person?(id, tenant) do
+  @doc false
+  def site_person?(id, tenant) do
     tenant
     |> KilnCMS.Accounts.Scoping.users_with_tier([:admin, :editor, :viewer])
     |> Enum.any?(&(&1.id == id))

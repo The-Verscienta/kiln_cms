@@ -1403,6 +1403,30 @@
               ],
               "x-kiln-graphql-kind": "string"
             },
+            "price_band": {
+              "additionalProperties": false,
+              "properties": {
+                "max": {
+                  "description": "A number, or an ISO-8601 date (YYYY-MM-DD); both bounds are the same kind.",
+                  "type": [
+                    "number",
+                    "string"
+                  ]
+                },
+                "min": {
+                  "description": "A number, or an ISO-8601 date (YYYY-MM-DD); both bounds are the same kind.",
+                  "type": [
+                    "number",
+                    "string"
+                  ]
+                }
+              },
+              "type": [
+                "object",
+                "null"
+              ],
+              "x-kiln-graphql-kind": "json"
+            },
             "properties": {
               "description": "The chosen terms, in the order the editor arranged them.",
               "items": {
@@ -1503,6 +1527,63 @@
                 "no_index",
                 "title"
               ]
+            },
+            "source": {
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                "rel": {
+                  "type": "string"
+                },
+                "target": {
+                  "enum": [
+                    "_blank",
+                    "_self"
+                  ]
+                },
+                "url": {
+                  "maxLength": 2048,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "type": [
+                "object",
+                "null"
+              ],
+              "x-kiln-graphql-kind": "json"
+            },
+            "specs": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "key": {
+                    "maxLength": 100,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "value": {
+                    "maxLength": 1000,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "key",
+                  "value"
+                ],
+                "type": "object"
+              },
+              "maxItems": 100,
+              "type": [
+                "array",
+                "null"
+              ],
+              "x-kiln-graphql-kind": "json"
             },
             "subtitle": {
               "type": [

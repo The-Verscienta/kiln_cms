@@ -1237,6 +1237,41 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       assert has_element?(lv, ~s|#new-field-form select#{default_attr()}|)
     end
 
+    test "a date field can take today's date instead of a fixed value (#2286)", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      type_change(lv, "date")
+
+      source = ~s|#new-field-form select[name="field_definition[default_source]"]|
+      assert has_element?(lv, source <> " option[value=today]")
+      refute has_element?(lv, source <> " option[value=now]")
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{scopes: ["page"], label: "Opened on", field_type: "date"}
+      )
+      |> render_change(%{"field_definition" => %{"default_source" => "today"}})
+
+      # The fixed-value input steps aside for the source.
+      refute has_element?(lv, ~s|#new-field-form input[type=date]#{default_attr()}|)
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{
+          scopes: ["page"],
+          label: "Opened on",
+          field_type: "date",
+          default_source: "today"
+        }
+      )
+      |> render_submit()
+
+      assert [%{default_source: :today, default: nil}] =
+               :page
+               |> CMS.field_definitions_for!(authorize?: false)
+               |> Enum.filter(&(&1.name == "opened_on"))
+    end
+
     test "a select's default is picked from its options", %{conn: conn} do
       admin = authed_user(:admin)
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")

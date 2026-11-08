@@ -683,6 +683,10 @@ defmodule KilnCMSWeb.Router do
     get "/editor/content/export.csv", ContentExportController, :export_csv
     get "/editor/content/export.json", ContentExportController, :export_json
 
+    # The field definitions as a config-sync document (#2288). Admin-gated in
+    # the controller and again by `FieldSync.export/1`.
+    get "/editor/fields/export.json", FieldSyncController, :export
+
     # XLIFF export for translation vendors (#502) — a file download, so a
     # controller route; editor-gated in the controller for the same reason as
     # the analytics exports above (`TranslationsLive` is editor-visible).

@@ -136,7 +136,12 @@ defmodule KilnCMS.CMS.Changes.EnforceCustomFieldGrants do
 
   # The paths (`["name"]`, `["group", "sub"]`) the editor's payload moves.
   defp changed_paths(changeset, restriction, context) do
-    supplied = ApplyCustomFields.supplied_keys(changeset) || []
+    # A default the payload left the field blank for (#2286) is the system's
+    # value, not the editor's edit.
+    supplied =
+      (ApplyCustomFields.supplied_keys(changeset) || []) --
+        ApplyCustomFields.defaulted_keys(changeset)
+
     new = Ash.Changeset.get_attribute(changeset, :custom_fields) || %{}
     old = current(changeset, context)
 
