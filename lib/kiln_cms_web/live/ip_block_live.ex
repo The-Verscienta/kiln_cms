@@ -193,6 +193,10 @@ defmodule KilnCMSWeb.IpBlockLive do
 
   defp blank_to_nil(_other), do: nil
 
+  # The scanner guard's rules (#2253) carry its fixed note; an admin could type the
+  # same words, which only earns their rule an explanation that happens to fit.
+  defp automatic?(rule), do: rule.note == KilnCMS.Security.ScannerGuard.note()
+
   defp blank_form, do: to_form(%{"cidr" => "", "note" => "", "expires_at" => ""}, as: :rule)
 
   defp load_rules(socket) do
@@ -412,6 +416,11 @@ defmodule KilnCMSWeb.IpBlockLive do
               </p>
               <p :if={rule.expires_at} class="mt-0.5 text-xs text-base-content/70">
                 {gettext("Expires %{at}", at: format_time(rule.expires_at))}
+              </p>
+              <p :if={automatic?(rule)} class="mt-0.5 text-xs text-base-content/70">
+                {gettext(
+                  "Added automatically after repeated 404s or probes of paths like /wp-login.php. It expires by itself; Remove it to lift it sooner."
+                )}
               </p>
             </div>
             <.button
