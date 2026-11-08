@@ -672,7 +672,12 @@ defmodule KilnCMSWeb.SystemLive do
         <p class="text-sm text-base-content/70">
           {gettext("Apply it from your project's Kiln checkout, then rebuild and redeploy:")}
         </p>
-        <pre class="mt-2 rounded bg-base-200 p-3 text-xs overflow-x-auto"><code>{@update_command}</code></pre>
+        <pre
+          class="mt-2 rounded bg-base-200 p-3 text-xs overflow-x-auto"
+          tabindex="0"
+          role="group"
+          aria-label={gettext("Update command")}
+        ><code>{@update_command}</code></pre>
         <p class="mt-2 text-xs text-base-content/60">
           {gettext(
             "The command reports new migrations and any required upgrade steps before it changes the pin. It does not deploy."

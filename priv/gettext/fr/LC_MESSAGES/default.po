@@ -4488,6 +4488,13 @@ msgstr "Injection de code supprimée."
 msgid "Code injection saved."
 msgstr "Injection de code enregistrée."
 
+#: lib/kiln_cms/code_blocks.ex
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex
+#, elixir-autogen, elixir-format
+msgid "Code sample"
+msgstr "Exemple de code"
+
 #: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #, elixir-autogen, elixir-format
 msgid "Collapse all"
@@ -4533,6 +4540,16 @@ msgstr "Origines séparées par des virgules (schéma et hôte, éventuellement 
 #, elixir-autogen, elixir-format
 msgid "Comma-separated; the first keyphrase drives the auto-derived slug."
 msgstr "Séparés par des virgules ; la première expression clé détermine le slug dérivé automatiquement."
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Commands for Mix"
+msgstr "Commandes pour Mix"
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Commands for a release"
+msgstr "Commandes pour une release"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
@@ -20711,6 +20728,11 @@ msgstr "Mise à jour disponible"
 msgid "Update checks are turned off (KILN_UPDATE_CHECK=false). Compare this instance's version against the upstream releases page manually."
 msgstr "Les vérifications de mise à jour sont désactivées (KILN_UPDATE_CHECK=false). Comparez manuellement la version de cette instance à la page des versions en amont."
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Update command"
+msgstr "Commande de mise à jour"
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Updated"
@@ -23723,6 +23745,11 @@ msgstr "type schema.org (données structurées)"
 #, elixir-autogen, elixir-format
 msgid "score %{score}"
 msgstr "score %{score}"
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "security.txt as served"
+msgstr "security.txt tel que servi"
 
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format

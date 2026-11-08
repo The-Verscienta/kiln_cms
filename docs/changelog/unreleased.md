@@ -251,6 +251,25 @@ carries the reasoning.
 - **Field definitions gain a `validation` column (#2276).** `field_definitions.validation` is `jsonb NOT NULL DEFAULT '{}'`: additive, instant, and every existing field starts with no constraints, so nothing about stored data or writes changes until an admin sets one. Rolling the pin back is safe (the old release ignores the column). Overlays that carry their own migrations run `mix ash.codegen` and commit the result.
   - **Unique is not a database constraint.** Once an admin marks a field `unique`, the write path enforces it; raw SQL and a database restore bypass it. Run `mix kiln.fields.duplicates` (read-only, exits non-zero on repeats) after bulk imports or restores.
 
+<a id="focusable-code-blocks-upgrade"></a>
+
+- **Optional: run `mix kiln.refire_all` after deploying to put the new
+  code-block attributes into fired `:web` artifacts published before the
+  upgrade (#2164).** No migration and no setting. Public pages rendered by Kiln
+  itself pick the change up as soon as the deploy lands. A fired `:web`
+  artifact keeps its old markup until its document is next published or
+  edited: `format_version` does not change, so a read does not re-fire it.
+  `mix kiln.refire_all` (on a release,
+  `/app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`) rewrites every
+  published document's artifacts now. It sends no `updated` webhook and busts
+  no cache, and the artifact `ETag` does not change. A headless consumer, CDN
+  or browser that revalidates with `If-None-Match` can therefore keep the old
+  HTML until the document is next edited; a consumer that re-reads without a
+  validator gets the new markup. The same `ETag` gap applies to Kiln's own
+  public HTML pages behind a CDN or in a browser cache that revalidates
+  (#2463). Rolling the pin back is safe: the extra attributes are inert to the
+  previous release.
+
 ## Breaking
 
 <a id="breached-password-bootstrap-return"></a>
@@ -1949,6 +1968,66 @@ carries the reasoning.
     with `KILN_UPDATE_CONTRAST_BASELINE=1 mix test test/kiln_cms_web/muted_text_contrast_test.exs`
     and commit the file. See [Muted text](../design-language.md#muted-text).
   ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163))
+
+<a id="focusable-code-blocks"></a>
+
+- **A code block that scrolls sideways can now be reached and scrolled from
+  the keyboard (#2164).** A code block with a line wider than the column
+  scrolls horizontally, and a scroll container with nothing focusable in it
+  can only be scrolled with a mouse or touch, so a keyboard user could not
+  read the end of a long line (axe's `scrollable-region-focusable`, WCAG
+  2.1.1). Every code block in a rich-text block now renders as
+  `<pre tabindex="0" role="group" aria-label="Code sample">` (a highlighted
+  one keeps `class="highlight"` first). Tab stops on it, the arrow keys scroll
+  it, and a screen reader announces "Code sample". Whether a block overflows
+  depends on the reader's screen, which the server cannot know, so every code
+  block is focusable, not only the long ones.
+  - **Where.** It is added once, at the end of the rich-text block's `:web`
+    render, so it reaches public pages (columns and fragments included), every
+    editor preview, fired `:web` artifacts, and through them feeds,
+    newsletter email and the static export.
+  - **Label language.** The label is translated (French "Exemple de code",
+    Spanish "Ejemplo de código") and follows the content's locale, not the
+    request's: on a live page, including a cached second hit, and in a fired
+    artifact. An English page served under `/fr/` because it has no French
+    translation keeps the English label. Editor previews follow the editor's
+    interface language.
+  - **Focus ring.** `pre[tabindex="0"]:focus-visible` draws a 2px solid
+    `--color-primary-ink` outline, inset by 2px so a parent's
+    `overflow-x: clip` (the `monograph` preset) cannot cut it off, and in the
+    ink shade because plain `primary` on the block's `base-200` fill falls
+    under the 3:1 non-text contrast of WCAG 1.4.11 in the light theme. A site's
+    custom CSS should leave that outline in place
+    ([Custom CSS](../public-theming.md#custom-css)).
+  - **Authors cannot set or remove them.** The rich-text sanitizer still
+    strips every attribute but `class="highlight"` from a stored `<pre>`, so a
+    pasted `tabindex="-1"` cannot take a block out of the Tab order; the
+    attributes are added after it. The editor's own copy of the prose and the
+    `:json` artifact are unchanged.
+  - **The console's own code blocks too.** The update command on System, the
+    security.txt preview, the image-backend adopt commands, and the code
+    samples on `/developers` and the home page carry the same attributes, each
+    with its own label ("Update command", "security.txt as served", "Commands
+    for a release", "Commands for Mix", "Code sample").
+    `test/kiln_cms_web/scrollable_code_focus_test.exs` fails if a `<pre>` in
+    `lib/` with `overflow-x-auto` lacks them; see
+    [Scrolling code blocks](../design-language.md#scrolling-code-blocks).
+  - **Headless consumers.** The `:web` artifact's HTML gains the three
+    attributes; nothing is removed and `format_version` is unchanged. An
+    artifact fired before the upgrade keeps the old markup until its document
+    is next published or edited (see the
+    [upgrade note](#focusable-code-blocks-upgrade) for `mix kiln.refire_all`
+    and why revalidating clients may still keep the old HTML). The `:json`
+    artifact stays plain: a front end that renders `legacy_html` or Portable
+    Text from it adds the attributes and a focus ring itself
+    ([Code blocks in rendered HTML](../headless-consumer-guide.md#code-blocks-in-rendered-html)).
+  - **One side effect.** A fired `:web` artifact is now rendered in its
+    document's locale, so a newsletter signup block's labels ("Email",
+    "Subscribe") in that artifact are in the document's language rather than
+    in English, the firing worker's default. Live pages render them in the
+    reader's language, as before.
+  - **Not covered.** Code inside a plugin block's `:web` output, and wide
+    tables, which have the same problem (#2464).
 
 ## Security
 

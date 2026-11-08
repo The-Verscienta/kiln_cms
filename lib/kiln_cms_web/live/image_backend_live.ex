@@ -244,11 +244,21 @@ defmodule KilnCMSWeb.ImageBackendLive do
               <p class="text-xs font-semibold">
                 {gettext("From a release, such as Kiln's Docker image (in /app):")}
               </p>
-              <pre class="overflow-x-auto rounded-lg bg-base-200 p-3 text-xs"><code id="adopt-release">{adopt_commands(:release, @current_org)}</code></pre>
+              <pre
+                class="overflow-x-auto rounded-lg bg-base-200 p-3 text-xs"
+                tabindex="0"
+                role="group"
+                aria-label={gettext("Commands for a release")}
+              ><code id="adopt-release">{adopt_commands(:release, @current_org)}</code></pre>
               <p class="text-xs font-semibold">
                 {gettext("From a source checkout, with Mix:")}
               </p>
-              <pre class="overflow-x-auto rounded-lg bg-base-200 p-3 text-xs"><code id="adopt-mix">{adopt_commands(:mix, @current_org)}</code></pre>
+              <pre
+                class="overflow-x-auto rounded-lg bg-base-200 p-3 text-xs"
+                tabindex="0"
+                role="group"
+                aria-label={gettext("Commands for Mix")}
+              ><code id="adopt-mix">{adopt_commands(:mix, @current_org)}</code></pre>
               <p :if={@state != :active} class="text-xs text-warning-ink">
                 {gettext("Adopting needs the backend's settings in place first.")}
               </p>

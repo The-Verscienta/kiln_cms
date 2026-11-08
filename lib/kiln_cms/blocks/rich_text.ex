@@ -38,15 +38,21 @@ defmodule KilnCMS.Blocks.RichText do
 
   @impl Kiln.Block.Renderer
   def render(block, :web) do
-    case block.body do
-      [_ | _] = body ->
-        PortableText.to_html(body)
+    html =
+      case block.body do
+        [_ | _] = body ->
+          PortableText.to_html(body)
 
-      _ ->
-        # Legacy stored TipTap HTML is untrusted: strip it to the allowlist before
-        # it reaches a fired `:web` artifact (headless consumers assign to innerHTML).
-        KilnCMS.HTMLSanitizer.sanitize_rich_text(block.legacy_html)
-    end
+        _ ->
+          # Legacy stored TipTap HTML is untrusted: strip it to the allowlist before
+          # it reaches a fired `:web` artifact (headless consumers assign to innerHTML).
+          KilnCMS.HTMLSanitizer.sanitize_rich_text(block.legacy_html)
+      end
+
+    # Code blocks scroll sideways, so each takes keyboard focus and a name
+    # (#2164). Here, after the scrubber, so the attributes are always ours.
+    # Not on `:json`: that carries the stored prose as data.
+    KilnCMS.CodeBlocks.focusable(html)
   end
 
   def render(block, :json) do

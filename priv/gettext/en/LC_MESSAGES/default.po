@@ -4488,6 +4488,13 @@ msgstr ""
 msgid "Code injection saved."
 msgstr ""
 
+#: lib/kiln_cms/code_blocks.ex
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex
+#, elixir-autogen, elixir-format
+msgid "Code sample"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #, elixir-autogen, elixir-format
 msgid "Collapse all"
@@ -4532,6 +4539,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Comma-separated; the first keyphrase drives the auto-derived slug."
+msgstr ""
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Commands for Mix"
+msgstr ""
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Commands for a release"
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
@@ -20711,6 +20728,11 @@ msgstr ""
 msgid "Update checks are turned off (KILN_UPDATE_CHECK=false). Compare this instance's version against the upstream releases page manually."
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Update command"
+msgstr ""
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Updated"
@@ -23722,6 +23744,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "score %{score}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "security.txt as served"
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_txt_live.ex

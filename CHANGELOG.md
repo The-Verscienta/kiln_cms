@@ -102,6 +102,10 @@ Every summary line below that was shortened links to its own entry there.
   `unique` fields have no database backstop; audit with `mix kiln.fields.duplicates`.**
   ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation-upgrade))
 
+- **Optional: `mix kiln.refire_all` after deploying puts the new code-block focus attributes into `:web` artifacts fired before the upgrade.**
+  It sends no webhook or cache purge and `ETag`s don't change, so revalidating clients may keep the old HTML (#2463). No migration.
+  ([#2467](https://github.com/The-Verscienta/kiln_cms/pull/2467) · [long form](docs/changelog/unreleased.md#focusable-code-blocks-upgrade))
+
 ### Breaking
 
 - **Overlays: `Accounts.Bootstrap.create_first_admin/1` returns `{:ok, user, notices}`, not `{:ok, user}`.**
@@ -335,6 +339,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Muted text on public pages and shared form components is now readable: `text-base-content/70`, 4.5:1 or better on every surface.**
   ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163) · [long form](docs/changelog/unreleased.md#public-muted-text-contrast))
+
+- **Code blocks take keyboard focus and a name ("Code sample", translated), with a visible focus ring, so the arrow keys can scroll a line wider than the column.**
+  ([#2467](https://github.com/The-Verscienta/kiln_cms/pull/2467) · [long form](docs/changelog/unreleased.md#focusable-code-blocks))
 
 ### Security
 
