@@ -151,13 +151,13 @@ defmodule KilnCMS.CMS.FieldSync do
   defp field_docs(fields, children) do
     fields
     |> Enum.sort_by(&{&1.position, &1.name})
-    |> Enum.map(fn field ->
-      base = attrs_doc(field, field_keys())
+    |> Enum.map(&field_doc(&1, children))
+  end
 
-      Enum.reduce(@child_lists, base, fn {key, type}, acc ->
-        subs = if field.field_type == type, do: Map.get(children, field.id, []), else: []
-        if subs == [], do: acc, else: Map.put(acc, key, field_docs(subs, children))
-      end)
+  defp field_doc(field, children) do
+    Enum.reduce(@child_lists, attrs_doc(field, field_keys()), fn {key, type}, acc ->
+      subs = if field.field_type == type, do: Map.get(children, field.id, []), else: []
+      if subs == [], do: acc, else: Map.put(acc, key, field_docs(subs, children))
     end)
   end
 
@@ -196,22 +196,23 @@ defmodule KilnCMS.CMS.FieldSync do
 
     with :ok <- authorize(scope) do
       case parse(doc) do
-        {:error, problems} ->
-          {:error,
-           empty_report(apply?)
-           |> Map.put(:errors, Enum.map(problems, &%{path: "document", messages: [&1]}))}
-
-        {:ok, owners} ->
-          ops = plan(owners, scope, prune?)
-          report = build_report(ops, apply?)
-
-          if report.blocked != [] and not allow? do
-            {:error, report}
-          else
-            execute(report, scope, apply?)
-          end
+        {:error, problems} -> {:error, invalid_report(problems, apply?)}
+        {:ok, owners} -> plan_and_run(owners, scope, apply?, prune?, allow?)
       end
     end
+  end
+
+  defp invalid_report(problems, apply?) do
+    errors = Enum.map(problems, &%{path: "document", messages: [&1]})
+    %{empty_report(apply?) | errors: errors}
+  end
+
+  defp plan_and_run(owners, scope, apply?, prune?, allow?) do
+    report = owners |> plan(scope, prune?) |> build_report(apply?)
+
+    if report.blocked != [] and not allow?,
+      do: {:error, report},
+      else: execute(report, scope, apply?)
   end
 
   defp authorize(scope) do
@@ -468,20 +469,7 @@ defmodule KilnCMS.CMS.FieldSync do
           end
 
         subs =
-          Enum.flat_map(@child_lists, fn {key, _type} ->
-            kids = Map.get(field, key, [])
-
-            existing_kids =
-              if record,
-                do: Map.get(children_of, record.id, []) |> Enum.filter(&kid_of?(&1, key)),
-                else: []
-
-            if kids == [] and existing_kids == [] do
-              []
-            else
-              field_ops(kids, existing_kids, children_of, here, {key, here}, prune?)
-            end
-          end)
+          Enum.flat_map(@child_lists, &child_ops(&1, field, record, here, children_of, prune?))
 
         [own | subs]
       end)
@@ -500,6 +488,19 @@ defmodule KilnCMS.CMS.FieldSync do
       end
 
     present ++ extra
+  end
+
+  defp child_ops({key, _type}, field, record, here, children_of, prune?) do
+    kids = Map.get(field, key, [])
+
+    existing_kids =
+      if record,
+        do: children_of |> Map.get(record.id, []) |> Enum.filter(&kid_of?(&1, key)),
+        else: []
+
+    if kids == [] and existing_kids == [],
+      do: [],
+      else: field_ops(kids, existing_kids, children_of, here, {key, here}, prune?)
   end
 
   defp kid_of?(%{link_of_id: id}, "link_fields"), do: not is_nil(id)
@@ -611,13 +612,7 @@ defmodule KilnCMS.CMS.FieldSync do
   defp execute(report, scope, apply?) do
     result =
       AfterCommit.deferring(fn ->
-        Repo.transaction(fn ->
-          case run_ops(report.ops, scope) do
-            {:ok, ids} when apply? -> ids
-            {:ok, _ids} -> Repo.rollback(:dry_run)
-            {:error, errors} -> Repo.rollback({:errors, errors})
-          end
-        end)
+        Repo.transaction(fn -> in_transaction(report, scope, apply?) end)
       end)
 
     case result do
@@ -638,6 +633,14 @@ defmodule KilnCMS.CMS.FieldSync do
     end
   end
 
+  defp in_transaction(report, scope, apply?) do
+    case run_ops(report.ops, scope) do
+      {:ok, ids} when apply? -> ids
+      {:ok, _ids} -> Repo.rollback(:dry_run)
+      {:error, errors} -> Repo.rollback({:errors, errors})
+    end
+  end
+
   defp run_ops(ops, scope) do
     opts = [actor: scope[:actor], tenant: scope[:tenant], context: AfterCommit.context()]
     # Everything stored already, so a new field can find its stored owner.
@@ -648,9 +651,8 @@ defmodule KilnCMS.CMS.FieldSync do
 
     with {:ok, ids} <- run_phase(ops, :types, ids, opts),
          {:ok, ids} <- run_phase(ops, :fields, ids, opts),
-         {:ok, ids} <- run_phase(ops, :rules, ids, opts),
-         {:ok, ids} <- run_phase(ops, :deletes, ids, opts) do
-      {:ok, ids}
+         {:ok, ids} <- run_phase(ops, :rules, ids, opts) do
+      run_phase(ops, :deletes, ids, opts)
     end
   end
 
@@ -854,28 +856,30 @@ defmodule KilnCMS.CMS.FieldSync do
             allow_data_loss?: Keyword.get(opts, :allow_data_loss, false) == true
           ]
 
-      case import_doc(doc, run_opts) do
-        {:ok, report} ->
-          shell.(
-            if(report.applied?,
-              do: "── APPLIED ──",
-              else: "── DRY RUN — nothing was written ──"
-            )
-          )
-
-          shell.(describe(report))
-          {:ok, report}
-
-        {:error, :forbidden} ->
-          {:error, "That user cannot define fields (admin only)."}
-
-        {:error, report} ->
-          shell.(describe(report))
-
-          {:error,
-           "Nothing was written. Fix the problems above, or pass --allow-data-loss for a blocked change."}
-      end
+      report_import(import_doc(doc, run_opts), shell)
     end
+  end
+
+  defp report_import({:ok, report}, shell) do
+    shell.(
+      if(report.applied?,
+        do: "── APPLIED ──",
+        else: "── DRY RUN — nothing was written ──"
+      )
+    )
+
+    shell.(describe(report))
+    {:ok, report}
+  end
+
+  defp report_import({:error, :forbidden}, _shell),
+    do: {:error, "That user cannot define fields (admin only)."}
+
+  defp report_import({:error, report}, shell) do
+    shell.(describe(report))
+
+    {:error,
+     "Nothing was written. Fix the problems above, or pass --allow-data-loss for a blocked change."}
   end
 
   defp known(opts) do
