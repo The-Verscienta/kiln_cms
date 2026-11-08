@@ -169,6 +169,20 @@ longer exists, a `` `Module.fun/2` `` that was renamed or changed arity. Adding
 a new guide means adding it to both `extras` and `groups_for_extras` in
 `mix.exs`; an unlisted guide is silently invisible in the generated sidebar.
 
+The group also decides whether the guide is published to kilncms.dev's `/docs`,
+which `scripts/publish_docs.exs` builds from the same two lists. Each group is
+classified in `scripts/publish/docs.exs` as public (a section of the index),
+contributing (the last section, **Contributing to Kiln**, for pages about
+working on Kiln rather than using it) or internal (plans, audits and records,
+never published). A new group has to be added to one of those three lists, or
+the publisher raises; `test/scripts/publish_docs_test.exs` and CI's publisher
+dry run catch it on the pull request. If the guide is one an editor, a
+developer or an operator should read first, add it to that role's list in
+[Reading paths by role](docs/reading-paths.md), the one place the role tracks
+are curated; the index inlines them. Each track holds four to eight guides,
+each a published guide linked once, and the same test enforces that, so a
+full track means swapping a guide out rather than adding one.
+
 "View Source" links resolve against the release tag matching `mix.exs`'s
 version, so in a local build they point at the last release rather than at your
 branch. That only matters if you are checking the links themselves; pin them to
