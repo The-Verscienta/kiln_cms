@@ -19916,15 +19916,15 @@ msgstr "Título (A–Z)"
 msgid "Title contains “%{text}”"
 msgstr "El título contiene «%{text}»"
 
-#: lib/kiln_cms_web/live/security_log_live.ex
-#, elixir-autogen, elixir-format
-msgid "To (UTC)"
-msgstr "Hasta (UTC)"
-
 #: lib/kiln_cms/cms/field_types/range.ex
 #, elixir-autogen, elixir-format
 msgid "To"
 msgstr "Hasta"
+
+#: lib/kiln_cms_web/live/security_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "To (UTC)"
+msgstr "Hasta (UTC)"
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
