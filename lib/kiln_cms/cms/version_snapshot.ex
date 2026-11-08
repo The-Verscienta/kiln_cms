@@ -175,16 +175,7 @@ defmodule KilnCMS.CMS.VersionSnapshot do
   def changed_custom_fields(history, version) do
     case Map.fetch(changes(version), "custom_fields") do
       {:ok, new} when is_map(new) ->
-        old =
-          history
-          |> Enum.filter(&(&1.id != version.id and before?(&1, version)))
-          |> Enum.reduce(%{}, fn earlier, acc ->
-            case Map.fetch(changes(earlier), "custom_fields") do
-              {:ok, map} when is_map(map) -> map
-              {:ok, _other} -> %{}
-              :error -> acc
-            end
-          end)
+        old = previous_custom_fields(history, version)
 
         (Map.keys(new) ++ Map.keys(old))
         |> Enum.uniq()
@@ -194,6 +185,18 @@ defmodule KilnCMS.CMS.VersionSnapshot do
       _none ->
         []
     end
+  end
+
+  defp previous_custom_fields(history, version) do
+    history
+    |> Enum.filter(&(&1.id != version.id and before?(&1, version)))
+    |> Enum.reduce(%{}, fn earlier, acc ->
+      case Map.fetch(changes(earlier), "custom_fields") do
+        {:ok, map} when is_map(map) -> map
+        {:ok, _other} -> %{}
+        :error -> acc
+      end
+    end)
   end
 
   @doc """
