@@ -32,9 +32,10 @@ carries the reasoning.
 
 <a id="builtin-field-type-names-upgrade"></a>
 
-- **The field type names `email`, `telephone`, `color`, `slug`, `time` and `json` are reserved (#2278).**
+- **The field type names `email`, `telephone`, `color`, `slug`, `time`, `json`, `range`, `key_value` and `link` are reserved (#2278).**
   Kiln now ships a built-in type under each name (see
-  [Built-in format types](../extending-content.md#built-in-format-types)), and
+  [Built-in format types](../extending-content.md#built-in-format-types) and
+  [Range and key-value and link fields](../extending-content.md#range-and-key-value-and-link-fields)), and
   a name can be registered only once.
   - **Overlays and plugins.** A `Kiln.FieldType` that registers one of these
     names must be renamed, in the module's `name/0` and in any stored
@@ -283,10 +284,50 @@ carries the reasoning.
     picker, but a `searchable` flag indexes the strings and numbers nested in
     it (not the keys). Limits: 256 KB of input, 64 KB re-encoded, depth 32,
     5,000 values; NUL is refused.
-  - **Not yet.** A key/value or link type, number options (step, prefix,
-    suffix, range), a colour palette, JSON Schema validation.
+  - **Not yet.** Number options (step, prefix, suffix, slider), a slug
+    uniqueness rule, a colour palette, JSON Schema validation.
   - The six names are reserved; see the upgrade note
     [above](#builtin-field-type-names-upgrade).
+
+<a id="builtin-composite-field-types"></a>
+
+- **Three more built-in custom field types: `:range`, `:key_value` and `:link` (#2278).**
+  Admins pick them in `/editor/fields` like any type. Each is stored as JSON,
+  checked the same way in the editor, the API and imports, and served through
+  GraphQL and the client schema export as the generic JSON value. Guide:
+  [Range and key-value and link fields](../extending-content.md#range-and-key-value-and-link-fields).
+  - `:range`: `{"min": ..., "max": ...}`, both bounds numbers or both
+    `YYYY-MM-DD` dates. At least one bound is required (a half-open range is
+    allowed) and `min` may not exceed `max`. Edited as two text inputs, "From"
+    and "To". Never indexed for search, even if flagged `searchable`. The
+    published schema says each bound is a number or a string; the check, not
+    the schema, rejects a number paired with a date.
+  - `:key_value`: an ordered list of `{"key": ..., "value": ...}` pairs, edited
+    as a textarea with one `key=value` per line (split at the first `=`).
+    At most 100 pairs, values up to 1,000 characters, 64 KB in all; keys are
+    unique (case-sensitive), single-line and contain no `=`. A plain map from
+    an API client is accepted and stored sorted by key. A `searchable` flag
+    indexes the values, not the keys.
+  - `:link`: `{"url": ..., "label": ..., "target": ..., "rel": ...}`. The URL
+    (at most 2,048 bytes) must pass the same `safe_href` policy as rich-text
+    links unchanged: `http(s)`, `mailto:`, a relative `/path` or a `#fragment`
+    are stored; `javascript:`, `data:`, `tel:` and protocol-relative `//host`
+    are refused with an error. Label up to 200 characters; target `_blank` or
+    `_self`; `rel` from a fixed list, and a `_blank` target always adds
+    `noopener noreferrer`. A `searchable` flag indexes the label only. This
+    type is unrelated to the "link fields" (edge metadata) of a `:reference`
+    field.
+  - **Lists and queries.** None of the three is a Columns picker column, a list
+    sort, or usable as a condition source. A `custom_filter` on them answers
+    only "Empty or not" (`null`); any other operator is refused with *custom
+    field "x" (range) only supports null*, and a sort with *is not sortable*.
+    `multiple` is cleared and validation constraints (`min`, `pattern`,
+    `unique`, ...) are refused on them.
+  - **Plugin authors.** `Kiln.FieldType` `input_parts/1` entries may carry an
+    optional `options: [{value, label}]` list for a `type: "select"` part
+    (additive; the editor renders a `<select>`, put the blank choice first).
+  - **Upgrade.** No migration. The names `range`, `key_value` and `link` are
+    reserved; see the upgrade note [above](#builtin-field-type-names-upgrade).
 
 <a id="custom-field-grants"></a>
 

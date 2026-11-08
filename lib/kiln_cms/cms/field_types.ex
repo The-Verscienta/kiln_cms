@@ -71,7 +71,11 @@ defmodule KilnCMS.CMS.FieldTypes do
     KilnCMS.CMS.FieldTypes.Color,
     KilnCMS.CMS.FieldTypes.Slug,
     KilnCMS.CMS.FieldTypes.TimeField,
-    KilnCMS.CMS.FieldTypes.Json
+    KilnCMS.CMS.FieldTypes.Json,
+    # Composite values (#2278), all stored as JSON and served as generic JSON.
+    KilnCMS.CMS.FieldTypes.Range,
+    KilnCMS.CMS.FieldTypes.KeyValue,
+    KilnCMS.CMS.FieldTypes.Link
   ]
 
   # name → module, baked at compile time (plugins are compile-time code, D4).

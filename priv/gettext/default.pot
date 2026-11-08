@@ -1586,6 +1586,11 @@ msgstr ""
 msgid "A single short text — a name, a code."
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/range.ex
+#, elixir-autogen, elixir-format
+msgid "A span between two numbers or two dates, with either end optional. For a price band, an age bracket or a date window. Cannot be filtered or sorted."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A start and an end, in a time zone, optionally all day. A content type with one of these is an event and gets a calendar feed."
@@ -1659,6 +1664,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "A viewer can read content and manage their own account, but cannot use the editing console."
+msgstr ""
+
+#: lib/kiln_cms/cms/field_types/link.ex
+#, elixir-autogen, elixir-format
+msgid "A web address with an optional label, and whether it opens in a new tab. For a source, a call to action or an external resource. Cannot be filtered or sorted."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -2336,6 +2346,11 @@ msgstr ""
 msgid "Added to the working copy — publish changes to make it live"
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/link.ex
+#, elixir-autogen, elixir-format
+msgid "Address"
+msgstr ""
+
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "Address blocked."
@@ -2722,6 +2737,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live/preview.ex
 #, elixir-autogen, elixir-format
 msgid "An open review task already covers this content."
+msgstr ""
+
+#: lib/kiln_cms/cms/field_types/key_value.ex
+#, elixir-autogen, elixir-format
+msgid "An ordered list of named values, one key=value per line. For specifications or attributes that vary by record. Cannot be filtered or sorted."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/error_html/500.html.heex
@@ -5889,6 +5909,7 @@ msgstr ""
 msgid "Decorative — no alt text needed"
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/link.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #, elixir-autogen, elixir-format
 msgid "Default"
@@ -8324,6 +8345,7 @@ msgstr ""
 msgid "Fri"
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/range.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
@@ -9706,6 +9728,7 @@ msgstr ""
 msgid "Kind of value"
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/link.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
@@ -11074,6 +11097,7 @@ msgstr ""
 msgid "New release"
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/link.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "New tab"
@@ -12707,6 +12731,11 @@ msgstr ""
 msgid "OpenAPI spec (JSON)"
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/link.ex
+#, elixir-autogen, elixir-format
+msgid "Opens in"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
 msgid "Opens the Accessibility panel."
@@ -14262,6 +14291,11 @@ msgstr ""
 msgid "Reindexing this site."
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/link.ex
+#, elixir-autogen, elixir-format
+msgid "Rel"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Related %{kind}s"
@@ -15376,6 +15410,7 @@ msgstr ""
 msgid "Safety fields saved."
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/link.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Same tab"
@@ -19601,6 +19636,11 @@ msgstr ""
 msgid "Title contains “%{text}”"
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/range.ex
+#, elixir-autogen, elixir-format
+msgid "To"
+msgstr ""
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "To (current)"
@@ -22686,6 +22726,11 @@ msgstr ""
 #: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "its goal is one this version cannot check"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "key=value, one per line"
 msgstr ""
 
 #: lib/kiln_cms_web/live/translations_live.ex

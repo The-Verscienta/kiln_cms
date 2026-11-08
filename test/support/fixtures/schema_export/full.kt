@@ -555,6 +555,7 @@ public data class PostDocument(
          */
         public val parent: JsonObject? = null,
         public val phone: String? = null,
+        @SerialName("price_band") public val priceBand: PriceBand? = null,
         /** The chosen terms, in the order the editor arranged them. */
         public val properties: List<String>? = null,
         @SerialName("published_at") public val publishedAt: String? = null,
@@ -567,6 +568,8 @@ public data class PostDocument(
          */
         public val related: List<RelatedItem>? = null,
         public val seo: Seo? = null,
+        public val source: Source? = null,
+        public val specs: List<SpecsItem>? = null,
         public val subtitle: String? = null,
         public val summary: String? = null,
         /** The items, in the order the editor arranged them. */
@@ -582,6 +585,14 @@ public data class PostDocument(
         )
 
         @Serializable
+        public data class PriceBand(
+            /** A number, or an ISO-8601 date (YYYY-MM-DD); both bounds are the same kind. */
+            public val max: JsonElement? = null,
+            /** A number, or an ISO-8601 date (YYYY-MM-DD); both bounds are the same kind. */
+            public val min: JsonElement? = null,
+        )
+
+        @Serializable
         public data class RelatedItem(
             public val id: String,
             public val slug: String? = null,
@@ -593,6 +604,37 @@ public data class PostDocument(
         public data class Seo(
             @SerialName("no_index") public val noIndex: Boolean? = null,
             public val title: String? = null,
+        )
+
+        @Serializable
+        public data class Source(
+            public val label: String? = null,
+            public val rel: String? = null,
+            public val target: Target? = null,
+            public val url: String,
+        ) {
+            @Serializable
+            @JvmInline
+            public value class Target(public val value: String) {
+                public companion object {
+                    public val Blank: Target = Target("_blank")
+                    public val Self: Target = Target("_self")
+
+                    /** Every value the schema lists. */
+                    public val entries: List<Target> = listOf(Blank, Self)
+                }
+
+                /** False for a value the schema does not list — an option added since it was generated. */
+                public val isKnown: Boolean get() = this in entries
+
+                override fun toString(): String = value
+            }
+        }
+
+        @Serializable
+        public data class SpecsItem(
+            public val key: String,
+            public val value: String,
         )
 
         @Serializable

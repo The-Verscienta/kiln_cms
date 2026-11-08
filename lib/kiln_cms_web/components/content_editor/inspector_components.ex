@@ -1021,6 +1021,35 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       else: group_input(assign(assigns, :row, GroupRows.row(assigns.value)))
   end
 
+  # A `:key_value` field (#2278): one `key=value` per line. The stored pairs
+  # are shown as lines; after a failed save, the text that was posted.
+  def custom_field_input(%{definition: %{field_type: :key_value}} = assigns) do
+    assigns = assign(assigns, :kv_text, key_value_text(assigns.value))
+
+    ~H"""
+    <div>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
+      <textarea
+        id={cf_id(@definition)}
+        name={@name}
+        rows="5"
+        spellcheck="false"
+        placeholder={@placeholder || gettext("key=value, one per line")}
+        required={@definition.required}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        class="field-input font-mono text-xs"
+      >{@kv_text}</textarea>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/70">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
   # A `:json` field (#2278): a monospace textarea, with the stored structure
   # pretty-printed. After a failed save the value is what was posted, so the
   # editor sees their own text (and the parse error beside it), not a
@@ -1569,6 +1598,31 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
+  # A select part (`type: "select"`, `options: [{value, label}]`, #2278): the
+  # first option should be the blank one, so an untouched widget submits a
+  # blank part and the field reads as empty.
+  defp composite_part(%{part: %{type: "select"}} = assigns) do
+    current = to_string(composite_part_value(assigns.value, assigns.part.key) || "")
+    assigns = assign(assigns, :current, current)
+
+    ~H"""
+    <label for={cf_part_id(@definition, @part)} class="mb-0.5 block text-xs text-base-content/70">
+      {@part.label}
+    </label>
+    <select
+      id={cf_part_id(@definition, @part)}
+      name={"#{@name}[#{@part.key}]"}
+      aria-invalid={@errors != [] && "true"}
+      aria-describedby={@errors != [] && cf_errors_id(@definition)}
+      class="field-input"
+    >
+      <option :for={{value, text} <- @part.options} value={value} selected={value == @current}>
+        {text}
+      </option>
+    </select>
+    """
+  end
+
   defp composite_part(assigns) do
     ~H"""
     <label for={cf_part_id(@definition, @part)} class="mb-0.5 block text-xs text-base-content/70">
@@ -1672,6 +1726,17 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   defp list_items(["" | items]), do: Enum.map(items, &to_string/1)
   defp list_items(items) when is_list(items), do: Enum.map(items, &to_string/1)
   defp list_items(value), do: select_terms(value)
+
+  defp key_value_text(value) when is_binary(value), do: value
+
+  defp key_value_text(pairs) when is_list(pairs) do
+    Enum.map_join(pairs, "\n", fn
+      %{"key" => key, "value" => value} -> "#{key}=#{value}"
+      _other -> ""
+    end)
+  end
+
+  defp key_value_text(_value), do: ""
 
   defp json_text(value) when is_binary(value), do: value
 

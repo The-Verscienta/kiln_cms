@@ -22,7 +22,7 @@ defmodule KilnCMS.CMS.FieldKind do
   | `:media`     | `:media`                                                     |
   | `:geolocation` | `:geolocation` (`lat`, `lng`, `label`, `zoom`)             |
   | `:list`      | any definition with `multiple: true`                         |
-  | `:json`      | anything else: `:json`, `:computed`, `:datetime_range`, `:recurrence`, |
+  | `:json`      | anything else: `:json`, `:range`, `:key_value`, `:link`, `:computed`, `:datetime_range`, `:recurrence`, |
   |              | and a plugin type that does not implement `c:Kiln.FieldType.graphql_kind/1` |
 
   Core types are mapped here directly. A `Kiln.FieldType` module (built-in or

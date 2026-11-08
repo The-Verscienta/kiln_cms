@@ -128,7 +128,8 @@ defmodule Kiln.FieldType do
   ## Built-in types
 
   `:geolocation`, `:computed`, `:datetime_range`, `:recurrence` and the format
-  types `:email`, `:telephone`, `:color`, `:slug`, `:time` and `:json` ship
+  types `:email`, `:telephone`, `:color`, `:slug`, `:time`, `:json`, `:range`,
+  `:key_value` and `:link` ship
   in-tree and are implemented against this very contract rather than
   special-cased in the host — they're the reference implementations, and they
   register through
@@ -186,7 +187,9 @@ defmodule Kiln.FieldType do
           # to true; set false for a part that stays optional even when the
           # field as a whole is required (a geolocation's place name or zoom).
           optional(:required?) => boolean(),
-          optional(:attrs) => %{optional(atom()) => term()}
+          optional(:attrs) => %{optional(atom()) => term()},
+          # For `type: "select"`: the `{value, label}` choices, blank one first.
+          optional(:options) => [{String.t(), String.t()}]
         }
 
   @doc """
