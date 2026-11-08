@@ -201,7 +201,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 
 `org_setting_changed` covers every resource built with `use
 KilnCMS.CMS.OrgSettings`, so a new settings resource cannot forget it:
-`CMS.FeedSettings`, `FormSpamSettings`, `SiteAiProvider`, `SiteBranding`,
+`CMS.FeedSettings`, `FormSpamSettings`, `SiteAiProvider`, `SiteBotBudgets`, `SiteBranding`,
 `SiteCodeInjection`, `SiteCompliance`, `SiteEditorialSettings`,
 `SiteEmbedSettings`, `SiteLinkCheck`, `SiteLocaleSettings`, `SiteMailRelay`,
 `SiteMeilisearch`, `SitePasswordPolicy`, `SiteSafetyFields`, `SiteSecurityLog`,

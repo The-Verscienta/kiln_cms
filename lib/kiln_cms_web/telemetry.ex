@@ -243,6 +243,14 @@ defmodule KilnCMSWeb.Telemetry do
             "(#2242), tagged http / live / gql / collab / bridge. The address is " <>
             "deliberately not a tag or a log field."
       ),
+      counter("kiln_cms.delivery.client_class.count",
+        tags: [:class, :result],
+        description:
+          "Public delivery requests by the client class their user agent claims " <>
+            "(#2243: browser / search_engine / ai_crawler / declared_bot / empty) " <>
+            "and whether the class's ceiling allowed or throttled them. At most " <>
+            "ten series; the user agent, address and org are deliberately not tags."
+      ),
 
       # Oban job Metrics (emitted by Oban) — queue throughput, latency, failures
       distribution("oban.job.stop.duration",

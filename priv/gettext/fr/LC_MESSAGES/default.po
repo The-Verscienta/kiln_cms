@@ -403,6 +403,20 @@ msgstr "%{count} publié(s) sans modification depuis plus de %{days} jours"
 msgid "%{count} renames failed — re-run the preview to see what's left."
 msgstr "%{count} renommages ont échoué — relancez l'aperçu pour voir ce qu'il reste."
 
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} request a minute"
+msgid_plural "%{count} requests a minute"
+msgstr[0] "%{count} requête par minute"
+msgstr[1] "%{count} requêtes par minute"
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} request every %{seconds} seconds"
+msgid_plural "%{count} requests every %{seconds} seconds"
+msgstr[0] "%{count} requête toutes les %{seconds} secondes"
+msgstr[1] "%{count} requêtes toutes les %{seconds} secondes"
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} resolved comment"
@@ -1750,6 +1764,11 @@ msgstr "Assistant IA"
 #, elixir-autogen, elixir-format
 msgid "AI assist isn't configured."
 msgstr "L'assistant IA n'est pas configuré."
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "AI crawlers"
+msgstr "Robots d'IA"
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
@@ -3241,6 +3260,11 @@ msgstr[1] "Au moins %{count} lignes."
 msgid "At most"
 msgstr "Au maximum"
 
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "At most %{ceiling}%: this server's operator caps it there."
+msgstr "Au maximum %{ceiling}% : l'opérateur de ce serveur le plafonne à ce niveau."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "At most %{count} character."
@@ -3671,6 +3695,22 @@ msgstr "Corps du texte"
 msgid "Bold"
 msgstr "Gras"
 
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Bot budgets"
+msgstr "Quotas des robots"
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Bot budgets reset to the server's values."
+msgstr "Quotas des robots rétablis aux valeurs du serveur."
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Bot budgets saved."
+msgstr "Quotas des robots enregistrés."
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "Both surfaces work anonymously and return published content only. To read drafts, exchange editor credentials for a JWT and send it as a bearer token — admin-issued API keys go in the same header."
@@ -3737,6 +3777,11 @@ msgstr "Parcourir le blogue"
 #, elixir-autogen, elixir-format
 msgid "Browser"
 msgstr "Navigateur"
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Browsers"
+msgstr "Navigateurs"
 
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
@@ -4413,6 +4458,11 @@ msgstr "ID client"
 #, elixir-autogen, elixir-format
 msgid "Client secret"
 msgstr "Secret client"
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Clients that name themselves as tools or bots: curl, python-requests, headless browsers, link previews, SEO crawlers."
+msgstr "Clients qui se présentent comme des outils ou des robots : curl, python-requests, navigateurs sans interface, aperçus de liens, robots SEO."
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
@@ -6037,6 +6087,7 @@ msgstr "Décorative — aucun texte alternatif nécessaire"
 
 #: lib/kiln_cms/cms/field_types/link.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
 msgid "Default"
 msgstr "Par défaut"
@@ -7485,6 +7536,11 @@ msgstr "Saisissez un chemin commençant par /."
 msgid "Enter a valid go-live date and time."
 msgstr "Saisissez une date et une heure de mise en ligne valides."
 
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Enter a whole number from %{min} to %{max}, or leave it blank."
+msgstr "Saisissez un nombre entier de %{min} à %{max}, ou laissez le champ vide."
+
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Enter a whole number of days from 0 to %{max}."
@@ -8622,6 +8678,11 @@ msgstr "Entonnoir supprimé."
 msgid "Funnels"
 msgstr "Entonnoirs"
 
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "GPTBot, ClaudeBot, CCBot, PerplexityBot, Bytespider, Amazonbot and similar."
+msgstr "GPTBot, ClaudeBot, CCBot, PerplexityBot, Bytespider, Amazonbot et similaires."
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Gaps"
@@ -8705,6 +8766,11 @@ msgstr "Donnez un nom à la vue, de 255 caractères au plus."
 msgid "Go back to the default policy for this site?"
 msgstr "Revenir à la politique par défaut de ce site ?"
 
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Go back to the server's values for this site?"
+msgstr "Revenir aux valeurs du serveur pour ce site ?"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Go live at"
@@ -8773,6 +8839,11 @@ msgstr "Entonnoir cible"
 #, elixir-autogen, elixir-format
 msgid "Good"
 msgstr "Bon"
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot and Applebot."
+msgstr "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot et Applebot."
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/governance_live.ex
@@ -9163,6 +9234,16 @@ msgstr "Combien d’éléments"
 #, elixir-autogen, elixir-format
 msgid "How many on each side"
 msgstr "Combien de chaque côté"
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "How many public page requests one address may make, by what its browser or tool says it is. Each is a share of what a browser gets."
+msgstr "Combien de requêtes de pages publiques une adresse peut faire, selon ce que son navigateur ou son outil prétend être. Chaque valeur est une part de ce qu'obtient un navigateur."
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "How many requests crawlers, bots and scripts may make."
+msgstr "Combien de requêtes les robots d'indexation, robots et scripts peuvent faire."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -10106,6 +10187,11 @@ msgstr "Laissez une case vide pour ne fixer aucune limite. Les éditeurs sont pr
 #, elixir-autogen, elixir-format
 msgid "Leave a comment when a draft covers ground already covered."
 msgstr "Laisse un commentaire quand un brouillon traite un sujet déjà couvert."
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Leave a field blank to use the server's value. A site can lower a class below the server's value but not raise it above. Every class shares one count per address, so switching what a client claims never earns more."
+msgstr "Laissez un champ vide pour utiliser la valeur du serveur. Un site peut abaisser une catégorie sous la valeur du serveur, mais pas la dépasser. Toutes les catégories partagent un même compteur par adresse : changer ce qu'un client prétend être ne lui rapporte jamais davantage."
 
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #, elixir-autogen, elixir-format
@@ -12101,6 +12187,11 @@ msgstr "Deux documents de ce type et de cette langue ne peuvent pas avoir la mê
 msgid "No usable result"
 msgstr "Aucun résultat exploitable"
 
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "No user agent"
+msgstr "Sans agent utilisateur"
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "No versions recorded."
@@ -13100,6 +13191,11 @@ msgstr "Autre"
 #, elixir-autogen, elixir-format
 msgid "Other block types (full editor)"
 msgstr "Autres types de bloc (éditeur complet)"
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Other bots and scripts"
+msgstr "Autres robots et scripts"
 
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
@@ -15117,6 +15213,11 @@ msgstr "Retraitement de la bibliothèque en arrière-plan. Les originaux ne sont
 msgid "Request changes"
 msgstr "Demander des modifications"
 
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Requests that don't say what they are."
+msgstr "Requêtes qui ne disent pas ce qu'elles sont."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Require a time-based code from an authenticator app (Google Authenticator, 1Password, …) as a second factor when you sign in."
@@ -15737,6 +15838,7 @@ msgid "Sat"
 msgstr "sam."
 
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
@@ -15968,6 +16070,7 @@ msgid "Saving this sends this site's content to the URL below."
 msgstr "En enregistrant ceci, le contenu de ce site est envoyé à l'URL ci-dessous."
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
@@ -16135,6 +16238,16 @@ msgstr "Rechercher du contenu et des réglages"
 #, elixir-autogen, elixir-format
 msgid "Search content and settings…"
 msgstr "Rechercher du contenu et des réglages…"
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search engines"
+msgstr "Moteurs de recherche"
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search engines will be refused sooner than browsers. That can slow how quickly new pages are indexed."
+msgstr "Les moteurs de recherche seront refusés plus tôt que les navigateurs. Cela peut ralentir l'indexation des nouvelles pages."
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
@@ -16542,6 +16655,11 @@ msgstr "Servir ces extraits"
 msgid "Server public IP (for the SPF and reverse-DNS checks)"
 msgstr "IP publique du serveur (pour les vérifications SPF et DNS inverse)"
 
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Server setting"
+msgstr "Réglage du serveur"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set KILN_CONSOLE_HOST to a host no organization controls, such as console under your main host, point it and every subdomain of it at Kiln in DNS and TLS, and restart. Each organization's console then gets its own host, its slug followed by the console host. Otherwise, grant organization admin only to people you would trust with the console."
@@ -16561,6 +16679,11 @@ msgstr "Définies par l'opérateur dans la configuration, et utilisées par tout
 #, elixir-autogen, elixir-format
 msgid "Set by the operator in configuration, and used by any site that has not saved its own settings above."
 msgstr "Définies par l'opérateur dans la configuration, et utilisées par tout site qui n'a pas enregistré ses propres paramètres ci-dessus."
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set for this site"
+msgstr "Défini pour ce site"
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
@@ -18558,6 +18681,11 @@ msgstr "Le blocage n'a pas pu être enregistré."
 msgid "The block this task was anchored to has been removed."
 msgstr "Le bloc auquel cette tâche était rattachée a été supprimé."
 
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "The bot budgets could not be saved."
+msgstr "Les quotas des robots n'ont pas pu être enregistrés."
+
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "The breached-password check is switched off."
@@ -19072,6 +19200,11 @@ msgstr "La section sous laquelle les éditeurs le voient"
 #, elixir-autogen, elixir-format
 msgid "The selection is not a list of content ids."
 msgstr "La sélection n'est pas une liste d'identifiants de contenu."
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "The server allows at most %{percent}% here."
+msgstr "Le serveur autorise au maximum %{percent}% ici."
 
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -19661,6 +19794,11 @@ msgstr "Il s'agit de la version la plus récente de Kiln."
 msgid "This isn't an image, so nothing reads this out. It's shown because a value was set — clear it if it doesn't belong."
 msgstr "Ce n'est pas une image, donc rien ne lit ce texte à voix haute. Il s'affiche parce qu'une valeur a été définie : effacez-la si elle n'a pas lieu d'être."
 
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "This keeps floods and runaway crawlers from costing you capacity. It is not access control: any client can claim to be a browser or Googlebot. To keep a crawler out, use Blocked addresses, or a robots.txt served in front of Kiln."
+msgstr "Cela évite que les afflux de requêtes et les robots incontrôlés vous coûtent de la capacité. Ce n'est pas un contrôle d'accès : n'importe quel client peut prétendre être un navigateur ou Googlebot. Pour tenir un robot à l'écart, utilisez Adresses bloquées ou un robots.txt servi devant Kiln."
+
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
@@ -19827,6 +19965,11 @@ msgstr "Ce site en tant qu'acteur ActivityPub, et ses abonnés."
 #, elixir-autogen, elixir-format
 msgid "This site as an ActivityPub actor: who follows it, how deliveries are going, and who is refused."
 msgstr "Ce site en tant qu'acteur ActivityPub : qui le suit, comment se passent les envois et qui est refusé."
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site asks for %{site}%, above what the server now allows."
+msgstr "Ce site demande %{site}%, au-delà de ce que le serveur autorise désormais."
 
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
@@ -20944,6 +21087,11 @@ msgstr "Utiliser la valeur par défaut du déploiement"
 msgid "Use the operator defaults"
 msgstr "Utiliser les valeurs de l'opérateur"
 
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Use the server's values"
+msgstr "Utiliser les valeurs du serveur"
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Use this date"
@@ -21961,6 +22109,11 @@ msgstr "Vous n'avez pas l'autorisation de modifier le fournisseur d'IA de ce sit
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's blocked addresses."
 msgstr "Vous n'avez pas la permission de modifier les adresses bloquées de ce site."
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's bot budgets."
+msgstr "Vous n'avez pas l'autorisation de modifier les quotas des robots de ce site."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -23557,6 +23710,16 @@ msgstr "orphelin"
 #, elixir-autogen, elixir-format
 msgid "pending"
 msgstr "en attente"
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "per address"
+msgstr "par adresse"
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "per address. This is the delivery limit, set by the server."
+msgstr "par adresse. C'est la limite de diffusion, fixée par le serveur."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format

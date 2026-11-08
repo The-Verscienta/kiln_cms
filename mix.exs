@@ -361,6 +361,7 @@ defmodule KilnCMS.MixProject do
       "docs/sso.md": [],
       "docs/threat-model.md": [],
       "docs/ip-blocking.md": [title: "Blocking addresses"],
+      "docs/bot-budgets.md": [title: "Bot budgets"],
       "docs/security-events.md": [title: "The security log"],
       "docs/secrets-rotation.md": [],
       # Contributing to Kiln — for people working on Kiln itself. Published
@@ -541,6 +542,7 @@ defmodule KilnCMS.MixProject do
         "docs/sso.md",
         "docs/threat-model.md",
         "docs/ip-blocking.md",
+        "docs/bot-budgets.md",
         "docs/security-events.md",
         "docs/secrets-rotation.md"
       ],
