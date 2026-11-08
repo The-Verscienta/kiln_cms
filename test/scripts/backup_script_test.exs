@@ -870,9 +870,44 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     |> media_files()
     |> Enum.sort_by(&part_number/1)
     |> Enum.map(fn part ->
-      {:ok, names} = :erl_tar.table(String.to_charlist(part), [:compressed])
-      Enum.map(names, &norm/1)
+      case :erl_tar.table(String.to_charlist(part), [:compressed]) do
+        {:ok, names} -> Enum.map(names, &norm/1)
+        # `:erl_tar` refuses a member whose name is not valid UTF-8 (GNU tar
+        # writes it raw on Linux): extract with the system tar instead.
+        {:error, {:bad_header, :invalid_string}} -> extracted_members(part)
+      end
     end)
+  end
+
+  # Members of `archive`, by extracting it with the system tar and walking the
+  # result in the app's order (bytewise-sorted names, files and links before
+  # each folder's subfolders), names kept as raw bytes.
+  defp extracted_members(archive) do
+    dir = Path.join(System.tmp_dir!(), "members-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+
+    try do
+      {_, 0} = System.cmd("tar", ["-xzf", archive, "-C", dir], stderr_to_stdout: true)
+      dir |> walk_extracted("") |> Enum.map(&norm/1)
+    after
+      File.rm_rf!(dir)
+    end
+  end
+
+  defp walk_extracted(root, rel) do
+    abs = if rel == "", do: root, else: root <> "/" <> rel
+    {:ok, names} = :file.list_dir_all(abs)
+
+    {dirs, files} =
+      names
+      |> Enum.map(&IO.iodata_to_binary/1)
+      |> Enum.sort()
+      |> Enum.map(&if(rel == "", do: &1, else: rel <> "/" <> &1))
+      |> Enum.split_with(
+        &match?({:ok, %File.Stat{type: :directory}}, File.lstat(root <> "/" <> &1))
+      )
+
+    Enum.map(files, &("./" <> &1)) ++ Enum.flat_map(dirs, &walk_extracted(root, &1))
   end
 
   defp part_number(path) do
