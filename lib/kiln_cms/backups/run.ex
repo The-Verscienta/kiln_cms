@@ -31,7 +31,7 @@ defmodule KilnCMS.Backups.Run do
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer]
 
-  alias KilnCMS.Backups.Run.Changes.Normalize
+  alias KilnCMS.Backups.Run.Changes.{Normalize, Resume}
 
   @statuses [:running, :succeeded, :failed, :skipped]
   @statuses_sql Enum.map_join(@statuses, ", ", &"'#{&1}'")
@@ -116,6 +116,20 @@ defmodule KilnCMS.Backups.Run do
       change Normalize
     end
 
+    # A failed (or interrupted) in-app run picks up where it stopped (#2218):
+    # back to `running`, with the old outcome cleared. The guard is the
+    # `Resume` change, which refuses anything but a failed run or a stale
+    # `running` one; the stamp and `started_at` stay the original attempt's.
+    update :resume do
+      accept []
+      require_atomic? false
+      change Resume
+      change set_attribute(:status, :running)
+      change set_attribute(:finished_at, nil)
+      change set_attribute(:error, nil)
+      change Normalize
+    end
+
     # A cron-made backup becomes a row, once. `upsert_fields []` makes a
     # conflict on the stamp do nothing, so an existing run — the app's own,
     # still `running`, or a previous import — is never touched.
@@ -157,9 +171,11 @@ defmodule KilnCMS.Backups.Run do
     # Writes: closed to every person, platform admin included — there is no
     # `authorize_if PlatformAdmin` ahead of the narrowing, which would admit
     # one to every action. Only the named actions, only the `:backups` system
-    # actor. (No `destroy` action exists; deletion comes with #2225.)
+    # actor. (No `destroy` action exists; deletion comes with #2225.) `resume`
+    # (#2218) is the worker re-opening a failed run; the platform admin's
+    # "Resume" button enqueues a job, it never writes the run itself.
     policy action_type([:create, :update, :destroy]) do
-      forbid_unless action([:start, :skip, :record_progress, :finish, :fail, :import])
+      forbid_unless action([:start, :skip, :record_progress, :finish, :fail, :resume, :import])
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :backups}
     end
   end

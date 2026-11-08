@@ -51,6 +51,35 @@ defmodule KilnCMS.Backups.Recorder do
   end
 
   @doc """
+  Re-open the run for `stamp` as `running` (#2218), through its `:resume` action:
+  a failed (or stale-running) in-app run goes back to work with its old outcome
+  cleared, and the accumulator starts from the run's existing log so the history
+  keeps the first attempt's lines and gains the resume.
+
+  Unlike every other call here this one reports `{:error, reason}`: the caller
+  must refuse the resume when the run can't be re-opened (it is no longer
+  failed, the grant is revoked, the row is gone), not carry on without a row.
+  """
+  @spec reopen(String.t()) :: {:ok, t()} | {:error, term()}
+  def reopen(stamp) do
+    result =
+      safely("reopen", fn ->
+        with {:ok, %{} = run} <- Backups.get_run_by_stamp(stamp, actor: Backups.system()) do
+          Backups.resume_run(run, %{}, actor: Backups.system())
+        end
+      end)
+
+    case result do
+      {:ok, %{} = run} ->
+        log = Enum.map(run.log, &Map.take(&1, [:at, :level, :step, :message]))
+        {:ok, %__MODULE__{run: run, components: run.components, artifacts: [], log: log}}
+
+      _ ->
+        {:error, :not_resumable}
+    end
+  end
+
+  @doc """
   Record a refused attempt (no `pg_dump`, backups disabled) as a `skipped` run.
   The manifest is not touched by the caller.
   """
@@ -85,8 +114,15 @@ defmodule KilnCMS.Backups.Recorder do
   end
 
   @doc """
-  Set the status of one destination (`"rclone:<remote>"`) on the artifact called
+  Set the status of one destination (`"rclone:<remote>"`) for the file called
   `name`. `error` is redacted and capped here.
+
+  `name` is a single-file artifact's name, or the name of one PART of a media
+  set (the artifact itself is the logical `kiln-media-<stamp>`; see
+  `Artifact.files/1`). A part's result lands on the part, and the artifact's own
+  destination is re-derived from all its parts, as `Artifact.group_files/1`
+  does: `ok` only when every part reached the destination, else the first part
+  that did not (a part not attempted yet leaves it `pending`).
   """
   @spec put_destination(t(), String.t(), String.t(), :ok | {:error, term()}) :: t()
   def put_destination(%__MODULE__{} = rec, name, key, result) do
@@ -101,12 +137,44 @@ defmodule KilnCMS.Backups.Recorder do
 
     artifacts =
       for attrs <- rec.artifacts do
-        if attrs.name == name,
-          do: %{attrs | destinations: Map.put(attrs.destinations, key, entry)},
-          else: attrs
+        cond do
+          attrs.name == name ->
+            %{attrs | destinations: Map.put(attrs.destinations, key, entry)}
+
+          Map.get(attrs, :parts, []) != [] and name in Artifact.files(attrs) ->
+            put_part_destination(attrs, name, key, entry)
+
+          true ->
+            attrs
+        end
       end
 
     %{rec | artifacts: artifacts}
+  end
+
+  defp put_part_destination(attrs, name, key, entry) do
+    parts =
+      Enum.map(attrs.parts, fn part ->
+        if part["name"] == name,
+          do: Map.update(part, "destinations", %{key => entry}, &Map.put(&1, key, entry)),
+          else: part
+      end)
+
+    %{
+      attrs
+      | parts: parts,
+        destinations: Map.put(attrs.destinations, key, aggregate(parts, key))
+    }
+  end
+
+  defp aggregate(parts, key) do
+    entries = for part <- parts, entry = get_in(part, ["destinations", key]), do: entry
+
+    cond do
+      failing = Enum.find(entries, &(&1["status"] != "ok")) -> failing
+      length(entries) == length(parts) -> List.last(entries)
+      true -> %{"status" => "pending"}
+    end
   end
 
   @doc "Persist what has happened so far."
@@ -131,6 +199,10 @@ defmodule KilnCMS.Backups.Recorder do
   @doc """
   Mark `local` as `pruned` on the artifacts of OTHER runs whose files the
   retention sweep just deleted (`names` are file names). Best-effort per run.
+
+  A media set's parts are one artifact: each deleted part is marked, and the
+  artifact itself once none of its files is left to mark. Names that are not
+  artifacts (a checksum sidecar) are ignored.
   """
   @spec mark_pruned([String.t()]) :: :ok
   def mark_pruned(names) do
@@ -138,7 +210,7 @@ defmodule KilnCMS.Backups.Recorder do
 
     names
     |> Enum.group_by(fn name ->
-      with {:ok, _kind, stamp, false} <- Artifact.parse_name(name), do: stamp
+      with {:ok, %{stamp: stamp}} <- Artifact.parse_file(name), do: stamp
     end)
     |> Enum.each(fn
       {stamp, stamp_names} when is_binary(stamp) -> mark_run_pruned(stamp, stamp_names, at)
@@ -161,14 +233,35 @@ defmodule KilnCMS.Backups.Recorder do
 
   defp prune_artifact(artifact, names, at) do
     attrs = Map.take(artifact, @artifact_fields)
+    pruned = %{"status" => "pruned", "at" => at}
 
-    if artifact.name in names do
-      pruned = %{"status" => "pruned", "at" => at}
-      %{attrs | destinations: Map.put(attrs.destinations, "local", pruned)}
-    else
-      attrs
+    case attrs.parts do
+      [] ->
+        if artifact.name in names, do: put_local(attrs, pruned), else: attrs
+
+      parts ->
+        prune_parts(attrs, parts, names, pruned)
     end
   end
+
+  defp prune_parts(attrs, parts, names, pruned) do
+    parts =
+      Enum.map(parts, fn part ->
+        if part["name"] in names, do: put_local_part(part, pruned), else: part
+      end)
+
+    attrs = %{attrs | parts: parts}
+    if Enum.all?(parts, &local_pruned?/1), do: put_local(attrs, pruned), else: attrs
+  end
+
+  defp put_local(attrs, pruned),
+    do: %{attrs | destinations: Map.put(attrs.destinations, "local", pruned)}
+
+  defp put_local_part(part, pruned) do
+    Map.update(part, "destinations", %{"local" => pruned}, &Map.put(&1, "local", pruned))
+  end
+
+  defp local_pruned?(part), do: get_in(part, ["destinations", "local", "status"]) == "pruned"
 
   defp write(rec, label, fun, extra \\ %{}) do
     params =

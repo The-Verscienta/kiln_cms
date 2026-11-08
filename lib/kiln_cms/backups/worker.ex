@@ -3,9 +3,14 @@ defmodule KilnCMS.Backups.Worker do
   Runs one backup (#484) — the "Backup now" button, and anything else that
   wants a backup taken from inside the application.
 
-  Produces exactly what `scripts/backup.sh` produces: same directory layout,
-  same filenames, same `pg_dump` flags, same verification, same manifest. See
-  `KilnCMS.Backups` for why that identity is a requirement rather than a
+  Produces what `scripts/backup.sh` produces: same directory layout, same
+  database dump name, `pg_dump` flags and verification, same manifest. The one
+  difference is media (#2218): a library larger than `Backups.media_part_bytes/0`
+  becomes several independent `kiln-media-<stamp>.partNN.tar.gz` parts
+  (`KilnCMS.Backups.MediaArchive`) where the script writes one archive, and both
+  write `sha256` sidecars. Work in flight lives in `<BACKUP_DIR>/.work/<stamp>/`
+  (`KilnCMS.Backups.WorkState`) so a failed run can be resumed; see `run/3`. See
+  `KilnCMS.Backups` for why one shared format is a requirement rather than a
   nicety.
 
   ## Its own queue, deliberately
@@ -19,7 +24,7 @@ defmodule KilnCMS.Backups.Worker do
   ## Nothing is a backup until it verifies
 
   Every artifact is written to `<name>.partial` and renamed only after it
-  passes (`pg_restore --list` for a dump, `tar -tzf` for an archive). An
+  passes (`pg_restore --list` for a dump, `tar -tzf` for an archive part). An
   aborted or corrupt run leaves a `.partial` that nothing will ever mistake
   for a backup — which is the discipline the shell script has always had, and
   the reason a failed backup here is loud rather than a truncated file with a
@@ -40,7 +45,17 @@ defmodule KilnCMS.Backups.Worker do
     unique: [period: 300, states: Oban.Job.states() -- [:completed, :discarded, :cancelled]]
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Importer, Manifest, Recorder, Redact}
+
+  alias KilnCMS.Backups.{
+    Artifact,
+    Checksum,
+    Importer,
+    Manifest,
+    MediaArchive,
+    Recorder,
+    Redact,
+    WorkState
+  }
 
   require Logger
 
@@ -58,18 +73,44 @@ defmodule KilnCMS.Backups.Worker do
 
   # `max_attempts: 1` on purpose: a backup that failed should be visible and
   # re-run deliberately, not retried into a pile of half-finished dumps whose
-  # only trace is three identical error lines.
+  # only trace is three identical error lines. The deliberate re-run is a
+  # resume (#2218): args carrying `"resume"` continue that stamp's backup.
   @impl Oban.Worker
   def perform(%Oban.Job{id: id, args: args}) do
-    run(Map.get(args, "trigger", "manual"), id)
+    # `Map.has_key?`, not a nil check: a job whose `resume` is present but
+    # mangled must be refused, never quietly become a fresh backup.
+    opts = if Map.has_key?(args, "resume"), do: [resume: args["resume"]], else: []
+    run(Map.get(args, "trigger", "manual"), id, opts)
   end
 
   @doc """
   Perform a backup synchronously. Public so a release console can take one
   (`KilnCMS.Backups.Worker.run("console")`) without going through Oban.
+
+  ## Resuming (#2218)
+
+  `run(trigger, job_id, resume: stamp)` continues the failed or interrupted
+  backup of `stamp` instead of starting one. The stamp is validated against
+  `\\A\\d{8}-\\d{6}\\z` before any path is built, the stamp's Run must exist and
+  be resumable (failed, or running and stale; see `KilnCMS.Backups.resumable_run/2`)
+  and its `.work/<stamp>/state.json` must exist; anything else is
+  `{:error, reason}` and never a fresh run. The resumed backup keeps the original
+  stamp and `started_at` and re-opens the original Run (`:resume`).
+
+  A database dump or media part is **reused** only when `state.json` recorded its
+  sha256 and the file on disk still hashes to it; anything else is rebuilt (a
+  rename over the old file). The media plan is the frozen one from the first
+  attempt, so the parts are the same lists. Because finished parts are durable, a
+  run too big for one attempt converges over repeated resumes.
   """
-  @spec run(String.t(), integer() | nil) :: :ok | {:error, term()}
-  def run(trigger, job_id \\ nil) do
+  @spec run(String.t(), integer() | nil, keyword()) :: :ok | {:error, term()}
+  def run(trigger, job_id \\ nil, opts \\ []) do
+    if Keyword.has_key?(opts, :resume),
+      do: resume(Keyword.get(opts, :resume), job_id),
+      else: fresh(trigger, job_id)
+  end
+
+  defp fresh(trigger, job_id) do
     started_at = DateTime.utc_now()
     dir = Backups.dir()
 
@@ -101,6 +142,24 @@ defmodule KilnCMS.Backups.Worker do
     end
   end
 
+  # Nothing below `resumable_run/1` runs unless the stamp is well-formed, its
+  # Run exists and may be resumed, and its state file is there. The stamp and
+  # `started_at` are the ORIGINAL run's; the trigger too (the manifest says who
+  # started the backup, not who resumed it).
+  defp resume(stamp, _job_id) do
+    dir = Backups.dir()
+
+    with {:ok, run} <- Backups.resumable_run(stamp),
+         :ok <- Backups.availability(),
+         {:ok, rec} <- Recorder.reopen(run.stamp) do
+      execute_resume(dir, run, rec)
+    else
+      {:error, reason} = error ->
+        Logger.warning("Backup resume refused: #{inspect(reason)}")
+        error
+    end
+  end
+
   defp execute(dir, trigger, started_at, job_id) do
     stamp = Artifact.stamp(started_at)
     reconcile_stale_runs()
@@ -110,16 +169,44 @@ defmodule KilnCMS.Backups.Worker do
       |> Recorder.open(trigger, started_at, planned_components(), job_id)
       |> Recorder.log(:info, "start", "Backup started (#{trigger})")
 
+    pipeline(
+      %{dir: dir, trigger: trigger, started_at: started_at, stamp: stamp, resume?: false},
+      rec
+    )
+  end
+
+  # Re-opened FIRST: the sweep below fails `running` runs that went quiet, and
+  # this one was exactly that until `Recorder.reopen/1` flipped it back.
+  defp execute_resume(dir, run, rec) do
+    reconcile_stale_runs()
+    rec = Recorder.log(rec, :info, "resume", "Backup resumed (#{run.trigger})")
+
+    pipeline(
+      %{
+        dir: dir,
+        trigger: run.trigger,
+        started_at: run.started_at,
+        stamp: run.stamp,
+        resume?: true
+      },
+      rec
+    )
+  end
+
+  defp pipeline(ctx, rec) do
+    %{dir: dir, trigger: trigger, started_at: started_at} = ctx
     sweep_stale_partials(dir)
+    sweep_work_dirs(dir)
 
     result =
-      case artifacts(dir, stamp, rec) do
+      case artifacts(ctx, rec) do
         {:ok, artifacts, rec} ->
           rec = prune_step(dir, rec)
           {offsite, rec} = offsite_step(dir, artifacts, rec)
 
           # The manifest FIRST: it has no database dependency, and cron-era
-          # consumers read it. The run is closed after.
+          # consumers read it. The run is closed after. On a resume this
+          # overwrites the failed run's manifest with `ok: true` (atomic rename).
           write_manifest(dir, %Manifest{
             started_at: started_at,
             finished_at: DateTime.utc_now(),
@@ -178,9 +265,14 @@ defmodule KilnCMS.Backups.Worker do
     Recorder.progress(rec)
   end
 
-  # Per-artifact outcomes land on the run; the manifest keeps its all-or-nothing
-  # `offsite` (the remote, or nil), exactly as before.
-  defp offsite_step(dir, artifacts, rec) do
+  # Per-file outcomes land on the run (a part set's per-part results on its
+  # parts, with the artifact-level aggregate worked out by the recorder); the
+  # manifest keeps its all-or-nothing `offsite` (the remote, or nil), exactly as
+  # before. A sidecar is copied with its artifact: its result is logged, not
+  # recorded as a destination, because it is not an artifact.
+  @doc false
+  @spec offsite_step(Path.t(), [map()], Recorder.t()) :: {String.t() | nil, Recorder.t()}
+  def offsite_step(dir, artifacts, rec) do
     case offsite_results(dir, artifacts) do
       nil ->
         {nil, rec}
@@ -192,19 +284,17 @@ defmodule KilnCMS.Backups.Worker do
     end
   end
 
-  defp record_offsite({artifact, result}, rec, key) do
+  defp record_offsite({file, result}, rec, key) do
     result = with {:error, reason} <- result, do: {:error, describe(reason)}
     level = if result == :ok, do: :info, else: :warn
+    name = Path.basename(file.path)
 
-    rec
-    |> Recorder.put_destination(Path.basename(artifact.path), key, result)
-    |> Recorder.log(level, "offsite", offsite_message(artifact, result))
+    rec = if file[:sidecar?], do: rec, else: Recorder.put_destination(rec, name, key, result)
+    Recorder.log(rec, level, "offsite", offsite_message(name, result))
   end
 
-  defp offsite_message(artifact, :ok), do: "Copied #{Path.basename(artifact.path)} off-site"
-
-  defp offsite_message(artifact, {:error, error}),
-    do: "Off-site copy of #{Path.basename(artifact.path)} failed: #{error}"
+  defp offsite_message(name, :ok), do: "Copied #{name} off-site"
+  defp offsite_message(name, {:error, error}), do: "Off-site copy of #{name} failed: #{error}"
 
   # The database always; the media archive only on a Local-adapter deployment.
   # On S3 the bucket is backed up provider-side, and tarring an empty or
@@ -214,52 +304,405 @@ defmodule KilnCMS.Backups.Worker do
   # database dump is renamed into place before the media archive is attempted.
   # Reporting `artifacts: []` on a media failure left a verified `.dump` on
   # disk that the panel never mentioned — a real backup, invisible.
-  defp artifacts(dir, stamp, rec) do
-    case dump_database(dir, stamp) do
+  #
+  # Four steps (#2218): dump, plan, archive (per part), checksum. Each is a
+  # function of the directory, the stamp and what the earlier steps produced.
+  # With a media directory configured, `.work/<stamp>/state.json` records each
+  # step and each finished file's sha256 as it lands, which is what a resume
+  # builds on; with none (S3) there is nothing durable to resume and no work
+  # directory.
+  defp artifacts(ctx, rec) do
+    media_dir = Backups.media_dir()
+
+    with {:ok, work_dir, rec} <- open_work(ctx, media_dir, rec) do
+      case dump_step(ctx, work_dir, rec) do
+        {:ok, db, rec} -> media_artifacts(ctx, media_dir, work_dir, db, rec)
+        {:error, reason, rec} -> {:error, reason, [], rec}
+      end
+    end
+  end
+
+  defp open_work(_ctx, nil, rec), do: {:ok, nil, rec}
+
+  # A resume uses the directory it found. A fresh run starts it clean: a
+  # leftover directory under the same stamp (a stamp collision) must not lend
+  # its frozen plan or its recorded hashes to a backup that has nothing to do
+  # with them.
+  defp open_work(%{resume?: true} = ctx, _media_dir, rec),
+    do: {:ok, WorkState.path(ctx.dir, ctx.stamp), rec}
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp open_work(ctx, _media_dir, rec) do
+    work_dir = WorkState.path(ctx.dir, ctx.stamp)
+    File.rm_rf(work_dir)
+
+    with :ok <- mkdir_private(Path.dirname(work_dir)),
+         :ok <- mkdir_private(work_dir),
+         :ok <- WorkState.write(work_dir, WorkState.new(ctx.stamp)) do
+      {:ok, work_dir, rec}
+    else
+      {:error, reason} ->
+        {:error, reason, [], Recorder.log(rec, :error, "media", describe(reason))}
+    end
+  end
+
+  # Best-effort: a state that couldn't be written costs a rebuild on resume,
+  # never the backup.
+  defp record_state(nil, _stamp, _fun), do: :ok
+
+  defp record_state(work_dir, stamp, fun) do
+    case WorkState.update(work_dir, stamp, fun) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Couldn't record the backup's resume state: #{inspect(reason)}")
+        :ok
+    end
+  end
+
+  defp dump_step(ctx, work_dir, rec) do
+    case reuse_dump(ctx, work_dir) do
+      {:ok, db, at} ->
+        rec =
+          rec
+          |> Recorder.add_artifact(db)
+          |> Recorder.log(
+            :info,
+            "dump",
+            "Database dump reused from the original attempt (written #{at}); sha256 re-verified (#{db.bytes} bytes)"
+          )
+          |> Recorder.progress()
+
+        {:ok, db, rec}
+
+      :build ->
+        build_dump(ctx, work_dir, rec)
+    end
+  end
+
+  defp build_dump(ctx, work_dir, rec) do
+    case dump_database(ctx.dir, ctx.stamp) do
       {:ok, db} ->
+        record_state(work_dir, ctx.stamp, fn state ->
+          state
+          |> WorkState.put_dump(%{
+            name: Path.basename(db.path),
+            bytes: db.bytes,
+            sha256: db.sha256
+          })
+          |> WorkState.complete("dump")
+        end)
+
         rec =
           rec
           |> Recorder.add_artifact(db)
           |> Recorder.log(:info, "dump", "Database dump verified (#{db.bytes} bytes)")
           |> Recorder.progress()
 
-        media_artifacts(dir, stamp, db, rec)
+        {:ok, db, rec}
 
       {:error, reason} ->
-        {:error, reason, [], Recorder.log(rec, :error, "dump", describe(reason))}
+        {:error, reason, Recorder.log(rec, :error, "dump", describe(reason))}
     end
   end
 
-  defp media_artifacts(dir, stamp, db, rec) do
-    case maybe_archive_media(dir, stamp) do
-      {:ok, media} ->
-        rec = media |> Enum.reduce(rec, &record_media/2) |> Recorder.progress()
-        {:ok, [db | media], rec}
+  # A dump is reused only if `state.json` recorded its digest AND the file on
+  # disk still hashes to it (and has the recorded size). The name is rebuilt
+  # from the stamp, never taken from the file.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp reuse_dump(%{resume?: true} = ctx, work_dir) when is_binary(work_dir) do
+    name = "kiln-db-#{ctx.stamp}.dump"
+    target = Path.join([ctx.dir, "db", name])
 
-      {:error, reason} ->
-        {:error, reason, [db], Recorder.log(rec, :error, "media", describe(reason))}
+    with {:ok, state} <- WorkState.read(work_dir),
+         %{"name" => ^name, "bytes" => bytes, "sha256" => sha256} = entry <-
+           WorkState.dump(state),
+         :ok <- Checksum.verify(target, sha256),
+         {:ok, %{size: ^bytes}} <- File.stat(target),
+         :ok <-
+           Checksum.write_sidecar(
+             Path.join(Path.dirname(target), Artifact.sidecar_name(:db, ctx.stamp)),
+             [{name, sha256}]
+           ) do
+      {:ok, artifact("db", ctx.dir, target, sha256, bytes), entry["at"]}
+    else
+      _ -> :build
     end
   end
 
-  defp record_media(media, rec) do
-    rec
-    |> Recorder.add_artifact(media)
-    |> Recorder.log(:info, "media", "Media archive verified (#{media.bytes} bytes)")
-  end
+  defp reuse_dump(_ctx, _work_dir), do: :build
 
-  # A list rather than a nullable artifact, so the caller concatenates instead
-  # of branching — the S3 case (no media archive) and the Local case differ
-  # only in how many artifacts came back.
-  defp maybe_archive_media(dir, stamp) do
-    case Backups.media_dir() do
-      nil -> {:ok, []}
-      media_dir -> with {:ok, media} <- archive_media(dir, media_dir, stamp), do: {:ok, [media]}
+  defp media_artifacts(ctx, media_dir, work_dir, db, rec) do
+    case media_dir do
+      # S3 or unconfigured: no media artifact, and that is not an error.
+      nil ->
+        {:ok, [db], rec}
+
+      media_dir ->
+        case media_steps(ctx, media_dir, work_dir, rec) do
+          {:ok, entries, rec} ->
+            {:ok, [db | entries], rec}
+
+          {:error, reason, rec} ->
+            {:error, reason, [db], Recorder.log(rec, :error, "media", describe(reason))}
+        end
     end
   end
 
   # sobelow_skip ["Traversal.FileModule"]
+  defp media_steps(ctx, media_dir, work_dir, rec) do
+    target_dir = Path.join(ctx.dir, "media")
+
+    with {:ok, plan, rec} <- plan_step(ctx, media_dir, work_dir, target_dir, rec),
+         {:ok, parts, rec} <- archive_step(ctx, plan, target_dir, work_dir, rec),
+         {:ok, set, rec} <- checksum_step(ctx, plan, parts, target_dir, work_dir, rec) do
+      File.rm_rf(work_dir)
+      {:ok, media_entries(parts), record_media(rec, parts, set)}
+    else
+      {:error, reason, rec} -> {:error, reason, rec}
+      {:error, reason} -> {:error, reason, rec}
+    end
+  end
+
+  # The plan is frozen at first creation. A resume loads it; only if it is gone
+  # (planning never finished) is it made afresh, and then nothing recorded for
+  # the old partition means anything: the recorded parts are forgotten and the
+  # files of an earlier set under this stamp removed, so a leftover
+  # `part04` cannot sit beside a new three-part set.
+  defp plan_step(%{resume?: true} = ctx, media_dir, work_dir, target_dir, rec) do
+    case MediaArchive.load_plan(media_dir, work_dir) do
+      {:ok, plan} ->
+        {:ok, plan,
+         Recorder.log(
+           rec,
+           :info,
+           "media",
+           "Reusing the frozen plan: #{plan.files} file(s) in #{length(plan.parts)} part(s)"
+         )}
+
+      {:error, :no_plan} ->
+        discard_media_files(target_dir, ctx.stamp)
+        record_state(work_dir, ctx.stamp, &WorkState.clear_parts/1)
+        plan_afresh(ctx, media_dir, work_dir, rec)
+    end
+  end
+
+  defp plan_step(ctx, media_dir, work_dir, _target_dir, rec),
+    do: plan_afresh(ctx, media_dir, work_dir, rec)
+
+  defp plan_afresh(ctx, media_dir, work_dir, rec) do
+    with {:ok, plan} <- MediaArchive.plan_or_load(media_dir, work_dir, stamp: ctx.stamp) do
+      record_state(work_dir, ctx.stamp, &WorkState.complete(&1, "plan"))
+      {:ok, plan, log_plan(rec, plan)}
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp discard_media_files(target_dir, stamp) do
+    for path <- Path.wildcard(Path.join(target_dir, "kiln-media-#{stamp}*")), do: File.rm(path)
+    :ok
+  end
+
+  defp log_plan(rec, plan) do
+    excluded =
+      if plan.excluded > 0, do: ", #{plan.excluded} excluded by BACKUP_MEDIA_EXCLUDE", else: ""
+
+    rec =
+      Recorder.log(
+        rec,
+        :info,
+        "media",
+        "Planned #{plan.files} file(s) in #{length(plan.parts)} part(s)#{excluded}"
+      )
+
+    rec = log_unreadable(rec, plan)
+
+    case Enum.count(plan.parts, & &1.oversize) do
+      0 ->
+        rec
+
+      n ->
+        Recorder.log(
+          rec,
+          :warn,
+          "media",
+          "#{n} file(s) larger than the part size were archived as parts of their own"
+        )
+    end
+  end
+
+  defp log_unreadable(rec, %{unreadable_names: 0}), do: rec
+
+  defp log_unreadable(rec, plan) do
+    Recorder.log(
+      rec,
+      :warn,
+      "media",
+      "#{plan.unreadable_names} file(s) NOT in this backup: their names cannot be represented " <>
+        "in the server's file-name encoding (e.g. #{Enum.join(plan.unreadable_examples, ", ")})"
+    )
+  end
+
+  # One part at a time (rather than `MediaArchive.archive/3`) so the state is
+  # written and the Run touched after EACH part: that is what makes a resume
+  # skip the finished ones, and what keeps a long archive from looking stale.
+  defp archive_step(ctx, plan, target_dir, work_dir, rec) do
+    case archive_parts(plan.parts, ctx, plan, target_dir, work_dir, rec, [], []) do
+      {:ok, parts, reused, rec} ->
+        record_state(work_dir, ctx.stamp, &WorkState.complete(&1, "archive"))
+        {:ok, parts, log_reused(rec, reused, length(parts))}
+
+      {:error, reason, done, reused, rec} ->
+        {:error, reason, log_reused(log_dropped(rec, done), reused, length(plan.parts))}
+    end
+  end
+
+  defp archive_parts([], _ctx, _plan, _target_dir, _work_dir, rec, done, reused),
+    do: {:ok, Enum.reverse(done), Enum.reverse(reused), rec}
+
+  defp archive_parts([part | rest], ctx, plan, target_dir, work_dir, rec, done, reused) do
+    case reuse_part(ctx, plan, part, target_dir, work_dir) do
+      {:ok, finished, at} ->
+        rec = Recorder.progress(rec)
+
+        archive_parts(rest, ctx, plan, target_dir, work_dir, rec, [finished | done], [
+          {part.index, at} | reused
+        ])
+
+      :build ->
+        case MediaArchive.archive_part(plan, part.index, target_dir) do
+          {:ok, finished} ->
+            record_state(work_dir, ctx.stamp, &WorkState.put_part(&1, finished))
+            rec = rec |> log_dropped([finished]) |> Recorder.progress()
+
+            archive_parts(rest, ctx, plan, target_dir, work_dir, rec, [finished | done], reused)
+
+          {:error, reason} ->
+            {:error, reason, Enum.reverse(done), Enum.reverse(reused), rec}
+        end
+    end
+  end
+
+  # A part is reused only if `state.json` recorded its digest AND the file in
+  # the media directory still hashes to it with the recorded size. The name
+  # comes from the frozen plan, not from the state file.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp reuse_part(%{resume?: true}, plan, part, target_dir, work_dir) when is_binary(work_dir) do
+    name = plan |> MediaArchive.names() |> Enum.at(part.index - 1)
+    path = Path.join(target_dir, name)
+
+    with {:ok, state} <- WorkState.read(work_dir),
+         %{"name" => ^name, "bytes" => bytes, "sha256" => sha256} = entry <-
+           WorkState.part(state, part.index),
+         :ok <- Checksum.verify(path, sha256),
+         {:ok, %{size: ^bytes}} <- File.stat(path) do
+      {:ok,
+       %{
+         index: part.index,
+         name: name,
+         path: path,
+         bytes: bytes,
+         sha256: sha256,
+         oversize: part.oversize,
+         files: entry["files"] || part.files,
+         dropped: 0,
+         verified: true
+       }, entry["at"]}
+    else
+      _ -> :build
+    end
+  end
+
+  defp reuse_part(_ctx, _plan, _part, _target_dir, _work_dir), do: :build
+
+  # The set now mixes times: say so on the Run.
+  defp log_reused(rec, [], _total), do: rec
+
+  defp log_reused(rec, reused, total) do
+    indexes = Enum.map_join(reused, ", ", &elem(&1, 0))
+
+    Recorder.log(
+      rec,
+      :info,
+      "resume",
+      "Reused #{length(reused)} of #{total} media part(s) from the original attempt " <>
+        "(part #{indexes}), sha256 re-verified; the set mixes times"
+    )
+  end
+
+  defp log_dropped(rec, parts) do
+    Enum.reduce(parts, rec, fn
+      %{dropped: dropped, name: name}, rec when dropped > 0 ->
+        Recorder.log(
+          rec,
+          :warn,
+          "media",
+          "#{name}: #{dropped} file(s) vanished before they were archived"
+        )
+
+      _part, rec ->
+        rec
+    end)
+  end
+
+  defp checksum_step(ctx, plan, parts, target_dir, work_dir, rec) do
+    case MediaArchive.checksum(plan, parts, target_dir) do
+      {:ok, set} ->
+        record_state(work_dir, ctx.stamp, &WorkState.complete(&1, "checksum"))
+        {:ok, set, rec}
+
+      {:error, reason} ->
+        {:error, reason, rec}
+    end
+  end
+
+  # One flat manifest entry per part, in part order.
+  defp media_entries(parts) do
+    total = length(parts)
+
+    for part <- parts do
+      %{
+        kind: "media",
+        path: Path.join("media", part.name),
+        bytes: part.bytes,
+        verified: part.verified and part.sha256 != nil,
+        sha256: part.sha256,
+        part: part.index,
+        parts_total: total
+      }
+    end
+  end
+
+  # The run row holds ONE artifact per media set (`Artifact.group_files/1`);
+  # `group_files` can't know the digest of the concatenation, so it is set here.
+  defp record_media(rec, parts, set) do
+    entries =
+      for {part, entry} <- Enum.zip(parts, media_entries(parts)) do
+        {:ok, attrs} = Artifact.from_manifest(entry)
+        Map.put(attrs, :oversize, part.oversize)
+      end
+
+    attrs =
+      entries
+      |> Artifact.group_files()
+      |> Enum.map(&Map.put(&1, :sha256, set.sha256))
+
+    bytes = Enum.sum(Enum.map(parts, & &1.bytes))
+
+    %{rec | artifacts: rec.artifacts ++ attrs}
+    |> Recorder.log(
+      :info,
+      "media",
+      "Media archive verified (#{length(parts)} part(s), #{bytes} bytes)"
+    )
+    |> Recorder.progress()
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
   defp dump_database(dir, stamp) do
-    target = Path.join([dir, "db", "kiln-db-#{stamp}.dump"])
+    name = "kiln-db-#{stamp}.dump"
+    target = Path.join([dir, "db", name])
 
     with :ok <- File.mkdir_p(Path.dirname(target)),
          # Identical flags to scripts/backup.sh: custom format so `pg_restore`
@@ -281,7 +724,7 @@ defmodule KilnCMS.Backups.Worker do
          :ok <- cmd("pg_restore", ["--list", "#{target}.partial"]),
          :ok <- File.rename("#{target}.partial", target),
          :ok <- File.chmod(target, 0o600) do
-      {:ok, artifact("db", dir, target)}
+      checksummed(dir, stamp, name, target)
     else
       error ->
         File.rm("#{target}.partial")
@@ -289,37 +732,44 @@ defmodule KilnCMS.Backups.Worker do
     end
   end
 
+  # A dump with no checksum on record is not a backup the panel can vouch for;
+  # don't leave one lying beside a failed run.
   # sobelow_skip ["Traversal.FileModule"]
-  defp archive_media(dir, media_dir, stamp) do
-    target = Path.join([dir, "media", "kiln-media-#{stamp}.tar.gz"])
-
-    with :ok <- media_dir_exists(media_dir),
-         :ok <- mkdir_private(Path.dirname(target)),
-         # `-C` so the archive holds relative paths and restores anywhere —
-         # same as the script.
-         :ok <- cmd("tar", ["-czf", "#{target}.partial", "-C", media_dir, "."]),
-         :ok <- cmd("tar", ["-tzf", "#{target}.partial"]),
-         :ok <- File.rename("#{target}.partial", target),
-         :ok <- File.chmod(target, 0o600) do
-      {:ok, artifact("media", dir, target)}
+  defp checksummed(dir, stamp, name, target) do
+    with {:ok, sha256, hashed} <- Checksum.file(target),
+         :ok <-
+           Checksum.write_sidecar(
+             Path.join(Path.dirname(target), Artifact.sidecar_name(:db, stamp)),
+             [{name, sha256}]
+           ) do
+      {:ok, artifact("db", dir, target, sha256, hashed)}
     else
       error ->
-        File.rm("#{target}.partial")
+        File.rm(target)
         fail(error)
     end
   end
 
+  # `verified` is the conjunction the manifest promises: the listing passed
+  # (the caller got here), the size on disk is the size hashed, and a digest is
+  # on record.
   # sobelow_skip ["Traversal.FileModule"]
-  defp artifact(kind, dir, target) do
-    bytes =
+  defp artifact(kind, dir, target, sha256, hashed) do
+    size =
       case File.stat(target) do
         {:ok, %{size: size}} -> size
-        _ -> 0
+        _ -> nil
       end
 
     # Relative to the backup directory, so the manifest survives the directory
     # being moved or read from another mount.
-    %{kind: kind, path: Path.relative_to(target, dir), bytes: bytes, verified: true}
+    %{
+      kind: kind,
+      path: Path.relative_to(target, dir),
+      bytes: hashed,
+      verified: size == hashed and is_binary(sha256),
+      sha256: sha256
+    }
   end
 
   @doc """
@@ -345,9 +795,11 @@ defmodule KilnCMS.Backups.Worker do
     end
   end
 
-  # All-or-nothing, as `copy_offsite/2` has always answered.
+  # All-or-nothing over the artifact files, as `copy_offsite/2` has always
+  # answered. A failed sidecar is logged by `offsite_step/3` but does not take
+  # the remote away: the data it describes did arrive.
   defp offsite_remote(remote, results) do
-    if Enum.all?(results, fn {_artifact, result} -> result == :ok end) do
+    if Enum.all?(results, fn {file, result} -> file[:sidecar?] == true or result == :ok end) do
       remote
     else
       Logger.error("Off-site copy to #{Redact.text(remote)} FAILED — the local backup is fine")
@@ -355,18 +807,23 @@ defmodule KilnCMS.Backups.Worker do
     end
   end
 
-  # The per-artifact truth behind `copy_offsite/2`: `nil` when no remote or no
+  # The per-file truth behind `copy_offsite/2`: `nil` when no remote or no
   # `rclone` is configured, else the remote and one `:ok | {:error, reason}`
-  # per artifact. An error's rclone output has been through `Redact` (see
+  # per file: one `rclone copy` for each part of a set (and each single file),
+  # then one for each stamp's checksum sidecar, into the same `db/` or `media/`
+  # subdirectory. An error's rclone output has been through `Redact` (see
   # `cmd/3`), so it is safe to store and show.
-  defp offsite_results(dir, artifacts) do
+  @doc false
+  def offsite_results(dir, artifacts) do
     with remote when is_binary(remote) <- Backups.rclone_remote(),
          exe when is_binary(exe) <- System.find_executable("rclone") do
+      files = artifacts ++ sidecars(dir, artifacts)
+
       results =
-        for artifact <- artifacts do
+        for file <- files do
           # Mirrors the script's `rclone copy <file> <remote>/<subdir>`.
-          subdir = artifact.path |> Path.dirname() |> Path.basename()
-          {artifact, cmd(exe, ["copy", Path.join(dir, artifact.path), "#{remote}/#{subdir}"])}
+          subdir = file.path |> Path.dirname() |> Path.basename()
+          {file, cmd(exe, ["copy", Path.join(dir, file.path), "#{remote}/#{subdir}"])}
         end
 
       {remote, results}
@@ -375,9 +832,33 @@ defmodule KilnCMS.Backups.Worker do
     end
   end
 
+  # The checksum sidecar of each stamp+kind among `artifacts`, if it is on disk.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp sidecars(dir, artifacts) do
+    artifacts
+    |> Enum.flat_map(fn artifact ->
+      case Artifact.parse_file(Path.basename(artifact.path)) do
+        {:ok, %{kind: kind, stamp: stamp}} -> [{kind, stamp}]
+        :error -> []
+      end
+    end)
+    |> Enum.uniq()
+    |> Enum.flat_map(fn {kind, stamp} ->
+      path = Path.join(Artifact.subdir(kind), Artifact.sidecar_name(kind, stamp))
+
+      case File.lstat(Path.join(dir, path)) do
+        {:ok, %File.Stat{type: :regular}} ->
+          [%{kind: Atom.to_string(kind), path: path, sidecar?: true}]
+
+        _ ->
+          []
+      end
+    end)
+  end
+
   # Partials left behind by a job Oban's timeout killed, or a node that
   # restarted mid-dump. Nothing else reclaims them: the `else` cleanup in
-  # `dump_database`/`archive_media` doesn't run when the process is killed,
+  # `dump_database`/`MediaArchive` doesn't run when the process is killed,
   # and `prune/1` deliberately skips `.partial` so it can't delete a
   # CONCURRENT run's work. An hour's grace makes that distinction — anything
   # older than that has no live writer, because `timeout/1` caps a job well
@@ -399,38 +880,135 @@ defmodule KilnCMS.Backups.Worker do
     :ok
   end
 
-  # Deletes artifacts older than `keep_days`, matching the script's `prune`,
-  # and returns the file names it removed (so their runs can say `pruned`).
-  # Best-effort and never fatal: failing a backup that succeeded because its
-  # housekeeping didn't would be exactly backwards.
+  @work_dir_max_age_s 3 * 24 * 3600
+
+  @doc false
+  # `.work/<stamp>` directories older than three days (#2218): the newest of the
+  # directory's and `state.json`'s mtime, since every state write touches both.
+  # Three days is long enough to resume over a weekend and short enough that an
+  # abandoned failed run's lists don't pile up. Only directories named like a
+  # stamp are touched, and never one whose Run is `running` (or whose Run can't
+  # be read: when unsure, keep). Best-effort; returns the stamps removed.
   # sobelow_skip ["Traversal.FileModule"]
-  defp prune(dir) do
+  @spec sweep_work_dirs(Path.t(), integer()) :: [String.t()]
+  def sweep_work_dirs(dir, now \\ System.os_time(:second)) do
+    cutoff = now - @work_dir_max_age_s
+
+    for path <- Path.wildcard(Path.join([dir, ".work", "*"])),
+        stamp = Path.basename(path),
+        WorkState.valid_stamp?(stamp),
+        work_dir_mtime(path) < cutoff,
+        not run_in_flight?(stamp),
+        match?({:ok, _}, File.rm_rf(path)) do
+      Logger.warning("Removing an abandoned backup work directory: #{stamp}")
+      stamp
+    end
+  rescue
+    error ->
+      Logger.warning("Backup work directory sweep failed: #{inspect(error)}")
+      []
+  end
+
+  defp work_dir_mtime(path) do
+    [path, WorkState.file(path)]
+    |> Enum.map(fn p ->
+      case File.stat(p, time: :posix) do
+        {:ok, %{mtime: mtime}} -> mtime
+        _ -> 0
+      end
+    end)
+    |> Enum.max()
+  end
+
+  defp run_in_flight?(stamp) do
+    case Backups.get_run_by_stamp(stamp, actor: Backups.system(), authorize_with: :error) do
+      {:ok, nil} -> false
+      {:ok, %{status: :running}} -> true
+      {:ok, _run} -> false
+      {:error, _} -> true
+    end
+  end
+
+  @sidecar ~r/\Akiln-(?:db|media)-(\d{8}-\d{6})\.sha256\z/
+
+  # Deletes backups older than `keep_days`, matching the script's `prune`, and
+  # returns the file names it removed (so their runs can say `pruned`).
+  #
+  # The files of one stamp are ONE set (#2218): the dump, the media parts (or
+  # the legacy single archive) and the checksum sidecars. The set is aged by its
+  # NEWEST member and deleted together, so a retention sweep never leaves a
+  # media set with a hole in it, and never strips a fresh part set of its
+  # checksums. An orphan (the parts of a failed run) or a gap set ages out the
+  # same way. A `kiln-*` file that is none of these ages alone, as before.
+  # `.partial` is skipped (it may be a concurrent run's work; swept elsewhere)
+  # and `.work` is not under `db/` or `media/`.
+  #
+  # Best-effort and never fatal: failing a backup that succeeded because its
+  # housekeeping didn't would be exactly backwards. A removal that fails stops
+  # that set (its remaining members stay) rather than skipping on past it.
+  @doc false
+  @spec prune(Path.t()) :: [String.t()]
+  # sobelow_skip ["Traversal.FileModule"]
+  def prune(dir) do
     # `(keep_days + 1) * 86400`, not `keep_days * 86400`, to match the shell's
     # `find -mtime +N`: that deletes only files whose age in WHOLE days is
     # strictly greater than N, i.e. age >= (N+1) days. Off by one here meant a
     # 14-day-6-hour dump was kept by cron and deleted by the app.
     cutoff =
-      DateTime.add(DateTime.utc_now(), -(Backups.keep_days() + 1) * 24 * 60 * 60, :second)
+      DateTime.to_unix(
+        DateTime.add(DateTime.utc_now(), -(Backups.keep_days() + 1) * 24 * 60 * 60, :second)
+      )
 
-    for sub <- ["db", "media"],
-        path <- Path.wildcard(Path.join([dir, sub, "kiln-*"])),
-        not String.ends_with?(path, ".partial"),
-        older_than?(path, cutoff),
-        File.rm(path) == :ok do
-      Path.basename(path)
-    end
+    paths =
+      for sub <- ["db", "media"],
+          path <- Path.wildcard(Path.join([dir, sub, "kiln-*"])),
+          not String.ends_with?(path, ".partial"),
+          do: path
+
+    paths
+    |> Enum.group_by(&set_key/1)
+    |> Enum.flat_map(fn {_key, members} -> prune_set(members, cutoff) end)
   rescue
     error ->
       Logger.warning("Backup prune failed (backup itself succeeded): #{inspect(error)}")
       []
   end
 
-  # sobelow_skip ["Traversal.FileModule"]
-  defp older_than?(path, cutoff) do
-    case File.stat(path, time: :posix) do
-      {:ok, %{mtime: mtime}} -> mtime < DateTime.to_unix(cutoff)
-      _ -> false
+  defp set_key(path) do
+    name = Path.basename(path)
+
+    case Artifact.parse_file(name) do
+      {:ok, %{stamp: stamp}} ->
+        {:stamp, stamp}
+
+      :error ->
+        case Regex.run(@sidecar, name) do
+          [_, stamp] -> {:stamp, stamp}
+          nil -> {:file, path}
+        end
     end
+  end
+
+  defp prune_set(members, cutoff) do
+    mtimes =
+      for path <- members,
+          {:ok, %{mtime: mtime}} <- [File.stat(path, time: :posix)],
+          do: mtime
+
+    if mtimes != [] and Enum.max(mtimes) < cutoff, do: remove_set(members), else: []
+  end
+
+  # Sidecars last, so a set that stops half-way still has its checksums.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp remove_set(members) do
+    members
+    |> Enum.sort_by(&Regex.match?(@sidecar, Path.basename(&1)))
+    |> Enum.reduce_while([], fn path, deleted ->
+      if File.rm(path) == :ok,
+        do: {:cont, [Path.basename(path) | deleted]},
+        else: {:halt, deleted}
+    end)
+    |> Enum.reverse()
   end
 
   # A run that STARTED and failed writes a manifest. Leaving the previous,
@@ -528,10 +1106,6 @@ defmodule KilnCMS.Backups.Worker do
   # sobelow_skip ["Traversal.FileModule"]
   defp mkdir_private(dir) do
     with :ok <- File.mkdir_p(dir), do: File.chmod(dir, 0o700)
-  end
-
-  defp media_dir_exists(media_dir) do
-    if File.dir?(media_dir), do: :ok, else: {:error, {:missing_media_dir, media_dir}}
   end
 
   # Every step in both `with`s returns `:ok`/`{:ok, _}` or `{:error, _}`, so

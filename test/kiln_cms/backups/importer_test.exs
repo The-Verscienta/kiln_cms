@@ -8,7 +8,7 @@ defmodule KilnCMS.Backups.ImporterTest do
   use KilnCMS.DataCase, async: false
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Importer, Manifest}
+  alias KilnCMS.Backups.{Artifact, Checksum, Importer, Manifest}
 
   @moduletag :capture_log
 
@@ -301,6 +301,236 @@ defmodule KilnCMS.Backups.ImporterTest do
 
       assert [{:ok, _}, {:ok, _}] = results
       assert length(all_runs()) == 20
+    end
+  end
+
+  describe "media part sets (#2218)" do
+    @set "20260801-031700"
+    @hex_a String.duplicate("a", 64)
+    @hex_b String.duplicate("b", 64)
+
+    defp put_part(dir, stamp, n, opts \\ []) do
+      name = Artifact.part_name(stamp, n) <> (opts[:suffix] || "")
+      path = Path.join([dir, "media", name])
+      File.write!(path, String.duplicate("x", Keyword.get(opts, :size, 100)))
+      File.touch!(path, System.os_time(:second) - Keyword.get(opts, :age, 60) * 60)
+      path
+    end
+
+    defp put_sidecar(dir, kind, stamp, contents, age \\ 60) do
+      sub = Artifact.subdir(kind)
+      path = Path.join([dir, sub, Artifact.sidecar_name(kind, stamp)])
+      File.write!(path, contents)
+      File.touch!(path, System.os_time(:second) - age * 60)
+      path
+    end
+
+    test "the parts of a stamp import as ONE media artifact, in numeric order", %{dir: dir} do
+      # past part99, where lexicographic order is wrong
+      for n <- [100, 2, 1, 99, 3], do: put_part(dir, @set, n, size: n)
+      for n <- 4..98, do: put_part(dir, @set, n, size: n)
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+
+      assert %{status: :succeeded, components: [:media], artifacts: [artifact]} = run!(@set)
+      assert artifact.name == "kiln-media-#{@set}"
+      assert artifact.kind == :media
+      assert artifact.verified == false
+      assert artifact.sha256 == nil
+      assert artifact.bytes == Enum.sum(1..100)
+      assert length(artifact.parts) == 100
+      assert List.first(artifact.parts)["name"] == Artifact.part_name(@set, 1)
+      assert List.last(artifact.parts)["name"] == Artifact.part_name(@set, 100)
+      assert Artifact.files(artifact) == Enum.map(1..100, &Artifact.part_name(@set, &1))
+    end
+
+    test "a gap fails the run, naming the part that is missing", %{dir: dir} do
+      for n <- [1, 2, 4], do: put_part(dir, @set, n)
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert %{status: :failed, error: "incomplete media set: missing part03"} = run!(@set)
+      # what is on disk is still shown
+      assert [%{parts: [_, _, _]}] = run!(@set).artifacts
+    end
+
+    test "a set without its first part is incomplete too", %{dir: dir} do
+      for n <- [2, 3], do: put_part(dir, @set, n)
+      assert {:ok, _} = Importer.run()
+      assert %{status: :failed, error: "incomplete media set: missing part01"} = run!(@set)
+    end
+
+    test "a far-away part number does not cost a loop over every number", %{dir: dir} do
+      put_part(dir, @set, 1)
+      put_part(dir, @set, 99_999_999)
+
+      assert {:ok, _} = Importer.run()
+      assert %{status: :failed, error: "incomplete media set: missing part02, " <> _} = run!(@set)
+    end
+
+    test "a legacy single archive beside parts is an ambiguous, failed set", %{dir: dir} do
+      put(dir, :media, @set)
+      for n <- [1, 2], do: put_part(dir, @set, n)
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+
+      assert %{status: :failed, error: "ambiguous media set: " <> _, artifacts: artifacts} =
+               run!(@set)
+
+      assert length(artifacts) == 2
+    end
+
+    test "a legacy single-file archive imports as before", %{dir: dir} do
+      put(dir, :media, @set)
+      assert {:ok, %{imported: 1}} = Importer.run()
+
+      assert %{status: :succeeded, artifacts: [artifact]} = run!(@set)
+      assert artifact.name == "kiln-media-#{@set}.tar.gz"
+      assert artifact.parts == []
+    end
+
+    test "a .partNN partial holds the stamp's settle window", %{dir: dir} do
+      for n <- [1, 2], do: put_part(dir, @set, n)
+      partial = put_part(dir, @set, 3, suffix: ".partial")
+
+      assert {:ok, %{imported: 0, pending: 1}} = Importer.run()
+      assert all_runs() == []
+
+      File.rm!(partial)
+      put_part(dir, @set, 3)
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert %{status: :succeeded} = run!(@set)
+    end
+
+    test "a sidecar being written holds the stamp too", %{dir: dir} do
+      put(dir, :db, @set)
+      sidecar = put_sidecar(dir, :db, @set, "x")
+      File.rename!(sidecar, sidecar <> ".partial")
+
+      assert {:ok, %{imported: 0, pending: 1}} = Importer.run()
+    end
+
+    test "mixed db and parts under one stamp are one run with both artifacts", %{dir: dir} do
+      put(dir, :db, @set)
+      for n <- [1, 2, 3], do: put_part(dir, @set, n)
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+
+      assert %{status: :succeeded, components: [:db, :media], artifacts: [db, media]} =
+               run!(@set)
+
+      assert db.kind == :db
+      assert media.name == "kiln-media-#{@set}"
+      assert length(media.parts) == 3
+    end
+
+    test "a sidecar alone is not an artifact and makes no run", %{dir: dir} do
+      put_sidecar(dir, :media, @set, "#{@hex_a}  #{Artifact.part_name(@set, 1)}\n")
+      assert {:ok, %{imported: 0, pending: 0, skipped: 0}} = Importer.run()
+      assert all_runs() == []
+    end
+
+    test "a sidecar supplies per-part sha256, and the run stays unverified", %{dir: dir} do
+      for n <- [1, 2], do: put_part(dir, @set, n)
+
+      put_sidecar(
+        dir,
+        :media,
+        @set,
+        "#{@hex_a}  #{Artifact.part_name(@set, 1)}\n#{@hex_b}  #{Artifact.part_name(@set, 2)}\n"
+      )
+
+      put(dir, :db, @set)
+
+      :ok =
+        Checksum.write_sidecar(Path.join([dir, "db", Artifact.sidecar_name(:db, @set)]), [
+          {"kiln-db-#{@set}.dump", @hex_b}
+        ])
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+
+      assert %{artifacts: [db, media]} = run!(@set)
+      assert db.sha256 == @hex_b
+      assert db.verified == false
+      assert [%{"sha256" => @hex_a}, %{"sha256" => @hex_b}] = media.parts
+      assert media.verified == false
+    end
+
+    test "a malformed sidecar is ignored with a warning and never crashes", %{dir: dir} do
+      for n <- [1, 2], do: put_part(dir, @set, n)
+      put_sidecar(dir, :media, @set, "not a checksum line\n\0\xff")
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert %{status: :succeeded, artifacts: [media]} = run!(@set)
+      assert Enum.all?(media.parts, &is_nil(&1["sha256"]))
+    end
+
+    test "a sidecar in the wrong directory is not read", %{dir: dir} do
+      for n <- [1, 2], do: put_part(dir, @set, n)
+      wrong = Path.join([dir, "db", Artifact.sidecar_name(:media, @set)])
+      File.write!(wrong, "#{@hex_a}  #{Artifact.part_name(@set, 1)}\n")
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert %{artifacts: [media]} = run!(@set)
+      assert Enum.all?(media.parts, &is_nil(&1["sha256"]))
+    end
+
+    test "importing a part set twice leaves the same rows", %{dir: dir} do
+      for n <- [1, 2, 3], do: put_part(dir, @set, n)
+      assert {:ok, %{imported: 1}} = Importer.run()
+      before = all_runs() |> Enum.map(&{&1.id, &1.updated_at})
+
+      assert {:ok, %{imported: 0}} = Importer.run()
+      assert before == all_runs() |> Enum.map(&{&1.id, &1.updated_at})
+    end
+
+    test "two concurrent imports of a part set write one row", %{dir: dir} do
+      for n <- [1, 2, 3], do: put_part(dir, @set, n)
+
+      results =
+        1..4
+        |> Enum.map(fn _ ->
+          Task.async(fn -> Backups.with_actor(Backups.system(), &Importer.run/0) end)
+        end)
+        |> Task.await_many(30_000)
+
+      assert Enum.all?(results, &match?({:ok, _}, &1))
+      assert [_one] = all_runs()
+    end
+
+    test "a manifest listing the parts enriches them; the sidecar fills the gaps", %{dir: dir} do
+      for n <- [1, 2], do: put_part(dir, @set, n)
+      put_sidecar(dir, :media, @set, "#{@hex_b}  #{Artifact.part_name(@set, 2)}\n")
+
+      manifest!(dir,
+        trigger: "cron-nightly",
+        ok: true,
+        started_at: ~U[2026-08-01 03:17:00Z],
+        finished_at: ~U[2026-08-01 03:18:42Z],
+        artifacts: [
+          %{
+            kind: "media",
+            path: "media/#{Artifact.part_name(@set, 1)}",
+            bytes: 5,
+            verified: false,
+            sha256: @hex_a,
+            part: 1,
+            parts_total: 2
+          },
+          %{
+            kind: "media",
+            path: "media/#{Artifact.part_name(@set, 2)}",
+            bytes: 5,
+            verified: false,
+            part: 2,
+            parts_total: 2
+          }
+        ]
+      )
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert %{trigger: "cron-nightly", artifacts: [media]} = run!(@set)
+      assert [%{"sha256" => @hex_a}, %{"sha256" => @hex_b}] = media.parts
+      assert media.bytes == 200
     end
   end
 

@@ -11,7 +11,7 @@ defmodule KilnCMS.Backups.WorkerTest do
   use KilnCMS.DataCase, async: false
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.Manifest
+  alias KilnCMS.Backups.{Artifact, Checksum, Manifest}
   alias KilnCMS.Backups.Worker
 
   @moduletag :capture_log
@@ -78,6 +78,64 @@ defmodule KilnCMS.Backups.WorkerTest do
 
       assert [archive] = Path.wildcard(Path.join([dir, "media", "kiln-media-*.tar.gz"]))
       assert Path.basename(archive) =~ ~r/\Akiln-media-\d{8}-\d{6}\.tar\.gz\z/
+    end
+
+    @tag :pg_tools
+    test "a media set over the part size is split, hashed and sidecar'd", %{
+      dir: dir,
+      media: media
+    } do
+      for n <- 1..5,
+          do: File.write!(Path.join(media, "f#{n}.bin"), :crypto.strong_rand_bytes(300))
+
+      set_part_bytes(700)
+
+      assert :ok = Worker.run("manual")
+
+      manifest = Manifest.read(dir)
+      assert manifest.ok
+      assert [db | parts] = manifest.artifacts
+      assert length(parts) >= 2
+
+      assert Enum.map(parts, & &1.part) == Enum.to_list(1..length(parts))
+      assert Enum.all?(parts, &(&1.parts_total == length(parts) and &1.verified))
+
+      stamp = db.path |> Path.basename() |> String.replace(~r/\Akiln-db-|\.dump\z/, "")
+      assert Enum.map(parts, &Path.basename(&1.path)) == Artifact.set_names(stamp, length(parts))
+
+      # The sidecar checks out with the system's own tool.
+      sidecar = Path.join([dir, "media", Artifact.sidecar_name(:media, stamp)])
+
+      assert {_, 0} =
+               System.cmd("shasum", ["-a", "256", "-c", Path.basename(sidecar)],
+                 cd: Path.dirname(sidecar),
+                 stderr_to_stdout: true
+               )
+
+      # One Run artifact for the set, whose digest is that of the concatenation.
+      assert [run] = Backups.list_runs!(actor: Backups.system())
+      assert [%{kind: :db}, set] = run.artifacts
+      assert set.name == "kiln-media-" <> stamp
+      assert length(set.parts) == length(parts)
+
+      concat = Enum.map(parts, &Path.join(dir, &1.path))
+      assert {:ok, %{sha256: sha}} = Checksum.concat(concat)
+      assert set.sha256 == sha
+      assert set.verified
+
+      # The work directory is cleaned up on success.
+      assert Path.wildcard(Path.join([dir, ".work", "*"])) == []
+    end
+
+    @tag :pg_tools
+    test "the database dump gets a sha256 sidecar", %{dir: dir} do
+      assert :ok = Worker.run("manual")
+
+      assert [dump] = Path.wildcard(Path.join([dir, "db", "kiln-db-*.dump"]))
+      sidecar = String.replace_suffix(dump, ".dump", ".sha256")
+      assert {:ok, [{hex, name}]} = Checksum.parse_sidecar(sidecar)
+      assert name == Path.basename(dump)
+      assert {:ok, ^hex, _} = Checksum.file(dump)
     end
 
     @tag :pg_tools
@@ -255,6 +313,8 @@ defmodule KilnCMS.Backups.WorkerTest do
   describe "run history (#2217)" do
     defp runs, do: Backups.list_runs!(actor: Backups.system())
 
+    defp set_part_bytes(bytes), do: set_config(media_part_bytes: bytes)
+
     defp set_config(overrides) do
       original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
       Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.merge(original, overrides))
@@ -314,8 +374,19 @@ defmodule KilnCMS.Backups.WorkerTest do
       assert decoded |> Map.keys() |> Enum.sort() ==
                ~w(artifacts error finished_at keep_days offsite ok started_at trigger version)
 
-      assert decoded["artifacts"] |> hd() |> Map.keys() |> Enum.sort() ==
-               ~w(bytes kind path verified)
+      # The original four keys are still there, unchanged (#2218 only adds).
+      assert [db, media] = decoded["artifacts"]
+      assert db |> Map.keys() |> Enum.sort() == ~w(bytes kind path sha256 verified)
+
+      assert media |> Map.keys() |> Enum.sort() ==
+               ~w(bytes kind part parts_total path sha256 verified)
+
+      assert db["kind"] == "db"
+      assert db["verified"] == true
+      assert db["sha256"] =~ ~r/\A[0-9a-f]{64}\z/
+      assert {:ok, db["sha256"], db["bytes"]} == Checksum.file(Path.join(dir, db["path"]))
+      assert media["part"] == 1 and media["parts_total"] == 1
+      assert media["path"] =~ ~r/\Amedia\/kiln-media-\d{8}-\d{6}\.tar\.gz\z/
 
       # Byte-for-byte what `Manifest.write/2` produces from what it reads back.
       Manifest.write(dir, Manifest.read(dir))
@@ -376,6 +447,15 @@ defmodule KilnCMS.Backups.WorkerTest do
           %{stamp: "20200101-000000", trigger: "manual", started_at: long_ago},
           actor: Backups.system()
         )
+
+      # Quiet since then too: staleness is measured from the later of
+      # `started_at` and `updated_at`.
+      import Ecto.Query
+
+      KilnCMS.Repo.update_all(
+        from(r in "backup_runs", where: r.id == type(^killed.id, :binary_id)),
+        set: [updated_at: long_ago]
+      )
 
       assert :ok = Worker.run("manual")
 

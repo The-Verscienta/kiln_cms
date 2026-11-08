@@ -56,6 +56,8 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **App-made media backups may be several `kiln-media-<stamp>.partNN.tar.gz` files: update any script that globs `kiln-media-*.tar.gz`; after a rollback they do not show in History.** No migration.
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218) · [long form](docs/changelog/unreleased.md#backup-media-parts-upgrade))
 - **Run `mix ash.migrate` (new table `backup_runs`); overlays that restate `:ash_domains` must add `KilnCMS.Backups`.** Rolling the pin back is safe.
   ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217) · [long form](docs/changelog/unreleased.md#backup-history-upgrade))
 
@@ -100,6 +102,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-bootstrap-return))
 
 ### Added
+
+- **In-app media backups are split into independent `tar.gz` parts with SHA-256 sidecars, a Resume button for failed runs, and a multi-part `restore.sh media`.**
+  Settings `BACKUP_MEDIA_PART_MB` and `BACKUP_MEDIA_EXCLUDE`; no migration.
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218) · [long form](docs/changelog/unreleased.md#backup-media-parts))
 
 - **Roles and members can be granted individual custom fields, and private custom fields can be hidden from some editors.**
   New `custom_fields.<name>` grant keys and a `field_read_grants` axis; set both on `/editor/team`. Guide: [docs/granular-rbac.md](docs/granular-rbac.md#per-custom-field-grants-and-read-restrictions).

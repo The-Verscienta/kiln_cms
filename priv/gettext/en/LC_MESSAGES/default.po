@@ -358,6 +358,13 @@ msgid_plural "%{count} pages"
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} part"
+msgid_plural "%{count} parts"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} possible duplicate"
@@ -3357,6 +3364,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "Backup resumed — this page updates when it finishes."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "Backup started — this page updates when it finishes."
 msgstr ""
 
@@ -4840,6 +4852,11 @@ msgstr[1] ""
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Continue editing"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Continue this backup from the files it already wrote"
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -14931,6 +14948,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "Resume"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "Retention"
 msgstr ""
 
@@ -17729,6 +17751,21 @@ msgstr ""
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
 msgid "That action isn't allowed right now."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That backup can't be resumed."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That backup can't be resumed: only a failed or interrupted backup can."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That backup can't be resumed: the files it had written are gone."
 msgstr ""
 
 #: lib/kiln_cms_web/live/ip_block_live.ex

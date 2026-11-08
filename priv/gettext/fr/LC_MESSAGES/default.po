@@ -358,6 +358,13 @@ msgid_plural "%{count} pages"
 msgstr[0] "%{count} page"
 msgstr[1] "%{count} pages"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} part"
+msgid_plural "%{count} parts"
+msgstr[0] "%{count} partie"
+msgstr[1] "%{count} parties"
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} possible duplicate"
@@ -3357,6 +3364,11 @@ msgstr "Sauvegarde en cours…"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "Backup resumed — this page updates when it finishes."
+msgstr "Sauvegarde reprise : cette page se met à jour à la fin."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "Backup started — this page updates when it finishes."
 msgstr "Sauvegarde lancée — cette page se met à jour à la fin."
 
@@ -4841,6 +4853,11 @@ msgstr[1] "Continuer (%{count} restants)"
 #, elixir-autogen, elixir-format
 msgid "Continue editing"
 msgstr "Continuer l'édition"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Continue this backup from the files it already wrote"
+msgstr "Poursuivre cette sauvegarde à partir des fichiers déjà écrits"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -14931,6 +14948,11 @@ msgstr "Résultats"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "Resume"
+msgstr "Reprendre"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "Retention"
 msgstr "Rétention"
 
@@ -17730,6 +17752,21 @@ msgstr "Ce compte est introuvable."
 #, elixir-autogen, elixir-format
 msgid "That action isn't allowed right now."
 msgstr "Cette action n'est pas autorisée pour le moment."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That backup can't be resumed."
+msgstr "Cette sauvegarde ne peut pas être reprise."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That backup can't be resumed: only a failed or interrupted backup can."
+msgstr "Cette sauvegarde ne peut pas être reprise : seule une sauvegarde échouée ou interrompue le peut."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That backup can't be resumed: the files it had written are gone."
+msgstr "Cette sauvegarde ne peut pas être reprise : les fichiers déjà écrits ont disparu."
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format

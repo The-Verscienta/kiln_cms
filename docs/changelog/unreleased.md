@@ -7,6 +7,29 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="backup-media-parts-upgrade"></a>
+
+- **App-made media backups can now be several `kiln-media-<stamp>.partNN.tar.gz`
+  files; anything that globs `kiln-media-*.tar.gz` must accept them, and a
+  rollback hides them from History (#2218).** No migration and no setting to
+  change.
+  - **Naming.** A media library bigger than `BACKUP_MEDIA_PART_MB` (default 400)
+    is written as `kiln-media-<stamp>.part01.tar.gz`, `.part02.tar.gz`, and so
+    on (two digits, widening past 99). A library that fits in one part keeps the
+    legacy `kiln-media-<stamp>.tar.gz`. Check any rclone filter, monitoring or
+    retention script of your own that matches the old name; `scripts/restore.sh`
+    and `scripts/backup.sh verify`/`prune` already understand both.
+  - **Rolling the pin back is safe for the data but not for the view.** The
+    previous release's Importer and Presence ignore `.partNN` names, so part sets
+    do not show in History (and read as missing), while its prune glob
+    `kiln-*` would still age them out by file. The files are ordinary
+    `tar.gz` and restore by hand, one `tar -xzf` per part in numeric order. Nothing
+    is lost, nothing is migrated back.
+  - **Copying `$BACKUP_DIR` off-host with `rclone sync`?** Exclude `.work/**`:
+    the new resume state in `.work/<stamp>/` holds lists of media file names and
+    is removed when a backup succeeds.
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))
+
 <a id="builtin-field-type-names-upgrade"></a>
 
 - **The field type names `email`, `telephone`, `color`, `slug`, `time` and `json` are reserved (#2278).**
@@ -189,6 +212,53 @@ carries the reasoning.
   ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240))
 
 ## Added
+
+<a id="backup-media-parts"></a>
+
+- **In-app media backups are written as independent `tar.gz` parts with SHA-256
+  checksums, and a failed backup can be resumed (#2218).** For platform admins at
+  `/editor/backups`, operators and anyone restoring.
+  - **Parts.** The media directory is split by file set, not by bytes, so every
+    `kiln-media-<stamp>.partNN.tar.gz` is a complete archive of its own that can
+    be listed, hashed, copied and restored alone. `BACKUP_MEDIA_PART_MB` (default
+    400; 16 to 10240, otherwise the default plus a boot warning) is a ceiling on
+    each part's uncompressed input, not an exact size; a file bigger than the cap
+    is its own part. `BACKUP_MEDIA_EXCLUDE` (for example `tmp/**,cache/**`) leaves
+    paths out. Empty directories and directory timestamps are not preserved; a
+    file created after the backup started is in the next one, and one deleted
+    meanwhile is dropped with a log line.
+  - **Checksums.** A SHA-256 per part and per set is recorded in
+    `manifest.json` (additive keys `sha256`, `part`, `parts_total`; `version`
+    stays 1), on the History row, and in `kiln-media-<stamp>.sha256` and
+    `kiln-db-<stamp>.sha256` sidecars in `sha256sum -c` format. They are copied
+    off-site with their artifact and pruned with their set. `Verified` now needs
+    `tar -tzf` to pass, the size to match the hash, and a hash to be recorded.
+    `scripts/backup.sh` (still one archive, no splitting) writes the same keys and
+    sidecars and `verify` checks every file of the newest stamp.
+  - **Resume.** Finished steps and parts are kept in
+    `<BACKUP_DIR>/.work/<stamp>/` (0700; removed on success; swept after three
+    days). A failed or interrupted run shows **Resume** in History for platform
+    admins; it reuses only parts whose recorded hash still verifies, so a resumed
+    set can mix times (the Run log says so) and a very large library converges over
+    repeated resumes. Console form: `Backups.enqueue(resume: stamp)`, or
+    `Worker.run(trigger, job_id, resume: stamp)`. The one write policy change is
+    `:resume` on `Backups.Run`, system actor only. A stuck run is now failed when
+    it has been quiet for 2h15m, measured from its last update, not its start.
+  - **Restore.** `scripts/restore.sh media` takes a legacy archive, any one part
+    (the siblings are found), several paths, or a stamp prefix. Before it
+    extracts anything it verifies the sidecar, requires parts `01..N` with no gap
+    or duplicate, lists every part, and refuses absolute or `..` member names and
+    links that point absolute or upward. No sidecar is a loud warning, or an abort
+    with `RESTORE_REQUIRE_CHECKSUM=1`. Importing a part set into History with a gap
+    marks it failed ("incomplete media set").
+  - **Prune and disk.** Retention treats a stamp (dump, all parts, sidecars) as
+    one set aged by its newest member, in the app and in `backup.sh`. There is
+    no free-space check: budget for the dump, the finished parts and one in flight.
+  - **Not here yet.** The automatic Oban job-per-step chain, and splitting in
+    `backup.sh`, are follow-ups; the issue stays open. The runbook is in
+    [backups.md](../backups.md#media-backups-in-parts-2218).
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))
+
 
 <a id="builtin-format-field-types"></a>
 
