@@ -147,6 +147,7 @@ defmodule KilnCMS.OrgSettingsTest do
       KilnCMS.CMS.SiteMeilisearch,
       KilnCMS.CMS.SitePasswordPolicy,
       KilnCMS.CMS.SiteSafetyFields,
+      KilnCMS.CMS.SiteSecurityLog,
       KilnCMS.CMS.SiteSecurityTxt,
       KilnCMS.CMS.SiteSsoProvider,
       KilnCMS.CMS.SiteStorage,

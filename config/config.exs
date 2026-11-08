@@ -107,7 +107,8 @@ config :kiln_cms,
     KilnCMS.Backups,
     KilnCMS.Federation,
     KilnCMS.Experiments,
-    KilnCMS.Social
+    KilnCMS.Social,
+    KilnCMS.Security
     # The core stays project-agnostic. A downstream project registers its own
     # content domain (e.g. `MyApp.Catalog`) by appending to this list in its
     # OWN config — it must NOT be listed here, since it isn't compiled into the
@@ -624,6 +625,11 @@ config :kiln_cms, :federation_nonce_sweep_cron, "40 * * * *"
 # tomorrow's. `false` disables the schedule for a deployment driving
 # `KilnCMS.CMS.HealthSweep.run/0` itself.
 config :kiln_cms, :health_sweep_cron, "30 7 * * *"
+
+# When the security audit log is pruned to each org's retention window (#2241).
+# Daily, off-peak. `false` disables the schedule for a deployment driving
+# `KilnCMS.Security.prune/1` itself.
+config :kiln_cms, :security_log_prune_cron, "20 3 * * *"
 
 # Whether booting enqueues the one-off occurrence backfill (#766). On, because
 # the alternative is an upgrade step a human has to remember, and the feature

@@ -41,6 +41,7 @@ config :kiln_cms,
     KilnCMS.Federation,
     KilnCMS.Experiments,
     KilnCMS.Social,
+    KilnCMS.Security,
     Example.Catalog
   ],
   # Scanned by `KilnCMS.CMS.ContentTypes` for content types, and (via

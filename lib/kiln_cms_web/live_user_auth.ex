@@ -93,7 +93,13 @@ defmodule KilnCMSWeb.LiveUserAuth do
     # `refuse_foreign_claim!/3` exists to catch.
     org = request_org!(socket)
 
-    {:cont, socket |> assign(:current_org, org) |> vouch_host_uri()}
+    socket = socket |> assign(:current_org, org) |> vouch_host_uri()
+
+    # The client and org a security-relevant write (a role, an API key, a site
+    # setting) is logged with (#2241). `connect_info` is readable only while
+    # mounting, so it is captured here once and passed to the actions as their
+    # Ash `context:`.
+    {:cont, assign(socket, :security_context, KilnCMS.Security.AuthEvents.context(socket))}
   end
 
   def on_mount(:live_user_optional, _params, _session, socket) do

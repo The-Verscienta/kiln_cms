@@ -46,6 +46,7 @@ defmodule KilnCMS.Accounts.SecondFactor do
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.SignInAlert
   alias KilnCMS.Accounts.Totp
+  alias KilnCMS.Security.AuthEvents
 
   @doc """
   The whole second-factor step for a sign-in gate: charge, verify, forgive
@@ -71,18 +72,31 @@ defmodule KilnCMS.Accounts.SecondFactor do
   `/editor/settings` (#727), and that refusal is different news — the person
   there holds a session, not a first factor. See #757.
   """
-  @spec check(Accounts.User.t(), term()) ::
+  @spec check(Accounts.User.t(), term(), keyword()) ::
           {:ok, Accounts.User.t()} | :invalid | {:deny, Accounts.User.t(), non_neg_integer()}
-  def check(user, code) do
+  def check(user, code, opts \\ []) do
+    # The audit context (`KilnCMS.Security.AuthEvents.context/2`) of the door
+    # that asked: where a refused code or a lockout is recorded (#2241), and
+    # what a recovery code's use is attributed to. Without it nothing is.
+    context = Keyword.get(opts, :context, %{})
+
     case AccountThrottle.consume_second_factor(user.id) do
       :allow ->
-        forgive_on_success(verify(user, code))
+        user |> verify(code, context) |> audit_failure(user, context) |> forgive_on_success()
 
       {:deny, retry_after_ms} ->
         SignInAlert.second_factor_locked(user)
+        AuthEvents.locked(context, user, "second_factor", "second_factor", user.id)
         {:deny, user, retry_after_ms}
     end
   end
+
+  defp audit_failure(:invalid, user, context) do
+    AuthEvents.second_factor_failed(context, user)
+    :invalid
+  end
+
+  defp audit_failure(verified, _user, _context), do: verified
 
   # Someone whose authenticator was a minute out of sync, or who fumbled a
   # recovery code, has now proved they hold the factor; carrying those failures
@@ -116,19 +130,19 @@ defmodule KilnCMS.Accounts.SecondFactor do
   # codes. `{:ok, user}` — the *updated* record when a recovery code was burned,
   # carrying the caller's `__metadata__` (and so the first-factor token)
   # forward — or `:invalid`.
-  @spec verify(Accounts.User.t(), term()) :: {:ok, Accounts.User.t()} | :invalid
-  defp verify(user, code) when is_binary(code) do
+  @spec verify(Accounts.User.t(), term(), map()) :: {:ok, Accounts.User.t()} | :invalid
+  defp verify(user, code, context) when is_binary(code) do
     if is_binary(user.totp_secret) and Totp.valid?(user.totp_secret, code) do
       {:ok, mark(user, :totp)}
     else
-      case recovery_code(user, code) do
+      case recovery_code(user, code, context) do
         {:ok, updated} -> {:ok, mark(updated, :recovery)}
         other -> other
       end
     end
   end
 
-  defp verify(_user, _code), do: :invalid
+  defp verify(_user, _code, _context), do: :invalid
 
   # Which factor was actually accepted, carried on the returned record's Ash
   # metadata (#786). A recovery-code sign-in is what lets a gate mark the session
@@ -142,14 +156,17 @@ defmodule KilnCMS.Accounts.SecondFactor do
   # stored there is nothing a code could match, and skipping the changeset keeps
   # the wrong-code path — the only path a grinder ever takes — off the Ash
   # pipeline entirely.
-  defp recovery_code(%{totp_recovery_hashes: hashes}, _code) when hashes in [nil, []],
+  defp recovery_code(%{totp_recovery_hashes: hashes}, _code, _context) when hashes in [nil, []],
     do: :invalid
 
-  defp recovery_code(user, code) do
+  defp recovery_code(user, code, context) do
     # authorize?: false — pre-auth — the second factor is what is being
     # checked, so the sign-in has no actor yet. The consume action verifies
     # and burns the code in one write; it is not reachable any other way.
-    case Accounts.consume_totp_recovery_code(user, %{code: code}, authorize?: false) do
+    case Accounts.consume_totp_recovery_code(user, %{code: code},
+           authorize?: false,
+           context: context
+         ) do
       # The consume action returns a fresh record; the caller's metadata (the
       # already-minted first-factor token) is reattached so the sign-in can be
       # completed from it.

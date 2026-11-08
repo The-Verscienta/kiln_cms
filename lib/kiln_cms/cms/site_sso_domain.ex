@@ -52,6 +52,10 @@ defmodule KilnCMS.CMS.SiteSsoDomain do
       primary? true
       accept [:domain]
       change KilnCMS.CMS.Changes.PrepareSsoDomain
+
+      # Audit log (#2241), in the transaction.
+      change {KilnCMS.Security.Changes.RecordOrgSetting,
+              type: :sso_config_changed, provider: "site_sso_domain"}
     end
 
     # Looks the TXT record up now and stamps `verified_at` when it is there.
@@ -61,11 +65,17 @@ defmodule KilnCMS.CMS.SiteSsoDomain do
       accept []
       require_atomic? false
       change KilnCMS.CMS.Changes.VerifySsoDomain
+      # Audit log (#2241), in the transaction.
+      change {KilnCMS.Security.Changes.RecordOrgSetting,
+              type: :sso_config_changed, provider: "site_sso_domain"}
     end
 
     destroy :remove do
       primary? true
       require_atomic? false
+      # Audit log (#2241), in the transaction.
+      change {KilnCMS.Security.Changes.RecordOrgSetting,
+              type: :sso_config_changed, provider: "site_sso_domain"}
     end
   end
 

@@ -326,6 +326,9 @@ defmodule KilnCMS.Accounts.User do
       # a demotion or a narrowed scope left the live ones holding the grant they
       # had (#675). Dropping them makes the next message prove it again.
       change {KilnCMS.Accounts.Changes.EvictSessions, reason: :access_changed}
+
+      # Audit log (#2241), in the transaction: a raised or lowered role.
+      change KilnCMS.Security.Changes.RecordRoleChange
     end
 
     # Time-boxed elevation (`KilnCMS.Accounts.RoleGrant`) — "admin until Friday".
@@ -348,6 +351,9 @@ defmodule KilnCMS.Accounts.User do
       # grant; granting widens it, and a socket authorized a moment ago would
       # otherwise keep the old tier until it happened to reconnect.
       change {KilnCMS.Accounts.Changes.EvictSessions, reason: :role_grant_changed}
+
+      # Audit log (#2241), in the transaction: an elevation granted or revoked.
+      change KilnCMS.Security.Changes.RecordElevation
     end
 
     # The expiry sweep's write (AshOban trigger below). Authorization never needs
@@ -496,6 +502,9 @@ defmodule KilnCMS.Accounts.User do
       # attacker rotating IPs gets a fresh window per address otherwise.
       # Refuses with the same `AuthenticationFailed` a wrong password produces.
       prepare KilnCMS.Accounts.Preparations.ThrottleSignIn
+
+      # Audit log (#2241): wrong passwords and lockouts, observed only.
+      prepare KilnCMS.Security.Preparations.AuditSignIn
 
       # Mints the remember-me token when the box is ticked. On the LiveView path
       # it deliberately does nothing here: `sign_in_tokens_enabled?` is on, so
@@ -897,6 +906,12 @@ defmodule KilnCMS.Accounts.User do
       change KilnCMS.Accounts.Changes.PromotePendingTotpSecret
       change set_attribute(:totp_confirmed_at, &DateTime.utc_now/0)
       change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
+
+      # Audit log (#2241), in the transaction: the factor and its event commit together.
+      change {KilnCMS.Security.Changes.Record,
+              type: :second_factor_enrolled,
+              target: fn record, _changeset -> {"user", record.id} end,
+              metadata: fn _record, _changeset -> %{"kind" => "totp"} end}
     end
 
     # Replace the recovery-code set — requires a current authenticator code, so
@@ -932,6 +947,16 @@ defmodule KilnCMS.Accounts.User do
       argument :code, :string, allow_nil?: false, sensitive?: true
 
       change KilnCMS.Accounts.Changes.ConsumeRecoveryCode
+
+      # Audit log (#2241), in the transaction: a burned code always has its event.
+      # The person is the record itself (this runs pre-auth, with no actor).
+      change {KilnCMS.Security.Changes.Record,
+              type: :recovery_code_used,
+              user: fn record, _changeset -> record end,
+              target: fn record, _changeset -> {"user", record.id} end,
+              metadata: fn record, _changeset ->
+                %{"remaining" => length(record.totp_recovery_hashes || [])}
+              end}
     end
 
     # Turn 2FA off — requires a current code, and that code is now budgeted, so
@@ -957,6 +982,12 @@ defmodule KilnCMS.Accounts.User do
       change set_attribute(:totp_confirmed_at, nil)
       change set_attribute(:totp_recovery_hashes, [])
       change set_attribute(:totp_pending_secret, nil)
+
+      # Audit log (#2241), in the transaction.
+      change {KilnCMS.Security.Changes.Record,
+              type: :second_factor_removed,
+              target: fn record, _changeset -> {"user", record.id} end,
+              metadata: fn _record, _changeset -> %{"kind" => "totp"} end}
     end
   end
 

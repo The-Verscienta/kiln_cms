@@ -238,6 +238,8 @@ defmodule KilnCMSWeb.Router do
     # bucket so the two registration doors agree (#724) — see
     # `KilnCMSWeb.Plugs.AuthRateLimit`.
     plug KilnCMSWeb.Plugs.AuthRateLimit
+    # The client and org the sign-in actions' audit hooks record (#2241).
+    plug KilnCMSWeb.Plugs.SecurityContext
     # Remember-me is read *only* here, not on `:browser` (#699), and the reason
     # is the public delivery surface. `sign_in_with_remember_me` signs the
     # visitor in by writing the session, so `Plug.Session` emits `Set-Cookie` —
@@ -576,6 +578,10 @@ defmodule KilnCMSWeb.Router do
       # The site's IP/CIDR block list (#2242). Admin-only by the tier gate AND the
       # resource policy; enforcement is `KilnCMSWeb.Plugs.IpBlock` and the sockets.
       live "/editor/ip-blocks", IpBlockLive, :index
+      # The site's security audit log (#2241): sign-ins, lockouts, second factors,
+      # roles, API keys. Admin-only by the tier gate AND the `Security.Event` policy;
+      # the CSV download is the controller route below.
+      live "/editor/security-log", SecurityLogLive, :index
       # In-app backups (#484) — status, "back up now", retention. Admin-only:
       # the artifact list names the database dump, and an editor has no action
       # to take on it. Restore stays a documented ops procedure.
@@ -654,6 +660,10 @@ defmodule KilnCMSWeb.Router do
     # the router tells them apart on arity and this cannot be read as a content
     # type called "health".
     get "/editor/governance/health.csv", GovernanceController, :export_health_csv
+
+    # Security log download (#2241) - the page's filters as CSV; admin-gated in the
+    # controller, which also charges the `:export` budget and caps the rows.
+    get "/editor/security-log/export.csv", SecurityLogExportController, :export_csv
 
     # Form entries export (#477) — file download, admin-gated in the
     # controller (submissions are visitor-provided data, frequently PII;

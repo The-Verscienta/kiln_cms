@@ -55,12 +55,18 @@ defmodule KilnCMS.CMS.IpBlockRule do
       # (or one whose address is unknown) is refused unless confirmed. The caller
       # passes its address as `context: %{client_ip: tuple | nil}`.
       argument :confirm_self_block, :boolean, default: false, allow_nil?: false, public?: true
+
+      # Audit log (#2241), in the transaction: a site's access rules.
+      change KilnCMS.Security.Changes.RecordOrgSetting
     end
 
     destroy :destroy do
       primary? true
       # The bust change is an after_transaction hook, which cannot be atomic.
       require_atomic? false
+
+      # Audit log (#2241), in the transaction.
+      change KilnCMS.Security.Changes.RecordOrgSetting
     end
   end
 

@@ -90,7 +90,11 @@ defmodule KilnCMSWeb.IpBlockLive do
            CMS.can_destroy_ip_block_rule?(socket.assigns.current_user, rule,
              tenant: socket.assigns.current_org
            ),
-         :ok <- CMS.destroy_ip_block_rule(rule, opts) do
+         :ok <-
+           CMS.destroy_ip_block_rule(
+             rule,
+             opts ++ [context: socket.assigns.security_context]
+           ) do
       {:noreply,
        socket
        |> put_flash(:info, gettext("Block removed."))
@@ -114,7 +118,7 @@ defmodule KilnCMSWeb.IpBlockLive do
     case CMS.create_ip_block_rule(params,
            actor: socket.assigns.current_user,
            tenant: socket.assigns.current_org,
-           context: %{client_ip: socket.assigns.client_ip}
+           context: Map.put(socket.assigns.security_context, :client_ip, socket.assigns.client_ip)
          ) do
       {:ok, _rule} ->
         {:noreply,

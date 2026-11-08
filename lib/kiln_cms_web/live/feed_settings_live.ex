@@ -62,7 +62,8 @@ defmodule KilnCMSWeb.FeedSettingsLive do
 
     case CMS.save_feed_settings(attrs,
            actor: socket.assigns.current_user,
-           tenant: socket.assigns.current_org
+           tenant: socket.assigns.current_org,
+           context: socket.assigns.security_context
          ) do
       {:ok, _row} ->
         {:noreply,
@@ -89,7 +90,8 @@ defmodule KilnCMSWeb.FeedSettingsLive do
         # A destroy answers `:ok`, not `{:ok, record}`.
         case CMS.reset_feed_settings(row,
                actor: socket.assigns.current_user,
-               tenant: socket.assigns.current_org
+               tenant: socket.assigns.current_org,
+               context: socket.assigns.security_context
              ) do
           {:error, error} ->
             {:noreply, socket |> put_flash(:error, error_message(error)) |> load_settings()}

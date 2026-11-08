@@ -871,6 +871,15 @@ defmodule KilnCMS.CMS do
       define :reset_site_password_policy, action: :destroy
     end
 
+    # Per-org retention window of the security audit log (#2241). Read through
+    # `KilnCMS.Security.retention_days/1`, written through
+    # `KilnCMS.Security.set_retention_days/3`.
+    resource KilnCMS.CMS.SiteSecurityLog do
+      define :list_site_security_log, action: :read
+      define :save_site_security_log, action: :save
+      define :reset_site_security_log, action: :destroy
+    end
+
     # Per-org `/.well-known/security.txt` (RFC 9116, #1873). Served through
     # `KilnCMS.SecurityTxt` (cached); this interface is for the settings page
     # and the resolver's own lookup.

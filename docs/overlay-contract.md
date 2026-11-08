@@ -140,8 +140,8 @@ that counting as a major.
   test suite. What does transfer is the mechanic: `:plugins` replaces, exactly
   as `:ash_domains` and `:content_domains` do, so every core entry you want
   kept has to be restated — and re-synced when you bump the pin. A core module that becomes a domain
-  (`KilnCMS.Backups`, #2217) must be added to your list on that bump, or
-  `mix ash.codegen` offers to drop its table.
+  (`KilnCMS.Backups`, #2217; `KilnCMS.Security`, #2241) must be added to your
+  list on that bump, or `mix ash.codegen` offers to drop its table.
 - **`to_markdown/1` on a block module.** `KilnCMS.Blocks.to_markdown/1` calls
   it for the `llm` fired surface when a block module exports it, and falls
   back to the block's `search_text/1` otherwise. It is probed with

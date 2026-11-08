@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (new tables `security_events` and `site_security_log`); overlays that restate `:ash_domains` must add `KilnCMS.Security`. A new daily prune job is on by default (`KILN_SECURITY_LOG_PRUNE_CRON`, 365-day window).** Rolling the pin back is safe.
+  ([#2241](https://github.com/The-Verscienta/kiln_cms/issues/2241) · [long form](docs/changelog/unreleased.md#security-log-upgrade))
+
 - **App-made media backups may be several `kiln-media-<stamp>.partNN.tar.gz` files: update any script that globs `kiln-media-*.tar.gz`; after a rollback they do not show in History.** No migration.
   ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218) · [long form](docs/changelog/unreleased.md#backup-media-parts-upgrade))
 - **Run `mix ash.migrate` (new table `backup_runs`); overlays that restate `:ash_domains` must add `KilnCMS.Backups`.** Rolling the pin back is safe.
@@ -102,6 +105,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-bootstrap-return))
 
 ### Added
+
+- **Admins get a security log: who signed in, was locked out, or changed a second factor, passkey, role, API key or sign-in setting, and from where.**
+  At `/editor/security-log`, with filters, CSV download and a per-site retention window (default 365 days). Guide: [docs/security-events.md](docs/security-events.md).
+  ([#2241](https://github.com/The-Verscienta/kiln_cms/issues/2241) · [long form](docs/changelog/unreleased.md#security-log))
 
 - **In-app media backups are split into independent `tar.gz` parts with SHA-256 sidecars, a Resume button for failed runs, and a multi-part `restore.sh media`.**
   Settings `BACKUP_MEDIA_PART_MB` and `BACKUP_MEDIA_EXCLUDE`; no migration.

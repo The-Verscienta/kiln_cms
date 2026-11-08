@@ -125,6 +125,14 @@ defmodule KilnCMSWeb.SignInLive do
         KilnCMS.Accounts.SiteSso.sign_in_option(resolved.assigns.current_org)
       )
 
+    # The client and org the sign-in action's audit hook records (#2241).
+    socket =
+      update(
+        socket,
+        :context,
+        &Map.merge(&1, KilnCMS.Security.AuthEvents.context(socket, resolved.assigns.current_org))
+      )
+
     if charge_here?(socket) do
       {:ok, update(socket, :context, &Map.merge(&1, client_ip_context(socket)))}
     else
