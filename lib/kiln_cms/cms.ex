@@ -871,6 +871,15 @@ defmodule KilnCMS.CMS do
       define :reset_site_password_policy, action: :destroy
     end
 
+    # Per-org idle timeout and "sign out everyone" (#2246). Enforced through
+    # `KilnCMS.Accounts.IdleTimeout`; `sign_out_all_sessions` is admin-only.
+    resource KilnCMS.CMS.SiteSessionPolicy do
+      define :list_site_session_policy, action: :read
+      define :save_site_session_policy, action: :save
+      define :record_sessions_revoked, action: :record_sessions_revoked
+      define :sign_out_all_sessions, action: :sign_out_all
+    end
+
     # Per-class delivery ceilings by user agent (#2243). Delivery reads the row
     # through `KilnCMS.BotBudgets` (cached); this interface is for the settings
     # page and tests.

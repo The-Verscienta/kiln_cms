@@ -325,6 +325,9 @@ build if a resource is ever registered without that authorizer.
   LiveViews (`SessionEviction.evict_session/2`). It does not reach a
   `/ws/collab` or `/ws/gql` socket already connected from that browser: those
   are keyed per user, and close at their next reconnect or re-check.
+  Since #2246 a site admin can also end sessions on one site: after a
+  configurable idle time, or all at once with *Sign out everyone*; see
+  [Idle timeout and sign out everyone](#idle-timeout-and-sign-out-everyone-2246).
 
   **Remember-me and the second factor.** The cookie is a completed sign-in in a
   cookie — the read plug hands it to `store_in_session/2` directly, so it never
@@ -895,6 +898,66 @@ password leaves the server.
   corpus.
 - **Telemetry.** `[:kiln_cms, :password, :breach_check]`; see
   [observability.md](observability.md#breached-password-checks).
+
+### Idle timeout and sign out everyone (#2246)
+
+`KilnCMS.Accounts.IdleTimeout`, `KilnCMS.Accounts.SignOutAll`. A site admin
+can sign browsers out after a stretch of inactivity, and end every browser
+session on the site at once. Admin guide:
+[account administration](account-administration.md#sign-people-out-when-idle).
+
+Configured at `/editor/sessions`.
+
+- **Sessions are bound to a site.** A session's token row, and its remember-me
+  row, record the site (`tokens.org_id`) they signed in on, or the first site
+  that uses them if they predate #2246. The cookies are host-only, so a row
+  bound to site A arriving on a host of site B was copied there: it is served
+  signed out on B and nothing is written to it, so it can neither be used on B
+  nor kept awake from B. A remember-me cookie's signature is verified before
+  its row is looked at, and every write is also filtered on the account
+  (`subject`), so a forged or foreign jti changes no one's row.
+- **Last activity is the database's clock.** `last_used_at` is written by and
+  compared with Postgres `now()`, never a node's clock, and the expiring
+  UPDATE repeats the idle test in its `WHERE`, so a tab that kept the session
+  awake a moment earlier wins the race. Idle time is measured from no earlier
+  than the policy's last save (`policy_changed_at`), so enabling or shortening
+  the timeout signs no one out for past inactivity. That stamp is the saving
+  node's clock: skew between nodes shifts the grace by the skew.
+- **Public pages stay cache-safe.** On `:browser` an expired session is served
+  signed out without writing the session or a cookie (#699); the session and
+  remember-me cookies are dropped only on `:browser_auth`. On
+  `:media_transform` the check only reads.
+- **Sign out everyone.** One transaction revokes every session, remember-me and
+  two-factor hold row bound to the site, writes a watermark
+  (`SiteSessionPolicy.sessions_revoked_at`) and records `all_sessions_revoked`.
+  A row bound to no site that predates the watermark is revoked the next time
+  it is used on this site's host, for 30 days (the remember-me lifetime). The
+  token writes that bind a row to a site read the watermark in the same
+  statement, so such a row cannot escape by being used first. Other sites are
+  never reached.
+- **Fails open.** An unreadable `SiteSessionPolicy` row is logged and treated as
+  "no timeout, no watermark" for that request, uncached; an unreadable token
+  row leaves the request as it was, and an open page looks again in a minute.
+  The site decides the timeout; there is no operator ceiling
+  ([ADR 0018](decisions/0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md)
+  constrains a site only against one).
+- **Cost.** Every signed-in browser request and LiveView mount reads the
+  session's token row by primary key, whether or not the site has a timeout,
+  because the cross-site rule needs it.
+- **Residual risks.** (1) Not covered: API keys and headless bearer tokens,
+  including a token minted with a phished password. A breach response needs a
+  password reset or *Sign out everywhere* as well. (2) `/ws/collab` (a 24-hour
+  per-account token, behind a flag that is off by default) and `/ws/gql`
+  sockets are keyed per account and survive both idle expiry and sign out
+  everyone until their next reconnect or re-check. (3) Events a LiveComponent
+  handles itself (`phx-target={@myself}`) do not count as activity on their
+  own. (4) A node holding a cached policy from before a sign out everyone may,
+  for up to the cache's minute and until the cluster-wide bust lands, let an
+  unbound pre-watermark session through on a request; binding still refuses
+  it, and the next check catches it. (5) Activity is written at most once per
+  tenth of the timeout (30 seconds to 5 minutes), so a session can end after
+  as little as 90% of the timeout since its real last use. (6) Fail-open,
+  above.
 
 ### Site invitations (`/auth/invite/:invite_token`, #2135)
 

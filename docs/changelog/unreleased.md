@@ -7,6 +7,38 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="session-idle-timeout-upgrade"></a>
+
+- **Run `mix ash.migrate` for the idle timeout and "sign out everyone" (#2246).
+  Two migrations, both additive; one builds an index on `tokens` concurrently.**
+  Nothing changes for anyone until a site admin sets a timeout: the setting is
+  off by default and there is no environment variable.
+  - **What the migrations do.**
+    `20261108223445_add_session_org_and_idle_timeout` adds two nullable columns
+    to `tokens` (`org_id`, `revoked_reason`) and creates the table
+    `site_session_policy` (one row per site, created when an admin first saves
+    the setting). `20261108223446_add_session_org_and_idle_timeout_1` builds
+    `tokens_org_id_purpose_index` with `CREATE INDEX CONCURRENTLY`, outside a
+    transaction, so sign-ins keep working while it builds. On a large `tokens`
+    table it takes a while. If the build fails it leaves an `INVALID` index:
+    run `DROP INDEX CONCURRENTLY tokens_org_id_purpose_index;` and migrate
+    again.
+  - **Existing sessions stay signed in.** Their rows have no site yet. Each is
+    bound to the site it is next used on, unless that site's admin has since
+    used **Sign out everyone**, in which case it is signed out there instead.
+  - **One more read per signed-in request.** Every signed-in browser request
+    and every signed-in LiveView mount now reads the session's token row by
+    primary key, timeout or not: it is how a session cookie copied to another
+    site's host is refused there. Signed-in page requests also update
+    `last_used_at` at most once every five minutes per session (LiveView
+    mounts already did). Anonymous traffic is unaffected.
+  - **Rolling back.** Safe: the older release ignores the new columns and
+    table. Sites lose their idle timeout and the effect of a later "sign out
+    everyone" until you upgrade again; sessions already revoked stay revoked.
+  - **Overlays.** Nothing to run unless your overlay carries its own copy of
+    `KilnCMS.Accounts.Token`; core ships both migrations.
+  See also [the Added entry](#session-idle-timeout).
+
 <a id="backup-offsite-rehash-upgrade"></a>
 
 - **An in-app backup whose off-site copy fails now fails, and every file is
@@ -505,6 +537,56 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="session-idle-timeout"></a>
+
+- **Site admins can sign idle browsers out, and sign everyone out of the site
+  at once (#2246).** A new page, **Configure → Integrations → Sessions**
+  (`/editor/sessions`, admins only).
+  - **Sign out when idle.** Pick a time for **Everyone** (15 minutes to 24
+    hours, or **Never**, the default) and, optionally, a shorter one for
+    **Administrators**. The resource accepts 10 to 1440 minutes, and the
+    administrators' time may not be longer than everyone's. Turning it on or
+    shortening it starts the clock from the save. Activity is loading a page of
+    this site while signed in (public pages included), clicking or typing on a
+    console page, and moving within one; a tab left open, a reconnect and
+    automatic replies (`body_flushed`, `push_state`, `push_unsupported`) are
+    not. A browser is signed out between 90% and 100% of the timeout after its
+    last activity. The timeout wins over "remember me": an idle browser loses
+    its remember-me cookie too. Open pages go to `/sign-in` with "You were
+    signed out after a period of inactivity." Each person sees the time that
+    applies to them under **Active sessions** on **Your settings**.
+  - **Sign out everyone.** Ends every browser session, remember-me cookie and
+    sign-in waiting for a two-factor code on this site, platform admins'
+    sessions on it included, and sends their open pages to sign-in. **Keep me
+    signed in on this browser** (ticked by default) spares only the clicking
+    admin's current browser. Other sites are not affected. API keys, headless
+    app tokens and already-connected `/ws/collab` and `/ws/gql` sockets are not
+    ended: for a compromised account, reset its password or use **Sign out
+    everywhere** on `/editor/accounts` as well.
+  - **Sessions belong to a site.** Each browser session and remember-me cookie
+    now records the site it signed in on. One copied to another site's host is
+    served signed out there and never refreshed from it.
+  - **Fails open.** If the setting cannot be read, no timeout applies for that
+    request and a warning is logged. The site decides: there is no operator
+    ceiling and no environment variable.
+  - **Security log.** Two new event types, `session_idle_expired` ("Signed out
+    after inactivity"; `timeout_minutes`, `tier`, `surface`) and
+    `all_sessions_revoked` ("Everyone signed out"; `count`, `except_self`).
+    Saving the setting is `org_setting_changed` (`site_session_policy`).
+  - **Known limits.** A click handled only inside a LiveComponent
+    (`phx-target={@myself}`) does not count as activity on its own.
+  - **Developers.** `CMS.SiteSessionPolicy` is a new org-scoped settings
+    resource (`CMS.list_site_session_policy/1`, `save_site_session_policy/2`,
+    and the admin-only generic action `sign_out_all_sessions/2`, which returns
+    the number of sessions ended). It has no reset: its row holds the "sign out
+    everyone" watermark, so `:destroy` is refused to everyone. It is not
+    exposed over JSON:API, GraphQL or MCP. `Token` gains `org_id`,
+    `revoked_reason` and five system-only actions; see
+    [the policy matrix](../policy-matrix.md).
+  - Guide: [Sign people out when idle](../account-administration.md#sign-people-out-when-idle)
+    and [Sign everyone out](../account-administration.md#sign-everyone-out).
+    Threat model: [Idle timeout and sign out everyone](../threat-model.md#idle-timeout-and-sign-out-everyone-2246).
 
 <a id="scanner-404-blocking"></a>
 
