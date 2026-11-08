@@ -76,6 +76,139 @@ visitor. When Kiln detects forwarded requests with neither set, the page shows
 **Visitor addresses may be your proxy's.** and the self-block check cannot be
 trusted. Fix that before adding rules.
 
+## Block scanners automatically
+
+Probes arrive as a burst of 404s: `/wp-login.php`, `/.env`, `/.git/config`, a
+thousand guessed slugs. With smart 404 blocking on (#2253), Kiln adds a
+temporary rule for such an address by itself, so you do not have to find it in
+the logs. It is **off by default** and changes nothing until you turn it on.
+
+### Turn it on
+
+You need to set an environment variable on the deployment, so this is an
+operator task. The admin console has no switch for it.
+
+1. Set `KILN_SCANNER_BLOCKING=1` in the environment of every node and restart
+   (the variables are read at boot; see
+   [Environment variables](environment-variables.md#smart-404-blocking-2253)).
+   If the site is behind a reverse proxy, set `TRUSTED_PROXIES` first (see
+   "Behind a proxy" above): without it Kiln sees the proxy's address and never
+   counts the request, so nothing is blocked, which is safe but pointless.
+2. Optionally tune the limits. The defaults are 60 misses per 10 minutes
+   (`KILN_SCANNER_BLOCKING_THRESHOLD`, `KILN_SCANNER_BLOCKING_WINDOW_MINUTES`),
+   5 hits on bait paths in the same window (`KILN_SCANNER_BLOCKING_BAIT_THRESHOLD`)
+   and a block of 60 minutes (`KILN_SCANNER_BLOCKING_BLOCK_MINUTES`).
+3. Check it works from a machine that is not on a private network and is not
+   your proxy: request `/wp-login.php` six times with a plain client such as
+   `curl` (a script sends no browser headers, which the guard requires), then
+   open `/editor/ip-blocks`. Under **Current blocks** you see your address (an
+   IPv6 address as its `/64`) with the note **Automatic: scanner 404s** and an
+   expiry an hour away. Further requests from it get the empty `403`.
+   Admins can also see **Address blocked automatically** in the
+   [security log](security-events.md).
+4. Remove your test block: select **Remove** beside it.
+
+Bait paths only trip the guard if the 404 reaches the content controller. A
+path your own site serves, or one that a redirect covers, is not a miss.
+
+Example of a tuned configuration for a site that sees heavy scanning:
+
+```sh
+KILN_SCANNER_BLOCKING=1
+KILN_SCANNER_BLOCKING_THRESHOLD=30
+KILN_SCANNER_BLOCKING_BAIT_THRESHOLD=3
+KILN_SCANNER_BLOCKING_BLOCK_MINUTES=240
+```
+
+The list of bait paths is code config only (no environment variable). Set it in
+an overlay's `config/config.exs`; it **replaces** the built-in list, which holds
+paths such as `/wp-login.php`, `/xmlrpc.php`, `/.env`, `/.git`, `/phpmyadmin`
+and `/cgi-bin`:
+
+```elixir
+config :kiln_cms, :scanner_blocking,
+  bait_paths: ["/wp-login.php", "/.env", "/internal-probe"]
+```
+
+A path matches case-insensitively, exactly or as a directory prefix
+(`/.git` matches `/.git/config`). Include only paths your sites never serve.
+
+### What counts, and what never does
+
+Every miss on public content delivery counts toward the miss threshold; a miss
+on a bait path also counts toward the stricter bait threshold. A threshold is
+crossed when the count for the address goes past it inside the window: with
+the defaults, the 61st miss or the 6th bait-path hit within the same window. The window
+is **fixed**, aligned to the clock, not sliding: a burst that straddles a
+boundary is split across two windows and may need to be larger to trip.
+
+Never counted, so a person or a service is not blocked by mistake:
+
+- Anything other than a `GET` or `HEAD` request, a signed-in visitor, and any
+  404 that is not a public page: API, media and static files are not counted,
+  and neither is a path a redirect handles.
+- A request that looks like it came from a browser, that is, one carrying
+  `Sec-Fetch-Mode` or `Sec-Fetch-Dest`, or a `Sec-Fetch-Site` other than `none`
+  or `same-origin`. A scanner script does not send them; a person following a
+  stale link does. (A scanner may send them to evade the guard.)
+- Loopback, private (RFC 1918), unique-local, link-local and CGNAT
+  (`100.64.0.0/10`) addresses, and any range in `TRUSTED_PROXIES`.
+- A request with a forwarding header (`X-Forwarded-For` and similar) when no
+  proxy is trusted: the address is then the proxy's.
+- An address already on the block list.
+- For the **miss threshold only**, a client whose `User-Agent` claims to be a
+  known crawler (Googlebot, Bingbot, DuckDuckBot, Applebot, YandexBot,
+  Baiduspider, Slurp, facebookexternalhit, Twitterbot, LinkedInBot). The
+  claim is not verified (no reverse DNS), so it is spoofable, which is why
+  **bait paths still count** for them.
+
+An IPv6 client is counted and blocked as its `/64`, because a host can rotate
+through its whole prefix. IPv4 is blocked as a single address.
+
+At the moment of a trip the block is skipped if the address has a successful
+sign-in on this site in the last 24 hours: someone behind a shared address who
+can sign in is not a scanner.
+
+### How a block behaves
+
+- It is an ordinary rule with the note **Automatic: scanner 404s** and an
+  expiry, so it shows on `/editor/ip-blocks`, takes effect like any other (see
+  "How fast a change takes effect") and ends by itself after
+  `KILN_SCANNER_BLOCKING_BLOCK_MINUTES`.
+- **A false positive heals itself** when the block expires. To lift it sooner,
+  select **Remove** beside it, or use the lock-out commands below.
+- A trip is claimed once per block window. If the guard decides not to block
+  (the cap, a recent sign-in, a database error), it does **not** try again for
+  that address until the window rolls over.
+- At most **300** automatic rules per site are active at once (`max_auto_rules`
+  in `config :kiln_cms, :scanner_blocking`; not an environment variable). At the
+  cap a new trip is skipped and a warning without any address is logged: the
+  guard never removes a rule, because it is not allowed to.
+- Counting is off the request path and **fails open**: if the counter is
+  dropped under load or the database fails, the 404 renders and nothing is
+  blocked. Counters live in the shared throttle table, so limits hold across
+  nodes.
+- Turning the setting off stops new blocks. Rules already created stay until
+  they expire or you remove them.
+
+### Watching it
+
+The counter `kiln_cms.scanner_guard.blocked.count`, tagged `reason`
+(`miss_threshold` or `bait_path`), counts new blocks; see
+[Observability](observability.md#blocked-addresses). Each block is also one
+`ip_auto_blocked` event in the security log. The address is never a metric tag
+or a log field.
+
+### What can go wrong
+
+| You see | Meaning |
+|---|---|
+| Nothing is ever blocked | The variable is not set, or is set to a value Kiln did not recognise (a warning on stderr names it). Or the site is behind a proxy with no `TRUSTED_PROXIES`, or your test client is on a private network. |
+| A visitor reports an empty `403` | They tripped the limit (a crawler gone wrong, a link checker, a browser extension). Find the rule on `/editor/ip-blocks` by its note and **Remove** it, or wait for the expiry. Consider raising `KILN_SCANNER_BLOCKING_THRESHOLD`. |
+| An address you expected is not blocked | It is exempt (see above), the trip was skipped (cap, recent sign-in) and the window has not rolled over, or the count straddled two windows. |
+| A warning `ScannerGuard: block skipped, at the automatic rule cap` | 300 automatic rules are active on the site. Wait for expiry, remove rules, or raise `max_auto_rules`. |
+| A warning `ScannerGuard: block skipped, could not store the rule` | The rule could not be saved (a database fault, or the range was refused). The request was served normally. |
+
 ## How fast a change takes effect
 
 Each node keeps a site's rules in a small cache for **one minute**. Adding or
@@ -83,7 +216,8 @@ removing a rule in the console clears that cache on every node at once. An
 expiry takes effect at the second it passes, not at the next refresh. A rule
 changed directly in the database is seen when the minute is up.
 
-There is no environment variable: the behaviour is fixed.
+There is no environment variable for this: the behaviour is fixed. (Automatic
+blocking, above, has its own variables.)
 
 ## Recovering from a lock-out
 
@@ -138,6 +272,9 @@ never blocked.
 - **No address is logged.** The only trace of a refusal is the
   `kiln_cms.ip_block.refused.count` counter, tagged by surface; see
   [Observability](observability.md#blocked-addresses).
+- **Automatic rules share the list.** They carry an expiry, so they follow the
+  "expired rules" behaviour above too, and the scanner guard may only add rules;
+  an admin can still remove one at any time.
 - **Not in the API.** Block rules are not on JSON:API, GraphQL or MCP, so an API
   key can neither read nor edit them. Only an organization admin, in the console.
 - **Upgrading** adds a table, `ip_block_rules`; nothing existing changes. Rolling

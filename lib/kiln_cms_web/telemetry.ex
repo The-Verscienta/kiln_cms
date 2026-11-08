@@ -243,6 +243,12 @@ defmodule KilnCMSWeb.Telemetry do
             "(#2242), tagged http / live / gql / collab / bridge. The address is " <>
             "deliberately not a tag or a log field."
       ),
+      counter("kiln_cms.scanner_guard.blocked.count",
+        tags: [:reason],
+        description:
+          "Addresses temporarily blocked by the scanner guard (#2253), tagged " <>
+            "miss_threshold / bait_path. The address is deliberately not a tag."
+      ),
       counter("kiln_cms.delivery.client_class.count",
         tags: [:class, :result],
         description:

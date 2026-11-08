@@ -119,6 +119,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Optional smart 404 blocking: an address that racks up delivery 404s or probes `/wp-login.php`-style bait paths is blocked for an hour.**
+  Off by default; turn on with `KILN_SCANNER_BLOCKING=1`. Guide: [docs/ip-blocking.md](docs/ip-blocking.md#block-scanners-automatically).
+  ([#2471](https://github.com/The-Verscienta/kiln_cms/pull/2471) · [long form](docs/changelog/unreleased.md#scanner-404-blocking))
+
 - **Public delivery throttles by user-agent class: scripts and clients with no user agent are refused sooner than browsers; admins can lower each class at Organization → Bot budgets.**
   Operators set the ceilings with `KILN_BOT_BUDGET_*_PERCENT`; a site may only lower them. Cost control, not security. Guide: [docs/bot-budgets.md](docs/bot-budgets.md).
   ([#2470](https://github.com/The-Verscienta/kiln_cms/pull/2470) · [long form](docs/changelog/unreleased.md#bot-budgets))

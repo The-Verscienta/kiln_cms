@@ -14,7 +14,7 @@ defmodule KilnCMS.CMS.IpBlockRule do
       unique per range however it was typed. Loopback and ranges wider than
       `/8` (IPv4) or `/16` (IPv6) are refused on write
       (`Changes.NormalizeIpBlockCidr`).
-    * `expires_at` — optional; a rule stops matching at that instant (evaluated
+    * `expires_at` — optional (the scanner guard, #2253, always sets one); a rule stops matching at that instant (evaluated
       at match time, the row is not swept) and must be in the future when set.
       Adding a range whose earlier rule has expired replaces that row
       (`Changes.ReplaceExpiredIpBlock`); an active duplicate is still refused.
@@ -80,12 +80,17 @@ defmodule KilnCMS.CMS.IpBlockRule do
     # The request path reads the list as the `:ip_block` system actor, the one
     # action it is granted (`:list`). An operator at a shell on the host
     # (`KilnCMS.Release.ip_blocks/1`, the way back in after a lock-out) is
-    # `:operator`: `list` and `destroy`, never `create`. Neither grant is a bypass.
+    # `:operator`: `list` and `destroy`, never `create`. The scanner guard (#2253)
+    # adds temporary rules for addresses that probe the site and may do nothing
+    # else here: it neither lists nor removes. No grant is a bypass.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
-      forbid_unless action([:list, :destroy])
-      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :operator}
+      forbid_unless action([:list, :destroy, :create])
+
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :operator, action: [:list, :destroy]}
+
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :ip_block, action: :list}
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :scanner_guard, action: :create}
     end
   end
 

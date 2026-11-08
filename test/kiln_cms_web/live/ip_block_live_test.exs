@@ -86,6 +86,27 @@ defmodule KilnCMSWeb.IpBlockLiveTest do
       assert rules(ctx.org) == []
     end
 
+    test "explains a rule the scanner guard added, and only that one (#2253)", ctx do
+      {lv, _admin} = mount_as_admin(ctx)
+
+      for {cidr, note} <- [
+            {"203.0.113.7/32", KilnCMS.Security.ScannerGuard.note()},
+            {"198.51.100.0/24", "scraper"}
+          ] do
+        lv |> form("#ip-block-form", rule: %{cidr: cidr, note: note}) |> render_submit()
+      end
+
+      [automatic, manual] =
+        rules(ctx.org) |> Enum.sort_by(&(&1.note != KilnCMS.Security.ScannerGuard.note()))
+
+      html = render(lv)
+      hint = "Added automatically after repeated 404s"
+
+      assert lv |> element("#ip-block-#{automatic.id}") |> render() =~ hint
+      refute lv |> element("#ip-block-#{manual.id}") |> render() =~ hint
+      assert html =~ hint
+    end
+
     test "a malformed range is reported and nothing is stored", ctx do
       {lv, _admin} = mount_as_admin(ctx)
 

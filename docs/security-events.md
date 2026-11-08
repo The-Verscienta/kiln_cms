@@ -127,6 +127,7 @@ a type may carry only the keys below; anything else is dropped.
 | `api_key_revoked` | API key revoked | A key was revoked (a repeat revoke records nothing) | `name` |
 | `sso_config_changed` | Single sign-on changed | The site's identity provider or a verified SSO domain was saved, verified or removed | `provider`, `change` |
 | `org_setting_changed` | Site setting changed | Any other site-level setting, or a blocked-address rule, was saved or removed | `setting` |
+| `ip_auto_blocked` | Address blocked automatically | The [scanner guard](ip-blocking.md#block-scanners-automatically) temporarily blocked an address for racking up 404s or probing bait paths. The address is the event's IP; there is no acting person | `reason`, `count`, `window_minutes`, `block_minutes` |
 
 `method` is `password`, `password_reset`, `magic_link`, `sso`, `passkey`,
 `second_factor` or `other`. `reason` is `invalid_credentials` or
@@ -134,6 +135,13 @@ a type may carry only the keys below; anything else is dropped.
 `settings`. `change` is `created`, `updated` or `removed`; `provider` is
 `site_oidc` or `site_sso_domain`. `setting` is the settings resource's short
 name, for example `site_mail_relay`; it names the setting and never its value.
+
+For `ip_auto_blocked`, `reason` is `miss_threshold` or `bait_path`, `count` is
+the threshold that was crossed, and `window_minutes` and `block_minutes` are the
+settings in force. The requested path is attacker-controlled and is never
+recorded. The rule the guard stores is created by a system actor, and
+`org_setting_changed` is only written for a person's change, so an automatic
+block produces `ip_auto_blocked` alone.
 
 `resent` is `true` for a resend, and for inviting an address whose invitation
 had expired. The two invitation events target the invitation (target type
@@ -198,6 +206,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `api_key_revoked` | `Accounts.ApiKey` `:revoke` and `:retire_rotated` | in txn; only when the key was not already revoked |
 | `sso_config_changed` | `CMS.SiteSsoProvider` (every write, via the `audit: :sso_config` option of `use KilnCMS.CMS.OrgSettings`, `lib/kiln_cms/cms/site_sso_provider.ex`), and `CMS.SiteSsoDomain` `:add`, `:verify`, `:remove` (`lib/kiln_cms/cms/site_sso_domain.ex`) | in txn; never the issuer, client id, secret or domain |
 | `org_setting_changed` | `lib/kiln_cms/cms/org_settings.ex`: the `use KilnCMS.CMS.OrgSettings` macro adds `Changes.RecordOrgSetting` to every write of every settings resource, and `CMS.IpBlockRule` `:create`, `:destroy` (`lib/kiln_cms/cms/ip_block_rule.ex`) | in txn; names the setting, never a value. The retention setting itself is one of them |
+| `ip_auto_blocked` | `lib/kiln_cms/security/scanner_guard.ex`, after the guard's `CMS.IpBlockRule` `:create` succeeds, via `Recorder.record_after_commit/2` | outside the transaction, off the request path; skipped when the guard is off, the cap is reached or a recent sign-in from the address exists |
 
 `org_setting_changed` covers every resource built with `use
 KilnCMS.CMS.OrgSettings`, so a new settings resource cannot forget it:

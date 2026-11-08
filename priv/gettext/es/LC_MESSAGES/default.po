@@ -2415,6 +2415,11 @@ msgstr "Se añadió un párrafo"
 msgid "Added a quote"
 msgstr "Se añadió una cita"
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Added automatically after repeated 404s or probes of paths like /wp-login.php. It expires by itself; Remove it to lift it sooner."
+msgstr "Añadido automáticamente tras repetidos errores 404 o intentos de acceso a rutas como /wp-login.php. Caduca por sí solo; elimínelo para levantarlo antes."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Added to %{types} only — the next content type refused it."
@@ -2434,6 +2439,11 @@ msgstr "Añadido a la copia de trabajo — publique los cambios para que sea vis
 #, elixir-autogen, elixir-format
 msgid "Address"
 msgstr "Dirección"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Address blocked automatically"
+msgstr "Dirección bloqueada automáticamente"
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format

@@ -10,7 +10,7 @@ genuinely large — but almost none of it is something you have to decide.
    production release refuses to start. There are three.
 2. **[Common (10)](#common-10)** — not required, but what a real deployment
    usually sets. A short list, with a one-line reason for each.
-3. **[Everything else](#everything-else)** — the other 155, grouped by the
+3. **[Everything else](#everything-else)** — the other 160, grouped by the
    feature they configure. Every one is optional and has a default, so you can
    skip a whole section by not using the feature it configures.
 
@@ -28,7 +28,7 @@ into whichever one holds the read.
 >
 > `PHX_SERVER`, `PORT`, `CSP_IMG_SRC`, `UNSPLASH_ACCESS_KEY`, `BREACHED_PASSWORD_CHECK`, `CORS_ORIGINS`,
 > `KILN_READING_TIME_WPM`, `VISUAL_EDITING_ENABLED`, the `KILN_API_CACHE*` and
-> `KILN_CDN_PURGE_*` groups, `KILN_LINK_CHECK_CRON` /
+> `KILN_CDN_PURGE_*` and `KILN_SCANNER_BLOCKING*` groups, `KILN_LINK_CHECK_CRON` /
 > `KILN_LINK_CHECK_USER_AGENT`, `KILN_TASK_DIGEST_CRON`,
 > `KILN_OBAN_RESCUE_AFTER_MINUTES`,
 > `KILN_OCCURRENCE_SWEEP_CRON` / `KILN_OCCURRENCE_BACKFILL_ON_BOOT`,
@@ -174,6 +174,25 @@ request carrying a credential is `private, no-store` (see
 | `KILN_CDN_PURGE_TOKEN_HEADER` | `authorization` | Header the token goes in. `authorization` sends `Bearer <token>` (Cloudflare API tokens); any other name sends the bare token in that header, e.g. `fastly-key` for Fastly. | [`config/runtime/delivery.exs:82`](../config/runtime/delivery.exs#L82) |
 | `KILN_API_REJECT_INVALID_BEARER` | `true` | When on (the default), an `Authorization: Bearer …` header whose token does not verify (a garbled, expired or foreign JWT) is answered `401` in the standard error envelope (`invalid_token`, with `WWW-Authenticate: Bearer error="invalid_token"`) on `/api/json`, `/gql` and the other `/api` routes. Off, the request is quietly served as anonymous, so a client with a broken credential reads public content and takes it for success (#2161); that was the default for the one release that introduced the flag. A request with **no** `Authorization` header, or another scheme, stays anonymous either way; a bad `Bearer kiln_…` API key is always `401`. **On by default since the release after it shipped; `false` is an escape hatch kept for one more release, then removed** (see [ADR 0012](decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)), so use it only while you fix the client sending the stale token. Parsed by the shared [on/off rules](#boolean-variables). See [`KilnCMSWeb.Plugs.ApiKeyAuth`](../lib/kiln_cms_web/plugs/api_key_auth.ex). | [`config/runtime/delivery.exs:91`](../config/runtime/delivery.exs#L91) |
 
+### smart 404 blocking (#2253)
+
+Off by default. With it on, an address that racks up delivery 404s, or probes
+bait paths such as `/wp-login.php`, is blocked for a while. What counts, what
+never does and how to undo a block: [ip-blocking.md](ip-blocking.md#block-scanners-automatically).
+A bad value (not a recognised on/off spelling, or an integer outside the range)
+warns on stderr and keeps the default. The bait path list and the cap on
+automatic rules (300 per site) are code config under
+`config :kiln_cms, :scanner_blocking`, not environment variables. Read in every
+environment.
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_SCANNER_BLOCKING` | `false` | Turns the guard on. Parsed by the shared [on/off rules](#boolean-variables). | [`config/runtime/delivery.exs:102`](../config/runtime/delivery.exs#L102) |
+| `KILN_SCANNER_BLOCKING_THRESHOLD` | `60` | Delivery 404s from one address (an IPv6 `/64`) allowed per window; the next one blocks it. Integer, 5 to 100000. | [`config/runtime/delivery.exs:106`](../config/runtime/delivery.exs#L106) |
+| `KILN_SCANNER_BLOCKING_BAIT_THRESHOLD` | `5` | Bait-path 404s allowed per window before the block. Integer, 1 to 1000. | [`config/runtime/delivery.exs:110`](../config/runtime/delivery.exs#L110) |
+| `KILN_SCANNER_BLOCKING_WINDOW_MINUTES` | `10` | Length of the fixed, clock-aligned counting window, in minutes. Integer, 1 to 1440. | [`config/runtime/delivery.exs:114`](../config/runtime/delivery.exs#L114) |
+| `KILN_SCANNER_BLOCKING_BLOCK_MINUTES` | `60` | How long an automatic block lasts, in minutes; it also bounds how soon the same address can be blocked again. Integer, 1 to 10080. | [`config/runtime/delivery.exs:118`](../config/runtime/delivery.exs#L118) |
+
 ### bot budgets (#2243)
 
 Public delivery is rate-limited per address at the `:delivery` limit (300 a
@@ -186,10 +205,10 @@ in every environment except `:test`. See [bot-budgets.md](bot-budgets.md).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT` | `100` | Search engines (`Googlebot`, `bingbot`, `DuckDuckBot`, …): 100 is the browser limit, the same as before #2243. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:110`](../config/runtime/delivery.exs#L110) |
-| `KILN_BOT_BUDGET_AI_CRAWLER_PERCENT` | `100` | AI crawlers (`GPTBot`, `ClaudeBot`, `CCBot`, `PerplexityBot`, …). Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:111`](../config/runtime/delivery.exs#L111) |
-| `KILN_BOT_BUDGET_DECLARED_BOT_PERCENT` | `50` | Other bots and scripts: `curl`, `wget`, Go, Java and Python HTTP clients, headless browsers, link-preview fetchers, and any product name ending in `bot`, `crawler`, `spider` or `scraper`. 50 is 150 requests a minute. Raise it if a headless consumer of `/media/:id/stream` or `/media/:id/download` cannot send its own user agent. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:112`](../config/runtime/delivery.exs#L112) |
-| `KILN_BOT_BUDGET_EMPTY_UA_PERCENT` | `20` | Requests with no `User-Agent`, or an empty one. 20 is 60 requests a minute. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:113`](../config/runtime/delivery.exs#L113) |
+| `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT` | `100` | Search engines (`Googlebot`, `bingbot`, `DuckDuckBot`, …): 100 is the browser limit, the same as before #2243. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:137`](../config/runtime/delivery.exs#L137) |
+| `KILN_BOT_BUDGET_AI_CRAWLER_PERCENT` | `100` | AI crawlers (`GPTBot`, `ClaudeBot`, `CCBot`, `PerplexityBot`, …). Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:138`](../config/runtime/delivery.exs#L138) |
+| `KILN_BOT_BUDGET_DECLARED_BOT_PERCENT` | `50` | Other bots and scripts: `curl`, `wget`, Go, Java and Python HTTP clients, headless browsers, link-preview fetchers, and any product name ending in `bot`, `crawler`, `spider` or `scraper`. 50 is 150 requests a minute. Raise it if a headless consumer of `/media/:id/stream` or `/media/:id/download` cannot send its own user agent. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:139`](../config/runtime/delivery.exs#L139) |
+| `KILN_BOT_BUDGET_EMPTY_UA_PERCENT` | `20` | Requests with no `User-Agent`, or an empty one. 20 is 60 requests a minute. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:140`](../config/runtime/delivery.exs#L140) |
 
 
 ### multi-tenancy (#336)

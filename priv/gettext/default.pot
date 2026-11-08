@@ -2415,6 +2415,11 @@ msgstr ""
 msgid "Added a quote"
 msgstr ""
 
+#: lib/kiln_cms_web/live/ip_block_live.ex
+#, elixir-autogen, elixir-format
+msgid "Added automatically after repeated 404s or probes of paths like /wp-login.php. It expires by itself; Remove it to lift it sooner."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Added to %{types} only — the next content type refused it."
@@ -2433,6 +2438,11 @@ msgstr ""
 #: lib/kiln_cms/cms/field_types/link.ex
 #, elixir-autogen, elixir-format
 msgid "Address"
+msgstr ""
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Address blocked automatically"
 msgstr ""
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
