@@ -10,7 +10,7 @@ genuinely large — but almost none of it is something you have to decide.
    production release refuses to start. There are three.
 2. **[Common (10)](#common-10)** — not required, but what a real deployment
    usually sets. A short list, with a one-line reason for each.
-3. **[Everything else](#everything-else)** — the other 151, grouped by the
+3. **[Everything else](#everything-else)** — the other 155, grouped by the
    feature they configure. Every one is optional and has a default, so you can
    skip a whole section by not using the feature it configures.
 
@@ -42,7 +42,7 @@ into whichever one holds the read.
 > `BREACHED_PASSWORD_POLICY`, `KILN_ENV_LABEL` / `KILN_ENV_COLOR`, `EMBED_ORIGINS` / `EMBED_ORIGINS_LOCKED`,
 > `KILN_AUDIT_ANCHORS_ENABLED`, `KILN_AUDIT_ANCHOR_EVERY_WRITE`, the
 > `KILN_GOVERNANCE_WITNESS*` group (plus `KILN_GOVERNANCE_CHECKPOINT_CRON`), and
-> the `KILN_PROVENANCE_*` group, and the `KILN_DEMO_*` group. `MIX_TEST_PARTITION` and `KILN_STRICT_TEST`
+> the `KILN_PROVENANCE_*` group, the `KILN_DEMO_*` group, and the `KILN_BOT_BUDGET_*` group. `MIX_TEST_PARTITION` and `KILN_STRICT_TEST`
 > are the reverse — test-only. `KILN_ML` is neither: it is read at **build** time, by
 > `mix.exs` itself.
 
@@ -173,6 +173,24 @@ request carrying a credential is `private, no-store` (see
 | `KILN_CDN_PURGE_TOKEN` | unset | Credential for the purge request. Resolved at call time through the `KilnCMS.Keys` env provider; never logged. | [`config/runtime/delivery.exs:79`](../config/runtime/delivery.exs#L79) |
 | `KILN_CDN_PURGE_TOKEN_HEADER` | `authorization` | Header the token goes in. `authorization` sends `Bearer <token>` (Cloudflare API tokens); any other name sends the bare token in that header, e.g. `fastly-key` for Fastly. | [`config/runtime/delivery.exs:82`](../config/runtime/delivery.exs#L82) |
 | `KILN_API_REJECT_INVALID_BEARER` | `true` | When on (the default), an `Authorization: Bearer …` header whose token does not verify (a garbled, expired or foreign JWT) is answered `401` in the standard error envelope (`invalid_token`, with `WWW-Authenticate: Bearer error="invalid_token"`) on `/api/json`, `/gql` and the other `/api` routes. Off, the request is quietly served as anonymous, so a client with a broken credential reads public content and takes it for success (#2161); that was the default for the one release that introduced the flag. A request with **no** `Authorization` header, or another scheme, stays anonymous either way; a bad `Bearer kiln_…` API key is always `401`. **On by default since the release after it shipped; `false` is an escape hatch kept for one more release, then removed** (see [ADR 0012](decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)), so use it only while you fix the client sending the stale token. Parsed by the shared [on/off rules](#boolean-variables). See [`KilnCMSWeb.Plugs.ApiKeyAuth`](../lib/kiln_cms_web/plugs/api_key_auth.ex). | [`config/runtime/delivery.exs:91`](../config/runtime/delivery.exs#L91) |
+
+### bot budgets (#2243)
+
+Public delivery is rate-limited per address at the `:delivery` limit (300 a
+minute). A request whose `User-Agent` says it is a search engine, an AI crawler,
+another bot or script, or nothing at all is refused at its own **percentage** of
+that limit, on the same per-address count; browsers always get 100%. These set
+the percentage for each class and are the most any site may set. The user agent
+is spoofable, so a higher value is higher for anyone who claims the class. Read
+in every environment except `:test`. See [bot-budgets.md](bot-budgets.md).
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT` | `100` | Search engines (`Googlebot`, `bingbot`, `DuckDuckBot`, …): 100 is the browser limit, the same as before #2243. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:110`](../config/runtime/delivery.exs#L110) |
+| `KILN_BOT_BUDGET_AI_CRAWLER_PERCENT` | `100` | AI crawlers (`GPTBot`, `ClaudeBot`, `CCBot`, `PerplexityBot`, …). Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:111`](../config/runtime/delivery.exs#L111) |
+| `KILN_BOT_BUDGET_DECLARED_BOT_PERCENT` | `50` | Other bots and scripts: `curl`, `wget`, Go, Java and Python HTTP clients, headless browsers, link-preview fetchers, and any product name ending in `bot`, `crawler`, `spider` or `scraper`. 50 is 150 requests a minute. Raise it if a headless consumer of `/media/:id/stream` or `/media/:id/download` cannot send its own user agent. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:112`](../config/runtime/delivery.exs#L112) |
+| `KILN_BOT_BUDGET_EMPTY_UA_PERCENT` | `20` | Requests with no `User-Agent`, or an empty one. 20 is 60 requests a minute. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Organization → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:113`](../config/runtime/delivery.exs#L113) |
+
 
 ### multi-tenancy (#336)
 

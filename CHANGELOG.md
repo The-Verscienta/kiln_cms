@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (new table `site_bot_budgets`). Scripts (`curl`, Go, Java, Python) now get 150 public-page requests a minute per address, not 300, and requests with no user agent 60; one count is shared per address.** Rolling the pin back is safe.
+  ([#2470](https://github.com/The-Verscienta/kiln_cms/pull/2470) · [long form](docs/changelog/unreleased.md#bot-budgets-upgrade))
+
 - **Run `mix ash.migrate` (new table `invitations`). A new daily job prunes invitations 30 days past expiry; no setting.** Rolling the pin back is safe; pending invitation links stop working until you upgrade again.
   ([#2448](https://github.com/The-Verscienta/kiln_cms/pull/2448) · [long form](docs/changelog/unreleased.md#team-invitations-upgrade))
 
@@ -115,6 +118,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
 
 ### Added
+
+- **Public delivery throttles by user-agent class: scripts and clients with no user agent are refused sooner than browsers; admins can lower each class at Organization → Bot budgets.**
+  Operators set the ceilings with `KILN_BOT_BUDGET_*_PERCENT`; a site may only lower them. Cost control, not security. Guide: [docs/bot-budgets.md](docs/bot-budgets.md).
+  ([#2470](https://github.com/The-Verscienta/kiln_cms/pull/2470) · [long form](docs/changelog/unreleased.md#bot-budgets))
 
 - **Platform admins can invite someone with no account to a site by email: Team → Add or invite, with Pending invitations to resend or revoke.**
   Links last 7 days and work on invite-only sites; an unconfirmed account is now invited, not added. Guide: [docs/account-administration.md](docs/account-administration.md#invite-someone-to-a-site).

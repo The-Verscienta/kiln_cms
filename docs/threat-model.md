@@ -127,7 +127,11 @@ build if a resource is ever registered without that authorizer.
   buckets; limits in `lib/kiln_cms_web/rate_limit.ex`. The credential buckets
   (`:auth`, `:register`, `:unlock`) and every `AccountThrottle` budget count in
   Postgres (`KilnCMS.Accounts.ThrottleStore`, #1619), so they hold across nodes
-  and restarts; the rest are flood ceilings counted per node in ETS. **The credential forms
+  and restarts; the rest are flood ceilings counted per node in ETS. Inside
+  `:delivery`, a request whose `User-Agent` claims to be a search engine, an AI
+  crawler, another bot or nothing at all is refused at its own share of the same
+  per-address count (#2243, see [Bot budgets](#bot-budgets)); browsers are
+  unchanged. **The credential forms
   submit where no plug can reach them:** each is an AshAuthentication
   LiveComponent calling `AshPhoenix.Form.submit/2` in-process, so the
   credentials arrive as a `/live` event and pass no pipeline. (`auth_routes`
@@ -386,7 +390,11 @@ build if a resource is ever registered without that authorizer.
   (`public, max-age=60`) would otherwise let a shared cache serve one member's
   gated render to every anonymous visitor.
 - **Scraping / enumeration** — content is public and the sitemap is intentional.
-  The `:delivery` bucket caps volume; front with a CDN to absorb load.
+  The `:delivery` bucket caps volume per address, and since #2243 a client that
+  declares itself a script or bot, or sends no user agent, is capped lower than a
+  browser ([bot-budgets.md](bot-budgets.md)). *Residual:* the class comes from the
+  `User-Agent` header, so a scraper that claims to be a browser gets a browser's
+  ceiling; this is cost control, not a defence. Front with a CDN to absorb load.
 
 ### Image transforms (`/media/:id/t/:ops`)
 - **Resource exhaustion** — every distinct parameter set is a decode, a resize
@@ -635,6 +643,35 @@ An admin (#2242) can refuse an address or range per site from `/editor/ip-blocks
   carries the surface only.
 - **Limits.** Matching is per source address: it does not stop a distributed
   source, and a visitor can change address. Expired rules are not swept.
+
+### Bot budgets
+
+Each `:delivery` request is put in a class by its `User-Agent` (#2243,
+`KilnCMS.BotClass`): browser, search engine, AI crawler, other bot, or no user
+agent. Each class is refused at its own percentage of the `:delivery` limit;
+see [bot-budgets.md](bot-budgets.md).
+
+- **What it stops.** Volume from clients that say what they are: a runaway
+  `curl` loop, a crawler with no user agent, an over-eager SEO tool. Defaults
+  are 50% of the browser limit for other bots and 20% for no user agent.
+- **What it does not.** Anything that lies. The user agent is spoofable, so a
+  class grants nothing: search engines and AI crawlers default to 100%, the same
+  as a browser, precisely so that typing "Googlebot" earns no more than a
+  browser does. Raising either class by environment raises it for every spoofer
+  too. Verifying a crawler by reverse DNS is #2254.
+- **Switching user agents gains nothing.** Every class charges the one
+  per-address counter, so an address never gets past the highest single class
+  ceiling. The cost of sharing is that a browser-heavy shared address (an office
+  NAT) uses up a script's smaller ceiling.
+- **A site cannot widen it.** A site admin may lower a class but not raise it
+  above the operator's value: refused on write, clamped on read
+  ([ADR 0018](decisions/0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md)).
+  An unreadable site row is answered with the operator's values, never looser.
+- **Never classified.** `:probe` routes (`robots.txt`, `llms.txt`, sitemaps,
+  feeds, `/up`, `/ready`) and `/live`, so crawlers can always read the files
+  that tell them what to do and probes are never throttled by class.
+- **No user agent, address or org in the metric.** The counter
+  `kiln_cms.delivery.client_class.count` carries only `class` and `result`.
 
 ### Public forms
 - **CSRF** — deliberately absent: forms are meant to be posted from third-party

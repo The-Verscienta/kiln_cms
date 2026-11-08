@@ -578,6 +578,10 @@ defmodule KilnCMSWeb.Router do
       # The site's IP/CIDR block list (#2242). Admin-only by the tier gate AND the
       # resource policy; enforcement is `KilnCMSWeb.Plugs.IpBlock` and the sockets.
       live "/editor/ip-blocks", IpBlockLive, :index
+      # Per-class delivery ceilings by user agent (#2243). Admin-only by the tier
+      # gate AND the resource policy; enforcement is `KilnCMSWeb.Plugs.RateLimit`
+      # on the `:delivery` pipeline.
+      live "/editor/bot-budgets", BotBudgetsLive, :index
       # The site's security audit log (#2241): sign-ins, lockouts, second factors,
       # roles, API keys. Admin-only by the tier gate AND the `Security.Event` policy;
       # the CSV download is the controller route below.

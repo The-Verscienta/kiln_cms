@@ -7,6 +7,40 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="bot-budgets-upgrade"></a>
+
+- **Run `mix ash.migrate` for bot budgets (one new table, `site_bot_budgets`),
+  and check scripts that fetch public pages: `curl`, Go, Java and Python clients
+  now get 150 requests a minute per address instead of 300, and requests with no
+  user agent get 60 (#2243).** Browsers, search engines and AI crawlers keep
+  300.
+  - **Migration.** `20261108120718_add_site_bot_budgets` only creates a table, one
+    row per site, written when an admin first saves `/editor/bot-budgets`. It is
+    expand-only and changes no existing data. Rolling the pin back is safe: the
+    previous release ignores the table, and every client is back to 300 a minute.
+    Overlays that restate `:ash_domains` need no change: the resource is in
+    `KilnCMS.CMS`.
+  - **Who gets less.** On every `:delivery` route (public pages, `/search`,
+    `/forms/:slug/embed`, and `/media/:id/download` and `/media/:id/stream`), a
+    `User-Agent` that names a scripting tool, a headless browser, a link-preview
+    fetcher or a product ending in `bot`, `crawler`, `spider` or `scraper` is
+    refused past 50% of the `:delivery` limit, and one that is missing or empty
+    past 20%. The full list is in [bot-budgets.md](../bot-budgets.md).
+  - **One count per address.** Every class spends the same per-address counter,
+    so browsers and scripts behind one address share it. An office uptime check
+    sent by `curl` is refused once the office's browsers pass 150 requests in a
+    minute. Point load-balancer and uptime checks at `/up`, which is never
+    charged by class.
+  - **Headless media consumers.** A server or app that fetches
+    `/media/:id/stream` or `/media/:id/download` with a library's default user
+    agent (`python-requests`, `Go-http-client`, `curl`) now gets 150 a minute.
+    Send a user agent of your own, or raise the class with
+    `KILN_BOT_BUDGET_DECLARED_BOT_PERCENT`. Native mobile HTTP stacks
+    (`okhttp`, `CFNetwork`, `Dalvik`) and media players count as browsers.
+  - **Benchmarks.** `Application.put_env/3` of the whole `KilnCMSWeb.RateLimit`
+    config drops the `delivery_classes` key the new variables write; see
+    [performance.md](../performance.md#running-a-basic-load-check).
+
 <a id="team-invitations-upgrade"></a>
 
 - **Run `mix ash.migrate` for site invitations: one new table, `invitations`,
@@ -308,6 +342,55 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="bot-budgets"></a>
+
+- **Public delivery throttles requests by what their user agent says they are:
+  scripts and clients with no user agent are refused sooner than browsers, and a
+  site admin can lower each class at Organization → Bot budgets (#2243).**
+  The single per-address `:delivery` rate limit (300 a minute) used to treat a
+  browser, Googlebot, a `curl` loop and a request with no user agent alike.
+  - **Five classes.** `KilnCMS.BotClass` puts each `:delivery` request in one
+    of `browser`, `search_engine`, `ai_crawler`, `declared_bot` or `empty` from
+    its `User-Agent`, by curated name lists. An unknown non-empty user agent is a
+    browser: media players, native app HTTP stacks and old browsers send strings
+    no list keeps up with, and they are usually a person.
+  - **One counter, a ceiling per class.** Every class charges the same
+    `delivery:<ip>` counter, each refused at its own percentage of the
+    `:delivery` limit: search engines and AI crawlers 100%, declared bots 50%,
+    no user agent 20%. Browsers are unchanged. Switching user agents earns
+    nothing, because the count is shared. A refusal is the same `429` as before
+    and does not name the class.
+  - **Who sets it.** Built-in defaults, then the operator
+    (`KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT`, `_AI_CRAWLER_`, `_DECLARED_BOT_`,
+    `_EMPTY_UA_`, each 1-1000), then the site, which can only lower a class.
+    A site value above the operator's is refused when it is changed and clamped
+    when it is read, following the `EmbedCeiling` precedent (#1133) rather than
+    the password policy's "site wins": the operator owns capacity. See
+    [ADR 0018](../decisions/0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md).
+    There is no 0 and no unlimited: to keep a crawler out use robots.txt or
+    Blocked addresses (#2242).
+  - **The console page.** `/editor/bot-budgets`, admin only, under Organization
+    next to Blocked addresses. Each class shows the percentage in force, what it
+    comes to in requests a minute, where it comes from, and the most the site may
+    set. Saves and resets are recorded in the security log as
+    `org_setting_changed`. The setting is not on JSON:API, GraphQL or MCP.
+  - **Not security.** The user agent is spoofable, so this is cost control: a
+    higher ceiling for a class is a higher ceiling for anyone who claims it. That
+    is why search engines and AI crawlers default to 100%, not more. Higher
+    limits for verified crawlers belong to reverse-DNS verification (#2254).
+  - **Never classified.** robots.txt, llms.txt, sitemaps, feeds and the health
+    probes (`/up`, `/ready`, `/live`) are not on `:delivery`.
+  - **Telemetry.** `[:kiln_cms, :delivery, :client_class]` with `class` and
+    `result`, exported as `kiln_cms_delivery_client_class_count{class,result}`;
+    no user agent, address or org. Panel:
+    `sum(rate(kiln_cms_delivery_client_class_count[5m])) by (class, result)`.
+  - **"Configurable allowlist"** from the issue is delivered as configurable
+    budgets: which names belong to each class is curated in code, with a test
+    row per name. Known gaps: some browser-shaped crawlers not on the lists
+    (`GoogleOther`, `AdsBot-Google`) count as browsers, and `SeznamBot` and
+    `Qwantbot` count as declared bots.
+  - Guide: [bot-budgets.md](../bot-budgets.md).
 
 <a id="team-invitations"></a>
 

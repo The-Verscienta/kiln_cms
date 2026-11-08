@@ -694,6 +694,25 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("Refuse requests from an IP address or range."),
             keywords: ["ip", "block", "ban", "cidr", "firewall", "deny", "abuse"]
           },
+          # Beside Blocked addresses: both decide what a client may cost the site,
+          # one by address, this by what the client says it is (#2243).
+          %{
+            key: :bot_budgets,
+            label: gettext("Bot budgets"),
+            path: ~p"/editor/bot-budgets",
+            icon: "hero-bug-ant",
+            description: gettext("How many requests crawlers, bots and scripts may make."),
+            keywords: [
+              "bot",
+              "crawler",
+              "scraper",
+              "user agent",
+              "googlebot",
+              "gptbot",
+              "rate limit",
+              "throttle"
+            ]
+          },
           # Beside the other security screens: who did what, from where (#2241).
           %{
             key: :security_log,

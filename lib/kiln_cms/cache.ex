@@ -687,6 +687,36 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for a site's stored bot budgets (#2243, `KilnCMS.BotBudgets`):
+  the `SiteBotBudgets` columns as a map, before the operator clamp.
+  """
+  @spec bot_budgets_key(Ash.UUID.t()) :: String.t()
+  def bot_budgets_key(org_id), do: "bot_budgets:#{org_id}"
+
+  @doc """
+  Drop a site's cached bot budgets on every node after a `SiteBotBudgets`
+  write (`Changes.BustBotBudgets`). Cluster-wide like `bust_branding/1`: the
+  delivery limiter runs on every node, and one that kept the old values would
+  keep throttling a class by them until the TTL.
+  """
+  @spec bust_bot_budgets(Ash.UUID.t()) :: :ok
+  def bust_bot_budgets(org_id) do
+    if enabled?(),
+      do: ClusterBust.broadcast([bot_budgets_key(org_id), bot_budgets_recent_key(org_id)])
+
+    :ok
+  end
+
+  @doc """
+  Cache key for the short-lived answer in front of `bot_budgets_key/1`
+  (`KilnCMS.BotBudgets`): the stored values, or the mark that the row could not
+  be read, so an outage costs one read per org per interval rather than one
+  per request. Busted with `bust_bot_budgets/1`.
+  """
+  @spec bot_budgets_recent_key(Ash.UUID.t()) :: String.t()
+  def bot_budgets_recent_key(org_id), do: "bot_budgets:recent:#{org_id}"
+
+  @doc """
   Cache key for a generated feed (#486).
 
   `type` is the content-type name for a per-type feed (`/blog/feed.xml`) or

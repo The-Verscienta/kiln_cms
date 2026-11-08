@@ -376,6 +376,10 @@ still served, and still appears in the sync/change feed, the fired artifacts,
 the static export, JSON:API and GraphQL, each carrying the flags so a separate
 frontend can honour them.
 
+How fast a crawler may fetch pages is a separate setting: search engines get
+the browser rate limit by default, and a site admin can lower it at
+**Organization → Bot budgets**; see [bot-budgets.md](bot-budgets.md).
+
 The flags are part of the document's working copy: while a published document
 has a pending working copy, changing them takes effect on the live page when
 the working copy is published, like any other field.

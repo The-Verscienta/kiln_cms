@@ -4,16 +4,50 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
 
   API pipelines get the JSON error shape; browser pipelines (sign-in, public
   delivery pages) get a small HTML page instead of raw JSON (audit U-M7).
+
+  ## `:delivery` is charged per client class (#2243)
+
+  The request's `User-Agent` is classified (`KilnCMS.BotClass`) and the one
+  per-address `:delivery` counter is charged against that class's ceiling
+  (`KilnCMS.BotBudgets`). The operator's ceiling is charged first, without a
+  database read, so a request it refuses never reaches the site's row; only an
+  allowed non-browser request looks up the site's (cached) lower ceiling and is
+  refused if the count is past it. The refusal is this plug's ordinary 429 and
+  never names the class. Every `:delivery` check emits
+  `[:kiln_cms, :delivery, :client_class]` with `%{class, result}` and nothing
+  else: no user agent, address or org.
+
+  Classification happens only here, on the `:delivery` pipeline. robots.txt,
+  llms.txt, sitemaps, feeds and the health probes are on `:probe` and never
+  classified.
   """
   import Plug.Conn
 
   use Gettext, backend: KilnCMSWeb.Gettext
 
   alias KilnCMS.Accounts.AccountThrottle
+  alias KilnCMS.BotBudgets
+  alias KilnCMS.BotClass
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.RateLimit
 
   def init(bucket) when is_atom(bucket), do: bucket
+
+  def call(conn, :delivery) do
+    class = client_class(conn)
+
+    case RateLimit.check_limit(:delivery, remote_ip(conn), BotBudgets.operator_limit(class)) do
+      {:deny, retry_after_ms} ->
+        conn |> record(class, :throttled) |> deny(retry_after_ms)
+
+      {:allow, count} ->
+        if within_site_ceiling?(conn, class, count) do
+          record(conn, class, :allowed)
+        else
+          conn |> record(class, :throttled) |> deny(RateLimit.window_remaining_ms(:delivery))
+        end
+    end
+  end
 
   def call(conn, bucket) do
     case RateLimit.check(bucket, remote_ip(conn)) do
@@ -103,6 +137,31 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
       </body>
     </html>
     """
+  end
+
+  # The one place a request becomes a client class. A verified-crawler check
+  # (#2254) would refine the answer here, and nowhere else.
+  defp client_class(conn) do
+    case get_req_header(conn, "user-agent") do
+      [user_agent | _rest] -> BotClass.classify(user_agent)
+      [] -> :empty
+    end
+  end
+
+  # A browser's ceiling IS the `:delivery` limit, which the charge already
+  # applied; a site may only lower the other classes.
+  defp within_site_ceiling?(_conn, :browser, _count), do: true
+
+  defp within_site_ceiling?(conn, class, count),
+    do: count <= BotBudgets.limit(conn.assigns[:current_org], class)
+
+  defp record(conn, class, result) do
+    :telemetry.execute([:kiln_cms, :delivery, :client_class], %{count: 1}, %{
+      class: class,
+      result: result
+    })
+
+    conn
   end
 
   # Through `RateLimit.client_key/1` rather than formatted here, so this and the

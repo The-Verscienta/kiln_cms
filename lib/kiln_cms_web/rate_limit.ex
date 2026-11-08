@@ -53,7 +53,11 @@ defmodule KilnCMSWeb.RateLimit do
     # registering is rarer and more expensive than attempting a sign-in: a
     # bcrypt hash and a confirmation mail per request.
     register: {5, :timer.minutes(1)},
-    # Public HTML delivery — generous, just a flood/abuse ceiling per IP.
+    # Public HTML delivery — generous, just a flood/abuse ceiling per IP. This is
+    # the BROWSER ceiling; other client classes (#2243, `KilnCMS.BotClass`) are
+    # refused at a percentage of it (`KilnCMS.BotBudgets`), on the same
+    # per-address counter, so switching user agents never earns more than the
+    # highest single class ceiling.
     delivery: {300, :timer.minutes(1)},
     # Image transform requests (`/media/:id/t/…`), cached or not. One page can
     # hold dozens of images, each its own request, so this sits well above
@@ -232,6 +236,38 @@ defmodule KilnCMSWeb.RateLimit do
       {:allow, _count} -> :allow
       {:deny, retry_after} -> {:deny, retry_after}
     end
+  end
+
+  @doc """
+  Charges `key` once on `bucket`'s counter, refused above `limit` instead of the
+  bucket's own: `{:allow, count}` with the count after this charge, or
+  `{:deny, retry_after_ms}`.
+
+  For the per-class ceilings inside `:delivery` (#2243): every class charges the
+  one `"delivery:<ip>"` counter, each against its own ceiling, and the plug
+  compares the returned count with a site's lower ceiling. The bucket's window
+  is used as-is (never a per-class window; Hammer keys a window by its index,
+  not its length). Not for the credential buckets, whose limit is the
+  guessing bound and is never a caller's to choose.
+  """
+  @spec check_limit(atom(), String.t(), pos_integer()) ::
+          {:allow, pos_integer()} | {:deny, non_neg_integer()}
+  def check_limit(bucket, key, limit)
+      when is_atom(bucket) and bucket not in @shared_buckets and is_binary(key) and
+             is_integer(limit) and limit > 0 do
+    {_limit, scale} = Map.fetch!(limits(), bucket)
+    hit(bucket_key(bucket, key), scale, limit, 1)
+  end
+
+  @doc """
+  Milliseconds until `bucket`'s current fixed window closes: the retry-after of
+  a refusal decided after the charge (a site's ceiling under `check_limit/3`'s).
+  Hammer's windows are clock-aligned, so this is the same for every key.
+  """
+  @spec window_remaining_ms(atom()) :: pos_integer()
+  def window_remaining_ms(bucket) when is_atom(bucket) do
+    {_limit, scale} = Map.fetch!(limits(), bucket)
+    scale - rem(System.system_time(:millisecond), scale)
   end
 
   @doc """

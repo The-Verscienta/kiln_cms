@@ -65,6 +65,8 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_DEMO_RESET KILN_DEMO_RESET_CRON KILN_DEMO_GOLDEN_PATH
             KILN_FEDERATION_ENABLED
             BREACHED_PASSWORD_CHECK BREACHED_PASSWORD_POLICY
+            KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT KILN_BOT_BUDGET_AI_CRAWLER_PERCENT
+            KILN_BOT_BUDGET_DECLARED_BOT_PERCENT KILN_BOT_BUDGET_EMPTY_UA_PERCENT
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
             AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
             KILN_IMAGE_TRANSFORM_KEY KILN_IMAGE_TRANSFORM_UNSIGNED
@@ -1419,6 +1421,54 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
     test "the policy is not read in the test env, so an exported value cannot change the suite" do
       assert breach_config(%{"BREACHED_PASSWORD_POLICY" => "block"}, :test)[:default_policy] ==
                nil
+    end
+  end
+
+  describe "KILN_BOT_BUDGET_*_PERCENT (#2243)" do
+    @bot_budget_vars %{
+      search_engine: "KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT",
+      ai_crawler: "KILN_BOT_BUDGET_AI_CRAWLER_PERCENT",
+      declared_bot: "KILN_BOT_BUDGET_DECLARED_BOT_PERCENT",
+      empty: "KILN_BOT_BUDGET_EMPTY_UA_PERCENT"
+    }
+
+    defp bot_budgets(vars, env \\ :prod),
+      do: vars |> eval(env) |> get_in([:kiln_cms, KilnCMSWeb.RateLimit, :delivery_classes])
+
+    test "each variable sets its class, and only the ones set are written" do
+      for {class, var} <- @bot_budget_vars do
+        assert bot_budgets(%{var => " 400 "}) == %{class => 400}
+      end
+
+      assert bot_budgets(%{
+               "KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT" => "1",
+               "KILN_BOT_BUDGET_EMPTY_UA_PERCENT" => "1000"
+             }) == %{search_engine: 1, empty: 1000}
+    end
+
+    test "unset or blank writes nothing, so the built-in defaults stand" do
+      assert bot_budgets(%{}) == nil
+      assert bot_budgets(%{"KILN_BOT_BUDGET_EMPTY_UA_PERCENT" => "  "}) == nil
+    end
+
+    test "0, a non-number, or more than 1000 keeps the default and warns" do
+      for value <- ["0", "abc", "5000", "-5", "2.5"] do
+        {config, stderr} = eval_io(%{"KILN_BOT_BUDGET_DECLARED_BOT_PERCENT" => value}, :prod)
+
+        assert get_in(config, [:kiln_cms, KilnCMSWeb.RateLimit, :delivery_classes]) == nil,
+               "#{inspect(value)} must be refused, not clamped"
+
+        assert stderr =~ "KILN_BOT_BUDGET_DECLARED_BOT_PERCENT"
+
+        assert {"KILN_BOT_BUDGET_DECLARED_BOT_PERCENT", ^value, {:integer_in, 1, 1000}} =
+                 config
+                 |> get_in([:kiln_cms, :config_warnings])
+                 |> Enum.find(&(elem(&1, 0) == "KILN_BOT_BUDGET_DECLARED_BOT_PERCENT"))
+      end
+    end
+
+    test "nothing is written in the test env, so an exported value cannot change the suite" do
+      assert bot_budgets(%{"KILN_BOT_BUDGET_EMPTY_UA_PERCENT" => "5"}, :test) == nil
     end
   end
 end
