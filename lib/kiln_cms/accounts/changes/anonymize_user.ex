@@ -51,6 +51,8 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       :ok = KilnCMS.Billing.anonymize_actor(user.id)
       # Their name, snapshotted into other people's inboxes (#1320).
       :ok = KilnCMS.Notifications.anonymize_actor(user.id)
+      # Security audit log (#2241): events they acted in or were the target of.
+      :ok = KilnCMS.Security.anonymize_actor(user.id)
       {:ok, user}
     end)
   end

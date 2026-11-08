@@ -236,4 +236,32 @@ defmodule KilnCMSWeb.ApiKeyLiveTest do
       assert reloaded.revoked_at
     end
   end
+
+  describe "audit log (#2241)" do
+    test "minting and revoking from the console records both, in this site's log", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      lv
+      |> form("#new-api-key-form", %{name: "audited", user_id: admin.id, days: "30"})
+      |> render_submit()
+
+      org = KilnCMS.Accounts.default_org_id()
+      list = fn -> KilnCMS.Security.list_events!(actor: admin, tenant: org) end
+
+      assert [event] = Enum.filter(page(list.()), &(&1.type == :api_key_created))
+      assert event.actor_id == admin.id
+      assert event.org_id == org
+      assert event.metadata == %{"name" => "audited", "scope" => "read"}
+
+      key = hd(KilnCMS.Accounts.list_api_keys!(admin.id, actor: admin))
+      render_click(lv, "revoke", %{"id" => key.id})
+
+      assert [%{metadata: %{"name" => "audited"}}] =
+               Enum.filter(page(list.()), &(&1.type == :api_key_revoked))
+    end
+
+    defp page(%{results: results}), do: results
+    defp page(list) when is_list(list), do: list
+  end
 end

@@ -37,6 +37,7 @@ your deployment.
 | In-app notifications | `notifications` | Yes | One row per recipient (#1320): event, content title, a comment excerpt, and the acting user's display name (`actor_name`) plus `actor_id`. Readable only by the recipient — no admin bypass. Deleted with the recipient's account row; `actor_name`/`actor_id` nulled when the *actor* is erased. No retention purge yet. |
 | Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry; for a session, browser and OS family and last use. See [Auth tokens](#auth-token-retention-218). |
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
+| Security log | `security_events` | Yes | Admin-only audit log (#2241): the acting user's id and an **email snapshot** (known accounts only), the target, the **raw IP address** and **user agent** of the request, and a short allowlisted metadata map with no secrets. Kept 365 days by default (per-site setting, `0` keeps forever; then raw IPs are kept indefinitely). Scrubbed on erasure, purged on retention and by the staging scrub. See [Security log](security-events.md). |
 | Recorded search queries | `search_queries` | Possibly | Query text only — **no** actor/IP. See *Search query retention (#213) + disclosure (#220)* below. |
 | Consumer audiences | `users.audiences`, `org_memberships.audiences` | No | Which gated content a reader may see. Granted by an admin or by an active paid membership. Cleared on erasure. |
 | Paid memberships | `billing_memberships` | Pseudonymous | Status, period end, and the payment provider's customer/subscription ids. See [Paid memberships](memberships.md). |
@@ -145,6 +146,16 @@ the limit is a capacity choice rather than a privacy one, and 400 days is the
 smallest window in which year-over-year comparisons always resolve. The all-time
 `content_views` counter is never purged, so totals stay correct as buckets age
 out — which is also why the two will not sum to the same number.
+
+### Security log retention (#2241)
+
+The security log (`security_events`) is pruned daily by
+`KilnCMS.Security.PruneWorker` (`20 3 * * *`; `KILN_SECURITY_LOG_PRUNE_CRON`,
+`false` disables). The window is per site: 365 days by default, set by an admin on
+`/editor/security-log`, and `0` keeps events forever. It holds raw IP addresses
+and user agents, so with `0` (or the cron off) they are kept until the person is
+erased. It is not one of the AshOban triggers in the table above. The staging
+scrub deletes the whole table from a clone. See [Security log](security-events.md).
 
 ### Auth token retention (#218)
 
@@ -269,6 +280,13 @@ It:
    every site. The name was copied into each recipient's inbox when the event
    happened, so scrubbing `users.name` alone left it there. The rows stay and
    render a neutral "An editor".
+
+10. **Scrubs the security log** (`security_events`, #2241) on every site: on
+    each event the user acted in it nulls `actor_id`, `actor_label` (the email
+    snapshot), `ip` and `user_agent`; on each event that names them as its target
+    it nulls `target_id`; and it empties `metadata` on every event it touches. The
+    event itself (type and time) stays. If any site's sweep fails, the erasure
+    raises so it can be retried. See [Security log](security-events.md#privacy-ip-addresses-erasure-and-staging).
 
 The account **row is retained** (with no personal data) so authorship links and
 referential integrity in content/version history are preserved. Membership rows

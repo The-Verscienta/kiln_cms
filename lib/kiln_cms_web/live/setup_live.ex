@@ -167,7 +167,8 @@ defmodule KilnCMSWeb.SetupLive do
     if map_size(Map.drop(attrs, ["theme"])) > 0 or attrs["theme"] != "standard" do
       case CMS.save_site_branding(attrs,
              actor: user,
-             tenant: socket.assigns.current_org
+             tenant: socket.assigns.current_org,
+             context: socket.assigns.security_context
            ) do
         {:ok, _row} ->
           :ok

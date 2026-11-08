@@ -68,7 +68,10 @@ defmodule KilnCMSWeb.ApiKeyRotationController do
   end
 
   defp rotate_as(conn, actor) do
-    case Accounts.rotate_api_key(actor: actor) do
+    case Accounts.rotate_api_key(
+           actor: actor,
+           context: KilnCMS.Security.AuthEvents.context(conn)
+         ) do
       {:ok, key} ->
         conn
         |> put_status(:created)

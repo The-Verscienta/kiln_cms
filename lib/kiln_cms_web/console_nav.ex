@@ -694,6 +694,25 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("Refuse requests from an IP address or range."),
             keywords: ["ip", "block", "ban", "cidr", "firewall", "deny", "abuse"]
           },
+          # Beside the other security screens: who did what, from where (#2241).
+          %{
+            key: :security_log,
+            label: gettext("Security log"),
+            path: ~p"/editor/security-log",
+            icon: "hero-clipboard-document-list",
+            description: gettext("Sign-ins, lockouts, roles and keys: who did what, from where."),
+            keywords: [
+              "audit",
+              "log",
+              "sign-in",
+              "login",
+              "lockout",
+              "ip",
+              "2fa",
+              "retention",
+              "events"
+            ]
+          },
           # Beside the security contact: both are how the site answers for its
           # security (#2240).
           %{

@@ -52,7 +52,8 @@ defmodule KilnCMS.CMS.SiteSsoProvider do
     accept: [:enabled, :issuer, :client_id, :label],
     save_arguments: [{:client_secret, :string, sensitive?: true}],
     save_changes: [KilnCMS.CMS.Changes.StoreSsoClientSecret],
-    read: :admin
+    read: :admin,
+    audit: :sso_config
 
   validations do
     validate present([:issuer, :client_id]), where: [attribute_equals(:enabled, true)]

@@ -34,6 +34,7 @@ defmodule KilnCMS.Staging.Scrub do
           billing_settings_purged: non_neg_integer(),
           billing_events_purged: non_neg_integer(),
           backup_runs_purged: non_neg_integer(),
+          security_events_purged: non_neg_integer(),
           memberships_scrubbed: non_neg_integer(),
           tiers_deactivated: non_neg_integer(),
           admin_provisioned: String.t() | nil
@@ -92,6 +93,10 @@ defmodule KilnCMS.Staging.Scrub do
     # carry it, and the staging host's own backups start a history of their own.
     {backup_runs_purged, _} = Repo.delete_all(KilnCMS.Backups.Run)
 
+    # The security audit log (#2241) holds raw IPs, user agents and email
+    # snapshots of the production sign-ins: personal data a clone must not carry.
+    {security_events_purged, _} = Repo.delete_all(KilnCMS.Security.Event)
+
     # Memberships are SCRUBBED, not deleted: `billing_membership_events`
     # references them, and the entitlement trail should stay referentially intact
     # (the same audit-retention decision #219 made for content history). What
@@ -136,6 +141,7 @@ defmodule KilnCMS.Staging.Scrub do
       billing_settings_purged: billing_settings_purged,
       billing_events_purged: billing_events_purged,
       backup_runs_purged: backup_runs_purged,
+      security_events_purged: security_events_purged,
       memberships_scrubbed: memberships_scrubbed,
       tiers_deactivated: tiers_deactivated,
       admin_provisioned: admin_provisioned

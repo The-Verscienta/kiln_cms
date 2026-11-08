@@ -63,7 +63,14 @@ defmodule KilnCMS.Accounts.OrgMembership do
   end
 
   actions do
-    defaults [:read, :create]
+    defaults [:read]
+
+    # Explicit so the audit event (#2241) rides the transaction: a membership is
+    # a role granted on this site.
+    create :create do
+      primary? true
+      change KilnCMS.Security.Changes.RecordRoleChange
+    end
 
     # Explicit, so removing someone from an org drops the sockets that were
     # already authorized under it (#675). A membership is the per-org tier, so
@@ -74,6 +81,9 @@ defmodule KilnCMS.Accounts.OrgMembership do
 
       change {KilnCMS.Accounts.Changes.EvictSessions,
               reason: :membership_removed, user_id: :user_id}
+
+      # Audit log (#2241), in the transaction: the role the person no longer has.
+      change KilnCMS.Security.Changes.RecordRoleChange
     end
 
     # Explicit (not a default) so the grant-shape validation — which inspects
@@ -90,6 +100,10 @@ defmodule KilnCMS.Accounts.OrgMembership do
       # narrows a live socket's grant the same way `manage_access` does (#675).
       change {KilnCMS.Accounts.Changes.EvictSessions,
               reason: :membership_changed, user_id: :user_id}
+
+      # Audit log (#2241), in the transaction: a raised or lowered role (an edit
+      # that leaves the role alone records nothing).
+      change KilnCMS.Security.Changes.RecordRoleChange
     end
 
     # Time-boxed per-site elevation (`KilnCMS.Accounts.RoleGrant`) — the
@@ -104,6 +118,9 @@ defmodule KilnCMS.Accounts.OrgMembership do
 
       change {KilnCMS.Accounts.Changes.EvictSessions,
               reason: :role_grant_changed, user_id: :user_id}
+
+      # Audit log (#2241), in the transaction: an elevation granted or revoked.
+      change KilnCMS.Security.Changes.RecordElevation
     end
 
     # The expiry sweep's write (AshOban trigger above): clears the two dead

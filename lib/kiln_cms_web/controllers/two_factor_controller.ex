@@ -54,6 +54,7 @@ defmodule KilnCMSWeb.TwoFactorController do
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Accounts.SecondFactor
+  alias KilnCMS.Security.AuthEvents
   alias KilnCMSWeb.AuthController
 
   def new(conn, _params) do
@@ -65,7 +66,7 @@ defmodule KilnCMSWeb.TwoFactorController do
 
   def create(conn, %{"code" => code}) do
     with {:ok, %{user: user, remember_me?: remember_me?} = resolved} <- pending(conn),
-         {:ok, user} <- SecondFactor.check(user, code),
+         {:ok, user} <- SecondFactor.check(user, code, context: AuthEvents.context(conn)),
          # In the `with`, not beside it, and for the headless gate's reason
          # (#743) plus one of this door's own (#742): claiming releases the
          # first-factor token `mint_and_hold/4` held, and a session established on a token

@@ -62,7 +62,10 @@ defmodule KilnCMSWeb.ApiKeyLive do
 
     attrs = %{access: access, rotatable_until: rotatable_until(params["rotate_days"], access)}
 
-    case Accounts.mint_api_key(user_id, String.trim(name), expires_at, attrs, actor: actor) do
+    case Accounts.mint_api_key(user_id, String.trim(name), expires_at, attrs,
+           actor: actor,
+           context: socket.assigns.security_context
+         ) do
       {:ok, key} ->
         {:noreply,
          socket
@@ -103,7 +106,8 @@ defmodule KilnCMSWeb.ApiKeyLive do
 
     socket =
       with {:ok, key} <- Accounts.get_api_key(id, actor: actor),
-           {:ok, _} <- Accounts.revoke_api_key(key, actor: actor) do
+           {:ok, _} <-
+             Accounts.revoke_api_key(key, actor: actor, context: socket.assigns.security_context) do
         socket |> load_keys() |> put_flash(:info, gettext("Key revoked."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't revoke that key."))
