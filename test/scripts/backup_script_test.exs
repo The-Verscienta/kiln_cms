@@ -23,7 +23,8 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
   """
   use ExUnit.Case, async: false
 
-  alias KilnCMS.Backups.{Checksum, MediaArchive}
+  alias KilnCMS.Backups.{Checksum, MediaArchive, Retention}
+  alias KilnCMS.Backups.Retention.Policy
 
   @moduletag :capture_log
 
@@ -234,7 +235,7 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
   end
 
   describe "prune" do
-    test "removes a whole old set, and keeps one whose newest member is fresh", ctx do
+    test "removes a whole old unit, and keeps a component whose newest member is fresh", ctx do
       old = "20260101-000000"
       mixed = "20260301-000000"
       fresh = "20260805-031700"
@@ -245,14 +246,16 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
 
       age!(old_files, 40)
       age!(mixed_files, 40)
-      # One member is new: the set is not old.
+      # One media member is new: the media unit is not old; its dump is (#2219).
       age!([List.last(Enum.filter(mixed_files, &String.contains?(&1, ".part")))], 1)
       age!(fresh_files, 1)
 
       assert {_out, 0} = backup(ctx, "prune")
 
+      {mixed_db, mixed_media} = Enum.split_with(mixed_files, &String.contains?(&1, "/db/"))
       assert Enum.all?(old_files, &(not File.exists?(&1)))
-      assert Enum.all?(mixed_files, &File.exists?/1)
+      assert Enum.all?(mixed_db, &(not File.exists?(&1)))
+      assert Enum.all?(mixed_media, &File.exists?/1)
       assert Enum.all?(fresh_files, &File.exists?/1)
     end
 
@@ -268,15 +271,287 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
 
     test "leaves unrelated files and partials alone", ctx do
       other = Path.join(ctx.backups, "db/notes.txt")
+      stray = Path.join(ctx.backups, "media/kiln-media-notes.txt")
       partial = Path.join(ctx.backups, "media/kiln-media-20260101-000000.part01.tar.gz.partial")
       File.write!(other, "keep")
+      File.write!(stray, "keep")
       File.write!(partial, "in flight")
-      age!([other, partial], 90)
+      age!([other, stray, partial], 90)
 
       assert {_out, 0} = backup(ctx, "prune")
       assert File.exists?(other)
+      assert File.exists?(stray)
       assert File.exists?(partial)
     end
+
+    test "the newest complete unit of each kind is kept however old", ctx do
+      older = "20260101-000000"
+      newest = "20260301-000000"
+      older_files = set_files!(ctx, older)
+      newest_files = set_files!(ctx, newest)
+      age!(older_files ++ newest_files, 400)
+
+      assert {_out, 0} = backup(ctx, "prune")
+      assert Enum.all?(older_files, &(not File.exists?(&1)))
+      assert Enum.all?(newest_files, &File.exists?/1)
+    end
+
+    test "newer parts without their sidecar are not complete and protect nothing", ctx do
+      complete = "20260101-000000"
+      orphan = "20260301-000000"
+      complete_files = set_files!(ctx, complete)
+      orphan_files = app_set!(ctx, orphan)
+      File.rm!(Path.join(ctx.backups, "media/kiln-media-#{orphan}.sha256"))
+      age!(complete_files ++ orphan_files, 400)
+
+      assert {_out, 0} = backup(ctx, "prune")
+      assert Enum.all?(complete_files, &File.exists?/1)
+      assert Enum.all?(orphan_files, &(not File.exists?(&1)))
+    end
+
+    test "a recovery point in db/ or media/ pins both components, and stays", ctx do
+      pinned_db = "20260101-000000"
+      pinned_media = "20260201-000000"
+      newest = "20260301-000000"
+      files = Enum.flat_map([pinned_db, pinned_media, newest], &set_files!(ctx, &1))
+      db_marker = Path.join(ctx.backups, "db/kiln-#{pinned_db}.keep")
+      media_marker = Path.join(ctx.backups, "media/kiln-#{pinned_media}.keep")
+      File.write!(db_marker, "")
+      File.ln_s!("/nonexistent", media_marker)
+      age!(files ++ [db_marker], 400)
+
+      assert {_out, 0} = backup(ctx, "prune")
+      assert Enum.all?(files, &File.exists?/1)
+      assert File.exists?(db_marker)
+      assert {:ok, %{type: :symlink}} = File.lstat(media_marker)
+    end
+
+    test "a .work/<stamp> or a fresh .partial keeps its unit; an old .partial doesn't", ctx do
+      [working, writing, stale, newest] =
+        ~w(20260101-000000 20260201-000000 20260301-000000 20260401-000000)
+
+      files = Map.new([working, writing, stale, newest], &{&1, set_files!(ctx, &1)})
+      age!(Enum.flat_map(Map.values(files), & &1), 400)
+      File.mkdir_p!(Path.join(ctx.backups, ".work/#{working}"))
+      fresh = Path.join(ctx.backups, "media/kiln-media-#{writing}.sha256.partial")
+      old = Path.join(ctx.backups, "media/kiln-media-#{stale}.part09.tar.gz.partial")
+      File.write!(fresh, "")
+      File.write!(old, "")
+      age!([old], 2)
+
+      assert {_out, 0} = backup(ctx, "prune")
+
+      assert Enum.all?(files[working], &File.exists?/1)
+      {writing_db, writing_media} = Enum.split_with(files[writing], &String.contains?(&1, "/db/"))
+      assert Enum.all?(writing_media, &File.exists?/1)
+      assert Enum.all?(writing_db, &(not File.exists?(&1)))
+      assert Enum.all?(files[stale], &(not File.exists?(&1)))
+      assert File.exists?(fresh)
+      assert File.exists?(old)
+    end
+
+    test "a run in flight never takes the newest-complete slot from the last finished one",
+         ctx do
+      [older, previous, current] = ~w(20260101-000000 20260201-000000 20260301-000000)
+      files = Map.new([older, previous, current], &{&1, set_files!(ctx, &1)})
+      age!(Enum.flat_map(Map.values(files), & &1), 400)
+      File.mkdir_p!(Path.join(ctx.backups, ".work/#{current}"))
+
+      assert {_out, 0} = backup(ctx, "prune")
+      assert Enum.all?(files[current], &File.exists?/1)
+      assert Enum.all?(files[previous], &File.exists?/1)
+      assert Enum.all?(files[older], &(not File.exists?(&1)))
+    end
+
+    test "a .work that is not a listable directory: nothing is pruned", ctx do
+      files = set_files!(ctx, "20260101-000000") ++ set_files!(ctx, "20260201-000000")
+      age!(files, 400)
+      File.write!(Path.join(ctx.backups, ".work"), "not a directory")
+
+      assert {out, 0} = backup(ctx, "prune")
+      assert out =~ "could not list #{ctx.backups}/.work — nothing was pruned"
+      assert Enum.all?(files, &File.exists?/1)
+    end
+
+    test "a recovery point counts from the listing, even where it can't be stat'ed", ctx do
+      pinned = "20260101-000000"
+      newest = "20260201-000000"
+      dump = dump!(ctx, pinned)
+      dump!(ctx, newest)
+      age!([dump, Path.join(ctx.backups, "db/kiln-db-#{pinned}.sha256")], 400)
+      File.write!(Path.join(ctx.backups, "media/kiln-#{pinned}.keep"), "")
+      media = Path.join(ctx.backups, "media")
+      # Readable (listable) but not searchable: names, but no stat.
+      File.chmod!(media, 0o444)
+      on_exit(fn -> File.chmod(media, 0o700) end)
+
+      if File.exists?(Path.join(media, "kiln-#{pinned}.keep")) do
+        # Running as root: permissions don't bind, so there is nothing to test.
+        :ok
+      else
+        assert {_out, 0} = backup(ctx, "prune")
+        File.chmod!(media, 0o700)
+        assert File.exists?(dump)
+      end
+    end
+
+    test "if the search for partials fails, the unit is kept", ctx do
+      real_find = System.find_executable("find")
+
+      stub!(ctx.bin, "find", """
+      #!/bin/sh
+      for a in "$@"; do [ "$a" = "-mmin" ] && exit 1; done
+      exec #{real_find} "$@"
+      """)
+
+      [older, newest] = ~w(20260101-000000 20260201-000000)
+      older_files = set_files!(ctx, older)
+      age!(older_files ++ set_files!(ctx, newest), 400)
+
+      assert {out, 0} = backup(ctx, "prune")
+      assert out =~ "could not look for partials of db #{older}"
+      assert Enum.all?(older_files, &File.exists?/1)
+    end
+
+    # The app and the script must agree wherever the script can see what the
+    # app's rules need: with no run history, `Retention.plan/4` IS the script's
+    # rule set (recovery points, work in flight, newest complete, age).
+    test "PARITY: the app's plan with no history and cron's prune keep the same files", ctx do
+      expected = parity_fixture!(ctx)
+
+      {:ok, inventory} = Retention.scan(ctx.backups)
+      plan = Retention.plan(inventory, %{}, Policy.legacy(14), System.os_time(:second))
+      planned = for e <- plan.delete, name <- e.files, into: MapSet.new(), do: "#{e.sub}/#{name}"
+      app_survivors = MapSet.difference(listing(ctx), planned)
+
+      assert {_out, 0} = backup(ctx, "prune")
+      assert listing(ctx) == app_survivors
+
+      for {file, should_survive?} <- expected do
+        assert MapSet.member?(app_survivors, file) == should_survive?,
+               "#{file} should #{if should_survive?, do: "survive", else: "go"}"
+      end
+    end
+  end
+
+  # Every case the two prunes must agree on, `400` days old unless noted.
+  # Returns `[{relative path, survives?}]` for the ones the test spells out.
+  defp parity_fixture!(ctx) do
+    b = ctx.backups
+    put = fn rel, days, content -> parity_put!(b, rel, days, content) end
+    outside = Path.join(ctx.tmp, "outside.dump")
+    File.write!(outside, "precious")
+
+    # S1: complete db + single media → both go.
+    put.("db/kiln-db-20250101-000000.dump", 400, "d")
+    put.("db/kiln-db-20250101-000000.sha256", 400, "s")
+    put.("media/kiln-media-20250101-000000.tar.gz", 400, "m")
+
+    # S2: a complete part set with an OLD .partial beside it → the set goes, the
+    # partial stays.
+    for i <- 1..2, do: put.("media/kiln-media-20250201-000000.part0#{i}.tar.gz", 400, "p")
+    put.("media/kiln-media-20250201-000000.sha256", 400, "s")
+    put.("media/kiln-media-20250201-000000.part03.tar.gz.partial", 2, "p")
+    put.("db/kiln-db-20250201-000000.dump", 400, "d")
+
+    # S3: a symlinked dump (never deleted) with a regular sidecar (goes); parts
+    # with a zero-byte sidecar (incomplete; all regular files go).
+    File.ln_s!(outside, Path.join(b, "db/kiln-db-20250301-000000.dump"))
+    put.("db/kiln-db-20250301-000000.sha256", 400, "s")
+    for i <- 1..2, do: put.("media/kiln-media-20250301-000000.part0#{i}.tar.gz", 400, "p")
+    put.("media/kiln-media-20250301-000000.sha256", 400, "")
+
+    # S4: a complete 100-part set (part100 has three digits): the newest
+    # complete media unit → kept.
+    for i <- 1..100 do
+      put.("media/kiln-media-20250401-000000.part#{pad(i)}.tar.gz", 400, "p")
+    end
+
+    put.("media/kiln-media-20250401-000000.sha256", 400, "s")
+
+    # S5: single archive AND parts (incomplete) → goes; its complete dump goes.
+    put.("media/kiln-media-20250501-000000.tar.gz", 400, "m")
+    put.("media/kiln-media-20250501-000000.part01.tar.gz", 400, "p")
+    put.("media/kiln-media-20250501-000000.sha256", 400, "s")
+    put.("db/kiln-db-20250501-000000.dump", 400, "d")
+
+    # S6: a zero-byte dump; a gap set (part02 missing) → both go.
+    put.("db/kiln-db-20250601-000000.dump", 400, "")
+    for i <- [1, 3], do: put.("media/kiln-media-20250601-000000.part0#{i}.tar.gz", 400, "p")
+    put.("media/kiln-media-20250601-000000.sha256", 400, "s")
+
+    # S7: the newest complete dump → kept; parts without a sidecar → go.
+    put.("db/kiln-db-20250701-000000.dump", 400, "d")
+    put.("db/kiln-db-20250701-000000.sha256", 400, "s")
+    for i <- 1..2, do: put.("media/kiln-media-20250701-000000.part0#{i}.tar.gz", 400, "p")
+
+    # S8/S9: pinned from db/ and from media/ (zero-byte dumps: not complete,
+    # so they don't take the newest-complete slot) → kept.
+    put.("db/kiln-20250801-000000.keep", 400, "")
+    put.("db/kiln-db-20250801-000000.dump", 400, "")
+    put.("media/kiln-20250901-000000.keep", 400, "")
+    put.("db/kiln-db-20250901-000000.dump", 400, "")
+
+    # S10: .work/<stamp> → kept. S11: a fresh sidecar .partial → kept.
+    File.mkdir_p!(Path.join(b, ".work/20251001-000000"))
+    put.("db/kiln-db-20251001-000000.dump", 400, "")
+    put.("db/kiln-db-20251101-000000.dump", 400, "")
+    put.("db/kiln-db-20251101-000000.sha256.partial", 0, "")
+
+    # S13: a future-dated complete dump and an impossible-stamp (month 13)
+    # complete archive: neither may hold the newest slot, so S7 and S4 keep it
+    # and these age out.
+    put.("db/kiln-db-29991231-000000.dump", 400, "d")
+    put.("media/kiln-media-20251399-000000.tar.gz", 400, "m")
+    # November 31st and hour 24: the right shape, no real instant.
+    put.("db/kiln-db-20251131-000000.dump", 400, "d")
+    put.("media/kiln-media-20251231-240000.tar.gz", 400, "m")
+
+    # S12: incomplete but young → kept. An orphan marker → untouched.
+    for i <- 1..2, do: put.("media/kiln-media-20251201-000000.part0#{i}.tar.gz", 1, "p")
+    put.("media/kiln-20240101-000000.keep", 400, "")
+
+    [
+      {"db/kiln-db-20250101-000000.dump", false},
+      {"media/kiln-media-20250101-000000.tar.gz", false},
+      {"media/kiln-media-20250201-000000.part01.tar.gz", false},
+      {"media/kiln-media-20250201-000000.part03.tar.gz.partial", true},
+      {"db/kiln-db-20250301-000000.dump", true},
+      {"db/kiln-db-20250301-000000.sha256", false},
+      {"media/kiln-media-20250301-000000.sha256", false},
+      {"media/kiln-media-20250401-000000.part100.tar.gz", true},
+      {"media/kiln-media-20250401-000000.sha256", true},
+      {"media/kiln-media-20250501-000000.tar.gz", false},
+      {"db/kiln-db-20250501-000000.dump", false},
+      {"db/kiln-db-20250601-000000.dump", false},
+      {"media/kiln-media-20250601-000000.part03.tar.gz", false},
+      {"db/kiln-db-20250701-000000.dump", true},
+      {"media/kiln-media-20250701-000000.part01.tar.gz", false},
+      {"db/kiln-db-20250801-000000.dump", true},
+      {"db/kiln-20250801-000000.keep", true},
+      {"db/kiln-db-20250901-000000.dump", true},
+      {"db/kiln-db-20251001-000000.dump", true},
+      {"db/kiln-db-20251101-000000.dump", true},
+      {"media/kiln-media-20251201-000000.part01.tar.gz", true},
+      {"media/kiln-20240101-000000.keep", true},
+      {"db/kiln-db-29991231-000000.dump", false},
+      {"media/kiln-media-20251399-000000.tar.gz", false},
+      {"db/kiln-db-20251131-000000.dump", false},
+      {"media/kiln-media-20251231-240000.tar.gz", false}
+    ]
+  end
+
+  defp parity_put!(root, rel, days, content) do
+    path = Path.join(root, rel)
+    File.write!(path, content)
+    File.touch!(path, System.os_time(:second) - days * 86_400)
+  end
+
+  defp listing(ctx) do
+    for sub <- ["db", "media"],
+        name <- File.ls!(Path.join(ctx.backups, sub)),
+        into: MapSet.new(),
+        do: "#{sub}/#{name}"
   end
 
   describe "splitting media into parts" do

@@ -269,7 +269,12 @@ defmodule KilnCMS.Backups do
   @spec rclone_remote() :: String.t() | nil
   def rclone_remote, do: config(:rclone_remote, nil)
 
-  @doc "Local retention in days — the script's `BACKUP_KEEP_DAYS`."
+  @doc """
+  Local retention in days — the script's `BACKUP_KEEP_DAYS`. A backup older
+  than this may be deleted unless a keep rule holds it (the newest verified and
+  newest complete backup of each component, a recovery point, one in flight);
+  see `KilnCMS.Backups.Retention`.
+  """
   @spec keep_days() :: pos_integer()
   def keep_days, do: config(:keep_days, 14)
 

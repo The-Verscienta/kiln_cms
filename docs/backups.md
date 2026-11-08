@@ -54,8 +54,8 @@ Meilisearch/embedding reindex) if stale.
 
 | What | Cadence | Local retention | Off-site |
 |---|---|---|---|
-| DB dump | nightly (cron above) | 14 days (`BACKUP_KEEP_DAYS`) | every dump, via `BACKUP_RCLONE_REMOTE` |
-| Media archive (Local adapter) | nightly, same run | 14 days, a whole set at a time | every part and sidecar |
+| DB dump | nightly (cron above) | 14 days (`BACKUP_KEEP_DAYS`), and always the newest good one ([below](#what-retention-deletes-and-what-it-keeps)) | every dump, via `BACKUP_RCLONE_REMOTE` |
+| Media archive (Local adapter) | nightly, same run | 14 days, all parts of a set together, and always the newest good one | every part and sidecar |
 | Media (S3/R2 adapter) | continuous | — | bucket **versioning + lifecycle** (e.g. keep noncurrent versions 30 days), or a nightly `rclone sync` to a second bucket/provider |
 | Secrets/env snapshot | on change | — | password manager |
 | **Restore drill** | **quarterly** | — | recorded below |
@@ -89,6 +89,227 @@ Rules that make this a strategy rather than a script:
 - If Postgres runs as a **Coolify-managed database resource**, also enable
   Coolify's built-in scheduled backups to S3 — belt and braces; the host cron
   works regardless of how PG is run.
+
+### What retention deletes and what it keeps
+
+Both paths delete old local backups. The app does it during every in-app
+backup, once that backup's own files have verified and before its off-site
+copy; a backup whose own files failed prunes nothing. `backup.sh` does it at the
+end of a `backup.sh all` that succeeded, and on its own as `backup.sh prune`.
+Neither touches the off-site copies.
+
+`BACKUP_KEEP_DAYS` (default 14) is the age at which a backup **may** be
+deleted, not a promise that it will be. "Older than `BACKUP_KEEP_DAYS`" means
+what `find -mtime +N` means: at least N + 1 whole days old. With the default, a
+dump 14 days and 6 hours old stays and one 15 days old may go.
+
+**The unit is one component of one stamp.** A stamp's database dump and its
+sidecar are one unit; its media archive (or every part of it) and the media
+sidecar are another. Each unit is aged by its own newest file and deleted
+whole: the data files first, the sidecar last, so a unit that stops half-way
+still has its checksums. The two components of a stamp come and go
+independently, so an old dump can be deleted while the same stamp's newer media
+stays. A resumed backup is the usual case: its dump keeps the time of the first
+attempt, while the parts the resume rebuilt are newer. With a very small
+`BACKUP_KEEP_DAYS`, that dump can age out before its media does.
+
+**Keep rules.** For each unit, the first rule that holds decides:
+
+1. **Recovery point.** A `kiln-<stamp>.keep` marker in `db/` or `media/` keeps
+   both components of that stamp, however old
+   ([below](#keep-a-backup-as-a-recovery-point)).
+2. **In flight.** The stamp has a `.work/<stamp>/` directory, or a `.partial`
+   file of that unit younger than an hour, or (app only) its History row is
+   still `Running`. This is what keeps the backup doing the pruning, and one
+   still being written by cron or another job, out of reach.
+3. **Newest verified** (app only). The newest unit of its kind, by stamp, that is complete
+   on disk and belongs to a `Succeeded` run whose artifact of that kind is
+   verified (app-made) or present (imported from cron, which is never
+   verified). The app never deletes it.
+4. **Newest complete.** The newest unit of its kind, by stamp, that is complete on disk,
+   whatever its run says. `backup.sh prune` keeps the same one, so the two
+   prunes together cannot empty a component.
+5. **Age.** Anything else is deleted once it is older than `BACKUP_KEEP_DAYS`.
+   That includes a unit with no History row, with a `Skipped` row, or whose
+   row records no artifact of that kind.
+
+Rules 3 and 4 choose only among units that are not in flight and whose stamp is
+a real date and time no more than a day ahead of the clock. A backup still being
+written, a misnamed file or a future-dated stamp never takes the slot from the
+last finished backup.
+
+**Complete on disk** is judged from the final files alone. A database unit
+needs its dump; a media unit needs either the single archive and no parts, or
+parts `01` to `N` with no gap, no single archive beside them, and the media
+sidecar. Each of those must be a regular, non-empty file: a symlink, a
+directory or an empty file does not count. A `.partial` younger than an hour
+makes the unit in flight; an older one is ignored.
+
+**What this means for the disk.** When backups stop (cron not running, every
+run failing), the last good backup of each component stays past
+`BACKUP_KEEP_DAYS` instead of being pruned away. Budget for up to two units per
+component older than the window (the newest verified and the newest complete
+can be different stamps), plus every recovery point.
+
+**Never deleted by retention:** `.partial` files (the next in-app backup
+removes those older than an hour), symlinks, directories, `.work/`, and
+recovery-point markers. A `kiln-*` file in `db/` or `media/` that belongs to no
+unit, such as a part named `part001` instead of `part01`, is a stray: the app
+deletes it once it is older than `BACKUP_KEEP_DAYS`, and `backup.sh` leaves it
+alone.
+
+In History, a run whose dump retention removed while its media is still on disk
+reads `partly pruned (retention)` ([Backup history](#backup-history-2217)).
+
+### Keep a backup as a recovery point
+
+Pin one backup, say the last one before a migration, so retention never deletes
+it. You need a shell on the host, as the user that runs the backups. The Backups
+page does not show or set recovery points yet.
+
+1. Find the backup's stamp: the `YYYYMMDD-HHMMSS` (UTC) in its file names.
+
+   ```bash
+   ls /var/backups/kiln/db/
+   # kiln-db-20261020-031700.dump  kiln-db-20261020-031700.sha256  …
+   ```
+
+2. Create the marker in `db/` or `media/`. One marker pins both components of
+   the stamp.
+
+   ```bash
+   touch /var/backups/kiln/db/kiln-20261020-031700.keep
+   ```
+
+3. The next prune, in-app or cron, keeps every file of that stamp. Nothing is
+   printed for a kept backup; `backup.sh prune` prints only the files it
+   removes.
+
+To release it, delete the marker. The backup then ages like any other, so one
+already older than `BACKUP_KEEP_DAYS` goes at the next prune unless it is the
+newest verified or newest complete one.
+
+Things to know:
+
+- Only the marker's name counts. It can be an empty file, a directory or a
+  symlink; its contents are never read.
+- The name must be exactly `kiln-<stamp>.keep` with a full stamp.
+  `kiln-20261020.keep` pins nothing, and is left alone too.
+- Retention never creates or deletes a marker. A marker whose backup is gone is
+  harmless.
+- Markers live on this host's disk, not in the database, so they survive a
+  database restore. `rclone sync` of `BACKUP_DIR` copies them like any file.
+- Rolling back to a release before markers existed: its in-app prune does not
+  honour them, and deletes a marker itself once the marker file is older than
+  `BACKUP_KEEP_DAYS`.
+
+**See what the app would delete.** A dry run plans without deleting. Run it
+against the live app with `rpc` (as in [deploy.md](deploy.md)), since it reads
+History. It imports cron-made backups into History first, as every retention
+run does.
+
+```bash
+bin/kiln_cms rpc 'KilnCMS.Backups.Retention.run(KilnCMS.Backups.dir(), dry_run: true) |> IO.inspect()'
+```
+
+It returns `{:ok, %{deleted: [], units: 0, stopped: nil, plan: plan}}`. Each
+entry of `plan.delete` and `plan.keep` names its unit, its files and the rule
+that decided. For example, the plan for this directory with
+`BACKUP_KEEP_DAYS=7`, a recovery point on `20261020-031700`, and none of the
+stamps in History yet (reformatted):
+
+```text
+db/    kiln-20261020-031700.keep
+db/    kiln-db-20261020-031700.dump   kiln-db-20261020-031700.sha256   (19 days old)
+db/    kiln-db-20261025-031700.dump   kiln-db-20261025-031700.sha256   (14 days old)
+db/    kiln-db-20261107-031700.dump   kiln-db-20261107-031700.sha256   (today)
+media/ kiln-media-20261025-031700.tar.gz                               (14 days old)
+```
+
+```elixir
+%{
+  delete: [
+    %{stamp: "20261025-031700", kind: :db, sub: "db",
+      files: ["kiln-db-20261025-031700.dump", "kiln-db-20261025-031700.sha256"],
+      reason: {:expired, :unrecorded, 7}}
+  ],
+  keep: [
+    %{stamp: "20261020-031700", kind: :db, sub: "db",
+      files: ["kiln-db-20261020-031700.dump", "kiln-db-20261020-031700.sha256"],
+      reason: :recovery_point},
+    %{stamp: "20261025-031700", kind: :media, sub: "media",
+      files: ["kiln-media-20261025-031700.tar.gz"],
+      reason: :newest_complete},
+    %{stamp: "20261107-031700", kind: :db, sub: "db",
+      files: ["kiln-db-20261107-031700.dump", "kiln-db-20261107-031700.sha256"],
+      reason: :newest_complete}
+  ]
+}
+```
+
+The `20261025-031700` dump goes while that stamp's media stays: it is the
+newest complete media unit, and the newer `20261107-031700` stamp has no media.
+`backup.sh prune` on the same directory removes the same two files. A kept
+unit's `reason` is one of `:recovery_point`, `:in_flight`, `:newest_verified`,
+`:newest_complete`, `:unrecorded` or `:keep_days`; a deleted one's is
+`{:expired, rule, days}`, where `rule` is `:unrecorded`, `:keep_days` or
+`:stray`. Once the newest unit of a kind belongs to a succeeded run that verified it (or
+imported it from cron), it reads `:newest_verified` instead.
+
+### What the cron prune cannot see
+
+`backup.sh` has no database, so two of the rules above are the app's alone:
+
+- **It cannot keep the newest verified backup.** It keeps the newest complete
+  one. If the newest complete set on disk came from a run that failed (for
+  example its off-site copy was refused), cron keeps that set and deletes the
+  older, verified one once it is past `BACKUP_KEEP_DAYS`. The app never does.
+  If that matters, pin the verified one with a
+  [recovery point](#keep-a-backup-as-a-recovery-point).
+- **It cannot see an in-app backup that is `Running`.** It relies on that
+  backup's `.work/<stamp>/` directory and `.partial` files instead.
+
+It also never deletes strays.
+
+### When retention is skipped or stops
+
+Retention fails closed: when it cannot see everything its rules need, it deletes
+nothing. The backup itself is not affected either way; it succeeds or fails on
+its own files and off-site copy.
+
+**In the app**, retention is skipped when importing cron's backups into History
+fails, when `db/`, `media/` or `.work/` cannot be listed, when a file in them
+cannot be read, or when History cannot be read. It writes an error to the
+server log ("Backup retention skipped: …; nothing was deleted"), emits the
+`[:kiln_cms, :backups, :retention, :skipped]` telemetry event (measurements
+`%{count: 1}`, metadata `%{reason: reason}`), and adds a `prune` line at error
+level to the run's log in the database:
+
+```text
+Retention skipped: couldn't read the backup history (Ash.Error.Forbidden); nothing was deleted
+```
+
+Other reasons in the same place: `couldn't import cron-made backups into the
+backup history (…)`, `couldn't list media/ in the backup directory (…)`,
+`couldn't read <file> (…)`, and `the retention policy is invalid
+(BACKUP_KEEP_DAYS must be a whole number of days, 1 or more)`.
+
+Right before each unit goes, the app looks again: a unit that has gained a
+`.work/<stamp>/` directory or a marker, whose run is now `Running`, or whose run
+cannot be read is left in place. A file that cannot be removed stops that unit,
+so its sidecar stays. If the deleting itself breaks off, the run's log reads
+"Retention removed 2 file(s) from 1 backup(s), then stopped: …", the server log
+has the error, and `[:kiln_cms, :backups, :retention, :stopped]` is emitted
+(measurements `%{count: 1, deleted: n}`). The files already removed are still
+marked `pruned` in History. A normal sweep logs "Retention removed N file(s)
+from M backup(s)".
+
+**In cron**, `backup.sh prune` prints a `warning:` line on stderr, deletes
+nothing and exits 0 (so `backup.sh all` still succeeds) when `db/`, `media/` or
+`.work` exists but cannot be listed, or when this host's `date` supports neither
+GNU `date -d @N` nor BSD `date -r N`. A unit whose `.partial` files it cannot
+look for is kept, and a file it cannot remove stops that unit. Read the cron
+log for these: no ping or exit code reports them.
 
 ## In-app backups (#484)
 
@@ -242,9 +463,11 @@ whole backup remains the fallback.
 **Disk space.** There is no free-space check. Budget for the database dump, plus
 all finished media parts, plus one part being written, plus the file lists.
 
-**Retention and off-site.** Prune treats one stamp (the dump, every media part
-and the sidecars) as ONE set, aged by its newest member, and deletes it whole,
-so a retention sweep can never leave half a set. Off-site copies the dump, each
+**Retention and off-site.** Retention deletes a media set whole (every part,
+then the sidecar), aged by its newest file, so a sweep can never leave half a
+set; the dump of the same stamp is aged on its own
+([What retention deletes and what it keeps](#what-retention-deletes-and-what-it-keeps)).
+Off-site copies the dump, each
 part and each sidecar, one `rclone copy` per file, each after its own re-hash.
 A failed copy, of a data file or of a sidecar, fails the run: a part set whose
 sidecar never left the host is one `restore.sh` refuses to restore from the
@@ -252,9 +475,10 @@ remote. There is no retry in Kiln itself; rclone's own retries are the retries
 (`--retries`, 3 by default, settable with `RCLONE_RETRIES` in the environment of
 the app or the cron line). The run is marked failed only after those.
 
-The app prunes before its off-site copy, so expired sets are removed even when
-the off-site copy then fails. Cron prunes only at the end of a run that
-succeeded, off-site copy included. Prune never touches the current stamp.
+The app prunes before its off-site copy, so expired backups are removed even
+when the off-site copy then fails. Cron prunes only at the end of a run that
+succeeded, off-site copy included. Neither touches the backup being taken: the
+app's is in flight, and cron's is the newest complete one.
 
 The re-hash costs one extra sequential read of every file, and only when a
 remote is set. It is far quicker than the upload that follows, and it leaves
@@ -453,6 +677,7 @@ The files column reads:
 |-------|---------|
 | `on disk` | Every file is under `BACKUP_DIR`. |
 | `pruned (retention)` | The application's own retention removed them. |
+| `partly pruned (retention)` | Some files are still here; every missing one was removed by the application's own retention (it ages a backup's dump and media separately). |
 | `off-site only` | Gone locally, but every missing file has a successful rclone copy. |
 | `expired` | A cron-made backup older than the retention window plus a day; `backup.sh`'s own prune almost certainly removed it. A guess: cron records no prune. |
 | `missing` | Gone with no recorded reason: deleted by hand, or recorded by another node. |
@@ -709,7 +934,7 @@ configured for cron needs nothing extra for the console.
 | `DATABASE_URL` | backup | source DB (read-only) |
 | `BACKUP_DIR` | backup + app | local backup root (default `/var/backups/kiln`) |
 | `MEDIA_DIR` | backup + app | uploads root (Local adapter only; omit on S3). Defaults to `KILN_MEDIA_ROOT` when that is set |
-| `BACKUP_KEEP_DAYS` | backup + app | local retention (default 14) |
+| `BACKUP_KEEP_DAYS` | backup + app | local retention (default 14): the age at which a backup may be deleted ([keep rules](#what-retention-deletes-and-what-it-keeps)) |
 | `BACKUP_ENABLED` | app | set false to disable the in-app path only; cron is unaffected (default true) |
 | `BACKUP_STALE_AFTER_HOURS` | app | how old before the console warns (default 36) |
 | `BACKUP_MEDIA_PART_MB` | backup + app | target ceiling on one media part's input size, 16 to 10240 (default 400) |

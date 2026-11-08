@@ -66,6 +66,34 @@ defmodule KilnCMS.Backups.PresenceTest do
     assert Presence.for(run, dir, 14) == :missing
   end
 
+  # Retention ages a stamp's dump and its media separately (#2219).
+  test "partly pruned when every missing file was removed by retention", %{dir: dir} do
+    touch(dir, "media", "kiln-media-20260805-031700.tar.gz")
+
+    run =
+      run([
+        artifact(:db, "kiln-db-20260805-031700.dump", %{"local" => %{"status" => "pruned"}}),
+        artifact(:media, "kiln-media-20260805-031700.tar.gz")
+      ])
+
+    assert Presence.for(run, dir, 14) == :partly_pruned
+  end
+
+  test "some files present, one pruned and one gone out-of-band is missing", %{dir: dir} do
+    touch(dir, "db", "kiln-db-20260805-031700.dump")
+
+    run =
+      run([
+        artifact(:db, "kiln-db-20260805-031700.dump"),
+        artifact(:media, "kiln-media-20260805-031700.part01.tar.gz", %{
+          "local" => %{"status" => "pruned"}
+        }),
+        artifact(:media, "kiln-media-20260805-031700.part02.tar.gz")
+      ])
+
+    assert Presence.for(run, dir, 14) == :missing
+  end
+
   test "pruned when retention marked the local copy", %{dir: dir} do
     run =
       run([artifact(:db, "kiln-db-a.dump", %{"local" => %{"status" => "pruned"}})])

@@ -7,7 +7,9 @@
 #   ./scripts/backup.sh media    # tar $MEDIA_DIR → $BACKUP_DIR/media/ (in parts)
 #   ./scripts/backup.sh all      # both (media skipped unless MEDIA_DIR is set)
 #   ./scripts/backup.sh verify   # sanity-check every file of the newest backup(s)
-#   ./scripts/backup.sh prune    # delete backups older than $BACKUP_KEEP_DAYS
+#   ./scripts/backup.sh prune    # delete backups older than $BACKUP_KEEP_DAYS,
+#                                # except recovery points (kiln-<stamp>.keep),
+#                                # the newest complete one, and work in flight
 #
 # Environment:
 #   DATABASE_URL         source database (required for `db`/`all`; read-only)
@@ -26,7 +28,7 @@
 #                        a pattern without `/` matches a name at any depth)
 #   TMPDIR               where the media file lists are built (default: /tmp);
 #                        removed when the script exits
-#   BACKUP_KEEP_DAYS     local retention in days (default: 14)
+#   BACKUP_KEEP_DAYS     local retention in days (default: 14); see `prune`
 #   BACKUP_RCLONE_REMOTE optional rclone target (e.g. "r2:kiln-backups") —
 #                        each new backup is copied off-site after it verifies;
 #                        each file is re-hashed right before its copy and the
@@ -54,7 +56,8 @@
 # of its own. If any part fails, every file of the unfinished set is removed:
 # cron has no resume, and a partial set must not look like a backup.
 # Needs GNU tar or bsdtar (`--null -T`); busybox tar is refused up front.
-# `verify` and `prune` treat a stamp's files as one set.
+# `verify` treats a stamp's files as one set; `prune` treats each component
+# of a stamp (db, media) as one unit.
 #
 # Every dump is verified (pg_restore --list) before it counts as a backup.
 # Plain shell + pg_dump/tar so it behaves the same on a laptop and on the VPS
@@ -1043,32 +1046,255 @@ cmd_verify() {
   fi
 }
 
-# Prune whole backups, not files: everything stamped alike (the dump, the media
-# archive or ALL its parts, and the sidecars) is one set, deleted together once
-# even its NEWEST member is older than the retention. A per-file `find -mtime`
-# would reap an old part while its fresh siblings survive, leaving a set that
-# can't be restored.
+# --- prune (#2219; keep in step with KilnCMS.Backups.Retention) ------------
+#
+# The unit is one COMPONENT of one stamp: the dump and its sidecar, or the
+# media archive (or ALL its parts) and the media sidecar. A unit is aged by its
+# newest regular file and deleted whole, data first and the sidecar last, so
+# the database and the media of one stamp come and go independently. Per kind,
+# a unit is KEPT when, in order:
+#
+#   - a recovery point pins its stamp: `kiln-<stamp>.keep` (any kind of entry)
+#     in db/ or media/. Only its presence counts; prune never removes one.
+#   - it is in flight: `.work/<stamp>` exists, or one of its `.partial` files is
+#     younger than 60 minutes (the app's partial grace).
+#   - it is the newest COMPLETE unit of its kind (see unit_complete) that is
+#     not in flight and whose stamp is a real date no later than tomorrow.
+#   - any of its regular files is not older than BACKUP_KEEP_DAYS (`-mtime +N`).
+#
+# The app also keeps the newest VERIFIED backup and anything its run history
+# says is running; this script has no database, so it cannot. It never deletes
+# a `.partial`, a symlink, a directory, or a file that is no unit's member.
+# Only regular files count, judged with `find` (`[ -f ]` follows symlinks).
+
+PART_NUM_ERE='(0[1-9]|[1-9][0-9]|[1-9][0-9]{2,})'
+
+# The final member names of one unit ($1 = kind, $2 = stamp) among the names
+# in $3 (one per line), exactly as Artifact.parse_file names them: a part
+# number is two digits (01-99) or three or more with no leading zero.
+unit_members() {
+  local ere
+  if [ "$1" = db ]; then
+    ere="^kiln-db-${2}\\.(dump|sha256)\$"
+  else
+    ere="^kiln-media-${2}((\\.part${PART_NUM_ERE})?\\.tar\\.gz|\\.sha256)\$"
+  fi
+  printf '%s\n' "$3" | grep -E "$ere" || true
+}
+
+# Whether $1 is a regular file (never through a symlink); `solid` also needs
+# it non-empty.
+is_regular() { [ -n "$(find "$1" -prune -type f -print 2>/dev/null)" ]; }
+is_solid() { [ -n "$(find "$1" -prune -type f -size +0c -print 2>/dev/null)" ]; }
+
+# Whether a unit is whole on disk, from its final files only (Retention's
+# complete?/1): a db unit needs its dump; a media unit needs either the single
+# archive and no parts, or parts 01..N with no gap, no single archive, and the
+# media sidecar. Every one of those a regular, non-empty file.
+# $1 = directory, $2 = kind, $3 = stamp, $4 = the unit's member names.
+unit_complete() {
+  local dir="$1" kind="$2" stamp="$3" members="$4" name n single=0 nums="" expected=1
+  if [ "$kind" = db ]; then
+    is_solid "$dir/kiln-db-${stamp}.dump"
+    return
+  fi
+  for name in $members; do
+    case "$name" in
+      "kiln-media-${stamp}.tar.gz") single=1 ;;
+      "kiln-media-${stamp}.sha256") ;;
+      *)
+        is_solid "$dir/$name" || return 1
+        n="${name#"kiln-media-${stamp}.part"}"
+        n="${n%.tar.gz}"
+        nums="$nums $((10#$n))"
+        ;;
+    esac
+  done
+  if [ -z "$nums" ]; then
+    [ "$single" = 1 ] && is_solid "$dir/kiln-media-${stamp}.tar.gz"
+    return
+  fi
+  [ "$single" = 0 ] || return 1
+  is_solid "$dir/kiln-media-${stamp}.sha256" || return 1
+  # shellcheck disable=SC2086 # $nums is a space-separated list of integers
+  for n in $(printf '%s\n' $nums | sort -n); do
+    [ "$n" -eq "$expected" ] || return 1
+    expected=$((expected + 1))
+  done
+}
+
+# The stamps with at least one unit member, newest first ($1 = kind, $2 = names).
+unit_stamps() {
+  printf '%s\n' "$2" |
+    sed -n -E "s/^kiln-${1}-([0-9]{8}-[0-9]{6})(\\.part[0-9]+)?\\.(dump|tar\\.gz|sha256)\$/\\1/p" |
+    sort -ru
+}
+
+# Whether line $2 is one of the lines of $1. grep reads all of its input: with
+# pipefail, `grep -q` exiting early could SIGPIPE printf and turn a match into
+# a miss.
+has_line() {
+  printf '%s\n' "$1" | grep -Fx -- "$2" >/dev/null
+}
+
+# `YYYYMMDD-HHMMSS` (UTC) one day from now: the latest stamp that may hold the
+# newest-complete slot (Retention.plausible_stamp?/2). GNU `date -d @N` or BSD
+# `date -r N`, whichever this host has; nothing printed when neither works.
+future_limit() {
+  local t
+  t=$(($(date -u +%s) + 86400))
+  if [ "$(date -u -d @0 +%Y 2>/dev/null)" = 1970 ]; then
+    date -u -d "@$t" +%Y%m%d-%H%M%S
+  elif [ "$(date -u -r 0 +%Y 2>/dev/null)" = 1970 ]; then
+    date -u -r "$t" +%Y%m%d-%H%M%S
+  fi
+}
+
+# Whether stamp $1 may hold the newest-complete slot: a real date and time
+# (1970 or later; month, day for that month, hour, minute and second in range)
+# no later than $PRUNE_FUTURE_LIMIT. Any other stamp's units still age as usual.
+plausible_stamp() {
+  local s="$1" y m d max
+  y=$((10#${s:0:4}))
+  m=$((10#${s:4:2}))
+  d=$((10#${s:6:2}))
+  [ "$y" -ge 1970 ] && [ "$m" -ge 1 ] && [ "$m" -le 12 ] && [ "$d" -ge 1 ] || return 1
+  [ $((10#${s:9:2})) -le 23 ] && [ $((10#${s:11:2})) -le 59 ] && [ $((10#${s:13:2})) -le 59 ] || return 1
+  case "$m" in
+    2) if [ $((y % 4)) -eq 0 ] && { [ $((y % 100)) -ne 0 ] || [ $((y % 400)) -eq 0 ]; }; then max=29; else max=28; fi ;;
+    4 | 6 | 9 | 11) max=30 ;;
+    *) max=31 ;;
+  esac
+  [ "$d" -le "$max" ] || return 1
+  [ $((10#${s/-/})) -le $((10#${PRUNE_FUTURE_LIMIT/-/})) ]
+}
+
+# Whether unit ($2 = kind, $3 = stamp) in $1 is being written: `.work/<stamp>`
+# exists (from the listing in $PRUNE_WORK) or it has a fresh `.partial`.
+in_flight() {
+  has_line "$PRUNE_WORK" "$3" || has_fresh_partial "$1" "$2" "$3"
+}
+
+# The newest stamp whose unit of kind $2 is complete in $1 ($3 = names), among
+# units not in flight and with a plausible stamp — so a run still writing, or a
+# misnamed or future-dated file, never takes the slot from the last finished
+# backup.
+newest_complete_stamp() {
+  local stamp
+  for stamp in $(unit_stamps "$2" "$3"); do
+    plausible_stamp "$stamp" || continue
+    in_flight "$1" "$2" "$stamp" && continue
+    if unit_complete "$1" "$2" "$stamp" "$(unit_members "$2" "$stamp" "$3")"; then
+      echo "$stamp"
+      return 0
+    fi
+  done
+}
+
+# Whether a recovery point pins stamp $1: an entry named `kiln-<stamp>.keep`
+# (of any kind) in the listings of db/ or media/ ($PRUNE_PINS) — the listing,
+# not a stat, so an entry this user can't stat still counts.
+is_pinned() {
+  has_line "$PRUNE_PINS" "kiln-${1}.keep"
+}
+
+# Whether unit ($2 = kind, $3 = stamp) in $1 has a `.partial` younger than the
+# 60-minute grace. Fails closed: if `find` itself fails, the unit counts as in
+# flight.
+has_fresh_partial() {
+  local ere found
+  if [ "$2" = db ]; then
+    ere="^kiln-db-${3}\\.(dump|sha256)\\.partial\$"
+  else
+    ere="^kiln-media-${3}((\\.part${PART_NUM_ERE})?\\.tar\\.gz|\\.sha256)\\.partial\$"
+  fi
+  if ! found="$(find "$1" -maxdepth 1 -name "kiln-${2}-${3}.*.partial" -mmin -60 -print)"; then
+    warn "could not look for partials of ${2} ${3} in $1; keeping it"
+    return 0
+  fi
+  printf '%s\n' "$found" | sed 's#.*/##' | grep -E "$ere" >/dev/null
+}
+
+# Delete one unit's regular members ($1 = directory, $2 = kind, $3 = stamp,
+# $4 = member names): data first, the sidecar last. Stops at the first file
+# that can't be removed, so a unit cut short keeps its checksums.
+remove_unit() {
+  local dir="$1" sidecar="kiln-${2}-${3}.sha256" name
+  for name in $4; do
+    [ "$name" = "$sidecar" ] && continue
+    is_regular "$dir/$name" || continue
+    rm -f -- "$dir/$name" || { warn "could not remove $dir/$name; kept the rest of ${2} ${3}"; return 1; }
+    echo "$dir/$name"
+  done
+  if is_regular "$dir/$sidecar"; then
+    rm -f -- "$dir/$sidecar" || { warn "could not remove $dir/$sidecar"; return 1; }
+    echo "$dir/$sidecar"
+  fi
+}
+
 cmd_prune() {
   echo "==> Pruning backups older than ${BACKUP_KEEP_DAYS} days"
-  local stamps stamp dirs=()
-  [ -d "$BACKUP_DIR/db" ] && dirs+=("$BACKUP_DIR/db")
-  [ -d "$BACKUP_DIR/media" ] && dirs+=("$BACKUP_DIR/media")
-  [ "${#dirs[@]}" -gt 0 ] || return 0
+  local kind dir names stamp members newest fresh name db_names="" media_names=""
+  local work="$BACKUP_DIR/.work"
 
-  # shellcheck disable=SC2012 # names are filtered by the sed regex below
-  stamps="$(ls -1 "${dirs[@]}" 2>/dev/null |
-    sed -n -E 's/^kiln-(db|media)-([0-9]{8}-[0-9]{6})\.(dump|tar\.gz|sha256|part[0-9]+\.tar\.gz)$/\2/p' |
-    sort -u || true)"
-
-  for stamp in $stamps; do
-    # Any member that is not older than the cutoff keeps the whole set.
-    if [ -z "$(find "${dirs[@]}" -maxdepth 1 -type f \
-      \( -name "kiln-db-${stamp}.*" -o -name "kiln-media-${stamp}.*" \) \
-      ! -name '*.partial' ! -mtime "+${BACKUP_KEEP_DAYS}" -print 2>/dev/null | head -1)" ]; then
-      find "${dirs[@]}" -maxdepth 1 -type f \
-        \( -name "kiln-db-${stamp}.*" -o -name "kiln-media-${stamp}.*" \) \
-        ! -name '*.partial' -print -delete 2>/dev/null || true
+  # Both listings first: a marker in either directory pins both components,
+  # so a directory that can't be listed means nothing is deleted at all.
+  for kind in db media; do
+    dir="$BACKUP_DIR/$kind"
+    [ -d "$dir" ] || continue
+    # shellcheck disable=SC2012 # every name is matched against a strict regex below
+    if ! names="$(ls -1 "$dir")"; then
+      warn "could not list $dir — nothing was pruned"
+      return 0
     fi
+    if [ "$kind" = db ]; then db_names="$names"; else media_names="$names"; fi
+  done
+  PRUNE_PINS="$(printf '%s\n%s\n' "$db_names" "$media_names")"
+
+  # A backup in flight keeps `.work/<stamp>`; a `.work` that exists but can't
+  # be listed means none of them can be ruled out.
+  PRUNE_WORK=""
+  if [ -e "$work" ] || [ -L "$work" ]; then
+    # shellcheck disable=SC2012 # names are only compared whole against a stamp
+    if [ ! -d "$work" ] || ! PRUNE_WORK="$(ls -1 "$work")"; then
+      warn "could not list $work — nothing was pruned"
+      return 0
+    fi
+  fi
+
+  if ! PRUNE_FUTURE_LIMIT="$(future_limit)" || [ -z "$PRUNE_FUTURE_LIMIT" ]; then
+    warn "could not work out tomorrow's date with this date(1) — nothing was pruned"
+    return 0
+  fi
+
+  for kind in db media; do
+    dir="$BACKUP_DIR/$kind"
+    if [ "$kind" = db ]; then names="$db_names"; else names="$media_names"; fi
+    [ -n "$names" ] || continue
+    newest="$(newest_complete_stamp "$dir" "$kind" "$names")"
+
+    for stamp in $(unit_stamps "$kind" "$names"); do
+      members="$(unit_members "$kind" "$stamp" "$names")"
+      [ -n "$members" ] || continue
+      is_pinned "$stamp" && continue
+      in_flight "$dir" "$kind" "$stamp" && continue
+      [ "$stamp" = "$newest" ] && continue
+
+      # Any regular member not older than the retention keeps the unit; a unit
+      # with no regular member has nothing to delete.
+      fresh=1
+      for name in $members; do
+        is_regular "$dir/$name" || continue
+        fresh=0
+        if [ -z "$(find "$dir/$name" -prune -mtime "+${BACKUP_KEEP_DAYS}" -print 2>/dev/null)" ]; then
+          fresh=1
+          break
+        fi
+      done
+      [ "$fresh" = 1 ] && continue
+
+      remove_unit "$dir" "$kind" "$stamp" "$members" || true
+    done
   done
 }
 

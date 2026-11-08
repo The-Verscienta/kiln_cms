@@ -50,9 +50,9 @@ carries the reasoning.
     takes a failed manifest's remote as proof that its files went off-site. A
     stamp already in History keeps its row; an old failure manifest still on
     disk imports without the remote.
-  - **Still different between the paths.** The app prunes expired sets before
-    its off-site copy, so it prunes even when that copy fails; cron prunes only
-    after a run that succeeded.
+  - **Still different between the paths.** The app prunes expired backups
+    before its off-site copy, so it prunes even when that copy fails; cron
+    prunes only after a run that succeeded.
   - **Cost.** One extra sequential read of each file, only when a remote is
     set; much faster than the upload it precedes.
   - **For developers.** New `KilnCMS.Backups.Checksum.recheck/3` and
@@ -731,7 +731,7 @@ carries the reasoning.
     `manifest.json` (additive keys `sha256`, `part`, `parts_total`; `version`
     stays 1), on the History row, and in `kiln-media-<stamp>.sha256` and
     `kiln-db-<stamp>.sha256` sidecars in `sha256sum -c` format. They are copied
-    off-site with their artifact and pruned with their set. `Verified` now needs
+    off-site with their artifact and pruned with their component. `Verified` now needs
     `tar -tzf` to pass, the size to match the hash, and a hash to be recorded.
     `scripts/backup.sh` writes the same parts, keys and sidecars ([below](#backup-sh-media-parts-upgrade))
     and `verify` checks every file of the newest stamp.
@@ -751,9 +751,11 @@ carries the reasoning.
     links that point absolute or upward. No sidecar is a loud warning, or an abort
     with `RESTORE_REQUIRE_CHECKSUM=1`. Importing a part set into History with a gap
     marks it failed ("incomplete media set").
-  - **Prune and disk.** Retention treats a stamp (dump, all parts, sidecars) as
-    one set aged by its newest member, in the app and in `backup.sh`. There is
-    no free-space check: budget for the dump, the finished parts and one in flight.
+  - **Prune and disk.** Retention deletes a media set whole (all parts, then
+    the sidecar), aged by its newest file, in the app and in `backup.sh`; the
+    dump of the same stamp is aged on its own
+    ([retention by component](#backup-retention-by-component)). There is no
+    free-space check: budget for the dump, the finished parts and one in flight.
   - **Not here yet.** The automatic Oban job-per-step chain is a follow-up;
     the issue stays open. Splitting in `backup.sh` followed in a later PR
     ([upgrade note](#backup-sh-media-parts-upgrade)). The runbook is in
@@ -1559,6 +1561,69 @@ carries the reasoning.
   - Guide: [Constrain the values of a field](../extending-content.md#constrain-the-values-of-a-field).
 
 ## Changed
+
+<a id="backup-retention-by-component"></a>
+
+- **Backup retention now keeps the newest good backup, honours recovery points,
+  ages a stamp's database and media separately, and deletes nothing when it
+  cannot see what it needs, in the app and in `scripts/backup.sh prune`
+  (#2219).** For operators. `BACKUP_KEEP_DAYS` keeps its name, default and
+  meaning (`find -mtime +N`: at least N + 1 whole days old), but it is now the
+  age at which a local backup *may* be deleted. No new setting, no migration.
+  - **The unit is one component of one stamp.** The dump with its sidecar is
+    one unit, the media archive or parts with the media sidecar another. Each is
+    aged by its own newest file and deleted whole, sidecar last. Before, a
+    stamp's files were one set. An old dump can now go while the same stamp's
+    newer media stays: a resumed backup's dump keeps the first attempt's time,
+    so with a very small `BACKUP_KEEP_DAYS` it can age out before its media.
+  - **Kept past the window, per component:** the newest complete unit (app and
+    cron), the newest verified unit (app only: complete on disk and vouched for
+    by a `Succeeded` run), anything in flight (`.work/<stamp>/`, a `.partial`
+    younger than an hour, or, in the app, a `Running` row), and every recovery
+    point. A stamp that is not a real date and time, or lies more than a day in
+    the future, cannot hold a "newest" slot. Before, a deployment whose backups
+    stopped lost its last backup once it was `BACKUP_KEEP_DAYS` + 1 days old; it
+    now keeps it. Disk use can grow by up to two units per component, plus
+    pinned stamps.
+  - **Recovery points.** `touch <BACKUP_DIR>/db/kiln-<stamp>.keep` (or in
+    `media/`; any kind of entry, only the name counts) pins both components of
+    that stamp. Retention never creates or removes a marker; one with a
+    malformed name pins nothing and is left alone; one whose backup is gone is
+    harmless. The Backups page does not set them yet.
+  - **Fails closed, loudly.** If importing cron's backups, resolving the policy,
+    listing `db/`, `media/` or `.work/`, reading a file's metadata or reading
+    History fails, the app deletes nothing, logs an error, emits
+    `[:kiln_cms, :backups, :retention, :skipped]`, and writes "Retention
+    skipped: <reason>; nothing was deleted" to the run's log at error level.
+    Each unit is checked again right before it goes. A sweep that breaks off
+    part-way logs "Retention removed N file(s) from M backup(s), then stopped:
+    …", emits `[:kiln_cms, :backups, :retention, :stopped]`, and still marks
+    what it removed as `pruned`. The backup's own outcome never changes. The
+    app imports cron's backups into History before it decides, and still prunes
+    where it did, before the off-site copy.
+  - **Cron's prune.** `backup.sh prune` applies the same rules except the two
+    that need the database: it keeps the newest complete set, so it can delete
+    the newest *verified* one when a newer complete set came from a failed run
+    (a known limitation; pin the verified one with a marker if it matters), and
+    it cannot see a `Running` in-app backup except through its `.work/<stamp>/`
+    and `.partial` files. It never deletes strays (the app ages those under
+    `BACKUP_KEEP_DAYS`), so a misnamed part such as `part001` is no longer
+    removed with its stamp. It now prints each file it removes, and prints a
+    `warning:`, deletes nothing and exits 0 when `db/`, `media/` or `.work`
+    cannot be listed, or when `date` supports neither GNU `-d @N` nor BSD
+    `-r N`. A unit whose `.partial` files it cannot look for is kept.
+  - **History.** A run whose dump was pruned while its media is still on disk
+    reads `missing`, not `pruned (retention)`.
+  - **For developers.** New `KilnCMS.Backups.Retention` (`run/2` with
+    `dry_run:`, `plan/4`, `scan/1`, `complete?/1`, `describe/1`) and
+    `KilnCMS.Backups.Retention.Policy`; `KilnCMS.Backups.Artifact.keep_name/1`,
+    `parse_keep_name/1` and `parse_sidecar_name/1`. The worker's internal
+    `prune/1` (`@doc false`) is gone.
+  - **Rolling the pin back** is safe: nothing is migrated. The previous release
+    goes back to pruning whole stamps by age alone, ignores markers, and its
+    in-app prune deletes a marker file once it is older than
+    `BACKUP_KEEP_DAYS`.
+  Guide: [What retention deletes and what it keeps](../backups.md#what-retention-deletes-and-what-it-keeps).
 
 <a id="public-image-weight"></a>
 

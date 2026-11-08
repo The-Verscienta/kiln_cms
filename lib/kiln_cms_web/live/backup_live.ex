@@ -654,6 +654,7 @@ defmodule KilnCMSWeb.BackupLive do
   defp presence_label(:present), do: gettext("on disk")
   defp presence_label(:missing), do: gettext("missing")
   defp presence_label(:pruned), do: gettext("pruned (retention)")
+  defp presence_label(:partly_pruned), do: gettext("partly pruned (retention)")
   defp presence_label(:expired), do: gettext("expired")
   defp presence_label(:off_site_only), do: gettext("off-site only")
 

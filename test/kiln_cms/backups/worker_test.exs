@@ -266,21 +266,63 @@ defmodule KilnCMS.Backups.WorkerTest do
   describe "retention" do
     @tag :pg_tools
     test "deletes artifacts past keep_days and keeps the rest", %{dir: dir} do
+      older = Path.join([dir, "db", "kiln-db-20190101-000000.dump"])
       old = Path.join([dir, "db", "kiln-db-20200101-000000.dump"])
       recent = Path.join([dir, "db", "kiln-db-20991231-000000.dump"])
       File.mkdir_p!(Path.dirname(old))
+      File.write!(older, "older")
       File.write!(old, "old")
       File.write!(recent, "recent")
 
       # mtime is what the script's `find -mtime` uses, so this uses it too —
       # a filename-derived date would disagree with the shell path.
       ancient = System.os_time(:second) - 365 * 24 * 3600
+      File.touch!(older, ancient)
       File.touch!(old, ancient)
 
       assert :ok = Worker.run("manual")
 
-      refute File.exists?(old)
+      # `old` is imported first and, with this run still running and `recent`
+      # too fresh to import, it is the newest verified dump: kept (#2219).
+      refute File.exists?(older)
+      assert File.exists?(old)
       assert File.exists?(recent)
+
+      assert [%{stamp: stamp}] = Enum.filter(runs(), &(&1.origin == :app))
+      assert File.exists?(Path.join([dir, "db", "kiln-db-#{stamp}.dump"]))
+
+      assert %{log: log} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+
+      assert Enum.any?(
+               log,
+               &(&1.step == "prune" and
+                   &1.message == "Retention removed 1 file(s) from 1 backup(s)")
+             )
+    end
+
+    @tag :pg_tools
+    test "a retention that can't run deletes nothing, and the backup still succeeds",
+         %{dir: dir} do
+      old = Path.join([dir, "db", "kiln-db-20190101-000000.dump"])
+      File.mkdir_p!(Path.dirname(old))
+      File.write!(old, "older")
+      File.touch!(old, System.os_time(:second) - 365 * 24 * 3600)
+      # Not a usable policy, so retention fails closed.
+      set_config(keep_days: 0)
+
+      assert :ok = Worker.run("manual")
+      assert File.exists?(old)
+
+      assert [%{stamp: stamp, status: :succeeded}] =
+               Enum.filter(runs(), &(&1.origin == :app))
+
+      assert %{log: log} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+
+      assert %{level: :error, message: message} = Enum.find(log, &(&1.step == "prune"))
+
+      assert message ==
+               "Retention skipped: the retention policy is invalid (BACKUP_KEEP_DAYS must " <>
+                 "be a whole number of days, 1 or more); nothing was deleted"
     end
 
     @tag :pg_tools
@@ -469,6 +511,11 @@ defmodule KilnCMS.Backups.WorkerTest do
       File.mkdir_p!(Path.dirname(old))
       File.write!(old, "old")
       File.touch!(old, System.os_time(:second) - 365 * 24 * 3600)
+      # A newer finished backup holds the newest slots; this run, still running,
+      # never does (#2219).
+      newer = Path.join([dir, "db", "kiln-db-20260101-000000.dump"])
+      File.write!(newer, "newer")
+      File.touch!(newer, System.os_time(:second) - 24 * 3600)
 
       {:ok, attrs} =
         Backups.Artifact.from_manifest(%{kind: "db", path: "db/#{Path.basename(old)}"})
@@ -484,6 +531,7 @@ defmodule KilnCMS.Backups.WorkerTest do
       assert :ok = Worker.run("manual")
 
       refute File.exists?(old)
+      assert File.exists?(newer)
       stored = Backups.get_run_by_stamp!("20200101-000000", actor: Backups.system())
       assert [%{destinations: %{"local" => %{"status" => "pruned"}}}] = stored.artifacts
     end
@@ -618,16 +666,22 @@ defmodule KilnCMS.Backups.WorkerTest do
 
     @tag :pg_tools
     test "a run that fails off-site still prunes expired sets", %{dir: dir} do
+      older = Path.join([dir, "db", "kiln-db-20190101-000000.dump"])
       old = Path.join([dir, "db", "kiln-db-20200101-000000.dump"])
       File.mkdir_p!(Path.dirname(old))
-      File.write!(old, "old")
-      File.touch!(old, System.os_time(:second) - 365 * 24 * 3600)
+
+      for path <- [older, old] do
+        File.write!(path, "old")
+        File.touch!(path, System.os_time(:second) - 365 * 24 * 3600)
+      end
 
       set_config(rclone_remote: "r2:kiln")
       fake_bin([{"rclone", "exit 1\n"}])
 
       assert {:error, {:offsite, _}} = Worker.run("manual")
-      refute File.exists?(old)
+      refute File.exists?(older)
+      # The newest verified dump (imported; this run's own is not finished).
+      assert File.exists?(old)
     end
 
     @tag :pg_tools

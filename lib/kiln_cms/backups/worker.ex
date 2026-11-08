@@ -71,6 +71,7 @@ defmodule KilnCMS.Backups.Worker do
     MediaArchive,
     Recorder,
     Redact,
+    Retention,
     WorkState
   }
 
@@ -218,7 +219,7 @@ defmodule KilnCMS.Backups.Worker do
     result =
       case artifacts(ctx, rec) do
         {:ok, artifacts, rec} ->
-          rec = prune_step(dir, rec)
+          rec = retention_step(dir, rec)
 
           case offsite_step(dir, artifacts, rec) do
             {:ok, offsite, rec} -> succeed(ctx, artifacts, offsite, rec)
@@ -309,18 +310,41 @@ defmodule KilnCMS.Backups.Worker do
     if Backups.media_dir(), do: [:db, :media], else: [:db]
   end
 
-  defp prune_step(dir, rec) do
-    deleted = prune(dir)
-    Recorder.mark_pruned(deleted)
-
+  # Before the off-site copy, as it always ran (#2481): this run is `running`,
+  # so `Retention` counts it in flight and never touches it. A retention that
+  # can't see the backup history deletes nothing and says so on the run; the
+  # backup's own outcome does not change.
+  defp retention_step(dir, rec) do
     rec =
-      case deleted do
-        [] -> rec
-        names -> Recorder.log(rec, :info, "prune", "Removed #{length(names)} expired file(s)")
+      case Retention.run(dir) do
+        {:ok, %{deleted: [], stopped: nil}} ->
+          rec
+
+        {:ok, %{deleted: names, units: units, stopped: nil}} ->
+          Recorder.log(rec, :info, "prune", removed(names, units))
+
+        {:ok, %{deleted: names, units: units, stopped: reason}} ->
+          Recorder.log(
+            rec,
+            :error,
+            "prune",
+            removed(names, units) <> ", then stopped: #{Retention.describe(reason)}"
+          )
+
+        {:error, reason} ->
+          Recorder.log(
+            rec,
+            :error,
+            "prune",
+            "Retention skipped: #{Retention.describe(reason)}; nothing was deleted"
+          )
       end
 
     Recorder.progress(rec)
   end
+
+  defp removed(names, units),
+    do: "Retention removed #{length(names)} file(s) from #{units} backup(s)"
 
   # Per-file outcomes land on the run (a part set's per-part results on its
   # parts, with the artifact-level aggregate worked out by the recorder); the
@@ -1074,7 +1098,7 @@ defmodule KilnCMS.Backups.Worker do
   # Partials left behind by a job Oban's timeout killed, or a node that
   # restarted mid-dump. Nothing else reclaims them: the `else` cleanup in
   # `dump_database`/`MediaArchive` doesn't run when the process is killed,
-  # and `prune/1` deliberately skips `.partial` so it can't delete a
+  # and retention deliberately skips `.partial` so it can't delete a
   # CONCURRENT run's work. An hour's grace makes that distinction — anything
   # older than that has no live writer, because `timeout/1` caps a job well
   # inside it and this queue runs one job at a time.
@@ -1083,7 +1107,7 @@ defmodule KilnCMS.Backups.Worker do
   # is how a backup directory fills a disk.
   # sobelow_skip ["Traversal.FileModule"]
   defp sweep_stale_partials(dir) do
-    cutoff = System.os_time(:second) - 3600
+    cutoff = System.os_time(:second) - Retention.partial_grace_s()
 
     for sub <- ["db", "media"],
         path <- Path.wildcard(Path.join([dir, sub, "*.partial"])),
@@ -1142,88 +1166,6 @@ defmodule KilnCMS.Backups.Worker do
       {:ok, _run} -> false
       {:error, _} -> true
     end
-  end
-
-  @sidecar ~r/\Akiln-(?:db|media)-(\d{8}-\d{6})\.sha256\z/
-
-  # Deletes backups older than `keep_days`, matching the script's `prune`, and
-  # returns the file names it removed (so their runs can say `pruned`).
-  #
-  # The files of one stamp are ONE set (#2218): the dump, the media parts (or
-  # the legacy single archive) and the checksum sidecars. The set is aged by its
-  # NEWEST member and deleted together, so a retention sweep never leaves a
-  # media set with a hole in it, and never strips a fresh part set of its
-  # checksums. An orphan (the parts of a failed run) or a gap set ages out the
-  # same way. A `kiln-*` file that is none of these ages alone, as before.
-  # `.partial` is skipped (it may be a concurrent run's work; swept elsewhere)
-  # and `.work` is not under `db/` or `media/`.
-  #
-  # Best-effort and never fatal: failing a backup that succeeded because its
-  # housekeeping didn't would be exactly backwards. A removal that fails stops
-  # that set (its remaining members stay) rather than skipping on past it.
-  @doc false
-  @spec prune(Path.t()) :: [String.t()]
-  # sobelow_skip ["Traversal.FileModule"]
-  def prune(dir) do
-    # `(keep_days + 1) * 86400`, not `keep_days * 86400`, to match the shell's
-    # `find -mtime +N`: that deletes only files whose age in WHOLE days is
-    # strictly greater than N, i.e. age >= (N+1) days. Off by one here meant a
-    # 14-day-6-hour dump was kept by cron and deleted by the app.
-    cutoff =
-      DateTime.to_unix(
-        DateTime.add(DateTime.utc_now(), -(Backups.keep_days() + 1) * 24 * 60 * 60, :second)
-      )
-
-    paths =
-      for sub <- ["db", "media"],
-          path <- Path.wildcard(Path.join([dir, sub, "kiln-*"])),
-          not String.ends_with?(path, ".partial"),
-          do: path
-
-    paths
-    |> Enum.group_by(&set_key/1)
-    |> Enum.flat_map(fn {_key, members} -> prune_set(members, cutoff) end)
-  rescue
-    error ->
-      Logger.warning("Backup prune failed (backup itself succeeded): #{inspect(error)}")
-      []
-  end
-
-  defp set_key(path) do
-    name = Path.basename(path)
-
-    case Artifact.parse_file(name) do
-      {:ok, %{stamp: stamp}} ->
-        {:stamp, stamp}
-
-      :error ->
-        case Regex.run(@sidecar, name) do
-          [_, stamp] -> {:stamp, stamp}
-          nil -> {:file, path}
-        end
-    end
-  end
-
-  defp prune_set(members, cutoff) do
-    mtimes =
-      for path <- members,
-          {:ok, %{mtime: mtime}} <- [File.stat(path, time: :posix)],
-          do: mtime
-
-    if mtimes != [] and Enum.max(mtimes) < cutoff, do: remove_set(members), else: []
-  end
-
-  # Sidecars last, so a set that stops half-way still has its checksums.
-  # sobelow_skip ["Traversal.FileModule"]
-  defp remove_set(members) do
-    members
-    |> Enum.sort_by(&Regex.match?(@sidecar, Path.basename(&1)))
-    |> Enum.reduce_while([], fn path, deleted ->
-      if File.rm(path) == :ok,
-        do: {:cont, [Path.basename(path) | deleted]},
-        else: {:halt, deleted}
-    end)
-    |> Enum.reverse()
   end
 
   # A run that STARTED and failed writes a manifest. Leaving the previous,
