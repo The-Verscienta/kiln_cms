@@ -119,6 +119,12 @@ defmodule KilnCMSWeb.PageHTML do
     ]
   end
 
+  # The editorial workflow guide (#2158), on GitHub like "How it works": the
+  # stock home page ships to every install, and a relative /docs link would
+  # 404 wherever the guides are not published; GitHub also always shows the
+  # guide's screenshots.
+  @workflow_guide "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/editorial-workflow.md"
+
   defp features do
     [
       %{
@@ -135,7 +141,9 @@ defmodule KilnCMSWeb.PageHTML do
         text:
           gettext(
             "Draft, review and publish, with scheduled publishing and content releases that ship several changes at once."
-          )
+          ),
+        href: @workflow_guide,
+        link: gettext("Walk through the workflow")
       },
       %{
         icon: "hero-shield-check",
@@ -143,7 +151,9 @@ defmodule KilnCMSWeb.PageHTML do
         text:
           gettext(
             "Admins, editors and viewers, enforced by policies on every read and write — in the editor and the APIs alike."
-          )
+          ),
+        href: @workflow_guide <> "#who-can-do-what",
+        link: gettext("See who can do what")
       },
       %{
         icon: "hero-globe-alt",

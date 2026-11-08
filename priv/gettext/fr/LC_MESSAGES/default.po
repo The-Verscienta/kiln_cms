@@ -16260,6 +16260,11 @@ msgstr "Voyez ce qui sera publié et quand, et faites glisser un élément pour 
 msgid "See what this rule would do. Nothing is sent or saved."
 msgstr "Voyez ce que ferait cette règle. Rien n’est envoyé ni enregistré."
 
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "See who can do what"
+msgstr "Voir qui peut faire quoi"
+
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
 msgid "Segment"
@@ -21220,6 +21225,11 @@ msgstr "En attente de relecture : un contenu %{kind}."
 #, elixir-autogen, elixir-format
 msgid "Waiting for your device… Follow your browser's prompt to finish."
 msgstr "En attente de votre appareil… Suivez les instructions de votre navigateur pour terminer."
+
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "Walk through the workflow"
+msgstr "Parcourir le flux de travail"
 
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format

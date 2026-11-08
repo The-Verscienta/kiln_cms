@@ -141,6 +141,13 @@
         </span>
         <h3 class="mt-4 text-base font-semibold">{feature.title}</h3>
         <p class="mt-2 text-sm leading-6 text-base-content/70">{feature.text}</p>
+        <a
+          :if={feature[:href]}
+          href={feature.href}
+          class="link mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary-ink"
+        >
+          {feature.link}<.icon name="hero-arrow-right" class="size-4" />
+        </a>
       </article>
     </div>
 

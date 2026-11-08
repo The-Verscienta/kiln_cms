@@ -265,9 +265,11 @@ curl -s 'http://localhost:4000/api/json/posts' \
   - **Read + write**: may additionally author content over **all three
     key-authenticated surfaces** — JSON:API (`POST`/`PATCH`/`DELETE`), GraphQL
     (mutations), and MCP (`/mcp`) — as its owning user, within that user's role.
-    An **editor** creates/updates/submits drafts; **return-to-draft, publish,
-    unpublish and (soft-)delete require an admin** — an editor submits for
-    review, and deciding the outcome is the admin's half; the hard delete
+    An **editor** creates/updates/submits drafts, and may also unpublish and
+    archive; **return-to-draft and (soft-)delete require an admin**, and so
+    does **publish** unless the site lets editors publish (Team → Publishing).
+    Whether unpublishing should need an admin too is an open question in
+    [#2134](https://github.com/The-Verscienta/kiln_cms/issues/2134). The hard delete
     (`:purge`) is never exposed to any key. `/mcp` additionally exposes no publish/delete tools at all (LLM
     authoring is draft-only). See [json-api.md](json-api.md) → "Writing",
     [headless-graphql-api.md](headless-graphql-api.md) → "Mutations", and

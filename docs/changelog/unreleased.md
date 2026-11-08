@@ -1650,6 +1650,81 @@ carries the reasoning.
     which picks up the new titles and the new index; the one manual step is
     trashing `/docs/chain-fold-order`.
 
+<a id="editorial-workflow-guide"></a>
+
+- **A new guide, [The editorial workflow](../editorial-workflow.md), follows
+  one page from draft to review to published in about five minutes, with
+  eight annotated screenshots and a table of what viewers, editors and admins
+  can each do (#2158).** Before this, the workflow was spread across the
+  working-copy, releases, lifecycles and policy-matrix guides, and nothing
+  showed an editor the screens. The guide leads the Authoring & editorial
+  section and the Editor reading track.
+
+  - **The role table is tested.** It sits between
+    `<!-- role-matrix:start -->` and `<!-- role-matrix:end -->`, and
+    `test/kiln_cms/docs/editorial_workflow_test.exs` runs each row's action
+    as a viewer, an editor and an admin, with Team → Publishing off and on,
+    and fails when a cell disagrees with the policies. A row the test has no
+    check for fails too, so the table cannot gain a claim nobody verifies.
+  - **What the guide says about taking content down.** Editors can unpublish
+    and archive a live page even where only admins may publish. The guide
+    says so in a note under the table and links the open question,
+    [#2134](https://github.com/The-Verscienta/kiln_cms/issues/2134), rather
+    than describe a rule Kiln does not enforce. **Publish changes** by an
+    editor is described as by design, as
+    [The working copy](../working-copy.md) records.
+  - **API docs corrected to match.** [api.md](../api.md),
+    [json-api.md](../json-api.md) and
+    [headless-graphql-api.md](../headless-graphql-api.md) said unpublishing
+    needs an admin. They now say an editor may unpublish, that publishing
+    needs an admin unless the site lets editors publish, and link #2134. The
+    policies did not change.
+  - **Editor reading track.** The guide is first; Trash and restore leaves
+    the track (deleting and restoring are admin-only) and is still linked
+    from the guide and listed on the index.
+  - **Home page.** On the stock home page, which ships to every install, the
+    "Editorial workflow" card now links "Walk through the workflow" and the
+    "Roles and permissions" card "See who can do what", both to the guide on
+    GitHub (`main`), the same way the "How it works" button links out. A
+    relative `/docs` link would 404 on an install that does not publish the
+    guides. The two labels are translated in `es` and `fr`. A site whose home
+    page is a published `home` page does not show this page.
+  - **Screenshots on kilncms.dev.** The rich-text sanitizer keeps no `<img>`,
+    so until now an image in a guide published as nothing. The publisher
+    (`scripts/publish_docs.exs`) now sends a paragraph that holds only an
+    image of a repo file as an image block, linked to a media-library item.
+    It uploads each file once through `POST /api/media`, with the same
+    `KILN_DOCS_API_KEY`, named `<basename>-<first 12 hex of its
+    sha256>.<ext>`, and finds it by that filename on later runs. A run checks
+    every image of the guides it publishes first: a missing file or empty alt
+    text raises before any page or media item is written, and so does a
+    failed upload. A change to a file under `docs/images/` republishes every
+    guide that shows it. A guide with no images publishes exactly the single
+    rich-text block it did before.
+  - **Other images in guides.** An image inside a paragraph or a link now
+    publishes as its alt text, so the "Deploy to Render" button in
+    [One-click deploy platforms](../deploy-platforms.md) publishes as a
+    labelled link instead of an empty one. A standalone image at an external `http(s)` URL
+    publishes as a link to it, labelled with its alt text, because the
+    site's `img-src` policy would block it. `--dry-run --out` renders images
+    as `<figure>`s loading the files from GitHub and uploads nothing.
+  - **ExDoc.** `docs/images/` is copied into the docs build as `images/`
+    (`assets:` in `mix.exs`), so the same relative `images/...` path works
+    in ExDoc and on GitHub.
+  - **For contributors.** The screenshots come from
+    `e2e/screenshots/editorial-workflow.spec.js`, with numbered callouts
+    drawn by `e2e/screenshots/annotate.js`, and are derived to WebP by
+    `scripts/optimize_home_images.sh docs`. The test above holds them to 90
+    KB per image, 600 KB for the guide and eight images, each referenced and
+    with alt text. CONTRIBUTING.md → "Adding screenshots to a guide" has the
+    steps.
+  - **Upgrade.** Nothing to do on a Kiln install. On kilncms.dev, the first
+    publish after the merge resends every guide (`mix.exs` and the publisher
+    changed) and uploads the eight screenshots to the media library, so the
+    docs key's account must be allowed to upload media. A screenshot that is
+    later replaced leaves its old media item behind, because the new file
+    has a new name; delete superseded items in the media library.
+
 ## Fixed
 
 <a id="custom-sort-json-null-last"></a>

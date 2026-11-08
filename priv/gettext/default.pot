@@ -16260,6 +16260,11 @@ msgstr ""
 msgid "See what this rule would do. Nothing is sent or saved."
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "See who can do what"
+msgstr ""
+
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
 msgid "Segment"
@@ -21219,6 +21224,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Waiting for your device… Follow your browser's prompt to finish."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/page_html.ex
+#, elixir-autogen, elixir-format
+msgid "Walk through the workflow"
 msgstr ""
 
 #: lib/kiln_cms_web/live/password_policy_live.ex

@@ -12,21 +12,22 @@ full catalogue is grouped by subject on the documentation index.
 
 You write, review and publish content in the Kiln editor.
 
-1. [Editor shortcuts](editor-shortcuts.md): the keyboard shortcuts and slash
+1. [The editorial workflow](editorial-workflow.md): a page from draft to
+   review to published, and what viewers, editors and admins can each do.
+2. [Editor shortcuts](editor-shortcuts.md): the keyboard shortcuts and slash
    commands that make the editor quick to use.
-2. [Markdown](markdown.md): pasting and importing Markdown, and what it
+3. [Markdown](markdown.md): pasting and importing Markdown, and what it
    becomes.
-3. [The working copy](working-copy.md): editing a live document without
+4. [The working copy](working-copy.md): editing a live document without
    changing what readers see until you publish.
-4. [Content releases](content-releases.md): publishing several changes
+5. [Content releases](content-releases.md): publishing several changes
    together, as one change at one moment.
-5. [Discussions](comments.md): comments on a block during review, resolved
+6. [Discussions](comments.md): comments on a block during review, resolved
    or turned into a task.
-6. [Editorial advisories](advisories.md): the editor's advice on what you
+7. [Editorial advisories](advisories.md): the editor's advice on what you
    are writing, such as a skipped heading level or an image with no alt text.
-7. [SEO](seo.md): the search analysis and the help drafting titles and
+8. [SEO](seo.md): the search analysis and the help drafting titles and
    descriptions.
-8. [Trash and restore](trash.md): getting back something you deleted.
 
 ## Developer
 

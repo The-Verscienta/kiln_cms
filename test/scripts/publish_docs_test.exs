@@ -233,6 +233,174 @@ defmodule KilnCMS.Scripts.PublishDocsTest do
     end
   end
 
+  describe "the editorial workflow guide (#2158)" do
+    @guide "docs/editorial-workflow.md"
+
+    test "leads Authoring & editorial, and the Editor track", %{catalogue: catalogue} do
+      assert [%{path: @guide, title: "The editorial workflow", slug: "editorial-workflow"} | _] =
+               Enum.filter(catalogue, &(&1.group == "Authoring & editorial"))
+
+      assert "docs/reading-paths.md" |> File.read!() |> String.split("## Editor") |> Enum.at(1) =~
+               ~r/\A[^\[]*\n1\. \[The editorial workflow\]\(editorial-workflow\.md\)/
+    end
+
+    test "publishes its screenshots as image blocks between its prose", %{catalogue: catalogue} do
+      [doc] = catalogue |> Enum.filter(&(&1.path == @guide)) |> PublishDocs.render_all()
+
+      images = for {:image, image} <- doc.blocks, do: image
+      assert length(images) >= 4
+      assert Enum.all?(images, &String.starts_with?(&1.src, "docs/images/editorial-workflow/"))
+      assert Enum.all?(images, &(String.trim(&1.alt) != ""))
+      assert PublishDocs.validate_images!([doc]) == :ok
+      assert match?([{:html, _} | _], doc.blocks)
+      refute Enum.any?(doc.blocks, &match?({:html, ""}, &1))
+
+      # --dry-run's page loads them from GitHub.
+      assert doc.html =~
+               ~s(<img src="https://raw.githubusercontent.com/The-Verscienta/kiln_cms/main/docs/images/editorial-workflow/)
+    end
+
+    test "every other guide is one rich_text block, as it was", %{catalogue: catalogue} do
+      for doc <- PublishDocs.render_all(catalogue), doc.path != @guide do
+        assert [{:html, _}] = doc.blocks, "#{doc.path} grew a block"
+      end
+    end
+
+    test "a changed screenshot selects the guides that show it, and a dry run sends nothing" do
+      image = "docs/images/editorial-workflow/1-content-list.webp"
+
+      output =
+        ExUnit.CaptureIO.capture_io(fn ->
+          PublishDocs.main(["--dry-run", image], fn -> flunk("a dry run built a client") end)
+        end)
+
+      assert output =~ ~r/^1 of \d+ guides selected/
+      assert output =~ "/docs/editorial-workflow  The editorial workflow"
+    end
+
+    @tag :tmp_dir
+    test "a missing image or an empty alt stops the run before anything is sent", %{tmp_dir: dir} do
+      doc =
+        fixture_doc(dir, [{:image, %{src: Path.join(dir, "gone.webp"), alt: "A", caption: nil}}])
+
+      assert_raise RuntimeError, ~r/gone\.webp does not exist/, fn ->
+        PublishDocs.validate_images!([doc])
+      end
+
+      File.write!(Path.join(dir, "here.webp"), "RIFF")
+
+      doc =
+        fixture_doc(dir, [{:image, %{src: Path.join(dir, "here.webp"), alt: " ", caption: nil}}])
+
+      assert_raise RuntimeError, ~r/has no alt text/, fn ->
+        PublishDocs.validate_images!([doc])
+      end
+    end
+
+    @tag :tmp_dir
+    test "uploads each screenshot once, then writes image blocks pointing at it", %{tmp_dir: dir} do
+      path = Path.join(dir, "shot.webp")
+      File.write!(path, "RIFF shot")
+
+      doc =
+        fixture_doc(dir, [
+          {:html, "<p>Before</p>"},
+          {:image, %{src: path, alt: "The shot", caption: nil}},
+          {:image, %{src: path, alt: "The shot again", caption: nil}}
+        ])
+
+      out =
+        ExUnit.CaptureIO.capture_io(fn ->
+          assert PublishDocs.publish_all([doc], [doc], fake_site(:accepts_upload)) == :ok
+        end)
+
+      assert out =~ "uploaded"
+      assert_received {:request, "POST", "/api/media", _}
+      refute_received {:request, "POST", "/api/media", _}
+
+      assert_received {:request, "POST", "/api/json/entries",
+                       %{"data" => %{"attributes" => attrs}}}
+
+      assert attrs["block_tree"] == [
+               %{"_type" => "rich_text", "legacy_html" => "<p>Before</p>"},
+               %{
+                 "_type" => "image",
+                 "media_id" => "m1",
+                 "url" => "/media/m1",
+                 "alt" => "The shot"
+               },
+               %{
+                 "_type" => "image",
+                 "media_id" => "m1",
+                 "url" => "/media/m1",
+                 "alt" => "The shot again"
+               }
+             ]
+    end
+
+    @tag :tmp_dir
+    test "a refused upload publishes no guide", %{tmp_dir: dir} do
+      path = Path.join(dir, "shot.webp")
+      File.write!(path, "RIFF shot")
+      doc = fixture_doc(dir, [{:image, %{src: path, alt: "The shot", caption: nil}}])
+
+      ExUnit.CaptureIO.capture_io(fn ->
+        assert_raise RuntimeError, ~r/no guide was published.*422/s, fn ->
+          PublishDocs.publish_all([doc], [doc], fake_site(:refuses_upload))
+        end
+      end)
+
+      refute_received {:request, _, "/api/json/entries", _}
+      refute_received {:request, _, "/api/json/pages", _}
+    end
+  end
+
+  defp fixture_doc(dir, blocks) do
+    %{
+      path: Path.join(dir, "guide.md"),
+      slug: "guide",
+      title: "Guide",
+      group: "Authoring & editorial",
+      seo_description: nil,
+      blocks: blocks,
+      html: PublishDocs.html(blocks)
+    }
+  end
+
+  # A site that answers the publisher's requests, recording each as
+  # `{:request, method, path, decoded_json_body | nil}`.
+  defp fake_site(mode) do
+    KilnPublish.API.client("https://site.test/", "key")
+    |> Req.merge(
+      plug: fn conn ->
+        {:ok, raw, conn} = Plug.Conn.read_body(conn)
+        json = if raw != "" and not String.starts_with?(raw, "--"), do: Jason.decode!(raw)
+        send(self(), {:request, conn.method, conn.request_path, json})
+
+        {status, body} = respond(conn.method, conn.request_path, mode)
+        Plug.Conn.send_resp(conn, status, Jason.encode!(body))
+      end
+    )
+  end
+
+  defp respond("GET", "/api/json/type-definitions/by-name/doc", _mode),
+    do: {200, %{"data" => %{"id" => "t1"}}}
+
+  defp respond("POST", "/api/media", :refuses_upload),
+    do: {422, %{"errors" => [%{"code" => "strip_failed"}]}}
+
+  defp respond("POST", "/api/media", _mode),
+    do: {201, %{"data" => %{"id" => "m1", "attributes" => %{"url" => "/media/m1"}}}}
+
+  # Nothing exists yet: no media item, no guide, no index page.
+  defp respond("GET", _path, _mode), do: {200, %{"data" => []}}
+
+  defp respond("POST", _path, _mode),
+    do: {201, %{"data" => %{"id" => "r1", "attributes" => %{"state" => "draft"}}}}
+
+  defp respond("PATCH", _path, _mode),
+    do: {200, %{"data" => %{"id" => "r1", "attributes" => %{"state" => "published"}}}}
+
   # `[{role, nodes}]`: each `##` heading and the nodes under it.
   defp tracks(ast) do
     ast
