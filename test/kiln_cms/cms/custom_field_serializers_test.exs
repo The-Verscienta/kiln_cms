@@ -74,6 +74,8 @@ defmodule KilnCMS.CMS.CustomFieldSerializersTest do
       lib/kiln_cms/cms/field_display.ex
       lib/kiln_cms/cms/reference_snapshots.ex
       lib/kiln_cms/cms/version_diff.ex
+      lib/kiln_cms/cms/version_snapshot.ex
+      lib/kiln_cms_web/controllers/revision_controller.ex
       lib/kiln_cms/cms/working_copy.ex
       lib/kiln_cms/i18n/calculations/inherited_fields.ex
       lib/kiln_cms/portability/csv.ex

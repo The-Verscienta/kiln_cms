@@ -713,8 +713,8 @@ curl -s "http://localhost:4000/api/content/post/$POST_ID/revisions?limit=10" \
   and an empty map for the first). A revision that did not touch them has `[]`.
   Revisions written in one transaction share an instant and have random ids, so
   which counts as the earlier of two is arbitrary. The list does not carry it.
-  Only editors and admins can read history, and they see private fields, so
-  nothing is filtered by caller.
+  The version reads are masked for the caller (private and field-grant-hidden
+  keys are absent), so a key the caller may not see is never named.
 - **The acting user is an id.** User records are not exposed over the API (PII,
   #183); `user_id` is `null` when the write had no actor.
 - **Pagination** is newest first: `?limit=` (1–100, default 20) and an opaque

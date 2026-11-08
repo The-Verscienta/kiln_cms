@@ -46,9 +46,8 @@ defmodule KilnCMSWeb.RevisionController do
   `custom_fields` map against the previous version that carried one
   (`KilnCMS.CMS.VersionSnapshot.changed_custom_fields/2`). `changed_fields` is
   unchanged and still says just `custom_fields`. The list endpoint does not
-  carry it: it would cost a history fold per page. Everyone who can read
-  history is an editor or admin, who may see private custom fields, so no
-  per-caller filter applies.
+  carry it: it would cost a history fold per page. The version rows are read as the
+  caller (`MaskVersionFields`), so keys the caller may not see are never named.
 
   History is stored `:changes_only`, so no version row holds the whole document;
   the snapshot is the fold `KilnCMS.CMS.VersionSnapshot.at/4` computes — the
