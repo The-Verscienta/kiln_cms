@@ -104,7 +104,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Optional: `mix kiln.refire_all` after deploying puts the new code-block focus attributes into `:web` artifacts fired before the upgrade.**
   It sends no webhook or cache purge and `ETag`s don't change, so revalidating clients may keep the old HTML (#2463). No migration.
-  ([#2164](https://github.com/The-Verscienta/kiln_cms/issues/2164) · [long form](docs/changelog/unreleased.md#focusable-code-blocks-upgrade))
+  ([#2467](https://github.com/The-Verscienta/kiln_cms/pull/2467) · [long form](docs/changelog/unreleased.md#focusable-code-blocks-upgrade))
 
 ### Breaking
 
@@ -341,7 +341,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163) · [long form](docs/changelog/unreleased.md#public-muted-text-contrast))
 
 - **Code blocks take keyboard focus and a name ("Code sample", translated), with a visible focus ring, so the arrow keys can scroll a line wider than the column.**
-  ([#2164](https://github.com/The-Verscienta/kiln_cms/issues/2164) · [long form](docs/changelog/unreleased.md#focusable-code-blocks))
+  ([#2467](https://github.com/The-Verscienta/kiln_cms/pull/2467) · [long form](docs/changelog/unreleased.md#focusable-code-blocks))
 
 ### Security
 
