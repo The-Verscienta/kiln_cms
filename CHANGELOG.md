@@ -260,6 +260,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Backup retention keeps the newest good backup of each component, honours `kiln-<stamp>.keep` recovery points, ages a stamp's dump and media separately, and deletes nothing when it can't read what it needs.**
+  `BACKUP_KEEP_DAYS` unchanged; no migration. Local disk use may grow by up to two backups per component, plus pinned ones.
+  ([long form](docs/changelog/unreleased.md#backup-retention-by-component))
+
 - **The signed-out home page and the default logo ship right-sized images: page image weight drops from about 1,030 KB to about 100 KB (WebP).**
   ([#2165](https://github.com/The-Verscienta/kiln_cms/issues/2165) · [long form](docs/changelog/unreleased.md#public-image-weight))
 

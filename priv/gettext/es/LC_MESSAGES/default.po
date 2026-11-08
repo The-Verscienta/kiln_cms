@@ -23744,6 +23744,11 @@ msgstr "huérfano"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "partly pruned (retention)"
+msgstr "parcialmente depurada (retención)"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "pending"
 msgstr "pendiente"
 

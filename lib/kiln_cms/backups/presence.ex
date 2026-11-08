@@ -11,6 +11,10 @@ defmodule KilnCMS.Backups.Presence do
       file under `dir`.
     * `:pruned` - the application's own retention removed them (the artifact's
       `"local"` destination is marked `"pruned"`).
+    * `:partly_pruned` - some files are still here and every missing one was
+      removed by the application's own retention. Retention ages a stamp's
+      database dump and its media separately (#2219), so an old dump can go
+      while the same backup's newer media stays.
     * `:off_site_only` - nothing is left locally, but every missing artifact has
       a successful rclone copy.
     * `:expired` - a cron-made (imported) run older than the retention window
@@ -22,7 +26,7 @@ defmodule KilnCMS.Backups.Presence do
   """
   alias KilnCMS.Backups.{Artifact, Run}
 
-  @type t :: :present | :pruned | :off_site_only | :expired | :missing | :none
+  @type t :: :present | :pruned | :partly_pruned | :off_site_only | :expired | :missing | :none
 
   @doc """
   The presence of `run`'s files under `dir`.
@@ -45,9 +49,15 @@ defmodule KilnCMS.Backups.Presence do
 
     cond do
       absent == [] -> :present
-      length(absent) < length(states) -> :missing
+      length(absent) < length(states) -> some_absent(absent)
       true -> all_absent(absent, expired?(run, keep_days, now))
     end
+  end
+
+  defp some_absent(absent) do
+    if Enum.all?(absent, fn {_unit, state} -> state == :pruned end),
+      do: :partly_pruned,
+      else: :missing
   end
 
   defp all_absent(absent, expired?) do

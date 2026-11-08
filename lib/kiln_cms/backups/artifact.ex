@@ -17,7 +17,8 @@ defmodule KilnCMS.Backups.Artifact do
   bytes concatenated in order. `encrypted?` stays reserved for #2224.
 
   File names are built and parsed here and nowhere else: `parse_file/1`,
-  `part_name/2`, `set_names/2`, `sidecar_name/2`.
+  `part_name/2`, `set_names/2`, `sidecar_name/2`, `parse_sidecar_name/1`,
+  `keep_name/1`, `parse_keep_name/1`.
   """
   use Ash.Resource, data_layer: :embedded
 
@@ -175,6 +176,50 @@ defmodule KilnCMS.Backups.Artifact do
   @spec sidecar_name(:db | :media, String.t()) :: String.t()
   def sidecar_name(kind, stamp) when kind in @kinds and is_binary(stamp),
     do: "kiln-#{kind}-#{stamp}.sha256"
+
+  @sidecar_name ~r/\Akiln-(db|media)-(\d{8}-\d{6})\.sha256(\.partial)?\z/
+
+  @doc """
+  Parse a checksum sidecar's name (`kiln-<kind>-<stamp>.sha256`, optionally
+  `.partial` while it is being written) into `{:ok, %{kind, stamp, partial?}}`,
+  or `:error`.
+  """
+  @spec parse_sidecar_name(String.t()) ::
+          {:ok, %{kind: :db | :media, stamp: String.t(), partial?: boolean()}} | :error
+  def parse_sidecar_name(name) when is_binary(name) do
+    case Regex.run(@sidecar_name, name) do
+      [_, kind, stamp | rest] ->
+        {:ok, kind} = kind(kind)
+        {:ok, %{kind: kind, stamp: stamp, partial?: rest != []}}
+
+      nil ->
+        :error
+    end
+  end
+
+  def parse_sidecar_name(_other), do: :error
+
+  @doc """
+  The recovery-point marker for a stamp (#2219): `kiln-<stamp>.keep`. An entry
+  of this name in `db/` or `media/` pins every component of that stamp against
+  retention (`KilnCMS.Backups.Retention`, `scripts/backup.sh prune`). Only its
+  presence counts; its contents are never read.
+  """
+  @spec keep_name(String.t()) :: String.t()
+  def keep_name(stamp) when is_binary(stamp), do: "kiln-#{stamp}.keep"
+
+  @keep_name ~r/\Akiln-(\d{8}-\d{6})\.keep\z/
+
+  @doc "The stamp a `keep_name/1` marker names, as `{:ok, stamp}`, or `:error`."
+  @spec parse_keep_name(String.t()) :: {:ok, String.t()} | :error
+  def parse_keep_name(name) when is_binary(name) do
+    case Regex.run(@keep_name, name) do
+      [_, stamp] -> {:ok, stamp}
+      nil -> :error
+    end
+  end
+
+  def parse_keep_name(_other), do: :error
 
   @doc """
   The file names an artifact occupies in its kind's subdirectory, in order:
