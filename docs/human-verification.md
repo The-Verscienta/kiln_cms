@@ -1,4 +1,4 @@
-# Human verification (CAPTCHA) at sign-in and registration
+# Human verification (CAPTCHA) at sign-in, registration and on forms
 
 Kiln can ask for a human-verification check (Cloudflare Turnstile) before a
 password sign-in or a registration goes through (#2249). It is **adaptive**:
@@ -6,9 +6,11 @@ the check appears only when an attempt looks like part of a guessing run, so
 most people never see it. It slows down password guessing and scripted
 sign-ups without locking the real owner of an account out.
 
-It is **off** until the operator configures a provider. This first release
-covers password sign-in and registration only; public forms and per-site keys
-come later.
+A site admin can also ask for the check on each public form, so scripted
+submissions stop reaching the inbox. See [Public forms](#public-forms).
+
+It is **off** until the operator configures a provider. Per-site keys come
+later.
 
 ## Who sees a check, and when
 
@@ -205,8 +207,12 @@ cookie or consent notice needs to mention it. Turnstile is a security measure
 on a page the visitor asked for, but whether that needs consent where you
 operate is a question for your own advice.
 
-Tokens are never logged: `challenge_token` and `cf-turnstile-response` are
-filtered from request logs and scrubbed from error reports.
+On a form that asks for a check, every visitor who scrolls to the form loads
+Cloudflare's script, not only the ones that look suspicious.
+
+Tokens are never logged: `challenge_token`, `cf-turnstile-response` and a
+form's `_kiln_challenge` are filtered from request logs and scrubbed from
+error reports.
 
 ## For API clients
 
@@ -253,6 +259,209 @@ to `CHALLENGE_HOSTNAMES`.
 The other answers are `401` `challenge_failed` (the token was refused; same
 `meta`) and `503` `challenge_unavailable` with `retry-after: 30`. See
 [the API guide](api.md#human-verification).
+
+## Public forms
+
+A site admin can make a public form ask every visitor for a check before the
+submission is acted on. It is set **per form** and is **off** by default. It
+works only on a deployment where the operator has configured a provider (see
+[Turn on human verification](#turn-on-human-verification)); sign-in and
+registration do not have to be on for it.
+
+Unlike sign-in, the check on a form never turns a visitor away for want of
+a token. A submission without a passing check is **held**: it is stored in
+**Spam** for an admin to review, and nothing is done with it. The visitor
+sees the form's usual success message either way. So a real visitor whose
+widget could not load still reaches the inbox, and a script that never ran
+the widget gets nothing mailed, forwarded or counted. See
+[ADR 0021](decisions/0021-a-form-opts-in-to-human-verification-and-an-unverified-submission-is-held-not-refused.md).
+
+### Ask for a check on a form
+
+You need the **admin** role: the Forms pages are admin-only.
+
+1. Open **Forms** (`/editor/forms`) and click the form's name. The builder
+   opens on its **Fields** tab.
+2. Click the **General** tab.
+3. Tick **Ask visitors to complete a human-verification check**. The line
+   under it explains what happens to submissions without a check.
+
+   If the box is greyed out and the line under it reads "Human verification
+   isn't available on this deployment. Ask the operator to configure it.",
+   no form can ask on this deployment yet: the operator has not set a
+   provider, a site key and a secret, has set `CHALLENGE_FORMS=false`, or has
+   the kill switch on.
+4. Click **Save**. The builder says **Saved.**
+5. Open the form in a private browser window, at `/forms/<slug>` on the
+   site's host or on a published page that has the form block. Above the
+   submit button, a status line reads "Loading the human-verification
+   check…", then the widget appears, and "Check complete." once it is solved
+   (Turnstile often solves it without a click).
+6. Send the form. Back in the builder, open the **Entries** tab: the new
+   entry carries a **Verified** badge.
+
+To switch it off, untick the box on the **General** tab and click **Save**.
+That works even while verification is unavailable on the deployment, so a
+form is never stuck asking.
+
+The widget is drawn wherever the form is: on a delivered page (inside a
+columns block or an experiment variant too), on the form's own page
+`/forms/<slug>`, and inside the embed iframe (`embed.js`). An embedded form
+needs no extra host configuration: the iframe is served from the site's own
+host. Previews render no form, and fired artifacts keep their
+`data-kiln-form` placeholder, so neither changes.
+
+### What visitors see
+
+The widget sits above the submit button with a status line under it, the
+same lines as on sign-in: "Loading the human-verification check…", "Check
+complete.", "The check expired. Complete it again." If the visitor clicks
+submit before the check has finished, the line reads "Finishing the
+human-verification check…" and the form waits up to 8 seconds for it, then
+sends anyway.
+
+If the widget cannot load (a script blocker, a network that blocks
+`challenges.cloudflare.com`), the line reads "The human-verification check
+could not load." and under it: "If the check doesn't load, you can still
+send this form — it will be reviewed before it's acted on." Without
+JavaScript the form shows "This check needs JavaScript." and the same
+sentence.
+
+Cloudflare's script loads only when the widget scrolls into view, so a
+visitor who never reaches the form never contacts Cloudflare.
+
+### What happens to each submission
+
+The check runs only after the form's own fields are valid, so a visitor who
+mistyped an email address keeps their token for the next try. A submission
+that trips the honeypot is discarded before the check, as before.
+
+| The check | What happens | Badge on the **Entries** tab |
+|---|---|---|
+| Passed | Accepted as usual: notification email, autoresponder, `form.submitted` webhook, experiment conversion | **Verified** |
+| No token: the widget did not load, JavaScript was off, or a script never ran it | **Held**: stored in **Spam**; the visitor sees the success message | **Held** ("Held: sent without completing the check.") |
+| Solved on a host this deployment does not serve | **Held**, and the log names the host (see [Headless sites](#headless-sites)) | **Held** ("Held: the check was completed on a site this deployment doesn't serve.") |
+| Cloudflare could not be asked: a timeout, a network error, a `5xx` or `429` | **Held** | **Held** ("Held: the verification service couldn't be reached.") |
+| Refused: wrong, expired, already used, malformed, or drawn for another action | **Not stored.** The form comes back (`422`) with the visitor's values and a fresh widget, and "The human-verification check didn't pass. Complete it again, then send the form." | — |
+
+A held submission is never mailed to `notify_email`, never autoresponded
+to, never sent to webhooks and never counted as an experiment conversion.
+Hover a badge to see its reason.
+
+There is no grace period when you switch the check on: a visitor who loaded
+the page before, in a tab left open or from a cache (a delivered page may be
+served for up to six minutes), sends without a token and lands in Spam.
+
+### Review held submissions
+
+1. Open the form's **Entries** tab and click **Spam**. Held entries carry a
+   **Held** badge.
+2. Read the entry. If it is genuine, click **Mark as reviewed** on it (or
+   tick several and use **Mark as reviewed** in the bar above the list).
+
+Marking an entry reviewed does not send its notification or webhook after
+the fact: that only ever happens when the submission arrives. Act on it by
+hand. Spam, held entries included, is deleted after `spam_retention_days`
+(30 days by default), so review it before then.
+
+### Headless sites
+
+A front end that renders a form from `GET /api/forms/<slug>` has to draw the
+widget itself. Without a token, everything it sends is held.
+
+1. Ask the operator to add the front end's hostnames to the Turnstile widget
+   in Cloudflare and to `CHALLENGE_HOSTNAMES` (see
+   [Turn on human verification](#turn-on-human-verification)). Kiln accepts
+   a token only when Cloudflare reports a host this deployment serves or one
+   listed there.
+2. Read the form's schema. Its `challenge` is `null` for a form that does not
+   ask, or this:
+
+   ```sh
+   curl -s https://cms.example.com/api/forms/contact
+   ```
+
+   ```json
+   {
+     "slug": "contact",
+     "name": "Contact",
+     "honeypot_field": "website",
+     "submit_url": "/forms/contact",
+     "challenge": {
+       "required": true,
+       "provider": "turnstile",
+       "site_key": "0x4AAAAAAA...",
+       "script_url": "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
+       "action": "form",
+       "field": "_kiln_challenge",
+       "without_token": "held"
+     },
+     "fields": ["…"]
+   }
+   ```
+
+3. Load `script_url` and render the widget with `site_key` and `action`
+   (Cloudflare refuses a token drawn for another action).
+4. Send the token as a string under `field`, beside the form's values:
+
+   ```sh
+   curl -s -X POST https://cms.example.com/api/forms/contact \
+     -H 'content-type: application/json' \
+     -d '{"email": "visitor@example.com", "message": "Hello", "_kiln_challenge": "<token>"}'
+   ```
+
+   ```json
+   {"ok": true, "message": "Thanks, we'll be in touch.", "challenge": "verified"}
+   ```
+
+   `cf-turnstile-response`, the name Turnstile's own markup posts, is
+   accepted when `_kiln_challenge` is absent or empty.
+
+`challenge` in the answer is `"verified"`, or `"held"` when the submission
+was kept for review. A refused token is a `422`:
+
+```json
+{
+  "ok": false,
+  "errors": {"_kiln_challenge": "did not pass the human-verification check"},
+  "challenge": "failed"
+}
+```
+
+Draw a fresh widget and send again: a token is good for one request. A form
+that does not ask answers exactly as it did before, with no `challenge`
+key. Full reference: [the API guide](api.md#human-verification-on-forms).
+
+If the operator turned `send_remote_ip` on, Kiln sends Cloudflare the
+address of whoever made the request, which for a server relaying a browser's
+submission is the server's own address.
+
+### Turn forms off for the whole deployment
+
+The operator can stop every form asking without touching any form's
+setting:
+
+```sh
+CHALLENGE_FORMS=false
+```
+
+Restart every node. Every form then renders and submits as if its check
+were off, and the **General** tab greys the box out for forms that do not
+have it on. Each form's setting is kept, so unsetting the variable and
+restarting puts them back. `KILN_CHALLENGE_DISABLED=1`, or a provider that
+is not fully configured, has the same effect on forms.
+
+### What can go wrong with forms
+
+| You see | Meaning |
+|---|---|
+| The **General** tab's box is greyed out with "Human verification isn't available on this deployment." | No provider, site key or secret, `CHALLENGE_FORMS=false`, or the kill switch. Ask the operator. |
+| Saving is refused with a message that the check can't be turned on because human verification isn't available on this deployment | The deployment lost its provider (or turned forms off) between loading the tab and saving. Reload the page. |
+| Every entry from a headless site is **Held**, and the log says "A form submission's human-verification token was solved on "www.example.org", which this deployment does not serve; it was held as spam. If that is your own site, add it to CHALLENGE_HOSTNAMES." | That host is not in `CHALLENGE_HOSTNAMES`. Logged at most once a minute per node. |
+| Every entry from a headless site is **Held** as "sent without completing the check", and nothing is logged | The front end is not sending `_kiln_challenge`. |
+| Entries are **Held** as "couldn't be reached" | Kiln could not reach Cloudflare, or the secret is wrong: check `kiln_cms.challenge.verify.stop.count` by `result` ([Observability](observability.md#human-verification)). |
+| An embedded form draws no widget, and its entries are all **Held** | The embed's script `/assets/js/challenge_static.js` is missing: a custom asset build that skipped the `kiln_challenge_embed` esbuild profile. |
+| A burst of **Held** entries right after switching the check on | Pages loaded (or cached) before the switch; see above. |
 
 ## What can go wrong
 
@@ -305,7 +514,10 @@ development (and skipped by the test suite).
 - **Metrics.** `kiln_cms.challenge.decision.count` and
   `kiln_cms.challenge.verify.stop.*`; see
   [Observability](observability.md#human-verification).
-- **Upgrading and rolling back.** No migration. Nothing changes until a
-  provider is configured, and rolling the pin back simply stops asking.
+- **Upgrading and rolling back.** Sign-in and registration need no
+  migration. The form setting adds a `challenge` column to `forms` and to
+  `form_submissions` (`mix ash.migrate`). Nothing changes until a provider is
+  configured, and rolling the pin back simply stops asking, on forms too:
+  a form that asked for a check acts on every submission again.
 
 See also the [threat model](threat-model.md#human-verification-2249).

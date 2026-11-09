@@ -244,18 +244,35 @@ defmodule KilnCMSWeb.Embed do
   The full Content-Security-Policy for one form's embed responses (the form page
   and the thank-you page it posts to). Same-origin everything, except
   `frame-ancestors`, which is this form's policy (#648).
+
+  `sources` are the human-verification provider's origins
+  (`KilnCMS.Challenge.csp_sources/2`, #2249), passed only for a form that
+  draws the widget: they join `script-src` and `connect-src`, and an explicit
+  `frame-src 'self' <origin>` is added — the policy otherwise has none, and
+  `default-src 'self'` would refuse the provider's frame. With no sources the
+  policy is byte-for-byte what it was.
   """
-  @spec content_security_policy(map() | nil) :: String.t()
-  def content_security_policy(form) do
+  @spec content_security_policy(map() | nil, map()) :: String.t()
+  def content_security_policy(form, sources \\ %{}) do
+    script_src = Map.get(sources, :script_src, [])
+    frame_src = Map.get(sources, :frame_src, [])
+    connect_src = Map.get(sources, :connect_src, [])
+
     "default-src 'self'; " <>
-      "script-src 'self'; " <>
+      "script-src #{sources_list(["'self'" | script_src])}; " <>
       "style-src 'self' 'unsafe-inline'; " <>
       "img-src 'self' data: blob:; " <>
       "font-src 'self' data:; " <>
-      "connect-src 'self'; " <>
+      "connect-src #{sources_list(["'self'" | connect_src])}; " <>
+      frame_src_directive(frame_src) <>
       "object-src 'none'; base-uri 'self'; form-action 'self'; " <>
       "frame-ancestors #{frame_ancestors_for(form)}"
   end
+
+  defp sources_list(sources), do: sources |> Enum.uniq() |> Enum.join(" ")
+
+  defp frame_src_directive([]), do: ""
+  defp frame_src_directive(origins), do: "frame-src #{sources_list(["'self'" | origins])}; "
 
   @doc """
   Warn once per node when a request is being framed by another site and the

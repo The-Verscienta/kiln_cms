@@ -13,6 +13,7 @@ defmodule KilnCMSWeb.BlockComponents do
   alias KilnCMS.Blocks
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.HTMLSanitizer
+  alias KilnCMSWeb.ChallengeComponents
 
   # The rendered width of an image block in the stock reading column.
   @column_image_sizes "(max-width: 768px) 100vw, 768px"
@@ -381,6 +382,10 @@ defmodule KilnCMSWeb.BlockComponents do
         </div>
       </div>
 
+      <%!-- Human verification (#2249): nothing unless this form asks for it.
+            The token is never echoed back — a re-render draws a fresh one. --%>
+      <ChallengeComponents.form_challenge form={@form} id={@id_prefix} embedded={@embed} />
+
       <button type="submit" class="btn btn-primary">
         {@form.submit_label || gettext("Submit")}
       </button>
@@ -625,10 +630,31 @@ defmodule KilnCMSWeb.BlockComponents do
   defp form_error_message("is no longer accepting submissions"),
     do: gettext("This form is no longer accepting submissions.")
 
+  defp form_error_message("did not pass the human-verification check"),
+    do:
+      gettext("The human-verification check didn't pass. Complete it again, then send the form.")
+
   defp form_error_message(message) when message in ["is not valid", "must be a boolean"],
     do: gettext("This value isn't valid.")
 
   defp form_error_message(message), do: to_string(message)
+
+  @doc """
+  Every form the enriched `blocks` render (`columns` children included), in
+  order, duplicates kept. Unresolved form blocks (an inactive or unknown slug)
+  render nothing and are not listed. Delivery decides a page's
+  human-verification policy and ETag from these (#2249).
+  """
+  @spec block_forms([map()]) :: [map()]
+  def block_forms(blocks) when is_list(blocks) do
+    Enum.flat_map(blocks, fn
+      %{type: "columns", columns: cols} -> Enum.flat_map(List.wrap(cols), &block_forms(&1.blocks))
+      %{type: "form", form: %{} = form} -> [form]
+      _block -> []
+    end)
+  end
+
+  def block_forms(_blocks), do: []
 
   @doc """
   The field's column span on the public form's 6-column grid (`width` on

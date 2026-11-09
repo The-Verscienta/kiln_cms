@@ -156,16 +156,16 @@ the `result="error"` share.
 
 ## Human verification
 
-The adaptive sign-in and registration check
-([human-verification.md](human-verification.md), #2249) emits two events. No
+The adaptive sign-in and registration check and the check on public forms
+([human-verification.md](human-verification.md), #2249) emit two events. No
 address, account, token or anything the provider echoed is ever in either.
 
 | Event | Fired by | Measurements | Metadata |
 |-------|----------|--------------|----------|
-| `[:kiln_cms, :challenge, :decision]` | `KilnCMS.Challenge.Gate`, once per password sign-in or registration that the check applies to | `count` (always `1`) | `action`, `decision` |
+| `[:kiln_cms, :challenge, :decision]` | `KilnCMS.Challenge.Gate`, once per password sign-in or registration that the check applies to, and once per submission to a form that asks for a check | `count` (always `1`) | `action`, `decision` |
 | `[:kiln_cms, :challenge, :verify, :stop]` | `KilnCMS.Challenge.verify/4`, once per token check (only when a check is required) | `duration` (native units) | `provider`, `action`, `result` |
 
-- `:action` -- `:sign_in` or `:register`.
+- `:action` -- `:sign_in`, `:register` or `:form`.
 - `:decision` -- `:not_required` (under both thresholds), `:passed`,
   `:missing` (a check was required and no token came), `:failed` (the provider
   refused the token), `:fail_open` (the provider could not be asked and the
@@ -173,6 +173,13 @@ address, account, token or anything the provider echoed is ever in either.
   sign-in was refused because its address is past `ip_closed_after`).
   Registration is never `:fail_closed`. A `POST /api/auth/sign_in` with
   `CHALLENGE_API_SIGN_IN` off, or anything with the feature off, emits nothing.
+- For `action: :form` the decision is what happened to the submission:
+  `:passed`; `:failed` (refused, the visitor got the form back); or one of
+  the three *held* outcomes, stored in Spam and not acted on: `:missing` (no
+  token), `:wrong_host` (solved on a host this deployment does not serve) or
+  `:unavailable` (the provider could not be asked). A form never fails open
+  or closed. A form that does not ask, a submission with a field error and a
+  tripped honeypot emit nothing.
 - `:provider` -- `"turnstile"`.
 - `:result` -- `:passed`; a refusal: `:missing`, `:malformed`, `:invalid`,
   `:expired`, `:hostname_mismatch`, `:action_mismatch`; or why the provider
@@ -193,6 +200,15 @@ Useful Grafana panel:
 
 Alert on a sustained `decision="fail_open"` share: tokens are not being
 checked, and sign-ins that needed a check are getting through without one.
+On forms, watch `action="form"`: a rise in `unavailable` is the provider
+path again (submissions are being held, not admitted), and a steady
+`wrong_host` is almost always a headless site whose host is not in
+`CHALLENGE_HOSTNAMES`. The log then says "A form submission's
+human-verification token was solved on "www.example.org", which this
+deployment does not serve; it was held as spam. If that is your own site,
+add it to CHALLENGE_HOSTNAMES." at most once a minute per node, naming the
+host Cloudflare reported. A high `missing` share on a form usually means a
+headless front end is not sending `_kiln_challenge`.
 `result="not_configured"` in the verify counter is the secret (wrong or
 unreadable); `timeout` or `transport` is the network path to
 `challenges.cloudflare.com`. Any `fail_closed` means password sign-in is being

@@ -1,7 +1,8 @@
 defmodule KilnCMSWeb.ChallengeComponents do
   @moduledoc """
   The human-verification widget on the sign-in and registration forms (#2249),
-  and the state those forms keep about it.
+  and the state those forms keep about it — and, in `form_challenge/1`, the
+  widget on a public form that asks for one.
 
   ## Nothing until it is needed
 
@@ -34,6 +35,7 @@ defmodule KilnCMSWeb.ChallengeComponents do
   """
   use Phoenix.Component
   use Gettext, backend: KilnCMSWeb.Gettext
+  use KilnCMSWeb, :verified_routes
 
   alias KilnCMS.Accounts.Errors.ChallengeRequired
   alias KilnCMS.Challenge
@@ -150,6 +152,83 @@ defmodule KilnCMSWeb.ChallengeComponents do
   end
 
   def challenge_widget(assigns), do: ~H""
+
+  attr :form, :map, required: true, doc: "The `KilnCMS.CMS.Form` being rendered."
+  attr :id, :string, required: true, doc: "Unique on the page; the form's own id prefix."
+
+  attr :embedded, :boolean,
+    default: false,
+    doc: "Inside the embed iframe, which loads its own mount script instead of app.js."
+
+  @doc """
+  The widget on a public form (#2249), or nothing when the form does not need
+  one right now (`KilnCMS.Challenge.form_required?/2`) — so a form left `:off`,
+  or every form while the operator has them off, renders exactly as before.
+
+  These pages are dead renders, so there is no hook: the element is marked
+  `data-kiln-challenge` and `mountAll` in `assets/js/challenge.js` mounts it —
+  from app.js on the site's own pages, from `challenge_static.js` (a
+  `<script type="module" src>`, never inline) inside the embed. The token goes
+  in `KilnCMS.Forms.challenge_field/0`, always empty when rendered: a refused
+  submission comes back with a fresh widget, not the spent token.
+
+  Without the token the form still submits; the submission is held for review
+  rather than refused, and the fallback line says so.
+  """
+  def form_challenge(assigns) do
+    config = Challenge.config()
+
+    assigns =
+      assign(assigns,
+        widget:
+          if(Challenge.form_required?(config, assigns.form),
+            do: Challenge.widget(config, :form)
+          )
+      )
+
+    ~H"""
+    <div :if={@widget} class="kiln-form-challenge" data-role="challenge">
+      <div
+        id={@id <> "-challenge"}
+        data-kiln-challenge
+        data-script-url={@widget.script_url}
+        data-global={@widget.global}
+        data-sitekey={@widget.site_key}
+        data-action={@widget.action}
+        data-loading-text={gettext("Loading the human-verification check…")}
+        data-solved-text={gettext("Check complete.")}
+        data-expired-text={gettext("The check expired. Complete it again.")}
+        data-error-text={gettext("The human-verification check could not load.")}
+        data-waiting-text={gettext("Finishing the human-verification check…")}
+      >
+        <input
+          type="hidden"
+          name={KilnCMS.Forms.challenge_field()}
+          value=""
+          data-role="challenge-token"
+        />
+        <div data-role="challenge-widget"></div>
+        <p class="mt-1 text-xs text-base-content/70" role="status" data-role="challenge-status"></p>
+        <p class="mt-1 text-xs text-base-content/70" data-role="challenge-fallback" hidden>
+          {form_fallback_text()}
+        </p>
+      </div>
+      <noscript>
+        <p class="mt-1 text-xs text-base-content/70">
+          {gettext("This check needs JavaScript.")} {form_fallback_text()}
+        </p>
+      </noscript>
+      <script :if={@embedded} type="module" src={~p"/assets/js/challenge_static.js"}>
+      </script>
+    </div>
+    """
+  end
+
+  defp form_fallback_text,
+    do:
+      gettext(
+        "If the check doesn't load, you can still send this form — it will be reviewed before it's acted on."
+      )
 
   @doc "The sentence that says why a challenge is showing — also the no-JS form POST's flash."
   @spec reason_text(ChallengeRequired.reason(), Challenge.action()) :: String.t()

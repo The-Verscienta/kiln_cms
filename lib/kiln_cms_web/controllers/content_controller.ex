@@ -32,6 +32,7 @@ defmodule KilnCMSWeb.ContentController do
   require Ash.Query
 
   alias KilnCMS.Cache
+  alias KilnCMS.Challenge
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentPassword
   alias KilnCMS.CMS.ContentTypes
@@ -41,9 +42,11 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMS.I18n
   alias KilnCMS.I18n.Fallback
   alias KilnCMS.Seo.Patterns
+  alias KilnCMSWeb.BlockComponents
   alias KilnCMSWeb.ContentLock
   alias KilnCMSWeb.EventIndex
   alias KilnCMSWeb.Params
+  alias KilnCMSWeb.Plugs.ChallengeCsp
   alias KilnCMSWeb.StructuredData
   alias KilnCMSWeb.ViewTracking
 
@@ -188,6 +191,9 @@ defmodule KilnCMSWeb.ContentController do
 
   defp render_form_page(conn, form) do
     conn
+    # The page draws the form's human-verification widget when it asks for one
+    # (#2249); only then does the policy allow the provider.
+    |> widen_for_forms([form])
     # Same window as the event index's: the page changes only when an admin
     # edits the form, and a form deactivated inside it refuses the POST anyway.
     |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
@@ -998,10 +1004,19 @@ defmodule KilnCMSWeb.ContentController do
         not is_nil(Map.get(record, :access_password_hash)) or
         Experiments.Delivery.goal_page?(conn)
 
+    # Human verification on a form this page renders (#2249): the policy is
+    # widened only when one draws the widget, and the ETag carries what the
+    # forms render — fields, settings and the provider's site key — so a
+    # client holding a validator sees a form edit. Both before the 304 branch,
+    # so a conditional hit carries the same headers as the full response.
+    challenge = Challenge.config()
+    conn = widen_for_forms(conn, BlockComponents.block_forms(blocks), challenge)
+    forms_digest = forms_digest(blocks, challenge)
+
     conn =
       if private?,
         do: put_private_delivery_headers(conn),
-        else: put_delivery_cache_headers(conn, record)
+        else: put_delivery_cache_headers(conn, record, forms_digest)
 
     # The locale actually served, which a fallback chain can make differ from
     # the one in the URL (`/fr-CA/…` answered in French). `<html lang>` already
@@ -1014,7 +1029,7 @@ defmodule KilnCMSWeb.ContentController do
     start = System.monotonic_time()
 
     result =
-      if not private? and delivery_fresh?(conn, record) do
+      if not private? and delivery_fresh?(conn, record, forms_digest) do
         send_resp(conn, :not_modified, "")
       else
         render_content_body(conn, template, record, blocks, translations, bylines, ct, variant)
@@ -1064,10 +1079,59 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct, org, bylines)))
     |> assign(:bylines, bylines)
     |> assign(:experiment_variant, variant && variant.id)
+    |> render_variant(template, record, blocks, variant, org.id)
+  end
+
+  # A variant that patches blocks can render a form the canonical page does
+  # not (#2249), so its policy is widened from what it actually renders. A
+  # variant render is private — no ETag to keep in step.
+  defp render_variant(conn, template, record, blocks, variant, org_id) do
+    rendered = variant_blocks(record, blocks, variant, org_id, conn)
+
+    conn
+    |> widen_for_forms(BlockComponents.block_forms(rendered))
     |> render(template,
       record: Experiments.Assignment.apply_to_record(record, variant),
-      blocks: variant_blocks(record, blocks, variant, org.id, conn)
+      blocks: rendered
     )
+  end
+
+  defp widen_for_forms(conn, forms, config \\ Challenge.config()) do
+    if Enum.any?(forms, &Challenge.form_required?(config, &1)),
+      do: ChallengeCsp.widen_for_forms(conn, config),
+      else: conn
+  end
+
+  # What the forms on a page render, for its ETag (#2249): each form's id,
+  # `updated_at` and effective challenge, its fields' ids and `updated_at`, and
+  # — when any of them draws the widget — the provider and site key. `""` for a
+  # page with no form, so its ETag is exactly what it was. A form or field
+  # write busts the payload cache (`Changes.BustFormCache`), so these are the
+  # rows the next render reads.
+  defp forms_digest(blocks, config) do
+    forms = blocks |> BlockComponents.block_forms() |> Enum.uniq_by(& &1.id)
+
+    parts =
+      Enum.map(forms, fn form ->
+        fields =
+          case Map.get(form, :fields) do
+            fields when is_list(fields) ->
+              Enum.map_join(fields, ",", &"#{&1.id}@#{&1.updated_at}")
+
+            _not_loaded ->
+              ""
+          end
+
+        challenge = if Challenge.form_required?(config, form), do: "always", else: "off"
+        "#{form.id}@#{form.updated_at}@#{challenge}[#{fields}]"
+      end)
+
+    parts =
+      if Enum.any?(forms, &Challenge.form_required?(config, &1)),
+        do: parts ++ [Challenge.forms_fingerprint(config)],
+        else: parts
+
+    Enum.join(parts, ";")
   end
 
   # Applying the patch to the STORED blocks and re-running the pipeline, rather
@@ -1484,11 +1548,11 @@ defmodule KilnCMSWeb.ContentController do
     |> put_resp_header("vary", "Cookie, Accept-Language")
   end
 
-  defp put_delivery_cache_headers(conn, record) do
+  defp put_delivery_cache_headers(conn, record, forms_digest) do
     conn
     |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
     |> put_resp_header("vary", "Accept-Language")
-    |> put_resp_header("etag", etag(record, current_org_id(conn)))
+    |> put_resp_header("etag", etag(record, current_org_id(conn), forms_digest))
   end
 
   # The resolved SEO fields are part of the raw string, not just the record's
@@ -1500,19 +1564,23 @@ defmodule KilnCMSWeb.ContentController do
   # autodiscovery, branding, code injection and calendar links live in `<head>`
   # but are not columns on the content row, so a settings save must move the
   # ETag or a revalidating client keeps a 304 body whose links are already wrong.
-  defp etag(record, org_id) do
+  #
+  # `forms_digest` (#2249, `forms_digest/2`) is appended only when the page
+  # renders a form, so every page without one keeps the ETag it had.
+  defp etag(record, org_id, forms_digest) do
     raw =
       "#{record.id}:#{record.locale}:#{record.updated_at}:#{record.published_version_id}" <>
         ":#{record.seo_title}:#{record.seo_description}" <>
         ":#{KilnCMSWeb.Robots.directive(record)}" <>
-        ":#{KilnCMS.Cache.head_generation(org_id)}"
+        ":#{KilnCMS.Cache.head_generation(org_id)}" <>
+        if(forms_digest == "", do: "", else: ":" <> forms_digest)
 
     digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)
     ~s("#{digest}")
   end
 
-  defp delivery_fresh?(conn, record) do
+  defp delivery_fresh?(conn, record, forms_digest) do
     match?([_ | _], get_req_header(conn, "if-none-match")) and
-      etag(record, current_org_id(conn)) in get_req_header(conn, "if-none-match")
+      etag(record, current_org_id(conn), forms_digest) in get_req_header(conn, "if-none-match")
   end
 end

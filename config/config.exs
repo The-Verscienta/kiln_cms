@@ -922,8 +922,22 @@ config :phoenix, :filter_parameters, [
   # Human-verification tokens (#2249): ours, and the field Turnstile's own
   # markup would post if it were ever rendered with its default input.
   "challenge_token",
-  "cf-turnstile-response"
+  "cf-turnstile-response",
+  # The same token on a public form submission.
+  "_kiln_challenge"
 ]
+
+# The embedded form's human-verification mount (#2249): an esbuild profile of
+# its own, with no splitting, since the embed iframe loads this one file and
+# never app.js. Declared here rather than beside `kiln_cms` above so the line
+# anchors in docs/environment-variables.md stay put; `config` merges the two.
+config :esbuild,
+  kiln_challenge_embed: [
+    args:
+      ~w(js/challenge_static.js --bundle --format=esm --target=es2022 --outdir=../priv/static/assets/js),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+  ]
 
 # Error tracking (Sentry). The DSN is only set in config/runtime.exs from the
 # SENTRY_DSN env var, so with no DSN every capture is a no-op — dev, test, and

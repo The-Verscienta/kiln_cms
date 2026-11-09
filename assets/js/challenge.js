@@ -17,6 +17,14 @@
 // submit, so LiveView replaces it — `destroyed()` removes the old widget and
 // `mounted()` draws a fresh one.
 //
+// Public forms (#2249) are dead renders — a delivered page, `/forms/:slug`,
+// the embed iframe, a refused re-render — so there is no hook to mount them.
+// Their widget is marked `data-kiln-challenge` instead, and `mountAll` mounts
+// every one in a document once: app.js calls it on the site's own pages, and
+// the embed (which does not load app.js) loads `challenge_static.js`, which
+// does nothing else. It also makes the form wait briefly for a token rather
+// than posting without one (`holdSubmitForToken`).
+//
 // `mountChallenge` takes its window and document as arguments so `node --test`
 // (assets/test/challenge.test.mjs) can drive it without a browser.
 
@@ -118,9 +126,29 @@ export function mountChallenge(el, {win = window, doc = document} = {}) {
 
   const stopWatching = whenVisible(el, draw, win)
 
+  // A page restored from the back/forward cache still holds the token it was
+  // submitted with, which the provider will refuse as spent: drop it and ask
+  // the widget for a new one.
+  const onPageShow = (event) => {
+    if (!event || !event.persisted) return
+    setToken("")
+    say("")
+    if (state.api && state.widgetId != null && typeof state.api.reset === "function") {
+      try {
+        state.api.reset(state.widgetId)
+      } catch (_error) {
+        // The widget is gone; the next submit waits and then goes without.
+      }
+    }
+  }
+  if (typeof win.addEventListener === "function") win.addEventListener("pageshow", onPageShow)
+
   return {
     destroy() {
       state.gone = true
+      if (typeof win.removeEventListener === "function") {
+        win.removeEventListener("pageshow", onPageShow)
+      }
       stopWatching()
       if (state.api && state.widgetId != null) {
         try {
@@ -131,6 +159,81 @@ export function mountChallenge(el, {win = window, doc = document} = {}) {
       }
     },
   }
+}
+
+// How long a submit waits for the widget to produce a token. A visitor who
+// clicks before the invisible check finishes would otherwise post without one
+// and be held for review; past this the form goes anyway, which is still fine.
+export const SUBMIT_WAIT_MS = 8000
+const SUBMIT_POLL_MS = 100
+
+// Mounts every public-form widget under `root` that is not mounted yet.
+// Idempotent: a widget is marked when mounted, so calling this twice (app.js
+// and an embed script on one page, or a test) draws nothing twice.
+export function mountAll(root = document, {win = window, doc = document} = {}) {
+  const mounted = []
+  for (const el of Array.from(root.querySelectorAll("[data-kiln-challenge]"))) {
+    if (el.dataset.kilnChallengeMounted === "true") continue
+    el.dataset.kilnChallengeMounted = "true"
+    mounted.push(mountChallenge(el, {win, doc}))
+    holdSubmitForToken(el, {win})
+  }
+  return mounted
+}
+
+// Mount on DOMContentLoaded, or now if that has passed.
+export function mountAllWhenReady({win = window, doc = document} = {}) {
+  const run = () => mountAll(doc, {win, doc})
+  if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", run, {once: true})
+  else run()
+}
+
+// A submit with no token yet waits up to `SUBMIT_WAIT_MS` for one, then
+// submits again either way. The re-fired submit is let through by a flag on
+// the form, so it can never wait on itself. A widget that has already failed
+// (its fallback line showing) does not wait at all.
+export function holdSubmitForToken(el, {win = window, waitMs = SUBMIT_WAIT_MS} = {}) {
+  const form = el.closest && el.closest("form")
+  if (!form) return
+  const input = el.querySelector("[data-role='challenge-token']")
+  const status = el.querySelector("[data-role='challenge-status']")
+  const fallback = el.querySelector("[data-role='challenge-fallback']")
+  let waiting = false
+
+  form.addEventListener("submit", (event) => {
+    if (form.dataset.kilnChallengeSubmitting === "true") return
+    if (!input || input.value) return
+    if (fallback && !fallback.hidden) return
+
+    event.preventDefault()
+    // A second click while waiting joins the wait rather than starting
+    // another, which would submit the form twice.
+    if (waiting) return
+    waiting = true
+    if (status && el.dataset.waitingText) status.textContent = el.dataset.waitingText
+
+    const submitter = event.submitter
+    const deadline = Date.now() + waitMs
+    // The flag only has to outlive the one synchronous re-fired submit event.
+    // Cleared afterwards, so a later submit (the page restored by Back, or a
+    // re-request that constraint validation blocked) waits for a fresh token
+    // again rather than going straight through.
+    const resubmit = () => {
+      form.dataset.kilnChallengeSubmitting = "true"
+      try {
+        if (typeof form.requestSubmit === "function") form.requestSubmit(submitter || undefined)
+        else form.submit()
+      } finally {
+        delete form.dataset.kilnChallengeSubmitting
+        waiting = false
+      }
+    }
+    const poll = () => {
+      if (input.value || Date.now() >= deadline || (fallback && !fallback.hidden)) resubmit()
+      else win.setTimeout(poll, SUBMIT_POLL_MS)
+    }
+    win.setTimeout(poll, SUBMIT_POLL_MS)
+  })
 }
 
 export const Challenge = {

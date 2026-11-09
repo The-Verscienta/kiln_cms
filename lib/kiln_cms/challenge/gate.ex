@@ -56,6 +56,30 @@ defmodule KilnCMS.Challenge.Gate do
   load at all, and the attempt gets the same bounded treatment as a token the
   provider could not check; anything else would refuse the legitimate visitor
   with nothing to submit while admitting an attacker who submits junk.
+
+  ## Public forms
+
+  `form/3` decides a submission to a form that asks for a challenge
+  (`KilnCMS.Challenge.form_required?/2`). A form is not an account: nothing is
+  locked out and nothing is spent, so the question is only what to do with
+  the submission. One rule for the browser route and the JSON API:
+
+    * **passed** — accepted as `:passed`.
+    * **no token** — *held*: stored, but scored as spam, so nobody is mailed,
+      no webhook fires and no experiment counts it. A visitor whose widget
+      could not load still reaches the inbox, and a script that never ran the
+      widget gets nowhere. Also during an outage: a missing token is never
+      admitted on the provider's say-so.
+    * **the provider could not answer** — held too (`:unavailable`). The data
+      is kept for review rather than refused, but an outage — which a caller
+      can provoke with a burst of junk — never opens a way past the check.
+    * **solved on another host** — held (`:wrong_host`), and logged at most
+      once a minute naming the host the provider reported. Almost always a
+      headless site the operator has not listed in `CHALLENGE_HOSTNAMES`, so
+      it is kept rather than refused. The host the request named plays no part
+      (`KilnCMS.Challenge.hostname_allowed?/1`).
+    * **any other refusal** (invalid, expired, malformed, a token for another
+      action) — refused: the visitor gets the form back to try again.
   """
 
   require Logger
@@ -77,6 +101,101 @@ defmodule KilnCMS.Challenge.Gate do
   @count_only 1_000_000_000
 
   @type verdict :: :ok | {:refuse, KilnCMS.Accounts.Errors.ChallengeRequired.reason()}
+
+  @typedoc "What a form submission records about its check (`FormSubmission.challenge`)."
+  @type form_outcome :: :passed | :missing | :wrong_host | :unavailable
+
+  @type form_verdict :: :not_required | {:accept, form_outcome()} | {:refuse, :failed}
+
+  @doc """
+  The verdict for a submission to `form` carrying `token` (see "Public
+  forms" above). `:not_required` when the form does not ask for a challenge
+  now — the provider is never called. `opts`: `:remote_ip`.
+
+  Call it only for a submission that is otherwise acceptable: a tripped
+  honeypot or a field error must not spend the token or a provider call.
+  """
+  @spec form(map(), term(), keyword()) :: form_verdict()
+  def form(form, token, opts \\ []) do
+    config = Challenge.config()
+
+    if Challenge.form_required?(config, form) do
+      {check, reported} = reporting_hostname_check()
+
+      result =
+        Challenge.verify(config, token, :form,
+          hostname?: check,
+          remote_ip: Keyword.get(opts, :remote_ip)
+        )
+
+      verdict = form_verdict(result)
+      hostname = reported.()
+      if verdict == {:accept, :wrong_host}, do: wrong_host_logged(hostname)
+
+      decided(verdict, :form, form_decision(verdict))
+    else
+      :not_required
+    end
+  end
+
+  defp form_decision({:accept, outcome}), do: outcome
+  defp form_decision({:refuse, :failed}), do: :failed
+
+  defp form_verdict(:ok), do: {:accept, :passed}
+  defp form_verdict({:error, :missing}), do: {:accept, :missing}
+  defp form_verdict({:error, :hostname_mismatch}), do: {:accept, :wrong_host}
+  defp form_verdict({:error, {:unavailable, _reason}}), do: {:accept, :unavailable}
+  defp form_verdict({:error, _refusal}), do: {:refuse, :failed}
+
+  # The provider checks the hostname inside an unlinked task, so the predicate
+  # reports what it was asked to this process. `reported` collects the last
+  # one (and empties the mailbox of them) — the log names the host to add to
+  # `CHALLENGE_HOSTNAMES`, which is the whole fix for a held headless site.
+  defp reporting_hostname_check do
+    case hostname_check() do
+      nil ->
+        {nil, fn -> nil end}
+
+      check ->
+        parent = self()
+        ref = make_ref()
+
+        reporting = fn hostname ->
+          send(parent, {ref, hostname})
+          check.(hostname)
+        end
+
+        {reporting, fn -> drain_reported(ref, nil) end}
+    end
+  end
+
+  defp drain_reported(ref, last) do
+    receive do
+      {^ref, hostname} -> drain_reported(ref, hostname)
+    after
+      0 -> last
+    end
+  end
+
+  defp wrong_host_logged(hostname) do
+    allowed =
+      try do
+        match?(
+          {:allow, _},
+          ThrottleStore.Local.hit(:challenge_form_wrong_host_logged, :timer.minutes(1), 1)
+        )
+      rescue
+        ArgumentError -> true
+      end
+
+    if allowed do
+      Logger.warning(
+        "A form submission's human-verification token was solved on " <>
+          "#{inspect(hostname)}, which this deployment does not serve; it was held as spam. " <>
+          "If that is your own site, add it to CHALLENGE_HOSTNAMES."
+      )
+    end
+  end
 
   @doc """
   The verdict for a password sign-in on `identifier` carrying `token`, from

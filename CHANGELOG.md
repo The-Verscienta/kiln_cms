@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (`forms` and `form_submissions` each gain a `challenge` column). A custom asset build or overlay Dockerfile that does not run `mix assets.deploy` must also run `esbuild kiln_challenge_embed`.**
+  Rolling the pin back is safe, but forms switched to a human-verification check stop asking, without a word, until you upgrade again.
+  ([long form](docs/changelog/unreleased.md#form-human-verification-upgrade))
+
 - **Lists on number, date, link and other scalar custom fields: no migration, but before rolling back, don't edit those list fields or their records on the older release.**
   It clears `multiple` on such a field's definition when saved, keeping each list's first item, and stringifies a list written there.
   ([long form](docs/changelog/unreleased.md#scalar-list-fields-upgrade))
@@ -139,6 +143,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
 
 ### Added
+
+- **Site admins can ask for a human-verification check (Turnstile) on each public form; a submission without a passing check is kept in Spam for review instead of being acted on.**
+  Per form, off by default (Forms → General); `CHALLENGE_FORMS=false` turns every form off. `GET /api/forms/:slug` gains `challenge`; headless sites send `_kiln_challenge`.
+  ([long form](docs/changelog/unreleased.md#form-human-verification))
 
 - **Operators can turn on an adaptive Cloudflare Turnstile check for password sign-in and registration with `CHALLENGE_PROVIDER`, `CHALLENGE_SITE_KEY` and `CHALLENGE_SECRET_KEY`; `/api/auth/sign_in` is only challenged with `CHALLENGE_API_SIGN_IN=true`.**
   Off until configured; deployment-wide; no migration. Guide: [docs/human-verification.md](docs/human-verification.md).
