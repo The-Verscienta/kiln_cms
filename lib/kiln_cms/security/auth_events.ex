@@ -156,6 +156,64 @@ defmodule KilnCMS.Security.AuthEvents do
     end)
   end
 
+  @doc """
+  An unlock link was mailed (#2250). Only ever called once the mail is queued,
+  off the request path, so the log names no address that was not mailed. The
+  account is labelled only when it belongs to the request's site.
+  """
+  @spec sign_in_unlock_requested(map(), Accounts.User.t()) :: :ok
+  def sign_in_unlock_requested(context, user) do
+    safe(:sign_in_unlock_requested, fn ->
+      tenant = context[Recorder.tenant_key()]
+
+      if is_binary(tenant) do
+        Recorder.record_after_commit(
+          :sign_in_unlock_requested,
+          [user: fn -> member_of(user, tenant) end, metadata: %{"surface" => "browser"}] ++
+            opts(context)
+        )
+      end
+    end)
+  end
+
+  @doc "An unlock link lifted a sign-in pause (#2250). `was_locked` is whether one was on."
+  @spec sign_in_unlocked(map(), Accounts.User.t(), boolean()) :: :ok
+  def sign_in_unlocked(context, user, was_locked) do
+    safe(:sign_in_unlocked, fn ->
+      tenant = context[Recorder.tenant_key()]
+
+      if is_binary(tenant) do
+        Recorder.record_after_commit(
+          :sign_in_unlocked,
+          [
+            user: fn -> member_of(user, tenant) end,
+            metadata: %{"was_locked" => to_string(was_locked)}
+          ] ++ opts(context)
+        )
+      end
+    end)
+  end
+
+  @doc """
+  An unlock link was refused (#2250), sampled per IP like a failed sign-in.
+  `user` is the account a *verified* link names, or nil; it is labelled only
+  when it belongs to the request's site.
+  """
+  @spec sign_in_unlock_refused(map(), Accounts.User.t() | nil, String.t()) :: :ok
+  def sign_in_unlock_refused(context, user, reason) do
+    safe(:sign_in_unlock_refused, fn ->
+      tenant = context[Recorder.tenant_key()]
+
+      if is_binary(tenant) do
+        Recorder.record_sampled(
+          :sign_in_unlock_refused,
+          [user: fn -> member_of(user, tenant) end, metadata: %{"reason" => reason}] ++
+            opts(context)
+        )
+      end
+    end)
+  end
+
   defp opts(context) do
     [tenant: context[Recorder.tenant_key()], request: context[Recorder.context_key()]]
   end
@@ -176,11 +234,16 @@ defmodule KilnCMS.Security.AuthEvents do
 
   defp account(_other), do: nil
 
-  # `user` when it belongs to `org`, else nil (recorded as unknown). Belonging
-  # is what `KilnCMS.Accounts.Scoping` decides: a membership on the org, or no
-  # membership anywhere on the default org (the legacy account). A platform
-  # admin with neither is not labelled either; the log is the site's own.
-  defp member_of(%Accounts.User{id: user_id} = user, org) when is_binary(org) do
+  @doc """
+  `user` when it belongs to `org`, else nil (recorded as unknown). Belonging
+  is what `KilnCMS.Accounts.Scoping` decides: a membership on the org, or no
+  membership anywhere on the default org (the legacy account). A platform
+  admin with neither is not labelled either; the log is the site's own.
+
+  Also the rule for who may be mailed a sign-in unlock link on a site (#2250).
+  """
+  @spec member_of(Accounts.User.t() | nil, term()) :: Accounts.User.t() | nil
+  def member_of(%Accounts.User{id: user_id} = user, org) when is_binary(org) do
     # authorize?: false — the same membership reads Scoping makes to resolve a
     # tier; the answer only decides whether the audit event is labelled.
     case Accounts.get_org_membership(user_id, org, authorize?: false, not_found_error?: false) do
@@ -189,7 +252,7 @@ defmodule KilnCMS.Security.AuthEvents do
     end
   end
 
-  defp member_of(_user, _org), do: nil
+  def member_of(_user, _org), do: nil
 
   defp legacy_member?(user_id, org) do
     # authorize?: false — the same legacy-account check Scoping makes; the answer

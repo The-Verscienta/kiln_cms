@@ -409,3 +409,8 @@ config :kiln_cms, KilnCMS.Accounts.BreachedPassword, enabled: false
 config :kiln_cms, KilnCMS.Challenge,
   providers: [KilnCMS.ChallengeFake],
   req_options: [plug: {Req.Test, KilnCMS.Challenge}]
+
+# The sign-in unlock request (#2250) runs its lookup and mail inline, like
+# `:async_analytics` above, so they stay on the test's sandbox connection;
+# `KilnCMS.Accounts.SignInUnlockAsyncTest` turns the hand-off back on.
+config :kiln_cms, KilnCMS.Accounts.SignInUnlock, async: false

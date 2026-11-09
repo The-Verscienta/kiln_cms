@@ -227,6 +227,11 @@ defmodule KilnCMS.Accounts do
       define :register_with_invitation, action: :register_with_invitation
 
       define :accept_invitation_with_password, action: :accept_invitation_with_password
+      # The emailed link that lifts a sign-in pause (#2250) — both system-only
+      # (`authorize?: false` from `KilnCMSWeb.SignInUnlockController`, with the
+      # request host's org in `context:`; an actor-carrying call is refused).
+      define :request_sign_in_unlock, action: :request_sign_in_unlock, args: [:email]
+      define :redeem_sign_in_unlock, action: :redeem_sign_in_unlock, args: [:token]
       # Admin-only: assign role + consumer audiences; pass `actor: admin`.
       define :manage_user_access, action: :manage_access
       # Time-boxed elevation above the standing role (KilnCMS.Accounts.RoleGrant).

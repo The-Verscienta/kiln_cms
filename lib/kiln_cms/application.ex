@@ -154,6 +154,11 @@ defmodule KilnCMS.Application do
       # arrival rate. Revisit this number if a deployment enables the flag and
       # sees view/day-bucket undercounting increase.
       {Task.Supervisor, name: KilnCMS.TaskSupervisor, max_children: 100},
+      # The sign-in unlock request's hand-off (#2250), apart from the shared
+      # supervisor above so a burst of unlock requests cannot crowd out the
+      # challenge gate or analytics, and they cannot crowd it out. A full
+      # supervisor drops the request (`KilnCMS.Accounts.SignInUnlock`).
+      {Task.Supervisor, name: KilnCMS.Accounts.SignInUnlock.TaskSupervisor, max_children: 20},
       KilnCMSWeb.Presence,
       KilnCMS.Collab.Locks,
       # Advisory field locks for the content editor (KilnCMS.Collab.FieldLock):

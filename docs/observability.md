@@ -104,6 +104,33 @@ are answering `503` on that site. A burst of `not_listed` right after a save is
 someone on a network the list no longer covers; one with no change to the list
 can be an admin whose address changed, or a proxy that stopped being trusted.
 
+## Sign-in unlock requests
+
+A request for a [sign-in unlock link](account-administration.md#lift-a-sign-in-pause-by-email)
+(#2250) is answered at once and handed to a task under its own supervisor,
+`KilnCMS.Accounts.SignInUnlock.TaskSupervisor`, which runs at most 20 at a
+time. When it is full, or restarting, the request is dropped: the person was
+already shown the usual answer and can ask again. Each drop emits
+`[:kiln_cms, :accounts, :sign_in_unlock_shed]` (measurement `count`, always
+`1`; no metadata, so no address) and, at most once a minute, logs a warning:
+
+```text
+Dropped a sign-in unlock request: the unlock task supervisor is full. Further drops are not logged for a minute.
+```
+
+The event is not in `KilnCMSWeb.Telemetry.metrics/0`, so it is not exported
+to Prometheus; attach a `:telemetry` handler to count it. Each task looks up
+one account and sends at most one mail, so the supervisor fills only under a
+flood of requests to `/sign-in/unlock`, which the per-IP `:auth` limit (40 a
+minute) already slows. Sustained drops mean a flood from many addresses, or
+tasks running slowly because the database is; check both before anything
+else.
+
+A request whose task fails logs `Sign-in unlock request failed: <error
+module>` or `Sign-in unlock request exited`, at `warning`, and never the
+address. A mailed link, a redeemed one and a refused one are recorded in the
+site's [security log](security-events.md#what-is-recorded), not as telemetry.
+
 ## Delivery client classes
 
 Every request on the `:delivery` rate limit (public pages, `/search`, media

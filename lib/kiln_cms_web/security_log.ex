@@ -162,6 +162,10 @@ defmodule KilnCMSWeb.SecurityLog do
   def type_label(:admin_allowlist_overridden),
     do: gettext("Admin allowlist changed from the server")
 
+  def type_label(:sign_in_unlock_requested), do: gettext("Sign-in unlock link sent")
+  def type_label(:sign_in_unlocked), do: gettext("Sign-in pause lifted by email")
+  def type_label(:sign_in_unlock_refused), do: gettext("Sign-in unlock link refused")
+
   def type_label(other), do: to_string(other)
 
   @doc "`{label, value}` options for the type filter, in `Event.types/0` order."

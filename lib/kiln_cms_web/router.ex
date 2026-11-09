@@ -1281,6 +1281,15 @@ defmodule KilnCMSWeb.Router do
       live "/auth/invite/:invite_token", InviteLive, :show
     end
 
+    # The sign-in unlock link (#2250): a plain form that asks for one, and the
+    # emailed link's page. Before `auth_routes` for the same reason as the
+    # routes above. Opening the link spends nothing (a mail scanner may follow
+    # it); only the POST redeems. `unlock_token` is in `:filter_parameters`.
+    get "/sign-in/unlock", SignInUnlockController, :new
+    post "/sign-in/unlock", SignInUnlockController, :create
+    get "/auth/unlock/:unlock_token", SignInUnlockController, :show
+    post "/auth/unlock/:unlock_token", SignInUnlockController, :redeem
+
     auth_routes AuthController, KilnCMS.Accounts.User, path: "/auth"
 
     # Second-factor (TOTP) prompt after the first factor for a 2FA-enabled
