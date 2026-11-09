@@ -57,7 +57,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Upgrade notes
 
 - **Run `mix ash.migrate` (new nullable `field_definitions.widget`, no backfill). Field-sync files now carry `"widget"`, which an older release's import refuses: upgrade the target first.** Rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#field-widgets-upgrade))
+  ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets-upgrade))
 
 - **Run `mix ash.migrate` (new table `site_admin_allowlist`). Rolling the pin back turns every site's admin allowlist off without a word; while a list is on, members and apps calling `/api/auth/sign_in` sign in only from listed networks.**
   Nothing changes until a site admin saves a list. Lock-out: `bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(clear: true)'`.
@@ -141,7 +141,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Admins can choose each custom field's editor input: radios or buttons for a select, checkboxes, one-line text, a reference dropdown, or a plugin type's own (`widget`).**
   Editor-only; nothing stored or delivered changes. Guide: [docs/extending-content.md](docs/extending-content.md#choose-how-editors-fill-in-a-field).
-  ([long form](docs/changelog/unreleased.md#field-widgets))
+  ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets))
 
 - **Site admins can restrict the console and every sign-in route, members' and `/api/auth/sign_in` included, to listed IPv4/IPv6 networks, at Configure → Sign-in & access → Admin allowlist.**
   Off by default; fails closed; API keys and issued tokens are not affected. Guide: [docs/admin-allowlist.md](docs/admin-allowlist.md).
