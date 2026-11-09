@@ -17,6 +17,16 @@ tagged `client-js-vX.Y.Z` in the
   `KilnValidationError` whose `fieldErrors()` name `_kiln_challenge`. Both
   fields are absent from servers older than this and from forms that do not
   ask, so nothing changes for existing callers.
+- **Any provider's widget (kiln_cms#2249):** `FormChallenge` gains optional
+  `global`, `onload_param`, `render_options`, `action_option`,
+  `interactive` and `api`, so a front end can draw the operator's provider,
+  whether Cloudflare Turnstile, Google reCAPTCHA v2 or a plugin's, with one
+  piece of code: load `script_url` (adding `<onload_param>=<callback>` and
+  waiting for it when `onload_param` is set), then call
+  `window[global].render(element, options)` with `render_options`,
+  `sitekey` and, only when `action_option` is not `null`, `action` under
+  that name. reCAPTCHA's `action_option` is `null`. Types only; the client
+  passes the schema through unchanged.
 
 ## 0.4.0
 

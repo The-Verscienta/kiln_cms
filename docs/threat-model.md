@@ -985,16 +985,20 @@ password leaves the server.
 
 ### Human verification (#2249)
 
-`KilnCMS.Challenge`, `KilnCMS.Challenge.Gate`,
-`KilnCMS.Challenge.Providers.Turnstile`, `KilnCMSWeb.Plugs.ChallengeCsp`. An
-adaptive Cloudflare Turnstile check on password sign-in and registration,
-configured by the operator for the whole deployment; off until a provider, a
-site key and a secret are set. A site admin can also make each public form
-ask (below). Guide:
+`KilnCMS.Challenge`, `KilnCMS.Challenge.Gate`, `KilnCMS.Challenge.Registry`,
+`KilnCMS.Challenge.Siteverify`, `KilnCMS.Challenge.Providers.Turnstile`,
+`KilnCMS.Challenge.Providers.Recaptcha`, `KilnCMSWeb.Plugs.ChallengeCsp`; the
+contract `Kiln.Challenge.Provider` in `kiln_plugin`. An adaptive check on
+password sign-in and registration, configured by the operator for the whole
+deployment with one provider: Cloudflare Turnstile (recommended), Google
+reCAPTCHA v2, or a plugin's. Off until a provider, a site key and a secret
+are set. A site admin can also make each public form ask (below). Guide:
 [human-verification.md](human-verification.md); decisions:
 [ADR 0020](decisions/0020-human-verification-is-deployment-wide-and-fails-open-only-within-the-sign-in-budget.md),
 [ADR 0021](decisions/0021-a-form-opts-in-to-human-verification-and-an-unverified-submission-is-held-not-refused.md)
-for forms.
+for forms,
+[ADR 0022](decisions/0022-a-challenge-provider-is-a-plugin-contract-and-the-core-enforces-its-claims.md)
+for providers.
 
 - **What it slows.** Password guessing that stays under the per-account budget
   by spreading across accounts, and scripted self-registration. Sign-in asks
@@ -1024,11 +1028,36 @@ for forms.
 - **Races.** Free attempts are spent with one atomic increment-and-compare per
   axis, so a burst at the start of a window cannot all skip the check; at most
   the threshold's worth do.
-- **Token binding.** Turnstile's answer must say `success`, name the action
-  the widget was drawn for (`sign_in` or `register`), and name a hostname this
-  deployment serves or one in `CHALLENGE_HOSTNAMES`. The request's `Host` and
-  a LiveView join URL never vouch for a hostname (tested with a forged
-  `Host`). Tokens are single-use at Cloudflare and never cached by Kiln.
+- **Token binding, enforced by the core.** A provider's pass reports the
+  hostname and the action the token was solved for (`{:ok, claims}`), and
+  `KilnCMS.Challenge.verify/4`, not the provider, applies them: a hostname
+  that is missing or is not one this deployment serves (or one in
+  `CHALLENGE_HOSTNAMES`) is `:hostname_mismatch`, and an action that is
+  present and differs from the one the widget was drawn for (`sign_in`,
+  `register`, `form`) is `:action_mismatch`. Turnstile always reports the
+  action, and its provider refuses an answer without one. The request's
+  `Host` and a LiveView join URL never vouch for a hostname (tested with a
+  forged `Host`). Tokens are single-use at the provider and never cached by
+  Kiln.
+- **A provider's answer is read conservatively.** `:missing` and `:malformed`
+  come only from the core's own precheck (absent; not a short printable
+  string). A provider that returns either, or any refusal the contract does
+  not name, is read as `:invalid`, because a missing token can be admitted
+  during an outage and a refused one never can. An unknown unavailable
+  reason, any answer outside `{:ok, _}` / `{:error, _}`, a crash, and the
+  3-second deadline are `{:unavailable, :crashed}` or `:timeout`. Tested with
+  a plugin provider answering `:missing` during an outage: refused, not
+  admitted; on a form, refused, not held.
+- **reCAPTCHA v2.** Its tokens carry no action, so the action rule cannot
+  bind them: a token solved on one of this deployment's pages (a form, say)
+  can be spent once on another of its checks (sign-in) within its two-minute
+  life. The hostname is still enforced, so the token was solved on a page
+  this deployment serves. An answer that carries a `score` (a v3 or
+  Enterprise key) is refused as `:invalid`, never admitted on a guessed
+  threshold. Google answers a wrong secret with `invalid-input-response`, the
+  bad-token code, so a misconfigured reCAPTCHA secret refuses everyone
+  rather than failing open, and does not log "could not use its secret
+  key".
 - **Fail rules.** A provider refusal never admits. "Unavailable" (timeout past
   the 3-second deadline, transport error, `5xx`, `429`, malformed answer,
   unreadable or rejected secret, crash) admits a sign-in until the account's
@@ -1037,22 +1066,59 @@ for forms.
   registration is admitted within the `:register` rate limit. A missing token
   is a refusal, except within `outage_window` (60 s) of this node seeing an
   unavailable answer, when it gets the unavailable treatment.
-- **Outbound call.** Through `KilnCMS.SafeFetch` to
-  `challenges.cloudflare.com`: no redirects, no retries, a 16 KB cap, 1 s
-  connect and 2 s receive timeouts, the whole call bounded at 3 s in an
-  unlinked task. The secret is read from `KilnCMS.Keys` only at verification
-  and never logged; the client address is sent only with `send_remote_ip`.
-- **Content-Security-Policy.** `script-src` and `frame-src` on the
-  `:browser_auth` pipeline gain `https://challenges.cloudflare.com` only while
-  a challenge can be shown; the header is byte-identical otherwise. No inline
-  script: the `Challenge` hook loads the provider's script. Turnstile was
-  chosen over reCAPTCHA because reCAPTCHA needs `www.google.com` in
-  `script-src`, an origin with JSONP endpoints that is a known way round a
-  strict policy.
+- **Outbound call.** Through `KilnCMS.SafeFetch` (`KilnCMS.Challenge.Transport`),
+  which a provider receives as the `:post` function: to
+  `challenges.cloudflare.com` for Turnstile and
+  `www.recaptcha.net/recaptcha/api/siteverify` for reCAPTCHA (never
+  `www.google.com`, so an egress allowlist needs one host per provider). No
+  redirects, no retries, a 16 KB cap, 1 s connect and 2 s receive timeouts,
+  the whole call bounded at 3 s in an unlinked task. The secret is read from
+  `KilnCMS.Keys` only at verification and never logged; the client address
+  is sent only with `send_remote_ip`.
+- **Content-Security-Policy.** `script-src`, `frame-src` and `connect-src`
+  on the `:browser_auth` pipeline gain the provider's declared sources only
+  while a challenge can be shown; the header is byte-identical otherwise,
+  and also when the named provider is unknown or fails conformance (tested).
+  Turnstile adds `https://challenges.cloudflare.com` to `script-src` and
+  `frame-src`. reCAPTCHA adds `https://www.recaptcha.net/recaptcha/` and
+  `https://www.gstatic.com/recaptcha/` to `script-src` and
+  `https://www.recaptcha.net/recaptcha/` to `frame-src`, path-scoped. It is
+  loaded from `www.recaptcha.net` because `www.google.com` serves JSONP
+  endpoints that are a known way round a strict policy; no policy ever names
+  `www.google.com` (tested). Checked in headless Chromium against the
+  development server: `/sign-in`, `/register`, a form's page and its embed
+  raised no violation with those sources. No inline script: the `Challenge`
+  hook loads the provider's script.
+- **Plugin providers.** A provider is compile-time plugin code
+  (`c:Kiln.Plugin.challenge_providers/0`), as trusted as any plugin: it runs
+  in the VM and sees the secret and each token in `verify/2`. What the core
+  limits is what reaches the page and the decision. The provider is resolved
+  once per node and id and checked with
+  `Kiln.Challenge.Provider.conformance/1`: `script_url` must be `https://`,
+  without credentials, fragment, whitespace or quotes, and covered by one of
+  its own `script_src` entries; every CSP source must be
+  `https://host[:port][/path]`, with no wildcard, keyword, quote, `;` or `,`,
+  so a provider cannot inject a directive or `'unsafe-inline'`; render
+  options must be JSON and may not set `sitekey` or the callbacks. A
+  provider that fails, raises, or that no plugin registered, leaves the
+  feature off with a boot warning, never on with a guessed policy. Request
+  paths read only the memoised descriptor, so `widget/0` or `csp_sources/0`
+  cannot slow or crash a page; only `verify/2` runs per attempt, under the
+  deadline. A built-in id (`turnstile`, `recaptcha`) always resolves to the
+  built-in, and `mix kiln.plugins.doctor` flags a plugin that claims one.
+  Residual: once the operator names a plugin's provider, its sources are
+  added to the `:browser_auth` policy, which includes the console host's
+  sign-in, and its script runs there; a conformant source can still be an
+  origin the operator would not otherwise trust. Choosing it is the
+  operator's act, as choosing to install the plugin was.
 - **Secrets in transit and logs.** `challenge_token`,
-  `cf-turnstile-response` and the forms' `_kiln_challenge` are in
-  `:filter_parameters` and the Sentry scrubber; the argument is `sensitive?`
-  on both sign-in actions.
+  `cf-turnstile-response`, `g-recaptcha-response` and the forms'
+  `_kiln_challenge` are in `:filter_parameters` and the Sentry scrubber; the
+  argument is `sensitive?` on both sign-in actions. A plugin provider's own
+  `response_field` is added to the Sentry scrubber from the registry, but not
+  to `:filter_parameters`, which Phoenix compiles before the plugins are
+  read: a boot warning (`challenge_response_fields`) asks the operator to add
+  it.
 - **Residual risks.**
   1. **Outage as a bypass, bounded.** An attacker who can make verification
      fail (a network position between Kiln and Cloudflare, or a provider
@@ -1060,11 +1126,12 @@ for forms.
      address and `ip_closed_after` per client address. Rotating addresses
      defeats the second bound; the first still holds. The
      `kiln_cms.challenge.decision.count` `fail_open` share shows it.
-  2. **A wrong secret fails open silently.** Only a missing secret *source* is
-     logged at boot. A secret Cloudflare rejects makes every verification
-     "unavailable" (`result: :not_configured` in the verify metric), which also
-     arms the outage memory, so missing tokens are admitted within the bounds
-     above.
+  2. **A wrong secret fails open silently (Turnstile).** Only a missing
+     secret *source* is logged at boot. A secret Turnstile rejects makes every
+     verification "unavailable" (`result: :not_configured` in the verify
+     metric), which also arms the outage memory, so missing tokens are
+     admitted within the bounds above. A wrong reCAPTCHA secret fails closed
+     instead (see reCAPTCHA v2 above).
   3. **Shared addresses.** Everyone behind one NAT shares the address axis:
      more than `ip_threshold` failures there challenge everyone for the window,
      and during an outage `ip_closed_after` failures refuse password sign-in
@@ -1083,11 +1150,18 @@ for forms.
   7. **Thin, wide stuffing.** A run spread across many accounts and addresses,
      each under its threshold, is never asked. A deployment-wide failure-rate
      trigger is a follow-up.
-  8. **Third-party script.** When the widget is shown, Cloudflare's script runs
-     in the sign-in page's origin, which is the console's own origin when
-     someone signs in on the console host. The policy admits only that one
-     origin, and only on the auth pages and on responses that draw a form's
-     widget (below).
+  8. **Third-party script.** When the widget is shown, the provider's script
+     runs in the sign-in page's origin, which is the console's own origin
+     when someone signs in on the console host. The policy admits only the
+     provider's declared sources (one origin for Turnstile, two path-scoped
+     ones for reCAPTCHA), and only on the auth pages and on responses that
+     draw a form's widget (below).
+  9. **reCAPTCHA cross-check reuse.** As above: a v2 token is not bound to
+     sign-in, registration or a form, so one solved for any of them passes
+     once on another within two minutes. Turnstile tokens are bound.
+  10. **No `remove` in reCAPTCHA.** reCAPTCHA has no `remove`: a widget LiveView
+     replaces stays in the script's own bookkeeping until the page unloads.
+     Harmless (its element is gone).
 
 #### Human verification on public forms
 
@@ -1124,8 +1198,10 @@ for forms.
   sign-in, on both `POST /forms/:slug` and `POST /api/forms/:slug`: a host
   this deployment serves or one in `CHALLENGE_HOSTNAMES`, never the request's
   `Host`. The embed's `embed_origins` are not accepted hosts: the widget runs
-  inside the iframe, on the site's own host. The action must be `form`, so a
-  sign-in token cannot be replayed on a form, nor the reverse. A mismatch is
+  inside the iframe, on the site's own host. A provider that reports the
+  action (Turnstile) must report `form`, so a sign-in token cannot be
+  replayed on a form, nor the reverse; reCAPTCHA v2 reports none (residual
+  risk 9 above). A mismatch is
   held, not refused, and logged at most once a minute per node with the host
   the provider reported (a config cause, almost always a headless site).
 - **Content-Security-Policy.** Widened with the provider's origins only on a

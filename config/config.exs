@@ -919,10 +919,13 @@ config :phoenix, :filter_parameters, [
   "preview_token",
   "unlock",
   "invite_token",
-  # Human-verification tokens (#2249): ours, and the field Turnstile's own
-  # markup would post if it were ever rendered with its default input.
+  # Human-verification tokens (#2249): ours, and the fields the built-in
+  # providers' own markup posts (reCAPTCHA's always, Turnstile's if it were
+  # ever rendered with its default input). A plugin provider's field is added
+  # at boot when it can be (`KilnCMS.Application`).
   "challenge_token",
   "cf-turnstile-response",
+  "g-recaptcha-response",
   # The same token on a public form submission.
   "_kiln_challenge"
 ]

@@ -149,6 +149,19 @@ defmodule KilnCMS.Challenge.TurnstileTest do
              connect_src: []
            }
 
-    assert Turnstile.script_url() =~ "render=explicit"
+    assert Turnstile.widget().script_url =~ "render=explicit"
+    assert Kiln.Challenge.Provider.conformance(Turnstile) == :ok
+  end
+
+  test "its widget keeps today's browser behaviour" do
+    assert %{
+             global: "turnstile",
+             render_options: %{"response-field" => false},
+             action_option: "action",
+             response_field: "cf-turnstile-response"
+           } = Turnstile.widget()
+
+    assert {:ok, %{widget: %{interactive: false, onload_param: nil, api: :explicit_render}}} =
+             Kiln.Challenge.Provider.describe(Turnstile)
   end
 end

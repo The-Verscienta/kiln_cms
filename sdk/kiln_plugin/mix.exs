@@ -17,7 +17,8 @@ defmodule KilnPlugin.MixProject do
       deps: deps(),
       description:
         "The compile-time plugin contract for KilnCMS: Kiln.Plugin, Kiln.Block, " <>
-          "Kiln.FieldType, Kiln.Forms.SpamCheck, Kiln.ImageBackend, Kiln.Advisory and " <>
+          "Kiln.FieldType, Kiln.Forms.SpamCheck, Kiln.ImageBackend, Kiln.Challenge.Provider, " <>
+          "Kiln.Advisory and " <>
           "Kiln.SafeFetch, " <>
           "so a plugin can ship as a Hex, git or path dependency.",
       package: package(),
@@ -84,6 +85,7 @@ defmodule KilnPlugin.MixProject do
         "Spam checks": ~r/^Kiln\.Forms\.SpamCheck(\.|$)/,
         "Advisory checks": ~r/^Kiln\.Advisory(\.|$)/,
         "Image backends": [Kiln.ImageBackend],
+        "Challenge providers": [Kiln.Challenge.Provider],
         "Outbound HTTP": [Kiln.SafeFetch]
       ]
     ]

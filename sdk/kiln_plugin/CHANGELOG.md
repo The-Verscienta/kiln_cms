@@ -34,6 +34,16 @@ Releases are tagged `kiln_plugin-vX.Y.Z` in the
   should require `{:kiln_plugin, "~> 1.4"}`; publish this version to Hex before
   a plugin does. Additive: no callback or return shape changed.
 
+- **`Kiln.Challenge.Provider` and `c:Kiln.Plugin.challenge_providers/0`
+  (kiln_cms#2249).** A plugin can ship a human-verification provider that
+  the operator picks with `CHALLENGE_PROVIDER`, beside the built-in
+  Turnstile and reCAPTCHA v2. `c:Kiln.Plugin.challenge_providers/0` defaults
+  to `[]`. `Kiln.Challenge.Provider.conformance/1` checks a provider the way
+  the core does before using it: an unregistered or non-conforming provider
+  leaves verification off rather than failing open. The core enforces the
+  hostname and action a provider reports. A plugin using it should require
+  `{:kiln_plugin, "~> 1.4"}`.
+
 ## 1.3.1
 
 ### Changed

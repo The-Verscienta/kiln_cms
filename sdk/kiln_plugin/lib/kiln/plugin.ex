@@ -23,6 +23,10 @@ defmodule Kiln.Plugin do
       go to instead of the operator's store. Installing one changes nothing
       until the operator selects it
       (`config :kiln_cms, :image_backend, Module`).
+    * `challenge_providers/0` — `Kiln.Challenge.Provider` modules
+      (kiln_cms#2249): a human-verification widget and its check, offered
+      beside the built-in Turnstile and reCAPTCHA. Installing one changes
+      nothing until the operator names it (`CHALLENGE_PROVIDER`). Since 1.4.
     * `nav_items/0` — links in the admin top nav
       (`%{label: "...", path: "/editor/...", role: :editor | :admin}`).
     * `admin_routes/0` — LiveViews mounted in the admin-gated live session
@@ -73,7 +77,8 @@ defmodule Kiln.Plugin do
   dependencies loaded, so what a dependency plugin can contribute is what it
   can build from this package alone:
 
-    * blocks, field types, spam checks, advisory checks and image backends;
+    * blocks, field types, spam checks, advisory checks, image backends and
+      human-verification providers;
     * nav items, supervision children and Oban queues;
     * routes, but only to a LiveView that depends on `phoenix_live_view`
       directly — one that does `use KilnCMSWeb, :live_view` needs the core.
@@ -126,6 +131,7 @@ defmodule Kiln.Plugin do
   @callback advisories() :: [module()]
   @callback spam_checks() :: [module()]
   @callback image_backends() :: [module()]
+  @callback challenge_providers() :: [module()]
   @callback nav_items() :: [nav_item()]
   @callback admin_routes() :: [admin_route()]
   @callback editor_routes() :: [admin_route()]
@@ -176,6 +182,9 @@ defmodule Kiln.Plugin do
       def image_backends, do: []
 
       @impl Kiln.Plugin
+      def challenge_providers, do: []
+
+      @impl Kiln.Plugin
       def nav_items, do: []
 
       @impl Kiln.Plugin
@@ -206,6 +215,7 @@ defmodule Kiln.Plugin do
                      advisories: 0,
                      spam_checks: 0,
                      image_backends: 0,
+                     challenge_providers: 0,
                      nav_items: 0,
                      admin_routes: 0,
                      editor_routes: 0,

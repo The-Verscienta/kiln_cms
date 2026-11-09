@@ -4792,6 +4792,11 @@ msgstr "Completarla"
 
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
+msgid "Complete the check above, then send again."
+msgstr "Completa la comprobación de arriba y vuelve a enviar."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
 msgid "Complete the human-verification check below, then register again."
 msgstr "Completa la comprobación de verificación humana de abajo y vuelve a registrarte."
 
@@ -9518,6 +9523,11 @@ msgstr "Cómo aparece su nombre ante los lectores y las personas con las que tra
 msgid "Human verification isn't available on this deployment. Ask the operator to configure it."
 msgstr "La verificación humana no está disponible en esta instalación. Pide al operador que la configure."
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Human-verification providers"
+msgstr "Proveedores de verificación humana"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "I have a team — review before publishing"
@@ -9717,6 +9727,11 @@ msgstr "En revisión"
 #, elixir-autogen, elixir-format
 msgid "In the content editor"
 msgstr "En el editor de contenido"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "In use (CHALLENGE_PROVIDER=%{id})"
+msgstr "En uso (CHALLENGE_PROVIDER=%{id})"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -9921,6 +9936,11 @@ msgstr "Insertar:"
 #, elixir-autogen, elixir-format
 msgid "Inspector"
 msgstr "Inspector"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Installed as %{id}, not selected"
+msgstr "Instalado como %{id}, no seleccionado"
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
@@ -12533,6 +12553,11 @@ msgstr "Ninguno seleccionado"
 #, elixir-autogen, elixir-format
 msgid "None — set in config without a plugin declaring it"
 msgstr "Ninguno — definido en la configuración sin que un complemento lo declare"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not a usable provider"
+msgstr "Proveedor no utilizable"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format

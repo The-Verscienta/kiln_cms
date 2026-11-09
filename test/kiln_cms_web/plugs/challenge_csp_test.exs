@@ -60,6 +60,46 @@ defmodule KilnCMSWeb.Plugs.ChallengeCspTest do
     end
   end
 
+  describe "the provider decides the sources (#2249)" do
+    test "reCAPTCHA adds recaptcha.net and gstatic, and never www.google.com", %{conn: conn} do
+      off = conn |> get(~p"/sign-in") |> policy() |> scrub()
+
+      enable!(provider: "recaptcha")
+      on = build_conn() |> get(~p"/sign-in") |> policy() |> scrub()
+
+      assert directive(on, "script-src") ==
+               directive(off, "script-src") <>
+                 " https://www.recaptcha.net/recaptcha/ https://www.gstatic.com/recaptcha/"
+
+      assert directive(on, "frame-src") ==
+               directive(off, "frame-src") <> " https://www.recaptcha.net/recaptcha/"
+
+      assert directive(on, "connect-src") == directive(off, "connect-src")
+      refute on =~ "www.google.com"
+    end
+
+    test "a plugin's provider adds its own sources", %{conn: conn} do
+      off = conn |> get(~p"/sign-in") |> policy() |> scrub()
+
+      enable!(provider: "dep_fixture")
+      on = build_conn() |> get(~p"/sign-in") |> policy() |> scrub()
+
+      assert directive(on, "script-src") ==
+               directive(off, "script-src") <> " https://captcha.dep-fixture.test/v1/"
+
+      assert directive(on, "frame-src") ==
+               directive(off, "frame-src") <> " https://captcha.dep-fixture.test"
+    end
+
+    @tag :capture_log
+    test "an id no provider answers to leaves the policy byte for byte", %{conn: conn} do
+      baseline = conn |> get(~p"/sign-in") |> policy() |> scrub()
+
+      enable!(provider: "nobody_installed_this")
+      assert build_conn() |> get(~p"/sign-in") |> policy() |> scrub() == baseline
+    end
+  end
+
   test "no other page is widened" do
     enable!()
 

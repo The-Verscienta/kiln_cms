@@ -54,6 +54,21 @@ defmodule KilnCMSWeb.SentryScrubberTest do
     assert params["email"] == "a@example.com"
   end
 
+  test "reCAPTCHA's own token field is masked (#2249)" do
+    params =
+      SentryScrubber.scrub_params(%Plug.Conn{
+        params: %{
+          "g-recaptcha-response" => "0.recaptcha",
+          "email" => "a@example.com"
+        }
+      })
+
+    assert params == %{
+             "g-recaptcha-response" => "*********",
+             "email" => "a@example.com"
+           }
+  end
+
   test "an empty or absent query string is left alone" do
     assert SentryScrubber.scrub_query_string("") == ""
     assert SentryScrubber.scrub_query_string(nil) == nil

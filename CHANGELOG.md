@@ -144,6 +144,14 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Plugins can add a human-verification provider (`challenge_providers/0`, `Kiln.Challenge.Provider`, new in `kiln_plugin` 1.4); the operator selects it with `CHALLENGE_PROVIDER=<id>`.**
+  Checked once against the contract (and by `mix kiln.plugins.doctor`); an unknown or non-conforming provider leaves checks off with a boot warning. The core enforces the hostname and action a provider reports.
+  ([#2507](https://github.com/The-Verscienta/kiln_cms/pull/2507) · [long form](docs/changelog/unreleased.md#challenge-provider-plugins))
+
+- **Google reCAPTCHA v2 (the checkbox) is a second built-in human-verification provider, `CHALLENGE_PROVIDER=recaptcha`; Cloudflare Turnstile stays the recommended one.**
+  Loaded and verified from `www.recaptcha.net` only, never `www.google.com`; v2 keys only; a wrong secret refuses every check. Guide: [Turn on reCAPTCHA](docs/human-verification.md#turn-on-recaptcha).
+  ([#2507](https://github.com/The-Verscienta/kiln_cms/pull/2507) · [long form](docs/changelog/unreleased.md#recaptcha-provider))
+
 - **Site admins can ask for a human-verification check (Turnstile) on each public form; a submission without a passing check is kept in Spam for review instead of being acted on.**
   Per form, off by default (Forms → General); `CHALLENGE_FORMS=false` turns every form off. `GET /api/forms/:slug` gains `challenge`; headless sites send `_kiln_challenge`.
   ([#2501](https://github.com/The-Verscienta/kiln_cms/pull/2501) · [long form](docs/changelog/unreleased.md#form-human-verification))

@@ -642,8 +642,9 @@ guide, including how an operator gets admins back in after a lock-out, is
 
 ## Human verification at sign-in
 
-The operator can have password sign-in and registration ask for a Cloudflare
-Turnstile check once an email address or an IP address has had too many
+The operator can have password sign-in and registration ask for a
+human-verification check (Cloudflare Turnstile, Google reCAPTCHA v2 or a
+plugin's provider) once an email address or an IP address has had too many
 attempts. It is set for the whole installation with environment variables, not
 per site, so there is no console page for it. Passkeys, sign-in links,
 password reset, two-factor codes, single sign-on and invitations never ask for

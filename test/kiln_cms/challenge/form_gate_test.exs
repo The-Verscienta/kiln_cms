@@ -148,7 +148,8 @@ defmodule KilnCMS.Challenge.FormGateTest do
       assert %{action: "form", site_key: "test-site-key", provider: "fake"} =
                Challenge.widget(config, :form)
 
-      assert Challenge.forms_fingerprint(config) == "fake:test-site-key"
+      assert "fake:test-site-key:" <> digest = Challenge.forms_fingerprint(config)
+      assert byte_size(digest) == 12
       assert Challenge.csp_sources(config, :forms).script_src == ["https://challenge.test"]
 
       enable!(forms: false)

@@ -45,6 +45,12 @@ defmodule KilnCMSWeb.FormControllerChallengeTest do
       assert html =~ ~s(data-sitekey="test-site-key")
       assert html =~ ~s(data-action="form")
       assert html =~ ~s(name="_kiln_challenge")
+      # How to call the provider's script comes from the provider (#2249).
+      assert html =~ ~s(data-global="kilnFakeChallenge")
+      assert html =~ ~s(data-render-options="{&quot;response-field&quot;:false}")
+      assert html =~ ~s(data-action-option="action")
+      assert html =~ ~s(data-onload-param="")
+      assert html =~ ~s(data-interactive="false")
       # On the site's own pages app.js mounts it; no extra script.
       refute html =~ "challenge_static.js"
 
@@ -145,6 +151,65 @@ defmodule KilnCMSWeb.FormControllerChallengeTest do
     end
   end
 
+  describe "with reCAPTCHA (#2249)" do
+    setup do
+      enable!(provider: "recaptcha")
+      test = self()
+
+      Req.Test.stub(KilnCMS.Challenge, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test, {:siteverify, conn.host, conn.request_path, URI.decode_query(body)})
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.send_resp(200, ~s({"success": true, "hostname": "localhost"}))
+      end)
+
+      :ok
+    end
+
+    test "the page draws reCAPTCHA's widget and admits only its origins", %{
+      conn: conn,
+      form: form
+    } do
+      conn = conn |> unique_ip() |> get("/forms/#{form.slug}")
+      html = html_response(conn, 200)
+
+      assert html =~ ~s(data-global="grecaptcha")
+      assert html =~ ~s(data-onload-param="onload")
+      assert html =~ ~s(data-interactive="true")
+      assert html =~ "Complete the check above, then send again."
+
+      assert csp(conn) =~
+               "https://www.recaptcha.net/recaptcha/ https://www.gstatic.com/recaptcha/"
+
+      refute csp(conn) =~ "www.google.com"
+      refute csp(conn) =~ @provider
+    end
+
+    test "the embed admits the same origins", %{conn: conn, form: form} do
+      conn = conn |> unique_ip() |> get("/forms/#{form.slug}/embed")
+
+      assert csp(conn) =~
+               "script-src 'self' https://www.recaptcha.net/recaptcha/ https://www.gstatic.com/recaptcha/;"
+
+      assert csp(conn) =~ "frame-src 'self' https://www.recaptcha.net/recaptcha/;"
+      refute csp(conn) =~ "www.google.com"
+    end
+
+    test "the token reCAPTCHA posts is verified at recaptcha.net and never stored",
+         %{conn: conn, form: form} do
+      conn = post_form(conn, form, %{"email" => "a@b.co", "g-recaptcha-response" => "rc-token"})
+
+      assert html_response(conn, 200) =~ "Merci!"
+      assert [%{challenge: :passed, data: data}] = submissions(form)
+      refute Map.has_key?(data, "g-recaptcha-response")
+
+      assert_received {:siteverify, "www.recaptcha.net", "/recaptcha/api/siteverify",
+                       %{"response" => "rc-token"}}
+    end
+  end
+
   describe "the embed" do
     test "draws the widget with its own mount script and widens only its policy",
          %{conn: conn, form: form} do
@@ -228,7 +293,15 @@ defmodule KilnCMSWeb.FormControllerChallengeTest do
                "script_url" => "https://challenge.test/api.js?render=explicit",
                "action" => "form",
                "field" => "_kiln_challenge",
-               "without_token" => "held"
+               "without_token" => "held",
+               # What to call the script with (#2249), so a headless front end
+               # can draw any provider's widget, not only Turnstile's.
+               "global" => "kilnFakeChallenge",
+               "onload_param" => nil,
+               "render_options" => %{"response-field" => false},
+               "action_option" => "action",
+               "interactive" => false,
+               "api" => "explicit_render"
              }
     end
 

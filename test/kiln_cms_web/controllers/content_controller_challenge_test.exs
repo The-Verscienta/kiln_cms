@@ -210,6 +210,37 @@ defmodule KilnCMSWeb.ContentControllerChallengeTest do
       conn = fetch(page.slug, rotated)
       refute html_response(conn, 200) =~ "data-kiln-challenge"
     end
+
+    # A plugin update can change the script or options its widget is drawn
+    # with under the same id and site key; a cached page would then draw it
+    # with the old ones.
+    test "200 after the provider's widget changes under the same id", %{required: required} do
+      page = page!([form_block(required)])
+      tag = etag(fetch(page.slug))
+
+      enable!(providers: [__MODULE__.MovedFake])
+      conn = fetch(page.slug, tag)
+
+      assert html_response(conn, 200) =~ ~s(data-script-url="https://challenge.test/v2/api.js")
+      refute etag(conn) == tag
+    end
+  end
+
+  describe "with reCAPTCHA (#2249)" do
+    test "the page admits recaptcha.net and gstatic, never www.google.com",
+         %{required: required} do
+      enable!(provider: "recaptcha")
+      page = page!([form_block(required)])
+      conn = fetch(page.slug)
+
+      html = html_response(conn, 200)
+      assert html =~ ~s(data-onload-param="onload")
+      assert html =~ ~s(data-interactive="true")
+      assert html =~ ~s(data-action-option="")
+      assert csp(conn) =~ "https://www.recaptcha.net/recaptcha/"
+      assert csp(conn) =~ "https://www.gstatic.com/recaptcha/"
+      refute csp(conn) =~ "www.google.com"
+    end
   end
 
   describe "an experiment variant" do
@@ -294,4 +325,18 @@ defmodule KilnCMSWeb.ContentControllerChallengeTest do
       refute_received {:challenge_verify, _, _}
     end
   end
+end
+
+defmodule KilnCMSWeb.ContentControllerChallengeTest.MovedFake do
+  @moduledoc false
+  # `KilnCMS.ChallengeFake` after a release that moved its script.
+  use Kiln.Challenge.Provider
+
+  def id, do: "fake"
+
+  def widget,
+    do: %{KilnCMS.ChallengeFake.widget() | script_url: "https://challenge.test/v2/api.js"}
+
+  def csp_sources, do: KilnCMS.ChallengeFake.csp_sources()
+  def verify(token, opts), do: KilnCMS.ChallengeFake.verify(token, opts)
 end

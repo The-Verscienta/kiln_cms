@@ -84,7 +84,8 @@ end
 # `KilnCMS.Challenge`. Operator-only and deployment-wide: an account is global,
 # so no site may turn its own sign-in challenges off.
 #
-#   CHALLENGE_PROVIDER           turnstile (the one built-in)
+#   CHALLENGE_PROVIDER           turnstile (recommended), recaptcha (v2
+#                                checkbox) or an installed plugin's id
 #   CHALLENGE_SITE_KEY           the widget's public site key
 #   CHALLENGE_SECRET_KEY         the secret, or CHALLENGE_SECRET_KEY_FILE for a
 #                                mounted file (resolved through KilnCMS.Keys)
@@ -101,8 +102,21 @@ end
 # Nothing is required until a provider, a site key and a secret are all set.
 # Skipped in :test so an exported value cannot change what the suite asserts.
 if config_env() != :test do
-  with {:ok, provider} <- KilnCMS.Config.Env.one_of("CHALLENGE_PROVIDER", ~w(turnstile)) do
-    config :kiln_cms, KilnCMS.Challenge, provider: provider
+  # Only the id's shape here: a plugin's provider is not known yet. An id no
+  # installed provider answers to leaves challenges off, with a boot warning.
+  case KilnCMS.Challenge.parse_provider_id(System.get_env("CHALLENGE_PROVIDER")) do
+    {:ok, provider} ->
+      config :kiln_cms, KilnCMS.Challenge, provider: provider
+
+    :unset ->
+      :ok
+
+    :invalid ->
+      KilnCMS.Config.Env.record_unusable(
+        "CHALLENGE_PROVIDER",
+        System.get_env("CHALLENGE_PROVIDER"),
+        "a provider id: turnstile, recaptcha or a plugin's (a-z, 0-9, _)"
+      )
   end
 
   case System.get_env("CHALLENGE_SITE_KEY", "") |> String.trim() do
