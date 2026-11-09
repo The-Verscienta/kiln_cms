@@ -627,6 +627,10 @@ defmodule KilnCMSWeb.Router do
       # roles, API keys. Admin-only by the tier gate AND the `Security.Event` policy;
       # the CSV download is the controller route below.
       live "/editor/security-log", SecurityLogLive, :index
+      # Which security settings are on, and what to fix first (#2252).
+      # Admin-only by the tier gate AND the `Security.PostureReport` policy;
+      # the deployment's checks are shown to platform admins only.
+      live "/editor/security-posture", SecurityPostureLive, :index
       # In-app backups (#484) — status, "back up now", retention. Admin-only:
       # the artifact list names the database dump, and an editor has no action
       # to take on it. Restore stays a documented ops procedure.

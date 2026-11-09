@@ -365,6 +365,7 @@ defmodule KilnCMS.MixProject do
       "docs/human-verification.md": [title: "Human verification (CAPTCHA)"],
       "docs/bot-budgets.md": [title: "Bot budgets"],
       "docs/security-events.md": [title: "The security log"],
+      "docs/security-posture.md": [title: "Security posture"],
       "docs/secrets-rotation.md": [],
       # Contributing to Kiln — for people working on Kiln itself. Published
       # under their own heading, last on the /docs index (#2157).
@@ -548,6 +549,7 @@ defmodule KilnCMS.MixProject do
         "docs/human-verification.md",
         "docs/bot-budgets.md",
         "docs/security-events.md",
+        "docs/security-posture.md",
         "docs/secrets-rotation.md"
       ],
       "Contributing to Kiln": [

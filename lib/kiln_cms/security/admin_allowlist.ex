@@ -86,6 +86,13 @@ defmodule KilnCMS.Security.AdminAllowlist do
 
   def policy(_no_org), do: :off
 
+  @doc false
+  # The site's stored list as `policy/1` would answer it with the operator's
+  # switch off: the same cached, fail-closed read. For the Security posture
+  # page (#2252), which has to see a list the switch is currently ignoring.
+  @spec configured(Ash.UUID.t()) :: policy()
+  def configured(org_id) when is_binary(org_id), do: resolve(org_id)
+
   defp resolve(org_id) do
     # Taken here, not in `read`: a cache miss runs `read` on a Cachex courier
     # process, where the `OrgSettings.with_actor/2` test seam does not reach.

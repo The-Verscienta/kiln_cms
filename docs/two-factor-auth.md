@@ -6,6 +6,15 @@ Any account can add a second factor from a standard authenticator app (Google
 Authenticator, 1Password, Authy, …); once enabled, a valid code is required at
 every sign-in, after the first factor.
 
+To see who on a site has no authenticator app yet, a site admin opens
+**Configure → Organization → Security posture**: the "Two-step sign-in"
+lines fail for any administrator without one and warn for editors, and a
+platform admin also sees the platform administrators
+([Security posture](security-posture.md#two-step-sign-in)). A passkey is not
+counted there. It is another way to sign in, and it does not protect the
+account's password sign-in: someone who has the password signs in with the
+password and, without TOTP, needs nothing else.
+
 ## How it works
 
 - **Self-service enrolment** at `/editor/settings` → "Two-factor authentication":

@@ -433,6 +433,20 @@ defmodule KilnCMS.Accounts.Scoping do
   """
   @spec users_with_tier(struct() | String.t() | nil, [:admin | :editor | :viewer]) :: [struct()]
   def users_with_tier(org, tiers) when is_list(tiers) do
+    # authorize?: false — a roster over every account (who to notify, who may
+    # review). A system grant on `Accounts.User` would be a standing read of
+    # every account on the deployment — wider than this query (#1402).
+    org |> users_with_tier_query(tiers) |> Ash.read!(authorize?: false)
+  end
+
+  @doc """
+  `users_with_tier/2` as a query, not yet run, for a caller that narrows it
+  further (the Security posture page's second-factor check, #2252). Reading it
+  is the caller's system read to justify, as `users_with_tier/2` does.
+  """
+  @spec users_with_tier_query(struct() | String.t() | nil, [:admin | :editor | :viewer]) ::
+          Ash.Query.t()
+  def users_with_tier_query(org, tiers) when is_list(tiers) do
     org_id = Accounts.org_id(org)
     platform? = :admin in tiers
     legacy? = org_id == Accounts.default_org_id()
@@ -448,11 +462,8 @@ defmodule KilnCMS.Accounts.Scoping do
     admin_tier = RoleGrant.expression([:admin])
     wanted = RoleGrant.expression(tiers)
 
-    # authorize?: false — a roster over every account (who to notify, who may
-    # review). A system grant on `Accounts.User` would be a standing read of
-    # every account on the deployment — wider than this query (#1402).
-    Accounts.User
-    |> Ash.Query.filter(
+    Ash.Query.filter(
+      Accounts.User,
       (^platform? and ^admin_tier) or
         (not (^admin_tier) and
            exists(
@@ -461,7 +472,6 @@ defmodule KilnCMS.Accounts.Scoping do
            )) or
         (^legacy? and ^wanted and not exists(org_memberships, true))
     )
-    |> Ash.read!(authorize?: false)
   end
 
   # A membership-less account's global role applies only on the default org.

@@ -1102,6 +1102,36 @@ create, update or destroy a person can reach. Reads are org-admin only and
 tenant-scoped, so another org's admin sees nothing. Not exposed over JSON:API,
 GraphQL or MCP.
 
+## Security posture — `Security.PostureReport` (#2252)
+
+| Action | org admin | platform admin | editor | viewer | anonymous | System actor |
+|--------|:---------:|:--------------:|:------:|:------:|:---------:|:------------:|
+| `run` (generic action) | ✅ (own org; site checks only) | ✅ (any org; site and deployment checks) | ❌ | ❌ | ❌ | ❌ |
+
+The [Security posture](security-posture.md) page's one action. It has no data
+layer and stores nothing. One policy, `authorize_if Checks.OrgAdmin`. The site
+is the action's tenant, never an argument; with no tenant it is the default
+site, which an admin of another site is refused on, and so is an admin whose
+membership is still waiting for approval. What a caller *gets* is decided
+inside the action from the same actor: every caller gets the `:site` checks,
+and a caller whose effective platform role is `:admin` (standing or by a live
+grant) also gets the `:deployment` checks. The console page re-checks the tier
+on **Run checks again**, as the security log does.
+
+Three checks read rows no policy would show the caller, with
+`authorize?: false` and a written reason at the call site: the site's
+administrators and editors (`Posture.Checks.SecondFactor`, through
+`Scoping.users_with_tier_query/2`, as the review roster reads it), the
+platform administrators (`Posture.Checks.OperatorSecondFactor`), and every
+valid API key with its owner (`Posture.Checks.ApiKeys`). Each reaches the page
+only as counts and, under **Details**, email addresses and key names; the last
+two are `:deployment` checks, shown only to platform admins. The idle-timeout,
+allowlist and password-policy checks read through their existing
+`:accounts` and `:admin_allowlist` grants (above), with no new grant. At most
+three reports of one site run at once on a node; a fourth is refused with
+`Security.Errors.PostureBusy`, which is not a permission refusal. Not exposed
+over JSON:API, GraphQL or MCP.
+
 ## Automation & newsletter
 
 `Automation.Rule`, `Newsletter.Subscriber`, `Newsletter.Segment`,

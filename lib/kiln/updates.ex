@@ -72,7 +72,12 @@ defmodule Kiln.Updates do
 
   ## Network behaviour
 
-  Made only when an admin opens the update page: one unauthenticated GET to the
+  Made only when an admin opens the update page (System), or a platform admin
+  opens the Security posture page while the cache is cold. The posture page
+  never waits on the network: it reads `cached/0`, and on a miss `warm/0`
+  starts one non-forced `check/1` in the background (at most one in flight per
+  node), which fills the same cache. Either way it is one
+  unauthenticated GET to the
   feed (more only if it pages), and a GET to the GitHub releases API only if
   the feed failed. Both are public reads. Each request carries a bare
   `KilnCMS` user-agent and nothing else that could identify the instance: no
@@ -383,6 +388,67 @@ defmodule Kiln.Updates do
     :persistent_term.erase(@force_key)
     :ok
   end
+
+  @doc """
+  The cached answer, without touching the network: what `check/1` would serve
+  from its cache, `{:error, :disabled}` when checks are off, or `nil` when
+  nothing fresh is cached.
+  """
+  @spec cached() :: result() | nil
+  def cached do
+    if enabled?(), do: cached_result(), else: {:error, :disabled}
+  end
+
+  @warmer Module.concat(__MODULE__, Warmer)
+
+  @doc """
+  Fill the cache in the background: one non-forced `check/1` in a supervised
+  task, for a caller that must not wait on the network (the Security posture
+  page). At most one runs per node at a time. Answers `:started`,
+  `:in_flight` (one is already running), `:cached` (nothing to do) or
+  `:disabled`.
+  """
+  @spec warm() :: :started | :in_flight | :cached | :disabled
+  def warm do
+    cond do
+      not enabled?() -> :disabled
+      cached_result() -> :cached
+      Process.whereis(@warmer) -> :in_flight
+      true -> start_warmer()
+    end
+  end
+
+  defp start_warmer do
+    case Task.Supervisor.start_child(KilnCMS.TaskSupervisor, &warm_once/0) do
+      {:ok, _pid} -> :started
+      {:error, _full} -> :in_flight
+    end
+  end
+
+  # The registered name is the "one in flight" guard: registering is atomic,
+  # so of two warmers started at once the second finds the name taken and
+  # stops without a request.
+  defp warm_once do
+    if register_warmer(), do: check()
+  end
+
+  defp register_warmer do
+    Process.register(self(), @warmer)
+  rescue
+    # `register/2` raises when the name is taken: another warmer is running.
+    ArgumentError -> false
+  end
+
+  @doc false
+  # Test seam: the name a running warmer is registered under.
+  @spec warmer_name() :: atom()
+  def warmer_name, do: @warmer
+
+  @doc false
+  # Test seam: answer `check/1` with `result` from the cache, as if a check had
+  # just stored it, so a caller's test needs no stub of the network.
+  @spec put_cache(result()) :: result()
+  def put_cache(result), do: cache(result)
 
   defp cached_result do
     case :persistent_term.get(@cache_key, nil) do

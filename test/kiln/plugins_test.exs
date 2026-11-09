@@ -99,6 +99,10 @@ defmodule Kiln.PluginsTest do
       assert Kiln.Plugins.PlugRoute.of(NotLoadedAnywhere) == []
     end
 
+    test "contributes no security checks (#2252)" do
+      assert KilnCMS.Security.Posture.Registry.of_plugin(OldPlugin) == []
+    end
+
     test "contributes no challenge providers (#2249)" do
       assert KilnCMS.Challenge.Registry.of_plugin(OldPlugin) == []
       assert KilnCMS.Challenge.Registry.of_plugin(NotLoadedAnywhere) == []
@@ -112,6 +116,7 @@ defmodule Kiln.PluginsTest do
       assert DefaultsPlugin.plug_routes() == []
       assert Kiln.Plugins.PlugRoute.of(DefaultsPlugin) == []
       assert DefaultsPlugin.challenge_providers() == []
+      assert DefaultsPlugin.security_checks() == []
       assert KilnCMS.Challenge.Registry.of_plugin(DefaultsPlugin) == []
     end
   end
@@ -155,6 +160,11 @@ defmodule Kiln.PluginsTest do
       assert contributions(challenge_providers: [Captcha, Other]) == "2 challenge providers"
     end
 
+    test "the contribution summary counts security checks (#2252)" do
+      assert contributions(security_checks: [Captcha]) == "1 security check"
+      assert contributions(security_checks: [Captcha, Other]) == "2 security checks"
+    end
+
     test "the contribution summary counts advisories and spam checks" do
       # The other two kinds no in-tree plugin declares. `advisories` is also the
       # one irregular plural in the summary — the generic rule would render it
@@ -192,6 +202,7 @@ defmodule Kiln.PluginsTest do
           spam_checks: [],
           image_backends: [],
           challenge_providers: [],
+          security_checks: [],
           nav_items: 0,
           admin_routes: 0,
           editor_routes: 0,
@@ -984,6 +995,92 @@ defmodule Kiln.PluginsTest do
       assert Doctor.challenge_provider_problems([KilnDepFixture.Plugin], "recaptcha") == []
       assert Doctor.challenge_provider_problems([KilnDepFixture.Plugin], "dep_fixture") == []
       assert Doctor.challenge_provider_problems([FixturePlugin], nil) == []
+    end
+
+    # #2252: the core drops a check that fails the contract, takes a `core.`
+    # id or repeats another plugin's, with only a log line; the doctor says so
+    # before deploy.
+    test "flags security checks that break the contract, take a core id, or collide" do
+      defmodule NotACheck do
+        def id, do: "acme.not_a_check"
+      end
+
+      defmodule CoreSquatter do
+        use Kiln.Security.Check
+        def id, do: "core.transport"
+        def title, do: "Transport"
+        def scope, do: :deployment
+        def run(_context), do: pass("ok")
+      end
+
+      defmodule TwinCheck do
+        use Kiln.Security.Check
+        def id, do: "dep_fixture.build_env"
+        def title, do: "Twin"
+        def scope, do: :site
+        def run(_context), do: pass("ok")
+      end
+
+      defmodule BadScopeCheck do
+        use Kiln.Security.Check
+        def id, do: "acme.bad_scope"
+        def title, do: "Bad scope"
+        def scope, do: :galaxy
+        def run(_context), do: pass("ok")
+      end
+
+      defmodule CheckPlugin do
+        use Kiln.Plugin
+
+        def security_checks,
+          do: [NotACheck, CoreSquatter, TwinCheck, BadScopeCheck, {TwinCheck, []}]
+      end
+
+      defmodule BrokenCheckPlugin do
+        use Kiln.Plugin
+        def security_checks, do: :nope
+      end
+
+      defmodule ThrowingCheckPlugin do
+        use Kiln.Plugin
+        def security_checks, do: throw(:no_checks)
+      end
+
+      defmodule ExitingCheckPlugin do
+        use Kiln.Plugin
+        def security_checks, do: exit(:gone)
+      end
+
+      alias Mix.Tasks.Kiln.Plugins.Doctor
+
+      problems =
+        Doctor.security_check_problems([KilnDepFixture.Plugin, CheckPlugin, BrokenCheckPlugin])
+
+      assert Enum.any?(
+               problems,
+               &(&1 =~ "NotACheck: " and &1 =~ "does not implement Kiln.Security.Check")
+             )
+
+      assert Enum.any?(problems, &(&1 =~ ~s(takes the id "core.transport", which is reserved)))
+      assert Enum.any?(problems, &(&1 =~ ~s(id "dep_fixture.build_env" is declared by more)))
+      assert Enum.any?(problems, &(&1 =~ "only kiln_dep_fixture's is shown"))
+      assert Enum.any?(problems, &(&1 =~ "BadScopeCheck: scope/0 must return"))
+
+      assert Enum.any?(
+               problems,
+               &(&1 =~ "security_checks/0 entry {Kiln.PluginsTest.TwinCheck, []}")
+             )
+
+      assert Enum.any?(problems, &(&1 =~ "security_checks/0 must return a list, got :nope"))
+
+      # A throw or an exit is a reported problem, not a crashed doctor run.
+      assert [thrown, exited] =
+               Doctor.security_check_problems([ThrowingCheckPlugin, ExitingCheckPlugin])
+
+      assert thrown =~ "security_checks/0 throw: :no_checks"
+      assert exited =~ "security_checks/0 exit: :gone"
+
+      assert Doctor.security_check_problems([KilnDepFixture.Plugin, FixturePlugin]) == []
     end
 
     # #937: `test/kiln/block/json_schema_test.exs` proves the *core* render/schema

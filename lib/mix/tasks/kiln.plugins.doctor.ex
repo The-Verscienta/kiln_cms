@@ -25,6 +25,10 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       with a built-in (`turnstile`, `recaptcha`, which always win) nor with
       each other; when `CHALLENGE_PROVIDER` names a provider, one is
       installed under that id;
+    * security posture checks (#2252) pass `Kiln.Security.Check.conformance/1`,
+      take no id under `core.` (KilnCMS's own, which a plugin's never
+      displaces) and no id another plugin's check already has (the first
+      registered is the one shown);
     * nav paths and admin routes are well-formed (`/editor/...`);
     * plug routes (#2272) are well-formed `{verb, path, plug, opts}` /
       `{:forward, path, plug, opts}` tuples, take no first segment a core route
@@ -107,6 +111,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         plug_route_problems(plugins) ++
         image_backend_problems(plugins, Application.get_env(:kiln_cms, :image_backend)) ++
         challenge_provider_problems(plugins, selected_challenge_provider()) ++
+        security_check_problems(plugins) ++
         block_schema_problems(plugins, blocks_by_plugin) ++
         field_type_schema_problems(plugins, field_types_by_plugin) ++
         field_type_hook_problems(plugins, field_types_by_plugin) ++
@@ -728,6 +733,88 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       {:ok, id} -> id
       _unset_or_invalid -> nil
     end
+  end
+
+  # ── security posture checks (#2252) ────────────────────────────────────────
+  #
+  # The core resolves checks the same way at run time and drops a bad one with
+  # a log line, so the page just shows one line fewer. This says so before
+  # deploy, and names the collision the registry settles silently.
+  @doc false
+  def security_check_problems(plugins) do
+    raw = for plugin <- plugins, do: {plugin, raw_security_checks(plugin)}
+
+    malformed =
+      for {plugin, {:error, message}} <- raw,
+          do: "#{plugin.name()}: security_checks/0 #{message}"
+
+    entries =
+      for {plugin, {:ok, list}} <- raw,
+          entry <- list,
+          do: {plugin, entry}
+
+    {declared, not_modules} = Enum.split_with(entries, fn {_plugin, entry} -> is_atom(entry) end)
+
+    malformed =
+      malformed ++
+        for {plugin, entry} <- not_modules do
+          "#{plugin.name()}: security_checks/0 entry #{inspect(entry)} is not a module"
+        end
+
+    described =
+      for {plugin, mod} <- Enum.uniq_by(declared, &elem(&1, 1)),
+          do: {plugin, mod, Kiln.Security.Check.describe(mod)}
+
+    conformance =
+      for {plugin, mod, {:error, problems}} <- described, problem <- problems do
+        "#{plugin.name()}: security check #{inspect(mod)}: #{problem}"
+      end
+
+    named = for {plugin, mod, {:ok, %{id: id}}} <- described, do: {plugin, mod, id}
+
+    reserved =
+      for {plugin, mod, id} <- named, String.starts_with?(id, "core.") do
+        "#{plugin.name()}: security check #{inspect(mod)} takes the id #{inspect(id)}, " <>
+          "which is reserved for KilnCMS's own checks: it is never shown"
+      end
+
+    collisions =
+      named
+      |> Enum.reject(fn {_plugin, _mod, id} -> String.starts_with?(id, "core.") end)
+      |> Enum.group_by(fn {_plugin, _mod, id} -> id end)
+      |> Enum.flat_map(fn
+        {_id, [_one]} ->
+          []
+
+        {id, [{first, _mod, _id} | _rest] = many} ->
+          [
+            "security check id #{inspect(id)} is declared by more than one module " <>
+              "(#{Enum.map_join(many, ", ", fn {_p, mod, _id} -> inspect(mod) end)}); " <>
+              "only #{first.name()}'s is shown"
+          ]
+      end)
+
+    malformed ++ conformance ++ reserved ++ collisions
+  end
+
+  # `{:ok, list}`, or `{:error, why}` for a callback that raises or answers
+  # something other than a list; `{:ok, []}` for a plugin built against an
+  # SDK without the callback.
+  defp raw_security_checks(plugin) do
+    if Code.ensure_loaded?(plugin) and function_exported?(plugin, :security_checks, 0) do
+      case plugin.security_checks() do
+        list when is_list(list) -> {:ok, list}
+        other -> {:error, "must return a list, got #{inspect(other)}"}
+      end
+    else
+      {:ok, []}
+    end
+  rescue
+    error -> {:error, "raised: " <> Exception.message(error)}
+  catch
+    # A throw or an exit is the plugin's fault too: reported, not a crash of
+    # the whole doctor run.
+    kind, reason -> {:error, "#{kind}: #{inspect(reason)}"}
   end
 
   # ── block :json render vs exported schema (#937) ───────────────────────────

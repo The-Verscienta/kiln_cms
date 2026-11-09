@@ -69,6 +69,15 @@ defmodule Kiln.Plugins do
   @spec challenge_providers() :: [module()]
   def challenge_providers, do: KilnCMS.Challenge.Registry.plugin_providers()
 
+  @doc """
+  Security posture checks contributed by plugins (`Kiln.Security.Check`,
+  #2252), run on the Security posture page beside the core's own — see
+  `KilnCMS.Security.Posture.Registry`. A plugin compiled against a
+  `kiln_plugin` older than 1.4 has no such callback and contributes none.
+  """
+  @spec security_checks() :: [module()]
+  def security_checks, do: KilnCMS.Security.Posture.Registry.plugin_checks()
+
   @doc "Every plugin-declared admin nav item."
   @spec nav_items() :: [Kiln.Plugin.nav_item()]
   def nav_items, do: Enum.flat_map(all(), & &1.nav_items())
@@ -123,6 +132,7 @@ defmodule Kiln.Plugins do
           spam_checks: [module()],
           image_backends: [module()],
           challenge_providers: [module()],
+          security_checks: [module()],
           nav_items: non_neg_integer(),
           admin_routes: non_neg_integer(),
           editor_routes: non_neg_integer(),
@@ -156,6 +166,7 @@ defmodule Kiln.Plugins do
       spam_checks: plugin.spam_checks(),
       image_backends: plugin.image_backends(),
       challenge_providers: KilnCMS.Challenge.Registry.of_plugin(plugin),
+      security_checks: KilnCMS.Security.Posture.Registry.of_plugin(plugin),
       nav_items: length(plugin.nav_items()),
       admin_routes: length(plugin.admin_routes()),
       editor_routes: length(plugin.editor_routes()),

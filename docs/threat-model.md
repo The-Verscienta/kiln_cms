@@ -1615,9 +1615,75 @@ The how-to is
   `approval_for_site_sso` and provisions single sign-on accounts as active
   viewers; operators turn it on only once every node runs the release.
 
+### Security posture (`/editor/security-posture`, #2252)
+
+`KilnCMS.Security.Posture`, `KilnCMS.Security.PostureReport`,
+`KilnCMSWeb.SecurityPostureLive`. A read-only page that lists which security
+settings are on. The guide is [Security posture](security-posture.md); the
+policy is under "Security posture" in [policy-matrix.md](policy-matrix.md).
+
+- **It discloses configuration, so it is gated twice.** The page is a map of
+  what is off, which is what an attacker wants. It sits in the `:admin_routes`
+  live session (the tier gate) and its one action is authorized by
+  `Checks.OrgAdmin` on the request's site, which is the tenant and never an
+  argument. Editors, viewers, admins of other sites and admins whose
+  membership is still waiting are refused. **Run checks again** re-checks the
+  tier, because the socket outlives the mount.
+- **The deployment's lines are for platform admins only.** Which checks run is
+  decided inside the action from the actor's effective platform role, not by
+  the page: a site admin's report contains no `:deployment` entry at all. So
+  only platform admins learn which platform admins lack an authenticator app,
+  whether metrics, the API explorer or introspection are exposed, which
+  administrators hold long-lived or read-write keys, and how far behind the
+  release is. The per-site second-factor check leaves platform admins out, so
+  a site admin does not learn their two-factor status either.
+- **Email addresses are shown on the page and nowhere else.** A site admin
+  sees the addresses of that site's administrators and editors who have no
+  authenticator app (until now, a site admin who is not a platform admin
+  could not read another account). A platform admin also sees the addresses
+  of platform admins without one, and each flagged API key's name and owner.
+  They are in a result's `details`, which only the page renders. `facts`
+  carry counts and booleans only, and the SDK contract forbids secrets and
+  addresses in them, because a later release may publish facts to monitoring.
+  Nothing is stored or logged.
+- **Three system reads.** The two second-factor rosters and the API key list
+  read with `authorize?: false` (`User` reads are self-only; `ApiKey` reads are
+  platform-admin only), each with its reason at the call site. They select
+  only what the page needs (id, email, `totp_confirmed_at`; key name, access,
+  dates and owner), and only counts and the addresses above leave the check.
+  The other site checks read through their existing system grants
+  (`:accounts`, `:admin_allowlist`).
+- **Plugin checks are trusted code, contained.** A plugin's
+  `Kiln.Security.Check` runs in the node with the core's privileges and no
+  actor, like any plugin code: the page cannot stop it reading what it likes.
+  What the page does limit is the damage to the report. Each check runs in its
+  own task with a kill timer armed before it is called, so it dies at its
+  deadline even after the page is gone; a raise, throw, exit, timeout or
+  non-result is one "could not run" row, never a pass; checks run under their
+  own supervisor (50 tasks per node) so they cannot starve the rest of the
+  app; and every result passes `Result.sanitize/1`: summary and details are
+  escaped text, a fix link must be a `/editor/` path, a "Learn more" link must
+  be `https://`, and facts are held to scalars. A plugin cannot take a `core.`
+  id or displace a core check.
+- **Load.** Each report starts one task per check. A page refuses a rerun while
+  one runs and within five seconds of the last; at most three reports of one
+  site run at once per node (`with_slot/2`, a `Registry` count), and a full
+  supervisor makes the extra checks "busy" rows rather than queueing them.
+- **Residual risks.** (1) Work a check hands to another process (a `Task` it
+  starts, a `GenServer` call it makes) is not killed at its deadline. (2) A
+  check's metadata callbacks (`title/0`, `description/0`, …) are called before
+  the deadlines start, in the report's process: a plugin whose metadata
+  blocks holds up the whole page. (3) The admin-allowlist check reads
+  `KILN_ADMIN_ALLOWLIST_DISABLED` on the node that runs the report, so in a
+  cluster whose nodes disagree the line can change between page loads. (4)
+  The per-site cap is per node: N nodes allow 3×N concurrent reports of one
+  site. (5) Opening the page sends the update check when nothing is cached,
+  below.
+
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;
-admin-triggered, and the feed's `links.next` is followed only on its own
+admin-triggered from System, or from Security posture when no answer is
+cached, and the feed's `links.next` is followed only on its own
 origin),
 Meilisearch (the operator's instance — a site's own is below), S3/MinIO, the
 mailer, and the LLM providers behind `/api/ask` and

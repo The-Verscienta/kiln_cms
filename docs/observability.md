@@ -264,6 +264,30 @@ A missing site key or secret is not a boot warning: it is logged ("... has no
 site key (CHALLENGE_SITE_KEY) ...") at most once a minute per node, when a
 page first asks.
 
+## Security posture checks
+
+Each check on the [Security posture](security-posture.md) page (#2252) emits
+an event when it finishes, from `KilnCMS.Security.Posture.Runner`. The events
+carry the check's id and outcome, never what it found.
+
+| Event | Fired by | Measurements | Metadata |
+|-------|----------|--------------|----------|
+| `[:kiln_cms, :security_posture, :check, :stop]` | every check, once per report | `duration` (native units) | `id`, `status`, `error` |
+| `[:kiln_cms, :security_posture, :check, :exception]` | a check that raised, threw or exited, in addition to `:stop` | `duration` (native units) | `id`, `kind` |
+
+- `:status` -- `:pass`, `:warn`, `:fail`, `:unknown`, `:n_a`, or `:error`
+  when the check produced no result.
+- `:error` -- with `status: :error`: `:crashed`, `:timeout`,
+  `:invalid_result` or `:busy` (no room under the checks' task supervisor);
+  otherwise `nil`.
+- `:kind` -- `:error`, `:throw` or `:exit`.
+
+No metric is defined for these by default. A crashed check is also logged,
+with its stack trace: "Security posture check `<id>` (`<module>`) failed
+with ...". A plugin check the core skips is logged at warning level when the
+page runs ("Security posture: ... is not a usable check and is skipped", "...
+takes the reserved id ...", "... repeats the id ...").
+
 ## Where the metrics go
 
 The matching `Telemetry.Metrics` definitions live in
