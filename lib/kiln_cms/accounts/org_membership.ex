@@ -210,6 +210,10 @@ defmodule KilnCMS.Accounts.OrgMembership do
       description "Approve a registration awaiting a decision on this site."
       accept []
       require_atomic? false
+
+      # The account's row before the membership's (#2514, `AccountLock`'s lock
+      # order); an erased applicant is `DecideRegistration`'s to refuse.
+      change {KilnCMS.Accounts.Changes.LockAccount, refuse_erased?: false}
       change get_and_lock_for_update()
       change {KilnCMS.Accounts.Changes.DecideRegistration, outcome: :approve}
 
@@ -266,6 +270,8 @@ defmodule KilnCMS.Accounts.OrgMembership do
       # (validations run before the hook that writes it).
       validate {KilnCMS.Accounts.Validations.RoleBelongsToOrg, argument: :role_id}
 
+      # The account's row before the membership's, as `:approve_registration`.
+      change {KilnCMS.Accounts.Changes.LockAccount, refuse_erased?: false}
       change get_and_lock_for_update()
       change {KilnCMS.Accounts.Changes.DecideRegistration, outcome: :approve_by_invitation}
 
@@ -277,14 +283,30 @@ defmodule KilnCMS.Accounts.OrgMembership do
       change KilnCMS.Security.Changes.RecordRegistration
     end
 
-    # A site admin turns the applicant away. The account and the row are kept
-    # (`:rejected`), so the address cannot simply register here again; erasing
-    # a rejected account is a later change. Allowed on an unconfirmed row too,
-    # so a wave of bot sign-ups can be cleared without waiting for them.
+    # A site admin turns the applicant away. The row is kept (`:rejected`), and
+    # so is the account, so the address cannot simply register here again.
+    # Allowed on an unconfirmed row too, so a wave of bot sign-ups can be
+    # cleared without waiting for them.
+    #
+    # Unless the site erases unconfirmed rejected accounts (#2514,
+    # `SiteRegistration.rejected_accounts`) and the caller asks for it
+    # (`erase: true`, which the console passes only when its confirmation said
+    # so): then `EraseRejectedAccount` erases the account in this transaction,
+    # when its address was never confirmed and nothing but this application
+    # hangs off it (`Registrations.Erasure`). Declared first, so the account's
+    # row is locked before the membership's.
     update :reject_registration do
       description "Reject a registration awaiting a decision on this site."
       accept []
       require_atomic? false
+
+      argument :erase, :boolean do
+        description "Erase the account too, when the site's setting and the account allow it."
+        default false
+        allow_nil? false
+      end
+
+      change KilnCMS.Accounts.Changes.EraseRejectedAccount
       change get_and_lock_for_update()
       change {KilnCMS.Accounts.Changes.DecideRegistration, outcome: :reject}
 
@@ -377,6 +399,14 @@ defmodule KilnCMS.Accounts.OrgMembership do
     policy action([:registration_queue, :approve_registration, :reject_registration]) do
       authorize_if KilnCMS.Accounts.Checks.AdminOfMembershipOrg
     end
+  end
+
+  changes do
+    # Every membership create takes the account's row first (#2514): an
+    # erasure of a rejected registration then cannot miss a membership being
+    # created elsewhere, and a create reaching an erased account is refused.
+    # Resource-wide, so a create path added later cannot forget it.
+    change KilnCMS.Accounts.Changes.LockAccount, on: [:create]
   end
 
   validations do

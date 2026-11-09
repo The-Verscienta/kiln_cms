@@ -137,7 +137,7 @@ a type may carry only the keys below; anything else is dropped.
 | `sign_in_unlock_refused` | Sign-in unlock link refused | An unlock link was not redeemed. The person is named only when the link's signature verified and the account belongs to this site. Sampled: see below | `reason` |
 | `registration_queued` | Registration awaiting approval | A password sign-up on a site that [requires approval](account-administration.md#approving-registrations) was queued, or a new account from the site's own single sign-on on a site that [holds those](account-administration.md#hold-new-single-sign-on-accounts-too). No acting person (the registration's own system write); the target is the new account | `method` |
 | `registration_approved` | Registration approved | A waiting or rejected registration was approved: by a site admin on Registrations, by the applicant accepting an invitation to the site (no person), or by a platform admin adding the address on Team. The target is the applicant | `role`, `via` |
-| `registration_rejected` | Registration rejected | A site admin rejected a waiting registration. The person is the admin; the target is the applicant | `outcome` |
+| `registration_rejected` | Registration rejected | A site admin rejected a waiting registration. The person is the admin; the target is the applicant, or none when the account was erased | `outcome` |
 
 `method` is `password`, `password_reset`, `magic_link`, `sso`, `passkey`,
 `second_factor` or `other`. `reason` is `invalid_credentials`,
@@ -203,10 +203,17 @@ event carries the address the sign-in came from). For `registration_approved`,
   with `via` `added` after a `registration_rejected` for the same target is
   that override.
 
-For `registration_rejected`, `outcome` is `kept`: the account and its
-row stay. Neither the queued row nor any approval writes a `role_granted` as
-well. Turning either approval switch on or off is `org_setting_changed` with
-`setting` `site_registration`.
+For `registration_rejected`, `outcome` is `kept` (the account and its row
+stay) or `erased` (#2514: the site erases unconfirmed applicants it rejects,
+and this account qualified, so it was
+[erased](account-administration.md#erase-unconfirmed-applicants-you-reject) in
+the same transaction; the row stays, `:rejected`). An `erased` event has **no
+target**: it is recorded after the erasure, and a target would only point at
+an account that no longer identifies anyone. The person is still the admin who
+rejected, not the system actor that ran the erasure. Neither the queued row
+nor any approval writes a `role_granted` as well. Changing any of the
+Registrations settings (either approval switch, or what rejecting does to the
+account) is `org_setting_changed` with `setting` `site_registration`.
 
 For `ip_auto_blocked`, `reason` is `miss_threshold` or `bait_path`, `count` is
 the threshold that was crossed, and `window_minutes` and `block_minutes` are the

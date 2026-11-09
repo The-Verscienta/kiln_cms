@@ -146,6 +146,31 @@ carries the reasoning.
     has these event types loads as before.
   See also [the Added entry](#registration-invitations-sso).
 
+<a id="registration-erasure-upgrade"></a>
+
+- **Run `mix ash.migrate` for erasing unconfirmed rejected accounts (#2251,
+  part three, second half). Set Registrations → "When you reject someone" to
+  erase only once every node runs this release.**
+  - **What the migration does.**
+    `20261109181713_registration_rejected_accounts` adds
+    `site_registration.rejected_accounts`, `text NOT NULL DEFAULT 'keep'`.
+    Additive: every existing site reads `keep`, which is the behaviour before
+    this change, and an older release ignores the column.
+  - **Mixed versions.** An erasure is safe only because every write that
+    would attach something to the account (a membership, a paid membership,
+    an API key, the entitlement recompute) or confirm it takes the account's
+    row lock first. A node still on an older release takes no such lock, so
+    during a rolling deploy an erasure can race a write there: a membership
+    or key can land on the erased account, or an account confirmed at that
+    moment can be erased. Choose **Erase the account if the email address was
+    never confirmed** only after every node runs this release.
+  - **Rolling back** is safe for the schema: the older release ignores the
+    column and keeps every rejected account. Accounts already erased stay
+    erased. No new security event type: `registration_rejected` gains the
+    `outcome` value `erased`, a string in the event's metadata, which an older
+    build that has the event type loads as before.
+  See also [the Added entry](#registration-erasure).
+
 <a id="sign-in-unlock-upgrade"></a>
 
 - **Sign-in unlock links (#2250): no migration, and nothing to set. Before
@@ -962,8 +987,8 @@ carries the reasoning.
   - **Later parts.** Telling admins and applicants is part two
     ([below](#registration-notifications)). Queueing a site's own SSO and
     invitations over a registration are the first half of part three
-    ([below](#registration-invitations-sso)); erasing rejected accounts is
-    still to come.
+    ([below](#registration-invitations-sso)), and erasing unconfirmed
+    rejected accounts is its second half ([below](#registration-erasure)).
   - **Security log.** `registration_queued` (`method`),
     `registration_approved` (`role`, `via`) and `registration_rejected`
     (`outcome`); see
@@ -1114,6 +1139,76 @@ carries the reasoning.
   [Invitations and registrations](../account-administration.md#invitations-and-registrations)
   and
   [Hold new single sign-on accounts too](../account-administration.md#hold-new-single-sign-on-accounts-too).
+
+<a id="registration-erasure"></a>
+
+- **A site can erase the account of an applicant it rejects when the email
+  address was never confirmed (#2251, part three, second half; #2514).**
+  Before, every rejected account was kept, so a wave of bot sign-ups left an
+  account per address that nobody proved they owned, and the address stayed
+  taken on the site.
+  - **The setting.** **Registrations** → **Settings** → **When you reject
+    someone**: **Keep the account** (the default) or **Erase the account if
+    the email address was never confirmed**
+    (`SiteRegistration.rejected_accounts`, `:keep` or `:erase_unconfirmed`).
+    The hint under it reads "Erasing can't be undone. Only accounts whose
+    address was never confirmed and that are used for nothing besides this
+    registration are erased; a rejected applicant who confirmed their address
+    is always kept. An erased address can register again, while a kept one
+    can't register here again."
+  - **When an account is erased.** Only when all of these hold: the setting
+    is on; the **Reject** dialog said the account would be erased (it does
+    on rows under **Email not confirmed yet**); a **standing** admin of the
+    site, or a standing platform admin, rejects (a temporary admin's
+    rejection keeps the account); the address was never confirmed; the
+    registration created the account; and the account is nothing but this
+    application: a *Viewer* with no temporary role, no audiences, no other
+    membership on any site, and no paid membership, API key, content,
+    comment, task, media, release, invitation sent, consent or logged event.
+    Then the account is anonymized, exactly as a platform admin's erasure,
+    in the rejection's transaction; a failed erasure undoes the rejection.
+    Otherwise the rejection is the usual one and the account is kept.
+  - **What the admin sees.** The dialog reads "Reject (address) and erase
+    the account? …", and afterwards "Rejected (address) and erased the
+    account." or "Rejected (address). The account was kept, because it's
+    more than this registration or it can't be erased right now." The row
+    stays on the **Rejected** tab with an **Account erased** badge.
+  - **Confirmed rejections are always kept**, whatever the setting: the kept
+    account holds the address, which is what stops the same person
+    registering on the site again. An erased address is free and can
+    register again. Nobody is emailed, since an unconfirmed applicant never
+    is.
+  - **Races.** The rejection locks the account's `users` row `FOR UPDATE`
+    before it checks, and every membership create, paid membership `:start`
+    and `:comp`, the entitlement recompute, API key `:create` and `:rotate`,
+    and the three updates that confirm an account take it `FOR KEY SHARE`
+    first (`KilnCMS.Accounts.AccountLock`). So an erasure never misses a
+    footprint or a confirmation being written at the same moment: whichever
+    locks first goes first, and the other either keeps the account or is
+    refused.
+  - **Security log.** `registration_rejected` has `outcome` `erased`, with no
+    target, besides `kept`.
+  - **Known cost.** The check scans several unindexed referencing columns
+    while it holds the lock; it runs only on a rejection that will try to
+    erase. Indexes are a follow-up.
+  - **Developers.** `OrgMembership` `:reject_registration` takes `erase`
+    (boolean, default `false`), a request the setting, the actor and the
+    check still decide; the returned row's `__metadata__.registration_outcome`
+    is `:erased` or `:kept`. `RegistrationPolicy.settings/1` returns
+    `rejected_accounts`. New: `Accounts.AccountLock` (`share/1`,
+    `exclusive/1`), `Changes.LockAccount`, `Changes.EraseRejectedAccount`,
+    `Changes.GuardRegistrationErasure`, `Registrations.Erasure` (`check/1`,
+    `standing_admin?/2`, `blocking/0`, `handled/0`), and the errors
+    `AccountErased` (a write to an erased account) and `ErasureRefused`. The
+    `:registrations` system actor may now run `User` `:anonymize`, held by
+    `GuardRegistrationErasure` to the one account the rejection in the same
+    transaction names.
+  Upgrade steps: [the upgrade note](#registration-erasure-upgrade). The
+  reasoning is in
+  [ADR 0024](../decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md)
+  (part three, c2); the how-to is
+  [Erase unconfirmed applicants you reject](../account-administration.md#erase-unconfirmed-applicants-you-reject).
+  Erasure itself also deletes more now: [below](#erasure-deletes-more).
 
 <a id="sign-in-unlock"></a>
 
@@ -2745,6 +2840,29 @@ carries the reasoning.
     read and the write now refuses it, which is the point.
   - **A no-op bulk update** (stream strategy, nothing changed) on a trashed
     row returns the record without consulting the filter. It writes nothing.
+
+<a id="erasure-deletes-more"></a>
+
+- **Erasing an account also deletes its Web Push subscriptions, its private
+  saved views and the notifications addressed to it, and now always clears
+  its audiences (#2514).** This is every erasure: a platform admin's
+  (`Accounts.anonymize_user/2`, and account removal), the staging scrub, and
+  a rejected registration's.
+  - **Push subscriptions** are a browser's endpoint and keys, a way to reach
+    the person's device. **Private saved views** are deleted on every site;
+    a shared view is the team's filter and stays, like authored content.
+    **Notifications addressed to the account** are deleted on every site
+    (new `Notification` action `:forget_recipient`, system-only, and
+    `Notifications.forget_recipient/1`); rows naming the account as the one
+    who acted are still kept and blanked, as before. If a site's delete
+    fails, the erasure raises so it can be retried.
+  - **Audiences.** The erasure set `audiences: []` on the account, but Ash
+    skipped the write when the copy of the account it was given already read
+    `[]` while the stored row had audiences (a billing recompute granted them
+    after that copy was read). The stored audiences then lasted until the
+    next recompute. They are now cleared in their own statement.
+  See [Erasure](../data-flows.md#subject-rights-workflows) in the data-flow
+  guide.
 
 <a id="scalar-list-filters-changed"></a>
 

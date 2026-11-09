@@ -8136,10 +8136,20 @@ msgstr "¿Borrar la cuenta y dejar su contenido donde está?"
 msgid "Erase the account and move everything it wrote to the trash?"
 msgstr "¿Borrar la cuenta y enviar a la papelera todo lo que escribió?"
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Erase the account if the email address was never confirmed"
+msgstr "Borrar la cuenta si la dirección de correo nunca se confirmó"
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Erased"
 msgstr "Borrado"
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Erasing can't be undone. Only accounts whose address was never confirmed and that are used for nothing besides this registration are erased; a rejected applicant who confirmed their address is always kept. An erased address can register again, while a kept one can't register here again."
+msgstr "El borrado no se puede deshacer. Solo se borran las cuentas cuya dirección nunca se confirmó y que no se usan para nada más que esta solicitud de registro; un solicitante rechazado que confirmó su dirección siempre se conserva. Una dirección borrada puede volver a registrarse; una conservada no puede volver a registrarse aquí."
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -10613,6 +10623,11 @@ msgstr "Mantener mi sesión abierta en este navegador"
 #, elixir-autogen, elixir-format
 msgid "Keep paragraph breaks"
 msgstr "Conservar los saltos de párrafo"
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keep the account"
+msgstr "Conservar la cuenta"
 
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
 #, elixir-autogen, elixir-format
@@ -15678,6 +15693,11 @@ msgstr "Rechazar"
 
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
+msgid "Reject %{email} and erase the account? This address was never confirmed, so the account is erased, unless it's used for anything besides this registration. Erasing can't be undone, and the address can register again."
+msgstr "¿Rechazar a %{email} y borrar la cuenta? Esta dirección nunca se confirmó, así que la cuenta se borra, salvo que se use para algo más que esta solicitud de registro. El borrado no se puede deshacer, y la dirección podrá volver a registrarse."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
 msgid "Reject %{email}? The account is kept but gets no access to this site, and they can't register here again with this address."
 msgstr "¿Rechazar a %{email}? La cuenta se conserva pero no tiene acceso a este sitio, y no podrá volver a registrarse aquí con esta dirección."
 
@@ -15704,8 +15724,18 @@ msgstr "Rechazado el %{at}"
 
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
+msgid "Rejected %{email} and erased the account."
+msgstr "Se rechazó a %{email} y se borró la cuenta."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
 msgid "Rejected %{email}."
 msgstr "%{email} rechazado."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rejected %{email}. The account was kept, because it's more than this registration or it can't be erased right now."
+msgstr "Se rechazó a %{email}. La cuenta se conservó, porque es algo más que esta solicitud de registro o no se puede borrar en este momento."
 
 #: lib/kiln_cms/cms/field_types/link.ex
 #, elixir-autogen, elixir-format
@@ -23249,6 +23279,11 @@ msgstr "Cuando esto ocurra"
 #, elixir-autogen, elixir-format
 msgid "When you publish or correct something, every website, app and cache you connect hears about it within seconds. KilnCMS keeps a record of who changed it, who approved it and exactly what readers saw at any moment, and signs every published page so anyone can check it. It runs on your own server: one app and a Postgres database."
 msgstr "Cuando publica o corrige algo, cada sitio web, aplicación y caché que conecte se entera en cuestión de segundos. KilnCMS guarda un registro de quién lo cambió, quién lo aprobó y qué vieron exactamente los lectores en cada momento, y firma cada página publicada para que cualquiera pueda comprobarla. Se ejecuta en su propio servidor: una aplicación y una base de datos Postgres."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "When you reject someone"
+msgstr "Al rechazar a alguien"
 
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format

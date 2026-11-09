@@ -16,6 +16,13 @@ defmodule KilnCMSWeb.RegistrationsLive do
   ones who have not can only be rejected, since anyone can register an address
   they do not own. The Rejected view lists those turned away.
 
+  A third setting, `rejected_accounts` (#2514), erases an unconfirmed
+  applicant's account when it is rejected, if nothing else hangs off it. The
+  confirmation on such a row then says so, and only then does the click ask
+  for the erasure (`erase: true`): an admin is never surprised by an erasure
+  the dialog did not warn of. A standing admin only; a temporary one sees the
+  ordinary confirmation, and the account is kept.
+
   Each list pages on its own (`Registrations.page/2`, "Load more"): confirmed
   applicants first and apart, so a wave of unconfirmed sign-ups cannot push the
   ones an admin can approve off the page. The headings count from bounded
@@ -34,6 +41,7 @@ defmodule KilnCMSWeb.RegistrationsLive do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Errors.RegistrationRefused
   alias KilnCMS.Accounts.Registrations
+  alias KilnCMS.Accounts.Registrations.Erasure
   alias KilnCMS.CMS
   alias KilnCMS.Notifications
 
@@ -69,8 +77,10 @@ defmodule KilnCMSWeb.RegistrationsLive do
   def handle_event("approve", %{"id" => id}, socket) when is_binary(id),
     do: decide(socket, id, :approve)
 
-  def handle_event("reject", %{"id" => id}, socket) when is_binary(id),
-    do: decide(socket, id, :reject)
+  # `erase` is what the confirmation showed; the action still decides, from
+  # the site's setting, the actor and the account, whether anything is erased.
+  def handle_event("reject", %{"id" => id} = params, socket) when is_binary(id),
+    do: decide(socket, id, {:reject, params["erase"] == "true"})
 
   # The next page of one list, after the last entry shown. The read is the
   # actor's own, so it is authorized again like the first.
@@ -85,7 +95,8 @@ defmodule KilnCMSWeb.RegistrationsLive do
     case CMS.save_site_registration(
            %{
              approval_required: params["approval_required"] == "true",
-             approval_for_site_sso: params["approval_for_site_sso"] == "true"
+             approval_for_site_sso: params["approval_for_site_sso"] == "true",
+             rejected_accounts: rejected_accounts(params["rejected_accounts"])
            },
            actor: socket.assigns.current_user,
            tenant: socket.assigns.current_org,
@@ -116,6 +127,10 @@ defmodule KilnCMSWeb.RegistrationsLive do
       when event in ~w(approve reject save_settings load_more),
       do: {:noreply, socket}
 
+  # Anything but the one value that erases keeps.
+  defp rejected_accounts("erase_unconfirmed"), do: :erase_unconfirmed
+  defp rejected_accounts(_keep), do: :keep
+
   # As the signed-in user, on their own unread notice for this site only —
   # `Notifications.mark_read_about/4` reads and marks as them. A failure costs
   # an unread badge, so it is not the page's business.
@@ -140,7 +155,7 @@ defmodule KilnCMSWeb.RegistrationsLive do
         result =
           case outcome do
             :approve -> Accounts.approve_registration(membership, %{}, opts)
-            :reject -> Accounts.reject_registration(membership, %{}, opts)
+            {:reject, erase?} -> Accounts.reject_registration(membership, %{erase: erase?}, opts)
           end
 
         {:noreply, settle(socket, key, membership.id, outcome, email, result)}
@@ -150,9 +165,9 @@ defmodule KilnCMSWeb.RegistrationsLive do
   # Decided — by this admin, or (refused as no longer pending) by another — so
   # it leaves the list; every other loaded row stays put. Any other refusal
   # leaves it where it was.
-  defp settle(socket, key, id, outcome, email, {:ok, _membership}) do
+  defp settle(socket, key, id, outcome, email, {:ok, membership}) do
     socket
-    |> put_flash(:info, decided_message(outcome, email))
+    |> put_flash(:info, decided_message(outcome, email, membership))
     |> drop_entry(key, id)
     |> load_counts()
   end
@@ -186,13 +201,27 @@ defmodule KilnCMSWeb.RegistrationsLive do
     if entries == [] and list.more?, do: load_page(socket, key), else: socket
   end
 
-  defp decided_message(:approve, email),
+  defp decided_message(:approve, email, _membership),
     do:
       gettext("Approved %{email}. They can now read this site as a viewer. We'll email them.",
         email: email
       )
 
-  defp decided_message(:reject, email), do: gettext("Rejected %{email}.", email: email)
+  defp decided_message({:reject, erase?}, email, membership) do
+    case {erase?, membership.__metadata__[:registration_outcome]} do
+      {_asked, :erased} ->
+        gettext("Rejected %{email} and erased the account.", email: email)
+
+      {true, _kept} ->
+        gettext(
+          "Rejected %{email}. The account was kept, because it's more than this registration or it can't be erased right now.",
+          email: email
+        )
+
+      {false, _kept} ->
+        gettext("Rejected %{email}.", email: email)
+    end
+  end
 
   defp error_message(error) do
     case RegistrationRefused.reason(error) do
@@ -272,15 +301,25 @@ defmodule KilnCMSWeb.RegistrationsLive do
     row = current_row(socket)
     required? = (row && row.approval_required) || false
     site_sso? = (row && row.approval_for_site_sso) || false
+    rejected_accounts = (row && row.rejected_accounts) || :keep
+    %{current_user: actor, current_org: org} = socket.assigns
 
     socket
     |> assign(:approval_required?, required?)
+    # Whether a rejection here erases an unconfirmed account: the site's
+    # setting, and a standing admin to do it (a temporary one only rejects).
+    |> assign(
+      :erase_unconfirmed?,
+      rejected_accounts == :erase_unconfirmed and
+        Erasure.standing_admin?(actor, org && org.id)
+    )
     |> assign(
       :settings_form,
       to_form(
         %{
           "approval_required" => to_string(required?),
-          "approval_for_site_sso" => to_string(site_sso?)
+          "approval_for_site_sso" => to_string(site_sso?),
+          "rejected_accounts" => to_string(rejected_accounts)
         },
         as: :registration
       )
@@ -321,6 +360,7 @@ defmodule KilnCMSWeb.RegistrationsLive do
   attr :entry, :map, required: true
   attr :status, :atom, required: true
   attr :approvable?, :boolean, default: true
+  attr :erase?, :boolean, default: false, doc: "whether the site erases unconfirmed rejections"
 
   defp applicant(assigns) do
     ~H"""
@@ -361,7 +401,8 @@ defmodule KilnCMSWeb.RegistrationsLive do
           size="sm"
           phx-click="reject"
           phx-value-id={@entry.membership.id}
-          data-confirm={reject_confirm(@entry)}
+          phx-value-erase={to_string(erases?(@entry, @erase?))}
+          data-confirm={reject_confirm(@entry, erases?(@entry, @erase?))}
         >
           <.icon name="hero-x-mark" class="size-4" /> {gettext("Reject")}
         </.button>
@@ -370,8 +411,22 @@ defmodule KilnCMSWeb.RegistrationsLive do
     """
   end
 
+  # Whether rejecting this entry asks for an erasure: the site erases
+  # unconfirmed rejections, and this address was never confirmed (#2514).
+  defp erases?(%{confirmed?: false, erased?: false}, true), do: true
+  defp erases?(_entry, _erase?), do: false
+
   # A confirmed applicant is mailed the rejection (#2251); an unconfirmed one is
   # not, since the address was never proven theirs, and nor is an erased one.
+  defp reject_confirm(%{email: email}, true),
+    do:
+      gettext(
+        "Reject %{email} and erase the account? This address was never confirmed, so the account is erased, unless it's used for anything besides this registration. Erasing can't be undone, and the address can register again.",
+        email: email
+      )
+
+  defp reject_confirm(entry, false), do: reject_confirm(entry)
+
   defp reject_confirm(%{confirmed?: true, erased?: false, email: email}),
     do:
       gettext(
@@ -461,6 +516,7 @@ defmodule KilnCMSWeb.RegistrationsLive do
               entry={entry}
               status={@status}
               approvable?={false}
+              erase?={@erase_unconfirmed?}
             />
           </ul>
           <.load_more :if={more?(@lists, :unconfirmed)} list={:unconfirmed} />
@@ -532,6 +588,21 @@ defmodule KilnCMSWeb.RegistrationsLive do
           <p class="text-xs text-base-content/70">
             {gettext(
               "Applies only if this site has its own single sign-on. Someone signing in that way for the first time gets an account that waits here; people who already have an account are not affected."
+            )}
+          </p>
+          <.input
+            field={@settings_form[:rejected_accounts]}
+            type="select"
+            label={gettext("When you reject someone")}
+            options={[
+              {gettext("Keep the account"), "keep"},
+              {gettext("Erase the account if the email address was never confirmed"),
+               "erase_unconfirmed"}
+            ]}
+          />
+          <p id="registration-rejected-accounts-hint" class="text-xs text-base-content/70">
+            {gettext(
+              "Erasing can't be undone. Only accounts whose address was never confirmed and that are used for nothing besides this registration are erased; a rejected applicant who confirmed their address is always kept. An erased address can register again, while a kept one can't register here again."
             )}
           </p>
           <.button phx-disable-with={gettext("Saving…")}>{gettext("Save")}</.button>

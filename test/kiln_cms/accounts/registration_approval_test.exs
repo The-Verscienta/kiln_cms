@@ -119,11 +119,16 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
       assert RegistrationPolicy.approval_required(site.id) == {:ok, false}
     end
 
-    test "settings/1 reads both switches, independently, and both off with no row" do
+    test "settings/1 reads every switch, independently, all off (keep) with no row" do
       site = org("settings-both")
 
       assert RegistrationPolicy.settings(site) ==
-               {:ok, %{approval_required: false, approval_for_site_sso: false}}
+               {:ok,
+                %{
+                  approval_required: false,
+                  approval_for_site_sso: false,
+                  rejected_accounts: :keep
+                }}
 
       CMS.save_site_registration!(%{approval_for_site_sso: true},
         actor: user(:admin),
@@ -131,7 +136,16 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
       )
 
       assert RegistrationPolicy.settings(site.id) ==
-               {:ok, %{approval_required: false, approval_for_site_sso: true}}
+               {:ok,
+                %{approval_required: false, approval_for_site_sso: true, rejected_accounts: :keep}}
+
+      CMS.save_site_registration!(%{rejected_accounts: :erase_unconfirmed},
+        actor: user(:admin),
+        tenant: site.id
+      )
+
+      assert {:ok, %{rejected_accounts: :erase_unconfirmed}} =
+               RegistrationPolicy.settings(site.id)
 
       assert RegistrationPolicy.approval_required(site) == {:ok, false}
 

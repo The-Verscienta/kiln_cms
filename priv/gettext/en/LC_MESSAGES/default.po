@@ -8136,9 +8136,19 @@ msgstr ""
 msgid "Erase the account and move everything it wrote to the trash?"
 msgstr ""
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Erase the account if the email address was never confirmed"
+msgstr ""
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Erased"
+msgstr ""
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Erasing can't be undone. Only accounts whose address was never confirmed and that are used for nothing besides this registration are erased; a rejected applicant who confirmed their address is always kept. An erased address can register again, while a kept one can't register here again."
 msgstr ""
 
 #: lib/kiln_cms_web/live/webhook_live.ex
@@ -10612,6 +10622,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Keep paragraph breaks"
+msgstr ""
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keep the account"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
@@ -15678,6 +15693,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
+msgid "Reject %{email} and erase the account? This address was never confirmed, so the account is erased, unless it's used for anything besides this registration. Erasing can't be undone, and the address can register again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
 msgid "Reject %{email}? The account is kept but gets no access to this site, and they can't register here again with this address."
 msgstr ""
 
@@ -15704,7 +15724,17 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
+msgid "Rejected %{email} and erased the account."
+msgstr ""
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
 msgid "Rejected %{email}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rejected %{email}. The account was kept, because it's more than this registration or it can't be erased right now."
 msgstr ""
 
 #: lib/kiln_cms/cms/field_types/link.ex
@@ -23248,6 +23278,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "When you publish or correct something, every website, app and cache you connect hears about it within seconds. KilnCMS keeps a record of who changed it, who approved it and exactly what readers saw at any moment, and signs every published page so anyone can check it. It runs on your own server: one app and a Postgres database."
+msgstr ""
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "When you reject someone"
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_txt_live.ex
