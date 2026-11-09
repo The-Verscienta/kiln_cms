@@ -537,7 +537,9 @@ defmodule KilnClient do
   `"options"`, `"help_text"`, `"placeholder"`, `"default_value"` and
   `"width"`. Newer servers add `"challenge"`: `nil`, or the form's
   human-verification check (`"provider"`, `"site_key"`, `"script_url"`,
-  `"action"`, `"field"`). An unknown or inactive form is
+  `"global"`, `"onload_param"`, `"render_options"`, `"action"`,
+  `"action_option"`, `"interactive"`, `"api"`, `"field"`). An unknown or
+  inactive form is
   `reason: :not_found`. Options: `:req`.
   """
   @spec form(String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}

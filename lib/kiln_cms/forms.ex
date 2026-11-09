@@ -14,8 +14,8 @@ defmodule KilnCMS.Forms do
     * **human verification** (#2249) — only for a form that asks for it
       (`KilnCMS.Challenge.form_required?/2`), and only once the fields are
       valid, so a typo never spends the visitor's token. The token rides in
-      `challenge_field/0` (or `cf-turnstile-response`, the name the provider's
-      own markup posts). `KilnCMS.Challenge.Gate.form/3` decides: a refused
+      `challenge_field/0` (or the field the configured provider's own markup
+      posts, such as `g-recaptcha-response`). `KilnCMS.Challenge.Gate.form/3` decides: a refused
       token returns the form with an error, and a missing token, one solved
       on another host or one the provider could not check is *held* — stored
       as spam, so nothing below runs for it. The outcome is kept on the
@@ -54,9 +54,11 @@ defmodule KilnCMS.Forms do
 
   @honeypot_field "website"
   @rendered_at_field "_kiln_rendered_at"
-  # The human-verification token (#2249), and the name the provider's own
-  # markup would post it under — accepted when ours is absent, so a headless
-  # front end that dropped in the stock widget is not held for the name.
+  # The human-verification token (#2249), and the name Turnstile's own markup
+  # would post it under — accepted when ours is absent, so a headless front
+  # end that dropped in the stock widget is not held for the name. The
+  # configured provider's own field (`response_field`) is accepted the same
+  # way, before this one.
   @challenge_field "_kiln_challenge"
   @challenge_alias "cf-turnstile-response"
   @challenge_refused "did not pass the human-verification check"
@@ -113,14 +115,27 @@ defmodule KilnCMS.Forms do
   def challenge_field, do: @challenge_field
 
   @doc """
-  The human-verification token `params` carry: `challenge_field/0`, or the
-  provider's own `cf-turnstile-response` when ours is absent or blank.
+  The human-verification token `params` carry: `challenge_field/0`; when that
+  is absent or blank, the configured provider's own field (reCAPTCHA's
+  `g-recaptcha-response`, which its widget adds inside the form); and last
+  Turnstile's `cf-turnstile-response`.
   """
   @spec challenge_token(map()) :: term()
   def challenge_token(params) when is_map(params) do
-    case Map.get(params, @challenge_field) do
-      blank when blank in [nil, ""] -> Map.get(params, @challenge_alias)
-      token -> token
+    [@challenge_field, provider_field(), @challenge_alias]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.find_value(fn field ->
+      case Map.get(params, field) do
+        blank when blank in [nil, ""] -> nil
+        token -> token
+      end
+    end)
+  end
+
+  defp provider_field do
+    case KilnCMS.Challenge.config().descriptor do
+      %{response_field: field} when is_binary(field) -> field
+      _none -> nil
     end
   end
 

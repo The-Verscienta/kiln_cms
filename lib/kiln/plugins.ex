@@ -60,6 +60,15 @@ defmodule Kiln.Plugins do
   @spec image_backends() :: [module()]
   def image_backends, do: Enum.flat_map(all(), & &1.image_backends())
 
+  @doc """
+  Human-verification providers contributed by plugins (`Kiln.Challenge.Provider`,
+  #2249). Which one is used is the operator's choice (`CHALLENGE_PROVIDER`) —
+  see `KilnCMS.Challenge.Registry`. A plugin compiled against a `kiln_plugin`
+  older than 1.4 has no such callback and contributes none.
+  """
+  @spec challenge_providers() :: [module()]
+  def challenge_providers, do: KilnCMS.Challenge.Registry.plugin_providers()
+
   @doc "Every plugin-declared admin nav item."
   @spec nav_items() :: [Kiln.Plugin.nav_item()]
   def nav_items, do: Enum.flat_map(all(), & &1.nav_items())
@@ -113,6 +122,7 @@ defmodule Kiln.Plugins do
           advisories: [module()],
           spam_checks: [module()],
           image_backends: [module()],
+          challenge_providers: [module()],
           nav_items: non_neg_integer(),
           admin_routes: non_neg_integer(),
           editor_routes: non_neg_integer(),
@@ -145,6 +155,7 @@ defmodule Kiln.Plugins do
       advisories: plugin.advisories(),
       spam_checks: plugin.spam_checks(),
       image_backends: plugin.image_backends(),
+      challenge_providers: KilnCMS.Challenge.Registry.of_plugin(plugin),
       nav_items: length(plugin.nav_items()),
       admin_routes: length(plugin.admin_routes()),
       editor_routes: length(plugin.editor_routes()),

@@ -4792,6 +4792,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
+msgid "Complete the check above, then send again."
+msgstr ""
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
 msgid "Complete the human-verification check below, then register again."
 msgstr ""
 
@@ -9518,6 +9523,11 @@ msgstr ""
 msgid "Human verification isn't available on this deployment. Ask the operator to configure it."
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Human-verification providers"
+msgstr ""
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "I have a team — review before publishing"
@@ -9716,6 +9726,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "In the content editor"
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "In use (CHALLENGE_PROVIDER=%{id})"
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
@@ -9920,6 +9935,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Inspector"
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Installed as %{id}, not selected"
 msgstr ""
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
@@ -12532,6 +12552,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "None — set in config without a plugin declaring it"
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not a usable provider"
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex

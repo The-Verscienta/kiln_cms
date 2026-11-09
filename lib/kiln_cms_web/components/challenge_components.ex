@@ -17,7 +17,9 @@ defmodule KilnCMSWeb.ChallengeComponents do
 
   ## No inline script
 
-  The markup carries everything as `data-` attributes and the `Challenge` hook
+  The markup carries everything as `data-` attributes — the provider's script,
+  its global, its render options and how it reports readiness
+  (`Kiln.Challenge.Provider`) — and the `Challenge` hook
   (`assets/js/challenge.js`) does the rest: it loads the provider's script once,
   draws the widget when the element is actually visible (the three auth forms
   share a page and two are hidden), writes the token into the hidden input,
@@ -130,6 +132,9 @@ defmodule KilnCMSWeb.ChallengeComponents do
         data-global={@state.widget.global}
         data-sitekey={@state.widget.site_key}
         data-action={@state.widget.action}
+        data-render-options={render_options(@state.widget)}
+        data-action-option={@state.widget.action_option || ""}
+        data-onload-param={@state.widget.onload_param || ""}
         data-loading-text={gettext("Loading the human-verification check…")}
         data-solved-text={gettext("Check complete.")}
         data-expired-text={gettext("The check expired. Complete it again.")}
@@ -195,6 +200,11 @@ defmodule KilnCMSWeb.ChallengeComponents do
         data-global={@widget.global}
         data-sitekey={@widget.site_key}
         data-action={@widget.action}
+        data-render-options={render_options(@widget)}
+        data-action-option={@widget.action_option || ""}
+        data-onload-param={@widget.onload_param || ""}
+        data-interactive={to_string(@widget.interactive)}
+        data-complete-first-text={gettext("Complete the check above, then send again.")}
         data-loading-text={gettext("Loading the human-verification check…")}
         data-solved-text={gettext("Check complete.")}
         data-expired-text={gettext("The check expired. Complete it again.")}
@@ -223,6 +233,11 @@ defmodule KilnCMSWeb.ChallengeComponents do
     </div>
     """
   end
+
+  # The provider's own render options, as JSON for the hook. Always present
+  # in markup rendered by this release: the hook falls back to Turnstile's
+  # options only for a page rendered before it (no attribute at all).
+  defp render_options(widget), do: Jason.encode!(Map.get(widget, :render_options, %{}))
 
   defp form_fallback_text,
     do:

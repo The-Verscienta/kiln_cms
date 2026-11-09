@@ -120,16 +120,13 @@ defmodule KilnCMS.Challenge.Gate do
     config = Challenge.config()
 
     if Challenge.form_required?(config, form) do
-      {check, reported} = reporting_hostname_check()
-
-      result =
-        Challenge.verify(config, token, :form,
-          hostname?: check,
+      {result, hostname} =
+        Challenge.verify_reporting(config, token, :form,
+          hostname?: hostname_check(),
           remote_ip: Keyword.get(opts, :remote_ip)
         )
 
       verdict = form_verdict(result)
-      hostname = reported.()
       if verdict == {:accept, :wrong_host}, do: wrong_host_logged(hostname)
 
       decided(verdict, :form, form_decision(verdict))
@@ -146,36 +143,6 @@ defmodule KilnCMS.Challenge.Gate do
   defp form_verdict({:error, :hostname_mismatch}), do: {:accept, :wrong_host}
   defp form_verdict({:error, {:unavailable, _reason}}), do: {:accept, :unavailable}
   defp form_verdict({:error, _refusal}), do: {:refuse, :failed}
-
-  # The provider checks the hostname inside an unlinked task, so the predicate
-  # reports what it was asked to this process. `reported` collects the last
-  # one (and empties the mailbox of them) — the log names the host to add to
-  # `CHALLENGE_HOSTNAMES`, which is the whole fix for a held headless site.
-  defp reporting_hostname_check do
-    case hostname_check() do
-      nil ->
-        {nil, fn -> nil end}
-
-      check ->
-        parent = self()
-        ref = make_ref()
-
-        reporting = fn hostname ->
-          send(parent, {ref, hostname})
-          check.(hostname)
-        end
-
-        {reporting, fn -> drain_reported(ref, nil) end}
-    end
-  end
-
-  defp drain_reported(ref, last) do
-    receive do
-      {^ref, hostname} -> drain_reported(ref, hostname)
-    after
-      0 -> last
-    end
-  end
 
   defp wrong_host_logged(hostname) do
     allowed =

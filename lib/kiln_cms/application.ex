@@ -26,6 +26,8 @@ defmodule KilnCMS.Application do
     warn_if_semantic_without_ml()
     warn_if_media_unwritable()
     warn_if_admin_allowlist_disabled()
+    filter_challenge_response_fields()
+    warn_if_challenge_provider_unusable()
 
     # Ensure custom AshPhoenix form error impls (e.g. for StaleRecord) are
     # loaded so they register with the protocol and prevent unhandled errors.
@@ -735,6 +737,51 @@ defmodule KilnCMS.Application do
 
       :ok
     end
+  end
+
+  # A human-verification provider's own markup can post its token under a field
+  # of its choosing (`response_field`, #2249). The built-ins' are in the list
+  # in config.exs; a plugin provider's is only known once the plugins are
+  # loaded. In a real boot Phoenix has already compiled the list by now, so
+  # this almost always only names the fields the filter misses (a warning the
+  # operator acts on in config); only a plain list, which tests set, is
+  # appended to. `{:keep, _}` is never touched. Sentry's scrubber reads the
+  # registry either way.
+  defp filter_challenge_response_fields do
+    current = Application.get_env(:phoenix, :filter_parameters, [])
+
+    case KilnCMS.Challenge.Registry.merge_filter_parameters(
+           current,
+           KilnCMS.Challenge.Registry.response_fields()
+         ) do
+      :unchanged ->
+        :ok
+
+      {:ok, filters} ->
+        Application.put_env(:phoenix, :filter_parameters, filters)
+
+      {:unfiltered, fields} ->
+        KilnCMS.Config.Report.warn(
+          "challenge_response_fields",
+          "A human-verification provider posts its token as #{Enum.join(fields, ", ")}, " <>
+            "which the request log does not filter: add it to config :phoenix, " <>
+            ":filter_parameters."
+        )
+    end
+
+    :ok
+  end
+
+  # CHALLENGE_PROVIDER names an id no installed provider answers to, or one
+  # that fails the provider contract (#2249). Human verification is then off —
+  # the safe direction, but the operator asked for it on — so say so at boot
+  # rather than only when a page first asks.
+  defp warn_if_challenge_provider_unusable do
+    if message = KilnCMS.Challenge.provider_problem() do
+      KilnCMS.Config.Report.warn("CHALLENGE_PROVIDER", message)
+    end
+
+    :ok
   end
 
   # The kill switch is a recovery step, not a setting to leave on: while it is

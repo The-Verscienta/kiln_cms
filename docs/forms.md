@@ -366,10 +366,13 @@ before treating a revocation as in force.
 **An embedded form that asks for a human-verification check** (#2249) draws
 the widget inside the iframe and loads one small script of its own,
 `/assets/js/challenge_static.js` (the embed never loads `app.js`). Its
-policy then gains `https://challenges.cloudflare.com` in `script-src` and an
-explicit `frame-src 'self' https://challenges.cloudflare.com`, on the form,
-its thank-you page and a refused re-render; every other form's embed policy
-is unchanged. The iframe is served from the site's own host, so the token is
+policy then gains the provider's sources in `script-src` and an explicit
+`frame-src 'self' <provider sources>`, on the form, its thank-you page and a
+refused re-render: `https://challenges.cloudflare.com` for Turnstile;
+`https://www.recaptcha.net/recaptcha/` and `https://www.gstatic.com/recaptcha/`
+in `script-src` and `https://www.recaptcha.net/recaptcha/` in `frame-src` for
+reCAPTCHA; a plugin provider's own declared sources. Every other form's
+embed policy is unchanged. The iframe is served from the site's own host, so the token is
 solved there and the parent page's host needs no configuration.
 
 ## Abuse protection
@@ -383,12 +386,16 @@ couldn't carry a token). Instead:
 - server-side validation of every declared field (unknown keys dropped);
 - **human verification** (#2249), per form and off by default: with the
   form's **General** tab's "Ask visitors to complete a human-verification
-  check" ticked, the form draws a Cloudflare Turnstile widget and every
+  check" ticked, the form draws the operator's provider's widget
+  (Cloudflare Turnstile, Google reCAPTCHA v2 or a plugin's) and every
   submission must carry its token. Only after the fields validate and the
   honeypot is empty is the token checked. A refused token gets the form back
   (`422`); a submission with no token, one solved on a host the deployment
-  does not serve, or one Cloudflare could not check is **held**: stored as
-  `:spam` and never acted on. Needs the operator's provider; see
+  does not serve, or one the provider could not check is **held**: stored as
+  `:spam` and never acted on. With a widget the visitor has to click
+  (reCAPTCHA's checkbox), the first click on submit without a token asks
+  them to complete it ("Complete the check above, then send again.") and the
+  second sends. Needs the operator's provider; see
   [Public forms](human-verification.md#public-forms).
 
 A browser submission that fails validation gets a `422` carrying the same form

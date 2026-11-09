@@ -1,6 +1,8 @@
 # 0020. Human verification is deployment-wide, and fails open only within the sign-in budget
 
-- **Status** — accepted (2026-11-08).
+- **Status** — accepted (2026-11-08). Partly superseded by
+  [ADR 0022](0022-a-challenge-provider-is-a-plugin-contract-and-the-core-enforces-its-claims.md):
+  the provider is now a plugin contract, and reCAPTCHA v2 is built in.
 - **References** — [#2249](https://github.com/The-Verscienta/kiln_cms/issues/2249)
   (the first of three parts), following
   [ADR 0018](0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md)
@@ -124,9 +126,12 @@ The work is split so each part ships on its own:
    and embed page policies. Shipped as a per-form setting under an operator
    ceiling, with unverified submissions held for review: see
    [ADR 0021](0021-a-form-opts-in-to-human-verification-and-an-unverified-submission-is-held-not-refused.md).
-3. Per-site keys and a settings page (sign-in stays deployment-wide),
-   reCAPTCHA v2, and a plugin SDK callback for providers once the shape is
-   proven.
+3. reCAPTCHA v2 and a plugin SDK callback for providers: shipped, see
+   [ADR 0022](0022-a-challenge-provider-is-a-plugin-contract-and-the-core-enforces-its-claims.md).
+   Per-site keys and a settings page (sign-in stays deployment-wide) moved to
+   [#2505](https://github.com/The-Verscienta/kiln_cms/issues/2505), and a
+   self-hosted proof-of-work provider to
+   [#2506](https://github.com/The-Verscienta/kiln_cms/issues/2506).
 
 Also: a deployment-wide trigger on the overall sign-in failure rate, for
 credential stuffing spread thinly across many accounts and addresses.
