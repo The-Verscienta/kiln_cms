@@ -23,8 +23,10 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       privacy, tenant and Entry scoping are the same code as `custom_filter`'s
       (a private field is the same "unknown custom field"). Reference, media,
       group, geolocation, link and relationship fields keep using
-      `custom_filter`; so does a `multiple` field, except `string` `eq`/`in` on
-      a multiple string or select.
+      `custom_filter`. A list of scalars (#2289) is given the kind of its
+      items and takes `eq` (contains), `notEq`, `in` (contains any) and
+      `isNull`; its `has*` / `count` are `custom_filter`'s, and other
+      `multiple` fields use `custom_filter` alone.
     * `custom_sort` — comma-separated field names, `-` prefix for descending
       (`"-price,title"`), appended to any explicit `sort` so it wins over an
       action's *default* order but not over a caller's.
@@ -57,9 +59,19 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   label can lag the target's title, and an order over unreadable targets would
   leak where they sit. On a `multiple` one
   (a gallery, a list of references) `eq` means "contains this id", `not_eq`
-  "does not", and `in` "contains any of them" — and a multiple `select` or
-  `string` reads the same way for its items
-  (`custom_filter[properties]=tonic`). A
+  "does not", and `in` "contains any of them".
+
+  A `multiple` scalar field — a list of phrases, terms, numbers, dates,
+  times, links, addresses, phone numbers, colours or slugs (#2289) — reads
+  the same way for its items (`custom_filter[properties]=tonic`,
+  `custom_filter[scores]=10`), and also takes `has` / `has_all` / `has_none`
+  over values and `count` over its items; `has_none` matches a record with
+  no value, `not_eq` does not. Items are cast as a single field of their
+  type would be. Comparing items (`gt`…) and matching text in them are not
+  supported yet, and a list is not sortable — see
+  `KilnCMS.CMS.Preparations.CustomFieldQuery.Lists`.
+
+  A
   reference also takes the
   relationship operators `has` / `has_all` / `has_none` / `count`, which
   read its `content_links` edges rather than the snapshot, and so do the
@@ -87,9 +99,16 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   require Ash.Sort
 
   alias Ash.Error.Query.InvalidArgument
+  alias KilnCMS.CMS.Preparations.CustomFieldQuery.Lists
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Relations
+  alias KilnCMS.CMS.ScalarLists
 
   @operators ~w(eq not_eq gt gte lt lte in ilike contains starts_with null is_nil)
+
+  # The field types a record-level `multiple` field may hold a list of (#2289);
+  # their operators are `Lists`'.
+  @scalar_list_types ScalarLists.types()
+  @typed_list_types ScalarLists.typed()
 
   # `custom_filter` groups (#2355).
   @max_group_depth 4
@@ -248,14 +267,16 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp equality_filter_value(_query, _field), do: nil
 
   # One field name may exist under several dynamic types; that's fine as long
-  # as every owner agrees on the value type (the SQL cast is the same).
+  # as every owner agrees on the value type (the SQL cast is the same) and,
+  # for a typed list (#2289), on whether it is one: a list's operators are not
+  # a single value's.
   defp resolve(defs, name) do
     case Enum.filter(defs, &(&1.name == name)) do
       [] ->
         {:error, "unknown custom field #{inspect(name)}"}
 
       [definition | _] = matches ->
-        if matches |> Enum.map(& &1.field_type) |> Enum.uniq() |> length() == 1 do
+        if matches |> Enum.map(&value_shape/1) |> Enum.uniq() |> length() == 1 do
           {:ok, definition}
         else
           {:error,
@@ -264,6 +285,11 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         end
     end
   end
+
+  defp value_shape(%{field_type: type} = definition) when type in @typed_list_types,
+    do: {type, Map.get(definition, :multiple) == true}
+
+  defp value_shape(%{field_type: type}), do: type
 
   # --- filtering ---------------------------------------------------------------
 
@@ -505,6 +531,16 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp relation_or_condition({:builtin, builtin}, op, raw, ctx),
     do: Relations.builtin_condition(builtin, op, raw, ctx)
 
+  # A list of scalars (#2289) takes the membership operators, `has*` and
+  # `count` included; `null` is the same question as on any field.
+  defp relation_or_condition(%{field_type: type, multiple: true} = definition, op, raw, _ctx)
+       when type in @scalar_list_types do
+    case normalize_op(op) do
+      "null" -> condition(definition, "null", raw)
+      op -> Lists.condition(definition, op, raw)
+    end
+  end
+
   # The relationship operators run over the reference's `content_links`
   # edges, single or `multiple` alike (R6).
   defp relation_or_condition(%{field_type: :reference} = definition, op, raw, ctx)
@@ -654,34 +690,6 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       _ ->
         {:error,
          "custom field #{inspect(name)} (#{list_label(type)}) only supports eq/not_eq/in/null"}
-    end
-  end
-
-  # A multiple select holds a list of terms (and a multiple string a list of
-  # phrases), so — as for a gallery — `eq` asks whether the list contains the
-  # term, `not_eq` whether it does not, and `in` whether it contains any of
-  # them: jsonb containment against a one-term array, bound as text and cast
-  # in SQL for the same reason.
-  defp condition(%{field_type: type, multiple: true, name: name}, op, raw)
-       when type in [:select, :string] do
-    probe = fn term -> Jason.encode!([to_string(term)]) end
-    contains = fn term -> list_contains(name, probe.(term)) end
-
-    case op do
-      "eq" ->
-        {:ok, contains.(raw)}
-
-      "not_eq" ->
-        {:ok, expr(not (^absent_safe_contains(name, probe.(raw))))}
-
-      "in" ->
-        cast_list(raw, nil, name, fn
-          [] -> expr(false)
-          values -> values |> Enum.map(contains) |> Enum.reduce(&expr(^&2 or ^&1))
-        end)
-
-      _ ->
-        {:error, "custom field #{inspect(name)} (a list) only supports eq/not_eq/in/null"}
     end
   end
 
@@ -944,8 +952,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp lcfirst(<<first::utf8, rest::binary>>), do: String.downcase(<<first::utf8>>) <> rest
 
   # The kind given must be the field's own. A `multiple` field is a `:list`;
-  # a multiple string or select keeps today's "list contains" meaning for
-  # `eq` / `in` and nothing else.
+  # a list of scalars (#2289) takes the kind of its items, with the list's
+  # meaning — `eq` contains, `not_eq` does not contain, `in` contains any —
+  # and `isNull`. Its other operators (`has*`, `count`) are `customFilter`'s.
   defp check_kind(definition, kind, ops) do
     actual = KilnCMS.CMS.FieldKind.kind_for(definition)
     given = if kind == :date_time, do: :datetime, else: kind
@@ -955,12 +964,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       actual == given ->
         :ok
 
-      actual == :list and given == :string and definition.field_type in [:string, :select] ->
-        if Map.keys(ops) -- ~w(eq in) == [],
-          do: :ok,
-          else:
-            {:error,
-             "custom field #{inspect(name)} is a list: customWhere supports only eq and in on it"}
+      actual == :list and definition.field_type in @scalar_list_types ->
+        list_kind(definition, kind, given, ops)
 
       actual in [:string, :int, :float, :boolean, :date, :datetime] ->
         {:error,
@@ -971,6 +976,26 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         {:error,
          "custom field #{inspect(name)} has kind #{actual}, which customWhere does not " <>
            "support; use customFilter"}
+    end
+  end
+
+  defp list_kind(definition, kind, given, ops) do
+    item = KilnCMS.CMS.FieldKind.item_kind_for(definition)
+    name = definition.name
+
+    cond do
+      item != given ->
+        {:error,
+         "custom field #{inspect(name)} is a list of #{camel(actual_key(item))} values, " <>
+           "not #{camel(kind)}; use the #{camel(actual_key(item))} condition"}
+
+      Map.keys(ops) -- ~w(eq not_eq in is_null) != [] ->
+        {:error,
+         "custom field #{inspect(name)} is a list: customWhere supports only eq, notEq, in " <>
+           "and isNull on it (customFilter also takes has, has_all, has_none and count)"}
+
+      true ->
+        :ok
     end
   end
 
@@ -1080,7 +1105,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       when type in [:geolocation, :group, :json, :range, :key_value, :link] ->
         invalid(query, :custom_sort, "custom field #{inspect(name)} (#{type}) is not sortable")
 
-      {:ok, %{field_type: type, multiple: true}} when type in [:select, :string] ->
+      {:ok, %{field_type: type, multiple: true}} when type in @scalar_list_types ->
         invalid(query, :custom_sort, "custom field #{inspect(name)} (a list) is not sortable")
 
       {:ok, definition} ->
@@ -1137,10 +1162,12 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # --- value casting -------------------------------------------------------------
 
   # Preserve the caller's JSON-native type so the encoded predicate matches how
-  # the value is actually stored.
-  defp cast_value(raw, :dynamic, _name) when is_number(raw) or is_boolean(raw), do: {:ok, raw}
+  # the value is actually stored. Public for the items of a scalar list
+  # (`Lists`), which cast as a single field of their type does.
+  @doc false
+  def cast_value(raw, :dynamic, _name) when is_number(raw) or is_boolean(raw), do: {:ok, raw}
 
-  defp cast_value(raw, :dynamic, name) when is_binary(raw) do
+  def cast_value(raw, :dynamic, name) when is_binary(raw) do
     # `Kiln.FieldType.parse_float/1` — `Float.parse/1` raises on an overflow
     # literal under Elixir 1.19 (total only from 1.20), and this value comes
     # straight off a query string.
@@ -1151,9 +1178,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     end
   end
 
-  defp cast_value(raw, :dynamic, name), do: cast_value(raw, nil, name)
+  def cast_value(raw, :dynamic, name), do: cast_value(raw, nil, name)
 
-  defp cast_value(raw, nil, name) do
+  def cast_value(raw, nil, name) do
     if is_binary(raw) or is_number(raw) or is_boolean(raw) do
       {:ok, to_string(raw)}
     else
@@ -1161,7 +1188,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     end
   end
 
-  defp cast_value(raw, type, name) do
+  def cast_value(raw, type, name) do
     case Ash.Type.cast_input(type, raw) do
       {:ok, value} when not is_nil(value) ->
         {:ok, value}

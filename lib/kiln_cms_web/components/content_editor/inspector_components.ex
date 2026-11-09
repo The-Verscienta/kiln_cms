@@ -22,6 +22,12 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   alias KilnCMSWeb.ContentEditor.Conditional
   alias KilnCMSWeb.ContentEditor.GroupRows
 
+  # The scalar lists that render one input per item (#2289); a multiple
+  # `:select` keeps its tag picker. Of those, a date, date-time, time or
+  # colour box holds one whole value and adds it by Enter or its Add button.
+  @list_input_types KilnCMS.CMS.ScalarLists.types() -- [:select]
+  @whole_value_types [:date, :datetime, :time, :color]
+
   require Logger
 
   # Whether this record currently carries a passphrase (#496). Derived from the
@@ -667,23 +673,40 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
-  # A list of phrases (`multiple` `:string` — symptoms, indications,
-  # synonyms): one text input per item, each editable in place, removable and
-  # dragged by its handle, plus an "add" box (`TermPicker` in lines mode) that
-  # adds an item on Enter and splits a pasted block into one item per line.
-  # No vocabulary and no suggestions: these lists run to hundreds of distinct
-  # phrases. The inputs post `name[]` in screen order behind the same blank
-  # sentinel as the tag picker. An item emptied in place keeps its row while
-  # the form holds it (`list_items/1`) — dropping it on the next patch would
-  # take the input out from under the author retyping it — and is dropped on
-  # save.
-  def custom_field_input(%{definition: %{field_type: :string, multiple: true}} = assigns) do
+  # A scalar list (`multiple` on a `:string` — symptoms, synonyms — or on a
+  # typed scalar: numbers, dates, times, links, addresses, phone numbers,
+  # colours, slugs; #2289): one input per item, each editable in place,
+  # removable and dragged by its handle, plus an "add" box (`TermPicker`).
+  # Each item's input is the one the single field of that type renders
+  # (`input_kind/1`: a date picker for a date, `step="any"` for a float),
+  # less `required` — the list's bounds are `min_items`/`max_items`.
+  #
+  # Text-like boxes (phrases, numbers, links, addresses, phone numbers,
+  # slugs) add on Enter and split a pasted block into one item per line
+  # (lines mode). A date, date-time, time or colour box holds one value and
+  # adds it on Enter or its Add button (`data-split="none"`), never on input
+  # or change: a picker fires those while the value is half chosen.
+  #
+  # No vocabulary and no suggestions — a multiple `:select` keeps its tag
+  # picker below. The inputs post `name[]` in screen order behind the same
+  # blank sentinel as the tag picker. An item emptied in place keeps its row
+  # while the form holds it (`list_items/1`) — dropping it on the next patch
+  # would take the input out from under the author retyping it — and is
+  # dropped on save.
+  def custom_field_input(%{definition: %{field_type: type, multiple: true}} = assigns)
+      when type in @list_input_types do
     items = list_items(assigns.value)
+    {input_type, extra} = input_kind(assigns.definition)
+    item_attrs = Map.drop(extra, [:placeholder, :required])
 
     assigns =
       assigns
       |> assign(:items, items)
       |> assign(:full?, full?(assigns.definition, length(items)))
+      |> assign(:input_type, input_type)
+      |> assign(:item_attrs, item_attrs)
+      |> assign(:whole?, type in @whole_value_types)
+      |> assign(:entry_placeholder, Map.get(extra, :placeholder))
 
     ~H"""
     <div
@@ -723,7 +746,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
             <.icon name="hero-bars-2" class="size-3.5" />
           </span>
           <input
-            type="text"
+            type={@input_type}
             id={"#{cf_id(@definition)}-#{index}"}
             name={"#{@name}[]"}
             value={item}
@@ -731,6 +754,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
               gettext("%{field}, item %{position}", field: @definition.label, position: index + 1)
             }
             class="field-input min-w-0 flex-1 py-1 text-sm"
+            {@item_attrs}
           />
           <button
             type="button"
@@ -747,23 +771,37 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       <div :if={!@full?} class="flex items-center gap-1">
         <span class="p-1 text-base-content/30"><.icon name="hero-plus" class="size-3.5" /></span>
         <input
-          type="text"
+          type={@input_type}
           id={"#{cf_id(@definition)}-entry"}
           phx-hook="TermPicker"
           data-field={@definition.name}
           data-count={length(@items)}
-          data-split="lines"
+          data-split={if @whole?, do: "none", else: "lines"}
           autocomplete="off"
           enterkeyhint="enter"
-          placeholder={gettext("Add an item…")}
+          placeholder={@entry_placeholder || gettext("Add an item…")}
           aria-label={gettext("Add an item to %{field}", field: @definition.label)}
           class="field-input min-w-0 flex-1 border-dashed py-1 text-sm"
+          {@item_attrs}
         />
+        <button
+          :if={@whole?}
+          type="button"
+          id={"#{cf_id(@definition)}-add"}
+          data-list-add
+          aria-label={gettext("Add to %{field}", field: @definition.label)}
+          class="btn btn-ghost btn-sm shrink-0"
+        >
+          {gettext("Add")}
+        </button>
       </div>
       <p class="mt-1 text-xs text-base-content/60">
         <span :if={@definition.help_text}>{@definition.help_text}</span>
-        <span :if={!@full?}>
+        <span :if={!@full? and !@whole?}>
           {gettext("Press Enter to add. Paste several lines to add one item per line.")}
+        </span>
+        <span :if={!@full? and @whole?}>
+          {gettext("Press Enter to add.")}
         </span>
         <span :if={@full?}>
           {gettext("At the limit of %{max} items.", max: @definition.max_items)}
@@ -1657,19 +1695,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # their HTML input kind + extra attributes (min/max/step/readonly/…) via the
   # registry; core types map below.
   defp scalar_custom_field_input(assigns) do
-    definition = assigns.definition
-
-    {input_type, extra} =
-      case KilnCMS.CMS.FieldTypes.get(definition.field_type) do
-        nil -> {custom_input_type(definition.field_type), %{}}
-        module -> {module.input_type(), module.input_attrs(definition)}
-      end
-
-    extra =
-      if input_type == "number" and definition.field_type == :float,
-        do: Map.put_new(extra, :step, "any"),
-        else: extra
-
+    {input_type, extra} = input_kind(assigns.definition)
     assigns = assigns |> assign(:input_type, input_type) |> assign(:extra, extra)
 
     ~H"""
@@ -1697,6 +1723,21 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
+  # The `<input>` a scalar field renders — its HTML type and extra attributes
+  # (min/max/step/pattern/placeholder/…) — whether it is the single field's
+  # one input or an item of its list.
+  defp input_kind(definition) do
+    {input_type, extra} =
+      case KilnCMS.CMS.FieldTypes.get(definition.field_type) do
+        nil -> {custom_input_type(definition.field_type), %{}}
+        module -> {module.input_type(), module.input_attrs(definition)}
+      end
+
+    if input_type == "number" and definition.field_type == :float,
+      do: {input_type, Map.put_new(extra, :step, "any")},
+      else: {input_type, extra}
+  end
+
   attr :definition, :map, required: true
   attr :errors, :list, required: true
 
@@ -1720,12 +1761,19 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   defp select_terms(value) when is_binary(value) and value != "", do: [value]
   defp select_terms(_value), do: []
 
-  # A list of phrases as the form holds it: the posted list less its leading
+  # A scalar list as the form holds it: the posted list less its leading
   # blank sentinel, blank items kept (see the input above); a stored list
-  # never holds a blank, and a stored single string is its one item.
-  defp list_items(["" | items]), do: Enum.map(items, &to_string/1)
-  defp list_items(items) when is_list(items), do: Enum.map(items, &to_string/1)
+  # never holds a blank, and a stored single value is its one item. A stored
+  # item that is no scalar at all (a snapshot left by a retype from a media or
+  # reference list) has no input to show it in, so it is left out — the same
+  # rule `ContentEditorLive` reads the items by, so indexes agree.
+  defp list_items(["" | items]), do: scalar_items(items)
+  defp list_items(items) when is_list(items), do: scalar_items(items)
+  defp list_items(value) when is_number(value), do: [to_string(value)]
   defp list_items(value), do: select_terms(value)
+
+  defp scalar_items(items),
+    do: for(item <- items, is_binary(item) or is_number(item), do: to_string(item))
 
   defp key_value_text(value) when is_binary(value), do: value
 
