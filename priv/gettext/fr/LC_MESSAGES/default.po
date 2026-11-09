@@ -3596,6 +3596,9 @@ msgstr "En attente d'approbation"
 msgid "Back"
 msgstr "Retour"
 
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/invalid.html.heex
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/new.html.heex
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/show.html.heex
 #: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
 #, elixir-autogen, elixir-format
 msgid "Back to sign in"
@@ -7503,6 +7506,7 @@ msgstr "Dans les deux cas, vous pourrez le modifier plus tard sur la page Équip
 
 #: lib/kiln_cms/blocks/newsletter_signup.ex
 #: lib/kiln_cms_web/components/block_components.ex
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/new.html.heex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
@@ -7526,6 +7530,12 @@ msgstr "Aperçu du corps de l’e-mail"
 #, elixir-autogen, elixir-format
 msgid "Email domains"
 msgstr "Domaines de messagerie"
+
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/new.html.heex
+#: lib/kiln_cms_web/live/sign_in_live.ex
+#, elixir-autogen, elixir-format
+msgid "Email me an unlock link"
+msgstr "Envoyez-moi un lien de déblocage"
 
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
 #, elixir-autogen, elixir-format
@@ -7784,6 +7794,11 @@ msgstr "Saisissez une adresse e-mail, par exemple nom@example.com."
 #, elixir-autogen, elixir-format
 msgid "Enter the 6-digit code from your authenticator app."
 msgstr "Saisissez le code à 6 chiffres de votre application d'authentification."
+
+#: lib/kiln_cms_web/controllers/sign_in_unlock_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Enter the email address you sign in with."
+msgstr "Saisissez l’adresse e-mail avec laquelle vous vous connectez."
 
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -9634,6 +9649,11 @@ msgstr "Identité"
 msgid "If KILN_GOVERNANCE_WITNESS is already set, check its value: an unrecognised value falls back to none."
 msgstr "Si KILN_GOVERNANCE_WITNESS est déjà défini, vérifiez sa valeur : une valeur non reconnue revient à « none »."
 
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "If an account with that address is paused after too many sign-in attempts, we've emailed it a link to lift the pause. The link works once, within %{minutes} minutes."
+msgstr "Si un compte avec cette adresse est en pause après trop de tentatives de connexion, nous lui avons envoyé un lien pour lever la pause. Le lien fonctionne une fois, pendant %{minutes} minutes."
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "If the account has two-factor authentication enabled, sign-in answers 200 with a pending token rather than 201 with a bearer token — branch on the status code, not on whether a token is present. Unattended clients should use an API key instead."
@@ -10628,6 +10648,24 @@ msgstr "Bibliothèque (%{count} sur %{total})"
 #, elixir-autogen, elixir-format
 msgid "Library (%{count})"
 msgstr "Bibliothèque (%{count})"
+
+#: lib/kiln_cms_web/controllers/sign_in_unlock_controller.ex
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "Lift a sign-in pause"
+msgstr "Lever une pause de connexion"
+
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/show.html.heex
+#, elixir-autogen, elixir-format
+msgid "Lift the pause"
+msgstr "Lever la pause"
+
+#: lib/kiln_cms_web/controllers/sign_in_unlock_controller.ex
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/invalid.html.heex
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/show.html.heex
+#, elixir-autogen, elixir-format
+msgid "Lift the sign-in pause"
+msgstr "Lever la pause de connexion"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -13941,6 +13979,11 @@ msgstr "Chemins demandés par les visiteurs que rien sur le site n'a pu servir, 
 msgid "Pattern"
 msgstr "Motif"
 
+#: lib/kiln_cms_web/live/sign_in_live.ex
+#, elixir-autogen, elixir-format
+msgid "Paused after too many attempts?"
+msgstr "En pause après trop de tentatives ?"
+
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
 msgid "Payment overdue"
@@ -15668,6 +15711,11 @@ msgstr "Retraiter toutes les images de la bibliothèque ? Les originaux ne sont 
 #, elixir-autogen, elixir-format
 msgid "Reprocessing the library in the background. Originals are untouched; new variants appear as jobs finish."
 msgstr "Retraitement de la bibliothèque en arrière-plan. Les originaux ne sont pas modifiés ; les nouvelles variantes apparaissent au fur et à mesure."
+
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/invalid.html.heex
+#, elixir-autogen, elixir-format
+msgid "Request a new link"
+msgstr "Demander un nouveau lien"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
@@ -17597,6 +17645,26 @@ msgstr "La connexion est temporairement indisponible. Réessayez dans une minute
 #, elixir-autogen, elixir-format
 msgid "Sign-in locked out"
 msgstr "Connexion verrouillée"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in pause lifted by email"
+msgstr "Pause de connexion levée par e-mail"
+
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "Sign-in pauses for a while after too many attempts that don't complete. Enter your email address and, if your account is paused, we'll email you a link that lifts the pause. It doesn't sign you in."
+msgstr "La connexion est mise en pause un moment après trop de tentatives qui n’aboutissent pas. Saisissez votre adresse e-mail et, si votre compte est en pause, nous vous enverrons un lien qui lève la pause. Il ne vous connecte pas."
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in unlock link refused"
+msgstr "Lien de déblocage refusé"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in unlock link sent"
+msgstr "Lien de déblocage envoyé"
 
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
@@ -19822,6 +19890,11 @@ msgstr "Le jeu de règles fourni exclut délibérément les mots publicitaires s
 msgid "The sidebar could not be changed."
 msgstr "La barre latérale n'a pas pu être modifiée."
 
+#: lib/kiln_cms_web/controllers/sign_in_unlock_controller.ex
+#, elixir-autogen, elixir-format
+msgid "The sign-in pause on your account is lifted. You may be asked to complete a check, or to wait a minute if your network is busy."
+msgstr "La pause de connexion de votre compte est levée. Il peut vous être demandé de réussir une vérification, ou d’attendre une minute si votre réseau est chargé."
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "The signing key could not be generated."
@@ -20414,6 +20487,16 @@ msgstr "Ce n'est pas une image, donc rien ne lit ce texte à voix haute. Il s'af
 #, elixir-autogen, elixir-format
 msgid "This keeps floods and runaway crawlers from costing you capacity. It is not access control: any client can claim to be a browser or Googlebot. To keep a crawler out, use Blocked addresses, or a robots.txt served in front of Kiln."
 msgstr "Cela évite que les afflux de requêtes et les robots incontrôlés vous coûtent de la capacité. Ce n'est pas un contrôle d'accès : n'importe quel client peut prétendre être un navigateur ou Googlebot. Pour tenir un robot à l'écart, utilisez Adresses bloquées ou un robots.txt servi devant Kiln."
+
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/show.html.heex
+#, elixir-autogen, elixir-format
+msgid "This lifts the pause on signing in to your account. It doesn't sign you in: you sign in as usual afterwards."
+msgstr "Ceci lève la pause de connexion de votre compte. Cela ne vous connecte pas : vous vous connectez ensuite comme d’habitude."
+
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/invalid.html.heex
+#, elixir-autogen, elixir-format
+msgid "This link has already been used or is no longer valid. If you still can't sign in, request a new one."
+msgstr "Ce lien a déjà été utilisé ou n’est plus valide. Si vous ne parvenez toujours pas à vous connecter, demandez-en un nouveau."
 
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
@@ -22055,6 +22138,11 @@ msgstr "Visuel"
 #, elixir-autogen, elixir-format
 msgid "Visual separator between sections"
 msgstr "Séparateur visuel entre les sections"
+
+#: lib/kiln_cms_web/controllers/sign_in_unlock_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "Waiting also works: the pause lifts on its own after a few minutes."
+msgstr "Attendre fonctionne aussi : la pause se lève d’elle-même après quelques minutes."
 
 #: lib/kiln_cms/notifications.ex
 #, elixir-autogen, elixir-format

@@ -165,6 +165,23 @@ defmodule KilnCMSWeb.SignInLive do
     {Upstream.render(assigns)}
     <.passkey_sign_in :if={@live_action == :sign_in} />
     <.site_sso :if={@live_action == :sign_in} option={@site_sso} />
+    <.unlock_link :if={@live_action == :sign_in} />
+    """
+  end
+
+  # The way out of a sign-in pause (#2250). Always drawn, and worded as a
+  # question, never as "your account is locked": a pause answers exactly like a
+  # wrong password, and a link shown only to a paused account would say which
+  # accounts are paused.
+  defp unlock_link(assigns) do
+    ~H"""
+    <p
+      id="sign-in-unlock-link"
+      class="mx-auto -mt-8 w-full max-w-sm pb-12 text-center text-sm text-base-content/70 lg:max-w-md"
+    >
+      {gettext("Paused after too many attempts?")}
+      <a href={~p"/sign-in/unlock"} class="link">{gettext("Email me an unlock link")}</a>
+    </p>
     """
   end
 

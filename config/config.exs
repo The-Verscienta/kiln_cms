@@ -919,6 +919,9 @@ config :phoenix, :filter_parameters, [
   "preview_token",
   "unlock",
   "invite_token",
+  # A sign-in unlock link's path parameter (#2250); `"unlock"` above already
+  # matches it as a substring, named here so removing that one cannot drop it.
+  "unlock_token",
   # Human-verification tokens (#2249): ours, and the fields the built-in
   # providers' own markup posts (reCAPTCHA's always, Turnstile's if it were
   # ever rendered with its default input). A plugin provider's field is added

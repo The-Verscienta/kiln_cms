@@ -131,7 +131,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   Every limit is config-overridable so the test suite can pin them:
 
       config :kiln_cms, KilnCMS.Accounts.AccountThrottle,
-        budget: 3, window: :timer.seconds(1), mail_budget: 2
+        budget: 3, window: :timer.seconds(1), mail_budget: 2, unlock_mail_budget: 1
   """
   require Logger
 
@@ -173,17 +173,37 @@ defmodule KilnCMS.Accounts.AccountThrottle do
 
   # Every bucket this module charges, for `forget_all/0`.
   @buckets ~w(signin challenge:free_signin 2fa signin:alert 2fa:alert 2fa:settings-alert mail:password_reset mail:magic_link mail:registration_notice
-               mail:invitation mail:membership_notice)
+               mail:invitation mail:membership_notice mail:sign_in_unlock)
 
   @mail_budget 5
   @mail_window :timer.hours(1)
+
+  # Unlock-link mail (#2250) gets a smaller share of the same window. It only
+  # goes to an account that is already paused, and an owner who needs more
+  # than three links in an hour is better served by a password reset, which
+  # lifts the pause too.
+  @unlock_mail_budget 3
+
+  @mail_purposes [
+    :password_reset,
+    :magic_link,
+    :registration_notice,
+    :invitation,
+    :membership_notice,
+    :sign_in_unlock
+  ]
 
   # One "someone is guessing at your password" mail per address per window,
   # however long the attack runs.
   @alert_window :timer.hours(6)
 
   @type purpose ::
-          :password_reset | :magic_link | :registration_notice | :invitation | :membership_notice
+          :password_reset
+          | :magic_link
+          | :registration_notice
+          | :invitation
+          | :membership_notice
+          | :sign_in_unlock
 
   @doc """
   Charges one sign-in attempt against this identifier.
@@ -224,6 +244,31 @@ defmodule KilnCMS.Accounts.AccountThrottle do
     drop("signin", identifier)
     drop(@free_bucket, identifier)
   end
+
+  @doc """
+  Whether this identifier's sign-in budget is spent for the current window,
+  charging nothing (#2250).
+
+  `sign_in_attempts/1` against the budget `consume/1` enforces, so the two
+  cannot disagree about where the line is. A read for the unlock mail, which
+  goes only to an account that is actually paused; never a gate.
+  """
+  @spec sign_in_paused?(String.t()) :: boolean()
+  def sign_in_paused?(identifier), do: sign_in_attempts(identifier) >= budget()
+
+  @doc """
+  Lifts the sign-in pause on this identifier (#2250): clears the sign-in
+  counter and nothing else.
+
+  Narrower than `forgive/1` on purpose. An unlock link proves the mailbox, not
+  the password, so it does not hand back the free attempts before a
+  human-verification challenge (`challenge:free_signin`), and it touches none
+  of the per-address buckets, the second-factor budget or the alert windows.
+  Whoever signs in next still pays the challenge, the per-IP limit and the
+  second factor exactly as before.
+  """
+  @spec unlock(String.t()) :: :ok
+  def unlock(identifier), do: drop("signin", identifier)
 
   @doc """
   Spends one of this identifier's sign-in attempts that need no
@@ -346,15 +391,8 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   attacker probing for accounts).
   """
   @spec allow_mail?(purpose(), String.t()) :: boolean()
-  def allow_mail?(purpose, identifier)
-      when purpose in [
-             :password_reset,
-             :magic_link,
-             :registration_notice,
-             :invitation,
-             :membership_notice
-           ] do
-    case charge("mail:#{purpose}", identifier, mail_window(), mail_budget()) do
+  def allow_mail?(purpose, identifier) when purpose in @mail_purposes do
+    case charge("mail:#{purpose}", identifier, mail_window(), mail_budget(purpose)) do
       :allow ->
         true
 
@@ -421,7 +459,8 @@ defmodule KilnCMS.Accounts.AccountThrottle do
       second_factor_budget: @second_factor_budget,
       second_factor_window: @second_factor_window,
       mail_budget: @mail_budget,
-      mail_window: @mail_window
+      mail_window: @mail_window,
+      unlock_mail_budget: @unlock_mail_budget
     ]
   end
 
@@ -439,10 +478,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
     forgive(identifier)
     drop("signin:alert", identifier)
 
-    Enum.each(
-      [:password_reset, :magic_link, :registration_notice, :invitation, :membership_notice],
-      &drop("mail:#{&1}", identifier)
-    )
+    Enum.each(@mail_purposes, &drop("mail:#{&1}", identifier))
   end
 
   @doc """
@@ -473,7 +509,8 @@ defmodule KilnCMS.Accounts.AccountThrottle do
 
   defp budget, do: config(:budget, @budget)
   defp window, do: config(:window, @window)
-  defp mail_budget, do: config(:mail_budget, @mail_budget)
+  defp mail_budget(:sign_in_unlock), do: config(:unlock_mail_budget, @unlock_mail_budget)
+  defp mail_budget(_purpose), do: config(:mail_budget, @mail_budget)
   defp mail_window, do: config(:mail_window, @mail_window)
   defp second_factor_budget, do: config(:second_factor_budget, @second_factor_budget)
   defp second_factor_window, do: config(:second_factor_window, @second_factor_window)

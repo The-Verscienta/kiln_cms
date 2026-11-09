@@ -76,6 +76,7 @@ the router so preflights are answered before route matching).
 | Membership (paid audiences) | `/membership` | optional session | `:delivery` |
 | Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*`, `/auth/site-sso[/callback]` | varies | `:auth`, except `POST /auth/*/password/register`, which takes `:register` **instead** so the two registration doors agree (#724) |
 | Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
+| Sign-in unlock (#2250) | `GET`/`POST /sign-in/unlock` (ask for a link), `GET`/`POST /auth/unlock/:unlock_token` (the emailed link) | none to ask; the signed, stored `sign_in_unlock` token is the credential, and only the `POST` spends it | `:auth`; the mail also `mail:sign_in_unlock` per address (3/h), charged only for a paused member of the site |
 | Credential submits over `/live` | LiveView `"submit"` on the sign-in, register, reset-request and magic-link forms — **all four render on all three auth pages** | credentials → session / account / mail | charged on the *action*, since no plug can reach them: sign-in `:auth` (#715) + per-account (#478); registration `:register` (#724); reset and magic-link `:auth` (#724) + the per-address mail budget |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |
 | Media bytes | `/media/:id/download`, `/media/:id/stream` | session (a gated item needs its audience) | `:delivery` |
@@ -168,7 +169,8 @@ build if a resource is ever registered without that authorizer.
   account it named. Deliberately flat rather than escalating —
   a lockout that lengthens each time an attacker burns a window is a denial of
   service against any known address. A successful sign-in, a completed password
-  reset and a passkey sign-in each clear it. A separate flat per-address budget
+  reset and a passkey sign-in each clear it, and so does an emailed unlock link
+  (#2250), which clears nothing else ([Account unlock](#account-unlock-2250)). A separate flat per-address budget
   covers the two mail-triggering requests (password reset, magic link) so
   neither becomes a mailbomb.
 
@@ -1365,6 +1367,90 @@ creates an account and grants a site tier.
   A self-registered account is a `:viewer` and cannot reach `/editor/settings`,
   where those are enrolled, so this needs another route to them to matter.
 
+### Account unlock (#2250)
+
+`AccountThrottle` pauses password sign-in for an address after 20 attempts in
+15 minutes, and the pause answers exactly as a wrong password does. An emailed
+link lets the owner lift it without waiting or resetting the password
+(`KilnCMS.Accounts.SignInUnlock`; the reasoning is
+[ADR 0023](decisions/0023-an-unlock-link-lifts-only-the-account-pause-and-the-pause-stays-undisclosed.md)).
+The how-to is
+[Lift a sign-in pause by email](account-administration.md#lift-a-sign-in-pause-by-email).
+
+- **No stronger than a reset.** The link goes only to the account's mailbox,
+  and whoever reads that mailbox can already reset the password, which lifts
+  the pause too. The link does less: it clears the `signin` counter for the
+  account's current address (`AccountThrottle.unlock/1`) and nothing else. Not
+  `challenge:free_signin`, the `2fa` budget, the alert windows, `ip:auth` or
+  the challenge gate's IP axes. It signs no one in, mints no session, confirms
+  nothing and touches no other token.
+- **The pause stays undisclosed.** The sign-in page shows the same link to
+  everyone, the request page answers one sentence for every address, and
+  `POST /api/auth/sign_in` still answers a paused account with the generic
+  `401`. There is no JSON request or redeem endpoint.
+- **The request does the same work for every address.** `request/2` hands
+  the address to a task under its own `Task.Supervisor` (at most 20 children,
+  apart from the shared `KilnCMS.TaskSupervisor`) and returns. The task mails
+  only a confirmed, not erased, not demo-shared account that is paused right
+  now and is a member of the requesting site, and only then charges the
+  per-address budget (`mail:sign_in_unlock`, 3 an hour), so a name that is
+  never mailed writes no counter row. The mail echoes nothing from the request
+  (no IP, no attempt count), so it cannot carry a phisher's text.
+- **The token.** An AshAuthentication JWT, purpose and `act`
+  `sign_in_unlock`, 15 minutes, stored like every token. Single use through
+  the token resource's atomic revoke (two concurrent redeems: exactly one
+  wins), and revoked with every other token on a password change or reset. It
+  is refused as a bearer credential and by the reset, confirmation,
+  magic-link and token sign-in routes. Its claims, also stored in
+  `tokens.extra_data`, bind it to the requesting site (`org`: refused
+  elsewhere, and not spent there) and to the address it was mailed to (`ed`, an
+  HMAC keyed from `secret_key_base`, so the stored value is not a lookup away
+  from the address).
+- **Opening is not redeeming.** The `GET` renders the same page for any token
+  and spends nothing, so a scanner that follows the link does not use it.
+  Only the CSRF-checked `POST` redeems.
+- **Who calls it.** `User` `:request_sign_in_unlock` and
+  `:redeem_sign_in_unlock` are `forbid_if always()`, and
+  `SignInUnlockAction` refuses an actor-carrying call because the admin bypass
+  would pass that ([policy-matrix.md](policy-matrix.md)). No signed-in person,
+  an operator included, can mint or spend a link.
+- **Audit.** `sign_in_unlock_requested` only once a mail is queued,
+  `sign_in_unlocked`, and `sign_in_unlock_refused` (sampled per IP like a
+  failed sign-in, with the account named only when the link's signature
+  verified and the account belongs to the site). See
+  [security-events.md](security-events.md).
+- **Residuals.**
+  (1) *A link holder gets 20 more attempts.* Whoever holds a link (the
+  owner, or someone reading the owner's mail) can redeem it for a fresh
+  sign-in budget: 20 more password attempts per link, at most 3 links an
+  hour per address. Each attempt still pays the human-verification check
+  where the operator turned it on (the free attempts are not given back), the
+  per-IP limits and the second factor. Someone reading the mailbox could
+  reset the password instead, so this is not a new capability, but it is a
+  quieter one: the attacker keeps guessing without changing the password,
+  which the owner would notice.
+  (2) *Denial of the unlock mail.* An attacker who knows the address can
+  keep the account paused by guessing, and can spend its 3 unlock mails an
+  hour by asking for them; the owner then gets no link until the hour rolls
+  (they receive the 3 the attacker caused). A password reset, which has its
+  own mail budget, and waiting are still open, and an attacker still guessing
+  re-pauses the account within seconds of any unlock anyway.
+  (3) *The node-local fallback.* An unlock is a `forget` of the shared
+  Postgres counter, so it reaches every node (`ThrottleStorePeerTest`). A node
+  that counted attempts in its own ETS fallback while the database was
+  unreachable keeps those counts through an unlock made elsewhere, until its
+  window rolls. That is `ThrottleStore`'s documented bound, not a new one.
+  (4) *The token is in the request path*, as for invitations, reset and
+  magic links: `unlock_token` is in `:filter_parameters`, which filters the
+  logged params map only. (5) *The plaintext link sits in the mail job's
+  args* in `oban_jobs` until Oban's Pruner deletes the finished job 7 days
+  later; it has expired long before. (6) *A newer link does not revoke an
+  older one*; each is short-lived and single use, and the mail budget bounds
+  how many exist. (7) *A scanner that submits forms* (not just follows
+  links) can spend a link; the refusal page says so and offers a new one.
+  (8) *A link revoked by a password change is logged as `used`*, not as
+  revoked.
+
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;
 admin-triggered, and the feed's `links.next` is followed only on its own
@@ -1551,7 +1637,7 @@ was named, never to the person who named it.
 | REST and author routes | No route serves accounts by name, address or slug outside the console and the sign-in flow. WebFinger answers a registered and an unregistered `acct:` handle with the same 404. A published post by a known account carries no address on HTML, feeds or the JSON:API. | `enumeration_author_routes_test.exs` | None. |
 | Site invitation link (`/auth/invite/:invite_token`, #2135) | A made-up, expired, revoked and used token open the same page, "This invitation is no longer valid", on the dead render and the connected one. A token is mailed only to the address it names. | `enumeration_invitation_test.exs` | An admin-tier invitation whose sender lost the role gets the same page. |
 | Admin lookups (`get_user_by_email`, `list_users`, `get_user`, admin password reset, add-or-invite) | Any actor but an admin, or none, finds nothing for a registered address and for an unregistered one alike; the admin-only reset and add-or-invite (#2135) refuse a non-admin before they look at the account. | `accounts/enumeration_lookups_test.exs` | Admin-only oracles (below). |
-| Account unlock | There is no unlock flow, so nothing to audit. | not applicable | None. |
+| Sign-in unlock (`/sign-in/unlock`, `/auth/unlock/:unlock_token`, #2250) | An unknown address, a known one that is not paused, a paused one, a paused one whose unlock-mail budget is spent and an erased one get the same page and the same sentence. The request hands the address to a background task before anything is looked up, so the request process does the same work for each. The sign-in page shows the same "Paused after too many attempts?" link to everyone, paused or not. The link's page is the same for a real and a made-up token, and every refused redeem renders one page. | `enumeration_unlock_test.exs` (the request); `accounts/sign_in_unlock_async_test.exs` (equal work on the request process); `controllers/sign_in_unlock_controller_test.exs` (the link's page, the sign-in page) | Owner-only mail (below). |
 
 ### What registration does now
 
@@ -1569,8 +1655,8 @@ reset and magic-link mail) and is dropped silently once spent.
 
 ### Residuals
 
-- **Owner-only mail side channel.** A known address receives a reset, magic-link
-  or registration-notice mail that a stranger's does not. The requester never
+- **Owner-only mail side channel.** A known address receives a reset, magic-link,
+  registration-notice or sign-in unlock mail that a stranger's does not. The requester never
   sees it; the owner does. The per-address mail budget bounds how much
   of it anyone can cause.
 - **Reset and magic-link request time is not equalised.** A known address mints

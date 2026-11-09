@@ -132,6 +132,9 @@ a type may carry only the keys below; anything else is dropped.
 | `admin_access_refused` | Refused outside the admin allowlist | A request, page connection or collaboration connect from an address the site's [admin allowlist](admin-allowlist.md) does not list was refused. No person (the gate runs before anyone is known); the address is the event's IP. Sampled: see below | `surface` |
 | `admin_allowlist_changed` | Admin allowlist changed | An admin saved the site's [admin allowlist](admin-allowlist.md), including turning it off. The target is the list (target type `site_admin_allowlist`) | `state`, `count`, `added`, `removed` |
 | `admin_allowlist_overridden` | Admin allowlist changed from the server | An operator widened or cleared the list with [`KilnCMS.Release.admin_allowlist/1`](admin-allowlist.md#recovering-from-a-lock-out). No person and no IP address; the target is the site (target type `organization`) | `change`, `count` |
+| `sign_in_unlock_requested` | Sign-in unlock link sent | An [unlock link](account-administration.md#lift-a-sign-in-pause-by-email) was mailed to a paused account. Only once the mail is queued: a request that sends nothing records nothing. The person is the account mailed | `surface` |
+| `sign_in_unlocked` | Sign-in pause lifted by email | An unlock link was redeemed and the account's sign-in pause cleared. The person is the account | `was_locked` |
+| `sign_in_unlock_refused` | Sign-in unlock link refused | An unlock link was not redeemed. The person is named only when the link's signature verified and the account belongs to this site. Sampled: see below | `reason` |
 
 `method` is `password`, `password_reset`, `magic_link`, `sso`, `passkey`,
 `second_factor` or `other`. `reason` is `invalid_credentials`,
@@ -168,6 +171,18 @@ event replaces `org_setting_changed` for this setting, so a save is still
 exactly one event. For `admin_allowlist_overridden`, `change` is `cleared` or
 `added` and `count` the number of entries after the change.
 
+For `sign_in_unlock_requested`, `surface` is always `browser`: the link can
+only be asked for on `/sign-in/unlock`. For `sign_in_unlocked`, `was_locked`
+is `true` when the account was still paused at the moment of the redeem and
+`false` when the pause had already ended on its own. For
+`sign_in_unlock_refused`, `reason` is `invalid` (made up, malformed, or not an
+unlock link), `expired` (older than 15 minutes), `used` (already redeemed, or
+revoked by a password change or reset), `wrong_site` (opened on another site's
+host; the link is not spent and still works on its own site) or
+`account_changed` (the account's address changed, or the account was erased).
+The person sees one page for all of them. Opening a link without pressing the
+button records nothing.
+
 For `ip_auto_blocked`, `reason` is `miss_threshold` or `bait_path`, `count` is
 the threshold that was crossed, and `window_minutes` and `block_minutes` are the
 settings in force. The requested path is attacker-controlled and is never
@@ -182,15 +197,17 @@ the invitee accepts, the membership that creates is recorded as `role_granted`
 with no person, because nobody signed in did it; the target is the new or
 existing account.
 
-### Failed sign-ins and allowlist refusals are sampled, lockouts are not
+### Failed sign-ins, allowlist and unlock refusals are sampled, lockouts are not
 
 A password-guessing flood must not fill the log, so at most **5 failed
 sign-ins per IP address per 15 minutes** are written; the rest are dropped.
 Anyone outside an admin allowlist can cause `admin_access_refused` just by
 opening `/sign-in`, so it is capped the same way, at **5 per address per 15
 minutes** on each site, with its own counter (a flood of one cannot use up the
-other's budget). An IPv6 address counts as its `/64`, because one client can
-rotate through its whole prefix.
+other's budget). Anyone can post made-up unlock links, so
+`sign_in_unlock_refused` is capped the same way again, at **5 per address per
+15 minutes** on each site, with a counter of its own. An IPv6 address counts as
+its `/64`, because one client can rotate through its whole prefix.
 Each lockout is written once per subject and scope per 15 minutes (a locked
 account refuses every attempt until its window rolls, and one event says so).
 Both counters live in the same database-backed store as the sign-in throttles
@@ -250,6 +267,9 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `admin_access_refused` | `KilnCMSWeb.AdminAllowlist.record_refusal/4`, called from `lib/kiln_cms_web/plugs/admin_allowlist.ex` (`surface` `http` or `api`) and from `lib/kiln_cms_web/admin_allowlist.ex`: the LiveView `on_mount` (`live`) and `check_connect/2`, from the collab socket's `connect/3` in `lib/kiln_cms_web/channels/collab_socket.ex` (`collab`) | sampled, after commit; only for an address not on the list, never for a list that could not be read |
 | `admin_allowlist_changed` | `lib/kiln_cms/cms/changes/record_admin_allowlist_change.ex`, on `CMS.SiteAdminAllowlist` `:save` and `:update` (the `audit: {:change, ...}` option of `use KilnCMS.CMS.OrgSettings`) | in txn; only when the actor is a user. The previous list is read in the same transaction; if it cannot be read the save fails |
 | `admin_allowlist_overridden` | `lib/kiln_cms/cms/changes/operator_override_admin_allowlist.ex`, on `CMS.SiteAdminAllowlist` `:operator_override`, run by `KilnCMS.Release.admin_allowlist/1` | in txn: if the event cannot be written the list does not change |
+| `sign_in_unlock_requested` | `lib/kiln_cms/accounts/sign_in_unlock.ex`: the request's background task, via `AuthEvents.sign_in_unlock_requested/2`, once `SendSignInUnlock` has queued the mail | after commit, off the request path; tenant is the site the request was made on; `surface: "browser"` |
+| `sign_in_unlocked` | `sign_in_unlock.ex`: `redeem/2`, after the token's atomic revoke succeeded and the counter was cleared (`AuthEvents.sign_in_unlocked/3`) | after commit; `was_locked` |
+| `sign_in_unlock_refused` | `sign_in_unlock.ex`: `redeem/2` on every refusal, including the loser of two concurrent redeems (`AuthEvents.sign_in_unlock_refused/3`) | sampled, after commit; `reason` |
 
 `org_setting_changed` covers every resource built with `use
 KilnCMS.CMS.OrgSettings`, so a new settings resource cannot forget it:
@@ -283,6 +303,7 @@ recorded as long as it names a user actor and a tenant.
 | An invitation used up, or pruned | Not recorded | Accepting destroys the row through `Invitation` `:consume`; the `role_granted` of the membership it became is the record. The daily `:prune_expired` sweep removes rows long past expiry, which no one decided. |
 | A session signed out by an earlier "sign out everyone" when it is next used | Not recorded | A session that recorded no site (signed in before #2246) is caught later, on its next use on the site. `all_sessions_revoked` already records the decision; the late catch is its consequence. |
 | A session used on another site's host | Not recorded | The cookie was copied; it is served signed out there and nothing is written to it. |
+| An unlock request that mails nothing, or opening an unlock link | Not recorded | A request for an unknown, unpaused or non-member address is answered like any other and leaves no trace, so the log names no address that was not mailed. Opening the link only shows a button; mail scanners do it too. |
 | Unknown host | Not recorded | No site to attribute it to; the event is skipped. |
 | A save of the admin allowlist refused because it would lock you out | Not recorded | Nothing changed. |
 | The admin allowlist kill switch (`KILN_ADMIN_ALLOWLIST_DISABLED`) | Not recorded | It is an environment variable read at boot, with no site and no person. The boot log warns while it is set, and your platform's own record of environment changes is the trail. See [admin-allowlist.md](admin-allowlist.md#recovering-from-a-lock-out). |
@@ -327,7 +348,7 @@ telemetry events:
 | Telemetry event | Meaning |
 |---|---|
 | `[:kiln_cms, :security, :event_failed]` | An event could not be written. Metadata: `type`. Wire an alert to this one. |
-| `[:kiln_cms, :security, :event_sampled_out]` | An event was dropped on purpose: a failed sign-in or an admin allowlist refusal over the per-address cap, or a repeat lockout in the same window. Metadata: `type`. A sustained rate of `sign_in_failed` is a guessing attack. |
+| `[:kiln_cms, :security, :event_sampled_out]` | An event was dropped on purpose: a failed sign-in, an admin allowlist refusal or a refused unlock link over the per-address cap, or a repeat lockout in the same window. Metadata: `type`. A sustained rate of `sign_in_failed` is a guessing attack. |
 
 Events written inside a transaction (credentials, roles, API keys, settings)
 are different: if the event cannot be written, the change rolls back and the

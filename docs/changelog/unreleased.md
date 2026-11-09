@@ -26,6 +26,40 @@ carries the reasoning.
     `widgets/1` needs `{:kiln_plugin, "~> 1.4"}`. Nothing changes for one that
     doesn't.
 
+<a id="sign-in-unlock-upgrade"></a>
+
+- **Sign-in unlock links (#2250): no migration, and nothing to set. Before
+  rolling back to a build that has the security log (#2441) but not this
+  change, delete the three new security events, or roll forward instead.**
+  - **Why.** The security log stores an event's type as text, and a release
+    loads it back as one of the types it knows. This change adds three:
+    `sign_in_unlock_requested`, `sign_in_unlocked` and
+    `sign_in_unlock_refused`. A build without them cannot load such a row, and
+    the failure takes out the whole read, not just the row: that site's
+    **Security log** page and its CSV fail, and erasing a person who appears
+    in one of those events fails and retries. The daily retention prune is
+    unaffected. Tracked in
+    [#2509](https://github.com/The-Verscienta/kiln_cms/issues/2509).
+  - **Who this affects.** A rollback to v1.8.0 does not: v1.8.0 has no
+    security log and never reads the table. It matters for a rollback to a
+    later build that has the log, such as a release candidate or a `main` pin
+    taken before this change.
+  - **What to run before such a rollback**, in `psql` against the
+    deployment's database:
+
+    ```sql
+    DELETE FROM security_events
+    WHERE type IN ('sign_in_unlock_requested', 'sign_in_unlocked', 'sign_in_unlock_refused');
+    ```
+
+    This removes audit history, so export the log first if you need it
+    (**Download CSV** on `/editor/security-log`, filtered to those events).
+  - **Everything else rolls back cleanly.** Unlock links already mailed are
+    rows in `tokens` with purpose `sign_in_unlock`; an older build has no
+    route for them and the nightly sweep deletes them once expired. The
+    `mail:sign_in_unlock` throttle counters expire with their window.
+  See also [the Added entry](#sign-in-unlock).
+
 <a id="form-human-verification-upgrade"></a>
 
 - **Run `mix ash.migrate` for human verification on public forms (#2249,
@@ -656,6 +690,77 @@ carries the reasoning.
   - **Changing the field resets, a write that names a widget is refused.** A retype, `multiple`, rich text or `allow_custom` clears a stored widget the field no longer offers, unless the same write names one; then it is refused (`radios is not an editor input for this field (use one of: …)`). Field sync sends the file's widget with every update, so a file whose settings no longer suit its widget is refused rather than silently corrected.
   - **API and export.** Field definitions carry `widget` on JSON:API (`?include=field_definitions`, and in `docs/api/openapi.json`) and in field-sync files. The schema export adds `x-kiln-widget` only to a field whose chosen widget it still offers. GraphQL does not expose field definitions and is unchanged.
   - **Plugins.** `Kiln.FieldType` gains the optional `widgets/1` (not defaulted by `use`) and `Kiln.FieldType.widget/2` to read the pick back inside `input_attrs/1`, `input_parts/1` or `input_hook/1` (`kiln_plugin` 1.4). `input_type/0` takes no definition, so a widget cannot change the input's HTML `type`. `mix kiln.plugins.doctor` reports a `widgets/1` that raises, returns a non-list, or lists a malformed or repeated name.
+
+<a id="sign-in-unlock"></a>
+
+- **Someone whose password sign-in is paused after too many attempts can
+  have a link emailed that lifts the pause (#2250).** Until now the only ways
+  out were to wait for the 15-minute window to roll or to reset a password
+  that did not need changing.
+  - **What people see.** The sign-in page now always shows "Paused after too
+    many attempts? **Email me an unlock link**". It leads to
+    `/sign-in/unlock`, which asks for an email address and answers every
+    address with the same sentence: "If an account with that address is paused
+    after too many sign-in attempts, we've emailed it a link to lift the pause.
+    The link works once, within 15 minutes." The mail ("Lift the sign-in pause
+    on your (site) account") opens `/auth/unlock/(token)`, a page with a
+    **Lift the pause** button. Pressing it returns to `/sign-in` with "The
+    sign-in pause on your account is lifted. You may be asked to complete a
+    check, or to wait a minute if your network is busy." It does not sign
+    anyone in. The "Unusual sign-in activity" alert mail now links to the
+    request page too (never with a link token in it). The pages are
+    translated and need no JavaScript; the mail is in English, like the other
+    account mail.
+  - **The pause stays undisclosed.** A paused account still answers exactly
+    like a wrong password, and the sign-in page shows the link to everyone, so
+    it says nothing about which accounts are paused. The request answers
+    before it looks the address up; the lookup and the mail happen afterwards
+    in a background task.
+  - **No new trust.** The link goes only to the account's own mailbox, and
+    whoever reads that mailbox can already reset the password, which lifts
+    the pause as well.
+  - **What it lifts.** Only the account's sign-in counter
+    (`AccountThrottle.unlock/1`). Not the per-IP limits, not the free attempts
+    before a [human-verification](../human-verification.md) check, not the
+    two-factor code budget. The next sign-in still needs the password, the
+    second factor and, where the operator turned it on, a check.
+  - **Who is mailed.** Only a confirmed, not erased account that is paused
+    right now and is a member of the site the request was made on (or the
+    legacy no-membership account, on the default site). Never the demo's
+    shared account. At most 3 links an hour per address. The link is in that
+    site's branding, opens on that site's host and is refused on any other.
+    It works once, lasts 15 minutes, and stops working when the password is
+    changed or reset or the account's address changes. Opening it spends
+    nothing, so a mail scanner that follows it does not use it up.
+  - **Security log.** Three new types: `sign_in_unlock_requested` (Sign-in
+    unlock link sent; `surface`), `sign_in_unlocked` (Sign-in pause lifted by
+    email; `was_locked`) and `sign_in_unlock_refused` (Sign-in unlock link
+    refused; `reason`). Refusals are sampled like failed sign-ins. See
+    [The security log](../security-events.md#what-is-recorded).
+  - **Not an API.** There is no JSON endpoint: `POST /api/auth/sign_in` still
+    answers a paused account with the same `401` as a wrong password, and
+    recovery is browser-only.
+  - **Operators.** No migration, no environment variable. The new routes sit
+    behind the [admin allowlist](../admin-allowlist.md) with the other sign-in
+    pages and pay the per-IP `:auth` limit. A burst of requests beyond what
+    the unlock's own task supervisor holds (20 at once) is dropped with a
+    warning at most once a minute and the
+    `[:kiln_cms, :accounts, :sign_in_unlock_shed]` telemetry event
+    ([observability](../observability.md#sign-in-unlock-requests)).
+  - **Developers.** Two system-only `User` actions,
+    `:request_sign_in_unlock` and `:redeem_sign_in_unlock`
+    (`KilnCMS.Accounts.request_sign_in_unlock/2`,
+    `redeem_sign_in_unlock/2`), refused to every actor, admins included; the
+    site comes from the action context, never from an argument. The work is
+    `KilnCMS.Accounts.SignInUnlock`. The link is an AshAuthentication token
+    with purpose `sign_in_unlock`, stored in `tokens` with `org` and a keyed
+    HMAC of the address (`ed`) in `extra_data`. The mail budget is the new
+    `AccountThrottle` purpose `:sign_in_unlock` (`unlock_mail_budget`,
+    default 3).
+  The reasoning is in
+  [ADR 0023](../decisions/0023-an-unlock-link-lifts-only-the-account-pause-and-the-pause-stays-undisclosed.md);
+  the how-to is
+  [Lift a sign-in pause by email](../account-administration.md#lift-a-sign-in-pause-by-email).
 
 <a id="challenge-provider-plugins"></a>
 

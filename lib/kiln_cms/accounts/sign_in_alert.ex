@@ -357,14 +357,20 @@ defmodule KilnCMS.Accounts.SignInAlert do
     deliver(user, "Unusual sign-in activity on your #{site} account", body(site))
   end
 
+  # The unlock page (#2250) is linked bare, never with a token: this mail goes
+  # out on a lockout anyone can cause, and a token in it would be a link minted
+  # on an attacker's schedule. The page mails one on the owner's own request.
   defp body(site) do
     url = url(~p"/reset")
+    unlock = url(~p"/sign-in/unlock")
 
     """
     <p>Repeated sign-in attempts to your #{site} account have not succeeded.</p>
     <p>Sign-in for this account is paused briefly. If that was you, nothing is wrong —
     wait a few minutes and try again, or reset your password:</p>
     <p><a href="#{url}">#{url}</a></p>
+    <p>Or have a link emailed to you that lifts the pause:
+    <a href="#{unlock}">#{unlock}</a></p>
     <p>If it wasn't you, none of those attempts completed a sign-in. Resetting your
     password, and turning on two-factor authentication or a passkey, will end them.</p>
     """

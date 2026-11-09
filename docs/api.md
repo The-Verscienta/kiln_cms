@@ -169,6 +169,14 @@ Notes:
 
 - Invalid credentials return a generic **401** (`{"errors": [...]}`) — the
   response never reveals whether the email exists. Missing fields return **422**.
+- After 20 attempts on one address in 15 minutes, sign-in for that address is
+  paused, and the endpoint keeps answering the same **401**
+  `invalid_credentials`, never a 429 or a "locked" code, so a paused account
+  cannot be told from a wrong password. Recovery is browser-only: the person
+  waits, resets their password, or asks for an unlock link at
+  `/sign-in/unlock` ([Lift a sign-in pause by email](account-administration.md#lift-a-sign-in-pause-by-email)).
+  There is no API endpoint to request or redeem an unlock link. Point your
+  app's "can't sign in" help at those pages on the site's host.
 - The endpoint is rate-limited per IP under the tight `auth` bucket (40/min —
   a two-factor sign-in spends two of it, one for the password and one for the
   code).

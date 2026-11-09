@@ -59,6 +59,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new nullable `field_definitions.widget`, no backfill). Field-sync files now carry `"widget"`, which an older release's import refuses: upgrade the target first.** Rolling the pin back is safe.
   ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets-upgrade))
 
+- **Before rolling back to a build that has the security log but predates sign-in unlock links, delete the `sign_in_unlock_requested`, `sign_in_unlocked` and `sign_in_unlock_refused` security events, or roll forward.**
+  No migration. An older build cannot load those rows, which breaks that site's security log and CSV, and erasing a person named in one (#2509). v1.8.0 has no security log and is unaffected.
+  ([#2510](https://github.com/The-Verscienta/kiln_cms/pull/2510) · [long form](docs/changelog/unreleased.md#sign-in-unlock-upgrade))
+
 - **Run `mix ash.migrate` (`forms` and `form_submissions` each gain a `challenge` column). A custom asset build or overlay Dockerfile that does not run `mix assets.deploy` must also run `esbuild kiln_challenge_embed`.**
   Rolling the pin back is safe, but forms switched to a human-verification check stop asking, without a word, until you upgrade again.
   ([#2501](https://github.com/The-Verscienta/kiln_cms/pull/2501) · [long form](docs/changelog/unreleased.md#form-human-verification-upgrade))
@@ -150,6 +154,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Admins can choose each custom field's editor input: radios or buttons for a select, checkboxes, one-line text, a reference dropdown, or a plugin type's own (`widget`).**
   Editor-only; nothing stored or delivered changes. Guide: [docs/extending-content.md](docs/extending-content.md#choose-how-editors-fill-in-a-field).
   ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets))
+
+- **Someone whose sign-in is paused after too many attempts can have a link emailed that lifts the pause: "Email me an unlock link" on the sign-in page.**
+  The link lasts 15 minutes, works once and goes only to confirmed members of that site (3 an hour). It clears only the account pause, and the sign-in page still never says an account is paused. Guide: [docs/account-administration.md](docs/account-administration.md#lift-a-sign-in-pause-by-email).
+  ([#2510](https://github.com/The-Verscienta/kiln_cms/pull/2510) · [long form](docs/changelog/unreleased.md#sign-in-unlock))
 
 - **Plugins can add a human-verification provider (`challenge_providers/0`, `Kiln.Challenge.Provider`, new in `kiln_plugin` 1.4); the operator selects it with `CHALLENGE_PROVIDER=<id>`.**
   Checked once against the contract (and by `mix kiln.plugins.doctor`); an unknown or non-conforming provider leaves checks off with a boot warning. The core enforces the hostname and action a provider reports.
