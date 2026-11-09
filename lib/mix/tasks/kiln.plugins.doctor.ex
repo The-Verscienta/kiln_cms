@@ -42,6 +42,10 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       was actually bundled: the name it returns is registered in LiveView's
       colocated-hook manifest. A typo, or a `<script>` in a template that never
       compiled, otherwise surfaces only as a silent no-op in the browser;
+    * a field type's editor inputs (`c:Kiln.FieldType.widgets/1`, #2284) are
+      a list of machine-name atoms or `{name, label}` pairs, with no name
+      twice. The host drops a malformed entry without a word, so the fields
+      admin would simply not offer it;
     * every dependency that requires `kiln_plugin` (a plugin shipped as a
       Hex, git or `path:` dependency, #1909) accepts the version this core
       bundles. The core takes the package with `override: true`, which is
@@ -106,6 +110,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         block_schema_problems(plugins, blocks_by_plugin) ++
         field_type_schema_problems(plugins, field_types_by_plugin) ++
         field_type_hook_problems(plugins, field_types_by_plugin) ++
+        field_type_widget_problems(plugins, field_types_by_plugin) ++
         sdk_requirement_problems(sdk_version(), sdk_requirements(declared_deps())) ++
         project_lock_problems(File.cwd!())
 
@@ -992,6 +997,64 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   rescue
     e -> raised_problem(plugin, "field type #{inspect(mod)}", "building its input_hook/1", e)
   end
+
+  # #2284: `widgets/1` is read by the host on every field-definition write and
+  # editor render, where a malformed entry is dropped silently (a plugin must
+  # not be able to fail a save). This is where it gets named instead.
+  defp field_type_widget_problems(plugins, field_types_by_plugin) do
+    for plugin <- plugins,
+        mod <- field_types_by_plugin[plugin],
+        field_type_module?(mod),
+        function_exported?(mod, :widgets, 1),
+        problem <- widget_problems(plugin, mod),
+        do: problem
+  end
+
+  defp widget_problems(plugin, mod) do
+    definition =
+      struct(FieldDefinition,
+        name: "sample_field",
+        field_type: mod.name(),
+        required: false,
+        content_type: probe_content_type()
+      )
+
+    subject = "#{plugin.name()}: field type #{inspect(mod.name())} widgets/1"
+
+    case mod.widgets(definition) do
+      widgets when is_list(widgets) ->
+        names = Enum.map(widgets, &widget_entry_name/1)
+
+        malformed =
+          for {entry, nil} <- Enum.zip(widgets, names) do
+            "#{subject} has entry #{inspect(entry)}; expected a machine-name atom " <>
+              ~s[(lowercase letters, digits and underscores) or {name, "Label"}]
+          end
+
+        duplicates =
+          names
+          |> Enum.reject(&is_nil/1)
+          |> Enum.frequencies()
+          |> Enum.filter(fn {_name, count} -> count > 1 end)
+          |> Enum.map(fn {name, _count} -> "#{subject} names #{inspect(name)} more than once" end)
+
+        malformed ++ duplicates
+
+      other ->
+        ["#{subject} returned #{inspect(other)}; expected a list of names or {name, label} pairs"]
+    end
+  rescue
+    e -> raised_problem(plugin, "field type #{inspect(mod)}", "listing its widgets/1", e)
+  end
+
+  # The widget's name when `entry` is one the SDK allows, else nil.
+  defp widget_entry_name({name, label}) when is_binary(label), do: widget_entry_name(name)
+
+  defp widget_entry_name(name) when is_atom(name) and name not in [nil, true, false] do
+    if Regex.match?(~r/\A[a-z][a-z0-9_]*\z/, Atom.to_string(name)), do: name
+  end
+
+  defp widget_entry_name(_entry), do: nil
 
   defp colocated_manifest do
     case File.read(colocated_manifest_path()) do

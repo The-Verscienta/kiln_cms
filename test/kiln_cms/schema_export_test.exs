@@ -580,6 +580,66 @@ defmodule KilnCMS.SchemaExportTest do
     end
   end
 
+  describe "a field's editor widget (#2284)" do
+    test "x-kiln-widget names a chosen widget and is absent for the default",
+         %{actor: actor, org: org} do
+      for attrs <- [
+            %{
+              name: "mood",
+              label: "Mood",
+              field_type: :select,
+              options: ["calm", "bright"],
+              widget: "radios"
+            },
+            %{name: "tone", label: "Tone", field_type: :select, options: ["a", "b"]},
+            %{
+              name: "line",
+              label: "Line",
+              field_type: :text,
+              format: :plain,
+              widget: "single_line"
+            }
+          ] do
+        CMS.create_field_definition!(Map.put(attrs, :content_type, :page),
+          actor: actor,
+          tenant: org
+        )
+      end
+
+      fields = custom_fields(org, "content_page")["properties"]
+
+      assert fields["mood"]["x-kiln-widget"] == "radios"
+      assert fields["line"]["x-kiln-widget"] == "single_line"
+      refute Map.has_key?(fields["tone"], "x-kiln-widget")
+    end
+
+    test "a stored widget the field no longer offers is not advertised",
+         %{actor: actor, org: org} do
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "mood",
+          label: "Mood",
+          field_type: :select,
+          options: ["calm"]
+        },
+        actor: actor,
+        tenant: org
+      )
+
+      # As if a plugin had dropped the widget since it was chosen: no write
+      # path stores a name the field doesn't offer.
+      %{num_rows: 1} =
+        KilnCMS.Repo.query!(
+          "UPDATE field_definitions SET widget = 'gone' WHERE name = 'mood' AND org_id = $1",
+          [Ecto.UUID.dump!(org.id)]
+        )
+
+      fields = custom_fields(org, "content_page")["properties"]
+      refute Map.has_key?(fields["mood"], "x-kiln-widget")
+    end
+  end
+
   describe "a typed list (#2289)" do
     setup %{actor: actor, org: org} do
       for attrs <- [

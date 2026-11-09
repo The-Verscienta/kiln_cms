@@ -17,7 +17,10 @@
 //
 // Hiding is a class and `aria-hidden` only: the inputs stay enabled so the
 // stored value still posts and round-trips. `required` is toggled for the
-// field's own text-like control, never on a type=hidden input.
+// field's own text-like control, never on a type=hidden input. A radio group
+// (a select's radios or buttons widget, #2284) is required the way a browser
+// requires one: `required` on its first option radio, and `aria-required` on
+// the group (`role=radiogroup`) rather than on each radio.
 import {holds, references} from "./conditions"
 
 const parse = (json) => {
@@ -131,5 +134,14 @@ export const FieldConditions = {
     // A composite field's parts are not all required; only a lone control is
     // safe to flip.
     if (controls.length === 1) controls[0].required = required
+
+    for (const group of this.el.querySelectorAll("[role=radiogroup]")) {
+      if (required) group.setAttribute("aria-required", "true")
+      else group.removeAttribute("aria-required")
+      // On an option radio, not "— None —" (value ""), which the server drops
+      // from the group once the field is required.
+      const radios = Array.from(group.querySelectorAll("input[type=radio]")).filter((el) => el.value !== "")
+      radios.forEach((el, i) => { el.required = required && i === 0 })
+    }
   },
 }

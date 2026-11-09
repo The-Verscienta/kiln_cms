@@ -94,5 +94,37 @@ defmodule KilnCMSWeb.PluginFieldTypeTest do
     assert input_tag =~ ~s(min="1")
     assert input_tag =~ ~s(max="5")
     assert input_tag =~ ~s(value="3")
+    # No widget chosen: the type's default, and the markup it always had.
+    refute input_tag =~ "data-widget"
+  end
+
+  # #2284: a plugin's widget needs nothing from the host — the type reads it
+  # in `input_attrs/1` (the fixture marks its stars widget).
+  test "a plugin widget reaches the type's own input attributes", %{conn: conn} do
+    admin = authed_admin()
+
+    CMS.create_field_definition!(
+      %{
+        content_type: :page,
+        name: "score",
+        label: "Score",
+        field_type: :rating,
+        widget: "stars"
+      },
+      actor: admin
+    )
+
+    page =
+      CMS.create_page!(
+        %{title: "Starred", slug: "pft-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/content/page/#{page.id}")
+
+    assert [input_tag] = Regex.run(~r/<input[^>]*id="custom-field-score"[^>]*>/, html)
+    assert input_tag =~ ~s(data-widget="stars")
+    assert input_tag =~ ~s(type="number")
+    assert input_tag =~ ~s(max="5")
   end
 end
