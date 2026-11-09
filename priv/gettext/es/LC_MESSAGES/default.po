@@ -19608,6 +19608,12 @@ msgstr "Ese día ya ha pasado. Elige uno posterior."
 msgid "That day is not on this calendar — nothing moved."
 msgstr "Ese día no está en este calendario: no se movió nada."
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "That delivery's endpoint was deleted, so it can't be redelivered."
+msgstr "El endpoint de esa entrega se eliminó, así que no se puede volver a entregar."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "That didn't work — try again."
@@ -24628,6 +24634,7 @@ msgid "deleted"
 msgstr "eliminado"
 
 #: lib/kiln_cms_web/live/governance_live.ex
+#: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "deleted endpoint"
 msgstr "endpoint eliminado"
