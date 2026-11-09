@@ -167,7 +167,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Site admins can see which security settings are on, and what to fix first, at Organization → Security posture; platform admins also see the installation's checks.**
   Read-only, ten checks; an unknown or broken check counts as a warning, never a pass. Plugins add checks with `security_checks/0` and `Kiln.Security.Check` (`kiln_plugin` 1.4). Guide: [docs/security-posture.md](docs/security-posture.md).
-  ([long form](docs/changelog/unreleased.md#security-posture))
+  ([#2520](https://github.com/The-Verscienta/kiln_cms/pull/2520) · [long form](docs/changelog/unreleased.md#security-posture))
 
 - **Admins can lay out a type's custom fields as tabs, fieldsets or accordions, and set a field's width (full, half, a third), at Fields → Sections of.**
   Keyboard-accessible tabs in the editor; `GET /api/schema` adds `x-kiln-section-display` and `x-kiln-width`. Guide: [docs/extending-content.md](docs/extending-content.md#lay-out-custom-fields-as-tabs-fieldsets-or-columns).
