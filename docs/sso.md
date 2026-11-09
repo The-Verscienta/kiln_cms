@@ -73,7 +73,7 @@ The sign-in page then offers "Sign in with Sso" alongside password/magic-link.
 ## Per-site providers
 
 On a deployment with several sites, a site admin can give their site its own
-OpenID Connect provider at **Configure → Integrations → Single sign-on**
+OpenID Connect provider at **Configure → Sign-in & access → Single sign-on**
 (`/editor/site-sso`, #1561). It sits *beside* the operator's provider above —
 which is unchanged and still offered where it was — and needs no rebuild and no
 environment variables.

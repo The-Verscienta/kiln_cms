@@ -46,7 +46,12 @@ defmodule KilnCMS.Security.Event do
     :api_key_revoked,
     :sso_config_changed,
     :org_setting_changed,
-    :ip_auto_blocked
+    :ip_auto_blocked,
+    :session_idle_expired,
+    :all_sessions_revoked,
+    :admin_access_refused,
+    :admin_allowlist_changed,
+    :admin_allowlist_overridden
   ]
 
   # The only metadata keys each type may carry. None names a person: who is in
@@ -69,7 +74,12 @@ defmodule KilnCMS.Security.Event do
     api_key_revoked: ~w(name),
     sso_config_changed: ~w(provider change),
     org_setting_changed: ~w(setting),
-    ip_auto_blocked: ~w(reason count window_minutes block_minutes)
+    ip_auto_blocked: ~w(reason count window_minutes block_minutes),
+    session_idle_expired: ~w(timeout_minutes tier surface),
+    all_sessions_revoked: ~w(count except_self),
+    admin_access_refused: ~w(surface),
+    admin_allowlist_changed: ~w(state count added removed),
+    admin_allowlist_overridden: ~w(change count)
   }
 
   @max_metadata_keys 8

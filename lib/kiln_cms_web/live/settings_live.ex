@@ -65,6 +65,9 @@ defmodule KilnCMSWeb.SettingsLive do
      # The account's own active sessions (#1823). `:current_session_jti` is
      # assigned by `KilnCMSWeb.SessionTracking` on every signed-in mount.
      |> assign(:sessions, Sessions.list(user))
+     # This site's idle timeout for this account, if any (#2246), so the list
+     # says why a session may end on its own.
+     |> assign(:idle_timeout_minutes, idle_timeout_minutes(socket))
      # Web Push (#628). `push_available?` is the *server* half — this site has
      # a VAPID key, its own (#1560) or the deployment's; `push_supported?` is
      # the browser half, which only the hook can answer, so it starts
@@ -1118,6 +1121,18 @@ defmodule KilnCMSWeb.SettingsLive do
                   "The browsers and devices signed in to your account. If you don't recognize one, sign it out and change your password."
                 )}
               </p>
+              <p
+                :if={@idle_timeout_minutes}
+                id="sessions-idle-timeout"
+                class="mb-4 flex items-start gap-2 text-sm text-base-content/70"
+              >
+                <.icon name="hero-clock" class="mt-0.5 size-4 shrink-0" />
+                {ngettext(
+                  "This site signs a browser out after %{count} minute without activity.",
+                  "This site signs a browser out after %{count} minutes without activity.",
+                  @idle_timeout_minutes
+                )}
+              </p>
 
               <.demo_locked_note :if={@credentials_locked?} />
 
@@ -1352,6 +1367,24 @@ defmodule KilnCMSWeb.SettingsLive do
 
   # This session first, then the rest most recently used first (the read's
   # own order).
+  defp idle_timeout_minutes(socket) do
+    case socket.assigns[:current_org] do
+      %{id: org_id} ->
+        org_id
+        |> KilnCMS.Accounts.IdleTimeout.policy()
+        |> KilnCMS.Accounts.IdleTimeout.timeout_seconds(
+          KilnCMSWeb.LiveUserAuth.effective_tier(socket)
+        )
+        |> case do
+          nil -> nil
+          seconds -> div(seconds, 60)
+        end
+
+      _no_site ->
+        nil
+    end
+  end
+
   defp sessions_current_first(sessions, current_jti) do
     {current, others} = Enum.split_with(sessions, &(&1.jti == current_jti))
     current ++ others

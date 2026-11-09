@@ -18,6 +18,13 @@ defmodule KilnCMS.Accounts.Token do
   `KilnCMS.Accounts.Checks.OwnsToken`) and `:record_sign_in` /
   `:record_session_use` (system bookkeeping), plus `browser`, `platform`,
   `last_used_at` and `remember_me_jti`. See `KilnCMS.Accounts.Sessions`.
+
+  The idle timeout and "sign out everyone" (#2246) add two columns and four
+  system actions: `org_id` (the site a browser session or remember-me cookie
+  was signed in on) and `revoked_reason` (why a row was revoked, so the page
+  that sends a browser to sign-in can say why), and `:session_activity`,
+  `:expire_idle_session`, `:revoke_stale_session` and `:revoke_org_session`.
+  See `KilnCMS.Accounts.IdleTimeout`.
   """
   use Ash.Resource,
     otp_app: :kiln_cms,
@@ -29,6 +36,13 @@ defmodule KilnCMS.Accounts.Token do
   postgres do
     table "tokens"
     repo KilnCMS.Repo
+
+    custom_indexes do
+      # "Sign out everyone" on one site (#2246) revokes by `org_id`. The table
+      # is large and written on every sign-in, so the index is built without
+      # taking a write lock on it.
+      index [:org_id, :purpose], concurrently: true
+    end
   end
 
   # The purpose and lifetime of a `:spend_jti` row, bound once and read by
@@ -77,6 +91,19 @@ defmodule KilnCMS.Accounts.Token do
   # (#1823). The list shows "last active" to the minute at best, and a write
   # per LiveView mount would put an UPDATE on every navigation.
   @last_used_interval_minutes 5
+
+  # Why a row was revoked (#2246), recorded beside the `"revocation"` purpose so
+  # the page that sends a browser to sign-in can say why.
+  @idle_reason "idle"
+  @sign_out_all_reason "admin_sign_out_all"
+
+  @doc "The `revoked_reason` of a session ended by the site's idle timeout (#2246)."
+  @spec idle_reason() :: String.t()
+  def idle_reason, do: @idle_reason
+
+  @doc "The `revoked_reason` of a session ended by an admin's \"sign out everyone\" (#2246)."
+  @spec sign_out_all_reason() :: String.t()
+  def sign_out_all_reason, do: @sign_out_all_reason
 
   @doc "The `purpose` a live, usable stored token carries — AshAuthentication's (#742)."
   @spec user_purpose() :: String.t()
@@ -350,29 +377,85 @@ defmodule KilnCMS.Accounts.Token do
       argument :browser, :string, constraints: [max_length: 40]
       argument :platform, :string, constraints: [max_length: 40]
       argument :remember_me_jti, :string, sensitive?: true
+      # The site the session signed in on (#2246): the request's org. Never
+      # moves a row already stamped for another site.
+      argument :org_id, :uuid
 
-      change filter(expr(purpose == ^@user_purpose))
+      change filter(
+               expr(
+                 purpose == ^@user_purpose and
+                   (is_nil(^arg(:org_id)) or org_id == ^arg(:org_id) or
+                      (is_nil(org_id) and not predates_sign_out_all(org_id: ^arg(:org_id))))
+               )
+             )
+
       change set_attribute(:browser, arg(:browser))
       change set_attribute(:platform, arg(:platform))
       change set_attribute(:remember_me_jti, arg(:remember_me_jti))
+
+      change atomic_update(
+               :org_id,
+               expr(if is_nil(^arg(:org_id)), do: org_id, else: ^arg(:org_id))
+             )
+
       change atomic_update(:last_used_at, expr(now()))
     end
 
-    # Bumped by a signed-in LiveView's mount — at most once per interval, by
-    # the filter, so a burst of navigation is one write and the rest match no
-    # row. The browser labels are refreshed with it: a session whose label
-    # changes under it is a cookie being used somewhere else.
+    # Binds a session or remember-me row to the site it is used on, and notes
+    # the use (#2246): the remember-me cookie issued (or used) at a sign-in, and
+    # the admin's own browser kept by "sign out everyone". A row already
+    # stamped for another site is not touched: the cookies are host-only, so
+    # one arriving on a host of another org was copied there.
+    update :bind_session_to_site do
+      description "Note the site a session or remember-me cookie belongs to, and that it was just used."
+      accept []
+      argument :org_id, :uuid, allow_nil?: false
+      # The account the rows must belong to: a jti from a cookie names a row,
+      # it does not prove whose.
+      argument :subject, :string, allow_nil?: false, sensitive?: true
+
+      change filter(
+               expr(
+                 purpose in ^[@user_purpose, @remember_me_purpose] and
+                   subject == ^arg(:subject) and
+                   (org_id == ^arg(:org_id) or
+                      (is_nil(org_id) and not predates_sign_out_all(org_id: ^arg(:org_id))))
+               )
+             )
+
+      change atomic_update(:org_id, expr(^arg(:org_id)))
+      change atomic_update(:last_used_at, expr(now()))
+    end
+
+    # Bumped by a signed-in page — a LiveView's first mount, an event, or an
+    # HTTP request while the site has an idle timeout (#2246) — at most once
+    # per interval, by the filter, so a burst of navigation is one write and
+    # the rest match no row. The browser labels are refreshed with it: a
+    # session whose label changes under it is a cookie being used somewhere
+    # else.
+    #
+    # The session's remember-me row is bumped with it, so idling out one idles
+    # out the other. A row stamped for another site is never touched (#2246):
+    # a cookie copied to another org's host must not keep this site's session
+    # awake. A row with no site yet (signed in before #2246) takes this one.
     update :record_session_use do
       description "Note that a session was just used, at most once per interval."
       accept []
       argument :browser, :string, constraints: [max_length: 40]
       argument :platform, :string, constraints: [max_length: 40]
+      argument :org_id, :uuid, allow_nil?: false
+
+      argument :interval_seconds, :integer,
+        default: @last_used_interval_minutes * 60,
+        constraints: [min: 30, max: @last_used_interval_minutes * 60]
 
       change filter(
                expr(
-                 purpose == ^@user_purpose and
+                 purpose in ^[@user_purpose, @remember_me_purpose] and
+                   (org_id == ^arg(:org_id) or
+                      (is_nil(org_id) and not predates_sign_out_all(org_id: ^arg(:org_id)))) and
                    (is_nil(last_used_at) or
-                      last_used_at < ago(^@last_used_interval_minutes, :minute))
+                      last_used_at < ago(^arg(:interval_seconds), :second))
                )
              )
 
@@ -380,7 +463,103 @@ defmodule KilnCMS.Accounts.Token do
       # keeps the label the sign-in wrote rather than blanking it.
       change set_attribute(:browser, arg(:browser)), where: present(:browser)
       change set_attribute(:platform, arg(:platform)), where: present(:platform)
+      change atomic_update(:org_id, expr(^arg(:org_id)))
       change atomic_update(:last_used_at, expr(now()))
+    end
+
+    # --- idle timeout and "sign out everyone" (#2246) -------------------------
+    #
+    # System bookkeeping like the pair above: keyed by a jti read from the
+    # signed session, or by the tenant of an action already authorized as an
+    # org admin, and refused to every caller by name below.
+
+    # One row by jti, whatever its purpose, with how long it has been idle by
+    # the database's clock. The idle check reads it; nothing here writes.
+    read :session_activity do
+      description "One stored token by jti, for the idle timeout."
+      get? true
+      argument :jti, :string, allow_nil?: false, sensitive?: true
+      filter expr(jti == ^arg(:jti))
+    end
+
+    # The idle timeout's verdict, repeated in the UPDATE's WHERE so a touch
+    # from another tab landing between the check and this write leaves the
+    # session alone: the statement then matches no row. Idle is measured from
+    # the later of the row's last use and `floor` — when the site last changed
+    # its timeout — so turning the timeout on, or shortening it, never signs
+    # out a session for inactivity that happened before the rule existed.
+    update :expire_idle_session do
+      description "Sign out a session (and its remember-me row) that has been idle too long."
+      accept []
+      argument :timeout_seconds, :integer, allow_nil?: false, constraints: [min: 60]
+      argument :floor, :utc_datetime_usec
+      # The account and site the rows must belong to (#2246): a jti read from a
+      # cookie names a row, it does not prove whose.
+      argument :subject, :string, allow_nil?: false, sensitive?: true
+      argument :org_id, :uuid, allow_nil?: false
+
+      change filter(
+               expr(
+                 subject == ^arg(:subject) and
+                   (is_nil(org_id) or org_id == ^arg(:org_id)) and
+                   purpose in ^[@user_purpose, @remember_me_purpose] and
+                   fragment(
+                     "GREATEST(COALESCE(?, ?), ?) < (now() AT TIME ZONE 'utc') - make_interval(secs => ?)",
+                     last_used_at,
+                     created_at,
+                     type(^arg(:floor), :utc_datetime_usec),
+                     ^arg(:timeout_seconds)
+                   )
+               )
+             )
+
+      change set_attribute(:purpose, "revocation")
+      change set_attribute(:revoked_reason, @idle_reason)
+    end
+
+    # A session or remember-me cookie with no site recorded — signed in before
+    # #2246, or held at the two-factor prompt — that predates the site's last
+    # "sign out everyone", found when it is next used on this site's host.
+    # Rows stamped for the site were revoked by `:revoke_org_session` at the
+    # time; the filter keeps this from reaching the ones it spared.
+    update :revoke_stale_session do
+      description "Sign out a session signed in before the site's last sign-out-everyone."
+      accept []
+      argument :before, :utc_datetime_usec, allow_nil?: false
+      argument :subject, :string, allow_nil?: false, sensitive?: true
+
+      change filter(
+               expr(
+                 subject == ^arg(:subject) and
+                   purpose in ^[@user_purpose, @remember_me_purpose, @second_factor_hold_purpose] and
+                   is_nil(org_id) and created_at < ^arg(:before)
+               )
+             )
+
+      change set_attribute(:purpose, "revocation")
+      change set_attribute(:revoked_reason, @sign_out_all_reason)
+    end
+
+    # "Sign out everyone" on one site: every session, remember-me cookie and
+    # held two-factor sign-in stamped for that site, minus `keep` (the admin's
+    # own browser, when asked). API keys are another resource and bearer JWTs
+    # carry no site, so neither is reached.
+    update :revoke_org_session do
+      description "Sign out every session signed in on one site."
+      accept []
+      argument :org_id, :uuid, allow_nil?: false
+      argument :keep, {:array, :string}, default: [], sensitive?: true
+
+      change filter(
+               expr(
+                 org_id == ^arg(:org_id) and
+                   purpose in ^[@user_purpose, @remember_me_purpose, @second_factor_hold_purpose] and
+                   jti not in ^arg(:keep)
+               )
+             )
+
+      change set_attribute(:purpose, "revocation")
+      change set_attribute(:revoked_reason, @sign_out_all_reason)
     end
 
     destroy :expunge_expired do
@@ -439,7 +618,15 @@ defmodule KilnCMS.Accounts.Token do
     # mount, keyed by a jti read from the signed session. Called with
     # `authorize?: false` by `KilnCMS.Accounts.Sessions` only; everyone else
     # is refused by name, as with the pairs above.
-    policy action([:record_sign_in, :record_session_use]) do
+    policy action([
+             :record_sign_in,
+             :record_session_use,
+             :bind_session_to_site,
+             :session_activity,
+             :expire_idle_session,
+             :revoke_stale_session,
+             :revoke_org_session
+           ]) do
       forbid_if always()
     end
   end
@@ -494,7 +681,53 @@ defmodule KilnCMS.Accounts.Token do
       sensitive? true
     end
 
+    # The site (org) a browser session or remember-me cookie was signed in on
+    # (#2246). No foreign key: the row is AshAuthentication's, collected when
+    # its JWT expires, and an org's removal must not wait on it. `nil` for a
+    # row signed in before this, an API sign-in, or a non-session purpose.
+    attribute :org_id, :uuid
+
+    # Why the row was revoked (#2246): `"idle"` or `"admin_sign_out_all"`, or
+    # `nil` for every other revocation.
+    attribute :revoked_reason, :string do
+      constraints max_length: 40
+    end
+
     create_timestamp :created_at
     update_timestamp :updated_at
+  end
+
+  calculations do
+    # Whether the row was signed in before the site `org_id`'s last "sign out
+    # everyone" (#2246), read from the site's row in the same statement, so a
+    # node holding a stale cached policy still cannot bind such a row to the
+    # site — binding is what would let it escape the watermark.
+    calculate :predates_sign_out_all,
+              :boolean,
+              expr(
+                fragment(
+                  "? < COALESCE((SELECT p.sessions_revoked_at FROM site_session_policy AS p WHERE p.org_id = ?), '-infinity'::timestamp)",
+                  created_at,
+                  type(^arg(:org_id), :uuid)
+                )
+              ) do
+      argument :org_id, :uuid, allow_nil?: false
+    end
+
+    # Seconds since the row was last used (or created), by the database's
+    # clock — never the node's, whose skew would move every timeout — and from
+    # no earlier than `floor` (#2246; see `:expire_idle_session`).
+    calculate :idle_seconds,
+              :integer,
+              expr(
+                fragment(
+                  "FLOOR(EXTRACT(EPOCH FROM ((now() AT TIME ZONE 'utc') - GREATEST(COALESCE(?, ?), ?))))::bigint",
+                  last_used_at,
+                  created_at,
+                  type(^arg(:floor), :utc_datetime_usec)
+                )
+              ) do
+      argument :floor, :utc_datetime_usec
+    end
   end
 end

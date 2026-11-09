@@ -56,7 +56,11 @@ defmodule KilnCMS.CMS.OrgSettings do
       records, in the transaction: `:org_setting` (the default;
       `org_setting_changed`, naming the setting and no value) or `:sso_config`
       (`sso_config_changed`, for the site's identity provider). See
-      `KilnCMS.Security.Changes.RecordOrgSetting`.
+      `KilnCMS.Security.Changes.RecordOrgSetting`. Or `{:change, module}`: the
+      resource's own audit change, attached in the same three places, for a
+      setting whose event says more than its name (the admin allowlist's
+      `admin_allowlist_changed`, #2248). It replaces the default, so it is
+      still one event per write and still declared here.
     * `:system_actions` — actions `KilnCMS.SystemActor` may run (#1659), each
       with the subsystem(s) whose code calls it (#1747), as a keyword list:
       `[read: [:federation, :operator], record_delivery: :federation]`.
@@ -166,9 +170,10 @@ defmodule KilnCMS.CMS.OrgSettings do
     system_actions = opts |> Keyword.get(:system_actions, []) |> system_grants!()
     audit = Keyword.get(opts, :audit, :org_setting)
 
-    unless audit in [:org_setting, :sso_config] do
+    unless audit in [:org_setting, :sso_config] or match?({:change, _module}, audit) do
       raise ArgumentError,
-            "OrgSettings :audit must be :org_setting or :sso_config, got #{inspect(audit)}"
+            "OrgSettings :audit must be :org_setting, :sso_config or {:change, module}, " <>
+              "got #{inspect(audit)}"
     end
 
     # The audit event of every write (#2241): one choke point for all of them.
@@ -183,6 +188,11 @@ defmodule KilnCMS.CMS.OrgSettings do
           quote do
             change {KilnCMS.Security.Changes.RecordOrgSetting,
                     type: :sso_config_changed, provider: "site_oidc"}
+          end
+
+        {:change, module} ->
+          quote do
+            change unquote(module)
           end
       end
 

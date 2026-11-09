@@ -22,7 +22,7 @@ defmodule KilnCMSWeb.SurfaceTest do
 
   @console ~w(
     /editor /editor/account/export.json /editor/accounts /editor/accounts/:id
-    /editor/analytics /editor/analytics/export.csv
+    /editor/admin-allowlist /editor/analytics /editor/analytics/export.csv
     /editor/analytics/export.json /editor/api-keys /editor/automation /editor/backups
     /editor/billing /editor/bot-budgets /editor/branding /editor/calendar /editor/code-injection
     /editor/compliance /editor/configure /editor/content/:type/:id /editor/content/:type/new
@@ -37,7 +37,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/links /editor/locales /editor/mail /editor/menus /editor/menus/:id /editor/newsletter /editor/organize
     /editor/overview /editor/pages/:id /editor/password-policy /editor/posts/:id /editor/presentation/:type/:slug
     /editor/preview/:kind/:id /editor/redirects /editor/releases /editor/releases/:id /editor/safety-fields
-    /editor/search /editor/search-synonyms /editor/security-log /editor/security-log/export.csv /editor/security-txt /editor/settings /editor/site-ai /editor/site-mail /editor/site-push
+    /editor/search /editor/search-synonyms /editor/security-log /editor/security-log/export.csv /editor/security-txt /editor/sessions /editor/settings /editor/site-ai /editor/site-mail /editor/site-push
     /editor/site-search /editor/site-sso /editor/site/:type/:slug /editor/slugs
     /editor/social /editor/structure/:type
     /editor/site-storage /editor/system /editor/system/image-backend /editor/tasks

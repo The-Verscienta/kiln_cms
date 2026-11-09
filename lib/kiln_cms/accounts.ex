@@ -45,6 +45,14 @@ defmodule KilnCMS.Accounts do
       # passes `authorize?: false`.
       define :record_session_sign_in, action: :record_sign_in
       define :record_session_use, action: :record_session_use
+      define :bind_sessions_to_site, action: :bind_session_to_site
+      # The idle timeout and "sign out everyone" (#2246), system bookkeeping
+      # likewise: `KilnCMS.Accounts.IdleTimeout` and `KilnCMS.Accounts.Sessions`
+      # pass `authorize?: false`. The writes take a query (bulk updates).
+      define :get_session_activity, action: :session_activity, args: [:jti]
+      define :expire_idle_sessions, action: :expire_idle_session
+      define :revoke_stale_sessions, action: :revoke_stale_session
+      define :revoke_org_sessions, action: :revoke_org_session
     end
 
     # External IdP links for OIDC SSO (#331) — managed by AshAuthentication.

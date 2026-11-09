@@ -620,17 +620,6 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("The mail provider and From address this site sends from."),
             keywords: ["smtp", "email", "relay", "sender", "from address", "postmark", "ses"]
           },
-          # A site's own identity provider (#1561). Not with the operator's
-          # `OIDC_*` provider, which has no screen: this one is a site admin's
-          # to set, and is honoured only for the domains the site verified.
-          %{
-            key: :site_sso,
-            label: gettext("Single sign-on"),
-            path: ~p"/editor/site-sso",
-            icon: "hero-finger-print",
-            description: gettext("Your own identity provider on this site's sign-in page."),
-            keywords: ["sso", "oidc", "openid connect", "okta", "entra", "identity provider"]
-          },
           # A site's own Web Push key (#1560), generated rather than entered.
           %{
             key: :site_push,
@@ -663,29 +652,72 @@ defmodule KilnCMSWeb.ConsoleNav do
           }
         ]
       },
+      # How people sign in to this site and from where (#2248): split out of
+      # Integrations and Organization, which were both at the seven-item cap.
       %{
-        key: :organization,
-        label: gettext("Organization"),
+        key: :access,
+        label: gettext("Sign-in & access"),
         items: [
+          # A site's own identity provider (#1561). Not with the operator's
+          # `OIDC_*` provider, which has no screen: this one is a site admin's
+          # to set, and is honoured only for the domains the site verified.
           %{
-            key: :governance,
-            label: gettext("Governance"),
-            path: ~p"/editor/governance",
+            key: :site_sso,
+            label: gettext("Single sign-on"),
+            path: ~p"/editor/site-sso",
+            icon: "hero-finger-print",
+            description: gettext("Your own identity provider on this site's sign-in page."),
+            keywords: ["sso", "oidc", "openid connect", "okta", "entra", "identity provider"]
+          },
+          # How long a signed-in browser lasts on this site, and the button that
+          # ends them all (#2246).
+          %{
+            key: :session_policy,
+            label: gettext("Sessions"),
+            path: ~p"/editor/sessions",
+            icon: "hero-clock",
+            description: gettext("Sign out idle browsers, or everyone signed in to this site."),
+            keywords: [
+              "session",
+              "idle",
+              "timeout",
+              "inactivity",
+              "sign out",
+              "log out",
+              "logout",
+              "security"
+            ]
+          },
+          # What happens when a new password is in a known breach (#2240).
+          %{
+            key: :password_policy,
+            label: gettext("Password policy"),
+            path: ~p"/editor/password-policy",
+            icon: "hero-key",
+            description: gettext("What happens when a new password is in a known breach."),
+            keywords: ["password", "breach", "pwned", "hibp", "leaked", "compromised", "security"]
+          },
+          # The networks the console and sign-in may be reached from (#2248).
+          %{
+            key: :admin_allowlist,
+            label: gettext("Admin allowlist"),
+            path: ~p"/editor/admin-allowlist",
             icon: "hero-shield-check",
-            description: gettext("Content freshness, provenance and the audit record."),
-            keywords: ["audit", "provenance", "witness", "freshness", "review cadence"]
+            description: gettext("Networks that can open the console and sign in."),
+            keywords: [
+              "allowlist",
+              "whitelist",
+              "ip",
+              "cidr",
+              "vpn",
+              "office",
+              "network",
+              "sign-in",
+              "lockout"
+            ]
           },
-          # Organization, not Delivery: who answers for the site's security is a
-          # statement about the organization, served as a file (#1873).
-          %{
-            key: :security_txt,
-            label: gettext("Security contact"),
-            path: ~p"/editor/security-txt",
-            icon: "hero-shield-exclamation",
-            description: gettext("Where researchers report a vulnerability: security.txt."),
-            keywords: ["security.txt", "vulnerability", "disclosure", "rfc 9116", "contact"]
-          },
-          # Beside Security contact: both are this site's security posture (#2242).
+          # The addresses refused everywhere on the site (#2242), after the one
+          # list that admits them to the console.
           %{
             key: :ip_blocks,
             label: gettext("Blocked addresses"),
@@ -712,6 +744,30 @@ defmodule KilnCMSWeb.ConsoleNav do
               "rate limit",
               "throttle"
             ]
+          }
+        ]
+      },
+      %{
+        key: :organization,
+        label: gettext("Organization"),
+        items: [
+          %{
+            key: :governance,
+            label: gettext("Governance"),
+            path: ~p"/editor/governance",
+            icon: "hero-shield-check",
+            description: gettext("Content freshness, provenance and the audit record."),
+            keywords: ["audit", "provenance", "witness", "freshness", "review cadence"]
+          },
+          # Organization, not Delivery: who answers for the site's security is a
+          # statement about the organization, served as a file (#1873).
+          %{
+            key: :security_txt,
+            label: gettext("Security contact"),
+            path: ~p"/editor/security-txt",
+            icon: "hero-shield-exclamation",
+            description: gettext("Where researchers report a vulnerability: security.txt."),
+            keywords: ["security.txt", "vulnerability", "disclosure", "rfc 9116", "contact"]
           },
           # Beside the other security screens: who did what, from where (#2241).
           %{
@@ -731,16 +787,6 @@ defmodule KilnCMSWeb.ConsoleNav do
               "retention",
               "events"
             ]
-          },
-          # Beside the security contact: both are how the site answers for its
-          # security (#2240).
-          %{
-            key: :password_policy,
-            label: gettext("Password policy"),
-            path: ~p"/editor/password-policy",
-            icon: "hero-key",
-            description: gettext("What happens when a new password is in a known breach."),
-            keywords: ["password", "breach", "pwned", "hibp", "leaked", "compromised", "security"]
           },
           %{
             key: :trash,
