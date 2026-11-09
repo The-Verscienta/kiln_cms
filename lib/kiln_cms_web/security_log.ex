@@ -165,6 +165,9 @@ defmodule KilnCMSWeb.SecurityLog do
   def type_label(:sign_in_unlock_requested), do: gettext("Sign-in unlock link sent")
   def type_label(:sign_in_unlocked), do: gettext("Sign-in pause lifted by email")
   def type_label(:sign_in_unlock_refused), do: gettext("Sign-in unlock link refused")
+  def type_label(:registration_queued), do: gettext("Registration awaiting approval")
+  def type_label(:registration_approved), do: gettext("Registration approved")
+  def type_label(:registration_rejected), do: gettext("Registration rejected")
 
   def type_label(other), do: to_string(other)
 

@@ -754,6 +754,15 @@ defmodule KilnCMSWeb.AccountsLive do
             "This account belongs to other sites but not this one, so it reads nothing gated here. Saving adds it to this site as a viewer."
           )}
         </p>
+        <p
+          :if={@source in [:pending, :rejected]}
+          class="mt-2 text-sm text-base-content/70"
+          id="audiences-source"
+        >
+          {gettext(
+            "This account's registration on this site has not been approved, so it reads nothing gated here. What you save applies once it is approved."
+          )}
+        </p>
       </div>
 
       <form phx-submit="save_audiences" id="audiences-form" class="space-y-4">

@@ -7,6 +7,46 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="registration-approval-upgrade"></a>
+
+- **Run `mix ash.migrate` for registration approval (#2251, first part). Turn
+  approval on only once every node runs this release. Before rolling back,
+  deal with waiting and rejected registrations and delete the three new
+  security events, or roll forward.**
+  - **What the migration does.** `20261109103330_registration_approval_status`
+    adds `org_memberships.status` (`text NOT NULL DEFAULT 'active'`),
+    `org_memberships.decided_at` (nullable) and an index on
+    `(organization_id, status)`, and creates `site_registration` (one row per
+    site, `approval_required boolean NOT NULL DEFAULT false`). Additive: every
+    existing membership reads `active`, and nothing changes until a site admin
+    turns approval on.
+  - **Mixed versions.** A node still on the previous release has no `status`
+    and reads a waiting registration as an ordinary active *Viewer*
+    membership: little more than an anonymous visitor gets (no audiences), but
+    it can comment where viewers may and start a checkout. Turn approval on
+    only after every node runs this release.
+  - **Rolling back.** The older release reads every waiting **and rejected**
+    registration as an active viewer on its site. Before rolling back, approve
+    the ones you would let in and anonymize the accounts you would not
+    (**Accounts** → Remove, which leaves nothing that can sign in). Don't
+    delete their membership rows instead: an account left with no membership
+    becomes a viewer on the default site.
+  - **Security events.** Three new types, `registration_queued`,
+    `registration_approved` and `registration_rejected`. As for the unlock
+    events above, a build with the security log that predates them cannot load
+    those rows, which breaks that site's security log and CSV and erasing a
+    person named in one
+    ([#2509](https://github.com/The-Verscienta/kiln_cms/issues/2509)). Before
+    such a rollback, export what you need and run:
+
+    ```sql
+    DELETE FROM security_events
+    WHERE type IN ('registration_queued', 'registration_approved', 'registration_rejected');
+    ```
+
+    v1.8.0 has no security log and is unaffected by this part.
+  See also [the Added entry](#registration-approval).
+
 <a id="sign-in-unlock-upgrade"></a>
 
 - **Sign-in unlock links (#2250): no migration, and nothing to set. Before
@@ -659,6 +699,63 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="registration-approval"></a>
+
+- **A site can make new password sign-ups wait for an administrator's
+  approval (#2251, first of three parts).** Open registration let anyone
+  become a viewer straight away; a site can now hold them without turning
+  registration off.
+  - **Turning it on.** A site admin opens **Registrations** under
+    **Sign-in & access** (`/editor/registrations`) and ticks **New
+    registrations wait for an administrator's approval** under **Settings**.
+    Off by default, per site, no environment variable.
+  - **What waiting means.** The account is created with a `:pending`
+    membership on the site. `KilnCMS.Accounts.Scoping` grants nothing through
+    a membership that is not `:active`, so every surface treats the account
+    as an anonymous reader, on every site, the default one included: no
+    console, no gated content, no drafts, no comments, `"role": "none"` from
+    `POST /api/auth/sign_in`. It can sign in, and `/account` says "Waiting for
+    approval on (site)".
+  - **Deciding.** The page lists confirmed applicants, unconfirmed ones and
+    rejected ones, each paged 50 at a time. **Approve** makes the row an
+    ordinary *Viewer* membership; **Reject** keeps the account and marks the
+    row rejected. An unconfirmed address can be rejected but not approved,
+    because anyone can register an address they don't own. A rejection can
+    be undone by approving from the **Rejected** tab. Each decision locks the
+    row, so two admins can't both decide it. Only an admin of the site the
+    row belongs to (or a standing platform admin) may list or decide.
+  - **Default site.** A sign-up on a site without approval is queued on the
+    default site when that one requires approval, since it would otherwise be
+    an unreviewed viewer there.
+  - **Never queued.** Invitations, either kind of single sign-on, and existing
+    accounts. **Add or invite** refuses an address waiting or rejected on the
+    site and points at the queue.
+  - **Paying is not a way in.** On a site that requires approval, starting a
+    paid membership is refused for an account not let in there, and the
+    entitlement recompute creates no viewer membership for one.
+  - **Fails closed.** If the setting cannot be read, the sign-up is refused
+    with a retryable error and nothing is created.
+  - **Not yet.** Admins are not notified of new registrations, and applicants
+    get no email about the decision (part two). Erasing rejected accounts,
+    queueing a site's own SSO, and accepting an invitation over a waiting
+    registration are part three.
+  - **Security log.** `registration_queued` (`method`),
+    `registration_approved` (`role`, `via`) and `registration_rejected`
+    (`outcome`); see
+    [the security log](../security-events.md#what-is-recorded).
+  - **Developers.** `OrgMembership` gains `status` (`:active`, `:pending`,
+    `:rejected`) and `decided_at`, set only by the new actions
+    `:queue_registration` (system-only), `:approve_registration`,
+    `:reject_registration` and the `:registration_queue` read, with code
+    interfaces on `KilnCMS.Accounts`. `for_org` now returns active rows only.
+    `KilnCMS.Accounts.Registrations` pages the queue;
+    `KilnCMS.Accounts.Errors.RegistrationRefused` names refusals. The
+    setting is `KilnCMS.CMS.SiteRegistration`.
+  The reasoning is in
+  [ADR 0024](../decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md);
+  the how-to is
+  [Approving registrations](../account-administration.md#approving-registrations).
 
 <a id="sign-in-unlock"></a>
 

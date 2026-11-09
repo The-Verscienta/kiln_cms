@@ -54,7 +54,10 @@ defmodule KilnCMS.Security.Event do
     :admin_allowlist_overridden,
     :sign_in_unlock_requested,
     :sign_in_unlocked,
-    :sign_in_unlock_refused
+    :sign_in_unlock_refused,
+    :registration_queued,
+    :registration_approved,
+    :registration_rejected
   ]
 
   # The only metadata keys each type may carry. None names a person: who is in
@@ -85,7 +88,10 @@ defmodule KilnCMS.Security.Event do
     admin_allowlist_overridden: ~w(change count),
     sign_in_unlock_requested: ~w(surface),
     sign_in_unlocked: ~w(was_locked),
-    sign_in_unlock_refused: ~w(reason)
+    sign_in_unlock_refused: ~w(reason),
+    registration_queued: ~w(method),
+    registration_approved: ~w(role via),
+    registration_rejected: ~w(outcome)
   }
 
   @max_metadata_keys 8

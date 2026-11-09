@@ -36,7 +36,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/governance/health.csv /editor/inbox /editor/ip-blocks
     /editor/links /editor/locales /editor/mail /editor/menus /editor/menus/:id /editor/newsletter /editor/organize
     /editor/overview /editor/pages/:id /editor/password-policy /editor/posts/:id /editor/presentation/:type/:slug
-    /editor/preview/:kind/:id /editor/redirects /editor/releases /editor/releases/:id /editor/safety-fields
+    /editor/preview/:kind/:id /editor/redirects /editor/registrations /editor/releases /editor/releases/:id /editor/safety-fields
     /editor/search /editor/search-synonyms /editor/security-log /editor/security-log/export.csv /editor/security-txt /editor/sessions /editor/settings /editor/site-ai /editor/site-mail /editor/site-push
     /editor/site-search /editor/site-sso /editor/site/:type/:slug /editor/slugs
     /editor/social /editor/structure/:type

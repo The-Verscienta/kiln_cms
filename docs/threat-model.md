@@ -1451,6 +1451,85 @@ The how-to is
   (8) *A link revoked by a password change is logged as `used`*, not as
   revoked.
 
+### Registration approval (#2251)
+
+A site can make password sign-ups wait for an admin
+(`KilnCMS.CMS.SiteRegistration`, `KilnCMS.Accounts.Registrations`; the
+reasoning is
+[ADR 0024](decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md)).
+The how-to is
+[Approving registrations](account-administration.md#approving-registrations).
+
+- **One choke point.** Waiting is a `status` on the account's
+  `OrgMembership`, and `KilnCMS.Accounts.Scoping` grants nothing through a row
+  that is not `:active`: no tier, no audiences, a denied type scope, no field
+  grants. Every surface already asks `Scoping`, so none needed its own check.
+  The row still makes the account affiliated, so it is `:none` on every other
+  site, the default one included.
+- **Site admins see applicants' addresses, and only those.** Until now a site
+  admin who is not a platform admin could not read another account (`User`
+  reads are self-only). The queue shows each applicant's email address, name
+  and whether it is confirmed. `Registrations.page/2` reads those columns as
+  the system, for the user ids of rows that the `:registration_queue` read
+  returned, and that read admits only an admin of the org the
+  `organization_id` argument names (`Checks.AdminOfMembershipOrg`), never the
+  request's host. So a site admin sees exactly the people who asked to join
+  their site, and an admin of site B is refused site A's queue from any host.
+  The `User` policies are unchanged.
+- **Hijack by an unconfirmed address.** Anyone can register an address they
+  don't own. Approving it would give the site's access to whoever typed it, and
+  the real owner, signing up later, would find the address taken. So approving
+  requires `confirmed_at`, checked on the locked row inside the action
+  (`Changes.DecideRegistration`), not just hidden in the page. Rejecting does
+  not require it.
+- **Bot waves.** A flood of sign-ups costs an admin nothing to ignore: the
+  queue lists confirmed, unconfirmed and rejected applicants separately, 50 a
+  page on a keyset, with counts capped at 100, so an unconfirmed wave neither
+  loads unbounded nor pushes approvable applicants off the first page.
+  Registration's own per-address throttle and human verification apply first.
+  Residual: there is no bulk reject, and waiting rows never expire (a
+  follow-up), so a wave stays in the unconfirmed list until rejected one by
+  one.
+- **Billing.** The entitlement recompute gives a paying reader a viewer
+  membership on a site where it has none, which would let anyone pay past the
+  queue. On a site that requires approval, `Billing.Membership` `:start` is
+  refused (`Validations.RegistrationApproved`) unless the account is already
+  let in there (`Scoping.effective_tier/2` is not `:none`, which includes the
+  legacy membership-less viewer on the default site), and the recompute
+  creates no viewer row for an account that is not. A waiting or rejected row
+  on the site is always refused. Residual: on a site that does **not** require
+  approval, an account waiting on another site can still pay and becomes a
+  viewer member of that site; that site chose open sign-up.
+- **Fails closed.** The setting is read before the sign-up's transaction as
+  a system actor admitted to `read` only, `authorize_with: :error`. An
+  unreadable row refuses the sign-up and creates nothing, and an unreadable
+  setting at checkout refuses the start; "no approval needed" is the
+  direction that would let an unreviewed account in.
+- **Decisions race safely.** Approve and reject lock the row
+  (`get_and_lock_for_update`) and refuse one that is no longer waiting, so two
+  admins or a stale tab cannot both decide. Sessions are evicted after commit,
+  so the reconnect is authorized against the decided row. A temporary platform
+  admin is refused by `StandingAdminOnly`.
+- **Who may queue.** `OrgMembership` `:queue_registration` admits only the
+  `:registrations` system actor; the platform-admin bypass forbids it, so no
+  person can create a waiting row, for themselves or anyone.
+- **Mixed-version nodes.** A node on the previous release has no `status` and
+  reads a waiting (or rejected) row as an active viewer membership: no
+  audiences, but comments and checkout where viewers may. Operators turn
+  approval on only once every node runs the new release, and before rolling
+  back anonymize the waiting and rejected accounts they would not let in
+  ([ADR 0024](decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md#upgrade-notes)).
+- **Enumeration.** The sign-up page says nothing about waiting, and a
+  registration for an existing address answers as before. **Add or invite**
+  tells a platform admin that an address has a waiting or rejected
+  registration on the site; that is an admin of the site learning about its
+  own applicants.
+- **Residuals.** (1) Admins are not notified and applicants are not emailed
+  (part two). (2) A rejected account is kept, not erased (part three). (3) An
+  invitation accepted over a waiting registration leaves it waiting (part
+  three). (4) A site admin whose admin tier is a temporary membership grant can
+  decide registrations; `StandingAdminOnly` constrains only platform grants.
+
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;
 admin-triggered, and the feed's `links.next` is followed only on its own

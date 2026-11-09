@@ -654,6 +654,11 @@ defmodule KilnCMS.Accounts.User do
       # mailed (#2255). AFTER the hash, so a known address pays for bcrypt too.
       change KilnCMS.Accounts.Changes.RefuseExistingAddress
 
+      # On a site that requires approval (#2251), a `:pending` membership on the
+      # site registered on, in this transaction. Its setting is read before the
+      # transaction and an unreadable one refuses the registration.
+      change KilnCMS.Accounts.Changes.QueueRegistration
+
       # Generates an authentication token for the user
       change AshAuthentication.GenerateTokenChange
 
