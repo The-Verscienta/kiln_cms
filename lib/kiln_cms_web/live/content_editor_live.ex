@@ -5321,7 +5321,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
         # already in the trash, and what was asked for is done.
         if gone_after_stale?(socket, error) do
           socket
-          |> put_flash(:info, gettext("Someone else already moved this to the trash or deleted it."))
+          |> put_flash(
+            :info,
+            gettext("Someone else already moved this to the trash or deleted it.")
+          )
           |> push_navigate(to: ~p"/editor")
         else
           put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("trash", error))
