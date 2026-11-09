@@ -799,6 +799,69 @@ carries the reasoning.
 
 ## Added
 
+<a id="security-posture"></a>
+
+- **A read-only Security posture page says which security settings are on,
+  and what to fix first (#2252, first of three parts).** Kiln had governance,
+  compliance and advisory pages, but nothing that told an administrator
+  "this site is configured safely". The page is **Configure → Organization →
+  Security posture** (`/editor/security-posture`). It changes nothing: each
+  line links to the screen that does, or names the environment variable.
+  Guide: [Security posture](../security-posture.md).
+  - **Who sees what.** A site's administrators see **This site**: two-step
+    sign-in for the site's administrators and editors, idle sign-out, the
+    admin allowlist and the breached-password policy. Platform administrators
+    also see **This installation**: their own two-step sign-in, HTTPS and
+    secure cookies, exposed endpoints (metrics, API explorer, GraphQL
+    introspection), API keys, human verification and the Kiln version.
+    Editors and viewers can't open it.
+  - **No score.** The summary is the worst line (Fix now, Review or OK) and a
+    count of each status. A check that could not read its setting shows
+    **Unknown**, and one that crashed, overran its deadline or answered
+    nonsense shows **Could not run**; both count as a warning, never a pass.
+  - **Same reads as enforcement.** Each core check asks the function the gate
+    it reports on uses (`IdleTimeout`, `AdminAllowlist`, `PasswordPolicy`,
+    `KilnCMS.Challenge`, the endpoint's compiled configuration). Where that
+    function fails open, the check uses a twin that can say "could not read"
+    (`IdleTimeout.read_policy/1`, `PasswordPolicy.read/2`,
+    `AdminAllowlist.configured/1`). A passkey is not counted as a second
+    factor: it does not protect the same account's password sign-in.
+  - **A check cannot take the page down.** Every check runs in its own task
+    under `KilnCMS.Security.Posture.TaskSupervisor` (at most 50 per node), with
+    its own deadline (one second by default, held to 0.1–5 s), enforced by
+    the task itself so it holds even when the page has gone. **Run checks
+    again** is refused while a run is in flight and for five seconds after
+    the last one, and at most three reports of one site run at once per node
+    (`KilnCMS.Security.Errors.PostureBusy`).
+  - **One more trigger for the update check.** The Kiln version check reads
+    only `Kiln.Updates`' cache. On a cold cache it starts one background
+    check (`Kiln.Updates.warm/0`, at most one in flight per node) and shows
+    "unknown, reopen in a minute". So the request to kilncms.dev (then
+    GitHub) can now also be sent when a platform administrator opens this
+    page, not only from **System**. Same request, same cache, same opt-out
+    (`KILN_UPDATE_CHECK=false`); [data flows](../data-flows.md) is updated.
+  - **Plugins (`kiln_plugin` 1.4).** `c:Kiln.Plugin.security_checks/0`
+    (default `[]`) lists `Kiln.Security.Check` modules: `id/0`, `title/0`,
+    `scope/0` (`:site` or `:deployment`), `run/1` and optional
+    `description/0` and `timeout/0`. `run/1` gets a
+    `Kiln.Security.Check.Context` (site, build environment, time, reader's
+    locale; no actor) and answers a `Kiln.Security.Check.Result`, which the
+    core trims to its limits; a `fix_path` outside `/editor/` or a non-`https`
+    `docs_url` is dropped. Ids under `core.` are reserved; of two plugins
+    sharing an id the first registered wins. `mix kiln.plugins.doctor`
+    checks conformance, reserved ids and collisions; `mix kiln.plugins.list`
+    counts each plugin's checks. A plugin built against an older SDK adds
+    none. Authoring guide:
+    [Add a check from a plugin](../security-posture.md#add-a-check-from-a-plugin).
+  - **Developers.** `KilnCMS.Security.PostureReport` (action `:run`,
+    org-admin policy, code interface `KilnCMS.Security.run_posture/2`, site
+    from the tenant) returns a `KilnCMS.Security.Posture.Report`. It is not
+    on JSON:API, GraphQL or MCP. Telemetry:
+    `[:kiln_cms, :security_posture, :check, :stop]` and `:exception`.
+  - **Not yet.** JSON output for monitoring, matching security notices and
+    plugin advisories against installed versions, a check that two-factor
+    sign-in is required, and API key last-use. No migration.
+
 <a id="field-layout"></a>
 
 - **Admins can lay out a content type's custom fields as tabs, fieldsets or
