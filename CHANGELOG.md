@@ -62,7 +62,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Run `mix ash.migrate` (`users.notify_on_registration`, `NOT NULL DEFAULT true`). A node on an older release can't load the new `registration_pending` notification: during a rolling deploy and after a rollback, an admin's bell there shows the count but an empty list and Mark all read fails (#2509).**
   Before rolling back, run `DELETE FROM notifications WHERE event = 'registration_pending'`, or roll forward.
-  ([long form](docs/changelog/unreleased.md#registration-notifications-upgrade))
+  ([#2517](https://github.com/The-Verscienta/kiln_cms/pull/2517) · [long form](docs/changelog/unreleased.md#registration-notifications-upgrade))
 
 - **Before rolling back to a build that has the security log but predates sign-in unlock links, delete the `sign_in_unlock_requested`, `sign_in_unlocked` and `sign_in_unlock_refused` security events, or roll forward.**
   No migration. An older build cannot load those rows, which breaks that site's security log and CSV, and erasing a person named in one (#2509). v1.8.0 has no security log and is unaffected.
@@ -162,7 +162,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Site admins get one bell notice and email per site when a confirmed applicant is waiting, and applicants are emailed when they're approved or rejected.**
   The notice collapses while unread, names no applicant, and is read by opening Registrations; mute the email under Your settings → Email notifications. Guide: [docs/account-administration.md](docs/account-administration.md#get-told-when-someone-is-waiting).
-  ([long form](docs/changelog/unreleased.md#registration-notifications))
+  ([#2517](https://github.com/The-Verscienta/kiln_cms/pull/2517) · [long form](docs/changelog/unreleased.md#registration-notifications))
 
 - **Someone whose sign-in is paused after too many attempts can have a link emailed that lifts the pause: "Email me an unlock link" on the sign-in page.**
   The link lasts 15 minutes, works once and goes only to confirmed members of that site (3 an hour). It clears only the account pause, and the sign-in page still never says an account is paused. Guide: [docs/account-administration.md](docs/account-administration.md#lift-a-sign-in-pause-by-email).
