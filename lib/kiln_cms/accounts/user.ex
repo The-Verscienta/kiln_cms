@@ -500,6 +500,14 @@ defmodule KilnCMS.Accounts.User do
         allow_nil? true
       end
 
+      # Human verification (#2249): read by `ThrottleSignIn` only when the
+      # attempt needs a challenge; ignored otherwise.
+      argument :challenge_token, :string do
+        description "A human-verification token, when the sign-in asks for one."
+        allow_nil? true
+        sensitive? true
+      end
+
       # validates the provided email and password and generates a token
       prepare AshAuthentication.Strategy.Password.SignInPreparation
 
@@ -601,6 +609,10 @@ defmodule KilnCMS.Accounts.User do
       # replaying `submit` was unlimited account creation.
       change KilnCMS.Accounts.Changes.ThrottleRegistration
 
+      # Human verification (#2249), per the operator's registration mode. After
+      # the throttle for the same reason as the breached-password lookup below.
+      change KilnCMS.Accounts.Changes.RequireRegistrationChallenge
+
       # Breached-password lookup (#2240). After the throttle, so a flood of
       # registrations is bounded before it can fan out to a third party.
       change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :register}
@@ -623,6 +635,12 @@ defmodule KilnCMS.Accounts.User do
       argument :password_confirmation, :string do
         description "The proposed password for the user (again), in plain text."
         allow_nil? false
+        sensitive? true
+      end
+
+      argument :challenge_token, :string do
+        description "A human-verification token, when registration asks for one (#2249)."
+        allow_nil? true
         sensitive? true
       end
 

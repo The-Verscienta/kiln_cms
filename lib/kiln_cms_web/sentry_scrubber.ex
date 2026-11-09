@@ -74,8 +74,10 @@ defmodule KilnCMSWeb.SentryScrubber do
   )
 
   # Matched as the whole key, case-insensitively — see the moduledoc. `unlock`
-  # is the passphrase grant's query parameter (#496).
-  @sensitive_exact ~w(code otp pin api_key apikey unlock)
+  # is the passphrase grant's query parameter (#496); `cf-turnstile-response`
+  # the human-verification widget's own field (#2249; `challenge_token` is
+  # already caught by `token`).
+  @sensitive_exact ~w(code otp pin api_key apikey unlock cf-turnstile-response)
 
   # Credential headers beyond Sentry's own three (`authorization`,
   # `authentication`, `cookie`): the API key's alternative header and the two

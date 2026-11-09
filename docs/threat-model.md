@@ -452,6 +452,9 @@ build if a resource is ever registered without that authorizer.
   the budget keys on the *submitted* identifier, so an address with no account
   throttles identically and the refusal is not an enumeration oracle. The
   account owner is mailed once per window when attempts start being refused.
+  The operator can also ask for a human-verification check here with
+  `CHALLENGE_API_SIGN_IN` (off by default, so the contract is unchanged); see
+  [Human verification](#human-verification-2249).
 - **Skipping the second factor** — *closed (#726).* This endpoint used to return
   a full JWT for a 2FA-enabled account on the password alone, where the browser
   flow diverts to `/sign-in/verify`. That made TOTP optional in practice rather
@@ -976,6 +979,107 @@ password leaves the server.
 - **Telemetry.** `[:kiln_cms, :password, :breach_check]`; see
   [observability.md](observability.md#breached-password-checks).
 
+### Human verification (#2249)
+
+`KilnCMS.Challenge`, `KilnCMS.Challenge.Gate`,
+`KilnCMS.Challenge.Providers.Turnstile`, `KilnCMSWeb.Plugs.ChallengeCsp`. An
+adaptive Cloudflare Turnstile check on password sign-in and registration,
+configured by the operator for the whole deployment; off until a provider, a
+site key and a secret are set. Guide:
+[human-verification.md](human-verification.md); decision:
+[ADR 0020](decisions/0020-human-verification-is-deployment-wide-and-fails-open-only-within-the-sign-in-budget.md).
+
+- **What it slows.** Password guessing that stays under the per-account budget
+  by spreading across accounts, and scripted self-registration. Sign-in asks
+  once the submitted address has had `account_threshold` (3) attempts in the
+  account window, or the client address `ip_threshold` (5) unrefunded attempts
+  in `ip_window` (15 minutes); a correct password refunds the address's unit,
+  so in effect only failures count there. Registration asks after
+  `registration_threshold` (2) attempts per address per hour, or always.
+- **Where it is enforced.** On the actions (`ThrottleSignIn` on
+  `:sign_in_with_password`, `RequireRegistrationChallenge` on
+  `:register_with_password`), so the LiveView, the no-JavaScript POST and
+  `POST /api/auth/sign_in` pass one check. The API is checked only with
+  `CHALLENGE_API_SIGN_IN` on. Passkeys, magic links, reset, the second factor,
+  single sign-on and invitations are never challenged: each needs a proof the
+  guesser lacks, and they are the way in for someone who cannot solve a check.
+- **Deployment-wide.** No site setting can turn sign-in challenges off, because
+  the account is shared across sites; the decision never reads the dialled
+  host. Tested: a site's own host cannot weaken the mode.
+- **A refusal costs the owner nothing.** The gate runs before
+  `AccountThrottle.consume/1`; an attempt refused for want of a check spends no
+  budget and runs no bcrypt, so the challenge cannot be used to lock an owner
+  out.
+- **No enumeration.** The account axis keys on the submitted string, the
+  address axis on the caller's own IP; a known and an unknown address are
+  refused alike (see the table below). The refusal is never "incorrect
+  password".
+- **Races.** Free attempts are spent with one atomic increment-and-compare per
+  axis, so a burst at the start of a window cannot all skip the check; at most
+  the threshold's worth do.
+- **Token binding.** Turnstile's answer must say `success`, name the action
+  the widget was drawn for (`sign_in` or `register`), and name a hostname this
+  deployment serves or one in `CHALLENGE_HOSTNAMES`. The request's `Host` and
+  a LiveView join URL never vouch for a hostname (tested with a forged
+  `Host`). Tokens are single-use at Cloudflare and never cached by Kiln.
+- **Fail rules.** A provider refusal never admits. "Unavailable" (timeout past
+  the 3-second deadline, transport error, `5xx`, `429`, malformed answer,
+  unreadable or rejected secret, crash) admits a sign-in until the account's
+  own budget refuses or the client address reaches `ip_closed_after` (20)
+  failed sign-ins in the window, and then refuses (`503` on the API). A
+  registration is admitted within the `:register` rate limit. A missing token
+  is a refusal, except within `outage_window` (60 s) of this node seeing an
+  unavailable answer, when it gets the unavailable treatment.
+- **Outbound call.** Through `KilnCMS.SafeFetch` to
+  `challenges.cloudflare.com`: no redirects, no retries, a 16 KB cap, 1 s
+  connect and 2 s receive timeouts, the whole call bounded at 3 s in an
+  unlinked task. The secret is read from `KilnCMS.Keys` only at verification
+  and never logged; the client address is sent only with `send_remote_ip`.
+- **Content-Security-Policy.** `script-src` and `frame-src` on the
+  `:browser_auth` pipeline gain `https://challenges.cloudflare.com` only while
+  a challenge can be shown; the header is byte-identical otherwise. No inline
+  script: the `Challenge` hook loads the provider's script. Turnstile was
+  chosen over reCAPTCHA because reCAPTCHA needs `www.google.com` in
+  `script-src`, an origin with JSONP endpoints that is a known way round a
+  strict policy.
+- **Secrets in transit and logs.** `challenge_token` and
+  `cf-turnstile-response` are in `:filter_parameters` and the Sentry scrubber;
+  the argument is `sensitive?` on both actions.
+- **Residual risks.**
+  1. **Outage as a bypass, bounded.** An attacker who can make verification
+     fail (a network position between Kiln and Cloudflare, or a provider
+     incident) gets attempts without a check, up to the account budget per
+     address and `ip_closed_after` per client address. Rotating addresses
+     defeats the second bound; the first still holds. The
+     `kiln_cms.challenge.decision.count` `fail_open` share shows it.
+  2. **A wrong secret fails open silently.** Only a missing secret *source* is
+     logged at boot. A secret Cloudflare rejects makes every verification
+     "unavailable" (`result: :not_configured` in the verify metric), which also
+     arms the outage memory, so missing tokens are admitted within the bounds
+     above.
+  3. **Shared addresses.** Everyone behind one NAT shares the address axis:
+     more than `ip_threshold` failures there challenge everyone for the window,
+     and during an outage `ip_closed_after` failures refuse password sign-in
+     for the whole address. Passkeys and magic links still work.
+  4. **The outage memory is node-local.** Each node decides for itself whether
+     a missing token means "down"; on a cluster, a node that has not yet seen
+     the outage refuses missing tokens.
+  5. **The API failure count is shared.** Failed `POST /api/auth/sign_in`
+     attempts count toward the address's failure count even with
+     `CHALLENGE_API_SIGN_IN` off, so API traffic from an address can bring the
+     browser's outage closed point nearer. They do not trigger the browser
+     check itself.
+  6. **Solvers.** A paid CAPTCHA-solving service passes the check; it raises
+     the cost of a run, it does not stop one. The per-account budget remains
+     the limit.
+  7. **Thin, wide stuffing.** A run spread across many accounts and addresses,
+     each under its threshold, is never asked. A deployment-wide failure-rate
+     trigger is a follow-up.
+  8. **Third-party script.** When the widget is shown, Cloudflare's script runs
+     in the sign-in page's origin, which is the console's own origin when
+     someone signs in on the console host. The policy admits only that one
+     origin, and only on the auth pages.
+
 ### Idle timeout and sign out everyone (#2246)
 
 `KilnCMS.Accounts.IdleTimeout`, `KilnCMS.Accounts.SignOutAll`. A site admin
@@ -1280,6 +1384,7 @@ was named, never to the person who named it.
 | --- | --- | --- | --- |
 | Browser sign-in (form and LiveView submit) | Wrong password for a known address and an unknown address: same page, same redirect, same flash ("Email or password was incorrect"). An unknown address still pays for one bcrypt check. | `enumeration_sign_in_test.exs` | Lockout owner mail (below). |
 | Headless sign-in (`POST /api/auth/sign_in`) | Same generic 401 for both, with the simulated hash for an unknown address. | `enumeration_sign_in_test.exs` | None beyond timing. |
+| Human-verification challenge (#2249) | A known and an unknown address are asked at the same attempt and refused with the same error, page, redirect and API body: the account axis keys on the submitted string and the address axis on the caller's IP. A refused attempt runs no bcrypt for either. | `accounts/sign_in_challenge_test.exs`, `challenge_auth_test.exs` | None. |
 | Per-account sign-in budget | A known and an unknown address run out at the same attempt and get the same refusal, because the budget keys on the string typed. | `accounts/enumeration_throttle_test.exs` | Lockout owner mail (below). |
 | Password reset request | Form, plain POST and the action answer `:ok` / the same page and flash for both. A spent mail budget (`mail:password_reset`) still answers as for an unknown address. | `enumeration_request_forms_test.exs`, `accounts/enumeration_throttle_test.exs` | Owner-only mail; request-time timing not equalised (below). |
 | Magic link request | As password reset (`mail:magic_link`). | same | Same. |

@@ -27,6 +27,7 @@ import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
 import {FocusTrap} from "./focus_trap"
 import {PasskeyEnroll, PasskeySignIn} from "./passkeys"
+import {Challenge} from "./challenge"
 import {PushToggle} from "./push"
 import {initAdvisoryJump} from "./advisory_jump"
 import {initRevealSection} from "./reveal_section"
@@ -74,6 +75,9 @@ const Hooks = {
   // Passkey sign-in on /sign-in (#331, #1681): reveals the server-rendered,
   // hidden button where WebAuthn exists — see assets/js/passkeys.js.
   PasskeySignIn,
+  // Human verification on the sign-in and registration forms (#2249): loads
+  // the provider's script and draws the widget — see assets/js/challenge.js.
+  Challenge,
   // Web Push opt-in on /editor/settings (#628) — see assets/js/push.js.
   PushToggle,
   // Presentation console (#355): relay the framed external front end's

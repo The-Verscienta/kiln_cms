@@ -239,6 +239,9 @@ defmodule KilnCMSWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers, @browser_csp_headers
     plug :put_browser_csp
+    # The human-verification widget's origin (#2249), only while a challenge
+    # can be shown; the header is untouched otherwise.
+    plug KilnCMSWeb.Plugs.ChallengeCsp
     # `:auth`, except on the registration POST, which gets its own tighter
     # bucket so the two registration doors agree (#724) — see
     # `KilnCMSWeb.Plugs.AuthRateLimit`.

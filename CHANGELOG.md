@@ -136,6 +136,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Operators can turn on an adaptive Cloudflare Turnstile check for password sign-in and registration with `CHALLENGE_PROVIDER`, `CHALLENGE_SITE_KEY` and `CHALLENGE_SECRET_KEY`; `/api/auth/sign_in` is only challenged with `CHALLENGE_API_SIGN_IN=true`.**
+  Off until configured; deployment-wide; no migration. Guide: [docs/human-verification.md](docs/human-verification.md).
+  ([long form](docs/changelog/unreleased.md#human-verification))
+
 - **Site admins can restrict the console and every sign-in route, members' and `/api/auth/sign_in` included, to listed IPv4/IPv6 networks, at Configure → Sign-in & access → Admin allowlist.**
   Off by default; fails closed; API keys and issued tokens are not affected. Guide: [docs/admin-allowlist.md](docs/admin-allowlist.md).
   ([long form](docs/changelog/unreleased.md#admin-allowlist))

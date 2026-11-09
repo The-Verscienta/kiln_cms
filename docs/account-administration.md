@@ -640,6 +640,15 @@ apps that sign people in are restricted too while the list is on. The full
 guide, including how an operator gets admins back in after a lock-out, is
 [Restricting sign-in to your networks](admin-allowlist.md).
 
+## Human verification at sign-in
+
+The operator can have password sign-in and registration ask for a Cloudflare
+Turnstile check once an email address or an IP address has had too many
+attempts. It is set for the whole installation with environment variables, not
+per site, so there is no console page for it. Passkeys, sign-in links,
+password reset, two-factor codes, single sign-on and invitations never ask for
+one. See [Human verification](human-verification.md).
+
 ## Removing an account
 
 `KilnCMS.Accounts.AccountRemoval.remove/3` is two decisions in one step: what

@@ -401,3 +401,11 @@ config :kiln_cms, KilnCMS.Provenance, enabled: false
 # party; the tests that exercise it switch it on with a stub for their own
 # duration (`KilnCMS.BreachedPasswordFixtures`).
 config :kiln_cms, KilnCMS.Accounts.BreachedPassword, enabled: false
+
+# Human verification (#2249). No provider is configured, so nothing is ever
+# required; `KilnCMS.ChallengeFixtures.enable!/1` turns it on for a test with
+# the fake provider (`KilnCMS.ChallengeFake`), and Turnstile's own tests point
+# the transport at a `Req.Test` stub.
+config :kiln_cms, KilnCMS.Challenge,
+  providers: [KilnCMS.ChallengeFake],
+  req_options: [plug: {Req.Test, KilnCMS.Challenge}]

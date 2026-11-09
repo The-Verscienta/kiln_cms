@@ -4,9 +4,11 @@ defmodule KilnCMSWeb.AuthController do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Errors.AlreadyRegistered
+  alias KilnCMS.Accounts.Errors.ChallengeRequired
   alias KilnCMS.Accounts.PasswordNotice
   alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Security.AuthEvents
+  alias KilnCMSWeb.ChallengeComponents
   alias KilnCMSWeb.SafeRedirect
 
   # Same flag the session cookie rides, for the same reason: `__Host-` is only
@@ -257,13 +259,30 @@ defmodule KilnCMSWeb.AuthController do
   defp message_for({:password, :reset}), do: gettext("Your password has successfully been reset")
   defp message_for(_activity), do: gettext("You are now signed in")
 
-  def failure(conn, {:password, :register} = activity, reason) do
-    if AlreadyRegistered.in?(reason),
-      do: registration_requested(conn),
-      else: rejected(conn, activity, reason)
+  def failure(conn, {:password, phase} = activity, reason) when phase in [:sign_in, :register] do
+    cond do
+      challenge = ChallengeRequired.find(reason) -> challenge_required(conn, phase, challenge)
+      phase == :register and AlreadyRegistered.in?(reason) -> registration_requested(conn)
+      true -> rejected(conn, activity, reason)
+    end
   end
 
   def failure(conn, activity, reason), do: rejected(conn, activity, reason)
+
+  # The form POST behind the sign-in and registration pages was refused for
+  # want of a human-verification challenge (#2249). Back to the page it came
+  # from with `?challenge=1`, which draws the widget from the first render, and
+  # the refusal's reason in the flash. Never "Incorrect email or password": the
+  # password was not checked, and saying it was wrong would send a user with
+  # the right one to retype it into a form that is asking for something else.
+  defp challenge_required(conn, phase, %ChallengeRequired{reason: reason}) do
+    action = if phase == :register, do: :register, else: :sign_in
+    path = if phase == :register, do: ~p"/register?challenge=1", else: ~p"/sign-in?challenge=1"
+
+    conn
+    |> put_flash(:error, ChallengeComponents.reason_text(reason, action))
+    |> redirect(to: path)
+  end
 
   defp registration_requested(conn) do
     conn

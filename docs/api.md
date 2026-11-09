@@ -185,6 +185,73 @@ Notes:
   account, members included, so a single-page app or a mobile app that signs
   people in from their own devices only works from listed networks while a
   list is on. Tokens already issued and API keys are not affected.
+- The endpoint accepts an optional `challenge_token`, which is read only when
+  the operator has turned on [human verification](#human-verification) for
+  it. By default it is not, and the endpoint behaves exactly as above.
+
+### Human verification
+
+An operator can ask for a Cloudflare Turnstile check on password sign-in once
+an email address or an IP address has had too many attempts
+([Human verification](human-verification.md)). **`POST /api/auth/sign_in` is
+only challenged when the operator also sets `CHALLENGE_API_SIGN_IN=true`.**
+With that off, which is the default, the endpoint never asks for a check and
+none of the responses below occur.
+
+With it on, three more answers are possible:
+
+| Status | `code` | Meaning | What to do |
+|---|---|---|---|
+| `401` | `challenge_required` | This sign-in needs a check and the request had no `challenge_token`. The password was not checked. | Draw the widget from `meta`, then repeat the request with the token. |
+| `401` | `challenge_failed` | The provider refused the token: wrong, expired, already used, or solved on a host this deployment does not serve. | Draw a fresh widget; a token is good for one request. |
+| `503` | `challenge_unavailable` | The provider could not be reached and this caller's IP address is past the point where Kiln lets sign-ins through without a check. Carries `retry-after: 30`. | Retry later. |
+
+The two `401`s carry what a client needs to draw the widget in the error's
+`meta`:
+
+```json
+{
+  "errors": [
+    {
+      "status": "401",
+      "code": "challenge_required",
+      "detail": "Complete a human-verification challenge.",
+      "meta": {
+        "provider": "turnstile",
+        "site_key": "0x4AAAAAAA...",
+        "script_url": "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
+        "action": "sign_in"
+      }
+    }
+  ]
+}
+```
+
+Render the widget with `site_key` and `action` (Turnstile refuses a token
+drawn for another action), then send it as a string:
+
+```bash
+curl -s -X POST http://localhost:4000/api/auth/sign_in \
+  -H 'content-type: application/json' \
+  -d '{"email": "editor@example.com", "password": "…", "challenge_token": "<token>"}'
+```
+
+Notes:
+
+- **Branch on `code`, not on the status.** `invalid_credentials` is a `401`
+  too.
+- A `challenge_token` that is not a string is treated as absent.
+- Whether a check is required depends only on attempts against the submitted
+  address and from the caller's IP address, so an address with no account gets
+  the same answer as one with an account.
+- A refused attempt does not spend the account's sign-in budget.
+- The page the widget runs on must be on a host the deployment serves, or one
+  the operator lists in `CHALLENGE_HOSTNAMES`; otherwise every token comes back
+  `challenge_failed`.
+- Failed sign-ins on this endpoint count toward the IP address's failure count
+  even when `CHALLENGE_API_SIGN_IN` is off (it decides when an outage stops
+  letting sign-ins through), but they do not make the browser form ask for a
+  check.
 
 ### Accounts with two-factor authentication
 
@@ -1815,7 +1882,10 @@ array**, each entry carrying a string `status` (HTTP code), a machine-readable
 
 This is the JSON:API shape. `status` is always the **numeric** HTTP code as a
 string (`"422"`, never `"unprocessable_entity"`) — safe to `parseInt` — and
-`code` is a stable token you can branch on.
+`code` is a stable token you can branch on. An entry may also carry JSON:API's
+`meta` object with facts a client needs to act on the error, such as the
+widget details on a sign-in's `challenge_required`
+([Human verification](#human-verification)); ignore members you do not use.
 
 You get it from the headless sign-in, fired-artifact (`not_found` /
 `artifact_compiling`), related-content, provenance, form-schema and
