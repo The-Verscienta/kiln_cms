@@ -85,6 +85,25 @@ A rise in the refused counter right after you add a rule is expected. A rise on 
 change, or a rule that suddenly matches everyone (a proxy not declared in
 `TRUSTED_PROXIES`), is worth a look.
 
+## Admin allowlist refusals
+
+`kiln_cms.admin_allowlist.refused.count` counts requests, LiveView joins and
+collaboration connects refused by a site's
+[admin allowlist](admin-allowlist.md) (#2248). It is tagged `surface` (`http`,
+`api`, `live` or `collab`) and `reason`: `not_listed` (the address is not on
+the list) or `unavailable` (the list could not be read, so the gate failed
+closed). The address is not a tag. The underlying telemetry event is
+`[:kiln_cms, :admin_allowlist, :refused]` (measurement `count`, metadata
+`surface` and `reason`).
+
+Useful Grafana panel:
+`sum(rate(kiln_cms_admin_allowlist_refused_count[5m])) by (surface, reason)`.
+
+Any sustained `reason="unavailable"` is worth an alert: the console and sign-in
+are answering `503` on that site. A burst of `not_listed` right after a save is
+someone on a network the list no longer covers; one with no change to the list
+can be an admin whose address changed, or a proxy that stopped being trusted.
+
 ## Delivery client classes
 
 Every request on the `:delivery` rate limit (public pages, `/search`, media

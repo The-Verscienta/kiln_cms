@@ -47,8 +47,12 @@ defmodule KilnCMSWeb.CollabSocket do
          # The struct match matters: a `not_found_error?: false` interface would
          # return `{:ok, nil}`, and an anonymous actor reads published content.
          {:ok, %{} = actor} <- fetch_actor(user_id),
-         {:ok, org} <- fetch_org(connect_info) do
-      {:ok, socket |> assign(:actor, actor) |> assign(:org, org)}
+         {:ok, org} <- fetch_org(connect_info),
+         # The admin allowlist (#2248): the console's own socket. After the
+         # site is resolved, so an unserved host is refused (and alerted) there
+         # first; the address is kept for the channel's periodic re-check.
+         {:ok, client_ip} <- KilnCMSWeb.AdminAllowlist.check_connect(:collab, connect_info) do
+      {:ok, socket |> assign(:actor, actor) |> assign(:org, org) |> assign(:client_ip, client_ip)}
     else
       _refused -> :error
     end

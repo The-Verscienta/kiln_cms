@@ -22,7 +22,7 @@ defmodule KilnCMSWeb.SurfaceTest do
 
   @console ~w(
     /editor /editor/account/export.json /editor/accounts /editor/accounts/:id
-    /editor/analytics /editor/analytics/export.csv
+    /editor/admin-allowlist /editor/analytics /editor/analytics/export.csv
     /editor/analytics/export.json /editor/api-keys /editor/automation /editor/backups
     /editor/billing /editor/bot-budgets /editor/branding /editor/calendar /editor/code-injection
     /editor/compliance /editor/configure /editor/content/:type/:id /editor/content/:type/new

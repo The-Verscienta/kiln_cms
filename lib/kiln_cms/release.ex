@@ -500,6 +500,139 @@ defmodule KilnCMS.Release do
     rule.cidr <> expiry <> note
   end
 
+  @doc """
+  Show, widen or turn off a site's admin allowlist (#2248) — the way back in
+  when the list has locked a site's admins out.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist()'
+      bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(add: "198.51.100.7")'
+      bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(clear: true)'
+      bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(org: "acme", clear: true)'
+
+  With neither `add:` nor `clear:` it only lists. `add: "<address or range>"`
+  adds one entry to a list that is on (any spelling the console accepts); it
+  refuses a list that is off, because adding would turn it on and lock out
+  every admin not on that network. `clear: true` empties the list, turning it
+  off. `org: "<slug>"` acts on a site other than the default one. Prints what
+  it found or did and returns `{:ok, entries}` (the list after) or
+  `{:error, message}`.
+
+  It can only widen or empty a list, so it cannot lock anyone out. It runs the
+  resource's `operator_override` action as the `:operator` system actor, which
+  records "Admin allowlist changed from the server" in the site's security log
+  in the same transaction, and the change reaches every node at once.
+
+  Through `rpc`, not `eval`: the cluster-wide cache bust and the message to
+  open pages need the running application. `rpc` exits 0 whatever this
+  returns; a script that must fail on an error matches the result:
+
+      bin/kiln_cms rpc '{:ok, _} = KilnCMS.Release.admin_allowlist(clear: true)'
+  """
+  @spec admin_allowlist(keyword()) :: {:ok, [String.t()]} | {:error, String.t()}
+  def admin_allowlist(opts \\ []), do: run_admin_allowlist(opts, serving?())
+
+  # `serving?` is an argument only so the test can take the `eval` branch.
+  @doc false
+  def run_admin_allowlist(opts, serving?) do
+    result =
+      with true <- serving? || {:error, @needs_running_node},
+           {:ok, org_id} <- KilnCMS.CMS.FieldConversion.org_id(opts[:org]),
+           {:ok, row} <- admin_allowlist_row(org_id) do
+        cond do
+          opts[:clear] == true and is_binary(opts[:add]) ->
+            {:error, "Give add: or clear: true, not both."}
+
+          opts[:clear] == true ->
+            clear_admin_allowlist(org_id, row)
+
+          is_binary(opts[:add]) ->
+            add_admin_allowlist(org_id, row, opts[:add])
+
+          true ->
+            list_admin_allowlist(row)
+        end
+      end
+
+    with {:error, message} <- result, do: IO.puts(message)
+    result
+  end
+
+  defp admin_allowlist_row(org_id) do
+    case KilnCMS.CMS.list_site_admin_allowlist(
+           actor: KilnCMS.SystemActor.new(:operator),
+           tenant: org_id,
+           authorize_with: :error
+         ) do
+      {:ok, rows} ->
+        {:ok, List.first(rows)}
+
+      {:error, error} ->
+        {:error, "Could not read the admin allowlist: #{Exception.message(error)}"}
+    end
+  end
+
+  defp list_admin_allowlist(row) do
+    case admin_allowlist_entries(row) do
+      [] ->
+        IO.puts("The admin allowlist is off on this site: sign-in is open to every network.")
+        {:ok, []}
+
+      entries ->
+        IO.puts("The admin allowlist is on, with #{length(entries)} entr(y/ies):")
+        Enum.each(entries, &IO.puts("  " <> &1))
+
+        IO.puts(
+          "Nothing changed. Add add: \"<address>\" to widen it, or clear: true to turn it off."
+        )
+
+        {:ok, entries}
+    end
+  end
+
+  defp clear_admin_allowlist(_org_id, row) when is_nil(row) or row.cidrs == [] do
+    IO.puts("The admin allowlist is already off on this site; nothing to clear.")
+    {:ok, []}
+  end
+
+  defp clear_admin_allowlist(org_id, row) do
+    with {:ok, row} <- override_admin_allowlist(org_id, row, %{clear: true}) do
+      IO.puts("Cleared the admin allowlist: sign-in is open to every network again.")
+      IO.puts("The change reaches every node now, and is in the site's security log.")
+      {:ok, row.cidrs}
+    end
+  end
+
+  defp add_admin_allowlist(_org_id, row, _add) when is_nil(row) or row.cidrs == [] do
+    {:error,
+     "The admin allowlist is off on this site; adding would turn it on and lock out every " <>
+       "admin on another network. Use the console to turn it on."}
+  end
+
+  defp add_admin_allowlist(org_id, row, add) do
+    with {:ok, row} <- override_admin_allowlist(org_id, row, %{add: add}) do
+      IO.puts("Added #{List.last(row.cidrs)}. The admin allowlist now has:")
+      Enum.each(row.cidrs, &IO.puts("  " <> &1))
+      IO.puts("The change reaches every node now, and is in the site's security log.")
+      {:ok, row.cidrs}
+    end
+  end
+
+  defp override_admin_allowlist(org_id, row, args) do
+    case KilnCMS.CMS.override_site_admin_allowlist(row, args,
+           actor: KilnCMS.SystemActor.new(:operator),
+           tenant: org_id
+         ) do
+      {:ok, row} ->
+        {:ok, row}
+
+      {:error, error} ->
+        {:error, "Could not change the admin allowlist: #{Exception.message(error)}"}
+    end
+  end
+
+  defp admin_allowlist_entries(nil), do: []
+  defp admin_allowlist_entries(row), do: row.cidrs
+
   # `serving?` is an argument only so the test can take the `eval` branch.
   @doc false
   def run_conversion(type, source, target, opts, serving?) do

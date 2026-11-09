@@ -425,7 +425,7 @@ API; the password never leaves your server. Signing in is not checked.
 
 Requires the admin role.
 
-1. Open **Password policy** under **Organization** in the console sidebar (or go to
+1. Open **Password policy** under **Sign-in & access** in the console sidebar (or go to
    `/editor/password-policy`).
 2. In **When a new password is in a known breach**, pick one of the three options:
    - **Off - don't warn.** The check result is ignored.
@@ -488,7 +488,7 @@ Requires the admin role on the site (an org admin, or a platform admin). The
 setting is per site and off by default: until you set it, a browser stays
 signed in until it signs out, and "remember me" keeps it signed in for 30 days.
 
-1. Open **Sessions** under **Configure → Integrations** in the console sidebar
+1. Open **Sessions** under **Configure → Sign-in & access** in the console sidebar
    (or go to `/editor/sessions`). Under **Sign out when idle**, the page reads
    "No idle timeout is set: browsers stay signed in until they sign out."
 2. In **Everyone**, pick how long a browser may sit unused: from **15
@@ -569,7 +569,7 @@ and the person signs in again.
 
 For a suspected breach on one site. Requires the admin role on the site.
 
-1. Open **Sessions** under **Configure → Integrations** (`/editor/sessions`)
+1. Open **Sessions** under **Configure → Sign-in & access** (`/editor/sessions`)
    and scroll to **Sign out everyone**.
 2. Leave **Keep me signed in on this browser** ticked to stay signed in here,
    or untick it to sign yourself out too.
@@ -630,6 +630,15 @@ refused. The idle timeouts are saved with
 `KilnCMS.CMS.save_site_session_policy/2`
 (`%{idle_timeout_minutes: 60, admin_idle_timeout_minutes: 15}`, each `nil` or
 10 to 1440); `KilnCMS.Accounts.IdleTimeout` enforces them.
+
+## Restrict sign-in to your networks
+
+A site admin can limit the console and every sign-in page on the site to a
+list of IP addresses and ranges, such as an office or a VPN, at **Configure →
+Sign-in & access → Admin allowlist** (`/editor/admin-allowlist`). Members and
+apps that sign people in are restricted too while the list is on. The full
+guide, including how an operator gets admins back in after a lock-out, is
+[Restricting sign-in to your networks](admin-allowlist.md).
 
 ## Removing an account
 

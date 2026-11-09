@@ -390,6 +390,86 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for a site's compiled admin allowlist (#2248) —
+  `KilnCMS.Security.AdminAllowlist.policy/1`, read on every console and
+  sign-in request.
+  """
+  @spec admin_allowlist_key(Ash.UUID.t()) :: String.t()
+  def admin_allowlist_key(org_id), do: "admin_allowlist:#{org_id}"
+
+  @doc """
+  Key for the last admin allowlist this node read successfully for a site
+  (#2248), kept for a day so a failed read can tell "the list was off" from
+  "the list was on or is unknown". See `KilnCMS.Security.AdminAllowlist`.
+  """
+  @spec admin_allowlist_last_known_key(Ash.UUID.t()) :: String.t()
+  def admin_allowlist_last_known_key(org_id), do: "admin_allowlist:last_known:#{org_id}"
+
+  @doc """
+  Remember `value` under `key` for `ttl` ms, when the cache is on. For a value
+  a caller writes itself rather than through `fetch/3`'s miss path.
+  """
+  @spec put(String.t(), term(), pos_integer()) :: :ok
+  def put(key, value, ttl) do
+    if enabled?(), do: Cachex.put(@cache, key, value, expire: ttl)
+    :ok
+  end
+
+  @doc """
+  Replace the value under `key` with `fun.(current)` (`current` is `nil` when
+  there is none) unless `fun` answers `:keep`, atomically per key, and give a
+  written value `ttl` ms to live. For a value that must never move backwards:
+  `fun` sees what is stored and declines an older one.
+  """
+  @spec put_unless_kept(String.t(), pos_integer(), (term() -> term() | :keep)) :: :ok
+  def put_unless_kept(key, ttl, fun) when is_function(fun, 1) do
+    if enabled?() do
+      result = Cachex.get_and_update(@cache, key, &keep_or_commit(fun, &1))
+      if match?({:commit, _}, result), do: Cachex.expire(@cache, key, ttl)
+    end
+
+    :ok
+  end
+
+  defp keep_or_commit(fun, current) do
+    case fun.(current) do
+      :keep -> {:ignore, current}
+      value -> {:commit, value}
+    end
+  end
+
+  @doc "The value under `key`, or `nil` when there is none (or the cache is off)."
+  @spec peek(String.t()) :: term() | nil
+  def peek(key) do
+    if enabled?() do
+      case Cachex.get(@cache, key) do
+        {:ok, value} -> value
+        _error -> nil
+      end
+    end
+  end
+
+  @doc """
+  After a `SiteAdminAllowlist` write: drop the site's compiled list on every
+  node, and set its last-known copy everywhere to `last_known` — the list as
+  saved, with the version it was saved at. Cluster-wide, like
+  `bust_session_policy/1`: a node that kept the old list would go on admitting
+  a network an admin just removed, and a node whose next read fails must not
+  fall back to the list from before the change. The version is what stops a
+  read that began before the save from writing the old list back afterwards
+  (`KilnCMS.Security.AdminAllowlist`).
+  """
+  @spec bust_admin_allowlist(Ash.UUID.t(), term()) :: :ok
+  def bust_admin_allowlist(org_id, last_known) do
+    if enabled?() do
+      ClusterBust.broadcast([admin_allowlist_key(org_id)])
+      ClusterBust.broadcast_put([{admin_allowlist_last_known_key(org_id), last_known}])
+    end
+
+    :ok
+  end
+
+  @doc """
   Cache key for a site's resolved safety-field list (`KilnCMS.CMS.Severity`).
   """
   @spec safety_fields_key(Ash.UUID.t()) :: String.t()
