@@ -441,8 +441,27 @@ export interface FormChallenge {
   site_key: string;
   /** The provider's script, for explicit rendering. */
   script_url: string;
-  /** The action the widget must be drawn for. */
+  /**
+   * The action the widget must be drawn for. Pass it to `render` under
+   * `action_option`; when that is `null` the widget takes no action.
+   */
   action: string;
+  /** The browser global the script defines (absent from older servers). */
+  global?: string;
+  /**
+   * When not `null`, the script reports readiness by calling a global
+   * function named by this query parameter (reCAPTCHA's `onload`): wait for
+   * it rather than the script's `load` event. Absent from older servers.
+   */
+  onload_param?: string | null;
+  /** Extra options to pass `render` (absent from older servers). */
+  render_options?: Record<string, unknown>;
+  /** The `render` option the action goes under, or `null` for none. */
+  action_option?: string | null;
+  /** Whether people normally have to click or solve something. */
+  interactive?: boolean;
+  /** The browser API the global offers; today always `"explicit_render"`. */
+  api?: "explicit_render";
   /** The value name the token is submitted under: `_kiln_challenge`. */
   field: string;
   /** What happens to a submission sent without a token. */

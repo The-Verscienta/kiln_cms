@@ -254,9 +254,13 @@ the server's spam checks see them. A filled honeypot is discarded and still
 answers success, so never set it yourself.
 
 A form whose schema has a `challenge` asks for a human-verification check
-(Cloudflare Turnstile). Draw the widget in the browser with
-`challenge.script_url`, `challenge.site_key` and `challenge.action`, and
-send its token under `challenge.field` (`_kiln_challenge`). The result's
+(the operator's provider: Cloudflare Turnstile, reCAPTCHA v2 or a plugin's).
+Load `challenge.script_url`; when `challenge.onload_param` is set, append
+`<onload_param>=<a global callback>` and wait for that callback before
+rendering. Then call `window[challenge.global].render(element, options)` with
+`challenge.render_options`, `sitekey: challenge.site_key` and, when
+`challenge.action_option` is not `null`, `challenge.action` under that name.
+Send its token under `challenge.field` (`_kiln_challenge`). The result's
 `challenge` is then `"verified"`, or `"held"` when the submission was stored
 for review instead of being acted on (no token, a page host the server does
 not accept, or a provider it could not reach). A refused token throws `KilnValidationError`, with

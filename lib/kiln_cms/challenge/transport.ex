@@ -10,7 +10,7 @@ defmodule KilnCMS.Challenge.Transport do
   No redirects, no retries, a 16 KB cap (a verification answer is a few hundred
   bytes) and short timeouts — a sign-in must not wait on a third party. The
   overall deadline that bounds the whole call, DNS included, is enforced one
-  level up by `KilnCMS.Challenge.verify/3`, which runs the provider in a task.
+  level up by `KilnCMS.Challenge.verify/4`, which runs the provider in a task.
 
   Answers `{:ok, %{status: integer(), body: binary()}}` or
   `{:error, class}`, where `class` is `:timeout`, `:transport`, `:blocked` or

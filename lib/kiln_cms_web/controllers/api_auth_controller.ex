@@ -179,7 +179,7 @@ defmodule KilnCMSWeb.ApiAuthController do
 
   defp challenge_meta do
     case Challenge.widget(Challenge.config(), :sign_in) do
-      %{} = widget -> Map.take(widget, [:provider, :site_key, :script_url, :action])
+      %{} = widget -> Challenge.headless_widget(widget)
       nil -> %{}
     end
   end

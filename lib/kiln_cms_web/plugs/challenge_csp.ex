@@ -6,7 +6,7 @@ defmodule KilnCMSWeb.Plugs.ChallengeCsp do
   The widget is a script and an iframe from the provider's origin
   (`https://challenges.cloudflare.com` for Turnstile), which the auth pages'
   policy does not otherwise allow. This adds the provider's
-  `c:KilnCMS.Challenge.Provider.csp_sources/0` to `script-src`, `frame-src` and
+  `c:Kiln.Challenge.Provider.csp_sources/0` to `script-src`, `frame-src` and
   `connect-src` of the policy `put_browser_csp` already set on `:browser_auth`.
 
   Only while a challenge can actually be shown — a provider configured and
@@ -84,7 +84,7 @@ defmodule KilnCMSWeb.Plugs.ChallengeCsp do
 
   @doc false
   # Public for the test: the header is the whole of what this plug does.
-  @spec widen_policy(String.t(), KilnCMS.Challenge.Provider.csp_sources()) :: String.t()
+  @spec widen_policy(String.t(), Kiln.Challenge.Provider.csp_sources()) :: String.t()
   def widen_policy(policy, sources) do
     additions = %{
       "script-src" => Map.get(sources, :script_src, []),

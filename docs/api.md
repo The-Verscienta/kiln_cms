@@ -191,7 +191,8 @@ Notes:
 
 ### Human verification
 
-An operator can ask for a Cloudflare Turnstile check on password sign-in once
+An operator can ask for a human-verification check (Cloudflare Turnstile,
+Google reCAPTCHA v2 or a plugin's provider) on password sign-in once
 an email address or an IP address has had too many attempts
 ([Human verification](human-verification.md)). **`POST /api/auth/sign_in` is
 only challenged when the operator also sets `CHALLENGE_API_SIGN_IN=true`.**
@@ -220,15 +221,26 @@ The two `401`s carry what a client needs to draw the widget in the error's
         "provider": "turnstile",
         "site_key": "0x4AAAAAAA...",
         "script_url": "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
-        "action": "sign_in"
+        "global": "turnstile",
+        "onload_param": null,
+        "render_options": {"response-field": false},
+        "action": "sign_in",
+        "action_option": "action",
+        "interactive": false,
+        "api": "explicit_render"
       }
     }
   ]
 }
 ```
 
-Render the widget with `site_key` and `action` (Turnstile refuses a token
-drawn for another action), then send it as a string:
+With reCAPTCHA the same object reads `"provider": "recaptcha"`,
+`"script_url": "https://www.recaptcha.net/recaptcha/api.js?render=explicit"`,
+`"global": "grecaptcha"`, `"onload_param": "onload"`, `"render_options": {}`,
+`"action_option": null` and `"interactive": true`; `action` is still
+`"sign_in"`, but reCAPTCHA's widget takes no action, so don't pass it. Draw
+the widget as [Draw the widget in your own front end](#draw-the-widget-in-your-own-front-end)
+describes, then send its token as a string:
 
 ```bash
 curl -s -X POST http://localhost:4000/api/auth/sign_in \
@@ -252,6 +264,65 @@ Notes:
   even when `CHALLENGE_API_SIGN_IN` is off (it decides when an outage stops
   letting sign-ins through), but they do not make the browser form ask for a
   check.
+
+### Draw the widget in your own front end
+
+A sign-in's `meta` and a form schema's `challenge`
+([Human verification on forms](#human-verification-on-forms)) describe the
+widget the same way, whichever provider the operator chose, so one piece of
+browser code draws any of them:
+
+| Key | What to do with it |
+|---|---|
+| `api` | Which browser API the script offers. Today always `"explicit_render"`: `render(element, options)` returning a widget id. Don't draw a widget whose `api` you don't know. |
+| `script_url` | Load it once per page with a `<script>` tag. |
+| `onload_param` | `null`: the script is ready on its `load` event. Otherwise, define a global function, add `<onload_param>=<its name>` to `script_url`'s query, and wait until the script calls it. reCAPTCHA (`"onload"`) defines its global before it can render, so the global being there proves nothing. |
+| `global` | The `window` property the script defines (`"turnstile"`, `"grecaptcha"`). |
+| `render_options` | Pass these to `render`, then add your own. |
+| `site_key` | Pass as `sitekey`. |
+| `action`, `action_option` | When `action_option` is not `null`, pass `action` under that name (`action: "sign_in"` for Turnstile). When it is `null` (reCAPTCHA), pass no action. |
+| `interactive` | `true` when people normally have to click (reCAPTCHA's checkbox). Ask the visitor to complete it rather than waiting for a token to arrive on its own. |
+
+The token arrives in the `callback` you pass `render`.
+
+```js
+// `challenge` is a sign-in's error `meta` or a form schema's `challenge`.
+function drawChallenge(challenge, element, onToken) {
+  if (challenge.api !== "explicit_render") {
+    return Promise.reject(new Error("unsupported human-verification widget"))
+  }
+
+  return new Promise((resolve, reject) => {
+    const render = () => {
+      const options = {...challenge.render_options}
+      if (challenge.action_option) options[challenge.action_option] = challenge.action
+      options.sitekey = challenge.site_key
+      options.callback = onToken
+      resolve(window[challenge.global].render(element, options))
+    }
+
+    let src = challenge.script_url
+    const script = document.createElement("script")
+
+    if (challenge.onload_param) {
+      window.kilnChallengeReady = render
+      src += (src.includes("?") ? "&" : "?") +
+        encodeURIComponent(challenge.onload_param) + "=kilnChallengeReady"
+    } else {
+      script.onload = render
+    }
+
+    script.src = src
+    script.async = true
+    script.onerror = () => reject(new Error("the widget's script did not load"))
+    document.head.appendChild(script)
+  })
+}
+```
+
+Your own page's Content-Security-Policy has to admit the provider's script
+and frame origins, the same ones Kiln adds to its own pages
+([Choose a provider](human-verification.md#choose-a-provider)).
 
 ### Accounts with two-factor authentication
 
@@ -1509,7 +1580,8 @@ rather than a blank iframe.
 
 ### Human verification on forms
 
-A site admin can make a form ask for a Cloudflare Turnstile check (#2249;
+A site admin can make a form ask for a human-verification check, drawn by
+the operator's provider (#2249;
 [Public forms](human-verification.md#public-forms)). Nothing below changes
 for a form that does not ask: its schema has `"challenge": null` and its
 answers carry no `challenge` key.
@@ -1519,26 +1591,36 @@ answers carry no `challenge` key.
 | Key | Value |
 |---|---|
 | `required` | `true` |
-| `provider` | `"turnstile"` |
+| `provider` | `"turnstile"`, `"recaptcha"` or a plugin provider's id |
 | `site_key` | The widget's public site key |
-| `script_url` | The provider's script, for explicit rendering: `https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit` |
-| `action` | `"form"`. Render the widget with it; a token drawn for another action is refused. |
+| `script_url` | The provider's script, for explicit rendering: `https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit` for Turnstile, `https://www.recaptcha.net/recaptcha/api.js?render=explicit` for reCAPTCHA |
+| `global` | The browser global the script defines: `"turnstile"`, `"grecaptcha"` |
+| `onload_param` | `null`, or the query parameter that names the callback the script calls when ready: `"onload"` for reCAPTCHA |
+| `render_options` | Options to pass `render`: `{"response-field": false}` for Turnstile, `{}` for reCAPTCHA |
+| `action` | `"form"` |
+| `action_option` | The `render` option to pass `action` under (`"action"` for Turnstile), or `null` when the widget takes none (reCAPTCHA). A Turnstile token drawn for another action is refused. |
+| `interactive` | `true` when the visitor has to click (reCAPTCHA), `false` otherwise |
+| `api` | `"explicit_render"`, the only kind today |
 | `field` | `"_kiln_challenge"`, the name to send the token under |
 | `without_token` | `"held"`: what happens to a submission without one |
+
+How to use them: [Draw the widget in your own front end](#draw-the-widget-in-your-own-front-end).
 
 `challenge` is `null` too while the operator has forms off
 (`CHALLENGE_FORMS=false`), the kill switch on, or no provider configured,
 whatever the form's own setting.
 
-**`POST /api/forms/:slug`** reads the token from `_kiln_challenge`, or from
-`cf-turnstile-response` when that is absent or empty. Send it as a string.
+**`POST /api/forms/:slug`** reads the token from `_kiln_challenge`. When
+that is absent or empty, it reads the field the provider's own markup posts
+(`g-recaptcha-response` with reCAPTCHA, or a plugin provider's own), and
+last `cf-turnstile-response`. Send it as a string.
 For a form that asks, the answer gains `challenge`:
 
 | Status | Body | Meaning |
 |---|---|---|
 | `200` | `{"ok": true, "message": "…", "challenge": "verified"}` | Passed; acted on as usual. |
 | `200` | `{"ok": true, "message": "…", "challenge": "held"}` | Stored for review in Spam, and not acted on: no token, a token solved on a host this deployment does not serve, or the provider could not be asked. |
-| `422` | `{"ok": false, "errors": {"_kiln_challenge": "did not pass the human-verification check"}, "challenge": "failed"}` | The provider refused the token (wrong, expired, already used, malformed, another action). Nothing stored. Draw a fresh widget and send again. |
+| `422` | `{"ok": false, "errors": {"_kiln_challenge": "did not pass the human-verification check"}, "challenge": "failed"}` | The provider refused the token (wrong, expired, already used, malformed, another action). Nothing stored. Draw a fresh widget and send again. With reCAPTCHA, a `422` on every submission usually means the operator's secret key is wrong. |
 
 Field errors come first and do not spend the token: a `422` without
 `challenge` is the usual per-field map. A tripped honeypot answers `200` in
@@ -1546,9 +1628,13 @@ the same shape as a real submission (`"verified"` when a token was sent,
 `"held"` when not), but nothing is stored and the provider is not asked.
 
 The page that draws the widget must be on a host the deployment serves, or
-one in `CHALLENGE_HOSTNAMES`, and in the Turnstile widget's hostnames in
-Cloudflare. Otherwise every submission comes back `"held"`, and the server
-log names the host.
+one in `CHALLENGE_HOSTNAMES`, and in the provider's key (the Turnstile
+widget's hostnames, or the reCAPTCHA key's domains). Otherwise every
+submission comes back `"held"`, and the server log names the host.
+
+A reCAPTCHA v2 token is not bound to an action: one solved for a form could
+also be spent once on this deployment's sign-in, within its two minutes. The
+hostname is still checked.
 
 ## Image transforms
 

@@ -507,6 +507,7 @@ defmodule KilnCMSWeb.SystemLive do
       {gettext("Advisories"), length(manifest.advisories)},
       {gettext("Spam checks"), length(manifest.spam_checks)},
       {gettext("Image backends"), length(manifest.image_backends)},
+      {gettext("Human-verification providers"), length(manifest.challenge_providers)},
       {gettext("Nav items"), manifest.nav_items},
       {gettext("Admin routes"), manifest.admin_routes},
       {gettext("Editor routes"), manifest.editor_routes},
@@ -534,6 +535,8 @@ defmodule KilnCMSWeb.SystemLive do
       {gettext("Editor checks"), Enum.map(manifest.advisories, &{module_title(&1), nil})},
       {gettext("Spam checks"), Enum.map(manifest.spam_checks, &{module_title(&1), nil})},
       {gettext("Image backends"), Enum.map(manifest.image_backends, &image_backend_feature/1)},
+      {gettext("Human-verification providers"),
+       Enum.map(manifest.challenge_providers, &challenge_provider_feature/1)},
       {gettext("Console pages"), console_pages(plugin)},
       {gettext("Public pages"), Enum.map(plugin.public_routes(), &route_feature/1)},
       {gettext("Endpoints"), Enum.map(Kiln.Plugins.PlugRoute.of(plugin), &endpoint_feature/1)},
@@ -599,6 +602,28 @@ defmodule KilnCMSWeb.SystemLive do
       end
 
     {module_title(backend), detail}
+  end
+
+  # Installed is not in use either: say which provider the operator named, by
+  # the id they would name it with. Read from the memoised configuration, so
+  # a provider whose callbacks raise shows as its module name instead.
+  defp challenge_provider_feature(provider) do
+    id = KilnCMS.Challenge.Registry.id_of(provider)
+    config = KilnCMS.Challenge.config()
+
+    detail =
+      cond do
+        is_nil(id) ->
+          gettext("Not a usable provider")
+
+        config.provider == provider ->
+          gettext("In use (CHALLENGE_PROVIDER=%{id})", id: id)
+
+        true ->
+          gettext("Installed as %{id}, not selected", id: id)
+      end
+
+    {module_title(provider), detail}
   end
 
   # `Example.Catalog.TeamMember` → "Team member".
