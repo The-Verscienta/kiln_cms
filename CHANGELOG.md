@@ -59,9 +59,16 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new column `field_definitions.width`, new table `field_sections`). Field sync files exported from now on carry `width`, which builds from before this change refuse.** Rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#field-layout-upgrade))
 
+- **Run `mix ash.migrate` (new nullable `field_definitions.widget`, no backfill). Field-sync files now carry `"widget"`, which an older release's import refuses: upgrade the target first.** Rolling the pin back is safe.
+  ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets-upgrade))
+
 - **Run `mix ash.migrate` (new table `site_registration`; `org_memberships` gains `status` and `decided_at`). Turn registration approval on only once every node runs this release: an older node reads a waiting registration as an active viewer.**
   Before rolling back, anonymize the waiting and rejected accounts you don't want (don't delete their rows) and delete the three `registration_*` security events (#2509), or roll forward.
   ([#2512](https://github.com/The-Verscienta/kiln_cms/pull/2512) · [long form](docs/changelog/unreleased.md#registration-approval-upgrade))
+
+- **Run `mix ash.migrate` (`users.notify_on_registration`, `NOT NULL DEFAULT true`). A node on an older release can't load the new `registration_pending` notification: during a rolling deploy and after a rollback, an admin's bell there shows the count but an empty list and Mark all read fails (#2509).**
+  Before rolling back, run `DELETE FROM notifications WHERE event = 'registration_pending'`, or roll forward.
+  ([#2517](https://github.com/The-Verscienta/kiln_cms/pull/2517) · [long form](docs/changelog/unreleased.md#registration-notifications-upgrade))
 
 - **Before rolling back to a build that has the security log but predates sign-in unlock links, delete the `sign_in_unlock_requested`, `sign_in_unlocked` and `sign_in_unlock_refused` security events, or roll forward.**
   No migration. An older build cannot load those rows, which breaks that site's security log and CSV, and erasing a person named in one (#2509). v1.8.0 has no security log and is unaffected.
@@ -159,9 +166,17 @@ Every summary line below that was shortened links to its own entry there.
   Keyboard-accessible tabs in the editor; `GET /api/schema` adds `x-kiln-section-display` and `x-kiln-width`. Guide: [docs/extending-content.md](docs/extending-content.md#lay-out-custom-fields-as-tabs-fieldsets-or-columns).
   ([long form](docs/changelog/unreleased.md#field-layout))
 
+- **Admins can choose each custom field's editor input: radios or buttons for a select, checkboxes, one-line text, a reference dropdown, or a plugin type's own (`widget`).**
+  Editor-only; nothing stored or delivered changes. Guide: [docs/extending-content.md](docs/extending-content.md#choose-how-editors-fill-in-a-field).
+  ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets))
+
 - **A site can hold new password sign-ups for an admin's approval: Sign-in & access → Registrations, then Approve or Reject each applicant.**
-  Until approved an account can sign in but reads only what's public, on every site, and can't pay its way in. Admins aren't notified and applicants get no email yet. Guide: [docs/account-administration.md](docs/account-administration.md#approving-registrations).
+  Until approved an account can sign in but reads only what's public, on every site, and can't pay its way in. Guide: [docs/account-administration.md](docs/account-administration.md#approving-registrations).
   ([#2512](https://github.com/The-Verscienta/kiln_cms/pull/2512) · [long form](docs/changelog/unreleased.md#registration-approval))
+
+- **Site admins get one bell notice and email per site when a confirmed applicant is waiting, and applicants are emailed when they're approved or rejected.**
+  The notice collapses while unread, names no applicant, and is read by opening Registrations; mute the email under Your settings → Email notifications. Guide: [docs/account-administration.md](docs/account-administration.md#get-told-when-someone-is-waiting).
+  ([#2517](https://github.com/The-Verscienta/kiln_cms/pull/2517) · [long form](docs/changelog/unreleased.md#registration-notifications))
 
 - **Someone whose sign-in is paused after too many attempts can have a link emailed that lifts the pause: "Email me an unlock link" on the sign-in page.**
   The link lasts 15 minutes, works once and goes only to confirmed members of that site (3 an hour). It clears only the account pause, and the sign-in page still never says an account is paused. Guide: [docs/account-administration.md](docs/account-administration.md#lift-a-sign-in-pause-by-email).

@@ -184,6 +184,7 @@ defmodule KilnCMS.Accounts.User do
       :notify_on_publish,
       :notify_on_return_to_draft,
       :notify_on_comment,
+      :notify_on_registration,
       :nav_preset,
       :status_marks,
       :content_list_columns
@@ -291,7 +292,8 @@ defmodule KilnCMS.Accounts.User do
         :notify_on_review_request,
         :notify_on_publish,
         :notify_on_return_to_draft,
-        :notify_on_comment
+        :notify_on_comment,
+        :notify_on_registration
       ]
     end
 
@@ -1307,6 +1309,14 @@ defmodule KilnCMS.Accounts.User do
     end
   end
 
+  changes do
+    # Registration approval (#2251): the update that confirms an applicant's
+    # address tells the admins of every site where they wait. On every update
+    # rather than on `:confirm_new_user` alone, because three actions confirm
+    # an unconfirmed account (see the change).
+    change KilnCMS.Accounts.Changes.AnnouncePendingRegistration, on: [:update]
+  end
+
   attributes do
     uuid_primary_key :id
 
@@ -1461,6 +1471,17 @@ defmodule KilnCMS.Accounts.User do
     # keep the mentions") would still need all three toggled together, which is
     # the setting nobody finds.
     attribute :notify_on_comment, :boolean do
+      default true
+      allow_nil? false
+      public? true
+    end
+
+    # Registration approval (#2251): mail me when someone is waiting for
+    # approval on a site I administer. Mutes the email only — the bell row is
+    # always written (`KilnCMS.Notifications.Registrations`), so a muted admin
+    # still sees the queue is waiting. One flag for every site the account
+    # administers.
+    attribute :notify_on_registration, :boolean do
       default true
       allow_nil? false
       public? true

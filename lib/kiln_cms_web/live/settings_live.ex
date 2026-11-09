@@ -36,6 +36,12 @@ defmodule KilnCMSWeb.SettingsLive do
      # The client and org the credential changes below are logged with (#2241).
      |> assign(:security_context, KilnCMS.Security.AuthEvents.context(socket))
      |> assign(:form, prefs_form(user))
+     # The registration-notice switch (#2251), for anyone who would get the
+     # notice on some site: the flag is one per account, across every site.
+     |> assign(
+       :registration_notices?,
+       KilnCMS.Notifications.Registrations.administers_any_site?(user)
+     )
      |> assign(:profile_form, profile_form(user))
      # A "Saved" line beside the button (#1828), cleared by the next edit: the
      # flash alone was easy to miss on a long page.
@@ -1233,6 +1239,16 @@ defmodule KilnCMSWeb.SettingsLive do
                   type="checkbox"
                   label={
                     gettext("Comments — replies on threads I'm in, and when someone @mentions me")
+                  }
+                />
+                <.input
+                  :if={@registration_notices?}
+                  field={@form[:notify_on_registration]}
+                  type="checkbox"
+                  label={
+                    gettext(
+                      "New registrations — email me when someone is waiting for approval on a site I administer"
+                    )
                   }
                 />
 

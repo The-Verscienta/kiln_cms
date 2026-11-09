@@ -84,16 +84,31 @@ defmodule KilnCMSWeb.NotificationTextTest do
            These events are allowed by `KilnCMS.Notifications.Notification`'s
            `one_of` constraint but have no sentence in
            `KilnCMSWeb.NotificationText.headline/1`, so the inbox and the bell
-           would crash rendering them:
+           would render them as the bare fallback:
 
            #{Enum.map_join(missing, "\n", &"  * #{inspect(&1)}")}
            """
   end
 
+  test "an event with no sentence of its own reads as the neutral fallback" do
+    assert NotificationText.headline(%{event: :from_a_newer_release, actor_name: "Ada"}) ==
+             NotificationText.fallback()
+  end
+
+  test "a registration notice names no applicant" do
+    assert NotificationText.headline(%{event: :registration_pending, actor_name: nil}) ==
+             "Registrations waiting for approval"
+  end
+
+  # The catch-all clause answers `fallback/0` for any event, so reaching it
+  # is what "no sentence" means now.
   defp has_sentence?(event) do
     case NotificationText.headline(%{event: event, actor_name: nil}) do
-      headline when is_binary(headline) -> headline != ""
-      _other -> false
+      headline when is_binary(headline) ->
+        headline != "" and headline != NotificationText.fallback()
+
+      _other ->
+        false
     end
   rescue
     FunctionClauseError -> false

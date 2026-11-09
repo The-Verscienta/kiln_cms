@@ -31,6 +31,25 @@ carries the reasoning.
     column, and `FieldSection` is in the existing `KilnCMS.CMS` domain.
   ([#2280](https://github.com/The-Verscienta/kiln_cms/issues/2280))
 
+<a id="field-widgets-upgrade"></a>
+
+- **Field definitions gain a nullable `widget` column (#2284).** Run
+  `mix ash.migrate`. `field_definitions.widget` is `text`, nullable, with no
+  backfill: every existing field reads `nil`, which is its type's default and
+  the input it had before, so nothing changes in the editor until an admin
+  picks an input. Additive, and it does not touch the `kiln_reporting_v1`
+  views. Rolling the pin back is safe: the previous release ignores the column,
+  and editors see the default inputs again until you upgrade.
+  - **Field sync across versions.** A field-sync file exported by this release
+    carries `"widget"` on every field, which an older release's
+    `mix kiln.fields.import` refuses as `unknown key(s) widget`: upgrade the
+    target first. A file exported before this release has no `"widget"`, so
+    importing it here sets every chosen input back to the default; export again
+    after upgrading. See [field-sync.md](../field-sync.md#editor-inputs-widget).
+  - **Plugins.** A plugin field type that implements the new optional
+    `widgets/1` needs `{:kiln_plugin, "~> 1.4"}`. Nothing changes for one that
+    doesn't.
+
 <a id="registration-approval-upgrade"></a>
 
 - **Run `mix ash.migrate` for registration approval (#2251, first part). Turn
@@ -70,6 +89,36 @@ carries the reasoning.
 
     v1.8.0 has no security log and is unaffected by this part.
   See also [the Added entry](#registration-approval).
+
+<a id="registration-notifications-upgrade"></a>
+
+- **Run `mix ash.migrate` for registration notices (#2251, second part).
+  While any node runs an older release, and after rolling back, an admin's
+  bell on that node can break; before rolling back, delete the new
+  notifications, or roll forward.**
+  - **What the migration does.**
+    `20261109122632_registration_notification_pref` adds
+    `users.notify_on_registration` (`boolean NOT NULL DEFAULT true`).
+    Additive: every existing account gets the email until it mutes it, and an
+    older release ignores the column.
+  - **Why the bell breaks.** The notifications table stores an event as text,
+    and a release loads it back as one of the events it knows. This change
+    adds `registration_pending`. A node on an older release cannot load such a
+    row, and the failure takes out the whole list read
+    ([#2509](https://github.com/The-Verscienta/kiln_cms/issues/2509)): for an
+    admin with one of these notices, the bell on that node shows the unread
+    count but an empty list, and **Mark all read** fails there.
+  - **During a rolling deploy** this lasts until every node runs the new
+    release; nothing needs doing.
+  - **Before rolling back**, in `psql` against the deployment's database:
+
+    ```sql
+    DELETE FROM notifications WHERE event = 'registration_pending';
+    ```
+
+    This removes only the "Registrations waiting for approval" notices; the
+    queue itself is untouched. Or roll forward instead.
+  See also [the Added entry](#registration-notifications).
 
 <a id="sign-in-unlock-upgrade"></a>
 
@@ -771,6 +820,18 @@ carries the reasoning.
     sub-fields).
   ([#2280](https://github.com/The-Verscienta/kiln_cms/issues/2280))
 
+<a id="field-widgets"></a>
+
+- **Admins can choose the editor input a custom field uses: radio buttons or a row of buttons for a select, checkboxes for several terms, one line for plain text, a dropdown list for a reference, or a plugin type's own (#2284).**
+  In `/editor/fields`, a field that has a choice shows an **Editor input** group of cards, its type's default first and checked; the list of fields badges a field that uses anything else. The choice is stored in the field definition's new `widget` attribute (a string; `nil` is the default, today's input). It is editor-only: what is stored, validated and delivered does not change. Guide: [Choose how editors fill in a field](../extending-content.md#choose-how-editors-fill-in-a-field).
+  - **What is offered.** A single select: `dropdown` (default), `radios`, `buttons`. Several terms: `tags` (default), `checkboxes`, but not while editors may add new terms (`allow_custom`); the fields admin disables whichever of the two is not in use and says why. Plain text: `textarea` (default), `single_line`. A single reference: `autocomplete` (default), `dropdown`. Rich text, lists of references, link fields, group sub-fields and every other core type offer no choice.
+  - **Safe by construction.** Radios and checkboxes show a stored value that is no longer among the options as its own checked input, so a save keeps it. A one-line field whose value already holds a line break opens as a textarea, so a save keeps the breaks. A field with more than 50 options keeps the dropdown or tags in the editor whatever is chosen, and the fields admin warns on those cards. A radio group required by a **Required when** rule is required the way a browser requires one (`required` on its first radio, `aria-required` on the group).
+  - **Checkboxes reorder.** Saving a record whose field uses checkboxes stores its terms in the field's option order, with terms outside the options after them.
+  - **The reference dropdown** lists the targets the editor could find by searching, in the editor's own site, sorted by title and grouped by type on a field with several target types, at most 100 in all. Past 100 the editor keeps the search box and says *Too many to list — search instead.* A target full under `max_sources` is listed disabled, the current pick is always listed (as *Unavailable* when the editor can't read it), and **Add new** still works. The list is read once when the editor opens.
+  - **Changing the field resets, a write that names a widget is refused.** A retype, `multiple`, rich text or `allow_custom` clears a stored widget the field no longer offers, unless the same write names one; then it is refused (`radios is not an editor input for this field (use one of: …)`). Field sync sends the file's widget with every update, so a file whose settings no longer suit its widget is refused rather than silently corrected.
+  - **API and export.** Field definitions carry `widget` on JSON:API (`?include=field_definitions`, and in `docs/api/openapi.json`) and in field-sync files. The schema export adds `x-kiln-widget` only to a field whose chosen widget it still offers. GraphQL does not expose field definitions and is unchanged.
+  - **Plugins.** `Kiln.FieldType` gains the optional `widgets/1` (not defaulted by `use`) and `Kiln.FieldType.widget/2` to read the pick back inside `input_attrs/1`, `input_parts/1` or `input_hook/1` (`kiln_plugin` 1.4). `input_type/0` takes no definition, so a widget cannot change the input's HTML `type`. `mix kiln.plugins.doctor` reports a `widgets/1` that raises, returns a non-list, or lists a malformed or repeated name.
+
 <a id="registration-approval"></a>
 
 - **A site can make new password sign-ups wait for an administrator's
@@ -807,8 +868,8 @@ carries the reasoning.
     entitlement recompute creates no viewer membership for one.
   - **Fails closed.** If the setting cannot be read, the sign-up is refused
     with a retryable error and nothing is created.
-  - **Not yet.** Admins are not notified of new registrations, and applicants
-    get no email about the decision (part two). Erasing rejected accounts,
+  - **Not yet.** Telling admins and applicants is part two
+    ([below](#registration-notifications)). Erasing rejected accounts,
     queueing a site's own SSO, and accepting an invitation over a waiting
     registration are part three.
   - **Security log.** `registration_queued` (`method`),
@@ -825,6 +886,68 @@ carries the reasoning.
     setting is `KilnCMS.CMS.SiteRegistration`.
   The reasoning is in
   [ADR 0024](../decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md);
+  the how-to is
+  [Approving registrations](../account-administration.md#approving-registrations).
+
+<a id="registration-notifications"></a>
+
+- **A site's admins hear when a registration is waiting for them, and the
+  applicant is emailed the decision (#2251, second of three parts).** Part one
+  left both to the admin checking the queue and telling people themselves.
+  - **When admins hear.** When an applicant confirms their address: by the
+    confirmation link, by a password reset, or by accepting an invitation with
+    a password. That is when the registration can be approved, so registering
+    alone tells nobody. Every site where the applicant waits is told. A
+    magic-link sign-in does not confirm an account, so it tells nobody either
+    ([#2516](https://github.com/The-Verscienta/kiln_cms/issues/2516)).
+  - **What admins get.** One bell notice per admin and site, "Registrations
+    waiting for approval", titled with the site's name and linking to
+    **Registrations** (`/editor/registrations`), plus an email "Registrations
+    are waiting for approval on (site)" with a **Review registrations** link
+    on the site's own host. While the notice is unread, further applicants add
+    no notice and no email, so a wave of sign-ups is one of each. Opening
+    **Registrations** marks your notice read, and the next applicant after that
+    is news again. Neither the notice nor the email names the applicant.
+  - **Who.** A standing platform admin, or a member whose active membership
+    on the site is admin (a site's temporary admin grant counts). A temporary
+    platform admin is left out, since it can't decide registrations, and so
+    is an erased account.
+  - **Muting.** **Your settings** → **Email notifications** → **New
+    registrations — email me when someone is waiting for approval on a site I
+    administer**. It mutes the email only; the bell notice is always written.
+    One switch for every site you administer, shown to anyone who would be
+    told on some site.
+  - **What the applicant gets.** After the decision commits, approving mails
+    "Your registration on (site) was approved" with a **Sign in** link on the
+    site's host, including when an admin approves from the **Rejected** tab.
+    Rejecting mails "Your registration on (site) wasn't approved." under the
+    subject "About your registration on (site)", with no reason, no link and
+    no name. A rejected applicant who never confirmed their address gets no
+    email, since the address was never proven theirs, and an erased account
+    gets none. Both emails, and the admin email, go through the site's own
+    mail relay when it has one. The approve message on the page now ends
+    "We'll email them.", and the reject prompt for a confirmed applicant adds
+    "They'll be emailed that it wasn't approved."
+  - **Erased applicants.** A waiting account that was erased shows **Account
+    erased** in the queue and has no **Approve**; approving it from code is
+    refused with `RegistrationRefused` reason `:erased`. It can still be
+    rejected.
+  - **Best effort.** Notices and emails run after the commit. A failure is
+    logged and never undoes the confirmation or the decision.
+  - **Account data.** `export_user_data` now includes `notify_on_comment` and
+    `notify_on_registration`, and erasure resets both to on.
+  - **Developers.** `Notification.event` gains `:registration_pending`
+    (anchored on `content_type: "registration_queue"`, `content_id` = the
+    site's id, no actor). `KilnCMS.Notifications.Registrations` holds the
+    roster and `announce_org/1` for a path that queues an already-confirmed
+    account. `Notifications.record_in_app_result/1` says whether a row was
+    written (`:recorded`, `:already_waiting`, `:not_recorded`), and
+    `Notifications.mark_read_about/4` marks one subject's unread notices
+    read. `NotificationText.headline/1` gains a neutral "Notification" for an
+    event it doesn't know, rather than crashing.
+  Upgrade steps: [the upgrade note](#registration-notifications-upgrade). The
+  reasoning is in
+  [ADR 0024](../decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md#who-is-told-part-two);
   the how-to is
   [Approving registrations](../account-administration.md#approving-registrations).
 

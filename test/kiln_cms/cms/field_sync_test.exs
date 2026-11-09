@@ -45,7 +45,8 @@ defmodule KilnCMS.CMS.FieldSyncTest do
       position: 2,
       section: "Identity",
       help_text: "Pick one",
-      searchable: true
+      searchable: true,
+      widget: "radios"
     })
 
     field!(admin, %{
@@ -53,6 +54,7 @@ defmodule KilnCMS.CMS.FieldSyncTest do
       label: "Note",
       field_type: :text,
       format: :plain,
+      widget: "single_line",
       deliver_plain: true,
       plain_breaks: true,
       visible_when: %{"field" => "kind", "op" => "eq", "value" => "a"},
@@ -356,6 +358,69 @@ defmodule KilnCMS.CMS.FieldSyncTest do
       doc = export!(admin)
       assert {:error, :forbidden} = FieldSync.import_doc(doc, actor: user(:editor), apply?: true)
       assert {:error, :forbidden} = FieldSync.import_doc(doc, actor: nil)
+    end
+  end
+
+  describe "editor widget (#2284)" do
+    defp with_field(doc, name, fun),
+      do:
+        update_in(doc, ["owners", Access.all(), "fields", Access.all()], fn f ->
+          if f["name"] == name, do: fun.(f), else: f
+        end)
+
+    test "the export carries each field's widget, nil for the default", %{admin: admin} do
+      model!(admin)
+      post = Enum.find(export!(admin)["owners"], &(&1["type"] == "post"))
+      by_name = Map.new(post["fields"], &{&1["name"], &1})
+
+      assert by_name["kind"]["widget"] == "radios"
+      assert by_name["note"]["widget"] == "single_line"
+      assert Map.has_key?(by_name["rating"], "widget")
+      assert by_name["rating"]["widget"] == nil
+    end
+
+    test "a changed widget imports, and a second import changes nothing", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin) |> with_field("kind", &Map.put(&1, "widget", "buttons"))
+
+      assert {:ok, report} = apply!(doc, admin)
+
+      assert [%{path: "post.kind", changes: %{"widget" => {"radios", "buttons"}}}] =
+               Enum.filter(report.ops, &(&1.op == :update))
+
+      kind = Enum.find(CMS.field_definitions_for!(:post, actor: admin), &(&1.name == "kind"))
+      assert kind.widget == "buttons"
+
+      assert {:ok, again} = apply!(doc, admin)
+      assert Map.keys(again.counts) == [:unchanged]
+    end
+
+    test "a widget the field doesn't offer is reported by a dry run", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin) |> with_field("kind", &Map.put(&1, "widget", "single_line"))
+
+      assert {:error, %{errors: [%{path: "post.kind", messages: messages}]}} =
+               FieldSync.import_doc(doc, actor: admin)
+
+      assert Enum.any?(messages, &(&1 =~ "single_line"))
+    end
+
+    test "a file whose other settings no longer suit its widget is refused, not cleared", %{
+      admin: admin
+    } do
+      # The file keeps `radios` (as stored) but makes the select multiple:
+      # only `multiple` differs, yet the widget must travel with the update,
+      # or the write would drop it and the site would disagree with the file.
+      model!(admin)
+      doc = export!(admin) |> with_field("kind", &Map.put(&1, "multiple", true))
+
+      assert {:error, %{errors: [%{path: "post.kind", messages: messages}]}} =
+               apply!(doc, admin)
+
+      assert Enum.any?(messages, &(&1 =~ "radios"))
+
+      kind = Enum.find(CMS.field_definitions_for!(:post, actor: admin), &(&1.name == "kind"))
+      assert kind.widget == "radios" and kind.multiple == false
     end
   end
 

@@ -37,8 +37,9 @@ account's status (*Email not confirmed*, *erased*) is a separate line of badges
 under it, because none of it changes what the role allows.
 
 **Email not confirmed is not a sign-in block.** Password sign-in, magic links
-and the instance's own SSO all work for an unconfirmed account, and a magic
-link sign-in confirms the address on the way. The one thing that
+and the instance's own SSO all work for an unconfirmed account. A magic-link
+sign-in does not confirm the address: the account stays unconfirmed until its
+owner follows the confirmation link or resets their password. The one thing that
 waits on confirmation is a site's **own** single sign-on: it refuses to sign
 its provider's user into an existing account whose address was never
 confirmed, because someone else may have registered that address in advance
@@ -410,16 +411,10 @@ sign-ups wait for an administrator: the account is still created, but it gets
 no access on the site until an admin approves it on the **Registrations** page.
 Rejecting keeps the account and keeps it out.
 
-This is the first of three parts of
-[#2251](https://github.com/The-Verscienta/kiln_cms/issues/2251). Two things
-are **not built yet**:
-
-- **Admins are not notified** when someone registers. Check the
-  **Registrations** page yourself. Platform admins also see a count on
-  **Team**.
-- **The applicant gets no email** when you approve or reject them. If they
-  need to know, tell them yourself. The account page says it on their next
-  visit ([What an applicant can do while they wait](#what-an-applicant-can-do-while-they-wait)).
+The site's admins are told when someone who has confirmed their address is
+waiting ([Get told when someone is waiting](#get-told-when-someone-is-waiting)),
+and the applicant is emailed your decision
+([What the applicant is told](#what-the-applicant-is-told)).
 
 The reasoning is in
 [ADR 0024](decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md).
@@ -491,15 +486,20 @@ of another site is refused, whichever host they ask from.
    **Waiting for approval (n)**: the address, the name if they gave one, and
    "Registered (date and time) UTC". With nobody waiting, you see "Nobody is
    waiting."
+   Opening the page marks your registration notice for this site read.
 2. To let someone in, click **Approve** on their row. You see "Approved
-   (address). They can now read this site as a viewer." They leave the list,
-   appear in Team's member list as a *Viewer* with no audiences, and any page
-   they have open reconnects with the new access. Change their tier, custom
-   role or audiences afterwards as for any member.
+   (address). They can now read this site as a viewer. We'll email them."
+   They leave the list, appear in Team's member list as a *Viewer* with no
+   audiences, and any page they have open reconnects with the new access.
+   They are emailed a sign-in link. Change their tier, custom role or
+   audiences afterwards as for any member.
 3. To turn someone away, click **Reject** and confirm "Reject (address)? The
    account is kept but gets no access to this site, and they can't register
-   here again with this address." You see "Rejected (address)." and they move
-   to the **Rejected** tab.
+   here again with this address. They'll be emailed that it wasn't
+   approved." (For an applicant who hasn't confirmed their address, or whose
+   account was erased, the last sentence is missing, because they get no
+   email.) You see "Rejected (address)." and they move to the **Rejected**
+   tab.
 
 A rejected account can still sign in, reads only what's public on every site,
 and its account page says "Your registration on (site) wasn't approved." To
@@ -510,6 +510,69 @@ automatically is a later part of #2251.
 Approving gives exactly the *Viewer* tier on this site and nothing on other
 sites. Without approval, a password sign-up is a viewer on the **default
 site** only, whichever host it signed up on.
+
+**Erased applicants.** If a platform admin erased an applicant's account
+while it waited, its row shows an **Account erased** badge and has no
+**Approve**: there is nobody left to let in. Reject it to clear it; no email
+is sent.
+
+### Get told when someone is waiting
+
+You hear about a registration once the applicant has confirmed their address,
+because that is when it can be approved. Registering alone tells nobody.
+
+1. The applicant confirms their address: by the confirmation link, by
+   resetting their password, or by accepting an invitation with a password.
+   A magic-link sign-in does not confirm an address, so it does not count.
+2. Every site where they are waiting tells its admins. Each admin gets a
+   notice in the bell (and at `/editor/inbox`), "Registrations waiting for
+   approval", titled with the site's name. Clicking it opens
+   **Registrations**.
+3. Each admin who gets a new notice is also emailed "Registrations are
+   waiting for approval on (site)", with a **Review registrations** link to
+   the queue on the site's own host and a link to switch these emails off.
+4. Open **Registrations**. Your notice for this site is marked read.
+
+**One notice per site, not per applicant.** While your notice is unread,
+more applicants on that site add no notice and no email: a wave of fifty
+sign-ups is one notice and one email. Once you have opened the queue, the
+next applicant is news again and you get a fresh notice and email. Each
+admin's notice is their own, so opening the queue reads only yours.
+
+**No names.** Neither the notice nor the email names the applicant or gives
+their address. The queue shows those, to the people allowed to see them.
+
+**Who is told.** A standing platform admin, and anyone whose active
+membership on the site is admin, including a temporary admin grant on that
+membership. A temporary *platform* admin is not told, because it can't decide
+registrations, and nor is an erased account.
+
+**Turn the email off.** Open **Your settings** (`/editor/settings`), and under
+**Email notifications** untick **New registrations — email me when someone is
+waiting for approval on a site I administer**, then click
+**Save preferences**. This mutes the email only: the bell notice still
+appears, so you still see the queue is waiting next time you open the
+console. The switch is one for your whole account, across every site you
+administer, and it shows only if you would be told on at least one site (a
+temporary platform admin grant does not count).
+
+### What the applicant is told
+
+The applicant is emailed after your decision is saved, through the site's
+own mail relay if it has one:
+
+- **Approved**: "Your registration on (site) was approved", with a
+  **Sign in** link on the site's host. Also sent when you approve someone
+  from the **Rejected** tab.
+- **Rejected**: subject "About your registration on (site)", body "Your
+  registration on (site) wasn't approved." There is no reason, no link and
+  no name of who decided, and there is no way to add one.
+
+No email goes to a rejected applicant who never confirmed their address,
+since the address may belong to someone else, or to an erased account.
+
+If the email can't be queued, the decision still stands; the failure is
+logged. `/account` also shows the outcome on the applicant's next visit.
 
 ### Unconfirmed addresses cannot be approved
 
@@ -532,8 +595,10 @@ A rejection is not final.
 1. On **Registrations**, click the **Rejected** tab
    (`/editor/registrations?status=rejected`). Each row adds
    "Rejected (date and time) UTC".
-2. Click **Approve** on the row. It is offered only for a confirmed address.
-   You see "Approved (address). They can now read this site as a viewer."
+2. Click **Approve** on the row. It is offered only for a confirmed address
+   whose account hasn't been erased. You see "Approved (address). They can now
+   read this site as a viewer. We'll email them." The approval email goes out
+   as for any other approval.
 
 A rejected registration cannot be put back to waiting or rejected again; the
 **Rejected** tab only offers **Approve**.
@@ -625,6 +690,8 @@ On **Registrations**:
 - **"That person hasn't confirmed their email address yet, so it can't be
   approved."** The address was unconfirmed when you clicked. Reject it, or
   wait for them to confirm.
+- **"That account was erased, so it can't be approved."** The account was
+  erased after the page loaded. Reject it to clear it.
 - **"You don't have permission to decide registrations on this site."** You
   are not an admin of this site, for example because your tier was lowered
   since the page loaded.
@@ -657,7 +724,7 @@ site = Accounts.default_org_id()
 # The first page of the queue: 50 rows, oldest first.
 {:ok, %{entries: entries, more?: more?}} = Registrations.page(site, actor: admin)
 #=> entries: [%{membership: %OrgMembership{status: :pending}, email: "new@example.com",
-#              name: nil, confirmed?: true, registered_at: ~U[...]}, ...]
+#              name: nil, confirmed?: true, erased?: false, registered_at: ~U[...]}, ...]
 
 [entry | _] = entries
 Accounts.approve_registration(entry.membership, %{}, actor: admin)
@@ -675,11 +742,22 @@ Accounts.approve_registration(entry.membership, %{}, actor: admin)
   `approve_registration/3`.
 - A refused decision is `{:error, %Ash.Error.Invalid{}}` carrying a
   `KilnCMS.Accounts.Errors.RegistrationRefused`. `RegistrationRefused.reason/1`
-  returns `:not_pending` (already decided) or `:unconfirmed`. The same error
+  returns `:not_pending` (already decided), `:unconfirmed` or `:erased`
+  (approving an erased account). The same error
   carries `:settings_unavailable` on a refused sign-up and `:not_approved` on
   a refused paid-membership start.
 - `Accounts.queue_registration/2` is system-only: it is the sign-up's own
   write, and every person, a platform admin included, is refused it.
+- A decision from code mails the applicant exactly as the page does
+  ([What the applicant is told](#what-the-applicant-is-told)), after the
+  commit.
+- The admin notice is written by `KilnCMS.Notifications.Registrations`, when
+  any `User` update confirms an account that was unconfirmed. Code that queues
+  an account that is already confirmed tells the site's admins itself with
+  `KilnCMS.Notifications.Registrations.announce_org(org_id)` after its
+  commit. `recipients/1` returns who that notifies. The notice is the
+  `:registration_pending` notification event, with `content_type`
+  `"registration_queue"` and `content_id` the site's id.
 
 ## Password resets
 

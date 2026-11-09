@@ -415,7 +415,9 @@ defmodule KilnCMS.Accounts do
       notification_preferences: %{
         notify_on_review_request: user.notify_on_review_request,
         notify_on_publish: user.notify_on_publish,
-        notify_on_return_to_draft: user.notify_on_return_to_draft
+        notify_on_return_to_draft: user.notify_on_return_to_draft,
+        notify_on_comment: user.notify_on_comment,
+        notify_on_registration: user.notify_on_registration
       },
       # Paid memberships (#337 Phase 2). The provider ids ARE included: they are
       # identifiers a subprocessor holds about this person, so GDPR Art. 15/20

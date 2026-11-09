@@ -169,6 +169,30 @@ A file from an older build imports into a newer one as it is: a field without
 `width` is full width, and an owner without `sections` keeps the target's
 layouts.
 
+### Editor inputs (`widget`)
+
+Each field carries `"widget"`, the editor input an admin chose for it
+(`"radios"`, `"single_line"`, a plugin's own), or `null` for the type's
+default. See
+[Choose how editors fill in a field](extending-content.md#choose-how-editors-fill-in-a-field).
+
+- **A widget that doesn't fit is refused, not corrected.** The import sends
+  the file's widget with every update of its field, so a file whose other
+  settings no longer suit it — `"multiple": true` on a select still marked
+  `"radios"`, `"format": "rich"` with `"single_line"` — fails the field with
+  the field's path and a message such as `radios is not an editor input for
+  this field (use one of: tags, checkboxes)`, and nothing is written. Set `"widget"` to `null` or to one of the names the
+  message lists. The fields admin behaves differently on purpose: there, a
+  retype just drops the card that no longer applies.
+- **A file without the key resets widgets.** A file exported before field
+  widgets existed has no `"widget"`, and a key the file leaves out takes the
+  default, so importing it shows `~ post.kind: widget` for every field with a
+  chosen input and sets it back to the default. Export again from an upgraded
+  source.
+- **An older release refuses the key.** A file exported by a release with
+  widgets carries `"widget"` on every field, which an older release's import
+  reports as `unknown key(s) widget`. Upgrade the target before importing.
+
 ### What it does not carry
 
 - **Per-field role grants.** "Role X may read/write field Y" lives on roles and

@@ -496,7 +496,13 @@ agility of a live marketplace while staying compile-time-safe:
   part and cast as a map. A part with `type: "select"` carries an
   `options: [{value, label}]` list (blank choice first). An optional `description/0` is shown under the type
   picker once an admin selects the type, next to the core types' own
-  descriptions.
+  descriptions. A type that can be edited in more than one way (a number box
+  or stars) lists those ways with the optional `widgets/1` (`kiln_plugin`
+  1.4); admins then pick one per field under **Editor input**, and the type
+  reads the pick back with `Kiln.FieldType.widget/2` (see "Offering a choice
+  of editor input" under Plugins in
+  [extending-content.md](extending-content.md), and
+  [Choose how editors fill in a field](extending-content.md#choose-how-editors-fill-in-a-field)).
 
   A type that needs behaviour in the browser (an address type-ahead, a map
   picker) declares `input_hook/1` (#1918): the editor wraps its widget in an

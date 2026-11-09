@@ -17,7 +17,7 @@ UI" workflow, scoped to fields.
 
 - **Define**: `KilnCMS.CMS.FieldDefinition` rows describe each field
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
-  `allow_custom`, `format`, `option_labels`, `section`, `width`,
+  `allow_custom`, `format`, `option_labels`, `section`, `width`, `widget`,
   `target_type`, `target_types`, `multiple`, `min_items`, `max_items`,
   `max_sources`, `on_target_delete`, `inverse_label`, `inverse_name`,
   `schema_org_property`,
@@ -82,6 +82,15 @@ UI" workflow, scoped to fields.
   only: a link field or group sub-field is always `:full`. It is not part of
   the JSON:API or GraphQL field-definition shape; the schema export reports a
   narrower field as `x-kiln-width`.
+- **Editor input (`widget`)**: some fields can be filled in more than one
+  way — a single select as a dropdown, radio buttons or a row of buttons;
+  several terms as tags or checkboxes; plain text on several lines or one; one
+  reference by searching or from a dropdown list; a plugin type's own. The
+  field's `widget` names the admin's choice, `nil` being the type's default
+  (the input every field had before). Editor-only: what is stored, validated
+  and delivered is the same whichever input is chosen, and the schema export
+  reports a chosen one as `x-kiln-widget`. See
+  [Choose how editors fill in a field](#choose-how-editors-fill-in-a-field).
 - **Option labels**: a `:select` field's `options` are the stored values —
   often codes such as `transforming_phlegm` — and `option_labels` maps any of
   them to what an editor reads (`%{"transforming_phlegm" => "Transforming
@@ -1527,6 +1536,105 @@ The page lists the sections as they were when it loaded. A layout you set for
 a section another admin has since emptied (by renaming or deleting its last
 field) is not kept; reload to see the current list.
 
+### Choose how editors fill in a field
+
+A short list of choices reads better as radio buttons than as a dropdown, a
+code fits on one line, and a reference to one of a dozen records is quicker to
+pick from a list than to search for. Each field can say which input the
+content editor shows for it. You need the admin role.
+
+1. Open **Fields** (`/editor/fields`). Choose **Edit** on a field, or fill in
+   **Add a field** for a new one.
+2. Settle the settings the choice depends on first: the **Field type**,
+   **One choice** or **Several terms** for a select, **Plain text** under
+   **Editing** for a text field, the single-record choice for a relationship.
+   An **Editor input** group appears with a card for each input the field can
+   use, the default checked. If no such group appears, the field has no
+   choice (see the table below).
+3. Pick a card:
+
+   | Field | Cards (default first) | Stored `widget` |
+   |---|---|---|
+   | Select, **One choice** | **Dropdown**, **Radio buttons**, **Buttons** (a row of segments) | `dropdown`, `radios`, `buttons` |
+   | Select, **Several terms** | **Tags**, **Checkboxes** | `tags`, `checkboxes` |
+   | Text, **Plain text** | **Several lines**, **One line** | `textarea`, `single_line` |
+   | A relationship to one record | **Search as you type**, **Dropdown list** | `autocomplete`, `dropdown` |
+   | A plugin field type that offers inputs | the plugin's own labels | the plugin's names |
+
+   Formatted (rich) text, a list of references, every other type, a
+   relationship's link fields and a group's sub-fields have no choice.
+4. Save (**Add field** or **Save**). In the list of fields, the field's row
+   now carries a badge naming its input (for example *Radio buttons*). The
+   default input has no badge.
+5. Open a record of that type in the editor. Under **Custom fields**, the
+   field uses the input you chose.
+
+The same field as a code interface call:
+
+```elixir
+CMS.create_field_definition!(%{
+  content_type: :post, name: "mood", label: "Mood",
+  field_type: :select, options: ~w(calm bright stormy), widget: "radios"
+}, actor: admin)
+```
+
+`widget` is a string; leave it out (or `nil`) for the type's default. It reads
+back as `widget` on a field definition in `?include=field_definitions`
+([json-api.md](json-api.md)) and in the field sync file
+([field-sync.md](field-sync.md)), and the schema export (`GET /api/schema`)
+adds `"x-kiln-widget": "radios"` to a field whose stored input it still offers.
+A field with no `widget` stored carries no annotation (the admin's default card
+stores none; a code interface call that names the default stores it). In code, read the input a field
+actually uses with `KilnCMS.CMS.FieldWidgets.resolve/1`, not the attribute.
+
+What to know before relying on it:
+
+- **Only the editor changes.** The value, its validation, its delivery and
+  the API are the same whichever input is chosen, so you can switch inputs on
+  a field that already holds data.
+- **Checkboxes save in option order.** The editor posts the ticked boxes in
+  the order they are drawn, so saving a record stores its terms in the
+  field's option order, whatever order they were in before. Tags keep the
+  order the editor arranges.
+- **Checkboxes and new terms exclude each other.** Checkboxes draw only the
+  field's options. While **Editors can add new terms** is ticked, the
+  Checkboxes card is disabled (*Not while editors can add new terms.*); while
+  Checkboxes is chosen, the new-terms box is disabled (*Checkboxes show only
+  the options. Pick Tags as the editor input to allow new terms.*).
+- **Over 50 options, the editor keeps the default.** Radio buttons, buttons
+  and checkboxes draw one input per option, so on a field with more than 50
+  options the editor shows the dropdown (or the tags) instead. The fields admin
+  says so on those cards (*Over 50 options — the editor shows a dropdown
+  instead.*). The stored choice is kept and applies again if options are
+  removed.
+- **Values the options no longer hold stay visible.** A stored value that is
+  not among the options shows as its own radio or checkbox, already checked,
+  so saving without touching the field keeps it. An optional radio group also
+  has a *— None —* radio; a required one does not.
+- **One line keeps line breaks.** A value that already holds a line break
+  opens in the several-lines box, so saving it does not drop the breaks.
+- **The reference dropdown lists what you can read.** It lists the target
+  records you could find by searching, on this site only, sorted by title and
+  grouped by type when the field allows several types; *— None —* clears the
+  pick. It lists at most 100 records across all target types: past that the
+  editor keeps the search box and says *Too many to list — search instead.* A
+  target that already has as many links as the field allows (**Each … can be
+  linked from…**, `max_sources`) is listed but disabled. The current pick is always listed, as *Unavailable* when you can't
+  read it. The list is read when the editor opens, so a record created
+  elsewhere since appears after a reload; one you create with **Add new** is
+  picked straight away.
+- **Changing the field's settings resets the input.** A new type, switching
+  to **Several terms**, **Formatted text**, or allowing new terms changes the
+  cards, and a stored input the field no longer offers goes back to the
+  default when you save. A write that names an input itself (a code interface
+  call, a field sync import) is refused instead, with one of these messages:
+
+| Message | Meaning |
+|---|---|
+| `<name> is not an editor input for this field (use one of: …)` | The field's type and settings don't offer that input. |
+| `this field has no choice of editor input` | The field takes no widget at all (rich text, a list of references, a link field or group sub-field, most types). Send `nil`. |
+| `checkboxes can't take terms of their own: use tags, or turn off new terms` | `checkboxes` on a select with `allow_custom: true`. |
+
 ## 2. Relations that carry data
 
 `KilnCMS.CMS.ContentLink` links any two content records by id with a named
@@ -1808,6 +1916,47 @@ its own `GeolocationValue`). Leave it out for a map, a list or any mixed shape: 
 `JsonValue`, and a `multiple` field is always a `ListValue` of its kind. An
 unrecognised answer is also treated as `:json`. The kinds are fixed in the
 core, so this is a choice among them, not a way to add a GraphQL type.
+
+**Offering a choice of editor input.** A plugin `Kiln.FieldType` that can be
+edited in more than one way lists those ways with the optional `widgets/1`
+(from `kiln_plugin` 1.4, `{:kiln_plugin, "~> 1.4"}`), the default first. The
+fields admin offers them as the field's **Editor input** cards (see
+[Choose how editors fill in a field](#choose-how-editors-fill-in-a-field)) and
+stores the pick as a string in the definition's `widget`. Only the editor
+reads it, so the type renders the difference itself, by asking
+`Kiln.FieldType.widget/2` inside `input_attrs/1`, `input_parts/1` or
+`input_hook/1`:
+
+```elixir
+@impl Kiln.FieldType
+def widgets(_definition), do: [:number, {:stars, "Stars"}]
+
+@impl Kiln.FieldType
+def input_attrs(definition) do
+  case Kiln.FieldType.widget(definition, __MODULE__) do
+    "stars" -> %{min: 1, max: 5, "data-widget": "stars"}
+    _number -> %{min: 1, max: 5}
+  end
+end
+```
+
+- An entry is a machine-name atom (lowercase letters, digits and
+  underscores, starting with a letter) or `{name, "Label"}`. A name without a
+  label is shown humanized (`:number` → *Number*). Fewer than two entries
+  offer no choice.
+- `widgets/1` receives the definition as it is about to be saved, so it can
+  answer differently for a `multiple` field.
+- `use Kiln.FieldType` does not define it: the host checks whether the module
+  exports it, and a default would have every type claim a choice.
+- `input_type/0` takes no definition, so a widget cannot change the input's
+  HTML `type`; vary its attributes, parts or hook instead.
+- The host never lets a plugin fail a save or the editor: a `widgets/1` that
+  raises offers no choice, and a malformed or repeated entry is dropped.
+  `mix kiln.plugins.doctor` names both.
+- `cast/2`, storage and delivery are the same whichever widget is chosen. A
+  widget a later version of the plugin stops offering falls back to the
+  first, and the stored name is cleared the next time an admin saves the
+  field.
 
 **Full-text search needs one migration per type.** The `:search` action
 filters on a trigger-maintained `search_vector` column that is not an Ash

@@ -125,6 +125,16 @@ defmodule Kiln.FieldType do
   `data-config` is rendered into the page — never put a secret in
   `c:input_hook/1`'s `data`.
 
+  ## A choice of editor input
+
+  A type that can be edited in more than one way (a rating as a number box or
+  as stars) lists those ways with `c:widgets/1`, the default first. The
+  fields admin then offers them under "Editor input", and the admin's pick is
+  stored on the field definition as a string. Only the editor reads it: read
+  it back with `widget/2` inside `c:input_attrs/1`, `c:input_parts/1` or
+  `c:input_hook/1` and render the difference there. `c:input_type/0` takes no
+  definition, so a widget cannot change the HTML `type` of the input.
+
   ## Built-in types
 
   `:geolocation`, `:computed`, `:datetime_range`, `:recurrence` and the format
@@ -290,6 +300,47 @@ defmodule Kiln.FieldType do
   """
   @callback graphql_kind(definition :: struct()) :: graphql_kind()
 
+  @typedoc """
+  One editor input a type offers (see `c:widgets/1`): a machine name, or a
+  name and the label the fields admin shows for it.
+  """
+  @type widget :: atom() | {atom(), String.t()}
+
+  @doc """
+  The editor inputs an admin may choose between for a field of this type
+  (kiln_cms#2284), the default first: `[:number, {:stars, "Stars"}]`.
+
+  The fields admin offers them as the field's "Editor input" and stores the
+  pick as a string on the definition (`widget`). Nothing else reads it:
+  `c:cast/2`, storage and delivery are the same whichever is chosen. The type
+  renders the difference itself, by asking `widget/2` inside `c:input_attrs/1`,
+  `c:input_parts/1` or `c:input_hook/1`:
+
+      @impl Kiln.FieldType
+      def widgets(_definition), do: [:number, {:stars, "Stars"}]
+
+      @impl Kiln.FieldType
+      def input_attrs(definition) do
+        case Kiln.FieldType.widget(definition, __MODULE__) do
+          "stars" -> %{min: 1, max: 5, "data-widget": "stars"}
+          _number -> %{min: 1, max: 5}
+        end
+      end
+
+  `c:input_type/0` takes no definition, so a widget cannot change the HTML
+  `type` of the input.
+
+  A name is a machine name (lowercase letters, digits and underscores,
+  starting with a letter) and a label a plain string; a name with no label is
+  shown humanized. `[]`, or one entry, offers no choice.
+  `mix kiln.plugins.doctor` checks the shape.
+
+  Optional, and not defaulted by `use Kiln.FieldType` (the host probes for it
+  with `function_exported?/3`): a type without it offers no choice. Added in
+  `kiln_plugin` 1.4.
+  """
+  @callback widgets(definition :: struct()) :: [widget()]
+
   @typedoc "A client hook for the field's editor widget: see `c:input_hook/1`."
   @type input_hook :: %{required(:hook) => String.t(), optional(:data) => map()}
 
@@ -335,6 +386,67 @@ defmodule Kiln.FieldType do
   def colocated_hook(module, name) when is_atom(module) and is_binary(name),
     do: "#{inspect(module)}.#{String.trim_leading(name, ".")}"
 
+  @doc ~S"""
+  The widget `definition` uses, out of the ones `module` offers through
+  `c:widgets/1`: the stored `widget` while `module` still offers it, else the
+  first one, else `nil` (a module without `c:widgets/1`, or one offering
+  none). Always a string, as the definition stores it.
+
+      iex> defmodule Doc.StarRating do
+      ...>   use Kiln.FieldType
+      ...>   def cast(value, _definition), do: {:ok, value}
+      ...>   def widgets(_definition), do: [:number, {:stars, "Stars"}]
+      ...> end
+      iex> Kiln.FieldType.widget(%{widget: "stars"}, Doc.StarRating)
+      "stars"
+      iex> Kiln.FieldType.widget(%{widget: nil}, Doc.StarRating)
+      "number"
+      iex> Kiln.FieldType.widget(%{widget: "dropped"}, Doc.StarRating)
+      "number"
+  """
+  @spec widget(map(), module()) :: String.t() | nil
+  def widget(definition, module) when is_map(definition) and is_atom(module) do
+    offered = offered_widgets(definition, module)
+
+    stored = Map.get(definition, :widget)
+    stored = if is_atom(stored) and not is_nil(stored), do: Atom.to_string(stored), else: stored
+
+    if stored in offered, do: stored, else: List.first(offered)
+  end
+
+  # Read the list exactly as the host does (`KilnCMS.CMS.FieldWidgets`): a
+  # malformed entry, a name that isn't a machine name, or a repeat is
+  # dropped, and a raise offers nothing. Otherwise the editor could render a
+  # different default from the one the fields admin shows as chosen.
+  defp offered_widgets(definition, module) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :widgets, 1),
+      do: definition |> module.widgets() |> widget_names(),
+      else: []
+  rescue
+    _exception -> []
+  end
+
+  @widget_name ~r/\A[a-z][a-z0-9_]*\z/
+
+  defp widget_names(widgets) when is_list(widgets) do
+    widgets
+    |> Enum.flat_map(fn
+      {name, label} when is_atom(name) and is_binary(label) -> widget_name(name)
+      name when is_atom(name) -> widget_name(name)
+      _other -> []
+    end)
+    |> Enum.uniq()
+  end
+
+  defp widget_names(_widgets), do: []
+
+  defp widget_name(name) when name in [nil, true, false], do: []
+
+  defp widget_name(name) do
+    name = Atom.to_string(name)
+    if Regex.match?(@widget_name, name), do: [name], else: []
+  end
+
   # `input_parts/1`, `tokens/1` and `description/0` were added after this
   # contract shipped.
   # `use Kiln.FieldType` defaults them, but a plugin that hand-rolls
@@ -351,13 +463,16 @@ defmodule Kiln.FieldType do
   # `input_hook/1` (#1918) is the same story: defaulted to `nil` by `use`.
   # `handle_input_event/3` is not defaulted — the editor probes for it, and a
   # type without one answers its hook's events with an error.
+  # `widgets/1` (kiln_cms#2284) is not defaulted either: the host probes for
+  # it, and a default would have every type claim a choice of editor input.
   @optional_callbacks input_parts: 1,
                       tokens: 1,
                       json_schema: 1,
                       graphql_kind: 1,
                       description: 0,
                       input_hook: 1,
-                      handle_input_event: 3
+                      handle_input_event: 3,
+                      widgets: 1
 
   @doc ~S"""
   `Float.parse/1`, made total — the numeric parse a custom field type's

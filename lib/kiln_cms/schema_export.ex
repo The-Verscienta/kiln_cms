@@ -43,6 +43,7 @@ defmodule KilnCMS.SchemaExport do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldTypes
+  alias KilnCMS.CMS.FieldWidgets
   alias KilnCMS.CMS.ReverseFields
   alias KilnCMS.CMS.ScalarLists
   alias KilnCMS.Media
@@ -566,6 +567,7 @@ defmodule KilnCMS.SchemaExport do
     |> put_localization(Map.get(definition, :localization))
     |> put_section(Map.get(definition, :section), section_displays)
     |> put_width(Map.get(definition, :width))
+    |> put_widget(definition)
   end
 
   # A field's value constraints (#2276) as annotations, not as JSON Schema's
@@ -700,6 +702,23 @@ defmodule KilnCMS.SchemaExport do
     do: Map.put(schema, "x-kiln-width", to_string(width))
 
   defp put_width(schema, _full), do: schema
+
+  # The editor input a field was set to (#2284), for a client building its
+  # own form: absent while the field uses its type's default. Only while the
+  # field still offers it (`FieldWidgets.resolve/1`): a stored name a plugin
+  # has since dropped is never advertised, and the editor falls back to the
+  # default, which absence already says.
+  defp put_widget(schema, definition) do
+    case Map.get(definition, :widget) do
+      widget when is_binary(widget) ->
+        if FieldWidgets.resolve(definition) == widget,
+          do: Map.put(schema, "x-kiln-widget", widget),
+          else: schema
+
+      _default ->
+        schema
+    end
+  end
 
   # A typed list (`multiple` `:integer`, `:date`, `:email`, … — #2289): an
   # array whose items are the single field's schema without its `null`, so
