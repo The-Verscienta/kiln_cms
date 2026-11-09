@@ -657,6 +657,134 @@ carries the reasoning.
   - **API and export.** Field definitions carry `widget` on JSON:API (`?include=field_definitions`, and in `docs/api/openapi.json`) and in field-sync files. The schema export adds `x-kiln-widget` only to a field whose chosen widget it still offers. GraphQL does not expose field definitions and is unchanged.
   - **Plugins.** `Kiln.FieldType` gains the optional `widgets/1` (not defaulted by `use`) and `Kiln.FieldType.widget/2` to read the pick back inside `input_attrs/1`, `input_parts/1` or `input_hook/1` (`kiln_plugin` 1.4). `input_type/0` takes no definition, so a widget cannot change the input's HTML `type`. `mix kiln.plugins.doctor` reports a `widgets/1` that raises, returns a non-list, or lists a malformed or repeated name.
 
+<a id="challenge-provider-plugins"></a>
+
+- **A plugin can contribute a human-verification provider (#2249, third
+  part): `c:Kiln.Plugin.challenge_providers/0` and the
+  `Kiln.Challenge.Provider` contract, new in `kiln_plugin` 1.4. The operator
+  selects one by its id with `CHALLENGE_PROVIDER`, beside the built-in
+  `turnstile` and `recaptcha`.** Installing a provider changes nothing until
+  it is named. No migration.
+  - **Why a contract in the SDK.** The first part kept the provider
+    behaviour inside the core, where a plugin shipped as a Mix dependency
+    could not implement it (a dependency compiles before the core). Moving
+    it to `kiln_plugin` lets any plugin add one, and lets the core check
+    what a provider says before any of it reaches a page. Decision:
+    [ADR 0022](../decisions/0022-a-challenge-provider-is-a-plugin-contract-and-the-core-enforces-its-claims.md),
+    which partly supersedes
+    [ADR 0020](../decisions/0020-human-verification-is-deployment-wide-and-fails-open-only-within-the-sign-in-budget.md)'s
+    single built-in provider.
+  - **Checked once, used as data.** The named provider is resolved once per
+    node and checked with `Kiln.Challenge.Provider.conformance/1`: an
+    `https://` script covered by its own `script-src` source, CSP sources of
+    the form `https://host[:port][/path]` (no wildcards, keywords, quotes,
+    `;` or `,`), JSON render options that cannot set the site key or the
+    callbacks. Pages read only the memoised result, so a provider's
+    `widget/0` or `csp_sources/0` cannot slow or crash a request; only
+    `verify/2` runs per attempt, under the existing 3-second deadline. Within
+    1.x these rules only loosen.
+  - **Off, said loudly, when it can't be used.** An id no installed provider
+    answers to, a provider that fails the check, or one whose callbacks raise
+    leaves human verification off, exactly as an unset provider does: no
+    widget, no wider page policy. The boot log (and Sentry, source
+    `CHALLENGE_PROVIDER`) says so and lists the installed ids, and a log line
+    repeats it at most once a minute per node. `CHALLENGE_PROVIDER` is now
+    trimmed, lowercased and held to the id format (a lowercase letter, then
+    up to 31 of `a-z`, `0-9`, `_`) rather than to a fixed list. A built-in
+    id always resolves to the built-in.
+  - **The core enforces what the provider reports.** `verify/2` answers
+    `{:ok, %{hostname: ..., action: ...}}`, and `KilnCMS.Challenge.verify/4`
+    applies the hostname rule (a missing or foreign hostname is refused
+    while hostnames are checked, the default) and the action rule (present
+    and different is refused). A provider answering `:missing`,
+    `:malformed`, or any refusal the contract does not name is read as
+    `:invalid`, so it can never turn a bad token into one an outage would
+    admit; an unknown unavailable reason or an answer outside the contract
+    is a crash. Turnstile's own behaviour is unchanged.
+  - **Operators.** `mix kiln.plugins.doctor` runs the conformance check on
+    every installed provider, flags an id that collides with a built-in or
+    another plugin's, and, with `CHALLENGE_PROVIDER` set in its environment,
+    fails when no installed provider answers to it. `mix kiln.plugins.list`
+    and the System page's Plugins list count each plugin's providers, and
+    the System page marks the one in use. If a plugin's provider posts its
+    token under its own form field, Sentry's scrubber masks it, but the
+    request log cannot (Phoenix compiles `:filter_parameters` before the
+    plugins are read): the boot log warns (`challenge_response_fields`) and
+    the operator adds the field to `config :phoenix, :filter_parameters`.
+  - **Headless clients.** A form schema's `challenge` and a refused API
+    sign-in's `meta` gain `global`, `onload_param`, `render_options`,
+    `action_option`, `interactive` and `api` (always `"explicit_render"`
+    today), so a front end can draw any provider's widget with one piece of
+    code ([api.md](../api.md#draw-the-widget-in-your-own-front-end)).
+    Additive; the OpenAPI description of the sign-in `401` names them.
+    `@kiln-cms/client`'s
+    `FormChallenge` type gains the six as optional fields.
+  - **Developers.** New: `KilnCMS.Challenge.Registry` (the built-ins, then
+    every plugin's providers, then the `providers:` test seam),
+    `KilnCMS.Challenge.Siteverify` (the exchange Turnstile and reCAPTCHA
+    share), `KilnCMS.Challenge.headless_widget/1`,
+    `KilnCMS.Challenge.provider_problem/0` and `parse_provider_id/1`, and a
+    `challenge_providers` key in each `Kiln.Plugins.manifests/0` entry. The
+    core-internal `KilnCMS.Challenge.Provider` from the first part is gone. The browser
+    hook now draws whatever the widget data describes: render options, the
+    option the action goes under, a readiness callback (with a 10-second
+    timeout), and widgets without `remove`; markup rendered before this
+    release still gets Turnstile's behaviour. `sdk/fixtures/dep_plugin`
+    ships `KilnDepFixture.ChallengeProvider` as a worked example.
+  - Guide: [Use a provider from a plugin](../human-verification.md#use-a-provider-from-a-plugin);
+    for authors: *Human-verification providers* in
+    [Plugin extensibility](../plugin-extensibility.md).
+    Threat model:
+    [Human verification](../threat-model.md#human-verification-2249).
+
+<a id="recaptcha-provider"></a>
+
+- **Google reCAPTCHA v2, the "I'm not a robot" checkbox, is a second
+  built-in human-verification provider: `CHALLENGE_PROVIDER=recaptcha` with
+  a v2 checkbox site key and secret. Cloudflare Turnstile stays the
+  recommended one.** It works everywhere Turnstile does: adaptive sign-in
+  and registration, `POST /api/auth/sign_in` with `CHALLENGE_API_SIGN_IN`,
+  and forms that ask. No migration.
+  - **Why Turnstile stays recommended.** reCAPTCHA always asks for a click,
+    adds two origins to the page policy instead of one, binds no action to
+    its tokens, and reports a wrong secret as a bad token (below).
+  - **Page policy and egress.** The script loads from `www.recaptcha.net`,
+    never `www.google.com`, whose JSONP endpoints are a known way round a
+    strict `script-src`. While a check can be shown, `script-src` gains
+    `https://www.recaptcha.net/recaptcha/` and
+    `https://www.gstatic.com/recaptcha/`, and `frame-src` gains
+    `https://www.recaptcha.net/recaptcha/`; checked in a real browser on
+    `/sign-in`, `/register`, a form's page and its embed with no policy
+    violation. Tokens are verified at
+    `https://www.recaptcha.net/recaptcha/api/siteverify`, so an egress
+    allowlist needs that one host.
+  - **v2 only.** An answer that carries a `score` (a v3 or Enterprise key)
+    is refused, never admitted on a threshold Kiln would have to guess.
+  - **No action binding.** v2 tokens carry no action, so a token solved for
+    one of this deployment's checks can be spent once on another within its
+    two minutes. The hostname is still enforced.
+  - **A wrong secret refuses everyone.** Google answers a wrong secret with
+    `invalid-input-response`, the code for a bad token, so every check fails
+    (`result="invalid"` in `kiln_cms.challenge.verify.stop.count`) and the
+    "could not use its secret key" line never appears. That is the safe
+    direction, but check `CHALLENGE_SECRET_KEY` first when every reCAPTCHA
+    check fails.
+  - **On public forms** the checkbox is `interactive`: the first click on
+    submit without a token is stopped with "Complete the check above, then
+    send again.", and a second click sends (held for review, as before).
+    reCAPTCHA's widget adds `g-recaptcha-response` inside the form, which
+    `POST /forms/:slug` and `POST /api/forms/:slug` accept when
+    `_kiln_challenge` is empty. `g-recaptcha-response` is filtered from
+    request logs and scrubbed from error reports.
+  - **Testing.** Google's published test secret still verifies, reporting
+    the hostname `testkey.google.com`, which must then be in
+    `CHALLENGE_HOSTNAMES`. Its published test site key no longer renders
+    ("Invalid site key", checked 2026-11-09), so trying the widget needs a
+    real v2 key registered for the development hostname.
+  - Guide: [Turn on reCAPTCHA](../human-verification.md#turn-on-recaptcha).
+    Decision:
+    [ADR 0022](../decisions/0022-a-challenge-provider-is-a-plugin-contract-and-the-core-enforces-its-claims.md).
+
 <a id="form-human-verification"></a>
 
 - **A site admin can ask for a human-verification check (Cloudflare
@@ -806,9 +934,10 @@ carries the reasoning.
   - **Developers.** `:sign_in_with_password` and `:register_with_password`
     take an optional, sensitive `challenge_token` argument and may fail with
     `KilnCMS.Accounts.Errors.ChallengeRequired` (`reason` `:required`,
-    `:failed` or `:unavailable`). The provider behaviour,
-    `KilnCMS.Challenge.Provider`, is internal for now and not part of the
-    plugin SDK. `KilnCMS.Accounts.ThrottleStore` gains `peek/3` and
+    `:failed` or `:unavailable`). Providers implement
+    `Kiln.Challenge.Provider` from `kiln_plugin` 1.4, which a plugin can
+    contribute too (see [plugin providers](#challenge-provider-plugins)).
+    `KilnCMS.Accounts.ThrottleStore` gains `peek/3` and
     `refund/3`.
   - Guide: [Human verification](../human-verification.md). Threat model:
     [Human verification](../threat-model.md#human-verification-2249).

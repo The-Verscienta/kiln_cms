@@ -16989,7 +16989,7 @@
             "description": "Signed in — bearer token issued"
           },
           "401": {
-            "description": "Invalid email or password (`invalid_credentials`). Where the operator has turned on human verification for this endpoint, also `challenge_required` or `challenge_failed`, whose `meta` names the provider, `site_key`, `script_url` and `action` to draw the widget with; retry with `challenge_token`."
+            "description": "Invalid email or password (`invalid_credentials`). Where the operator has turned on human verification for this endpoint, also `challenge_required` or `challenge_failed`, whose `meta` names the provider, `site_key`, `script_url`, `global`, `onload_param`, `render_options`, `action` and `action_option`, `interactive` and `api` to draw the widget with; retry with `challenge_token`."
           },
           "422": {
             "description": "Missing email or password"

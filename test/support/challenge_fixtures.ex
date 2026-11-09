@@ -25,8 +25,10 @@ defmodule KilnCMS.ChallengeFixtures do
 
     System.put_env(@secret_var, "test-secret")
 
-    # The outage flag is node-wide too: start each test without one.
+    # The outage flag is node-wide too: start each test without one. So is
+    # the memoised provider.
     KilnCMS.Challenge.clear_outage()
+    KilnCMS.Challenge.reset_cache()
 
     Application.put_env(
       :kiln_cms,
@@ -47,6 +49,7 @@ defmodule KilnCMS.ChallengeFixtures do
 
     ExUnit.Callbacks.on_exit(fn ->
       KilnCMS.Challenge.clear_outage()
+      KilnCMS.Challenge.reset_cache()
       Application.put_env(:kiln_cms, KilnCMS.Challenge, original)
       Application.put_env(:kiln_cms, KilnCMS.ChallengeFake, original_fake)
 

@@ -180,12 +180,18 @@ address, account, token or anything the provider echoed is ever in either.
   `:unavailable` (the provider could not be asked). A form never fails open
   or closed. A form that does not ask, a submission with a field error and a
   tripped honeypot emit nothing.
-- `:provider` -- `"turnstile"`.
-- `:result` -- `:passed`; a refusal: `:missing`, `:malformed`, `:invalid`,
-  `:expired`, `:hostname_mismatch`, `:action_mismatch`; or why the provider
-  could not be asked: `:timeout`, `:transport`, `:http_status`,
-  `:malformed_response`, `:not_configured` (the secret is unreadable or
-  Cloudflare rejected it), `:crashed`.
+- `:provider` -- the id the operator chose: `"turnstile"`, `"recaptcha"`,
+  or a plugin provider's id.
+- `:result` -- `:passed`; a refusal: `:missing` and `:malformed` (Kiln's own
+  check before the provider is asked), `:invalid`, `:expired`,
+  `:hostname_mismatch`, `:action_mismatch`; or why the provider could not be
+  asked: `:timeout`, `:transport`, `:http_status`, `:malformed_response`,
+  `:not_configured` (the secret is unreadable or the provider rejected it),
+  `:crashed`. A provider answering outside its contract is counted
+  conservatively: a refusal Kiln does not know is `:invalid`, and any other
+  unexpected answer is `:crashed`. With reCAPTCHA a wrong secret shows as
+  `:invalid`, not `:not_configured`: Google answers it with the code for a
+  bad token.
 
 Metrics, in [`KilnCMSWeb.Telemetry.metrics/0`](../lib/kiln_cms_web/telemetry.ex):
 
@@ -207,14 +213,29 @@ path again (submissions are being held, not admitted), and a steady
 human-verification token was solved on "www.example.org", which this
 deployment does not serve; it was held as spam. If that is your own site,
 add it to CHALLENGE_HOSTNAMES." at most once a minute per node, naming the
-host Cloudflare reported. A high `missing` share on a form usually means a
+host the provider reported. A high `missing` share on a form usually means a
 headless front end is not sending `_kiln_challenge`.
 `result="not_configured"` in the verify counter is the secret (wrong or
-unreadable); `timeout` or `transport` is the network path to
-`challenges.cloudflare.com`. Any `fail_closed` means password sign-in is being
+unreadable); `timeout` or `transport` is the network path to the provider
+(`challenges.cloudflare.com` for Turnstile, `www.recaptcha.net` for
+reCAPTCHA). With reCAPTCHA, `result="invalid"` on nearly every check, with
+no `passed`, points at a wrong secret first. Any `fail_closed` means password sign-in is being
 refused for some addresses, and the log says "Human verification is
 unavailable (...); refusing password sign-ins from client addresses past the
 failure threshold until the provider answers." at most once a minute per node.
+
+Configuration problems are reported at boot through `KilnCMS.Config.Report`
+(a log warning and a Sentry message, grouped by source), so a misnamed
+provider is visible before anyone signs in:
+
+| Sentry source | When |
+|---|---|
+| `CHALLENGE_PROVIDER` | `CHALLENGE_PROVIDER` is not a provider id ("CHALLENGE_PROVIDER is set to an unrecognized value ..."), names an id no installed provider answers to ("... but names no installed provider (installed: turnstile, recaptcha) ..."), or names a plugin provider that fails the provider contract ("... does not meet the provider contract: ..."). Human verification is off in all three. |
+| `challenge_response_fields` | An installed plugin's provider posts its token under a field the request log does not filter ("A human-verification provider posts its token as ..., which the request log does not filter: add it to config :phoenix, :filter_parameters."). Add it; see [Privacy](human-verification.md#privacy). |
+
+A missing site key or secret is not a boot warning: it is logged ("... has no
+site key (CHALLENGE_SITE_KEY) ...") at most once a minute per node, when a
+page first asks.
 
 ## Where the metrics go
 

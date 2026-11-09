@@ -193,8 +193,14 @@ them. A filled honeypot is discarded and still answers success, so never set
 it yourself.
 
 A form whose schema has a `"challenge"` asks for a human-verification check
-(Cloudflare Turnstile), which the visitor's browser has to draw. Relay its
-token untouched as `"_kiln_challenge"`; the result then carries
+(the operator's provider: Cloudflare Turnstile, Google reCAPTCHA v2 or a
+plugin's), which the visitor's browser has to draw from the schema's
+`"script_url"`, `"global"`, `"render_options"`, `"site_key"`,
+`"action_option"` and `"onload_param"` (see
+[Draw the widget in your own front end](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api.md#draw-the-widget-in-your-own-front-end)).
+Relay its token untouched as `"_kiln_challenge"` (a reCAPTCHA widget posts
+it as `"g-recaptcha-response"`, which the server also accepts); the result
+then carries
 `"challenge" => "verified"`, or `"held"` when the submission was stored for
 review instead of being acted on. A refused token is `reason: :validation`
 with `"_kiln_challenge"` in `KilnClient.Error.field_errors/1`. See

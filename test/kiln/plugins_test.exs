@@ -77,6 +77,16 @@ defmodule Kiln.PluginsTest do
     assert {:forward, "/fixture-forward", KilnDepFixture.FeedRouter, []} in Kiln.Plugins.plug_routes()
   end
 
+  test "manifests/0 lists a dependency plugin's challenge providers (#2249)" do
+    manifest = Enum.find(Kiln.Plugins.manifests(), &(&1.module == KilnDepFixture.Plugin))
+
+    assert manifest.challenge_providers == [KilnDepFixture.ChallengeProvider]
+    assert KilnDepFixture.ChallengeProvider in Kiln.Plugins.challenge_providers()
+
+    fixture = Enum.find(Kiln.Plugins.manifests(), &(&1.module == FixturePlugin))
+    assert fixture.challenge_providers == []
+  end
+
   describe "a plugin compiled against kiln_plugin before 1.4" do
     # No `plug_routes/0` at all: the behaviour is implemented by hand, as a
     # plugin built against the 1.3 package would be.
@@ -89,6 +99,11 @@ defmodule Kiln.PluginsTest do
       assert Kiln.Plugins.PlugRoute.of(NotLoadedAnywhere) == []
     end
 
+    test "contributes no challenge providers (#2249)" do
+      assert KilnCMS.Challenge.Registry.of_plugin(OldPlugin) == []
+      assert KilnCMS.Challenge.Registry.of_plugin(NotLoadedAnywhere) == []
+    end
+
     test "a plugin that never overrides the callback contributes none" do
       defmodule DefaultsPlugin do
         use Kiln.Plugin
@@ -96,6 +111,8 @@ defmodule Kiln.PluginsTest do
 
       assert DefaultsPlugin.plug_routes() == []
       assert Kiln.Plugins.PlugRoute.of(DefaultsPlugin) == []
+      assert DefaultsPlugin.challenge_providers() == []
+      assert KilnCMS.Challenge.Registry.of_plugin(DefaultsPlugin) == []
     end
   end
 
@@ -131,6 +148,11 @@ defmodule Kiln.PluginsTest do
                "1 editor route, 2 public routes"
 
       assert contributions(plug_routes: 1) == "1 plug route"
+    end
+
+    test "the contribution summary counts challenge providers" do
+      assert contributions(challenge_providers: [Captcha]) == "1 challenge provider"
+      assert contributions(challenge_providers: [Captcha, Other]) == "2 challenge providers"
     end
 
     test "the contribution summary counts advisories and spam checks" do
@@ -169,6 +191,7 @@ defmodule Kiln.PluginsTest do
           advisories: [],
           spam_checks: [],
           image_backends: [],
+          challenge_providers: [],
           nav_items: 0,
           admin_routes: 0,
           editor_routes: 0,
@@ -882,6 +905,85 @@ defmodule Kiln.PluginsTest do
                [KilnCMS.FixturePlugin],
                KilnCMS.FixturePlugin.ImageBackend
              ) == []
+    end
+
+    # #2249: the core turns verification off for a provider that fails the
+    # contract; the doctor says so before deploy, and names the id collisions
+    # the registry would resolve silently (a built-in always wins).
+    test "flags challenge providers that break the contract, collide, or aren't installed" do
+      defmodule NotAProvider do
+        def id, do: "not_a_provider"
+      end
+
+      defmodule WildcardProvider do
+        use Kiln.Challenge.Provider
+        def id, do: "wildcard"
+        def widget, do: %{script_url: "https://cdn.example/api.js", global: "w"}
+        def csp_sources, do: %{script_src: ["https://*.example"], frame_src: [], connect_src: []}
+        def verify(_token, _opts), do: {:error, :invalid}
+      end
+
+      defmodule ImpostorProvider do
+        use Kiln.Challenge.Provider
+        def id, do: "turnstile"
+        def widget, do: %{script_url: "https://cdn.example/api.js", global: "t"}
+
+        def csp_sources,
+          do: %{script_src: ["https://cdn.example"], frame_src: [], connect_src: []}
+
+        def verify(_token, _opts), do: {:error, :invalid}
+      end
+
+      defmodule TwinProvider do
+        use Kiln.Challenge.Provider
+        def id, do: "dep_fixture"
+        def widget, do: %{script_url: "https://cdn.example/api.js", global: "t"}
+
+        def csp_sources,
+          do: %{script_src: ["https://cdn.example"], frame_src: [], connect_src: []}
+
+        def verify(_token, _opts), do: {:error, :invalid}
+      end
+
+      defmodule ProviderPlugin do
+        use Kiln.Plugin
+
+        def challenge_providers,
+          do: [
+            NotAProvider,
+            WildcardProvider,
+            ImpostorProvider,
+            TwinProvider,
+            {WildcardProvider, []}
+          ]
+      end
+
+      alias Mix.Tasks.Kiln.Plugins.Doctor
+
+      problems = Doctor.challenge_provider_problems([KilnDepFixture.Plugin, ProviderPlugin], nil)
+
+      assert Enum.any?(
+               problems,
+               &(&1 =~ "NotAProvider: " and &1 =~ "does not implement Kiln.Challenge.Provider")
+             )
+
+      assert Enum.any?(problems, &(&1 =~ ~s(WildcardProvider: csp_sources/0 script_src entry)))
+      assert Enum.any?(problems, &(&1 =~ ~s(takes the id "turnstile", which is a built-in's)))
+      assert Enum.any?(problems, &(&1 =~ ~s(id "dep_fixture" is declared by more than one)))
+
+      # An entry that is not a module is named, not silently dropped.
+      assert Enum.any?(
+               problems,
+               &(&1 =~
+                   "challenge_providers/0 entry {Kiln.PluginsTest.WildcardProvider, []} is not a module")
+             )
+
+      # The operator's selection must be installed; a built-in always is.
+      assert [problem] = Doctor.challenge_provider_problems([KilnDepFixture.Plugin], "nope")
+      assert problem =~ ~s(CHALLENGE_PROVIDER names "nope")
+      assert Doctor.challenge_provider_problems([KilnDepFixture.Plugin], "recaptcha") == []
+      assert Doctor.challenge_provider_problems([KilnDepFixture.Plugin], "dep_fixture") == []
+      assert Doctor.challenge_provider_problems([FixturePlugin], nil) == []
     end
 
     # #937: `test/kiln/block/json_schema_test.exs` proves the *core* render/schema

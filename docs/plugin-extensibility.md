@@ -93,7 +93,7 @@ what it contributes:
 
 | Shape | How it's installed | What it can contribute |
 |---|---|---|
-| **Mix dependency** — Hex, `git:` or `path:` | Depends on [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md), the package the plugin contract ships in (#1909); the site lists it in the overlay's `config/project_deps.exs` (#1967) | Blocks, field types (no colocated client hooks), spam checks, advisory checks, image backends, nav items, supervision children, Oban queues; routes only to a LiveView that doesn't `use KilnCMSWeb`; plug routes (`plug_routes/0`, from `kiln_plugin` 1.4) to any Plug, needing only `plug` |
+| **Mix dependency** — Hex, `git:` or `path:` | Depends on [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md), the package the plugin contract ships in (#1909); the site lists it in the overlay's `config/project_deps.exs` (#1967) | Blocks, field types (no colocated client hooks), spam checks, advisory checks, image backends, human-verification providers (`challenge_providers/0`, from `kiln_plugin` 1.4), nav items, supervision children, Oban queues; routes only to a LiveView that doesn't `use KilnCMSWeb`; plug routes (`plug_routes/0`, from `kiln_plugin` 1.4) to any Plug, needing only `plug` |
 | **`projects/<name>/` overlay** | Vendored into the overlay and compiled inside the core | Everything above, plus content types (`KilnCMS.CMS.Content`), Ash domains, and LiveViews built on `KilnCMSWeb` |
 
 A dependency compiles before the core and sees only its own dependencies, so
@@ -326,6 +326,123 @@ This is `KilnDepFixture.HookPlug`'s `:webhook` action in
 `test/kiln_cms_web/plugin_plug_routes_test.exs`: a signed delivery on a
 non-default org host, a redelivery, a wrong, missing or re-serialised
 signature, the wrong tenant, and an unconfigured hook.
+
+#### Human-verification providers (#2249)
+
+The operator's sign-in, registration and form checks
+([human-verification.md](human-verification.md)) are drawn by one provider:
+Turnstile and reCAPTCHA v2 are built in, and a plugin can add another with
+`challenge_providers/0` (`kiln_plugin` 1.4; require `{:kiln_plugin, "~> 1.4"}`).
+It works from a Mix dependency: the contract, `Kiln.Challenge.Provider`, is
+in the SDK, and the provider reaches its verification endpoint through a
+`:post` function the core hands it, so it needs no HTTP client.
+
+```elixir
+# The plugin's entry module
+@impl Kiln.Plugin
+def challenge_providers, do: [MyCaptcha.Provider]
+```
+
+```elixir
+defmodule MyCaptcha.Provider do
+  use Kiln.Challenge.Provider
+
+  @origin "https://captcha.example.com"
+
+  @impl Kiln.Challenge.Provider
+  def id, do: "my_captcha"
+
+  @impl Kiln.Challenge.Provider
+  def label, do: "My Captcha"
+
+  # Read once per node, never per request: return constants.
+  @impl Kiln.Challenge.Provider
+  def widget,
+    do: %{
+      script_url: @origin <> "/v1/api.js?render=explicit",
+      global: "myCaptcha",
+      action_option: "action",
+      response_field: "my-captcha-response"
+    }
+
+  @impl Kiln.Challenge.Provider
+  def csp_sources, do: %{script_src: [@origin <> "/v1/"], frame_src: [@origin], connect_src: []}
+
+  @impl Kiln.Challenge.Provider
+  def verify(token, opts) do
+    post = Keyword.fetch!(opts, :post)
+
+    case post.(@origin <> "/v1/verify", [{"secret", opts[:secret]}, {"response", token}]) do
+      {:ok, %{status: 200, body: body}} -> judge(Jason.decode(body))
+      {:ok, %{status: status}} when status == 429 or status >= 500 ->
+        {:error, {:unavailable, :http_status}}
+      {:ok, _refused} -> {:error, :invalid}
+      {:error, :timeout} -> {:error, {:unavailable, :timeout}}
+      {:error, _transport} -> {:error, {:unavailable, :transport}}
+    end
+  end
+
+  # Report where the token was solved; the core decides whether that counts.
+  defp judge({:ok, %{"success" => true} = answer}),
+    do: {:ok, %{hostname: answer["hostname"], action: answer["action"]}}
+
+  defp judge({:ok, %{"success" => false}}), do: {:error, :invalid}
+  defp judge(_not_json), do: {:error, {:unavailable, :malformed_response}}
+end
+```
+
+(`judge/1` decodes with Jason, which the plugin then depends on; any JSON
+library will do.) `sdk/fixtures/dep_plugin` has a worked provider,
+`KilnDepFixture.ChallengeProvider`, which the core's suite resolves and
+verifies through the real transport.
+
+What the core does with it:
+
+- **Nothing until it is named.** The operator selects a provider with
+  `CHALLENGE_PROVIDER=<id>`. The id is a lowercase letter, then up to 31 of
+  `a-z`, `0-9` and `_`. A built-in's id (`turnstile`, `recaptcha`) always
+  means the built-in, and two plugins should not share an id.
+- **Checked once, then used as data.** The first time the named provider is
+  needed on a node, the core runs `Kiln.Challenge.Provider.conformance/1`
+  and memoises the result. Pages read only that: `id/0`, `label/0`,
+  `widget/0` and `csp_sources/0` are never called on a request, so they must
+  return constants. A provider that fails the check, or raises, leaves human
+  verification **off** with a boot warning. Assert it in your own tests:
+  `assert Kiln.Challenge.Provider.conformance(MyCaptcha.Provider) == :ok`.
+- **The page policy.** `csp_sources/0` is added to the sign-in pages' policy
+  and to every response that draws a form's widget, only while a check can
+  be shown. Each source must be `https://host[:port][/path]` (no wildcards,
+  keywords or quotes), and `script_url` must be covered by one of the
+  `script_src` entries. Keep them as narrow as the widget allows: path-scope
+  them when you can.
+- **The browser half is data.** The core's own `Challenge` hook draws every
+  provider the same way (`render(element, options)` on `global`), steered by
+  `widget/0`'s `render_options`, `action_option`, `onload_param` and
+  `interactive`. Headless front ends get the same fields from the API
+  ([api.md](api.md#draw-the-widget-in-your-own-front-end)). The moduledoc of
+  `Kiln.Challenge.Provider` describes every key.
+- **The core enforces your claims.** Return `{:ok, %{hostname: ..., action:
+  ...}}` with what your service reported. The core refuses a missing or
+  foreign hostname while hostnames are checked (the default), and an action
+  that is present and differs. A refusal must be one of `:invalid`,
+  `:expired`, `:hostname_mismatch` or `:action_mismatch`; anything else,
+  `:missing` and `:malformed` included, is read as `:invalid`. Report
+  `{:unavailable, reason}` only when your service really could not answer:
+  that is the one answer that can let a sign-in through, within the core's
+  bounds.
+- **Logs.** If your widget's own markup posts the token under a field
+  (`response_field`), the core reads it as a fallback on form submissions
+  and scrubs it from Sentry. It cannot add it to Phoenix's request-log
+  filter at run time, so the operator gets a boot warning to add it; say so
+  in your plugin's README.
+- **Before deploying.** `mix kiln.plugins.doctor` runs the conformance check
+  on every installed provider, flags an id that collides with a built-in or
+  another plugin's, and, with `CHALLENGE_PROVIDER` set in its environment,
+  checks that some installed provider answers to it. `mix kiln.plugins.list`
+  and the System page count each plugin's providers.
+
+A plugin built against `kiln_plugin` older than 1.4 has no
+`challenge_providers/0`; the core treats it as declaring none.
 
 ### 2b. Catalog metadata (the "registry")
 

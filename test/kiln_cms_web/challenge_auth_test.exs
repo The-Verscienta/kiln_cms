@@ -431,7 +431,13 @@ defmodule KilnCMSWeb.ChallengeAuthTest do
                "provider" => "fake",
                "site_key" => "test-site-key",
                "script_url" => "https://challenge.test/api.js?render=explicit",
-               "action" => "sign_in"
+               "action" => "sign_in",
+               "global" => "kilnFakeChallenge",
+               "onload_param" => nil,
+               "render_options" => %{"response-field" => false},
+               "action_option" => "action",
+               "interactive" => false,
+               "api" => "explicit_render"
              }
 
       conn =
@@ -509,6 +515,69 @@ defmodule KilnCMSWeb.ChallengeAuthTest do
     end
   end
 
+  describe "with reCAPTCHA (#2249)" do
+    setup do
+      # Google's test keys answer this hostname; an operator lists it in
+      # CHALLENGE_HOSTNAMES while using them.
+      enable!(provider: "recaptcha", hostnames: ["testkey.google.com"])
+      test = self()
+
+      Req.Test.stub(Challenge, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test, {:siteverify, conn.host, URI.decode_query(body)["response"]})
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.send_resp(200, ~s({"success": true, "hostname": "testkey.google.com"}))
+      end)
+
+      :ok
+    end
+
+    test "the page draws reCAPTCHA's widget, told to wait for its onload callback" do
+      {conn, _ip} = client_conn(build_conn())
+      {:ok, _view, html} = live(conn, ~p"/sign-in?challenge=1")
+
+      assert widget?(html)
+      assert html =~ ~s(data-global="grecaptcha")
+      assert html =~ ~s(data-onload-param="onload")
+      assert html =~ ~s(data-action-option="")
+      assert html =~ ~s(data-render-options="{}")
+    end
+
+    test "a sign-in carrying its token is verified at recaptcha.net and admitted" do
+      address = email()
+      user!(address)
+      attempts(address, Challenge.threshold(:account))
+      {conn, _ip} = client_conn(build_conn())
+      {:ok, view, _html} = live(conn, ~p"/sign-in")
+
+      view
+      |> form(@sign_in_form, user: %{email: address, password: @password})
+      |> render_submit(%{user: %{challenge_token: "rc-token"}})
+
+      assert_received {:siteverify, "www.recaptcha.net", "rc-token"}
+      assert AccountThrottle.sign_in_attempts(address) == 0
+    end
+
+    test "the form POST without a token is refused, never admitted" do
+      address = email()
+      user!(address)
+      attempts(address, Challenge.threshold(:account))
+      {conn, _ip} = client_conn(build_conn())
+
+      conn =
+        conn
+        |> Plug.Test.init_test_session(%{})
+        |> post(~p"/auth/user/password/sign_in", %{
+          "user" => %{"email" => address, "password" => @password}
+        })
+
+      assert redirected_to(conn) == "/sign-in?challenge=1"
+      refute_received {:siteverify, _, _}
+    end
+  end
+
   describe "logs" do
     # The request log and the LiveView event log both print params through
     # `Phoenix.Logger.filter_values/1` with the app's `:filter_parameters`.
@@ -530,6 +599,15 @@ defmodule KilnCMSWeb.ChallengeAuthTest do
 
       assert Phoenix.Logger.filter_values(params)["user"]["challenge_token"] == "[FILTERED]"
       assert Phoenix.Logger.filter_values(params)["cf-turnstile-response"] == "[FILTERED]"
+    end
+
+    test "never carry the field reCAPTCHA's own markup posts (#2249)" do
+      params = %{"g-recaptcha-response" => "secret-token-4", "email" => "a@example.com"}
+
+      assert Phoenix.Logger.filter_values(params) == %{
+               "g-recaptcha-response" => "[FILTERED]",
+               "email" => "a@example.com"
+             }
     end
 
     test "the LiveView event log filters the submitted token" do

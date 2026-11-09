@@ -20,6 +20,11 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       unique `name/0` — it is recorded on every image the backend holds — and
       the backend selected in `config :kiln_cms, :image_backend` is one an
       installed plugin declares;
+    * human-verification providers (#2249) pass
+      `Kiln.Challenge.Provider.conformance/1`, and their ids collide neither
+      with a built-in (`turnstile`, `recaptcha`, which always win) nor with
+      each other; when `CHALLENGE_PROVIDER` names a provider, one is
+      installed under that id;
     * nav paths and admin routes are well-formed (`/editor/...`);
     * plug routes (#2272) are well-formed `{verb, path, plug, opts}` /
       `{:forward, path, plug, opts}` tuples, take no first segment a core route
@@ -101,6 +106,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         queue_collisions(plugins) ++
         plug_route_problems(plugins) ++
         image_backend_problems(plugins, Application.get_env(:kiln_cms, :image_backend)) ++
+        challenge_provider_problems(plugins, selected_challenge_provider()) ++
         block_schema_problems(plugins, blocks_by_plugin) ++
         field_type_schema_problems(plugins, field_types_by_plugin) ++
         field_type_hook_problems(plugins, field_types_by_plugin) ++
@@ -620,6 +626,109 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
 
   defp usable_backend_name?(name),
     do: is_binary(name) and String.trim(name) != "" and String.length(name) <= 64
+
+  # ── human-verification providers (#2249) ───────────────────────────────────
+  #
+  # The core checks a provider the same way before it uses one, and turns
+  # verification off when it fails — safe, but silent until a page asks. This
+  # says so before deploy. A plugin id equal to a built-in's is a problem even
+  # though the built-in wins: the plugin's provider can never be selected.
+  @doc false
+  def challenge_provider_problems(plugins, selected) do
+    # The raw list, not the registry's tolerant reading of it: the registry
+    # drops an entry that is not a module, which is right at run time and
+    # exactly what an author needs to hear about here.
+    raw = for plugin <- plugins, do: {plugin, raw_challenge_providers(plugin)}
+
+    malformed =
+      for {plugin, {:error, message}} <- raw,
+          do: "#{plugin.name()}: challenge_providers/0 #{message}"
+
+    entries =
+      for {plugin, {:ok, list}} <- raw,
+          entry <- list,
+          do: {plugin, entry}
+
+    {declared, not_modules} = Enum.split_with(entries, fn {_plugin, entry} -> is_atom(entry) end)
+
+    malformed =
+      malformed ++
+        for {plugin, entry} <- not_modules do
+          "#{plugin.name()}: challenge_providers/0 entry #{inspect(entry)} is not a module"
+        end
+
+    conformance =
+      for {plugin, mod} <- declared,
+          {:error, problems} <- [Kiln.Challenge.Provider.conformance(mod)],
+          problem <- problems do
+        "#{plugin.name()}: challenge provider #{inspect(mod)}: #{problem}"
+      end
+
+    built_in_ids = Enum.map(KilnCMS.Challenge.Registry.built_in(), & &1.id())
+
+    named =
+      for {plugin, mod} <- Enum.uniq_by(declared, &elem(&1, 1)),
+          id <- [KilnCMS.Challenge.Registry.id_of(mod)],
+          is_binary(id),
+          do: {plugin, mod, id}
+
+    built_in_collisions =
+      for {plugin, mod, id} <- named, id in built_in_ids do
+        "#{plugin.name()}: challenge provider #{inspect(mod)} takes the id #{inspect(id)}, " <>
+          "which is a built-in's: it can never be selected"
+      end
+
+    collisions =
+      named
+      |> Enum.reject(fn {_plugin, _mod, id} -> id in built_in_ids end)
+      |> Enum.group_by(fn {_plugin, _mod, id} -> id end)
+      |> Enum.flat_map(fn
+        {_id, [_one]} ->
+          []
+
+        {id, _many} ->
+          ["challenge provider id #{inspect(id)} is declared by more than one module"]
+      end)
+
+    installed_ids = built_in_ids ++ Enum.map(named, fn {_plugin, _mod, id} -> id end)
+
+    malformed ++
+      conformance ++
+      built_in_collisions ++ collisions ++ selected_provider_problems(selected, installed_ids)
+  end
+
+  # `{:ok, list}`, or `{:error, why}` for a callback that raises or answers
+  # something other than a list; `{:ok, []}` for a plugin built against an
+  # SDK without the callback.
+  defp raw_challenge_providers(plugin) do
+    if Code.ensure_loaded?(plugin) and function_exported?(plugin, :challenge_providers, 0) do
+      case plugin.challenge_providers() do
+        list when is_list(list) -> {:ok, list}
+        other -> {:error, "must return a list, got #{inspect(other)}"}
+      end
+    else
+      {:ok, []}
+    end
+  rescue
+    error -> {:error, "raised: " <> Exception.message(error)}
+  end
+
+  defp selected_provider_problems(nil, _installed_ids), do: []
+
+  defp selected_provider_problems(id, installed_ids) do
+    if id in installed_ids,
+      do: [],
+      else: ["CHALLENGE_PROVIDER names #{inspect(id)}, which no installed provider answers to"]
+  end
+
+  # Only what the operator set: a provider configured in a config file is the
+  # project's own business, and an unset variable selects nothing.
+  defp selected_challenge_provider do
+    case KilnCMS.Challenge.parse_provider_id(System.get_env("CHALLENGE_PROVIDER")) do
+      {:ok, id} -> id
+      _unset_or_invalid -> nil
+    end
+  end
 
   # ── block :json render vs exported schema (#937) ───────────────────────────
   #

@@ -19,6 +19,14 @@ tagged `kiln_client-vX.Y.Z` in the
   `"_kiln_challenge"` in its field errors. Documentation only: the client
   passes both through unchanged, and servers older than this send neither.
 
+- **Any provider's widget (kiln_cms#2249):** the documented `"challenge"`
+  keys now include `"global"`, `"onload_param"`, `"render_options"`,
+  `"action_option"`, `"interactive"` and `"api"`, which describe how the
+  visitor's browser draws the operator's provider (Cloudflare Turnstile,
+  Google reCAPTCHA v2 or a plugin's). A server relaying a browser's
+  reCAPTCHA submission may find the token under `"g-recaptcha-response"`;
+  the server accepts it there too. Documentation only.
+
 ## 0.7.0
 
 ### Added

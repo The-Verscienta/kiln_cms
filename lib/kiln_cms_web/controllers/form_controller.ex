@@ -24,8 +24,8 @@ defmodule KilnCMSWeb.FormController do
 
   A form set to `challenge: :always` (and a deployment where forms may ask —
   `KilnCMS.Challenge.form_required?/2`) draws the provider's widget, and every
-  submission carries its token as `_kiln_challenge` (or the provider's own
-  `cf-turnstile-response`). `KilnCMS.Forms.submit/3` decides; here that
+  submission carries its token as `_kiln_challenge` (or the field the
+  provider's own markup posts, such as `g-recaptcha-response`). `KilnCMS.Forms.submit/3` decides; here that
   becomes:
 
     * the schema's `challenge` — `null`, or what a headless front end needs to
@@ -189,15 +189,11 @@ defmodule KilnCMSWeb.FormController do
 
     with true <- Challenge.form_required?(config, form),
          %{} = widget <- Challenge.widget(config, :form) do
-      %{
+      Map.merge(Challenge.headless_widget(widget), %{
         required: true,
-        provider: widget.provider,
-        site_key: widget.site_key,
-        script_url: widget.script_url,
-        action: widget.action,
         field: Forms.challenge_field(),
         without_token: "held"
-      }
+      })
     else
       _not_required -> nil
     end
