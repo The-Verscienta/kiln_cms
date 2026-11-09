@@ -779,6 +779,24 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("Content freshness, provenance and the audit record."),
             keywords: ["audit", "provenance", "witness", "freshness", "review cadence"]
           },
+          # Which security settings are on, and what to fix first (#2252):
+          # beside Governance, the other "how is this site doing" report.
+          %{
+            key: :security_posture,
+            label: gettext("Security posture"),
+            path: ~p"/editor/security-posture",
+            icon: "hero-check-badge",
+            description: gettext("Which security settings are on, and what to fix first."),
+            keywords: [
+              "security",
+              "posture",
+              "hardening",
+              "checklist",
+              "2fa",
+              "score",
+              "audit"
+            ]
+          },
           # Organization, not Delivery: who answers for the site's security is a
           # statement about the organization, served as a file (#1873).
           %{

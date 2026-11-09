@@ -53,13 +53,26 @@ defmodule KilnCMS.Accounts.PasswordPolicy do
   """
   @spec resolve(Accounts.Organization.t() | Ash.UUID.t() | nil, tier() | atom()) :: policy()
   def resolve(org, target_tier) do
+    case read(org, target_tier) do
+      {:ok, policy} -> policy
+      :error -> :warn
+    end
+  end
+
+  @doc """
+  `resolve/2`, telling an unreadable row (`:error`) apart from the `:warn`
+  `resolve/2` answers for it. For the Security posture page (#2252), which
+  must not report a setting it cannot see.
+  """
+  @spec read(Accounts.Organization.t() | Ash.UUID.t() | nil, tier() | atom()) ::
+          {:ok, policy()} | :error
+  def read(org, target_tier) do
     if BreachedPassword.enabled?() do
-      org
-      |> Accounts.org_id()
-      |> configured()
-      |> downgrade(target_tier)
+      with {:ok, policy} <- org |> Accounts.org_id() |> configured() do
+        {:ok, downgrade(policy, target_tier)}
+      end
     else
-      :off
+      {:ok, :off}
     end
   end
 
@@ -104,8 +117,8 @@ defmodule KilnCMS.Accounts.PasswordPolicy do
       )
 
     case resolved do
-      {_source, policy} -> policy
-      nil -> :warn
+      {_source, policy} -> {:ok, policy}
+      nil -> :error
     end
   end
 end

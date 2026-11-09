@@ -136,6 +136,31 @@ defmodule KilnCMS.Accounts.IdleTimeout do
 
   def policy(_no_org), do: off()
 
+  @doc """
+  The policy of `org_id` read now, uncached, telling an unreadable row
+  (`:error`) apart from "off": `policy/1` answers both `off/0`. For the
+  Security posture page (#2252), which must not report a timeout it cannot
+  see as one that is unset.
+  """
+  @spec read_policy(Ash.UUID.t()) :: {:ok, Policy.t()} | :error
+  def read_policy(org_id) when is_binary(org_id) do
+    actor = KilnCMS.OrgSettings.system(:accounts)
+
+    case KilnCMS.OrgSettings.resolve_uncached(org_id,
+           read:
+             &KilnCMS.CMS.list_site_session_policy(
+               tenant: &1,
+               actor: actor,
+               authorize_with: :error
+             ),
+           build: &from_row/1,
+           label: "session policy"
+         ) do
+      %Policy{} = policy -> {:ok, policy}
+      nil -> :error
+    end
+  end
+
   @doc "A `SiteSessionPolicy` row (or `nil`, no row) as a `Policy`."
   @spec from_row(struct() | nil) :: Policy.t()
   def from_row(nil), do: off()

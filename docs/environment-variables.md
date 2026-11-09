@@ -758,7 +758,10 @@ database credentials do not own. See
 ### upstream update check
 
 The admin system page (`/editor/system`) reports whether a newer Kiln release
-exists. The check is made only when an admin opens the page, and asks in two
+exists. The check is made only when an admin opens the page, or when a
+platform admin opens **Security posture** (`/editor/security-posture`) while
+no answer is cached; that page starts the same check in the background and
+does not wait for it. It asks in two
 legs (#1877): first the **release feed on kilncms.dev** — the public
 published-entries API every Kiln serves, filtered to its `release` entries —
 and, only if that fails in any way, the **GitHub releases API**. An outage of

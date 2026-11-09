@@ -159,6 +159,14 @@ defmodule KilnCMS.Application do
       # challenge gate or analytics, and they cannot crowd it out. A full
       # supervisor drops the request (`KilnCMS.Accounts.SignInUnlock`).
       {Task.Supervisor, name: KilnCMS.Accounts.SignInUnlock.TaskSupervisor, max_children: 20},
+      # Security posture checks (#2252), one task per check per page load, each
+      # under its own deadline. Apart from the shared supervisor so a page of
+      # slow plugin checks cannot crowd out analytics or the challenge gate; a
+      # full supervisor shows the check as busy (`Posture.Runner`).
+      {Task.Supervisor, name: KilnCMS.Security.Posture.TaskSupervisor, max_children: 50},
+      # Which posture reports are running, per site, so one site's pages can
+      # hold only a few of the slots above at once (`Posture.with_slot/2`).
+      {Registry, keys: :duplicate, name: KilnCMS.Security.Posture.Slots},
       KilnCMSWeb.Presence,
       KilnCMS.Collab.Locks,
       # Advisory field locks for the content editor (KilnCMS.Collab.FieldLock):

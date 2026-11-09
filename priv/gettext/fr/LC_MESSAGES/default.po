@@ -71,12 +71,26 @@ msgstr "%{comments} et %{tasks} sur ce bloc"
 msgid "%{comments} on this block"
 msgstr "%{comments} sur ce bloc"
 
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} OK"
+msgid_plural "%{count} OK"
+msgstr[0] "%{count} OK"
+msgstr[1] "%{count} OK"
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} a11y issue"
 msgid_plural "%{count} a11y issues"
 msgstr[0] "%{count} problème d'accessibilité"
 msgstr[1] "%{count} problèmes d'accessibilité"
+
+#: lib/kiln_cms/security/posture/checks/second_factor.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} administrator has no authenticator app. A passkey doesn't protect password sign-in."
+msgid_plural "%{count} administrators have no authenticator app. A passkey doesn't protect password sign-in."
+msgstr[0] "%{count} administrateur n'a pas d'application d'authentification. Une clé d'accès ne protège pas la connexion par mot de passe."
+msgstr[1] "%{count} administrateurs n'ont pas d'application d'authentification. Une clé d'accès ne protège pas la connexion par mot de passe."
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -127,6 +141,13 @@ msgid_plural "%{count} connected"
 msgstr[0] "%{count} relié"
 msgstr[1] "%{count} reliés"
 
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} could not run"
+msgid_plural "%{count} could not run"
+msgstr[0] "%{count} non exécutée"
+msgstr[1] "%{count} non exécutées"
+
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/backup_live.ex
@@ -174,6 +195,13 @@ msgstr "%{count} modification(s) depuis le dernier ancrage — prises en compte 
 #, elixir-autogen, elixir-format
 msgid "%{count} editing"
 msgstr "%{count} en train de modifier"
+
+#: lib/kiln_cms/security/posture/checks/second_factor.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} editor has no authenticator app."
+msgid_plural "%{count} editors have no authenticator app."
+msgstr[0] "%{count} éditeur n'a pas d'application d'authentification."
+msgstr[1] "%{count} éditeurs n'ont pas d'application d'authentification."
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -268,6 +296,13 @@ msgid_plural "%{count} items need your approval"
 msgstr[0] "%{count} élément nécessite votre approbation"
 msgstr[1] "%{count} éléments nécessitent votre approbation"
 
+#: lib/kiln_cms/security/posture/checks/api_keys.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} key can write content as an administrator."
+msgid_plural "%{count} keys can write content as an administrator."
+msgstr[0] "%{count} clé peut écrire du contenu en tant qu'administrateur."
+msgstr[1] "%{count} clés peuvent écrire du contenu en tant qu'administrateur."
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -303,6 +338,13 @@ msgstr[1] "%{count} de plus le %{date} — afficher la semaine"
 #, elixir-autogen, elixir-format
 msgid "%{count} ms"
 msgstr "%{count} ms"
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} not applicable"
+msgid_plural "%{count} not applicable"
+msgstr[0] "%{count} sans objet"
+msgstr[1] "%{count} sans objet"
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -371,6 +413,13 @@ msgid "%{count} part"
 msgid_plural "%{count} parts"
 msgstr[0] "%{count} partie"
 msgstr[1] "%{count} parties"
+
+#: lib/kiln_cms/security/posture/checks/operator_second_factor.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} platform administrator has no authenticator app."
+msgid_plural "%{count} platform administrators have no authenticator app."
+msgstr[0] "%{count} administrateur de la plateforme n'a pas d'application d'authentification."
+msgstr[1] "%{count} administrateurs de la plateforme n'ont pas d'application d'authentification."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -559,6 +608,27 @@ msgid_plural "%{count} terms"
 msgstr[0] "%{count} terme"
 msgstr[1] "%{count} termes"
 
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} to fix"
+msgid_plural "%{count} to fix"
+msgstr[0] "%{count} à corriger"
+msgstr[1] "%{count} à corriger"
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} to review"
+msgid_plural "%{count} to review"
+msgstr[0] "%{count} à examiner"
+msgstr[1] "%{count} à examiner"
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} unknown"
+msgid_plural "%{count} unknown"
+msgstr[0] "%{count} inconnue"
+msgstr[1] "%{count} inconnues"
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} unresolved comment"
@@ -577,6 +647,13 @@ msgstr[1] "%{count} discussions non résolues"
 #, elixir-autogen, elixir-format
 msgid "%{count} unused recovery codes remain."
 msgstr "Il reste %{count} codes de récupération inutilisés."
+
+#: lib/kiln_cms/security/posture/checks/api_keys.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} valid key, none of them an administrator's write key, old or long-lived."
+msgid_plural "%{count} valid keys, none of them an administrator's write key, old or long-lived."
+msgstr[0] "%{count} clé valide ; aucune n'est une clé d'écriture d'administrateur, ancienne ou de longue durée."
+msgstr[1] "%{count} clés valides ; aucune n'est une clé d'écriture d'administrateur, ancienne ou de longue durée."
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -1375,6 +1452,21 @@ msgstr "Une zone qui s'agrandit avec le texte."
 msgid "A box to tick beside every option."
 msgstr "Une case à cocher à côté de chaque option."
 
+#: lib/kiln_cms/security/posture/checks/breached_passwords.ex
+#, elixir-autogen, elixir-format
+msgid "A breached password is allowed with a warning, administrators included."
+msgstr "Un mot de passe divulgué est accepté avec un avertissement, administrateurs compris."
+
+#: lib/kiln_cms/security/posture/checks/breached_passwords.ex
+#, elixir-autogen, elixir-format
+msgid "A breached password is refused for administrators."
+msgstr "Un mot de passe divulgué est refusé aux administrateurs."
+
+#: lib/kiln_cms/security/posture/checks/idle_timeout.ex
+#, elixir-autogen, elixir-format
+msgid "A browser left signed in on a shared or lost computer stays signed in until someone signs it out."
+msgstr "Un navigateur resté connecté sur un ordinateur partagé ou perdu le reste jusqu'à ce que quelqu'un le déconnecte."
+
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "A browser that does nothing on this site for this long is signed out, even if it chose “remember me”. Reading a page, clicking or typing counts as activity; a tab left open does not."
@@ -1394,6 +1486,11 @@ msgstr "Une campagne a déjà été envoyée pour cette révision publiée."
 #, elixir-autogen, elixir-format
 msgid "A chain is taken as written."
 msgstr "Une chaîne est appliquée telle qu'elle est écrite."
+
+#: lib/kiln_cms/security/posture/checks/human_verification.ex
+#, elixir-autogen, elixir-format
+msgid "A challenge on suspicious sign-ins and registrations slows down password guessing and fake sign-ups."
+msgstr "Une vérification sur les connexions et inscriptions suspectes freine la devinette de mots de passe et les fausses inscriptions."
 
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #, elixir-autogen, elixir-format
@@ -1484,6 +1581,16 @@ msgstr "Un rôle supérieur qui expire de lui-même. Le rôle permanent ci-dessu
 #, elixir-autogen, elixir-format
 msgid "A higher tier on this site that expires on its own. The site tier above is untouched, so the elevation ends whether or not anything runs on time."
 msgstr "Un niveau supérieur sur ce site qui expire de lui-même. Le niveau du site ci-dessus reste inchangé : l'élévation cesse que quelque chose s'exécute à l'heure ou non."
+
+#: lib/kiln_cms/security/posture/checks/human_verification.ex
+#, elixir-autogen, elixir-format
+msgid "A human-verification provider is named but can't be used (check its id and keys)."
+msgstr "Un fournisseur de vérification humaine est indiqué mais inutilisable (vérifiez son identifiant et ses clés)."
+
+#: lib/kiln_cms/security/posture/checks/human_verification.ex
+#, elixir-autogen, elixir-format
+msgid "A human-verification provider is set up, but switched off for both sign-in and registration."
+msgstr "Un fournisseur de vérification humaine est configuré, mais désactivé pour la connexion comme pour l'inscription."
 
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
@@ -1579,6 +1686,11 @@ msgstr "Une page est atteinte"
 msgid "A passphrase is set. Leave blank to keep it."
 msgstr "Une phrase secrète est définie. Laissez vide pour la conserver."
 
+#: lib/kiln_cms/security/posture/checks/breached_passwords.ex
+#, elixir-autogen, elixir-format
+msgid "A password that has appeared in a breach is among the first an attacker tries. Refusing one for administrators closes that door."
+msgstr "Un mot de passe apparu dans une fuite est parmi les premiers qu'un attaquant essaie. Le refuser aux administrateurs ferme cette porte."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A person field is always private: only editors and admins see it."
@@ -1603,6 +1715,11 @@ msgstr "Un contenu appartient à une seule catégorie."
 #, elixir-autogen, elixir-format
 msgid "A plain box, stored exactly as typed — for a note or a code."
 msgstr "Une zone simple, enregistrée telle quelle — pour une note ou un code."
+
+#: lib/kiln_cms/security/posture/checks/operator_second_factor.ex
+#, elixir-autogen, elixir-format
+msgid "A platform administrator can change every site on this installation, and its users, keys and backups."
+msgstr "Un administrateur de la plateforme peut modifier tous les sites de cette installation, ainsi que ses utilisateurs, clés et sauvegardes."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -1728,6 +1845,11 @@ msgstr "Un intervalle entre deux nombres ou deux dates, chaque borne étant facu
 #, elixir-autogen, elixir-format
 msgid "A start and an end, in a time zone, optionally all day. A content type with one of these is an event and gets a calendar feed."
 msgstr "Un début et une fin, dans un fuseau horaire, éventuellement toute la journée. Un type de contenu qui en porte un est un événement et obtient un calendrier."
+
+#: lib/kiln_cms/security/posture/checks/second_factor.ex
+#, elixir-autogen, elixir-format
+msgid "A stolen or guessed password is enough to sign in to an account without an authenticator app. Administrators can change every setting on this page."
+msgstr "Un mot de passe volé ou deviné suffit pour se connecter à un compte sans application d'authentification. Les administrateurs peuvent modifier tous les réglages de cette page."
 
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -1891,6 +2013,7 @@ msgstr "Clé API créée — copiez-la maintenant, elle ne sera plus affichée."
 msgid "API key revoked"
 msgstr "Clé d'API révoquée"
 
+#: lib/kiln_cms/security/posture/checks/api_keys.ex
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -2585,6 +2708,7 @@ msgctxt "role"
 msgid "Admin"
 msgstr "Administrateur"
 
+#: lib/kiln_cms/security/posture/checks/admin_allowlist.ex
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format
@@ -2893,6 +3017,11 @@ msgstr "Texte alternatif — à laisser vide uniquement si l'image est décorati
 msgid "Always encrypted, and the server's certificate is always checked."
 msgstr "Toujours chiffré, et le certificat du serveur est toujours vérifié."
 
+#: lib/kiln_cms/security/posture/checks/api_keys.ex
+#, elixir-autogen, elixir-format
+msgid "An API key works without a password or a second factor, for as long as it is valid. Keep keys narrow and short-lived."
+msgstr "Une clé d'API fonctionne sans mot de passe ni second facteur tant qu'elle est valide. Gardez des clés restreintes et de courte durée."
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "An OpenAPI spec and a browsable API explorer"
@@ -3162,6 +3291,11 @@ msgstr "Téléversé par n'importe qui"
 #, elixir-autogen, elixir-format
 msgid "Anyone"
 msgstr "N’importe qui"
+
+#: lib/kiln_cms/security/posture/checks/exposed_endpoints.ex
+#, elixir-autogen, elixir-format
+msgid "Anyone who can reach the metrics port can read it."
+msgstr "Quiconque peut atteindre le port des métriques peut le lire."
 
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -3951,6 +4085,16 @@ msgstr "Personnalisation de marque réinitialisée aux valeurs par défaut du si
 msgid "Branding saved."
 msgstr "Personnalisation de marque enregistrée."
 
+#: lib/kiln_cms/security/posture/checks/breached_passwords.ex
+#, elixir-autogen, elixir-format
+msgid "Breached passwords"
+msgstr "Mots de passe divulgués"
+
+#: lib/kiln_cms/security/posture/checks/breached_passwords.ex
+#, elixir-autogen, elixir-format
+msgid "Breached-password checks are off for this installation (BREACHED_PASSWORD_CHECK=false)."
+msgstr "La vérification des mots de passe divulgués est désactivée pour cette installation (BREACHED_PASSWORD_CHECK=false)."
+
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "Broadcast an internal event"
@@ -3991,6 +4135,11 @@ msgstr "Navigateur"
 #, elixir-autogen, elixir-format
 msgid "Browsers"
 msgstr "Navigateurs"
+
+#: lib/kiln_cms/security/posture/checks/transport.ex
+#, elixir-autogen, elixir-format
+msgid "Browsers are not told to insist on HTTPS (HSTS)."
+msgstr "Les navigateurs ne sont pas invités à exiger HTTPS (HSTS)."
 
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
@@ -4400,6 +4549,11 @@ msgstr "Vérification effectuée, mais enregistrement des résultats impossible.
 #, elixir-autogen, elixir-format
 msgid "Checking for updates..."
 msgstr "Recherche de mises à jour…"
+
+#: lib/kiln_cms/security/posture/checks/release.ex
+#, elixir-autogen, elixir-format
+msgid "Checking for updates; reopen this page in a minute."
+msgstr "Recherche de mises à jour en cours ; rouvrez cette page dans une minute."
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/image_backend_live.ex
@@ -5395,10 +5549,20 @@ msgstr "Copiez cette clé maintenant — elle ne sera plus affichée."
 msgid "Copy value"
 msgstr "Copier la valeur"
 
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Could not run"
+msgstr "Non exécuté"
+
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Could not save. Please try again."
 msgstr "Enregistrement impossible. Veuillez réessayer."
+
+#: lib/kiln_cms/security/posture/checks/release.ex
+#, elixir-autogen, elixir-format
+msgid "Could not tell whether a newer release exists. Open System to check."
+msgstr "Impossible de savoir si une version plus récente existe. Ouvrez Système pour vérifier."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -6793,6 +6957,11 @@ msgstr "Description"
 msgid "Detached items"
 msgstr "Éléments détachés"
 
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Details"
+msgstr "Détails"
+
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Details for %{title}"
@@ -7818,6 +7987,11 @@ msgstr "URL du point de terminaison"
 msgid "Endpoints"
 msgstr "Points de terminaison"
 
+#: lib/kiln_cms/security/posture/checks/exposed_endpoints.ex
+#, elixir-autogen, elixir-format
+msgid "Endpoints that describe the API to anyone are on."
+msgstr "Des points d'accès qui décrivent l'API à n'importe qui sont activés."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Enter a current code to generate new recovery codes"
@@ -8028,10 +8202,20 @@ msgstr "Les événements sont conservés indéfiniment."
 msgid "Events marked “includes unpublished content” send the full body of drafts and embargoed documents. They are off by default: select them only if this receiver should see content before it is published."
 msgstr "Les événements marqués « inclut du contenu non publié » envoient le corps complet des brouillons et des documents sous embargo. Ils sont désactivés par défaut : sélectionnez-les seulement si ce destinataire doit voir le contenu avant sa publication."
 
+#: lib/kiln_cms/security/posture/checks/second_factor.ex
+#, elixir-autogen, elixir-format
+msgid "Every administrator and editor uses an authenticator app."
+msgstr "Tous les administrateurs et éditeurs utilisent une application d'authentification."
+
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every browser signed in to this site is signed out now, including “remember me” and sign-ins waiting for a two-factor code. Open pages go to the sign-in page. Other sites on this server are not affected."
 msgstr "Tous les navigateurs connectés à ce site sont déconnectés maintenant, y compris « se souvenir de moi » et les connexions en attente d’un code à deux facteurs. Les pages ouvertes passent à la page de connexion. Les autres sites de ce serveur ne sont pas concernés."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every check passed."
+msgstr "Toutes les vérifications sont réussies."
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -8062,6 +8246,11 @@ msgstr "Toutes les options visibles sous forme d'une rangée de boutons — pour
 #, elixir-autogen, elixir-format
 msgid "Every option on view, one per line."
 msgstr "Toutes les options visibles, une par ligne."
+
+#: lib/kiln_cms/security/posture/checks/operator_second_factor.ex
+#, elixir-autogen, elixir-format
+msgid "Every platform administrator uses an authenticator app."
+msgstr "Tous les administrateurs de la plateforme utilisent une application d'authentification."
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
@@ -8348,6 +8537,11 @@ msgstr "L'export de contenu nécessite un compte éditeur."
 #, elixir-autogen, elixir-format
 msgid "Exports the columns shown in the list."
 msgstr "Exporte les colonnes affichées dans la liste."
+
+#: lib/kiln_cms/security/posture/checks/exposed_endpoints.ex
+#, elixir-autogen, elixir-format
+msgid "Exposed endpoints"
+msgstr "Points d'accès exposés"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
@@ -8715,10 +8909,20 @@ msgstr "Première valeur"
 msgid "First value that isn't empty"
 msgstr "Première valeur non vide"
 
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Fix"
+msgstr "Corriger"
+
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "Fix it once. It's fixed everywhere, and you can prove it."
 msgstr "Corrigez une fois. C'est corrigé partout, et vous pouvez le prouver."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Fix now"
+msgstr "À corriger"
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -8981,6 +9185,11 @@ msgstr "Nom de l’expéditeur"
 #, elixir-autogen, elixir-format
 msgid "From path"
 msgstr "Chemin d'origine"
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "From the %{plugin} plugin"
+msgstr "De l'extension %{plugin}"
 
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
@@ -9269,6 +9478,11 @@ msgstr "Référence de l'API GraphQL"
 msgid "GraphQL and JSON:API, both generated from one content model"
 msgstr "GraphQL et JSON:API, tous deux générés à partir d'un seul modèle de contenu"
 
+#: lib/kiln_cms/security/posture/checks/exposed_endpoints.ex
+#, elixir-autogen, elixir-format
+msgid "GraphQL introspection is on."
+msgstr "L'introspection GraphQL est activée."
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "GraphQL schema (SDL)"
@@ -9323,6 +9537,16 @@ msgstr "HTTP"
 #, elixir-autogen, elixir-format
 msgid "HTTP %{status}"
 msgstr "HTTP %{status}"
+
+#: lib/kiln_cms/security/posture/checks/transport.ex
+#, elixir-autogen, elixir-format
+msgid "HTTPS and secure cookies"
+msgstr "HTTPS et cookies sécurisés"
+
+#: lib/kiln_cms/security/posture/checks/transport.ex
+#, elixir-autogen, elixir-format
+msgid "HTTPS is enforced, with HSTS and a Secure session cookie."
+msgstr "HTTPS est imposé, avec HSTS et un cookie de session Secure."
 
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
@@ -9702,6 +9926,16 @@ msgstr "Comment construire la formule"
 msgid "How your name appears to readers and to the people you work with."
 msgstr "La façon dont votre nom apparaît aux lecteurs et aux personnes avec qui vous travaillez."
 
+#: lib/kiln_cms/security/posture/checks/human_verification.ex
+#, elixir-autogen, elixir-format
+msgid "Human verification"
+msgstr "Vérification humaine"
+
+#: lib/kiln_cms/security/posture/checks/human_verification.ex
+#, elixir-autogen, elixir-format
+msgid "Human verification is turned off (KILN_CHALLENGE_DISABLED)."
+msgstr "La vérification humaine est désactivée (KILN_CHALLENGE_DISABLED)."
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Human verification isn't available on this deployment. Ask the operator to configure it."
@@ -9741,6 +9975,21 @@ msgstr "IPv4 ou IPv6, avec un /préfixe facultatif."
 #, elixir-autogen, elixir-format
 msgid "Identity"
 msgstr "Identité"
+
+#: lib/kiln_cms/security/posture/checks/idle_timeout.ex
+#, elixir-autogen, elixir-format
+msgid "Idle browsers are never signed out."
+msgstr "Les navigateurs inactifs ne sont jamais déconnectés."
+
+#: lib/kiln_cms/security/posture/checks/idle_timeout.ex
+#, elixir-autogen, elixir-format
+msgid "Idle browsers are signed out."
+msgstr "Les navigateurs inactifs sont déconnectés."
+
+#: lib/kiln_cms/security/posture/checks/idle_timeout.ex
+#, elixir-autogen, elixir-format
+msgid "Idle sign-out"
+msgstr "Déconnexion après inactivité"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -10434,6 +10683,11 @@ msgstr "Identifie la valeur de ce champ dans les envois. Les entrées déjà re�
 msgid "Keywords applied. The slug was left unchanged because this content is live."
 msgstr "Mots-clés appliqués. Le slug n'a pas été modifié car ce contenu est en ligne."
 
+#: lib/kiln_cms/security/posture/checks/release.ex
+#, elixir-autogen, elixir-format
+msgid "Kiln %{version} is available; this is %{current}."
+msgstr "Kiln %{version} est disponible ; celle-ci est la %{current}."
+
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format
 msgid "Kiln can't see your real address."
@@ -10449,6 +10703,7 @@ msgstr "Kiln voit l’adresse d’un proxy, pas la vôtre : un en-tête de trans
 msgid "Kiln posts at most once per document per account per publish, and never retries an announcement whose outcome was unclear — a duplicate post cannot be taken back."
 msgstr "Kiln publie au plus une fois par document, par compte et par publication, et ne réessaie jamais une annonce dont l'issue était incertaine : une publication en double ne peut pas être retirée."
 
+#: lib/kiln_cms/security/posture/checks/release.ex
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Kiln version"
@@ -10616,6 +10871,7 @@ msgstr "Disposition"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/governance_live.ex
+#: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
 msgid "Learn more"
 msgstr "En savoir plus"
@@ -11901,6 +12157,11 @@ msgstr "Nouveau le %{date}"
 msgid "New password"
 msgstr "Nouveau mot de passe"
 
+#: lib/kiln_cms/security/posture/checks/breached_passwords.ex
+#, elixir-autogen, elixir-format
+msgid "New passwords are not checked against known breaches."
+msgstr "Les nouveaux mots de passe ne sont pas comparés aux fuites connues."
+
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
 msgid "New position pending"
@@ -12026,6 +12287,11 @@ msgstr "Aucun %{type} avec ce slug et cette langue n'existe — vérifiez la cib
 msgid "No 404s recorded"
 msgstr "Aucun 404 enregistré"
 
+#: lib/kiln_cms/security/posture/checks/api_keys.ex
+#, elixir-autogen, elixir-format
+msgid "No API keys are valid."
+msgstr "Aucune clé d'API n'est valide."
+
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "No API keys yet"
@@ -12073,6 +12339,11 @@ msgstr "Aucun compte connecté pour l'instant."
 #, elixir-autogen, elixir-format
 msgid "No accounts match that."
 msgstr "Aucun compte ne correspond."
+
+#: lib/kiln_cms/security/posture/checks/admin_allowlist.ex
+#, elixir-autogen, elixir-format
+msgid "No admin allowlist (optional; useful when administrators sign in from fixed networks)."
+msgstr "Pas de liste d'accès administrateur (facultative ; utile quand les administrateurs se connectent depuis des réseaux fixes)."
 
 #: lib/kiln_cms/branding/app_icon.ex
 #, elixir-autogen, elixir-format
@@ -12322,6 +12593,11 @@ msgstr "Aucun titre — les pages longues se parcourent plus facilement lorsqu'e
 #, elixir-autogen, elixir-format
 msgid "No headings — there's no outline to navigate by, so the page can only be read start to finish."
 msgstr "Aucun titre — il n'y a pas de plan pour naviguer, la page ne peut donc être lue que du début à la fin."
+
+#: lib/kiln_cms/security/posture/checks/human_verification.ex
+#, elixir-autogen, elixir-format
+msgid "No human-verification provider is set up (CHALLENGE_PROVIDER)."
+msgstr "Aucun fournisseur de vérification humaine n'est configuré (CHALLENGE_PROVIDER)."
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -12797,6 +13073,11 @@ msgstr "Aucune — défini dans la configuration sans qu’une extension le déc
 msgid "Not a usable provider"
 msgstr "Fournisseur inutilisable"
 
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not applicable"
+msgstr "Sans objet"
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not available"
@@ -12940,6 +13221,11 @@ msgstr "Rien n’est encore associé."
 #, elixir-autogen, elixir-format
 msgid "Nothing connects to this record yet."
 msgstr "Rien n’est encore relié à cet enregistrement."
+
+#: lib/kiln_cms/security/posture/checks/exposed_endpoints.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing describes the installation to an outsider."
+msgstr "Rien ne décrit l'installation à un inconnu."
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
@@ -13156,6 +13442,11 @@ msgstr "Nombres"
 #, elixir-autogen, elixir-format
 msgid "Numbers added up."
 msgstr "Nombres additionnés."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "OK"
+msgstr "OK"
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
@@ -13409,6 +13700,13 @@ msgstr "Un-à-plusieurs : un chapitre appartient à un seul livre."
 msgid "One-way — the terms find the targets, not back"
 msgstr "À sens unique — les termes trouvent les cibles, pas l'inverse"
 
+#: lib/kiln_cms/security/posture/checks/admin_allowlist.ex
+#, elixir-autogen, elixir-format
+msgid "Only %{count} listed network can reach the console and sign-in."
+msgid_plural "Only %{count} listed networks can reach the console and sign-in."
+msgstr[0] "Seul %{count} réseau de la liste peut atteindre la console et la connexion."
+msgstr[1] "Seuls %{count} réseaux de la liste peuvent atteindre la console et la connexion."
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "Only %{count} words — pages under %{min} rarely rank well."
@@ -13458,6 +13756,11 @@ msgstr "Seul un administrateur peut renvoyer le contenu en brouillon."
 #, elixir-autogen, elixir-format
 msgid "Only an admin can unpublish content on this site."
 msgstr "Sur ce site, seul un administrateur peut dépublier du contenu."
+
+#: lib/kiln_cms/security/posture/checks/transport.ex
+#, elixir-autogen, elixir-format
+msgid "Only checked on production builds; this is a %{env} build."
+msgstr "Vérifié uniquement sur les builds de production ; celui-ci est un build %{env}."
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -14341,6 +14644,11 @@ msgstr "Texte indicatif"
 #, elixir-autogen, elixir-format
 msgid "Plain CSS, served inside a <style> element on every public page — no <style> tags here, and no HTML. Use it to go beyond the theme presets in Branding."
 msgstr "Du CSS pur, servi dans un élément <style> sur chaque page publique — pas de balises <style> ni de HTML ici. Utilisez-le pour aller au-delà des préréglages de thème de Marque."
+
+#: lib/kiln_cms/security/posture/checks/transport.ex
+#, elixir-autogen, elixir-format
+msgid "Plain HTTP requests are not redirected to HTTPS (force_ssl)."
+msgstr "Les requêtes HTTP non chiffrées ne sont pas redirigées vers HTTPS (force_ssl)."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -15954,6 +16262,11 @@ msgstr "Demander un nouveau lien"
 msgid "Request changes"
 msgstr "Demander des modifications"
 
+#: lib/kiln_cms/security/posture/checks/transport.ex
+#, elixir-autogen, elixir-format
+msgid "Requests or cookies can travel over plain HTTP."
+msgstr "Des requêtes ou des cookies peuvent circuler en HTTP non chiffré."
+
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
 msgid "Requests that don't say what they are."
@@ -16163,6 +16476,7 @@ msgid "Reverse DNS is set in your hosting provider's panel, not in your DNS zone
 msgstr "Le DNS inverse se configure dans le panneau de votre hébergeur, pas dans votre zone DNS."
 
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
 msgid "Review"
 msgstr "Relecture"
@@ -16445,6 +16759,11 @@ msgstr "Règles appliquées"
 msgid "Run a reaction when content is published, updated, or unpublished — email, an internal broadcast, cache invalidation, or a re-index. HTTP/Slack notifications are the Webhooks page's job."
 msgstr "Déclenchez une réaction lorsqu'un contenu est publié, mis à jour ou dépublié — e-mail, diffusion interne, invalidation du cache ou réindexation. Les notifications HTTP/Slack relèvent de la page Webhooks."
 
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Run checks again"
+msgstr "Relancer les vérifications"
+
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "Run it on your own servers"
@@ -16462,10 +16781,20 @@ msgstr "Lancer l’analyse sur ce contenu et transmettre ce qu’elle trouve. L�
 msgid "Running"
 msgstr "En cours"
 
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Running the checks…"
+msgstr "Vérifications en cours…"
+
 #: lib/kiln_cms_web/live/configure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Running the deployment, not just this site."
 msgstr "Gérer le déploiement, pas seulement ce site."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Running…"
+msgstr "En cours…"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -17120,11 +17449,22 @@ msgstr "Sections de %{type}"
 msgid "Security contact"
 msgstr "Contact sécurité"
 
+#: lib/kiln_cms/security/posture/checks/release.ex
+#, elixir-autogen, elixir-format
+msgid "Security fixes reach an installation only when it is updated."
+msgstr "Les correctifs de sécurité n'arrivent sur une installation que lorsqu'elle est mise à jour."
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Security log"
 msgstr "Journal de sécurité"
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Security posture"
+msgstr "État de la sécurité"
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
@@ -17511,6 +17851,11 @@ msgstr "Paramètres"
 #, elixir-autogen, elixir-format
 msgid "Settings & keys"
 msgstr "Paramètres et clés"
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Settings of the whole installation, shown to platform administrators only. Most are changed in the environment, not here."
+msgstr "Réglages de toute l'installation, visibles uniquement par les administrateurs de la plateforme. La plupart se modifient dans l'environnement, pas ici."
 
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -18213,10 +18558,20 @@ msgstr "Une partie du contenu n'a pas pu être comptée (%{types}) : les chiffre
 msgid "Some content could not be read and was not handled: %{types}."
 msgstr "Une partie du contenu n'a pas pu être lue et n'a pas été traitée : %{types}."
 
+#: lib/kiln_cms/security/posture/checks/api_keys.ex
+#, elixir-autogen, elixir-format
+msgid "Some keys are over 180 days old (their age stands in for last use, which keys don't record yet) or expire more than a year from now."
+msgstr "Certaines clés ont plus de 180 jours (leur âge tient lieu de dernière utilisation, que les clés n'enregistrent pas encore) ou expirent dans plus d'un an."
+
 #: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "Some notifications could not be marked read."
 msgstr "Certaines notifications n'ont pas pu être marquées comme lues."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Some settings are worth a look."
+msgstr "Certains réglages méritent un coup d'œil."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -18267,6 +18622,11 @@ msgstr "Quelqu’un modifie un bloc en ce moment. Réessayez la vue Markdown une
 #, elixir-autogen, elixir-format
 msgid "Something needs fixing"
 msgstr "Quelque chose est à corriger"
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Something needs fixing."
+msgstr "Quelque chose est à corriger."
 
 #: lib/kiln_cms_web/controllers/error_html/500.html.heex
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
@@ -18718,6 +19078,11 @@ msgstr "Soutenez ce site et accédez aux articles réservés aux membres."
 #, elixir-autogen, elixir-format
 msgid "Suppressed addresses"
 msgstr "Adresses bloquées"
+
+#: lib/kiln_cms/security/posture/checks/human_verification.ex
+#, elixir-autogen, elixir-format
+msgid "Suspicious sign-ins and registrations are asked to prove they're human."
+msgstr "Les connexions et inscriptions suspectes doivent prouver qu'elles sont humaines."
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -19486,6 +19851,16 @@ msgstr "Le compte d'IA et les modèles qu'utilisent les suggestions, l'assistant
 msgid "The AI provider could not be saved."
 msgstr "Le fournisseur d'IA n'a pas pu être enregistré."
 
+#: lib/kiln_cms/security/posture/checks/exposed_endpoints.ex
+#, elixir-autogen, elixir-format
+msgid "The API explorer and spec are served (api_docs)."
+msgstr "L'explorateur et la spécification de l'API sont servis (api_docs)."
+
+#: lib/kiln_cms/security/posture/checks/exposed_endpoints.ex
+#, elixir-autogen, elixir-format
+msgid "The API explorer, GraphQL introspection and an open metrics port each map the installation for an attacker."
+msgstr "L'explorateur d'API, l'introspection GraphQL et un port de métriques ouvert cartographient chacun l'installation pour un attaquant."
+
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
 msgid "The API root of a server that speaks OpenAI's chat completions. Must be https:// and publicly reachable."
@@ -19621,6 +19996,26 @@ msgstr "La modification n'a pas pu être enregistrée."
 #, elixir-autogen, elixir-format
 msgid "The check expired. Complete it again."
 msgstr "La vérification a expiré. Recommencez-la."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "The checks are already running for this site. Try again in a moment."
+msgstr "Les vérifications sont déjà en cours pour ce site. Réessayez dans un instant."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "The checks are already running."
+msgstr "Les vérifications sont déjà en cours."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "The checks could not be run. Try again in a moment."
+msgstr "Les vérifications n'ont pas pu être lancées. Réessayez dans un instant."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "The checks just ran. Try again in a few seconds."
+msgstr "Les vérifications viennent d'être lancées. Réessayez dans quelques secondes."
 
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
@@ -19974,6 +20369,11 @@ msgstr "Le serveur de messagerie n'a pas pu accepter le message pour l'instant. 
 msgid "The mail server refused the message. The server log has its reply."
 msgstr "Le serveur de messagerie a refusé le message. Le journal du serveur contient sa réponse."
 
+#: lib/kiln_cms/security/posture/checks/exposed_endpoints.ex
+#, elixir-autogen, elixir-format
+msgid "The metrics port listens on every interface with no token (KILN_METRICS_TOKEN)."
+msgstr "Le port des métriques écoute sur toutes les interfaces sans jeton (KILN_METRICS_TOKEN)."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "The model returned nothing usable. Try again, or rephrase your instruction."
@@ -20059,6 +20459,11 @@ msgstr "Le passage de propositions s'est arrêté de façon inattendue. Réessay
 #, elixir-autogen, elixir-format
 msgid "The provider's OpenID Connect issuer, exactly as its discovery document states it. Must be https://."
 msgstr "L'émetteur OpenID Connect du fournisseur, exactement comme l'indique son document de découverte. Doit être en https://."
+
+#: lib/kiln_cms/security/posture/checks/transport.ex
+#, elixir-autogen, elixir-format
+msgid "The public URL is not https."
+msgstr "L'URL publique n'est pas en https."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -20161,6 +20566,11 @@ msgstr "Le serveur autorise au maximum %{percent}% ici."
 msgid "The server's operator has turned it off for the whole deployment (BREACHED_PASSWORD_CHECK=false). No password is looked up, and this setting has no effect until they turn it back on."
 msgstr "L’exploitant du serveur l’a désactivée pour toute l’installation (BREACHED_PASSWORD_CHECK=false). Aucun mot de passe n’est vérifié et ce réglage n’a aucun effet tant qu’elle n’est pas réactivée."
 
+#: lib/kiln_cms/security/posture/checks/transport.ex
+#, elixir-autogen, elixir-format
+msgid "The session cookie is not marked Secure."
+msgstr "Le cookie de session n'est pas marqué Secure."
+
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "The session settings could not be saved."
@@ -20186,10 +20596,20 @@ msgstr "La pause de connexion de votre compte est levée. Il peut vous être dem
 msgid "The signing key could not be generated."
 msgstr "La clé de signature n’a pas pu être générée."
 
+#: lib/kiln_cms/security/posture/checks/admin_allowlist.ex
+#, elixir-autogen, elixir-format
+msgid "The site has an admin allowlist, but the operator's switch (KILN_ADMIN_ALLOWLIST_DISABLED) turns it off, so any network can reach the console."
+msgstr "Le site a une liste d'accès administrateur, mais l'interrupteur de l'opérateur (KILN_ADMIN_ALLOWLIST_DISABLED) la désactive : n'importe quel réseau peut atteindre la console."
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "The site tier governs this member's capability on THIS site (platform admins always retain access); custom roles and scopes refine it."
 msgstr "Le niveau du site détermine les capacités de ce membre sur CE site (les administrateurs de la plateforme conservent toujours leur accès) ; les rôles personnalisés et les portées l'affinent."
+
+#: lib/kiln_cms/security/posture/checks/admin_allowlist.ex
+#, elixir-autogen, elixir-format
+msgid "The site's admin allowlist could not be read."
+msgstr "La liste d'accès administrateur du site n'a pas pu être lue."
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
@@ -20200,6 +20620,16 @@ msgstr "L'allocation d'embeddings en arrière-plan du site est épuisée pour l'
 #, elixir-autogen, elixir-format
 msgid "The site's default language"
 msgstr "La langue par défaut du site"
+
+#: lib/kiln_cms/security/posture/checks/breached_passwords.ex
+#, elixir-autogen, elixir-format
+msgid "The site's password policy could not be read."
+msgstr "La politique de mots de passe du site n'a pas pu être lue."
+
+#: lib/kiln_cms/security/posture/checks/idle_timeout.ex
+#, elixir-autogen, elixir-format
+msgid "The site's session settings could not be read."
+msgstr "Les réglages de session du site n'ont pas pu être lus."
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
@@ -20589,6 +21019,26 @@ msgstr "Ce build ne rapporte aucune version exploitable ; il ne peut donc pas ê
 msgid "This change touches a safety field. Open it in the editor to publish and say how much it matters."
 msgstr "Cette modification touche un champ de sécurité. Ouvrez-la dans l'éditeur pour la publier et indiquer son importance."
 
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "This check could not run: it failed."
+msgstr "Cette vérification n'a pas pu s'exécuter : elle a échoué."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "This check could not run: it gave an answer the page can't show."
+msgstr "Cette vérification n'a pas pu s'exécuter : elle a donné une réponse que la page ne peut pas afficher."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "This check could not run: it took too long."
+msgstr "Cette vérification n'a pas pu s'exécuter : elle a pris trop de temps."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "This check could not run: the server was busy."
+msgstr "Cette vérification n'a pas pu s'exécuter : le serveur était occupé."
+
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
 msgid "This check needs JavaScript."
@@ -20744,6 +21194,16 @@ msgstr "Cet objectif convertit sur une page ultérieure, ce qui nécessite l'aff
 msgid "This group has no fields yet. An admin adds them under Custom fields."
 msgstr "Ce groupe n’a pas encore de champs. Un administrateur les ajoute dans Champs personnalisés."
 
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "This installation"
+msgstr "Cette installation"
+
+#: lib/kiln_cms/security/posture/checks/operator_second_factor.ex
+#, elixir-autogen, elixir-format
+msgid "This installation has no platform administrators."
+msgstr "Cette installation n'a aucun administrateur de la plateforme."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "This instance"
@@ -20778,6 +21238,11 @@ msgstr "Ceci est un e-mail de test envoyé depuis les réglages de courrier sort
 #, elixir-autogen, elixir-format
 msgid "This is required."
 msgstr "Ce champ est obligatoire."
+
+#: lib/kiln_cms/security/posture/checks/release.ex
+#, elixir-autogen, elixir-format
+msgid "This is the newest Kiln release."
+msgstr "C'est la version la plus récente de Kiln."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -20977,6 +21442,7 @@ msgid "This setting applies to this form only — another site's forms are unaff
 msgstr "Ce réglage ne s'applique qu'à ce formulaire — les formulaires des autres sites ne sont pas affectés par ce que vous autorisez ici."
 
 #: lib/kiln_cms_web/live/federation_live.ex
+#: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site"
 msgstr "Ce site"
@@ -21010,6 +21476,11 @@ msgstr "Ce site n'utilise pas Meilisearch. La recherche utilise la recherche int
 #, elixir-autogen, elixir-format
 msgid "This site follows the operator defaults again."
 msgstr "Ce site suit à nouveau les valeurs de l'opérateur."
+
+#: lib/kiln_cms/security/posture/checks/second_factor.ex
+#, elixir-autogen, elixir-format
+msgid "This site has no administrators or editors of its own."
+msgstr "Ce site n'a ni administrateurs ni éditeurs à lui."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
@@ -21611,6 +22082,16 @@ msgstr "L'authentification à deux facteurs est désormais activée."
 msgid "Two-factor authentication is on."
 msgstr "L'authentification à deux facteurs est activée."
 
+#: lib/kiln_cms/security/posture/checks/second_factor.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in for administrators and editors"
+msgstr "Connexion en deux étapes pour les administrateurs et éditeurs"
+
+#: lib/kiln_cms/security/posture/checks/operator_second_factor.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in for platform administrators"
+msgstr "Connexion en deux étapes pour les administrateurs de la plateforme"
+
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/calendar_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -21770,6 +22251,7 @@ msgid "Unit"
 msgstr "Unité"
 
 #: lib/kiln_cms_web/live/experiments_live.ex
+#: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unknown"
 msgstr "Inconnu"
@@ -21923,6 +22405,11 @@ msgstr "À jour."
 #, elixir-autogen, elixir-format
 msgid "Update available"
 msgstr "Mise à jour disponible"
+
+#: lib/kiln_cms/security/posture/checks/release.ex
+#, elixir-autogen, elixir-format
+msgid "Update checks are turned off (KILN_UPDATE_CHECK=false)."
+msgstr "La recherche de mises à jour est désactivée (KILN_UPDATE_CHECK=false)."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -22702,6 +23189,11 @@ msgstr "Quand une recherche contient"
 msgid "When a translation is missing"
 msgstr "Quand une traduction manque"
 
+#: lib/kiln_cms/security/posture/checks/admin_allowlist.ex
+#, elixir-autogen, elixir-format
+msgid "When administrators always sign in from known networks (an office, a VPN), an allowlist keeps everyone else away from the console and sign-in."
+msgstr "Quand les administrateurs se connectent toujours depuis des réseaux connus (un bureau, un VPN), une liste d'accès tient tous les autres à l'écart de la console et de la connexion."
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "When it's empty, use"
@@ -22811,6 +23303,16 @@ msgstr "Quels types de contenu de ce site apparaissent dans ses flux Atom et JSO
 #, elixir-autogen, elixir-format
 msgid "Which records connect"
 msgstr "Quels enregistrements se relient"
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Which security settings are on, and what to fix first."
+msgstr "Quels réglages de sécurité sont activés, et quoi corriger en premier."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "Which security settings are on, and what to fix first. Nothing here changes a setting; each line links to where you can."
+msgstr "Quels réglages de sécurité sont activés, et quoi corriger en premier. Rien ici ne modifie un réglage ; chaque ligne mène là où vous pouvez le faire."
 
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
@@ -22948,6 +23450,11 @@ msgstr "Avec"
 #, elixir-autogen, elixir-format
 msgid "With it on, the editor gains a Compliance panel that quotes back the phrases a document contains from a claims vocabulary — \"clinically proven\", \"risk-free\", \"guaranteed results\". It is advice: a match is a prompt to look, not a verdict, and nothing is blocked unless you separately turn on the publish gate."
 msgstr "Une fois activé, l'éditeur affiche un panneau Conformité qui cite les expressions du document issues d'un vocabulaire d'allégations — « clinically proven », « risk-free », « guaranteed results ». C'est un conseil : une correspondance invite à regarder, ce n'est pas un verdict, et rien n'est bloqué tant que vous n'activez pas séparément le verrou de publication."
+
+#: lib/kiln_cms/security/posture/checks/transport.ex
+#, elixir-autogen, elixir-format
+msgid "Without HTTPS everywhere, a session cookie can be read off the network and replayed."
+msgstr "Sans HTTPS partout, un cookie de session peut être lu sur le réseau et rejoué."
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -23320,6 +23827,11 @@ msgstr "Vous n'avez pas la permission de faire cela."
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to restore media."
 msgstr "Vous n'avez pas la permission de restaurer des médias."
+
+#: lib/kiln_cms_web/live/security_posture_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to see this site's security posture."
+msgstr "Vous n'avez pas l'autorisation de voir l'état de la sécurité de ce site."
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -23807,6 +24319,7 @@ msgstr "ancré, non attesté"
 msgid "and"
 msgstr "et"
 
+#: lib/kiln_cms/security/posture.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/organize_live.ex

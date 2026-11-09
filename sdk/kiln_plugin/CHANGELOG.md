@@ -43,6 +43,19 @@ Releases are tagged `kiln_plugin-vX.Y.Z` in the
   without it offers no choice. A plugin that implements it should require
   `{:kiln_plugin, "~> 1.4"}`. Additive: no callback or return shape changed.
 
+- **`Kiln.Security.Check` and `c:Kiln.Plugin.security_checks/0`
+  (kiln_cms#2252).** A plugin can add a line to the console's Security
+  posture page: `id/0`, `title/0`, `scope/0` (`:site` or `:deployment`) and
+  `run/1`, which gets a `Kiln.Security.Check.Context` (site, build
+  environment, clock, reader's locale; no actor) and answers a
+  `Kiln.Security.Check.Result` built with `pass/2`, `warn/2`, `fail/2`,
+  `unknown/2` or `n_a/2`. The core runs each check in its own process under a
+  deadline (`timeout/0`, default 1000 ms); one that crashes, overruns or
+  answers anything else shows as "could not run", never as a pass. Ids
+  starting `core.` are reserved. `Kiln.Security.Check.conformance/1` checks a
+  module without running it. `c:Kiln.Plugin.security_checks/0` defaults to
+  `[]`. A plugin using it should require `{:kiln_plugin, "~> 1.4"}`.
+
 - **`Kiln.Challenge.Provider` and `c:Kiln.Plugin.challenge_providers/0`
   (kiln_cms#2249).** A plugin can ship a human-verification provider that
   the operator picks with `CHALLENGE_PROVIDER`, beside the built-in

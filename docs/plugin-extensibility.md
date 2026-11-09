@@ -93,7 +93,7 @@ what it contributes:
 
 | Shape | How it's installed | What it can contribute |
 |---|---|---|
-| **Mix dependency** — Hex, `git:` or `path:` | Depends on [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md), the package the plugin contract ships in (#1909); the site lists it in the overlay's `config/project_deps.exs` (#1967) | Blocks, field types (no colocated client hooks), spam checks, advisory checks, image backends, human-verification providers (`challenge_providers/0`, from `kiln_plugin` 1.4), nav items, supervision children, Oban queues; routes only to a LiveView that doesn't `use KilnCMSWeb`; plug routes (`plug_routes/0`, from `kiln_plugin` 1.4) to any Plug, needing only `plug` |
+| **Mix dependency** — Hex, `git:` or `path:` | Depends on [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md), the package the plugin contract ships in (#1909); the site lists it in the overlay's `config/project_deps.exs` (#1967) | Blocks, field types (no colocated client hooks), spam checks, advisory checks, image backends, human-verification providers (`challenge_providers/0`, from `kiln_plugin` 1.4), security posture checks (`security_checks/0`, from `kiln_plugin` 1.4), nav items, supervision children, Oban queues; routes only to a LiveView that doesn't `use KilnCMSWeb`; plug routes (`plug_routes/0`, from `kiln_plugin` 1.4) to any Plug, needing only `plug` |
 | **`projects/<name>/` overlay** | Vendored into the overlay and compiled inside the core | Everything above, plus content types (`KilnCMS.CMS.Content`), Ash domains, and LiveViews built on `KilnCMSWeb` |
 
 A dependency compiles before the core and sees only its own dependencies, so
@@ -443,6 +443,31 @@ What the core does with it:
 
 A plugin built against `kiln_plugin` older than 1.4 has no
 `challenge_providers/0`; the core treats it as declaring none.
+
+#### Security posture checks (#2252)
+
+The console's [Security posture](security-posture.md) page runs the core's
+own checks and every plugin's `security_checks/0` (`kiln_plugin` 1.4; require
+`{:kiln_plugin, "~> 1.4"}`). It works from a Mix dependency: the contract,
+`Kiln.Security.Check`, is in the SDK, and a check is handed everything it may
+use in a `Kiln.Security.Check.Context` (the site, the build environment, the
+clock and the reader's locale; no actor).
+
+```elixir
+# The plugin's entry module
+@impl Kiln.Plugin
+def security_checks, do: [MyPlugin.WebhookSecretCheck]
+```
+
+Each check runs in its own process under its own deadline (`timeout/0`,
+default one second, held to at most five): one that crashes, overruns or
+answers something other than a result shows as "could not run", never as a
+pass. Ids under `core.` are reserved, and of two plugins answering to one id
+the first registered wins; `mix kiln.plugins.doctor` reports both, and
+`mix kiln.plugins.list` counts each plugin's checks. A check's `facts` must
+never carry a secret or a person's address. A plugin built against
+`kiln_plugin` older than 1.4 has no `security_checks/0`; the core treats it
+as declaring none.
 
 ### 2b. Catalog metadata (the "registry")
 
