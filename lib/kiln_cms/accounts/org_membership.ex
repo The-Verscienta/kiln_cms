@@ -203,6 +203,9 @@ defmodule KilnCMS.Accounts.OrgMembership do
       change {KilnCMS.Accounts.Changes.EvictSessions,
               reason: :registration_approved, user_id: :user_id, after_commit?: true}
 
+      # After the commit too: the applicant hears the decision (#2251).
+      change {KilnCMS.Accounts.Changes.MailRegistrationDecision, outcome: :approve}
+
       change KilnCMS.Security.Changes.RecordRegistration
     end
 
@@ -221,6 +224,9 @@ defmodule KilnCMS.Accounts.OrgMembership do
       # the decided row, not the pending one still visible before COMMIT.
       change {KilnCMS.Accounts.Changes.EvictSessions,
               reason: :registration_rejected, user_id: :user_id, after_commit?: true}
+
+      # After the commit too: the applicant hears the decision (#2251).
+      change {KilnCMS.Accounts.Changes.MailRegistrationDecision, outcome: :reject}
 
       change KilnCMS.Security.Changes.RecordRegistration
     end

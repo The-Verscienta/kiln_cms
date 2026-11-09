@@ -16,6 +16,9 @@ defmodule KilnCMS.Accounts.Changes.DecideRegistration do
     * approving needs a **confirmed** account: anyone can register an address
       they do not own, and approving that would hand the site to whoever did.
       Rejecting needs nothing, so a wave of unconfirmed sign-ups can be cleared;
+    * approving refuses an **erased** account (`:erased`): erasure keeps the
+      row and its confirmation but scrubs the address and the credentials, so
+      there is nobody left to let in;
     * then `status` and `decided_at` are written onto the locked row. Forced,
       not set in the change body: the body runs against the caller's struct,
       and Ash drops a change equal to the data it was built on.
@@ -44,13 +47,18 @@ defmodule KilnCMS.Accounts.Changes.DecideRegistration do
 
   defp decide(%{data: %{status: status}} = changeset, outcome)
        when status == :pending or (status == :rejected and outcome == :approve) do
-    if outcome == :approve and not confirmed?(changeset.data.user_id) do
-      refuse(changeset, :unconfirmed)
-    else
-      Ash.Changeset.force_change_attributes(changeset, %{
-        status: status(outcome),
-        decided_at: DateTime.utc_now()
-      })
+    case outcome == :approve && applicant_state(changeset.data.user_id) do
+      :unconfirmed ->
+        refuse(changeset, :unconfirmed)
+
+      :erased ->
+        refuse(changeset, :erased)
+
+      _confirmed_or_rejecting ->
+        Ash.Changeset.force_change_attributes(changeset, %{
+          status: status(outcome),
+          decided_at: DateTime.utc_now()
+        })
     end
   end
 
@@ -60,11 +68,12 @@ defmodule KilnCMS.Accounts.Changes.DecideRegistration do
   defp status(:approve), do: :active
   defp status(:reject), do: :rejected
 
-  defp confirmed?(user_id) do
+  defp applicant_state(user_id) do
     # authorize?: false — reads the applicant's confirmation as stored; only refuses
     case Accounts.get_user(user_id, authorize?: false, not_found_error?: false) do
-      {:ok, %{confirmed_at: %DateTime{}}} -> true
-      _other -> false
+      {:ok, %{anonymized_at: %DateTime{}}} -> :erased
+      {:ok, %{confirmed_at: %DateTime{}}} -> :confirmed
+      _other -> :unconfirmed
     end
   end
 

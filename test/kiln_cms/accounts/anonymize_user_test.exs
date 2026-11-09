@@ -62,6 +62,25 @@ defmodule KilnCMS.Accounts.AnonymizeUserTest do
       assert anon.id == subject.id
     end
 
+    test "restores every notification preference to its default", %{admin: admin} do
+      muted =
+        user(:admin, %{
+          notify_on_review_request: false,
+          notify_on_publish: false,
+          notify_on_return_to_draft: false,
+          notify_on_comment: false,
+          notify_on_registration: false
+        })
+
+      assert {:ok, anon} = Accounts.anonymize_user(muted, actor: admin)
+
+      assert anon.notify_on_review_request
+      assert anon.notify_on_publish
+      assert anon.notify_on_return_to_draft
+      assert anon.notify_on_comment
+      assert anon.notify_on_registration
+    end
+
     test "scrambles the password so the account can't sign in", %{admin: admin, subject: subject} do
       original = Ash.get!(User, subject.id, authorize?: false).hashed_password
       {:ok, _} = Accounts.anonymize_user(subject, actor: admin)
@@ -197,6 +216,13 @@ defmodule KilnCMS.Accounts.AnonymizeUserTest do
       assert export.account.name == "Export Me"
       assert export.account.role == :editor
       assert export.notification_preferences.notify_on_publish == false
+      assert export.notification_preferences.notify_on_comment == true
+      assert export.notification_preferences.notify_on_registration == true
+
+      muted = user(:admin, %{notify_on_comment: false, notify_on_registration: false})
+      prefs = Accounts.export_user_data(muted).notification_preferences
+      assert prefs.notify_on_comment == false
+      assert prefs.notify_on_registration == false
       # No secrets leak into the export.
       refute Map.has_key?(export.account, :hashed_password)
     end

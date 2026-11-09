@@ -10,6 +10,8 @@ defmodule KilnCMS.Accounts.Errors.RegistrationRefused do
       row may still be approved, but not rejected again);
     * `:unconfirmed` — the applicant has not confirmed their email address, so
       it cannot be approved yet (rejecting it is still allowed);
+    * `:erased` — the applicant's account was erased, so there is nobody to
+      approve (rejecting it is still allowed);
     * `:not_approved` — the account's registration on this site awaits
       approval or was rejected, so a paid membership here is refused;
     * `:settings_unavailable` — the site's registration settings could not be
@@ -26,6 +28,9 @@ defmodule KilnCMS.Accounts.Errors.RegistrationRefused do
 
   def message(%{reason: :unconfirmed}),
     do: "can't be approved until the applicant confirms their email address"
+
+  def message(%{reason: :erased}),
+    do: "can't be approved because the applicant's account was erased"
 
   def message(%{reason: :not_approved}),
     do: "can't start a membership until the registration on this site is approved"

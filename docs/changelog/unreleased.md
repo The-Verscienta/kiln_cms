@@ -47,6 +47,36 @@ carries the reasoning.
     v1.8.0 has no security log and is unaffected by this part.
   See also [the Added entry](#registration-approval).
 
+<a id="registration-notifications-upgrade"></a>
+
+- **Run `mix ash.migrate` for registration notices (#2251, second part).
+  While any node runs an older release, and after rolling back, an admin's
+  bell on that node can break; before rolling back, delete the new
+  notifications, or roll forward.**
+  - **What the migration does.**
+    `20261109122632_registration_notification_pref` adds
+    `users.notify_on_registration` (`boolean NOT NULL DEFAULT true`).
+    Additive: every existing account gets the email until it mutes it, and an
+    older release ignores the column.
+  - **Why the bell breaks.** The notifications table stores an event as text,
+    and a release loads it back as one of the events it knows. This change
+    adds `registration_pending`. A node on an older release cannot load such a
+    row, and the failure takes out the whole list read
+    ([#2509](https://github.com/The-Verscienta/kiln_cms/issues/2509)): for an
+    admin with one of these notices, the bell on that node shows the unread
+    count but an empty list, and **Mark all read** fails there.
+  - **During a rolling deploy** this lasts until every node runs the new
+    release; nothing needs doing.
+  - **Before rolling back**, in `psql` against the deployment's database:
+
+    ```sql
+    DELETE FROM notifications WHERE event = 'registration_pending';
+    ```
+
+    This removes only the "Registrations waiting for approval" notices; the
+    queue itself is untouched. Or roll forward instead.
+  See also [the Added entry](#registration-notifications).
+
 <a id="sign-in-unlock-upgrade"></a>
 
 - **Sign-in unlock links (#2250): no migration, and nothing to set. Before
@@ -736,8 +766,8 @@ carries the reasoning.
     entitlement recompute creates no viewer membership for one.
   - **Fails closed.** If the setting cannot be read, the sign-up is refused
     with a retryable error and nothing is created.
-  - **Not yet.** Admins are not notified of new registrations, and applicants
-    get no email about the decision (part two). Erasing rejected accounts,
+  - **Not yet.** Telling admins and applicants is part two
+    ([below](#registration-notifications)). Erasing rejected accounts,
     queueing a site's own SSO, and accepting an invitation over a waiting
     registration are part three.
   - **Security log.** `registration_queued` (`method`),
@@ -754,6 +784,68 @@ carries the reasoning.
     setting is `KilnCMS.CMS.SiteRegistration`.
   The reasoning is in
   [ADR 0024](../decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md);
+  the how-to is
+  [Approving registrations](../account-administration.md#approving-registrations).
+
+<a id="registration-notifications"></a>
+
+- **A site's admins hear when a registration is waiting for them, and the
+  applicant is emailed the decision (#2251, second of three parts).** Part one
+  left both to the admin checking the queue and telling people themselves.
+  - **When admins hear.** When an applicant confirms their address: by the
+    confirmation link, by a password reset, or by accepting an invitation with
+    a password. That is when the registration can be approved, so registering
+    alone tells nobody. Every site where the applicant waits is told. A
+    magic-link sign-in does not confirm an account, so it tells nobody either
+    ([#2516](https://github.com/The-Verscienta/kiln_cms/issues/2516)).
+  - **What admins get.** One bell notice per admin and site, "Registrations
+    waiting for approval", titled with the site's name and linking to
+    **Registrations** (`/editor/registrations`), plus an email "Registrations
+    are waiting for approval on (site)" with a **Review registrations** link
+    on the site's own host. While the notice is unread, further applicants add
+    no notice and no email, so a wave of sign-ups is one of each. Opening
+    **Registrations** marks your notice read, and the next applicant after that
+    is news again. Neither the notice nor the email names the applicant.
+  - **Who.** A standing platform admin, or a member whose active membership
+    on the site is admin (a site's temporary admin grant counts). A temporary
+    platform admin is left out, since it can't decide registrations, and so
+    is an erased account.
+  - **Muting.** **Your settings** → **Email notifications** → **New
+    registrations — email me when someone is waiting for approval on a site I
+    administer**. It mutes the email only; the bell notice is always written.
+    One switch for every site you administer, shown to anyone who would be
+    told on some site.
+  - **What the applicant gets.** After the decision commits, approving mails
+    "Your registration on (site) was approved" with a **Sign in** link on the
+    site's host, including when an admin approves from the **Rejected** tab.
+    Rejecting mails "Your registration on (site) wasn't approved." under the
+    subject "About your registration on (site)", with no reason, no link and
+    no name. A rejected applicant who never confirmed their address gets no
+    email, since the address was never proven theirs, and an erased account
+    gets none. Both emails, and the admin email, go through the site's own
+    mail relay when it has one. The approve message on the page now ends
+    "We'll email them.", and the reject prompt for a confirmed applicant adds
+    "They'll be emailed that it wasn't approved."
+  - **Erased applicants.** A waiting account that was erased shows **Account
+    erased** in the queue and has no **Approve**; approving it from code is
+    refused with `RegistrationRefused` reason `:erased`. It can still be
+    rejected.
+  - **Best effort.** Notices and emails run after the commit. A failure is
+    logged and never undoes the confirmation or the decision.
+  - **Account data.** `export_user_data` now includes `notify_on_comment` and
+    `notify_on_registration`, and erasure resets both to on.
+  - **Developers.** `Notification.event` gains `:registration_pending`
+    (anchored on `content_type: "registration_queue"`, `content_id` = the
+    site's id, no actor). `KilnCMS.Notifications.Registrations` holds the
+    roster and `announce_org/1` for a path that queues an already-confirmed
+    account. `Notifications.record_in_app_result/1` says whether a row was
+    written (`:recorded`, `:already_waiting`, `:not_recorded`), and
+    `Notifications.mark_read_about/4` marks one subject's unread notices
+    read. `NotificationText.headline/1` gains a neutral "Notification" for an
+    event it doesn't know, rather than crashing.
+  Upgrade steps: [the upgrade note](#registration-notifications-upgrade). The
+  reasoning is in
+  [ADR 0024](../decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md#who-is-told-part-two);
   the how-to is
   [Approving registrations](../account-administration.md#approving-registrations).
 

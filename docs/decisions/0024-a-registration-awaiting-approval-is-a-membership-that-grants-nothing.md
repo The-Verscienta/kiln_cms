@@ -1,7 +1,7 @@
 # 0024. A registration awaiting approval is a membership that grants nothing
 
-- **Status** — accepted (2026-11-09). Part one of three; parts two and three
-  extend it.
+- **Status** — accepted (2026-11-09). Part one of three, extended by part two
+  (who is told, below); part three extends it further.
 - **References** — [#2251](https://github.com/The-Verscienta/kiln_cms/issues/2251),
   building on #336 (memberships), #419 (per-site tiers) and
   [ADR 0018](0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md)
@@ -71,6 +71,45 @@ the hole.
   Adding or inviting an address that has a pending or rejected registration on
   the site is refused, pointing at the queue.
 
+## Who is told (part two)
+
+- **A site's admins hear when someone can be approved.** The update that
+  confirms an applicant's address (the confirmation link, a password reset,
+  accepting an invitation with a password) announces every site where the
+  applicant waits: `Changes.AnnouncePendingRegistration`, declared on every
+  `User` update and attached only when the row was unconfirmed, so no action
+  can be forgotten from a list. Registering alone tells nobody: an unconfirmed
+  applicant cannot be approved yet. Creates are not hooked, since no create
+  that confirms leaves a pending row; a later path that queues a confirmed
+  account calls `Notifications.Registrations.announce_org/1` after its commit.
+- **One notice per admin and site, naming no one.** An in-app
+  `:registration_pending` notification whose title is the site's name and
+  whose link is `/editor/registrations`, and an email to the same effect. It
+  collapses like the document-level events: while it is unread a further
+  applicant adds no row and no mail. Opening the queue reads it; it is marked
+  before the queue is listed, so an applicant arriving in between leaves a
+  fresh notice. Neither the row nor the mail carries the applicant's address
+  or name: the queue shows those, to the people it checks.
+- **Recipients are standing admins.** A standing platform admin, or a member
+  whose active membership on the site is admin, and not an erased account. A
+  temporary platform admin is left out: it may not decide registrations.
+- **`User.notify_on_registration` mutes the email only.** The bell row is
+  always written. The flag is one per account, across every site the account
+  administers, so the settings page shows it to anyone who would be told on
+  some site (a standing platform admin, or an admin through an active
+  membership, including a live grant on it), whichever site it is opened on,
+  and the notice email links to it.
+- **The applicant hears the decision, by email.** After the commit:
+  approving (including reversing a rejection) mails a sign-in link on the
+  site's host; rejecting mails one sentence, "Your registration on (site)
+  wasn't approved.", with no reason, no link and no name. An unconfirmed
+  applicant is not mailed a rejection (the address was never proven theirs),
+  and an erased account is mailed nothing. Approving an erased account is
+  refused (`:erased`).
+- **Best effort.** Notices and mails run after the commit through
+  `KilnCMS.AfterCommit`; a failure is logged and never undoes the
+  confirmation or the decision.
+
 ## Considered and rejected
 
 - **A flag on the user.** One account spans sites; a flag would hold it on
@@ -119,8 +158,6 @@ may pay there as before, and becomes a viewer member of that site only.
 
 ## Not in this part
 
-- Notifying admins of a new registration, and mailing the applicant the
-  decision (part two).
 - Erasing rejected accounts, queueing a site's own single sign-on, and
   accepting an invitation over a pending row (part three).
 - Recording a membership for every registration whatever the setting, and
@@ -137,3 +174,10 @@ may pay there as before, and becomes a viewer member of that site only.
 - New atoms a rollback must tolerate: the membership statuses `:pending` and
   `:rejected`, and the security event types `registration_queued`,
   `registration_approved` and `registration_rejected`.
+- Part two adds `users.notify_on_registration` (`NOT NULL DEFAULT true`) and
+  the notification event `registration_pending`. A node on an older release
+  cannot load a row with that event, so during a rolling deploy, and after a
+  rollback, an affected admin's bell on such a node shows the count but an
+  empty list, and "mark all read" fails there. Finish the roll forward, or
+  before rolling back run
+  `DELETE FROM notifications WHERE event = 'registration_pending'`.

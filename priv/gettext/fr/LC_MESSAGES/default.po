@@ -1975,6 +1975,11 @@ msgstr "Compte"
 msgid "Account connected."
 msgstr "Compte connecté."
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Account erased"
+msgstr "Compte effacé"
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Account erased and %{count} document archived."
@@ -3208,8 +3213,8 @@ msgstr "Approuver ou refuser les personnes qui s'inscrivent sur ce site."
 
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
-msgid "Approved %{email}. They can now read this site as a viewer."
-msgstr "%{email} approuvé. Cette personne peut maintenant lire ce site en tant que lecteur."
+msgid "Approved %{email}. They can now read this site as a viewer. We'll email them."
+msgstr "%{email} approuvé. Cette personne peut maintenant lire ce site en tant que lecteur. Nous allons l'en informer par e-mail."
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -11780,6 +11785,11 @@ msgstr "Nouveaux codes de récupération générés — les anciens ne fonctionn
 msgid "New registrations wait for an administrator's approval"
 msgstr "Les nouvelles inscriptions attendent l'approbation d'un administrateur"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "New registrations — email me when someone is waiting for approval on a site I administer"
+msgstr "Nouvelles inscriptions — m'envoyer un e-mail quand quelqu'un attend une approbation sur un site que j'administre"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "New release"
@@ -12941,6 +12951,11 @@ msgstr "Rien n'a encore été rédigé ni importé."
 #, elixir-autogen, elixir-format
 msgid "Nothing yet."
 msgstr "Rien pour le moment."
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "Notification"
+msgstr "Notification"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -15160,6 +15175,11 @@ msgstr "Réglages d'inscription enregistrés."
 msgid "Registrations"
 msgstr "Inscriptions"
 
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "Registrations waiting for approval"
+msgstr "Inscriptions en attente d'approbation"
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reindex now"
@@ -15179,6 +15199,11 @@ msgstr "Refuser"
 #, elixir-autogen, elixir-format
 msgid "Reject %{email}? The account is kept but gets no access to this site, and they can't register here again with this address."
 msgstr "Refuser %{email} ? Le compte est conservé mais n'a aucun accès à ce site, et cette adresse ne pourra plus s'inscrire ici."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reject %{email}? The account is kept but gets no access to this site, and they can't register here again with this address. They'll be emailed that it wasn't approved."
+msgstr "Refuser %{email} ? Le compte est conservé mais n'a aucun accès à ce site, et cette adresse ne pourra plus s'inscrire ici. Cette personne sera informée par e-mail que son inscription n'a pas été approuvée."
 
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
@@ -18934,6 +18959,11 @@ msgstr "Cette URL n'est pas autorisée par la politique d'images du site. Télé
 #, elixir-autogen, elixir-format
 msgid "That account couldn't be found."
 msgstr "Ce compte est introuvable."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "That account was erased, so it can't be approved."
+msgstr "Ce compte a été effacé, il ne peut donc pas être approuvé."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/workflow_messages.ex

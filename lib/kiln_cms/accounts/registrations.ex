@@ -17,8 +17,9 @@ defmodule KilnCMS.Accounts.Registrations do
   The queue is an admin of the org the rows belong to — the
   `:registration_queue` read's policy (`Checks.AdminOfMembershipOrg`) — and a
   standing platform admin. Each row carries the applicant's email address,
-  name and whether they have confirmed the address, and nothing else about the
-  account: `queue/2` reads those four columns for the queue's own users only.
+  name, whether they have confirmed the address and whether the account was
+  since erased, and nothing else about the account: `queue/2` reads those
+  columns for the queue's own users only.
   This is the one place a site admin sees an account they do not administer —
   and only someone who asked to join their site.
   """
@@ -33,6 +34,7 @@ defmodule KilnCMS.Accounts.Registrations do
           email: String.t() | nil,
           name: String.t() | nil,
           confirmed?: boolean(),
+          erased?: boolean(),
           registered_at: DateTime.t()
         }
 
@@ -148,14 +150,14 @@ defmodule KilnCMS.Accounts.Registrations do
   defp applicants([]), do: %{}
 
   defp applicants(user_ids) do
-    # authorize?: false — the queue's own applicants only, four columns; `User`
+    # authorize?: false — the queue's own applicants only, five columns; `User`
     # reads are self-only and a site-admin grant there would read every account
     # (the queue read above already required an admin of this org)
     Accounts.list_users!(
       authorize?: false,
       query: [
         filter: [id: [in: user_ids]],
-        select: [:id, :email, :name, :confirmed_at]
+        select: [:id, :email, :name, :confirmed_at, :anonymized_at]
       ]
     )
     |> Map.new(&{&1.id, &1})
@@ -167,6 +169,9 @@ defmodule KilnCMS.Accounts.Registrations do
       email: user && to_string(user.email),
       name: user && user.name,
       confirmed?: match?(%{confirmed_at: %DateTime{}}, user),
+      # Erased since registering (#2251): approving is refused, and a
+      # rejection mails nobody, so the console says so.
+      erased?: match?(%{anonymized_at: %DateTime{}}, user),
       registered_at: membership.inserted_at
     }
   end

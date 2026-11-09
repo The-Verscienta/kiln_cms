@@ -69,7 +69,10 @@ defmodule KilnCMS.Notifications.Notification do
   (tenant, recipient, event, document), so two submits racing each other
   still leave one row. Once the row is read, the next occurrence is new
   again. Comment, mention and task events are never collapsed: each is a
-  different thing to read.
+  different thing to read. A registration notice (`:registration_pending`,
+  #2251) collapses the same way, anchored on the site (`content_id` is the
+  org's id): it says the queue has someone in it, so a second applicant while
+  it is unread adds nothing.
 
   `:notify` is the counterpart: system-only, because it writes a row addressed
   to somebody *other* than whoever acted. It is gated by `forbid_if
@@ -284,7 +287,12 @@ defmodule KilnCMS.Notifications.Notification do
                     :task_assigned,
                     # A retraction webhook that exhausted its retries (#1926),
                     # to the site's admins — `KilnCMS.Webhooks.RetractionLost`.
-                    :retraction_lost
+                    :retraction_lost,
+                    # Someone confirmed their address and waits for approval
+                    # (#2251), to the site's admins — one row per admin and
+                    # site, about the queue rather than the applicant
+                    # (`KilnCMS.Notifications.Registrations`).
+                    :registration_pending
                   ]
     end
 
