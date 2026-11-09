@@ -69,9 +69,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldSection
-  alias KilnCMS.CMS.SectionLayouts
   alias KilnCMS.CMS.FieldTypes
   alias KilnCMS.CMS.FieldWidgets
+  alias KilnCMS.CMS.SectionLayouts
   alias KilnCMS.CMS.Validations.FieldCondition
   alias KilnCMSWeb.ComputedBuilder
   alias KilnCMSWeb.ConditionsBuilder
