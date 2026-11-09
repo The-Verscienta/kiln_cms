@@ -119,6 +119,58 @@ defmodule KilnCMSWeb.SiteSsoControllerTest do
     assert get_session(conn, "user_token") == nil
   end
 
+  test "a queued single sign-on registration is audited with the request's address",
+       %{conn: conn, org: org, domain: domain, key: key} do
+    KilnCMS.CMS.save_site_registration!(%{approval_for_site_sso: true},
+      actor:
+        Ash.Seed.seed!(User, %{
+          email: "op-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password1234!"),
+          confirmed_at: DateTime.utc_now(),
+          role: :admin
+        }),
+      tenant: org.id
+    )
+
+    {conn, query} = start(conn, org, key)
+
+    conn =
+      finish(conn, org, key, query, %{"email" => "queued@#{domain}", "email_verified" => true})
+
+    assert is_binary(get_session(conn, "user_token"))
+    {:ok, user} = Accounts.get_user_by_email("queued@#{domain}", authorize?: false)
+
+    assert [event] =
+             KilnCMS.Security.list_events!(authorize?: false, tenant: org.id, page: [limit: 50])
+             |> then(fn
+               %{results: results} -> results
+               list -> list
+             end)
+             |> Enum.filter(&(&1.type == :registration_queued and &1.target_id == user.id))
+
+    assert event.metadata == %{"method" => "site_sso"}
+    # The address the request came from, as the client-IP plug resolved it.
+    assert event.ip == conn.remote_ip |> :inet.ntoa() |> to_string()
+  end
+
+  test "an unreadable registration setting says single sign-on is unavailable, and creates nothing",
+       %{conn: conn, org: org, domain: domain, key: key} do
+    {conn, query} = start(conn, org, key)
+
+    conn =
+      KilnCMS.OrgSettings.with_actor(nil, fn ->
+        finish(conn, org, key, query, %{"email" => "later@#{domain}", "email_verified" => true})
+      end)
+
+    assert redirected_to(conn) == "/sign-in"
+    assert get_session(conn, "user_token") == nil
+
+    assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+             "Single sign-on isn't available on this site right now"
+
+    assert {:error, _} = Accounts.get_user_by_email("later@#{domain}", authorize?: false)
+  end
+
   test "a flow started on one site cannot be finished on another",
        %{conn: conn, org: org, other: other, domain: domain, key: key} do
     # The other site has a provider and the same verified domain of its own,

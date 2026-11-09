@@ -12,6 +12,9 @@ defmodule KilnCMS.Accounts.Errors.RegistrationRefused do
       it cannot be approved yet (rejecting it is still allowed);
     * `:erased` — the applicant's account was erased, so there is nobody to
       approve (rejecting it is still allowed);
+    * `:rejected_after_invitation` — the registration was rejected after the
+      invitation being honoured was sent, so that invitation does not overrule
+      the rejection (#2514);
     * `:not_approved` — the account's registration on this site awaits
       approval or was rejected, so a paid membership here is refused;
     * `:settings_unavailable` — the site's registration settings could not be
@@ -31,6 +34,9 @@ defmodule KilnCMS.Accounts.Errors.RegistrationRefused do
 
   def message(%{reason: :erased}),
     do: "can't be approved because the applicant's account was erased"
+
+  def message(%{reason: :rejected_after_invitation}),
+    do: "was rejected after this invitation was sent, so the invitation can't approve it"
 
   def message(%{reason: :not_approved}),
     do: "can't start a membership until the registration on this site is approved"

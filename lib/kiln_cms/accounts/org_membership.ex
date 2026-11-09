@@ -171,18 +171,33 @@ defmodule KilnCMS.Accounts.OrgMembership do
     #
     # A self-registration on a site that requires approval records a `:pending`
     # membership here; `KilnCMS.Accounts.Scoping` grants nothing through a row
-    # that is not `:active`. `status` is in no `accept` list: these three
-    # actions are the only writes that set it.
+    # that is not `:active`. `status` is in no `accept` list: the registration
+    # actions below are the only writes that set it.
 
     # The registration's own write, from `Changes.QueueRegistration` inside the
-    # user's create. System-only (see the policies): a person cannot queue
+    # user's create, or from `SiteSso.Admission` for an account a site's own
+    # single sign-on provisions (#2514). System-only (see the policies): a person cannot queue
     # anyone, themselves included.
     create :queue_registration do
       description "Record a self-registration awaiting a site admin's approval (system-only)."
       accept [:organization_id, :user_id]
+
+      # Whether the registration created the account (#2514): a password
+      # sign-up always does, a site's own single sign-on does for an address
+      # it provisions. Recorded on the row as `created_account`.
+      argument :new_account?, :boolean, default: false, allow_nil?: false
+
+      # How the account registered, for the audit event.
+      argument :method, :atom do
+        constraints one_of: [:password, :site_sso]
+        default :password
+        allow_nil? false
+      end
+
       change set_attribute(:status, :pending)
       change set_attribute(:role, :viewer)
       change set_attribute(:audiences, [])
+      change set_attribute(:created_account, arg(:new_account?))
       change KilnCMS.Security.Changes.RecordRegistration
     end
 
@@ -205,6 +220,59 @@ defmodule KilnCMS.Accounts.OrgMembership do
 
       # After the commit too: the applicant hears the decision (#2251).
       change {KilnCMS.Accounts.Changes.MailRegistrationDecision, outcome: :approve}
+
+      change KilnCMS.Security.Changes.RecordRegistration
+    end
+
+    # An invitation honoured over a registration on its site (#2514): the
+    # invitee accepted (`Invitations.grant_membership/4`, as
+    # `SystemActor.new(:invitations)`), or a platform admin added a confirmed
+    # address directly (`Invitations.AddOrInvite`, `via: :added`). The row
+    # becomes `:active` with the tier the invitation names, rather than
+    # being left waiting behind a membership that never arrives.
+    #
+    # `DecideRegistration` refuses as for `:approve_registration` (a row no
+    # longer waiting, an unconfirmed or an erased applicant) and one more
+    # case: a `:rejected` row is approved only when the invitation was sent
+    # after the rejection (`invited_at` later than `decided_at`). An older
+    # invitation was sent before a site admin turned the applicant away, so it
+    # does not overrule that decision.
+    #
+    # No decision mail: the invitee accepted, or is told they were added.
+    update :approve_registration_by_invitation do
+      description "Approve a registration because an invitation to its site was honoured (system-only)."
+      accept []
+      require_atomic? false
+
+      argument :role, :atom do
+        constraints one_of: [:admin, :editor, :viewer]
+        default :viewer
+        allow_nil? false
+      end
+
+      argument :role_id, :uuid
+
+      # When the invitation was last sent (or, for a direct add, now).
+      argument :invited_at, :utc_datetime_usec, allow_nil?: false
+
+      # How the invitation arrived, for the audit event.
+      argument :via, :atom do
+        constraints one_of: [:invitation, :added]
+        default :invitation
+        allow_nil? false
+      end
+
+      # The role_id the row will take is the argument, not the row's own
+      # (validations run before the hook that writes it).
+      validate {KilnCMS.Accounts.Validations.RoleBelongsToOrg, argument: :role_id}
+
+      change get_and_lock_for_update()
+      change {KilnCMS.Accounts.Changes.DecideRegistration, outcome: :approve_by_invitation}
+
+      # After the commit, so the reconnect it causes is re-authorized against
+      # the decided row, not the pending one still visible before COMMIT.
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :registration_approved, user_id: :user_id, after_commit?: true}
 
       change KilnCMS.Security.Changes.RecordRegistration
     end
@@ -286,10 +354,20 @@ defmodule KilnCMS.Accounts.OrgMembership do
     end
 
     # The registration's own write — system code only, from
-    # `Changes.QueueRegistration`.
+    # `Changes.QueueRegistration` and `SiteSso.Admission`.
     policy action(:queue_registration) do
       authorize_if {KilnCMS.Checks.SystemActor,
                     subsystem: :registrations, action: :queue_registration}
+    end
+
+    # Honouring an invitation over a registration (#2514) — system code only,
+    # from `Invitations.grant_membership/4`. A platform admin's direct add
+    # passes the bypass above (a temporary one is refused by
+    # `StandingAdminOnly`); a site admin decides registrations under
+    # Registrations instead.
+    policy action(:approve_registration_by_invitation) do
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: :invitations, action: :approve_registration_by_invitation}
     end
 
     # Listing and deciding registrations: an admin of the org the row (or, for
@@ -404,6 +482,16 @@ defmodule KilnCMS.Accounts.OrgMembership do
 
     # When a registration was approved or rejected; nil for every other row.
     attribute :decided_at, :utc_datetime_usec do
+      public? true
+    end
+
+    # Whether this row's registration created the account (#2514): true for a
+    # password sign-up queued here and for an account a site's own single
+    # sign-on provisioned into the queue; false for every other row, including
+    # every row written before the column existed.
+    attribute :created_account, :boolean do
+      default false
+      allow_nil? false
       public? true
     end
 

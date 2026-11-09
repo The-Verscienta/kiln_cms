@@ -125,6 +125,10 @@ defmodule KilnCMS.Accounts do
       define :approve_registration, action: :approve_registration
       define :reject_registration, action: :reject_registration
 
+      # An invitation honoured over a registration (#2514): system-only from
+      # `Invitations.grant_membership/4`, or a platform admin's direct add.
+      define :approve_registration_by_invitation, action: :approve_registration_by_invitation
+
       define :list_registration_queue,
         action: :registration_queue,
         args: [:organization_id, {:optional, :status}]

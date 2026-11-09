@@ -39,7 +39,10 @@ defmodule KilnCMS.Accounts.Changes.AcceptInvitation do
   alias KilnCMS.Accounts.Errors.InvitationRefused
   alias KilnCMS.Accounts.Invitation
   alias KilnCMS.Accounts.Invitations
+  alias KilnCMS.AfterCommit
   alias KilnCMS.Security.Recorder
+
+  @effects :accept_invitation_after_commit
 
   @impl true
   def change(changeset, _opts, %{actor: actor}) when not is_nil(actor), do: invalid(changeset)
@@ -55,6 +58,7 @@ defmodule KilnCMS.Accounts.Changes.AcceptInvitation do
       |> Ash.Changeset.set_context(%{invitation: invitation})
       |> Ash.Changeset.before_action(&relock(&1, token))
       |> Ash.Changeset.after_action(&grant/2)
+      |> Ash.Changeset.after_transaction(&replay/2)
     else
       _no -> invalid(changeset)
     end
@@ -103,14 +107,31 @@ defmodule KilnCMS.Accounts.Changes.AcceptInvitation do
     # A brand-new account (the create) has no legacy tier to carry.
     grant_opts = [carry_legacy?: changeset.action_type != :create]
 
-    with {:ok, _membership} <-
-           Invitations.grant_membership(user, invitation, write_context, grant_opts),
-         # authorize?: false — the system-only consume of the invitation this
-         # transaction just honoured.
-         :ok <- Accounts.consume_invitation(invitation, authorize?: false) do
-      {:ok, user}
-    end
+    # Captured: approving a registration on the way (#2514) leaves an
+    # after-commit effect (the applicant's eviction) that must wait for this
+    # action's own commit — `replay/2` below.
+    {result, effects} =
+      AfterCommit.capture(fn ->
+        with {:ok, _membership} <-
+               Invitations.grant_membership(user, invitation, write_context, grant_opts) do
+          # authorize?: false — the system-only consume of the invitation this
+          # transaction just honoured.
+          Accounts.consume_invitation(invitation, authorize?: false)
+        end
+      end)
+
+    with :ok <- result, do: {:ok, Ash.Resource.put_metadata(user, @effects, effects)}
   end
+
+  # Run what `grant/2` captured once the account's transaction has committed
+  # (or queue it behind an enclosing `AfterCommit.deferring/1`). A rolled-back
+  # accept carries no record, and the effects are dropped with it.
+  defp replay(_changeset, {:ok, user}) do
+    user.__metadata__ |> Map.get(@effects, []) |> AfterCommit.replay()
+    {:ok, %{user | __metadata__: Map.delete(user.__metadata__, @effects)}}
+  end
+
+  defp replay(_changeset, other), do: other
 
   defp invalid(changeset),
     do:

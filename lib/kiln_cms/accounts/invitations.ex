@@ -44,8 +44,11 @@ defmodule KilnCMS.Accounts.Invitations do
   """
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Errors.InvitationRefused
+  alias KilnCMS.Accounts.Errors.RegistrationRefused
   alias KilnCMS.Accounts.Invitation
   alias KilnCMS.Accounts.LegacyAffiliation
+  alias KilnCMS.AfterCommit
 
   @ttl_days 7
   @prune_after_days 30
@@ -118,14 +121,23 @@ defmodule KilnCMS.Accounts.Invitations do
   def inviter_still_admin?(%Invitation{}), do: true
 
   @doc """
-  Give `user` the membership `invitation` names, as a system write. An existing
+  Give `user` the membership `invitation` names, as a system write. An active
   membership on that site is left as it is (the invitation is then simply used
-  up). Before an account's first membership on another site, its legacy
+  up). A registration on that site awaiting approval, or rejected, is approved
+  with the invitation's tier instead (`OrgMembership.:approve_registration_by_invitation`,
+  #2514): the site's admin invited this address, which is the decision the
+  queue was waiting for. A rejected one only when the invitation was sent
+  after the rejection; otherwise the invitation is refused as no longer valid.
+  Before an account's first membership on another site, its legacy
   default-site tier is carried onto a membership of its own
   (`KilnCMS.Accounts.LegacyAffiliation`), so accepting never demotes it there.
 
   `context` is the Ash context to write with (the request's client address, for
-  the audit event). Pass `carry_legacy?: false` for an account this same
+  the audit event). Approving a registration evicts the applicant's sessions
+  through `KilnCMS.AfterCommit`, so a caller running this inside its own
+  transaction must hold that effect until its commit: `AfterCommit.deferring/1`
+  around the transaction, or `capture/1` here and `replay/1` from its own
+  `after_transaction` hook. Pass `carry_legacy?: false` for an account this same
   transaction just created: it has no legacy tier to carry, and carrying would
   give it a stray `:viewer` membership on the default site (the site-SSO
   admission skips the carry for a new account for the same reason).
@@ -140,19 +152,62 @@ defmodule KilnCMS.Accounts.Invitations do
 
     with {:ok, memberships} <- memberships(user),
          :ok <- maybe_carry(user, memberships, invitation.organization_id, opts, grant_opts) do
-      if Enum.any?(memberships, &(&1.organization_id == invitation.organization_id)) do
-        {:ok, :already_member}
-      else
-        Accounts.create_org_membership(
-          %{
-            user_id: user.id,
-            organization_id: invitation.organization_id,
-            role: invitation.role,
-            role_id: invitation.role_id
-          },
-          opts
-        )
+      case Enum.find(memberships, &(&1.organization_id == invitation.organization_id)) do
+        nil ->
+          Accounts.create_org_membership(
+            %{
+              user_id: user.id,
+              organization_id: invitation.organization_id,
+              role: invitation.role,
+              role_id: invitation.role_id
+            },
+            opts
+          )
+
+        %{status: status} = registration when status in [:pending, :rejected] ->
+          approve_registration(registration, invitation, context)
+
+        _active ->
+          {:ok, :already_member}
       end
+    end
+  end
+
+  # As the invitations system actor, the one actor the action admits.
+  #
+  # A row another writer approved between the read above and the lock is a
+  # membership now, the same answer as an active row. Every other refusal (a
+  # rejection newer than the invitation, an unconfirmed or erased applicant)
+  # reads as an invitation that is no longer valid, so the accept page says
+  # what it says for any other. `rollback_on_error?: false` hands the refusal
+  # back here rather than aborting the accept's transaction with it; the
+  # caller still rolls back on an error returned.
+  #
+  # `AfterCommit.context/0`: the action's one after-commit effect, the
+  # eviction, goes through `AfterCommit.run/1`, which the callers hold until
+  # their own commit (see the doc above).
+  defp approve_registration(registration, invitation, context) do
+    case Accounts.approve_registration_by_invitation(
+           registration,
+           %{
+             role: invitation.role,
+             role_id: invitation.role_id,
+             invited_at: invitation.last_sent_at || invitation.inserted_at,
+             via: :invitation
+           },
+           actor: KilnCMS.SystemActor.new(:invitations),
+           context: Map.merge(context, AfterCommit.context()),
+           rollback_on_error?: false
+         ) do
+      {:ok, membership} ->
+        {:ok, membership}
+
+      {:error, error} ->
+        case RegistrationRefused.reason(error) do
+          :not_pending -> {:ok, :already_member}
+          nil -> {:error, error}
+          _refused -> {:error, InvitationRefused.exception(field: :token, reason: :invalid)}
+        end
     end
   end
 

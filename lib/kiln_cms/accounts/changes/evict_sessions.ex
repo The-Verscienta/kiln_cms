@@ -26,6 +26,14 @@ defmodule KilnCMS.Accounts.Changes.EvictSessions do
   than the default only because the other declared uses include a `destroy`,
   whose `after_transaction` hand-off has not been exercised here.
 
+  The broadcast goes through `KilnCMS.AfterCommit.run/1`. Called on its own,
+  the action's `after_transaction` runs after its own COMMIT and the broadcast
+  goes at once, as before. Run inside a transaction it did not open (accepting
+  an invitation approves a registration inside the accept's, #2514), the hook
+  fires before the outer COMMIT; the caller then holds the broadcast with
+  `AfterCommit.deferring/1` or `capture/1`, so it leaves after the outer commit
+  and is dropped on a rollback.
+
   ## Narrowing only, and every change counts as narrowing
 
   A widened grant needs no eviction — the socket simply has less than it could
@@ -45,6 +53,7 @@ defmodule KilnCMS.Accounts.Changes.EvictSessions do
   use Ash.Resource.Change
 
   alias KilnCMS.Accounts.SessionEviction
+  alias KilnCMS.AfterCommit
 
   @impl true
   def change(changeset, opts, _context) do
@@ -54,7 +63,7 @@ defmodule KilnCMS.Accounts.Changes.EvictSessions do
     if Keyword.get(opts, :after_commit?, false) do
       Ash.Changeset.after_transaction(changeset, fn
         _changeset, {:ok, record} = result ->
-          SessionEviction.evict(Map.get(record, field), reason)
+          evict_after_commit(Map.get(record, field), reason)
           result
 
         _changeset, result ->
@@ -67,4 +76,7 @@ defmodule KilnCMS.Accounts.Changes.EvictSessions do
       end)
     end
   end
+
+  defp evict_after_commit(user_id, reason),
+    do: AfterCommit.run(fn -> SessionEviction.evict(user_id, reason) end)
 end

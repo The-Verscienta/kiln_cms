@@ -119,6 +119,26 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
       assert RegistrationPolicy.approval_required(site.id) == {:ok, false}
     end
 
+    test "settings/1 reads both switches, independently, and both off with no row" do
+      site = org("settings-both")
+
+      assert RegistrationPolicy.settings(site) ==
+               {:ok, %{approval_required: false, approval_for_site_sso: false}}
+
+      CMS.save_site_registration!(%{approval_for_site_sso: true},
+        actor: user(:admin),
+        tenant: site.id
+      )
+
+      assert RegistrationPolicy.settings(site.id) ==
+               {:ok, %{approval_required: false, approval_for_site_sso: true}}
+
+      assert RegistrationPolicy.approval_required(site) == {:ok, false}
+
+      assert KilnCMS.OrgSettings.with_actor(nil, fn -> RegistrationPolicy.settings(site) end) ==
+               {:error, :unavailable}
+    end
+
     test "an unreadable row is an error, never a no" do
       site = org("unreadable")
       require_approval!(site.id, false)
@@ -152,6 +172,13 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
                  actor: site_admin,
                  tenant: site.id
                )
+
+      # The single sign-on switch is the same row, so the same rule.
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.save_site_registration(%{approval_for_site_sso: true},
+                 actor: editor,
+                 tenant: site.id
+               )
     end
   end
 
@@ -173,8 +200,15 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
       {_email, result} = register()
       assert {:ok, user} = result
 
-      assert [%{organization_id: ^org_id, status: :pending, role: :viewer, audiences: []}] =
-               memberships(user.id)
+      assert [
+               %{
+                 organization_id: ^org_id,
+                 status: :pending,
+                 role: :viewer,
+                 audiences: [],
+                 created_account: true
+               }
+             ] = memberships(user.id)
 
       assert Scoping.effective_tier(user, nil) == :none
 
@@ -302,6 +336,7 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
         )
 
       assert membership.status == :active
+      refute membership.created_account
     end
 
     test "status is not accepted from input on the ordinary write" do
@@ -348,8 +383,33 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
                "#{inspect(actor && Map.get(actor, :role, actor))} could queue a registration"
       end
 
-      assert {:ok, %{status: :pending}} =
+      assert {:ok, %{status: :pending, created_account: false}} =
                Accounts.queue_registration(attrs, actor: SystemActor.new(:registrations))
+    end
+
+    test "how the account registered is recorded on the event, and the method is constrained" do
+      site = org("queue-method")
+      target = user(:viewer)
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Accounts.queue_registration(
+                 %{organization_id: site.id, user_id: target.id, method: :magic_link},
+                 actor: SystemActor.new(:registrations)
+               )
+
+      assert {:ok, %{created_account: true}} =
+               Accounts.queue_registration(
+                 %{
+                   organization_id: site.id,
+                   user_id: target.id,
+                   method: :site_sso,
+                   new_account?: true
+                 },
+                 actor: SystemActor.new(:registrations)
+               )
+
+      assert [%{metadata: %{"method" => "site_sso"}}] =
+               Enum.filter(events(site.id, :registration_queued), &(&1.target_id == target.id))
     end
   end
 
@@ -733,34 +793,430 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
     end
   end
 
-  describe "adding or inviting an address with a registration here" do
-    test "a pending registration is refused, pointing at the queue" do
-      site = org("invite-pending")
-      {applicant, _row} = applicant(site.id)
-
-      assert {:error, error} =
-               Accounts.add_or_invite_member(
-                 %{organization_id: site.id, email: to_string(applicant.email)},
-                 actor: user(:admin)
-               )
-
-      assert InvitationRefused.in?(error, :pending_registration)
-      assert [%{status: :pending}] = memberships(applicant.id)
+  describe "an invitation honoured over a registration (#2514)" do
+    setup do
+      site = org("invite-reg")
+      site_admin = user(:viewer)
+      member!(site_admin, site.id, :admin)
+      %{site: site, site_admin: site_admin, admin: user(:admin)}
     end
 
-    test "a rejected registration is refused too, unconfirmed account or not" do
-      site = org("invite-rejected")
-      {applicant, row} = applicant(site.id, confirmed?: false)
-      Accounts.reject_registration!(row, %{}, actor: user(:admin))
+    defp invite!(site, email, admin, role \\ :editor) do
+      invitation =
+        Accounts.invite_to_org!(
+          %{organization_id: site.id, email: to_string(email), role: role},
+          actor: admin
+        )
+
+      drain_oban()
+      invitation
+    end
+
+    defp accept_existing(invitation),
+      # authorize?: false — the accept page's own call, holding the token
+      do:
+        Accounts.accept_invitation_for_existing_account(invitation.__metadata__.token,
+          authorize?: false
+        )
+
+    defp approvals(site_id, user),
+      do: Enum.filter(events(site_id, :registration_approved), &(&1.target_id == user.id))
+
+    defp pending_notices(admin, site_id),
+      do:
+        admin
+        |> KilnCMS.Notifications.recent(site_id, 50)
+        |> Enum.filter(&(&1.event == :registration_pending))
+
+    test "a confirmed account accepting over a waiting registration is approved at the invited tier",
+         ctx do
+      {applicant, row} = applicant(ctx.site.id)
+      invitation = invite!(ctx.site, applicant.email, ctx.admin)
+
+      assert {:ok, :accepted} = accept_existing(invitation)
+
+      assert %{status: :active, role: :editor, decided_at: %DateTime{}} = reload(row)
+      assert Scoping.effective_tier(applicant, ctx.site) == :editor
+      assert [event] = approvals(ctx.site.id, applicant)
+      assert event.metadata == %{"role" => "editor", "via" => "invitation"}
+      # Recorded as what it is, not as a role granted on top.
+      refute Enum.any?(events(ctx.site.id, :role_granted), &(&1.target_id == applicant.id))
+      # The invitation is used up.
+      assert KilnCMS.Accounts.Invitations.peek(invitation.__metadata__.token) == nil
+    end
+
+    test "an unconfirmed applicant setting a password through the invitation is confirmed and approved, and nobody is told they wait",
+         ctx do
+      {applicant, row} = applicant(ctx.site.id, confirmed?: false)
+      invitation = invite!(ctx.site, applicant.email, ctx.admin, :viewer)
+
+      assert {:ok, accepted} =
+               Accounts.accept_invitation_with_password(
+                 applicant,
+                 %{
+                   token: invitation.__metadata__.token,
+                   password: @password,
+                   password_confirmation: @password
+                 },
+                 authorize?: false
+               )
+
+      assert %DateTime{} = Accounts.get_user!(accepted.id, authorize?: false).confirmed_at
+      assert %{status: :active, role: :viewer} = reload(row)
+      assert [%{metadata: %{"via" => "invitation"}}] = approvals(ctx.site.id, applicant)
+      drain_oban()
+      assert pending_notices(ctx.site_admin, ctx.site.id) == []
+    end
+
+    test "an invitation sent before the rejection and resent after it approves", ctx do
+      {applicant, row} = applicant(ctx.site.id)
+      invitation = invite!(ctx.site, applicant.email, ctx.admin)
+      {:ok, _rejected} = Accounts.reject_registration(row, %{}, actor: ctx.site_admin)
+
+      resent = Accounts.resend_invitation!(invitation, %{role: :editor}, actor: ctx.admin)
+      drain_oban()
+      assert DateTime.compare(resent.last_sent_at, reload(row).decided_at) == :gt
+      assert DateTime.compare(resent.inserted_at, reload(row).decided_at) == :lt
+
+      assert {:ok, :accepted} = accept_existing(resent)
+      assert %{status: :active, role: :editor} = reload(row)
+    end
+
+    test "a row approved between the read and the lock is a membership, not an invalid invitation",
+         ctx do
+      {applicant, row} = applicant(ctx.site.id)
+      invitation = invite!(ctx.site, applicant.email, ctx.admin)
+      test_pid = self()
+      start_supervised!({Latch, name: :invitation_race, listener: test_pid})
+
+      # The queue's approval, held after it locked and wrote the row.
+      held =
+        row
+        |> Ash.Changeset.new()
+        |> Ash.Changeset.after_action(fn _changeset, record ->
+          Latch.enter(:invitation_race)
+          {:ok, record}
+        end)
+
+      approve =
+        Task.async(fn -> Accounts.approve_registration(held, %{}, actor: ctx.site_admin) end)
+
+      assert_receive {:latch_started, :invitation_race, 1}, 2_000
+
+      # `grant_membership` reads the row as still pending, then waits on the
+      # lock the approval holds, and finds it decided.
+      grant =
+        Task.async(fn -> KilnCMS.Accounts.Invitations.grant_membership(applicant, invitation) end)
+
+      assert [_] = Latch.release_all(:invitation_race)
+      assert {:ok, %{status: :active}} = Task.await(approve)
+      assert {:ok, :already_member} = Task.await(grant)
+      refute_received {:latch_timeout, _, _}
+
+      assert %{status: :active, role: :viewer} = reload(row)
+    end
+
+    test "the approval's eviction leaves after the accept commits, and never on a rollback",
+         ctx do
+      {applicant, row} = applicant(ctx.site.id)
+      KilnCMSWeb.Endpoint.subscribe(KilnCMS.Accounts.SessionEviction.topic(applicant.id))
+
+      invitation = invite!(ctx.site, applicant.email, ctx.admin)
+
+      {:error, :rolled_back} =
+        KilnCMS.AfterCommit.deferring(fn ->
+          Repo.transaction(fn ->
+            {:ok, :accepted} = accept_existing(invitation)
+            Repo.rollback(:rolled_back)
+          end)
+        end)
+
+      refute_received %Phoenix.Socket.Broadcast{event: "disconnect"}
+      assert reload(row).status == :pending
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          {:ok, :inside} =
+            KilnCMS.AfterCommit.deferring(fn ->
+              Repo.transaction(fn ->
+                {:ok, :accepted} = accept_existing(invitation)
+                refute_received %Phoenix.Socket.Broadcast{event: "disconnect"}
+                :inside
+              end)
+            end)
+        end)
+
+      assert_received %Phoenix.Socket.Broadcast{event: "disconnect"}
+      refute_received %Phoenix.Socket.Broadcast{event: "disconnect"}
+      refute log =~ "after_transaction"
+      assert reload(row).status == :active
+    end
+
+    test "the password accept evicts after its own commit, never on a rollback, without the nested-hook warning",
+         ctx do
+      {applicant, row} = applicant(ctx.site.id, confirmed?: false)
+      KilnCMSWeb.Endpoint.subscribe(KilnCMS.Accounts.SessionEviction.topic(applicant.id))
+      invitation = invite!(ctx.site, applicant.email, ctx.admin, :viewer)
+
+      accept = fn ->
+        Accounts.accept_invitation_with_password(
+          applicant,
+          %{
+            token: invitation.__metadata__.token,
+            password: @password,
+            password_confirmation: @password
+          },
+          authorize?: false
+        )
+      end
+
+      {:error, :rolled_back} =
+        KilnCMS.AfterCommit.deferring(fn ->
+          Repo.transaction(fn ->
+            {:ok, _} = accept.()
+            refute_received %Phoenix.Socket.Broadcast{event: "disconnect"}
+            Repo.rollback(:rolled_back)
+          end)
+        end)
+
+      refute_received %Phoenix.Socket.Broadcast{event: "disconnect"}
+      assert reload(row).status == :pending
+
+      log = ExUnit.CaptureLog.capture_log(fn -> assert {:ok, _} = accept.() end)
+
+      assert reload(row).status == :active
+      # The account's own token revocation evicts too; the approval adds one.
+      assert_received %Phoenix.Socket.Broadcast{event: "disconnect"}
+      refute log =~ "after_transaction"
+    end
+
+    test "a rejected registration is approved by an invitation sent after the rejection", ctx do
+      {applicant, row} = applicant(ctx.site.id)
+      {:ok, _rejected} = Accounts.reject_registration(row, %{}, actor: ctx.site_admin)
+      invitation = invite!(ctx.site, applicant.email, ctx.admin)
+
+      assert {:ok, :accepted} = accept_existing(invitation)
+      assert %{status: :active, role: :editor} = reload(row)
+    end
+
+    test "an invitation sent before the rejection does not overrule it", ctx do
+      {applicant, row} = applicant(ctx.site.id)
+      invitation = invite!(ctx.site, applicant.email, ctx.admin)
+      {:ok, _rejected} = Accounts.reject_registration(row, %{}, actor: ctx.site_admin)
+
+      assert {:error, error} = accept_existing(invitation)
+      assert InvitationRefused.in?(error, :invalid)
+      assert %{status: :rejected} = reload(row)
+      assert Scoping.effective_tier(applicant, ctx.site) == :none
+      assert approvals(ctx.site.id, applicant) == []
+      # Nothing was consumed: the refusal rolled the accept back.
+      assert %{} = KilnCMS.Accounts.Invitations.peek(invitation.__metadata__.token)
+    end
+
+    test "the password accept over an older invitation is refused too, and confirms nothing",
+         ctx do
+      {applicant, row} = applicant(ctx.site.id, confirmed?: false)
+      invitation = invite!(ctx.site, applicant.email, ctx.admin)
+      {:ok, _rejected} = Accounts.reject_registration(row, %{}, actor: ctx.site_admin)
 
       assert {:error, error} =
+               Accounts.accept_invitation_with_password(
+                 applicant,
+                 %{
+                   token: invitation.__metadata__.token,
+                   password: @password,
+                   password_confirmation: @password
+                 },
+                 authorize?: false
+               )
+
+      assert InvitationRefused.in?(error, :invalid)
+      assert is_nil(Accounts.get_user!(applicant.id, authorize?: false).confirmed_at)
+      assert %{status: :rejected} = reload(row)
+    end
+
+    test "a role of another org is refused, and the row keeps waiting", ctx do
+      foreign = org("invite-reg-foreign")
+
+      role =
+        Accounts.create_role!(%{name: "Foreign #{uniq()}", org_id: foreign.id}, actor: ctx.admin)
+
+      {_applicant, row} = applicant(ctx.site.id)
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               Accounts.approve_registration_by_invitation(
+                 row,
+                 %{role: :viewer, role_id: role.id, invited_at: DateTime.utc_now()},
+                 actor: SystemActor.new(:invitations)
+               )
+
+      assert Exception.message(error) =~ "must be a role of this organization"
+      assert reload(row).status == :pending
+    end
+
+    test "a role of the row's own org is taken", ctx do
+      role =
+        Accounts.create_role!(%{name: "Own #{uniq()}", org_id: ctx.site.id}, actor: ctx.admin)
+
+      {_applicant, row} = applicant(ctx.site.id)
+
+      assert {:ok, %{status: :active, role_id: role_id}} =
+               Accounts.approve_registration_by_invitation(
+                 row,
+                 %{role: :viewer, role_id: role.id, invited_at: DateTime.utc_now()},
+                 actor: SystemActor.new(:invitations)
+               )
+
+      assert role_id == role.id
+    end
+
+    test "an active member accepting is left as they are", ctx do
+      member = user(:viewer)
+      row = member!(member, ctx.site.id, :viewer)
+      invitation = invite!(ctx.site, member.email, ctx.admin)
+
+      assert {:ok, :accepted} = accept_existing(invitation)
+      assert %{status: :active, role: :viewer, decided_at: nil} = reload(row)
+      assert approvals(ctx.site.id, member) == []
+    end
+
+    test "only the invitations system actor and a standing platform admin may run it", ctx do
+      {applicant, row} = applicant(ctx.site.id)
+      editor = user(:viewer)
+      member!(editor, ctx.site.id, :editor)
+      viewer = user(:viewer)
+      member!(viewer, ctx.site.id, :viewer)
+      args = %{role: :admin, invited_at: DateTime.utc_now()}
+
+      for actor <- [
+            ctx.site_admin,
+            editor,
+            viewer,
+            applicant,
+            nil,
+            SystemActor.new(:registrations),
+            SystemActor.new(:accounts)
+          ] do
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Accounts.approve_registration_by_invitation(row, args, actor: actor),
+               "#{inspect(actor && Map.get(actor, :role, actor))} could approve by invitation"
+      end
+
+      temporary =
+        user(:viewer, %{
+          granted_role: :admin,
+          granted_role_expires_at: DateTime.add(DateTime.utc_now(), 3600)
+        })
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Accounts.approve_registration_by_invitation(row, args, actor: temporary)
+
+      assert reload(row).status == :pending
+
+      assert {:ok, %{status: :active, role: :admin}} =
+               Accounts.approve_registration_by_invitation(row, args, actor: ctx.admin)
+    end
+  end
+
+  describe "adding or inviting an address with a registration here" do
+    test "a confirmed applicant waiting here is approved at the chosen tier, via an add" do
+      site = org("invite-pending")
+      {applicant, row} = applicant(site.id)
+
+      assert {:ok, %{outcome: :approved, membership: membership}} =
+               Accounts.add_or_invite_member(
+                 %{organization_id: site.id, email: to_string(applicant.email), role: :editor},
+                 actor: user(:admin)
+               )
+
+      assert membership.id == row.id
+      assert %{status: :active, role: :editor} = reload(row)
+
+      assert [%{metadata: %{"role" => "editor", "via" => "added"}}] =
+               Enum.filter(
+                 events(site.id, :registration_approved),
+                 &(&1.target_id == applicant.id)
+               )
+    end
+
+    test "a confirmed applicant rejected here is approved too, and the outcome says it overrode the rejection" do
+      site = org("invite-rejected")
+      {applicant, row} = applicant(site.id)
+      Accounts.reject_registration!(row, %{}, actor: user(:admin))
+
+      assert {:ok, %{outcome: :approved_over_rejection}} =
                Accounts.add_or_invite_member(
                  %{organization_id: site.id, email: to_string(applicant.email)},
                  actor: user(:admin)
                )
 
-      assert InvitationRefused.in?(error, :rejected_registration)
-      assert [%{status: :rejected}] = memberships(applicant.id)
+      assert %{status: :active, role: :viewer} = reload(row)
+    end
+
+    test "a direct add overrides a rejection whatever its recorded time (no clock comparison)" do
+      site = org("invite-rejected-skew")
+      {applicant, row} = applicant(site.id)
+      Accounts.reject_registration!(row, %{}, actor: user(:admin))
+
+      # A rejection written by a node whose clock runs ahead.
+      KilnCMS.Repo.query!(
+        "UPDATE org_memberships SET decided_at = now() + interval '1 hour' WHERE id = $1",
+        [Ecto.UUID.dump!(row.id)]
+      )
+
+      assert {:ok, %{outcome: :approved_over_rejection}} =
+               Accounts.add_or_invite_member(
+                 %{organization_id: site.id, email: to_string(applicant.email)},
+                 actor: user(:admin)
+               )
+
+      assert %{status: :active} = reload(row)
+    end
+
+    test "an unconfirmed applicant, waiting or rejected, is invited and the row left alone" do
+      site = org("invite-unconfirmed")
+      {waiting, _row} = applicant(site.id, confirmed?: false)
+      {rejected, rejected_row} = applicant(site.id, confirmed?: false)
+      Accounts.reject_registration!(rejected_row, %{}, actor: user(:admin))
+
+      for {applicant, status} <- [{waiting, :pending}, {rejected, :rejected}] do
+        assert {:ok, %{outcome: :invited}} =
+                 Accounts.add_or_invite_member(
+                   %{organization_id: site.id, email: to_string(applicant.email)},
+                   actor: user(:admin)
+                 )
+
+        assert [%{status: ^status}] = memberships(applicant.id)
+      end
+    end
+
+    test "an erased, rejected applicant's address is simply invited; the old row is untouched" do
+      site = org("invite-erased")
+      {applicant, row} = applicant(site.id)
+      Accounts.reject_registration!(row, %{}, actor: user(:admin))
+      {:ok, _erased} = Accounts.anonymize_user(applicant, actor: user(:admin))
+
+      assert {:ok, %{outcome: :invited}} =
+               Accounts.add_or_invite_member(
+                 %{organization_id: site.id, email: to_string(applicant.email)},
+                 actor: user(:admin)
+               )
+
+      assert %{status: :rejected} = reload(row)
+    end
+
+    test "an active member is still refused" do
+      site = org("invite-active")
+      member = user(:viewer)
+      member!(member, site.id, :viewer)
+
+      assert {:error, error} =
+               Accounts.add_or_invite_member(
+                 %{organization_id: site.id, email: to_string(member.email)},
+                 actor: user(:admin)
+               )
+
+      assert InvitationRefused.in?(error, :already_member)
     end
   end
 

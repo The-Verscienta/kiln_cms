@@ -3211,8 +3211,13 @@ msgstr "S'applique quand un nouvel enregistrement laisse ce champ vide, jamais l
 
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
-msgid "Applies to people who sign up with a password on this site. Invitations, this site's single sign-on and existing accounts are not affected. Turning it off doesn't approve anyone already waiting."
-msgstr "S'applique aux personnes qui s'inscrivent avec un mot de passe sur ce site. Les invitations, l'authentification unique de ce site et les comptes existants ne sont pas concernés. Le désactiver n'approuve personne parmi ceux qui attendent déjà."
+msgid "Applies only if this site has its own single sign-on. Someone signing in that way for the first time gets an account that waits here; people who already have an account are not affected."
+msgstr "Ne s'applique que si ce site a sa propre authentification unique. Une personne qui se connecte ainsi pour la première fois obtient un compte qui attend ici ; les personnes qui ont déjà un compte ne sont pas concernées."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Applies to people who sign up with a password on this site. Invitations and existing accounts are not affected, and this site's single sign-on has its own switch below. Turning it off doesn't approve anyone already waiting."
+msgstr "S'applique aux personnes qui s'inscrivent avec un mot de passe sur ce site. Les invitations et les comptes existants ne sont pas concernés, et l'authentification unique de ce site a son propre réglage ci-dessous. Le désactiver n'approuve personne parmi ceux qui attendent déjà."
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
@@ -11821,6 +11826,11 @@ msgstr "Nom de la nouvelle %{kind}"
 msgid "New %{type}"
 msgstr "Créer : %{type}"
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "New accounts from this site's single sign-on wait for approval too"
+msgstr "Les nouveaux comptes issus de l'authentification unique de ce site attendent aussi une approbation"
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "New category"
@@ -19165,11 +19175,6 @@ msgstr "Cette adresse a reçu trop d’invitations au cours de la dernière heur
 
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
-msgid "That address has registered on this site and is waiting for approval — approve it under Registrations."
-msgstr "Cette adresse s'est inscrite sur ce site et attend une approbation : approuvez-la dans Inscriptions."
-
-#: lib/kiln_cms_web/live/team_live.ex
-#, elixir-autogen, elixir-format
 msgid "That address is already invited — resend it from Pending invitations."
 msgstr "Cette adresse est déjà invitée — renvoyez l’invitation depuis Invitations en attente."
 
@@ -19177,11 +19182,6 @@ msgstr "Cette adresse est déjà invitée — renvoyez l’invitation depuis Inv
 #, elixir-autogen, elixir-format
 msgid "That address is on the mail suppression list, so the invitation would not arrive. Clear it under Mail first."
 msgstr "Cette adresse figure sur la liste de suppression des e-mails, l’invitation n’arriverait donc pas. Retirez-la d’abord dans E-mail."
-
-#: lib/kiln_cms_web/live/team_live.ex
-#, elixir-autogen, elixir-format
-msgid "That address registered on this site and was rejected."
-msgstr "Cette adresse s'est inscrite sur ce site et a été refusée."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -20380,6 +20380,16 @@ msgstr "La copie de travail a pris de l’avance sur le texte publié."
 #, elixir-autogen, elixir-format
 msgid "The year of a date."
 msgstr "L’année d’une date."
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Their registration on this site had been rejected; it's now approved, and they are a member."
+msgstr "Son inscription sur ce site avait été refusée ; elle est désormais approuvée et cette personne en est membre."
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Their registration on this site is approved, and they are now a member."
+msgstr "Son inscription sur ce site est approuvée : cette personne en est désormais membre."
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/branding_live.ex

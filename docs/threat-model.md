@@ -1541,31 +1541,79 @@ The how-to is
   so the reconnect is authorized against the decided row. A temporary platform
   admin is refused by `StandingAdminOnly`.
 - **Who may queue.** `OrgMembership` `:queue_registration` admits only the
-  `:registrations` system actor; the platform-admin bypass forbids it, so no
-  person can create a waiting row, for themselves or anyone.
+  `:registrations` system actor (the password sign-up and the site single
+  sign-on admission); the platform-admin bypass forbids it, so no person can
+  create a waiting row, for themselves or anyone.
 - **Mixed-version nodes.** A node on the previous release has no `status` and
   reads a waiting (or rejected) row as an active viewer membership: no
   audiences, but comments and checkout where viewers may. Operators turn
   approval on only once every node runs the new release, and before rolling
   back anonymize the waiting and rejected accounts they would not let in
   ([ADR 0024](decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md#upgrade-notes)).
+- **Invitations decide registrations, without reopening a rejection by
+  accident (#2514).** An invitation is a platform admin's decision to let an
+  address in, so accepting one approves the invitee's waiting or rejected
+  row on that site with the invited tier
+  (`OrgMembership.:approve_registration_by_invitation`, admitted only for the
+  `:invitations` system actor and a standing platform admin). A rejected row
+  is approved only if the invitation was sent or last resent **after** the
+  rejection (`invited_at` later than `decided_at`, compared on the locked
+  row; equal or missing times leave the rejection standing). An invitation
+  older than the rejection is refused as "no longer valid", with the same
+  page as any other dead link, and the accept rolls back, confirming
+  nothing. So a site admin's rejection is not undone by an invitation that
+  predates it. A platform admin's direct add on Team overrides any rejection,
+  because it is a decision made now, and does it visibly: the outcome is
+  `:approved_over_rejection`, the page says the rejection was overridden, and
+  the log records `registration_approved` with `via` `added` and that admin
+  as the person. Approval still requires a confirmed, unerased applicant: an
+  unconfirmed address is invited, never added, and the invitee proves the
+  address by accepting. The applicant's sessions are evicted after the
+  accept's own commit (`KilnCMS.AfterCommit`), not when the nested approval
+  finishes, so a reconnect is never authorized against the row before it is
+  committed, and a rolled-back accept evicts nothing.
+- **A site's own single sign-on can be held for approval (#2514).**
+  `SiteRegistration.approval_for_site_sso`, off by default and independent of
+  `approval_required`, makes a **new** account the site's provider
+  provisions a `:pending` row (`queue_registration`, `method: site_sso`)
+  instead of a `:viewer` membership. The account gets a session that grants
+  nothing. Rule 3 of `SiteSso.Admission` (no access on any other site) is
+  unchanged and still sound: the pending row is on this site only, so the
+  account stays affiliated and is never the legacy membership-less viewer on
+  the default site, and a pending or rejected row on *another* site counts as
+  access elsewhere and refuses the sign-in, as any membership does. The
+  setting is read only when an account would be provisioned, before the
+  transaction, and fails closed: an unreadable row refuses the sign-in
+  (`:registration_settings_unavailable`) and creates nothing.
 - **Enumeration.** The sign-up page says nothing about waiting, and a
-  registration for an existing address answers as before. **Add or invite**
-  tells a platform admin that an address has a waiting or rejected
-  registration on the site; that is an admin of the site learning about its
-  own applicants.
-- **Residuals.** (1) A rejected account is kept, not erased (part three).
-  (2) An invitation accepted over a waiting registration leaves it waiting
-  (part three). (3) A site admin whose admin tier is a temporary membership
+  registration for an existing address answers as before. Single sign-on
+  answers a new and an existing account the same way whether or not the new
+  one waits: both are signed in. **Add or invite** tells a platform admin,
+  after the fact, that a confirmed address had a waiting or rejected
+  registration on the site (the outcome names it); for an unconfirmed address
+  it says nothing and invites. That is an admin of the site learning about
+  its own applicants, and a platform admin can read every account anyway.
+- **Residuals.** (1) A rejected account is kept, not erased (part three,
+  c2). (2) A site admin whose admin tier is a temporary membership
   grant can decide registrations, and is told about them;
-  `StandingAdminOnly` constrains only platform grants. (4) A node on an older
+  `StandingAdminOnly` constrains only platform grants. (3) A node on an older
   release cannot load a `registration_pending` notification, so during a
   rolling deploy or after a rollback an affected admin's bell there lists
   nothing ([#2509](https://github.com/The-Verscienta/kiln_cms/issues/2509));
-  an availability gap, not an exposure. (5) A magic-link sign-in does not
+  an availability gap, not an exposure. (4) A magic-link sign-in does not
   confirm an account, so an applicant who only ever signs in that way is
   never announced
   ([#2516](https://github.com/The-Verscienta/kiln_cms/issues/2516)).
+  (5) Holding single sign-on accounts covers new accounts only: an existing
+  account the site's provider admits for the first time is not queued
+  ([#2515](https://github.com/The-Verscienta/kiln_cms/issues/2515)).
+  (6) Sending, resending or re-inviting an address whose registration was
+  rejected does not tell the platform admin about the rejection; if the
+  invitee accepts, the rejection is overridden, and only the
+  `registration_approved` event (`via` `invitation`) after the
+  `registration_rejected` shows it. (7) A node on an older release ignores
+  `approval_for_site_sso` and provisions single sign-on accounts as active
+  viewers; operators turn it on only once every node runs the release.
 
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;

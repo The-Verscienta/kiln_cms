@@ -156,10 +156,32 @@ stops it paying nor stops its entitlement creating the viewer row it always
 did. On a site that does not require approval, an account pending elsewhere
 may pay there as before, and becomes a viewer member of that site only.
 
+## Part three (c1): invitations and a site's own single sign-on
+
+- **An invitation decides the registration.** Accepting an invitation to a
+  site where the address waits, or was rejected, approves that row with the
+  invitation's tier (`OrgMembership.:approve_registration_by_invitation`, as
+  `SystemActor.new(:invitations)`), recorded as `registration_approved` with
+  `via: invitation`. A rejected row is approved only when the invitation was
+  sent after the rejection; an older one is refused as no longer valid, so it
+  cannot overrule the later decision. A platform admin adding a confirmed
+  address on the Team page approves it the same way (`via: added`); an
+  unconfirmed address is invited, as before. No decision mail: the person
+  accepted, or is told they were added.
+- **A site's own single sign-on may queue new accounts.**
+  `site_registration.approval_for_site_sso` (off by default, independent of
+  `approval_required`) makes an account the site's provider provisions wait
+  as a pending row (`method: site_sso`); the admins are told after the
+  commit. An unreadable setting refuses the sign-in and creates nothing. An
+  existing account is admitted as before.
+- **Provenance.** `org_memberships.created_account` records that a queued
+  registration created the account (a password sign-up, or a provisioned
+  single sign-on account), for the erasure that follows.
+
 ## Not in this part
 
-- Erasing rejected accounts, queueing a site's own single sign-on, and
-  accepting an invitation over a pending row (part three).
+- Erasing rejected accounts (part three, c2), and queueing an existing
+  account the first time a site's own single sign-on admits it.
 - Recording a membership for every registration whatever the setting, and
   expiring old pending rows (follow-up issues).
 
@@ -181,3 +203,10 @@ may pay there as before, and becomes a viewer member of that site only.
   empty list, and "mark all read" fails there. Finish the roll forward, or
   before rolling back run
   `DELETE FROM notifications WHERE event = 'registration_pending'`.
+- Part three (c1) adds `org_memberships.created_account` and
+  `site_registration.approval_for_site_sso` (both `NOT NULL DEFAULT false`).
+  Turn `approval_for_site_sso` on only once every node runs this release: an
+  older node provisions single sign-on accounts as active viewers. New values
+  an older node may read: the `registration_queued` method `site_sso` and the
+  `registration_approved` vias `invitation` and `added`, all strings in event
+  metadata.

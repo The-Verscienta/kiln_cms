@@ -116,6 +116,16 @@ not trusted for everything it asserts:
   registration on, someone who signs in through the provider *before*
   accepting is already a `:viewer` member when they accept, and accepting leaves
   that membership as it is, so raise their tier on Team.
+- **New people can be made to wait for approval.** A site admin ticks **New
+  accounts from this site's single sign-on wait for approval too** on
+  **Registrations** (`/editor/registrations`; off by default, separate from
+  the password sign-up setting). A new account is then created and signed in
+  with no access on any site, and its registration waits for an admin to
+  approve it; existing accounts sign in as before. Someone who was invited
+  and is waiting this way gets the invited tier when they accept the
+  invitation. If the setting can't be read, a first sign-in is refused with
+  the "unavailable" message below and creates nothing. Details:
+  [Hold new single sign-on accounts too](account-administration.md#hold-new-single-sign-on-accounts-too).
 - **A second factor still applies.**
 - **`RS256` ID tokens only**, from the keys at the provider's `jwks_uri`. Every
   request Kiln makes to the provider goes through the same SSRF guard as
@@ -123,7 +133,9 @@ not trusted for everything it asserts:
 
 If the settings can't be read, or the client secret can't be decrypted (after
 a `SECRET_KEY_BASE` rotation — see [secrets-rotation.md](secrets-rotation.md)),
-the sign-in page says the site's single sign-on is unavailable. It never sends
+or a new account would be created and the site's registration setting can't be
+read, the sign-in page says "Single sign-on isn't available on this site right
+now. Sign in another way." It never sends
 people to the operator's provider instead.
 
 Not yet: turning password sign-in off for a site, SAML, and more than one

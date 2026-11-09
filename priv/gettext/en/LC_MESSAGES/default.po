@@ -3211,7 +3211,12 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
-msgid "Applies to people who sign up with a password on this site. Invitations, this site's single sign-on and existing accounts are not affected. Turning it off doesn't approve anyone already waiting."
+msgid "Applies only if this site has its own single sign-on. Someone signing in that way for the first time gets an account that waits here; people who already have an account are not affected."
+msgstr ""
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Applies to people who sign up with a password on this site. Invitations and existing accounts are not affected, and this site's single sign-on has its own switch below. Turning it off doesn't approve anyone already waiting."
 msgstr ""
 
 #: lib/kiln_cms_web/live/organize_live.ex
@@ -11821,6 +11826,11 @@ msgstr ""
 msgid "New %{type}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "New accounts from this site's single sign-on wait for approval too"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "New category"
@@ -19165,22 +19175,12 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
-msgid "That address has registered on this site and is waiting for approval — approve it under Registrations."
-msgstr ""
-
-#: lib/kiln_cms_web/live/team_live.ex
-#, elixir-autogen, elixir-format
 msgid "That address is already invited — resend it from Pending invitations."
 msgstr ""
 
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "That address is on the mail suppression list, so the invitation would not arrive. Clear it under Mail first."
-msgstr ""
-
-#: lib/kiln_cms_web/live/team_live.ex
-#, elixir-autogen, elixir-format
-msgid "That address registered on this site and was rejected."
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
@@ -20379,6 +20379,16 @@ msgstr ""
 #: lib/kiln_cms/cms/computed.ex
 #, elixir-autogen, elixir-format
 msgid "The year of a date."
+msgstr ""
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Their registration on this site had been rejected; it's now approved, and they are a member."
+msgstr ""
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Their registration on this site is approved, and they are now a member."
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex

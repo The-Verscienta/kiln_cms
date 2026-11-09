@@ -269,13 +269,22 @@ that is what they are for there.
 2. Under **Members**, enter the address in **Email**. Pick a **Site tier**
    (*Viewer* is the default) and, if the site has custom roles, a **Custom
    role**.
-3. Click **Add or invite**. You see one of two results:
+3. Click **Add or invite**. You see one of these results:
    - "Invitation sent to (address)." The address now appears under **Pending
      invitations (n)** with its tier, its custom role, "Invited by (you)." and
      "Expires (date and time, UTC)".
    - "Member added to this site." The address already had a confirmed account,
      so it is in the member list now. Its owner is mailed "You were added to
      (site)" with a sign-in link. There is nothing more to do.
+   - "Their registration on this site is approved, and they are now a
+     member." The address has a confirmed account whose registration was
+     [waiting for approval](#approving-registrations) here. Adding it approves
+     the registration with the tier you picked, and the owner is mailed as
+     for an add.
+   - "Their registration on this site had been rejected; it's now approved,
+     and they are a member." The same, for a registration an admin had
+     rejected: adding the address reverses that rejection
+     ([Invitations and registrations](#invitations-and-registrations)).
 4. The invitee receives "You've been invited to (site)". The mail names you,
    the site and the tier, and carries an **Accept the invitation** link that
    works once and expires in 7 days.
@@ -339,13 +348,15 @@ Accounts.add_or_invite_member(
 #=> {:ok, %{outcome: :invited, invitation: %KilnCMS.Accounts.Invitation{role: :editor, ...}}}
 ```
 
-`outcome` is `:added` (with `membership:`), `:invited` or `:reinvited` (an
-expired invitation sent again, with `invitation:`). A refusal is
+`outcome` is `:added` (with `membership:`), `:approved` or
+`:approved_over_rejection` (a confirmed account's waiting or rejected
+registration on the site approved with the chosen tier, with `membership:`),
+`:invited` or `:reinvited` (an expired invitation sent again, with
+`invitation:`). A refusal is
 `{:error, %Ash.Error.Invalid{}}` carrying a
 `KilnCMS.Accounts.Errors.InvitationRefused`;
 `InvitationRefused.reason/1` returns `:already_member`, `:already_invited`,
-`:pending_registration`, `:rejected_registration`, `:suppressed` or
-`:mail_budget`. Every read and write runs as `actor`, so an
+`:suppressed` or `:mail_budget`. Every read and write runs as `actor`, so an
 editor, a viewer or no actor gets `Ash.Error.Forbidden` before the address is
 looked up. `invite_to_org/2`, `resend_invitation/3`, `revoke_invitation/2` and
 `list_invitations_for_org/2` are the single steps. The accept actions are
@@ -360,13 +371,6 @@ On the Team page:
 - **"That address is already invited — resend it from Pending invitations."**
   A live invitation exists. Use **Resend**, or revoke it and invite again with a
   different tier.
-- **"That address has registered on this site and is waiting for approval —
-  approve it under Registrations."** The person signed up here while the site
-  [requires approval](#approving-registrations). Approve them on
-  **Registrations**, then change their tier on their Team row.
-- **"That address registered on this site and was rejected."** An admin
-  turned their registration down. To let them in after all, approve them from
-  the **Rejected** tab ([Undo a rejection](#undo-a-rejection)).
 - **"That address is on the mail suppression list, so the invitation would not
   arrive. Clear it under Mail first."** The address hard-bounced before. Remove
   it from the suppression list on **Mail** (`/editor/mail`, instance-wide) or
@@ -384,8 +388,11 @@ On the invitation page:
 - **"This invitation is no longer valid"** with "Ask a site admin to send you a
   new one." The link was made up, has expired, was revoked, was already used,
   or was replaced by a resend. An admin-tier invitation also shows this once
-  the admin who sent it is no longer a standing platform admin. The page does
-  not say which, on purpose. Send a new invitation.
+  the admin who sent it is no longer a standing platform admin, and so does
+  an invitation to a site where the person's registration was rejected after
+  the invitation was last sent
+  ([Invitations and registrations](#invitations-and-registrations)). The page
+  does not say which, on purpose. Send a new invitation.
 - **"An account with this address already exists — accept the invitation with
   it."** An account was created for the address after the page opened, by
   sign-up or single sign-on. Nothing was set; the page now offers the branch
@@ -434,12 +441,14 @@ default, set per site, and has no environment variable. Saving the setting is
 recorded in the [security log](security-events.md) as *Site setting changed*
 (`setting` `site_registration`).
 
-Only password sign-ups at `/register` on this site's host wait. These are
-never queued:
+This setting holds password sign-ups at `/register` on this site's host.
+New accounts from the site's own single sign-on have a switch of their own
+([below](#hold-new-single-sign-on-accounts-too)). These are never queued:
 
-- an accepted [invitation](#invite-someone-to-a-site), which an admin chose;
-- a sign-in through this site's own single sign-on, or through the
-  deployment's single sign-on (`OIDC_*`);
+- an accepted [invitation](#invite-someone-to-a-site), which an admin chose
+  (accepting one approves a waiting registration instead:
+  [Invitations and registrations](#invitations-and-registrations));
+- a sign-in through the deployment's single sign-on (`OIDC_*`);
 - an account that already exists, and the first admin created in `/setup`.
 
 Turning approval off again approves nobody: everyone already waiting keeps
@@ -447,6 +456,46 @@ waiting until an admin decides. If the deployment has switched open
 registration off, the page says "Open registration is switched off for this
 deployment, so nobody can sign up and this setting has no effect. People join
 through invitations."
+
+### Hold new single sign-on accounts too
+
+If the site has its own single sign-on provider
+([Per-site providers](sso.md#per-site-providers)), the first sign-in through
+it creates an account and, by default, makes it a *Viewer* on the site
+straight away. A second switch makes those new accounts wait for approval
+like a password sign-up. It is independent of the first: either can be on
+without the other.
+
+You need the admin tier on the site: a site admin, or a platform admin.
+
+1. Open **Registrations** (`/editor/registrations`).
+2. Under **Settings**, tick **New accounts from this site's single sign-on
+   wait for approval too**.
+3. Click **Save**. You see "Registration settings saved."
+
+The next person who signs in through the site's provider for the first time
+gets an account and a session, but no access on any site, and appears under
+**Waiting for approval** on **Registrations**. The provider has already
+verified their address, so they are approvable at once, and the site's
+admins are told straight away
+([Get told when someone is waiting](#get-told-when-someone-is-waiting)).
+Approve or reject them as for any other registration. The security log
+records *Registration awaiting approval* with `method` `site_sso`.
+
+- **Only new accounts.** Someone who already has an account signs in through
+  the provider as before, whatever this switch says.
+- **Someone still waiting** who signs in through the provider again is
+  signed in and is still waiting.
+- **Open registration off** (`:registration_enabled` false): the provider
+  creates no accounts, so this switch has nothing to act on.
+- **The setting can't be read**: a first sign-in through the provider is
+  refused with "Single sign-on isn't available on this site right now. Sign
+  in another way." and no account is created. Sign-ins of existing accounts
+  don't read the setting and are unaffected.
+
+Operators: turn this on only once every node runs the release that has it.
+An older node ignores the switch and makes new single sign-on accounts
+*Viewers* straight away.
 
 ### What an applicant can do while they wait
 
@@ -524,7 +573,12 @@ because that is when it can be approved. Registering alone tells nobody.
 1. The applicant confirms their address: by the confirmation link, by
    resetting their password, or by accepting an invitation with a password.
    A magic-link sign-in does not confirm an address, so it does not count.
-2. Every site where they are waiting tells its admins. Each admin gets a
+   A new account from the site's own single sign-on arrives confirmed, so on
+   a site that [holds those](#hold-new-single-sign-on-accounts-too) the
+   admins are told as soon as it is created.
+2. Every site where they are waiting tells its admins. (Accepting an
+   invitation approves the registration on the invitation's own site, so
+   that site has nothing to be told.) Each admin gets a
    notice in the bell (and at `/editor/inbox`), "Registrations waiting for
    approval", titled with the site's name. Clicking it opens
    **Registrations**.
@@ -616,21 +670,38 @@ while anyone is waiting: "1 registration is waiting for approval",
 "(n) registrations are waiting for approval", or "100 or more registrations
 are waiting for approval" once it reaches 100 (it stops counting there).
 
-### Invitations and waiting registrations
+### Invitations and registrations
 
 An invitation is never queued. Accepting one gives the invited tier on the
-site, even on a site that requires approval.
+site, even on a site that requires approval. An invitation is an admin's
+decision to let the person in, so it also decides a registration the person
+has on the same site:
 
-**Add or invite** on Team refuses an address that has a registration on the
-site:
+- **Accepting an invitation over a waiting registration approves it** with
+  the invited tier and custom role, whether the invitee accepts with one
+  click (a confirmed account) or by choosing a password (an unconfirmed one,
+  which accepting confirms). The row leaves **Waiting for approval**, and the
+  invitee gets no decision email: they just accepted.
+- **Accepting over a rejected registration approves it only if the
+  invitation is newer than the rejection**: sent, or last resent, after the
+  registration was rejected. An older invitation was sent before an admin
+  turned the person away, so it does not overrule that. The invitation page
+  then says "This invitation is no longer valid", the registration stays
+  rejected, and nothing about the account changes. To let them in after all,
+  **Resend** the invitation (a resend counts as newer) or approve them from
+  the **Rejected** tab.
+- **Add or invite** on Team, for an address with a confirmed account and a
+  registration here, approves the registration at once with the tier you
+  picked. A rejected one is approved too, whenever it was rejected, because
+  adding is a decision you make now; the message says the rejection was
+  overridden. An address whose account is unconfirmed is invited instead,
+  and accepting decides the registration as above. An erased account's
+  address no longer matches it, so it is simply invited.
 
-- waiting: approve it on **Registrations**, then change the tier on Team;
-- rejected: approve it from the **Rejected** tab, then change the tier.
-
-If someone was invited, then signed up with a password on the same site before
-accepting, their registration waits. Accepting the invitation afterwards
-leaves it waiting: approve it on **Registrations**. Accepting an invitation
-over a waiting registration is a later part of #2251.
+Each of these records *Registration approved* in the security log, with
+`via` `invitation` (an accepted invitation; no person, since the system
+honours it) or `added` (Add or invite; the person is the platform admin).
+Neither writes a separate *Role granted*.
 
 ### Sign-ups on another site's host
 
@@ -703,7 +774,10 @@ On **Registrations**:
 
 On the public site, the applicant can hit "registration is unavailable for a
 moment — try again shortly" (above), and at checkout "Your registration on
-this site hasn't been approved, so you can't join yet."
+this site hasn't been approved, so you can't join yet." A first sign-in
+through the site's own single sign-on can hit "Single sign-on isn't available
+on this site right now. Sign in another way." when the setting can't be read
+([Hold new single sign-on accounts too](#hold-new-single-sign-on-accounts-too)).
 
 ### Decide registrations from code
 
@@ -743,11 +817,30 @@ Accounts.approve_registration(entry.membership, %{}, actor: admin)
 - A refused decision is `{:error, %Ash.Error.Invalid{}}` carrying a
   `KilnCMS.Accounts.Errors.RegistrationRefused`. `RegistrationRefused.reason/1`
   returns `:not_pending` (already decided), `:unconfirmed` or `:erased`
-  (approving an erased account). The same error
+  (approving an erased account), and `:rejected_after_invitation` from
+  `approve_registration_by_invitation` (below). The same error
   carries `:settings_unavailable` on a refused sign-up and `:not_approved` on
   a refused paid-membership start.
+- `save_site_registration/2` also takes `approval_for_site_sso`, the
+  [single sign-on switch](#hold-new-single-sign-on-accounts-too).
+  `KilnCMS.Accounts.RegistrationPolicy.settings/1` reads both switches as
+  the system, `{:ok, %{approval_required: boolean, approval_for_site_sso:
+  boolean}}` (both `false` for a site with no row) or
+  `{:error, :unavailable}`.
 - `Accounts.queue_registration/2` is system-only: it is the sign-up's own
-  write, and every person, a platform admin included, is refused it.
+  write, and every person, a platform admin included, is refused it. Its
+  `method` argument (`:password`, the default, or `:site_sso`) is recorded on
+  the `registration_queued` event, and `new_account?` (default `false`) is
+  stored on the row as `created_account`: whether this registration created
+  the account. Rows written before the column existed read `false`.
+- `Accounts.approve_registration_by_invitation/3` is how an invitation
+  decides a registration ([Invitations and registrations](#invitations-and-registrations)).
+  It takes `role` (default `:viewer`), `role_id` (a custom role of the row's
+  own site), `invited_at` (required) and `via` (`:invitation`, the default,
+  or `:added`). It refuses as `approve_registration` does, and refuses a
+  rejected row whose `decided_at` is not earlier than `invited_at`. It admits
+  the `:invitations` system actor (an accepted invitation) and a standing
+  platform admin (Add or invite), nobody else. It sends no decision email.
 - A decision from code mails the applicant exactly as the page does
   ([What the applicant is told](#what-the-applicant-is-told)), after the
   commit.

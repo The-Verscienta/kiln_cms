@@ -8,7 +8,9 @@ defmodule KilnCMSWeb.RegistrationsLive do
   on this site's host creates the account and a `:pending` membership here
   (`KilnCMS.Accounts.Changes.QueueRegistration`). The account can sign in but
   holds nothing until an admin approves it on this page; approving makes it a
-  viewer here, rejecting keeps the account and marks the row rejected.
+  viewer here, rejecting keeps the account and marks the row rejected. A second
+  switch, `approval_for_site_sso` (#2514), does the same for a new account this
+  site's own single sign-on provisions; the two are independent.
 
   Applicants who have confirmed their address can be approved or rejected; the
   ones who have not can only be rejected, since anyone can register an address
@@ -81,7 +83,10 @@ defmodule KilnCMSWeb.RegistrationsLive do
 
   def handle_event("save_settings", %{"registration" => params}, socket) when is_map(params) do
     case CMS.save_site_registration(
-           %{approval_required: params["approval_required"] == "true"},
+           %{
+             approval_required: params["approval_required"] == "true",
+             approval_for_site_sso: params["approval_for_site_sso"] == "true"
+           },
            actor: socket.assigns.current_user,
            tenant: socket.assigns.current_org,
            context: socket.assigns.security_context
@@ -266,12 +271,19 @@ defmodule KilnCMSWeb.RegistrationsLive do
   defp load_settings(socket) do
     row = current_row(socket)
     required? = (row && row.approval_required) || false
+    site_sso? = (row && row.approval_for_site_sso) || false
 
     socket
     |> assign(:approval_required?, required?)
     |> assign(
       :settings_form,
-      to_form(%{"approval_required" => to_string(required?)}, as: :registration)
+      to_form(
+        %{
+          "approval_required" => to_string(required?),
+          "approval_for_site_sso" => to_string(site_sso?)
+        },
+        as: :registration
+      )
     )
   end
 
@@ -509,7 +521,17 @@ defmodule KilnCMSWeb.RegistrationsLive do
           />
           <p class="text-xs text-base-content/70">
             {gettext(
-              "Applies to people who sign up with a password on this site. Invitations, this site's single sign-on and existing accounts are not affected. Turning it off doesn't approve anyone already waiting."
+              "Applies to people who sign up with a password on this site. Invitations and existing accounts are not affected, and this site's single sign-on has its own switch below. Turning it off doesn't approve anyone already waiting."
+            )}
+          </p>
+          <.input
+            field={@settings_form[:approval_for_site_sso]}
+            type="checkbox"
+            label={gettext("New accounts from this site's single sign-on wait for approval too")}
+          />
+          <p class="text-xs text-base-content/70">
+            {gettext(
+              "Applies only if this site has its own single sign-on. Someone signing in that way for the first time gets an account that waits here; people who already have an account are not affected."
             )}
           </p>
           <.button phx-disable-with={gettext("Saving…")}>{gettext("Save")}</.button>

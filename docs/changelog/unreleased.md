@@ -120,6 +120,32 @@ carries the reasoning.
     queue itself is untouched. Or roll forward instead.
   See also [the Added entry](#registration-notifications).
 
+<a id="registration-invitations-sso-upgrade"></a>
+
+- **Run `mix ash.migrate` for invitations over registrations and the site
+  single sign-on switch (#2251, part three, first half). Turn the new
+  switch on only once every node runs this release.**
+  - **What the migration does.**
+    `20261109145052_registration_provenance_and_site_sso` adds
+    `org_memberships.created_account` and
+    `site_registration.approval_for_site_sso`, both
+    `boolean NOT NULL DEFAULT false`. Additive: every existing row reads
+    `false`, which is the behaviour before this change, and an older release
+    ignores both columns.
+  - **Mixed versions.** A node still on an older release does not read
+    `approval_for_site_sso`, so a new account from a site's own single sign-on
+    that lands on it becomes an active *Viewer*, unreviewed. Turn the switch
+    on (**Registrations** → **New accounts from this site's single sign-on
+    wait for approval too**) only after every node runs this release.
+  - **Rolling back** is safe for the schema. Waiting single sign-on accounts
+    are waiting rows like any other, covered by
+    [the first part's upgrade note](#registration-approval-upgrade). No new
+    security event types: `registration_queued` gains the `method` value
+    `site_sso`, and `registration_approved` the `via` values `invitation` and
+    `added`, all strings in the event's metadata, which an older build that
+    has these event types loads as before.
+  See also [the Added entry](#registration-invitations-sso).
+
 <a id="sign-in-unlock-upgrade"></a>
 
 - **Sign-in unlock links (#2250): no migration, and nothing to set. Before
@@ -860,18 +886,21 @@ carries the reasoning.
   - **Default site.** A sign-up on a site without approval is queued on the
     default site when that one requires approval, since it would otherwise be
     an unreviewed viewer there.
-  - **Never queued.** Invitations, either kind of single sign-on, and existing
-    accounts. **Add or invite** refuses an address waiting or rejected on the
-    site and points at the queue.
+  - **Never queued.** Invitations, the deployment's single sign-on, and
+    existing accounts. A site's own single sign-on can be held with a switch
+    of its own, and an invitation or **Add or invite** approves a waiting or
+    rejected registration rather than being refused
+    ([part three, first half](#registration-invitations-sso)).
   - **Paying is not a way in.** On a site that requires approval, starting a
     paid membership is refused for an account not let in there, and the
     entitlement recompute creates no viewer membership for one.
   - **Fails closed.** If the setting cannot be read, the sign-up is refused
     with a retryable error and nothing is created.
-  - **Not yet.** Telling admins and applicants is part two
-    ([below](#registration-notifications)). Erasing rejected accounts,
-    queueing a site's own SSO, and accepting an invitation over a waiting
-    registration are part three.
+  - **Later parts.** Telling admins and applicants is part two
+    ([below](#registration-notifications)). Queueing a site's own SSO and
+    invitations over a registration are the first half of part three
+    ([below](#registration-invitations-sso)); erasing rejected accounts is
+    still to come.
   - **Security log.** `registration_queued` (`method`),
     `registration_approved` (`role`, `via`) and `registration_rejected`
     (`outcome`); see
@@ -950,6 +979,78 @@ carries the reasoning.
   [ADR 0024](../decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md#who-is-told-part-two);
   the how-to is
   [Approving registrations](../account-administration.md#approving-registrations).
+
+<a id="registration-invitations-sso"></a>
+
+- **An invitation now decides a registration waiting on its site, and a site
+  can hold new accounts from its own single sign-on for approval too (#2251,
+  part three, first half).** Before, accepting an invitation left the
+  invitee's registration waiting behind a membership that never came, Team's
+  **Add or invite** refused such an address, and a site's own provider made
+  every new account a viewer at once.
+  - **Accepting an invitation** (one click for a confirmed account, or
+    choosing a password for an unconfirmed one) over a waiting registration
+    on the invitation's site approves it with the invited tier and custom
+    role. Over a **rejected** registration it does so only when the
+    invitation was sent, or last resent, after the rejection; an older
+    invitation is "no longer valid" and the registration stays rejected, so
+    an invitation can't silently undo a later decision. The applicant gets
+    no decision email, since they just accepted.
+  - **Add or invite** on Team, for a confirmed account with a registration
+    on the site, approves it at once with the chosen tier and mails the
+    usual "You were added" notice: "Their registration on this site is
+    approved, and they are now a member." For a rejected registration the
+    message is "Their registration on this site had been rejected; it's now
+    approved, and they are a member.": a platform admin adding someone is a
+    decision made now, so it overrides a rejection of any age, and says so.
+    An unconfirmed address is invited as before; an erased account's address
+    no longer matches it and is simply invited. The refusals "is waiting for
+    approval — approve it under Registrations" and "registered on this site
+    and was rejected" are gone.
+  - **A site's own single sign-on.** A second switch on **Registrations**,
+    **New accounts from this site's single sign-on wait for approval too**
+    (`approval_for_site_sso`, off by default, independent of the password
+    setting), makes a new account the site's provider creates wait as a
+    pending registration. It is signed in but has no access anywhere until
+    approved, and the site's admins are told straight away, since the
+    provider has verified the address. Existing accounts sign in as before
+    ([#2515](https://github.com/The-Verscienta/kiln_cms/issues/2515) tracks
+    them). If the setting can't be read, the first sign-in is refused with
+    "Single sign-on isn't available on this site right now. Sign in another
+    way." and nothing is created.
+  - **Security log.** `registration_queued` has `method` `site_sso` for a
+    held single sign-on account, with the request's client address.
+    `registration_approved` has `via` `invitation` (no person: the system
+    honours the invitation) or `added` (the platform admin), besides `queue`.
+  - **Developers.** New `OrgMembership` action
+    `:approve_registration_by_invitation` (code interface
+    `Accounts.approve_registration_by_invitation/3`; arguments `role`,
+    `role_id`, `invited_at`, `via`), admitted for the `:invitations` system
+    actor and a standing platform admin only. `RegistrationRefused` gains
+    `:rejected_after_invitation`; `InvitationRefused` loses
+    `:pending_registration` and `:rejected_registration`.
+    `Invitations.AddOrInvite` returns the outcomes `:approved` and
+    `:approved_over_rejection`. `:queue_registration` takes `method`
+    (`:password` or `:site_sso`) and `new_account?`, stored as the new
+    `OrgMembership.created_account` attribute: whether the registration
+    created the account, groundwork for erasing rejected accounts.
+    `SiteRegistration` gains `approval_for_site_sso`, and
+    `RegistrationPolicy.settings/1` reads both switches.
+    `SiteSso.sign_in/5` and `SiteSso.Admission.admit/3` take the request's
+    Ash context as an optional last argument, and `admit/3` can refuse with
+    `:registration_settings_unavailable`. `Changes.EvictSessions` with
+    `after_commit?: true` now sends its eviction through
+    `KilnCMS.AfterCommit.run/1`, so an approval nested in another action's
+    transaction evicts after the outer commit; a caller nesting it holds the
+    effect with `AfterCommit.deferring/1` or `capture/1`.
+  Upgrade steps: [the upgrade note](#registration-invitations-sso-upgrade).
+  The reasoning is in
+  [ADR 0024](../decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md)
+  (part three);
+  the how-to is
+  [Invitations and registrations](../account-administration.md#invitations-and-registrations)
+  and
+  [Hold new single sign-on accounts too](../account-administration.md#hold-new-single-sign-on-accounts-too).
 
 <a id="sign-in-unlock"></a>
 
