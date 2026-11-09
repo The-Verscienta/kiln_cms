@@ -700,6 +700,11 @@ export class KilnClient {
    * `honeypot_field`) and `_kiln_rendered_at` through untouched. A filled
    * honeypot is discarded and still answers success, so never set it
    * yourself.
+   *
+   * A form whose schema has a `challenge` wants the visitor's
+   * human-verification token as `_kiln_challenge` (the schema's
+   * `challenge.field`): relay it untouched too. Without it the submission is
+   * accepted but held for review, and the result's `challenge` says `"held"`.
    */
   async submitForm(
     slug: string,

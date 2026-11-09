@@ -815,6 +815,10 @@ see [bot-budgets.md](bot-budgets.md).
   overlay would harvest — and grants nothing across the tenant boundary.
 - **Submission contents** — treat as untrusted PII; retention is covered in
   [`data-flows.md`](data-flows.md).
+- **Scripted submissions** — a site admin can make a form ask for a
+  human-verification check (#2249). A submission without a pass is held in
+  Spam rather than refused, so a script gets nothing acted on; see
+  [Human verification](#human-verification-2249).
 
 ### Preview
 - **Token as credential** — `/preview/:token` verifies a signed token and then
@@ -985,9 +989,12 @@ password leaves the server.
 `KilnCMS.Challenge.Providers.Turnstile`, `KilnCMSWeb.Plugs.ChallengeCsp`. An
 adaptive Cloudflare Turnstile check on password sign-in and registration,
 configured by the operator for the whole deployment; off until a provider, a
-site key and a secret are set. Guide:
-[human-verification.md](human-verification.md); decision:
-[ADR 0020](decisions/0020-human-verification-is-deployment-wide-and-fails-open-only-within-the-sign-in-budget.md).
+site key and a secret are set. A site admin can also make each public form
+ask (below). Guide:
+[human-verification.md](human-verification.md); decisions:
+[ADR 0020](decisions/0020-human-verification-is-deployment-wide-and-fails-open-only-within-the-sign-in-budget.md),
+[ADR 0021](decisions/0021-a-form-opts-in-to-human-verification-and-an-unverified-submission-is-held-not-refused.md)
+for forms.
 
 - **What it slows.** Password guessing that stays under the per-account budget
   by spreading across accounts, and scripted self-registration. Sign-in asks
@@ -1042,9 +1049,10 @@ site key and a secret are set. Guide:
   chosen over reCAPTCHA because reCAPTCHA needs `www.google.com` in
   `script-src`, an origin with JSONP endpoints that is a known way round a
   strict policy.
-- **Secrets in transit and logs.** `challenge_token` and
-  `cf-turnstile-response` are in `:filter_parameters` and the Sentry scrubber;
-  the argument is `sensitive?` on both actions.
+- **Secrets in transit and logs.** `challenge_token`,
+  `cf-turnstile-response` and the forms' `_kiln_challenge` are in
+  `:filter_parameters` and the Sentry scrubber; the argument is `sensitive?`
+  on both sign-in actions.
 - **Residual risks.**
   1. **Outage as a bypass, bounded.** An attacker who can make verification
      fail (a network position between Kiln and Cloudflare, or a provider
@@ -1078,7 +1086,74 @@ site key and a secret are set. Guide:
   8. **Third-party script.** When the widget is shown, Cloudflare's script runs
      in the sign-in page's origin, which is the console's own origin when
      someone signs in on the console host. The policy admits only that one
-     origin, and only on the auth pages.
+     origin, and only on the auth pages and on responses that draw a form's
+     widget (below).
+
+#### Human verification on public forms
+
+`KilnCMS.Challenge.Gate.form/3`, `KilnCMS.CMS.Validations.ChallengeAvailable`,
+`KilnCMS.CMS.Changes.ScoreFormSubmission`, `KilnCMSWeb.FormController`.
+
+- **Who sets it.** `Form.challenge` (`:off` by default, or `:always`) is a
+  site admin's, per form: a form with it off exposes only that site's inbox
+  (the ADR 0018 test). The operator's ceiling is `CHALLENGE_FORMS`, the kill
+  switch and a usable provider. It is refused on write while forms cannot ask
+  (only when the write changes `challenge`, so a form already on still saves
+  and can be switched off) and clamped on every read
+  (`KilnCMS.Challenge.form_required?/2`). Form writes stay admin-only; the
+  system actor cannot write it. Tested per role and across sites.
+- **Held, not refused.** No token, a token solved on a host this deployment
+  does not serve, and a token the provider could not check (timeout,
+  transport, `5xx`, `429`, crash, unreadable secret) are all *held*: stored
+  as `:spam` with the threshold added to the score, so no notification,
+  autoresponder, `form.submitted` webhook or experiment conversion. Holding is
+  in the scorer, not a registry check, so a plugin cannot unregister it. Only
+  a refusal the provider gave (invalid, expired, malformed, wrong action) is
+  refused, with a `422`.
+- **No outage bypass.** Unlike sign-in there is no fail-open: a missing token
+  is held even during an outage, and so is a token the provider could not
+  check. An attacker who provokes "unavailable" (a burst that draws `429`s)
+  gets their submissions stored as spam, not acted on.
+- **Order.** Inactive form, honeypot, field validation, then the check. A
+  tripped honeypot is discarded without calling the provider and answers
+  `200` with `"verified"` when any token was sent and `"held"` when none
+  was. That matches a real submission except for a token the provider would
+  refuse: with the honeypot empty, a junk token is a `422`, so a bot that
+  sends junk can tell the two apart. A field error does not spend the token.
+- **Token binding.** The same `KilnCMS.Challenge.hostname_allowed?/1` rule as
+  sign-in, on both `POST /forms/:slug` and `POST /api/forms/:slug`: a host
+  this deployment serves or one in `CHALLENGE_HOSTNAMES`, never the request's
+  `Host`. The embed's `embed_origins` are not accepted hosts: the widget runs
+  inside the iframe, on the site's own host. The action must be `form`, so a
+  sign-in token cannot be replayed on a form, nor the reverse. A mismatch is
+  held, not refused, and logged at most once a minute per node with the host
+  the provider reported (a config cause, almost always a headless site).
+- **Content-Security-Policy.** Widened with the provider's origins only on a
+  response that draws a form's widget: a delivered page whose blocks (or an
+  experiment variant's) render a form that asks, `/forms/:slug`, and a
+  non-embedded refused re-render. The embed policy adds the provider to
+  `script-src` and an explicit `frame-src 'self' <origin>` only for such a
+  form. Every other response's policy is byte-identical; tested. The embed's
+  mount is a separate same-origin module script
+  (`/assets/js/challenge_static.js`), never inline.
+- **Not covered.** Fired artifacts (the `data-kiln-form` placeholder is
+  settings-independent), previews (render no form), newsletter sign-up and
+  any form left `:off`.
+- **Residual risks.**
+  1. **Held data is still stored.** A script can fill Spam up to the per-IP
+     `:form` bucket (20 a minute); spam is pruned after
+     `spam_retention_days`.
+  2. **Stale pages.** A page loaded or cached (60 s plus 300 s
+     stale-while-revalidate) before the check was switched on posts without a
+     token and is held. No grace window is offered: held submissions keep
+     their data, and a grace keyed on when the page was rendered would admit
+     token-less posts for as long as an old render stamp stays valid.
+  3. **Outage memory is sign-in's alone.** A form verification the provider
+     could not answer never arms the node-local outage memory
+     (`KilnCMS.Challenge.verify/4` skips it for `:form`), so a burst of junk
+     form tokens that draws `429`s cannot switch on sign-in's bounded
+     fail-open. Tested.
+  4. **Solvers.** As for sign-in, a paid solving service passes the check.
 
 ### Idle timeout and sign out everyone (#2246)
 

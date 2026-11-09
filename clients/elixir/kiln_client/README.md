@@ -192,6 +192,14 @@ When it relays a visitor's browser submission, pass the honeypot field and
 them. A filled honeypot is discarded and still answers success, so never set
 it yourself.
 
+A form whose schema has a `"challenge"` asks for a human-verification check
+(Cloudflare Turnstile), which the visitor's browser has to draw. Relay its
+token untouched as `"_kiln_challenge"`; the result then carries
+`"challenge" => "verified"`, or `"held"` when the submission was stored for
+review instead of being acted on. A refused token is `reason: :validation`
+with `"_kiln_challenge"` in `KilnClient.Error.field_errors/1`. See
+[Public forms](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/human-verification.md#public-forms).
+
 A front end's draft mode mints a preview link where the key lives and hands
 only the token to the browser:
 

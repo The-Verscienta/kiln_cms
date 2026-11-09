@@ -861,11 +861,13 @@ locked every admin out and `bin/kiln_cms rpc` cannot be run.
 
 ### human verification (#2249)
 
-An adaptive Cloudflare Turnstile check on password sign-in and registration;
+An adaptive Cloudflare Turnstile check on password sign-in and registration,
+and an opt-in check on public forms;
 see [human-verification.md](human-verification.md). **Off until
 `CHALLENGE_PROVIDER`, `CHALLENGE_SITE_KEY` and a secret are all set**; nothing
 here is required. Operator-only and deployment-wide: there is no per-site
-setting. The thresholds and timeouts are Elixir config only
+setting, except that a site admin chooses, form by form, whether a form asks
+([Public forms](human-verification.md#public-forms)). The thresholds and timeouts are Elixir config only
 ([Thresholds and timeouts](human-verification.md#thresholds-and-timeouts)).
 
 | Variable | Default | Purpose | Where it's read |
@@ -878,7 +880,8 @@ setting. The thresholds and timeouts are Elixir config only
 | `CHALLENGE_REGISTRATION` | `adaptive` | `off`, `adaptive` (a check once an IP address has made 2 registration attempts in an hour) or `always` (every registration; every visitor to the registration form then loads Cloudflare's script). An unrecognized value keeps the default with a boot warning. Skipped in `:test`. | [`config/runtime/console.exs:123`](../config/runtime/console.exs#L123) |
 | `CHALLENGE_API_SIGN_IN` | off | On (any on-spelling, see [On/off variables](#boolean-variables)) also challenges `POST /api/auth/sign_in`: `401` `challenge_required` / `challenge_failed` with the widget's details in `meta`, `503` `challenge_unavailable`. Off, that endpoint is never challenged and its contract is unchanged. Turn it on only when every client can draw the widget ([For API clients](human-verification.md#for-api-clients)). Skipped in `:test`. | [`config/runtime/console.exs:133`](../config/runtime/console.exs#L133) |
 | `CHALLENGE_HOSTNAMES` | unset | Extra hostnames a token may have been solved on, separated by spaces or commas, matched case-insensitively. Every host the deployment serves (the canonical host, the console host, every site's subdomain, custom domain and console host) is accepted already, so most deployments never set this. The request's own `Host` header never counts. Skipped in `:test`. | [`config/runtime/console.exs:128`](../config/runtime/console.exs#L128) |
-| `KILN_CHALLENGE_DISABLED` | off | `1` (any on-spelling) is the kill switch: after a restart nothing is required anywhere, no widget is drawn and the auth pages' Content-Security-Policy is not widened. The keys can stay set. Skipped in `:test`. | [`config/runtime/console.exs:137`](../config/runtime/console.exs#L137) |
+| `KILN_CHALLENGE_DISABLED` | off | `1` (any on-spelling) is the kill switch: after a restart nothing is required anywhere, no widget is drawn (on the auth pages or on any form) and no page's Content-Security-Policy is widened. The keys can stay set. Skipped in `:test`. | [`config/runtime/console.exs:137`](../config/runtime/console.exs#L137) |
+| `CHALLENGE_FORMS` | on | Whether a public form may ask for a check at all. Each form opts in on its own (off by default, in the form builder's **General** tab). Off (`false`, or any off-spelling, see [On/off variables](#boolean-variables)) makes every form behave as if its check were off, after a restart, without changing any form's setting; site admins cannot switch one on meanwhile. Needs a configured provider either way, but not sign-in or registration. An unrecognized value keeps the default with a boot warning. Skipped in `:test`. | [`config/runtime/console.exs:144`](../config/runtime/console.exs#L144) |
 
 ### environment indicator
 

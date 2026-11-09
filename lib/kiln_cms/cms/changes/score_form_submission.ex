@@ -15,6 +15,15 @@ defmodule KilnCMS.CMS.Changes.ScoreFormSubmission do
   error used to answer `[]` too — either way the keyword check silently
   stopped flagging anything. A refusal or a read error now raises, so the
   submission is refused rather than stored unscored.
+
+  ## Human verification (#2249)
+
+  The create's `challenge` argument (`KilnCMS.Challenge.Gate.form/3`) is
+  stored on the attribute of the same name and offered to the checks as the
+  `challenge` fact. Every outcome but `:passed` *holds* the submission: the
+  score is raised by the threshold, so it lands in Spam with nobody mailed and
+  no webhook fired, but the data is kept for an admin to review. Done here
+  rather than as a registry check so a site cannot unregister or reweigh it.
   """
   use Ash.Resource.Change
 
@@ -28,22 +37,27 @@ defmodule KilnCMS.CMS.Changes.ScoreFormSubmission do
     data = Ash.Changeset.get_attribute(changeset, :data) || %{}
     locale = Ash.Changeset.get_attribute(changeset, :locale)
     fill_time_ms = Ash.Changeset.get_argument(changeset, :fill_time_ms)
+    challenge = Ash.Changeset.get_argument(changeset, :challenge)
 
     context =
       Context.new(data,
         locale: locale,
         keywords: keywords(changeset.tenant),
-        facts: %{fill_time_ms: fill_time_ms}
+        facts: %{fill_time_ms: fill_time_ms, challenge: challenge}
       )
 
     outcomes = Registry.run(context)
-    score = Registry.score(outcomes)
+    score = Registry.score(outcomes) + held_weight(challenge)
     status = if score >= SpamCheck.threshold(), do: :spam, else: :new
 
     changeset
+    |> Ash.Changeset.force_change_attribute(:challenge, challenge)
     |> Ash.Changeset.force_change_attribute(:spam_score, score)
     |> Ash.Changeset.force_change_attribute(:status, status)
   end
+
+  defp held_weight(challenge) when challenge in [nil, :passed], do: 0
+  defp held_weight(_held), do: SpamCheck.threshold()
 
   defp keywords(nil), do: []
 

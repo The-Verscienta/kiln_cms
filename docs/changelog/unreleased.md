@@ -26,6 +26,41 @@ carries the reasoning.
     `widgets/1` needs `{:kiln_plugin, "~> 1.4"}`. Nothing changes for one that
     doesn't.
 
+<a id="form-human-verification-upgrade"></a>
+
+- **Run `mix ash.migrate` for human verification on public forms (#2249,
+  second part). If you build assets yourself rather than with
+  `mix assets.deploy`, add the new `kiln_challenge_embed` esbuild profile.
+  Rolling the pin back is safe for data, but a form switched to the check
+  stops asking for it on the older release, with nothing to say so.**
+  - **What the migration does.** `20261109050524_add_form_challenge` adds
+    `forms.challenge` (`text NOT NULL DEFAULT 'off'`) and
+    `form_submissions.challenge` (`text`, nullable). Additive; every existing
+    form reads `off`, so nothing changes until a site admin switches one on.
+  - **A new JavaScript bundle.** The embedded form (`/forms/:slug/embed`) does
+    not load `app.js`, so its widget is mounted by a small bundle of its own,
+    `priv/static/assets/js/challenge_static.js`, built by the esbuild profile
+    `kiln_challenge_embed`. `mix assets.build` and `mix assets.deploy` (and
+    so the stock `Dockerfile`) now run it, and `mix phx.server` in
+    development watches it. A custom asset pipeline or an overlay
+    `Dockerfile` that calls `mix esbuild kiln_cms` directly must also run
+    `mix esbuild kiln_challenge_embed --minify` before `mix phx.digest`;
+    without it, an embedded form that asks for a check draws no widget, and
+    everything sent through it is held in Spam.
+  - **Who can switch it on.** Only a site admin, per form, and only while the
+    operator has a provider configured
+    ([Turn on human verification](../human-verification.md#turn-on-human-verification)).
+    A deployment without `CHALLENGE_PROVIDER`, `CHALLENGE_SITE_KEY` and a
+    secret sees no change at all. A deployment that already set them up for
+    sign-in lets site admins opt their forms in from this release; set
+    `CHALLENGE_FORMS=false` and restart if you do not want that.
+  - **Rolling back.** An older release ignores both columns: a form set to
+    ask for a check accepts and acts on every submission again (mail,
+    webhook, autoresponder), and the Entries tab no longer shows Verified or
+    Held. Submissions already held stay in Spam. The settings are still
+    stored, so rolling forward again restores them.
+  Guide: [Public forms](../human-verification.md#public-forms).
+
 <a id="scalar-list-fields-upgrade"></a>
 
 - **Number, date, link and other scalar custom fields can now hold a list
@@ -621,6 +656,93 @@ carries the reasoning.
   - **Changing the field resets, a write that names a widget is refused.** A retype, `multiple`, rich text or `allow_custom` clears a stored widget the field no longer offers, unless the same write names one; then it is refused (`radios is not an editor input for this field (use one of: …)`). Field sync sends the file's widget with every update, so a file whose settings no longer suit its widget is refused rather than silently corrected.
   - **API and export.** Field definitions carry `widget` on JSON:API (`?include=field_definitions`, and in `docs/api/openapi.json`) and in field-sync files. The schema export adds `x-kiln-widget` only to a field whose chosen widget it still offers. GraphQL does not expose field definitions and is unchanged.
   - **Plugins.** `Kiln.FieldType` gains the optional `widgets/1` (not defaulted by `use`) and `Kiln.FieldType.widget/2` to read the pick back inside `input_attrs/1`, `input_parts/1` or `input_hook/1` (`kiln_plugin` 1.4). `input_type/0` takes no definition, so a widget cannot change the input's HTML `type`. `mix kiln.plugins.doctor` reports a `widgets/1` that raises, returns a non-list, or lists a malformed or repeated name.
+
+<a id="form-human-verification"></a>
+
+- **A site admin can ask for a human-verification check (Cloudflare
+  Turnstile) on each public form (#2249, second part). A submission that
+  arrives without a passing check is kept in Spam for an admin to review
+  rather than refused: nobody is mailed, no webhook fires, no autoresponder
+  is sent and no experiment counts it.** Per form and off by default, in the
+  form builder's **General** tab ("Ask visitors to complete a
+  human-verification check"). It needs the operator's provider from the
+  first part; `CHALLENGE_FORMS=false` (default on) turns every form off in
+  effect without touching one, as do the kill switch and a provider that is
+  not fully configured.
+  - **Why per form, when sign-in is deployment-wide.** A form that leaves the
+    check off exposes only its own site's inbox, so by
+    [ADR 0018](../decisions/0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md)'s
+    test it is the site's choice. The operator keeps the ceiling: the setting
+    is refused on save while forms cannot ask, and ignored on every read
+    while they cannot, so turning `CHALLENGE_FORMS` off takes effect at once.
+    A form already on can still be saved and switched off then.
+  - **Held, not refused.** What happens to a submission to a form that asks:
+
+    | The check | What happens | Entries badge |
+    |---|---|---|
+    | Passed | Accepted as usual | **Verified** |
+    | No token (the widget did not load, JavaScript off, a script that never ran it) | Stored in Spam, thanked as usual | **Held** |
+    | Solved on a host this deployment does not serve | Stored in Spam, logged | **Held** |
+    | The provider could not answer (timeout, network error, `5xx`, `429`) | Stored in Spam | **Held** |
+    | Refused (invalid, expired, already used, malformed, for another action) | Not stored; the form comes back with "The human-verification check didn't pass. Complete it again, then send the form." (`422`) | — |
+
+    A real visitor whose widget could not load still reaches the inbox; a
+    script gets nothing acted on. Unlike sign-in, a provider outage never
+    lets a submission through unchecked, because a caller can provoke one
+    and holding costs the visitor nothing. Held submissions are pruned with
+    the rest of Spam after `spam_retention_days` (30 by default), and marking
+    one Reviewed does not send its mail or webhook afterwards. The check runs
+    only after the fields validate and never for a tripped honeypot, so a
+    typo does not spend the visitor's token. Submissions from pages loaded
+    before the check was switched on land in Spam too. Decision:
+    [ADR 0021](../decisions/0021-a-form-opts-in-to-human-verification-and-an-unverified-submission-is-held-not-refused.md).
+  - **Where the widget appears.** On delivered pages that render the form
+    block (including inside a columns block and an experiment variant), on
+    the form's own page `/forms/:slug`, in the embed iframe, and on a refused
+    re-render, which always draws a fresh widget. A submit waits up to 8
+    seconds for the token before posting. Unchanged: fired artifacts (still
+    the `data-kiln-form` placeholder), previews (they render no form),
+    newsletter sign-up (not challenged; its abuse is #2500) and sign-in.
+  - **Content-Security-Policy.** Widened with
+    `https://challenges.cloudflare.com` (`script-src`, `frame-src`) only on a
+    response that draws the widget; every other page's policy is unchanged
+    byte for byte. The embed's policy gains `frame-src 'self'
+    https://challenges.cloudflare.com` only for a form that asks.
+  - **Caching.** A delivered page that renders a form now carries the
+    form's fields, settings and, when it asks for a check, the provider and
+    site key in its `ETag`, so a revalidating client sees a form edit. Pages
+    without a form keep the `ETag` they had. A form or form-field write now
+    drops that site's cached delivery payloads on every node, rather than
+    the whole delivery cache on one. A CDN may serve a page for up to 60
+    seconds (plus 300 stale) after a change.
+  - **Headless sites.** `GET /api/forms/:slug` gains `challenge`: `null`, or
+    `{required, provider, site_key, script_url, action: "form", field:
+    "_kiln_challenge", without_token: "held"}`. Draw the widget and send its
+    token as `_kiln_challenge` (`cf-turnstile-response` is accepted too).
+    `POST /api/forms/:slug` adds `challenge: "verified"` or `"held"` to its
+    answer when the form asks; a refused token is `422` `{ok: false, errors:
+    {_kiln_challenge: "did not pass the human-verification check"},
+    challenge: "failed"}`. A headless site's hosts must be in the Turnstile
+    widget and in `CHALLENGE_HOSTNAMES`, or everything it sends is held; the
+    log then says which host to add. Forms that leave the check off answer
+    exactly as before. `@kiln-cms/client` and `kiln_client` document the new
+    fields.
+  - **Metrics.** `kiln_cms.challenge.decision.count` gains `action="form"`
+    with `decision` `passed`, `missing`, `wrong_host`, `unavailable` or
+    `failed`; `kiln_cms.challenge.verify.stop.*` gains `action="form"`.
+    `_kiln_challenge` is filtered from request logs and scrubbed from error
+    reports.
+  - **Developers.** `KilnCMS.CMS.Form` gains `challenge` (`:off` |
+    `:always`), validated by `KilnCMS.CMS.Validations.ChallengeAvailable`;
+    `KilnCMS.CMS.FormSubmission` gains a read-only `challenge` (`:passed`,
+    `:missing`, `:wrong_host`, `:unavailable`, or `nil`) and its create a
+    `challenge` argument. The decision is `KilnCMS.Challenge.Gate.form/3`;
+    `KilnCMS.Challenge` gains `form_required?/2`, `forms_available?/1`,
+    `forms_fingerprint/1` and `csp_sources/2`. `Kiln.Forms.SpamCheck` checks
+    see the outcome as the `:challenge` fact; holding is not a registry
+    check, so a plugin cannot unregister or reweigh it.
+  Guide: [Public forms](../human-verification.md#public-forms). Threat model:
+  [Human verification](../threat-model.md#human-verification-2249).
 
 <a id="human-verification"></a>
 

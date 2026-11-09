@@ -1033,10 +1033,16 @@ defmodule KilnCMS.MixProject do
         "esbuild.install --if-missing",
         "cmd --cd assets npm install"
       ],
-      "assets.build": ["compile", "tailwind kiln_cms", "esbuild kiln_cms"],
+      "assets.build": [
+        "compile",
+        "tailwind kiln_cms",
+        "esbuild kiln_cms",
+        "esbuild kiln_challenge_embed"
+      ],
       "assets.deploy": [
         "tailwind kiln_cms --minify",
         "esbuild kiln_cms --minify",
+        "esbuild kiln_challenge_embed --minify",
         "phx.digest"
       ],
       precommit:
