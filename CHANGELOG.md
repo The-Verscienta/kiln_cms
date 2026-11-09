@@ -59,6 +59,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new nullable `field_definitions.widget`, no backfill). Field-sync files now carry `"widget"`, which an older release's import refuses: upgrade the target first.** Rolling the pin back is safe.
   ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets-upgrade))
 
+- **Lists on number, date, link and other scalar custom fields: no migration, but before rolling back, don't edit those list fields or their records on the older release.**
+  It clears `multiple` on such a field's definition when saved, keeping each list's first item, and stringifies a list written there.
+  ([long form](docs/changelog/unreleased.md#scalar-list-fields-upgrade))
+
 - **Run `mix ash.migrate` (new table `site_admin_allowlist`). Rolling the pin back turns every site's admin allowlist off without a word; while a list is on, members and apps calling `/api/auth/sign_in` sign in only from listed networks.**
   Nothing changes until a site admin saves a list. Lock-out: `bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(clear: true)'`.
   ([long form](docs/changelog/unreleased.md#admin-allowlist-upgrade))
@@ -142,6 +146,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Admins can choose each custom field's editor input: radios or buttons for a select, checkboxes, one-line text, a reference dropdown, or a plugin type's own (`widget`).**
   Editor-only; nothing stored or delivered changes. Guide: [docs/extending-content.md](docs/extending-content.md#choose-how-editors-fill-in-a-field).
   ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets))
+
+- **Integer, float, date, date-time, time, URL, email, telephone, colour and slug custom fields can hold a list (Holds → A list in `/editor/fields`).**
+  Stored as a JSON array of tidied values, one typed input per item in the editor; `custom_filter` takes `eq`/`in`/`has`/`has_all`/`has_none`/`count`. Guide: [docs/extending-content.md](docs/extending-content.md#make-a-field-hold-a-list-of-values).
+  ([long form](docs/changelog/unreleased.md#scalar-list-fields))
 
 - **Site admins can restrict the console and every sign-in route, members' and `/api/auth/sign_in` included, to listed IPv4/IPv6 networks, at Configure → Sign-in & access → Admin allowlist.**
   Off by default; fails closed; API keys and issued tokens are not affected. Guide: [docs/admin-allowlist.md](docs/admin-allowlist.md).
@@ -283,6 +291,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Lists of strings and multiple selects now take `has`, `has_all`, `has_none` and `count` in `custom_filter`, and read a bare value stored before the field became a list as a one-item list (`eq` matches it, `not_eq` leaves it out).**
+  `has_none` matches a record with no value; `not_eq` does not. An unsupported operator's `400` now lists the supported ones.
+  ([long form](docs/changelog/unreleased.md#scalar-list-filters-changed))
+
 - **Single sign-on, Sessions, Password policy, Blocked addresses and Bot budgets moved to a new Configure → Sign-in & access section; their addresses are unchanged.**
   ([long form](docs/changelog/unreleased.md#console-sign-in-access-section))
 
@@ -340,6 +352,12 @@ Every summary line below that was shortened links to its own entry there.
   ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
 
 ### Fixed
+
+- **A single scalar custom field sent a list keeps its first item: a single URL field sent two URLs no longer stores them run together.**
+  ([long form](docs/changelog/unreleased.md#single-field-handed-a-list))
+
+- **The content editor ignores list, gallery and repeating-group edits on a field the editor's field grant leaves read-only.**
+  ([long form](docs/changelog/unreleased.md#read-only-list-events))
 
 - **Three dead links in the docs now resolve (the `KilnCMS.Keys` link in Memberships and Ghost's schema in both comparison pages), and a docs test refuses relative `.html` links.** ([#2167](https://github.com/The-Verscienta/kiln_cms/issues/2167))
 

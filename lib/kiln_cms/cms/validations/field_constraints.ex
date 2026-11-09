@@ -12,6 +12,8 @@ defmodule KilnCMS.CMS.Validations.FieldConstraints do
       `:string`, `:url`, `:integer`, `:float`, `:date` and `:datetime`
       top-level fields — not on a computed, shared-localization, link or
       group sub-field, and not alongside a `default`;
+    * on a `multiple` field (a list of phrases, numbers, links, …) every
+      constraint but `unique` applies to each item;
     * `min <= max`, `min_length <= max_length`;
     * the `pattern` is at most `KilnCMS.Limits.pattern/0` characters and
       compiles;

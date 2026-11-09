@@ -45,9 +45,12 @@ defmodule KilnCMS.SchemaExport do
   alias KilnCMS.CMS.FieldTypes
   alias KilnCMS.CMS.FieldWidgets
   alias KilnCMS.CMS.ReverseFields
+  alias KilnCMS.CMS.ScalarLists
   alias KilnCMS.Media
 
   @dialect "https://json-schema.org/draft/2020-12/schema"
+
+  @typed_lists ScalarLists.typed()
 
   # See `with_actor/2`.
   @actor_override {__MODULE__, :actor_override}
@@ -678,6 +681,26 @@ defmodule KilnCMS.SchemaExport do
     end
   end
 
+  # A typed list (`multiple` `:integer`, `:date`, `:email`, … — #2289): an
+  # array whose items are the single field's schema without its `null`, so
+  # an item keeps the `format`/`pattern` the single value carries. Numbers
+  # keep repeats; every other type drops them, hence `uniqueItems` only there.
+  defp base_custom_field_schema(type, %{multiple: true} = d) when type in @typed_lists do
+    item =
+      type
+      |> base_custom_field_schema(Map.put(d, :multiple, false))
+      |> Map.update!("type", &List.delete(&1, "null"))
+      |> Map.update!("type", fn [only] -> only end)
+
+    %{
+      "type" => ["array", "null"],
+      "items" => item,
+      "description" => "The items, in the order the editor arranged them."
+    }
+    |> put_unique_items(ScalarLists.distinct?(type))
+    |> put_item_bounds(d)
+  end
+
   defp base_custom_field_schema(:integer, _d), do: %{"type" => ["integer", "null"]}
   defp base_custom_field_schema(:float, _d), do: %{"type" => ["number", "null"]}
   defp base_custom_field_schema(:boolean, _d), do: %{"type" => ["boolean", "null"]}
@@ -846,6 +869,9 @@ defmodule KilnCMS.SchemaExport do
     |> put_bound("x-kiln-min-items", Map.get(d, :min_items))
     |> put_bound("x-kiln-max-items", Map.get(d, :max_items))
   end
+
+  defp put_unique_items(schema, true), do: Map.put(schema, "uniqueItems", true)
+  defp put_unique_items(schema, false), do: schema
 
   defp put_bound(schema, _key, nil), do: schema
   defp put_bound(schema, key, value), do: Map.put(schema, key, value)

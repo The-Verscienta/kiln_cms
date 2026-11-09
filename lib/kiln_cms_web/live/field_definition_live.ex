@@ -50,10 +50,19 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # and plugin types take a shape a single box can't give.
   @default_types ~w(string text url integer float boolean date datetime select)
 
+  # The types `multiple_field/1` asks "one or a list" of (a reference asks it
+  # in `relationship_counts/1`), the list-capable types by the name a form
+  # posts — looked up, never `String.to_atom/1` — and the typed scalar lists
+  # (#2289: numbers, dates, links, …).
+  @holds_types [:media, :group] ++ KilnCMS.CMS.ScalarLists.types()
+  @list_type_names Map.new(KilnCMS.CMS.Changes.ClearMultiple.list_types(), &{to_string(&1), &1})
+  @typed_list_types KilnCMS.CMS.ScalarLists.typed()
+
   import KilnCMSWeb.ComputedBuilderComponents, only: [compute_builder: 1]
   import KilnCMSWeb.ConditionsBuilderComponents, only: [conditions_field: 1]
 
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.Changes.ClearMultiple
   alias KilnCMS.CMS.Computed
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.DynamicDefaults
@@ -1643,11 +1652,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :stored, :any, default: nil
   # `{label, name}` pairs, to name a reference's target type in the choices.
   attr :target_types, :list, default: []
+  # The labels of the computed fields whose formula reads this one: a formula
+  # skips a list, so making the field a list is worth a warning (#2289).
+  attr :formula_readers, :list, default: []
 
   # Single image or a gallery, for a `:media` field — or one row or repeating
   # rows, for a `:group`, or one line or a list, for a `:string`, or one term
   # or several, for a `:select` (which then
-  # also asks whether editors may add terms of their own, `allow_custom`) —
+  # also asks whether editors may add terms of their own, `allow_custom`), or
+  # one value or a list, for a typed scalar (a number, a date, a link, #2289) —
   # with the list's optional item bounds. A `:reference` field asks the same question from
   # both sides in `relationship_counts/1`; this keeps only the warning, shown
   # whenever a stored list is about to become a single item or another type.
@@ -1657,9 +1670,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     stored_type = list_type(assigns.stored)
     target = target_label(assigns.form, assigns.target_types)
 
+    holds? = type in @holds_types
+
+    {narrowing, retyped_list} = list_change(stored_type, type, holds?, multiple?)
+
     assigns =
       assigns
       |> assign(:type, type)
+      |> assign(:holds?, holds?)
       |> assign(:multiple?, multiple?)
       |> assign(:target, target)
       |> assign(:choices, multiple_choices(type, target))
@@ -1670,16 +1688,18 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         type == :select and multiple? and
           FieldWidgets.resolve(form_widget_subject(assigns.form)) == "checkboxes"
       )
+      |> assign(:narrowing, narrowing)
+      |> assign(:retyped_list, retyped_list)
       |> assign(
-        :narrowing,
-        if(stored_type && (type != stored_type or not multiple?), do: stored_type)
+        :formula_warning?,
+        holds? and multiple? and is_nil(stored_type) and assigns.formula_readers != []
       )
 
     # The warning outlives the toggle: retyping a list field to another type
     # narrows it just the same (`SyncFieldValues`), so it shows then too.
     ~H"""
-    <div :if={@type in [:media, :group, :select, :string] || @narrowing} class="sm:col-span-2">
-      <fieldset :if={@type in [:media, :group, :select, :string]}>
+    <div :if={@holds? || @narrowing || @retyped_list} class="sm:col-span-2">
+      <fieldset :if={@holds?}>
         <legend class="mb-1 block text-sm font-medium">{gettext("Holds")}</legend>
         <div class="grid gap-2 sm:grid-cols-2">
           <label
@@ -1798,8 +1818,44 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         <.icon name="hero-exclamation-triangle" class="mt-px size-3.5 shrink-0" />
         {narrowing_warning(@narrowing)}
       </p>
+      <p
+        :if={@retyped_list}
+        id={"#{@id}-retyped"}
+        role="status"
+        class="mt-2 flex items-start gap-1.5 text-xs text-warning-ink"
+      >
+        <.icon name="hero-exclamation-triangle" class="mt-px size-3.5 shrink-0" />
+        {gettext(
+          "Lists already filled in keep their items as they are, not converted to the new type. An item the new type cannot hold is reported when that content is next saved; copy them into a new list field with mix kiln.fields.convert."
+        )}
+      </p>
+      <p
+        :if={@formula_warning?}
+        id={"#{@id}-formulas"}
+        role="status"
+        class="mt-2 flex items-start gap-1.5 text-xs text-warning-ink"
+      >
+        <.icon name="hero-exclamation-triangle" class="mt-px size-3.5 shrink-0" />
+        {gettext(
+          "Read by a formula in %{fields}. A formula skips a list: sum, min, max and text leave this field out once it holds one.",
+          fields: Enum.join(@formula_readers, ", ")
+        )}
+      </p>
     </div>
     """
+  end
+
+  # A list of phrases or a typed list (#2289) — what the field list badges
+  # "list"; a multiple select is badged by its own words.
+  defp scalar_list?(type), do: type == :string or type in @typed_list_types
+
+  # The labels of the computed fields among `definitions` whose formula reads
+  # `definition` (`Computed.references/1`).
+  defp formula_readers(definitions, definition) do
+    for %{field_type: :computed} = reader <- definitions,
+        reader.id != definition.id,
+        definition.name in Computed.references(reader.compute),
+        do: reader.label
   end
 
   attr :form, :any, required: true
@@ -2564,23 +2620,25 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp item_bounds_label(same, same), do: gettext("exactly %{count}", count: same)
   defp item_bounds_label(min, max), do: gettext("%{min} to %{max}", min: min, max: max)
 
+  # What becomes of a stored list (`stored_type`, nil when the stored field
+  # holds no list) as the form now stands: `{narrowing, retyped_list}`.
+  # Retyping a list into another type that is still a list leaves the saved
+  # items as they are (`SyncFieldValues`); anything else narrows them.
+  defp list_change(nil, _type, _holds?, _multiple?), do: {nil, nil}
+  defp list_change(stored, type, true, true) when type != stored, do: {nil, stored}
+  defp list_change(stored, type, _holds?, _multiple?) when type != stored, do: {stored, nil}
+  defp list_change(stored, _type, _holds?, false), do: {stored, nil}
+  defp list_change(_stored, _type, _holds?, true), do: {nil, nil}
+
   # The list-capable type a form or a stored definition is, or nil.
   defp list_type(nil), do: nil
 
-  defp list_type(%Phoenix.HTML.Form{} = form) do
-    case to_string(form[:field_type].value) do
-      "media" -> :media
-      "reference" -> :reference
-      "group" -> :group
-      "select" -> :select
-      "string" -> :string
-      _other -> nil
-    end
-  end
+  defp list_type(%Phoenix.HTML.Form{} = form),
+    do: Map.get(@list_type_names, to_string(form[:field_type].value))
 
-  defp list_type(%{field_type: type, multiple: true})
-       when type in [:media, :reference, :group, :select, :string],
-       do: type
+  defp list_type(%{field_type: type, multiple: true}) do
+    if type in ClearMultiple.list_types(), do: type
+  end
 
   defp list_type(_stored), do: nil
 
@@ -2659,6 +2717,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     ]
   end
 
+  defp multiple_choices(type, _target) when type in @typed_list_types do
+    [
+      {"false", gettext("One value"), gettext("A single value."), "hero-minus"},
+      {"true", gettext("A list"),
+       gettext(
+         "As many values as the editor adds, each checked as a single one would be, in their order — dates, links, numbers."
+       ), "hero-list-bullet"}
+    ]
+  end
+
   # Named after what the field connects, as a relationship ("One Page",
   # "Several Pages") rather than as a data shape, once the target is picked.
   defp multiple_choices(_reference, target) when is_binary(target) do
@@ -2693,7 +2761,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         "Saving keeps only the first row of each list already filled in. The other rows are removed from the content."
       )
 
-  defp narrowing_warning(:string),
+  defp narrowing_warning(type) when type == :string or type in @typed_list_types,
     do:
       gettext(
         "Saving keeps only the first item of each list already filled in. The other items are removed from the content."
@@ -3728,7 +3796,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                         {gettext("repeating")}
                       </span>
                       <span
-                        :if={definition.field_type == :string and definition.multiple}
+                        :if={definition.multiple and scalar_list?(definition.field_type)}
                         class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
                       >
                         {gettext("list")}
@@ -3975,6 +4043,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                       id={"edit-field-multiple-#{@edit.id}"}
                       stored={definition}
                       target_types={@target_types}
+                      formula_readers={formula_readers(definitions, definition)}
                     />
                   <% end %>
                   <.input field={@edit.form[:help_text]} label={gettext("Help text")} />

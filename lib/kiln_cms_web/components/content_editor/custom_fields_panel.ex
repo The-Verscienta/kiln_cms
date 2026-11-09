@@ -26,6 +26,8 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   alias KilnCMSWeb.ContentEditor.GroupRows
   alias KilnCMSWeb.ContentEditor.Localization
 
+  @list_input_types KilnCMS.CMS.ScalarLists.types() -- [:select]
+
   attr :form, :any, required: true
   attr :field_definitions, :list, required: true
   attr :localization, :map, required: true
@@ -386,10 +388,12 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   # "Add row" would add nothing anyone could see.
   defp input_value(form, %{field_type: :group, name: name}), do: GroupRows.posted(form, name)
 
-  # A list of phrases likewise: an item emptied in place keeps its row while
-  # the form holds it, and the cleaned value has dropped it.
-  defp input_value(form, %{field_type: :string, multiple: true, name: name}),
-    do: GroupRows.posted(form, name)
+  # A scalar list likewise (phrases, numbers, dates, …; a multiple select's
+  # chips are not edited in place): an item emptied in place keeps its row
+  # while the form holds it, and the cleaned value has dropped it.
+  defp input_value(form, %{field_type: type, multiple: true, name: name})
+       when type in @list_input_types,
+       do: GroupRows.posted(form, name)
 
   defp input_value(form, definition), do: custom_field_value(form, definition.name)
 

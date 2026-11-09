@@ -303,7 +303,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
     gallery_radio = "#new-field-form input[name='field_definition[multiple]'][value=true]"
 
-    lv |> form("#new-field-form", field_definition: %{field_type: "url"}) |> render_change()
+    lv |> form("#new-field-form", field_definition: %{field_type: "boolean"}) |> render_change()
     refute has_element?(lv, gallery_radio)
 
     lv |> form("#new-field-form", field_definition: %{field_type: "media"}) |> render_change()
@@ -2353,6 +2353,178 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
       create_change(lv, %{field_type: "select", multiple: "true", options: options})
       assert lv |> element("#new-field-widget-checkboxes-cap") |> render() =~ "tags instead"
+    end
+  end
+
+  describe "scalar lists (#2289)" do
+    @list_radio "#new-field-form input[name='field_definition[multiple]'][value=true]"
+
+    test "a number, date, link or address asks one value or a list; a boolean or JSON does not",
+         %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      for type <- ~w(integer date url email) do
+        html = type_change(lv, type)
+        assert has_element?(lv, @list_radio), type
+        assert html =~ "One value"
+        assert html =~ "As many values as the editor adds"
+      end
+
+      for type <- ~w(boolean json) do
+        type_change(lv, type)
+        refute has_element?(lv, @list_radio), type
+      end
+    end
+
+    test "a list of dates keeps its bounds, is badged, and warns before narrowing back", %{
+      conn: conn
+    } do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      type_change(lv, "date")
+
+      lv
+      |> form("#new-field-form", field_definition: %{multiple: "true"})
+      |> render_change()
+
+      assert has_element?(lv, "#new-field-multiple-bounds")
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{
+          scopes: ["page"],
+          name: "event_dates",
+          label: "Event dates",
+          field_type: "date",
+          multiple: "true",
+          min_items: "1",
+          max_items: "10"
+        }
+      )
+      |> render_submit()
+
+      field =
+        :page
+        |> CMS.field_definitions_for!(authorize?: false)
+        |> Enum.find(&(&1.name == "event_dates"))
+
+      assert {field.multiple, field.min_items, field.max_items} == {true, 1, 10}
+      assert lv |> element("#field-#{field.id}") |> render() =~ "list"
+
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+      refute has_element?(lv, "#edit-field-multiple-#{field.id}-narrowing")
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{multiple: "false"})
+      |> render_change()
+
+      assert lv |> element("#edit-field-multiple-#{field.id}-narrowing") |> render() =~
+               "Saving keeps only the first item of each list already filled in."
+    end
+
+    test "retyping a list into another list says the items are kept, not narrowed", %{
+      conn: conn
+    } do
+      admin = authed_user(:admin)
+
+      field =
+        CMS.create_field_definition!(
+          %{
+            content_type: :page,
+            name: "codes",
+            label: "Codes",
+            field_type: :string,
+            multiple: true
+          },
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{field_type: "date"})
+      |> render_change()
+
+      assert has_element?(lv, "#edit-field-multiple-#{field.id}-retyped")
+      refute has_element?(lv, "#edit-field-multiple-#{field.id}-narrowing")
+
+      # Retyped to a type that holds no list, the list narrows.
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{field_type: "boolean"})
+      |> render_change()
+
+      assert has_element?(lv, "#edit-field-multiple-#{field.id}-narrowing")
+      refute has_element?(lv, "#edit-field-multiple-#{field.id}-retyped")
+    end
+
+    test "making a field a list warns when a formula reads it", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      doses =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "doses", label: "Doses", field_type: :integer},
+          actor: admin
+        )
+
+      plain =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "steps", label: "Steps", field_type: :integer},
+          actor: admin
+        )
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "total_dose",
+          label: "Total dose",
+          field_type: :computed,
+          compute: "{{ sum(field.doses, 1) }}"
+        },
+        actor: admin
+      )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      lv |> element("#field-#{doses.id} button[phx-click=edit]") |> render_click()
+      refute has_element?(lv, "#edit-field-multiple-#{doses.id}-formulas")
+
+      lv
+      |> form("#edit-field-#{doses.id}", field_definition: %{multiple: "true"})
+      |> render_change()
+
+      assert lv |> element("#edit-field-multiple-#{doses.id}-formulas") |> render() =~
+               "Total dose"
+
+      lv |> element("#edit-field-#{doses.id} button", "Cancel") |> render_click()
+      lv |> element("#field-#{plain.id} button[phx-click=edit]") |> render_click()
+
+      lv
+      |> form("#edit-field-#{plain.id}", field_definition: %{multiple: "true"})
+      |> render_change()
+
+      refute has_element?(lv, "#edit-field-multiple-#{plain.id}-formulas")
+    end
+
+    test "a group's sub-field form never asks for a list", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      group =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "sessions", label: "Sessions", field_type: :group},
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{group.id}-sub-fields-add") |> render_click()
+
+      form_id = "#link-field-form-new-#{group.id}"
+
+      lv
+      |> element(form_id)
+      |> render_change(%{"link_field" => %{"field_type" => "date"}})
+
+      refute has_element?(lv, ~s|#{form_id} [name="link_field[multiple]"]|)
     end
   end
 
