@@ -573,6 +573,25 @@ defmodule KilnCMSWeb.Tenant do
   defp console_host?(_host), do: false
 
   @doc """
+  Whether `host` is one this deployment serves as itself: the canonical base
+  host, the console host, a site's subdomain, custom domain or console host
+  (`<slug>.<console host>`). Never the lenient fallback — an unknown host that
+  `fetch_org/1` would answer with the default org is not one of ours here.
+
+  For a question asked about a host the *request* did not arrive on, such as
+  the hostname a human-verification provider reports a token was solved on
+  (`KilnCMS.Challenge.Gate`, #2249). Read through the same host cache as
+  `fetch_org/1`, so it costs a cache lookup.
+  """
+  @spec deployment_host?(String.t() | nil) :: boolean()
+  def deployment_host?(host) when is_binary(host) do
+    canonical_host?(host) or console_host?(host) or
+      match?(%Accounts.Organization{}, known_org(host))
+  end
+
+  def deployment_host?(_host), do: false
+
+  @doc """
   `fetch_org/1` for a socket's connect info, whose host lives at `[:uri, :host]`.
 
   Sockets bypass the plug pipeline, so each one has to resolve its own tenant,

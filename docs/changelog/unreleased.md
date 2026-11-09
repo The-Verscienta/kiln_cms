@@ -662,6 +662,76 @@ carries the reasoning.
     sub-fields).
   ([#2280](https://github.com/The-Verscienta/kiln_cms/issues/2280))
 
+<a id="human-verification"></a>
+
+- **Operators can turn on an adaptive human-verification check (Cloudflare
+  Turnstile) for password sign-in and registration (#2249, first part).** Off
+  until `CHALLENGE_PROVIDER=turnstile`, `CHALLENGE_SITE_KEY` and
+  `CHALLENGE_SECRET_KEY` (or `CHALLENGE_SECRET_KEY_FILE`) are all set. No
+  migration; nothing changes on an upgrade that does not set them, and rolling
+  the pin back simply stops asking.
+  - **When it asks.** Password sign-in asks once the submitted email address
+    has had 3 attempts in 15 minutes, or the client's IP address 5 failed
+    sign-ins in 15 minutes (`CHALLENGE_SIGN_IN`, `off` or `adaptive`, default
+    `adaptive`). Registration asks once an IP address has made 2 registration
+    attempts in an hour, or always (`CHALLENGE_REGISTRATION`, `off`,
+    `adaptive` or `always`, default `adaptive`). Most people never see it.
+    Passkeys, magic links, password reset, two-factor codes, single sign-on
+    and invitations are never challenged, and the form's fallback line names
+    only the ones the site offers.
+  - **Deployment-wide, on purpose.** An account signs in on every site it
+    belongs to, so a site that could switch sign-in challenges off would be the
+    way every other site's accounts are guessed. There is no per-site setting
+    and no console page; per-site keys and public forms come in later parts.
+  - **A refusal costs the owner nothing.** An attempt refused for want of a
+    check does not spend the account's sign-in budget and runs no bcrypt, and
+    a known and an unknown address are asked and refused alike.
+  - **When Cloudflare is down.** A refused token never passes. A token that
+    could not be checked (timeout past 3 s, network error, `5xx`, `429`, an
+    unreadable or rejected secret) lets the sign-in through until the
+    account's own budget refuses or the IP address reaches 20 failed sign-ins
+    in 15 minutes, and then refuses with "The human-verification check is
+    unavailable right now." Registration is bounded by its rate limit. For 60
+    seconds after a node sees an outage, a missing token is treated the same
+    way, since the widget itself may not have loaded.
+  - **Headless sign-in is unchanged by default.** With
+    `CHALLENGE_API_SIGN_IN=true`, `POST /api/auth/sign_in` accepts
+    `challenge_token` and can answer `401` `challenge_required` or
+    `challenge_failed` (with the widget's `provider`, `site_key`,
+    `script_url` and `action` in the error's `meta`) and `503`
+    `challenge_unavailable` with `retry-after: 30`. API error objects may now
+    carry `meta`; the OpenAPI document gains the field and the responses.
+  - **Hostnames.** A token must have been solved on a host the deployment
+    serves (the canonical host, the console host, any site's subdomain, custom
+    domain or console host) or one listed in `CHALLENGE_HOSTNAMES`, and for the
+    action it is used on. The request's own host never counts. The Turnstile
+    widget in Cloudflare must list every one of those hosts.
+  - **Privacy.** When the widget shows, the browser loads a script and an
+    iframe from `challenges.cloudflare.com`; the auth pages' policy admits
+    that origin only while a check can be shown. The visitor's IP address is
+    not sent to Cloudflare from the server. Name Cloudflare in your privacy
+    policy before turning this on.
+  - **Kill switch.** `KILN_CHALLENGE_DISABLED=1` and a restart turn every
+    check off and restore the page policy, with the keys still set.
+  - **Security log and metrics.** `sign_in_failed` gains the reasons
+    `challenge_failed` and `challenge_unavailable` (sampled like wrong
+    passwords; a check merely asked for records nothing). New counters
+    `kiln_cms.challenge.decision.count` (`action`, `decision`) and
+    `kiln_cms.challenge.verify.stop.count` (`provider`, `action`, `result`),
+    and the distribution `kiln_cms.challenge.verify.stop.duration`.
+    `challenge_token` and `cf-turnstile-response` are filtered from logs and
+    error reports.
+  - **Developers.** `:sign_in_with_password` and `:register_with_password`
+    take an optional, sensitive `challenge_token` argument and may fail with
+    `KilnCMS.Accounts.Errors.ChallengeRequired` (`reason` `:required`,
+    `:failed` or `:unavailable`). The provider behaviour,
+    `KilnCMS.Challenge.Provider`, is internal for now and not part of the
+    plugin SDK. `KilnCMS.Accounts.ThrottleStore` gains `peek/3` and
+    `refund/3`.
+  - Guide: [Human verification](../human-verification.md). Threat model:
+    [Human verification](../threat-model.md#human-verification-2249).
+    Decision: [ADR 0020](../decisions/0020-human-verification-is-deployment-wide-and-fails-open-only-within-the-sign-in-budget.md).
+
 <a id="scalar-list-fields"></a>
 
 - **A number, date, date-time, time, link, email, phone, colour or slug

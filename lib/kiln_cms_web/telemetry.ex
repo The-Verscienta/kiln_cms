@@ -250,6 +250,25 @@ defmodule KilnCMSWeb.Telemetry do
             "allowlist (#2248), tagged surface (http / api / live / collab) and reason " <>
             "(not_listed / unavailable). The address is deliberately not a tag."
       ),
+      # Human verification (#2249). `decision` is not_required | passed |
+      # missing | failed | fail_open | fail_closed and `action` sign_in |
+      # register; `result` is the verification's class (passed, invalid,
+      # expired, timeout, …). No address, account or token is ever a tag.
+      counter("kiln_cms.challenge.decision.count",
+        tags: [:action, :decision],
+        description:
+          "Sign-ins and registrations by human-verification decision; a rising " <>
+            "fail_open share means the provider is unreachable and challenges are being waived"
+      ),
+      counter("kiln_cms.challenge.verify.stop.count",
+        tags: [:provider, :action, :result],
+        description: "Human-verification token checks by provider and result"
+      ),
+      distribution("kiln_cms.challenge.verify.stop.duration",
+        unit: {:native, :millisecond},
+        tags: [:provider],
+        description: "Time to verify a human-verification token, deadline included"
+      ),
       counter("kiln_cms.scanner_guard.blocked.count",
         tags: [:reason],
         description:

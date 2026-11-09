@@ -191,7 +191,14 @@ defmodule KilnCMSWeb.OpenApi do
                   required: [:email, :password],
                   properties: %{
                     email: %OpenApiSpex.Schema{type: :string, format: :email},
-                    password: %OpenApiSpex.Schema{type: :string, format: :password}
+                    password: %OpenApiSpex.Schema{type: :string, format: :password},
+                    challenge_token: %OpenApiSpex.Schema{
+                      type: :string,
+                      description:
+                        "A human-verification token. Only read when the operator " <>
+                          "has turned on challenges for this endpoint and the " <>
+                          "sign-in needs one (a `challenge_required` 401 says so)."
+                    }
                   }
                 }
               }
@@ -214,12 +221,25 @@ defmodule KilnCMSWeb.OpenApi do
                 "application/json" => %OpenApiSpex.MediaType{schema: token_schema()}
               }
             },
-            401 => %OpenApiSpex.Response{description: "Invalid email or password"},
+            401 => %OpenApiSpex.Response{
+              description:
+                "Invalid email or password (`invalid_credentials`). Where the " <>
+                  "operator has turned on human verification for this endpoint, " <>
+                  "also `challenge_required` or `challenge_failed`, whose `meta` " <>
+                  "names the provider, `site_key`, `script_url` and `action` to " <>
+                  "draw the widget with; retry with `challenge_token`."
+            },
             422 => %OpenApiSpex.Response{description: "Missing email or password"},
             429 => %OpenApiSpex.Response{
               description:
                 "Rate limited — per-IP `auth` bucket, or the per-account " <>
                   "sign-in budget. See `Retry-After`."
+            },
+            503 => %OpenApiSpex.Response{
+              description:
+                "`challenge_unavailable` — human verification is required and " <>
+                  "its provider cannot be reached. See `Retry-After`. Only where " <>
+                  "the operator has turned on human verification for this endpoint."
             }
           }
         }
