@@ -38,6 +38,13 @@ defmodule KilnCMS.Accounts.Scoping do
   get (role loaded alongside), memoized per process for a few seconds
   (several checks run per request), and short-circuits for non-editor actors
   — the anonymous delivery hot path never pays it.
+
+  **Only an `:active` membership grants anything** (#2251). A registration
+  awaiting approval (`:pending`) or turned away (`:rejected`) is a membership
+  row, so it still makes the account *affiliated* — `:none` on every other
+  site, the default org included — but on its own site it resolves to no tier,
+  no audiences, a `:denied` scope and an empty grant, exactly what a foreign
+  org gets.
   """
 
   require Ash.Query
@@ -124,7 +131,7 @@ defmodule KilnCMS.Accounts.Scoping do
   # Membership → role → user, per type key, for either grant map.
   defp resolve_grant(actor, subject, type_name, attribute) do
     case affiliation(actor, subject_org_id(subject)) do
-      {:member, membership} ->
+      {:member, %{status: :active} = membership} ->
         grant_key(membership, type_name, attribute) ||
           grant_key(role_of(membership), type_name, attribute) ||
           grant_key(actor, type_name, attribute)
@@ -132,7 +139,8 @@ defmodule KilnCMS.Accounts.Scoping do
       :unaffiliated ->
         grant_key(actor, type_name, attribute)
 
-      :foreign_org ->
+      # A foreign org, or a registration not (yet) approved here.
+      _none ->
         []
     end
   end
@@ -186,7 +194,10 @@ defmodule KilnCMS.Accounts.Scoping do
 
   def audiences(actor, subject) do
     case affiliation(actor, audience_org_id(subject)) do
-      {:member, membership} -> list_of(membership, :audiences)
+      {:member, %{status: :active} = membership} -> list_of(membership, :audiences)
+      # A registration awaiting approval reads nothing gated, whatever its row
+      # holds (#2251).
+      {:member, _not_active} -> []
       :unaffiliated -> []
       :foreign_org -> []
     end
@@ -256,6 +267,9 @@ defmodule KilnCMS.Accounts.Scoping do
     * `{:admin, :platform, user}` — a platform admin, standing or by a live
       grant on the user;
     * `{tier, :member, membership}` — the membership's tier on this org;
+    * `{:none, :member, membership}` — a membership on this org that is not
+      `:active` (a registration awaiting approval, or rejected, #2251): the row
+      is the source, and it grants nothing;
     * `{tier, :legacy, user}` — a membership-less account on the default org,
       from `User.role`;
     * `{:none, :none, nil}` — no tier here (foreign org, a membership-less
@@ -333,9 +347,19 @@ defmodule KilnCMS.Accounts.Scoping do
 
   defp member_tier(actor, {org, affiliation}) do
     case affiliation do
-      {:member, membership} -> {RoleGrant.effective_role(membership), :member, membership}
-      :unaffiliated -> legacy_tier(actor, org)
-      :foreign_org -> {:none, :none, nil}
+      {:member, %{status: :active} = membership} ->
+        {RoleGrant.effective_role(membership), :member, membership}
+
+      # A registration awaiting approval, or rejected (#2251): the row is the
+      # source, and it grants nothing.
+      {:member, membership} ->
+        {:none, :member, membership}
+
+      :unaffiliated ->
+        legacy_tier(actor, org)
+
+      :foreign_org ->
+        {:none, :none, nil}
     end
   end
 
@@ -430,7 +454,11 @@ defmodule KilnCMS.Accounts.Scoping do
     Accounts.User
     |> Ash.Query.filter(
       (^platform? and ^admin_tier) or
-        (not (^admin_tier) and exists(org_memberships, organization_id == ^org_id and ^wanted)) or
+        (not (^admin_tier) and
+           exists(
+             org_memberships,
+             organization_id == ^org_id and status == :active and ^wanted
+           )) or
         (^legacy? and ^wanted and not exists(org_memberships, true))
     )
     |> Ash.read!(authorize?: false)
@@ -458,14 +486,15 @@ defmodule KilnCMS.Accounts.Scoping do
 
   defp scope(actor, subject, axis) do
     case affiliation(actor, org_id(subject)) do
-      {:member, membership} ->
+      {:member, %{status: :active} = membership} ->
         list_axis(membership, axis) || list_axis(role_of(membership), axis) ||
           list_axis(actor, axis) || []
 
       :unaffiliated ->
         list_axis(actor, axis) || []
 
-      :foreign_org ->
+      # A foreign org, or a registration not (yet) approved here (#2251).
+      _none ->
         :denied
     end
   end
@@ -497,7 +526,8 @@ defmodule KilnCMS.Accounts.Scoping do
   # ── membership affiliation ─────────────────────────────────────────────────
 
   # The actor's relationship to the org, memoized per process:
-  #   {:member, membership} — a membership row exists for this org;
+  #   {:member, membership} — a membership row exists for this org, in any
+  #                           status (the callers above grant only `:active`);
   #   :foreign_org          — the user holds memberships, none for this org;
   #   :unaffiliated         — the user holds no memberships at all (legacy).
   defp affiliation(%{id: user_id}, org_id) when is_binary(user_id) and is_binary(org_id) do

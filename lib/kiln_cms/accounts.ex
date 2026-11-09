@@ -117,6 +117,17 @@ defmodule KilnCMS.Accounts do
       # the hourly sweep's write and takes no input.
       define :grant_membership_temporary_role, action: :grant_temporary_role
       define :expire_membership_role_grant, action: :expire_role_grant
+
+      # Registration approval (#2251) — see `KilnCMS.Accounts.Registrations`.
+      # `queue_registration` is system-only (`Changes.QueueRegistration`); the
+      # queue and the two decisions are an admin of the membership's own org.
+      define :queue_registration, action: :queue_registration
+      define :approve_registration, action: :approve_registration
+      define :reject_registration, action: :reject_registration
+
+      define :list_registration_queue,
+        action: :registration_queue,
+        args: [:organization_id, {:optional, :status}]
     end
 
     # Site invitations by email (#2135) — see `KilnCMS.Accounts.Invitations`.

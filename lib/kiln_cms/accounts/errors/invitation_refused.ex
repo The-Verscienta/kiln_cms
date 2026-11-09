@@ -7,6 +7,9 @@ defmodule KilnCMS.Accounts.Errors.InvitationRefused do
 
     * `:already_member` — the address already belongs to someone on this site;
     * `:already_invited` — a live invitation for the address is pending here;
+    * `:pending_registration` — the address registered here and awaits a site
+      admin's approval (#2251): approve it under Registrations instead;
+    * `:rejected_registration` — the address registered here and was rejected;
     * `:suppressed` — the address hard-bounced and is on a suppression list, so
       no mail would go out;
     * `:mail_budget` — the address has been sent too many invitations within
@@ -25,6 +28,12 @@ defmodule KilnCMS.Accounts.Errors.InvitationRefused do
 
   def message(%{reason: :already_invited}),
     do: "already has a pending invitation to this site — resend it instead"
+
+  def message(%{reason: :pending_registration}),
+    do: "has a pending registration on this site — approve it under Registrations"
+
+  def message(%{reason: :rejected_registration}),
+    do: "registered on this site and was rejected"
 
   def message(%{reason: :suppressed}),
     do: "is on the mail suppression list, so the invitation would not be delivered"

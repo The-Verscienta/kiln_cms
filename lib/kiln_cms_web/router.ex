@@ -600,6 +600,10 @@ defmodule KilnCMSWeb.Router do
       # and admin-only: it decides whether the site's administrators can be
       # refused a password.
       live "/editor/password-policy", PasswordPolicyLive, :index
+      # The registration approval queue and its switch (#2251). Org-scoped and
+      # admin-only by the tier gate AND the `OrgMembership` policies, which admit
+      # an admin of the row's own org to list and decide registrations.
+      live "/editor/registrations", RegistrationsLive, :index
       # The site's idle timeout and "sign out everyone" (#2246). Org-scoped and
       # admin-only by the tier gate AND the resource policy; enforcement is
       # `KilnCMSWeb.Plugs.IdleTimeout` and `KilnCMSWeb.IdleSession`.

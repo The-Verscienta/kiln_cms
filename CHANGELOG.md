@@ -59,6 +59,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new column `field_definitions.width`, new table `field_sections`). Field sync files exported from now on carry `width`, which builds from before this change refuse.** Rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#field-layout-upgrade))
 
+- **Run `mix ash.migrate` (new table `site_registration`; `org_memberships` gains `status` and `decided_at`). Turn registration approval on only once every node runs this release: an older node reads a waiting registration as an active viewer.**
+  Before rolling back, anonymize the waiting and rejected accounts you don't want (don't delete their rows) and delete the three `registration_*` security events (#2509), or roll forward.
+  ([#2512](https://github.com/The-Verscienta/kiln_cms/pull/2512) · [long form](docs/changelog/unreleased.md#registration-approval-upgrade))
+
 - **Before rolling back to a build that has the security log but predates sign-in unlock links, delete the `sign_in_unlock_requested`, `sign_in_unlocked` and `sign_in_unlock_refused` security events, or roll forward.**
   No migration. An older build cannot load those rows, which breaks that site's security log and CSV, and erasing a person named in one (#2509). v1.8.0 has no security log and is unaffected.
   ([#2510](https://github.com/The-Verscienta/kiln_cms/pull/2510) · [long form](docs/changelog/unreleased.md#sign-in-unlock-upgrade))
@@ -154,6 +158,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Admins can lay out a type's custom fields as tabs, fieldsets or accordions, and set a field's width (full, half, a third), at Fields → Sections of.**
   Keyboard-accessible tabs in the editor; `GET /api/schema` adds `x-kiln-section-display` and `x-kiln-width`. Guide: [docs/extending-content.md](docs/extending-content.md#lay-out-custom-fields-as-tabs-fieldsets-or-columns).
   ([long form](docs/changelog/unreleased.md#field-layout))
+
+- **A site can hold new password sign-ups for an admin's approval: Sign-in & access → Registrations, then Approve or Reject each applicant.**
+  Until approved an account can sign in but reads only what's public, on every site, and can't pay its way in. Admins aren't notified and applicants get no email yet. Guide: [docs/account-administration.md](docs/account-administration.md#approving-registrations).
+  ([#2512](https://github.com/The-Verscienta/kiln_cms/pull/2512) · [long form](docs/changelog/unreleased.md#registration-approval))
 
 - **Someone whose sign-in is paused after too many attempts can have a link emailed that lifts the pause: "Email me an unlock link" on the sign-in page.**
   The link lasts 15 minutes, works once and goes only to confirmed members of that site (3 an hour). It clears only the account pause, and the sign-in page still never says an account is paused. Guide: [docs/account-administration.md](docs/account-administration.md#lift-a-sign-in-pause-by-email).
