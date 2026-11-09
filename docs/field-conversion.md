@@ -8,7 +8,8 @@ list encoded twice, or plain prose where JSON was expected.
 
 `mix kiln.fields.convert` moves those values into a `:group` field, whose
 rows Kiln validates on every write
-([group fields](extending-content.md)). It changes the field's type, so it
+([group fields](extending-content.md)), or into a select holding several
+terms or a list field ([below](#into-a-select-holding-several-terms)). It changes the field's type, so it
 follows **expand / migrate / contract** (`docs/releasing.md`, "Migrations:
 expand, migrate, contract"):
 
@@ -26,7 +27,8 @@ mix kiln.fields.convert <content_type> <source_field> --to <group_field> [option
 | --- | --- |
 | `--apply` | Write. Without it the run is a **dry run** that writes nothing. |
 | `--org SLUG` | The organization to convert (default: the default org). |
-| `--map OLD=NEW` | Rename a key in every row before coercion. Repeatable. `NEW` must be a sub-field. |
+| `--map OLD=NEW` | Rename a key in every row before coercion. Repeatable. `NEW` must be a sub-field. Groups only. |
+| `--lines` | A list or multiple select target only: read a source that is not JSON as one item per line ([below](#into-a-list-of-values)). |
 | `--skip-invalid` | Write the valid records even if some are invalid. The invalid ones keep only their string. |
 | `--overwrite` | Also rewrite records whose group already holds rows. |
 | `--report PATH` | Also write the report as JSON. |
@@ -137,12 +139,35 @@ That list is what an admin reviews before deciding: add the terms to
 Every report also counts the **published** records a run converts: each of
 those writes re-fires the record's artifact.
 
-## Into a list of phrases
+## Into a list of values
 
-A `:string` field with `multiple: true` takes the same JSON arrays of
-strings, with no vocabulary to check. Some importers kept a list as plain
-text, one item per line ("One service per line"); pass `--lines` to read a
-source that is not JSON that way:
+A list field (`multiple: true` on a `:string`, `:integer`, `:float`, `:date`,
+`:datetime`, `:time`, `:url`, `:email`, `:telephone`, `:color` or `:slug`
+field, see
+[Make a field hold a list of values](extending-content.md#make-a-field-hold-a-list-of-values))
+takes a JSON array of its items, or that array encoded again. A list of
+phrases takes strings (`["fatigue","insomnia"]`); a typed list takes its own
+values (`[3, 5]`, `["2026-03-01","2026-03-08"]`). Each item is checked and
+tidied exactly as the field's own save would, so a list of colours stores
+`#FFF` as `#ffffff`, repeats drop out except in a number list, and
+`min_items` / `max_items` apply. An item that does not fit makes the record
+invalid, and the report names it by its position from 1: `item 2 must be a
+date (YYYY-MM-DD)`.
+
+There is no vocabulary to check, so the report lists no terms, and `--map`
+does not apply: items have no keys. The target must already be a list: a
+single typed field is refused before anything is read (`event_dates is a
+single date field — make it a list first`), as is a single `:string` (`… is a
+string field that holds one line — make it a list first`).
+
+```bash
+mix kiln.fields.convert event dates_json --to event_dates
+```
+
+Some importers kept a list as plain text, one item per line ("One service per
+line"); pass `--lines` to read a source that is not JSON that way. It works
+for any list target, a multiple select included, and each line is then
+checked as an item:
 
 ```bash
 mix kiln.fields.convert clinic services_text --to services --lines
@@ -153,7 +178,12 @@ target: prose would otherwise become a one-item list without a word.
 
 Use a **new** field, as for a group. Retyping the old `:text` field into a
 multiple select or a list in place leaves its JSON strings untouched — they are not
-wrapped as one-term lists — and the next save of each record refuses them.
+wrapped as one-item lists — and the next save of each record refuses them.
+The same holds when you retype one list into another (a list of strings into
+a list of dates): the stored items stay as they were, the fields admin says
+so, and the next save of a record refuses an item the new type cannot hold.
+To convert them, run this task from that field into a new list field; the
+source and the target cannot be the same field.
 
 ## Recipe: Verscienta's herb lists
 

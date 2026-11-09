@@ -580,6 +580,72 @@ defmodule KilnCMS.SchemaExportTest do
     end
   end
 
+  describe "a typed list (#2289)" do
+    setup %{actor: actor, org: org} do
+      for attrs <- [
+            %{name: "scores", field_type: :integer, multiple: true},
+            %{name: "weights", field_type: :float, multiple: true},
+            %{name: "dates", field_type: :date, multiple: true, min_items: 1, max_items: 10},
+            %{name: "contacts", field_type: :email, multiple: true},
+            %{name: "colours", field_type: :color, multiple: true},
+            %{name: "launch", field_type: :date}
+          ] do
+        CMS.create_field_definition!(
+          Map.merge(attrs, %{content_type: :page, label: attrs.name}),
+          actor: actor,
+          tenant: org
+        )
+      end
+
+      :ok
+    end
+
+    test "an integer list is an array of integers that keeps repeats", %{org: org} do
+      fields = custom_fields(org, "content_page")["properties"]
+
+      assert fields["scores"]["type"] == ["array", "null"]
+      assert fields["scores"]["items"] == %{"type" => "integer"}
+      refute Map.has_key?(fields["scores"], "uniqueItems")
+
+      assert fields["weights"]["items"] == %{"type" => "number"}
+      refute Map.has_key?(fields["weights"], "uniqueItems")
+    end
+
+    test "a date list carries the item format, uniqueItems and its bounds", %{org: org} do
+      dates = custom_fields(org, "content_page")["properties"]["dates"]
+
+      assert dates["items"] == %{"type" => "string", "format" => "date"}
+      assert dates["uniqueItems"] == true
+      assert dates["x-kiln-min-items"] == 1
+      assert dates["x-kiln-max-items"] == 10
+      refute Map.has_key?(dates, "minItems")
+      refute Map.has_key?(dates, "maxItems")
+    end
+
+    test "email and colour items keep their format and pattern", %{org: org} do
+      fields = custom_fields(org, "content_page")["properties"]
+
+      assert fields["contacts"]["items"] == %{"type" => "string", "format" => "email"}
+      assert fields["contacts"]["uniqueItems"] == true
+      assert fields["colours"]["items"] == %{"type" => "string", "pattern" => "^#[0-9a-f]{6}$"}
+    end
+
+    test "a single field of the same type is unchanged", %{org: org} do
+      assert custom_fields(org, "content_page")["properties"]["launch"] ==
+               %{"type" => ["string", "null"], "format" => "date"}
+    end
+
+    test "the GraphQL annotation names a list", %{org: org} do
+      fields =
+        SchemaExport.json_schema(org_id: org.id, graphql: true)["$defs"]["content_page"][
+          "properties"
+        ]["custom_fields"]["properties"]
+
+      assert fields["dates"]["x-kiln-graphql-kind"] == "list"
+      assert fields["scores"]["x-kiln-graphql-kind"] == "list"
+    end
+  end
+
   defp custom_fields(org, def_name) do
     SchemaExport.json_schema(org_id: org.id)["$defs"][def_name]["properties"]["custom_fields"]
   end

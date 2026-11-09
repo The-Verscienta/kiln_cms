@@ -7,6 +7,27 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="scalar-list-fields-upgrade"></a>
+
+- **Number, date, link and other scalar custom fields can now hold a list
+  (#2289). Upgrading needs nothing, but once an admin makes such a field a
+  list, rolling the pin back can lose list items.** No migration: the
+  `multiple`, `min_items` and `max_items` columns already exist.
+  - **What an older release does with a typed list.** A release before this
+    one only knows lists on media, reference, group, select and string fields.
+    If someone saves the definition of an `:integer`, `:float`, `:date`,
+    `:datetime`, `:time`, `:url`, `:email`, `:telephone`, `:color` or `:slug`
+    list field in its fields admin, it clears `multiple`, and the reshape that
+    follows keeps only the **first item** of every stored list of that field.
+    A list written to such a field there (an editor save, an API write) is
+    turned into one string or refused, depending on the type: a `:url` list
+    becomes the items run together (`"https://ahttps://b"`).
+  - **Before rolling back,** if any list fields of these types exist: do not
+    edit those field definitions or those records on the older release, or
+    first copy the values somewhere safe. Lists of strings and select terms
+    are not affected; the older release already knows those.
+  Guide: [Make a field hold a list of values](../extending-content.md#make-a-field-hold-a-list-of-values).
+
 <a id="admin-allowlist-upgrade"></a>
 
 - **Run `mix ash.migrate` for the admin allowlist (#2248): one new table,
@@ -639,6 +660,90 @@ carries the reasoning.
   - Guide: [Human verification](../human-verification.md). Threat model:
     [Human verification](../threat-model.md#human-verification-2249).
     Decision: [ADR 0020](../decisions/0020-human-verification-is-deployment-wide-and-fails-open-only-within-the-sign-in-budget.md).
+
+<a id="scalar-list-fields"></a>
+
+- **A number, date, date-time, time, link, email, phone, colour or slug
+  custom field can hold a list (#2289).** With `multiple: true`, an
+  `:integer`, `:float`, `:date`, `:datetime`, `:time`, `:url`, `:email`,
+  `:telephone`, `:color` or `:slug` field holds an ordered JSON array of its
+  values, bounded by `min_items` / `max_items`: the dates of an event, a
+  product's sizes, a clinic's phone numbers. Before, only strings (a list of
+  phrases) and selects could, and anything else needed a `:group` with one
+  sub-field, which every client then had to unwrap.
+  - **Stored JSON-native.** Each item is checked and tidied exactly as the
+    single field would be (`#FFF` becomes `#ffffff`, `9:30` becomes `09:30`,
+    an email's domain is lowercased), then stored as a number or an ISO
+    string: `{"scores": [3, 3, 7], "event_dates": ["2026-03-01",
+    "2026-03-08"]}`. Numbers keep repeats, because a quantity may repeat on
+    purpose; every other type drops a repeat once it is tidied. Order is
+    kept. A bare value is a one-item list, a string item holding line breaks
+    is one item per line, and an emptied list stores nothing.
+  - **Refused, not guessed.** An item the type cannot hold fails the save with
+    its position from 1 (`item 2 must be a date (YYYY-MM-DD)`); an item that
+    is an object or a boolean (`must be a list of values`) and a JSON-encoded
+    list sent as a string (`holds a JSON-encoded list`) are refused. `required`
+    asks for at least one item. A field's `validation` (`min`, `max`, length,
+    `pattern`) applies to each item and names it by its index from 0
+    (`scores[1]`); items the record already stored are not checked again, so
+    tightening `max` does not block adding a new item. `unique` still cannot
+    be combined with a list.
+  - **Record-level only.** A link field or a group sub-field holds one value,
+    as for lists of strings and selects. Not offered on `:boolean`, `:text`,
+    `:json`, `:user`, `:computed`, `:recurrence`, the composite types or plugin
+    types.
+  - **Fields admin.** The new types get the **Holds** choice: **One value** or
+    **A list**, then **Minimum** / **Maximum** items. The field list badges a
+    list field "list". Flipping a field to a list wraps each stored value in a
+    one-item list; flipping it back keeps the first item, after a warning.
+    Retyping one list into another (a list of strings into a list of dates)
+    keeps the stored items unconverted, and says so; `mix kiln.fields.convert`
+    is the tool that converts them. If a computed field's formula reads the
+    field, a warning says formulas skip a list (`sum`, `min`, `max` and text
+    leave it out). A field read by a **Show when** / **Required when** rule
+    with **is greater than** / **is less than** cannot become a list, and
+    such a rule cannot be written on a list field.
+  - **Content editor.** One input per item, of the single field's kind (a
+    date picker for a date, a number box for a number), edited in place,
+    removed with ×, dragged by its handle to reorder. Numbers, links,
+    addresses, phone numbers and slugs are added from the add box with Enter,
+    and pasting several lines adds one item per line. Dates, date-times, times
+    and colours are added with Enter or the **Add** button beside the box,
+    never by just picking a value, so a half-picked date is not added. At
+    `max_items` the add box goes away.
+  - **API.** JSON:API and GraphQL (`ListValue` of `IntValue`, `DateValue`,
+    …) carry the array. `custom_filter` takes `eq` (the list contains
+    the value), `not_eq`, `in`, `has`, `has_all`, `has_none` and `count` on
+    it, with each operand tidied as a stored item is, so `#FFF` finds
+    `#ffffff`. GraphQL `customWhere` takes the item's kind (`int: {eq: 10}`)
+    with `eq`, `notEq`, `in` and `isNull`. Comparing items (`gt`, `lt`, …)
+    and matching text in them (`contains`, `starts_with`, `ilike`) are not
+    supported yet and answer `400`, naming the operators a list does take; a
+    list is not sortable. `eq`, `in`, `has` and `has_all` can use the
+    `custom_fields` GIN index; `not_eq`, `has_none` and `count` cannot. On
+    `/entries` without `filter[type_name]`, a field name that is a list on one
+    dynamic type and a single value on another answers the same `400` as a
+    type mismatch ("has a different type per content type").
+  - **Schema export.** A typed list is `{"type": ["array", "null"], "items":
+    <the single field's schema>}`, with `uniqueItems: true` except on integer
+    and float lists and `x-kiln-min-items` / `x-kiln-max-items` when set. The
+    TypeScript, Kotlin and Swift exports follow (`scores?: Array<number> |
+    null`).
+  - **`mix kiln.fields.convert`** takes a typed list as its target: a JSON
+    array of items (`["2026-03-01","2026-03-08"]`, `[3, 5]`), each checked as
+    the field's own save would, an invalid item reported by position. A
+    single typed field is refused (`… is a single date field — make it a list
+    first`), and `--lines` now works for any list target, a multiple select
+    included.
+  - **For developers.** New `KilnCMS.CMS.ScalarLists` (`types/0`, `typed/0`,
+    `distinct?/1`, `ordered?/1`, `text?/1`), the custom-filter builder
+    `KilnCMS.CMS.Preparations.CustomFieldQuery.Lists`, and
+    `KilnCMS.CMS.Changes.ApplyCustomFields.coerce_item/2`.
+    `ClearMultiple.list_types/0` now includes the typed list types. The
+    GraphQL SDL changes only in the `CustomFieldCondition` description;
+    the OpenAPI document and `clients/` are unchanged.
+  Guide: [Make a field hold a list of values](../extending-content.md#make-a-field-hold-a-list-of-values);
+  filters: [json-api.md](../json-api.md#lists-of-values).
 
 <a id="admin-allowlist"></a>
 
@@ -1804,6 +1909,33 @@ carries the reasoning.
 
 ## Changed
 
+<a id="scalar-list-filters-changed"></a>
+
+- **Filters on lists of strings and multiple selects take `has`, `has_all`,
+  `has_none` and `count`, and read a value stored before the field was a list
+  as a one-item list (#2289).** The same filter code now serves every list of
+  values, typed lists included.
+  - **New operators.** `has` (contains any of up to 100 values), `has_all`
+    (contains every one), `has_none` (contains none of them) and `count` (how
+    many items, compared with `eq`, `gt`, `gte`, `lt`, `lte`; a bare number
+    is `eq`). Before, they were refused on these fields. `has_none` matches a
+    record with no value, as it does on a reference; `not_eq` still leaves
+    such a record out. On purpose: `has_none` asks "is none of these in the
+    list", `not_eq` compares a value. `count` reads no value as 0.
+  - **A stale bare value.** A string stored under the key before the field
+    became a list (a retype, or a reshape that did not finish) now matches
+    `eq` / `in` / `has` as a one-item list, is counted as 1 by `count`, and is
+    left out by `not_eq` when it is that value. Before, `eq` missed it and
+    `not_eq` matched it.
+  - **Error wording.** An unsupported operator on a list now reads `gt is not
+    supported on custom field "tags" (a list): it supports
+    eq/not_eq/in/has/has_all/has_none/count/null`, instead of `… only
+    supports eq/not_eq/in/null`.
+  - **GraphQL `customWhere`** takes `notEq` and `isNull` on these lists as
+    well as `eq` and `in`, with the `string` kind. Other operators are refused
+    with `customWhere supports only eq, notEq, in and isNull on it
+    (customFilter also takes has, has_all, has_none and count)`.
+
 <a id="console-sign-in-access-section"></a>
 
 - **The console's Configure menu has a new section, Sign-in & access (#2248).**
@@ -2316,6 +2448,26 @@ carries the reasoning.
     has a new name; delete superseded items in the media library.
 
 ## Fixed
+
+<a id="single-field-handed-a-list"></a>
+
+- **A single number, date, link or other scalar custom field sent a list now
+  keeps the list's first item, as a single string or select already did
+  (#2289).** Before, a single `:url` field written `["https://a",
+  "https://b"]` stored `"https://ahttps://b"`, and other types answered with a
+  misleading error or raised on an object item. The same happens when a
+  version saved while the field was a list is restored. Blank items are
+  skipped before the first is taken; an object item is refused with `must be
+  a single value`. An API client that sends an array to a single field now
+  gets its first item stored without an error, so send one value.
+
+<a id="read-only-list-events"></a>
+
+- **The content editor ignores list edits on a custom field the editor's
+  field grant leaves read-only (#2289).** The field already rendered disabled
+  and the save refused it (#2281); now a forged add, remove or reorder event
+  for a list, gallery or repeating-group field it cannot edit changes
+  nothing in the form either.
 
 <a id="custom-sort-json-null-last"></a>
 

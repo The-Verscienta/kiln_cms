@@ -536,8 +536,12 @@ public data class PostDocument(
         public val accent: String? = null,
         @SerialName("code_sample") public val codeSample: String? = null,
         @SerialName("contact_email") public val contactEmail: String? = null,
+        /** The items, in the order the editor arranged them. */
+        public val contacts: List<String>? = null,
         /** Rows of this group, in the order the editor arranged them. */
         public val dosages: List<DosagesItem>? = null,
+        /** The items, in the order the editor arranged them. */
+        @SerialName("event_dates") public val eventDates: List<String>? = null,
         public val extra: JsonElement? = null,
         public val featured: Boolean? = null,
         /** Snapshots of the picked media items, in gallery order. */
@@ -567,6 +571,8 @@ public data class PostDocument(
          * Links to: `post`.
          */
         public val related: List<RelatedItem>? = null,
+        /** The items, in the order the editor arranged them. */
+        public val scores: List<Long>? = null,
         public val seo: Seo? = null,
         public val source: Source? = null,
         public val specs: List<SpecsItem>? = null,

@@ -242,7 +242,7 @@ defmodule KilnCMSWeb.GraphqlCustomWhereTest do
       assert {:ok, %{errors: [%{message: message}]}} =
                run(%{"f" => Jason.encode!(%{"tagged" => %{"contains" => "["}})})
 
-      assert message =~ "only supports eq/not_eq/in/null"
+      assert message =~ "contains is not supported on custom field \"tagged\" (a list)"
     end
   end
 
@@ -306,11 +306,12 @@ defmodule KilnCMSWeb.GraphqlCustomWhereTest do
       assert error!([%{"name" => "count", "int" => %{}}]) =~ "at least one operator"
     end
 
-    test "a multiple field takes only string eq and in" do
+    test "a list of strings takes string eq, notEq, in and isNull" do
       assert error!([%{"name" => "tagged", "string" => %{"contains" => "a"}}]) =~
-               "supports only eq and in"
+               "supports only eq, notEq, in and isNull"
 
-      assert error!([%{"name" => "tagged", "int" => %{"eq" => 1}}]) =~ "does not support"
+      assert error!([%{"name" => "tagged", "int" => %{"eq" => 1}}]) =~
+               "is a list of string values, not int"
     end
 
     test "a field customWhere does not type is pointed at customFilter", %{admin: admin} do

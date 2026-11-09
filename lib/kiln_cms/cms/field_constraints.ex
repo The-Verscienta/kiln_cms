@@ -21,8 +21,8 @@ defmodule KilnCMS.CMS.FieldConstraints do
       write path (`KilnCMS.CMS.UniqueValues`), not by `check/3`.
 
   Only non-blank values are checked: a blank optional field is simply empty,
-  and `required` is the coercion's concern. A `multiple` string field is
-  checked per item (`tags[1]`); a `:group` per row and sub-field
+  and `required` is the coercion's concern. A scalar list (`multiple`
+  string, integer, url, …) is checked per item (`tags[1]`); a `:group` per row and sub-field
   (`dosages[2].unit`), with the sub-field's own `validation`.
 
   ## Safety
@@ -100,7 +100,7 @@ defmodule KilnCMS.CMS.FieldConstraints do
   The problems with `value` (already coerced) against `def`'s constraints.
 
   `def` needs `field_type`, `name`, `label`, `validation` and, for a
-  `:string` list, `multiple`; a `:group` also its loaded `group_fields`.
+  scalar list, `multiple`; a `:group` also its loaded `group_fields`.
   `path` defaults to the field's name and prefixes every problem's path.
   """
   @spec check(map(), term(), String.t() | nil) :: [problem()]
@@ -187,7 +187,7 @@ defmodule KilnCMS.CMS.FieldConstraints do
 
   # --- checks ------------------------------------------------------------
 
-  # One item of a `multiple` string field.
+  # One item of a scalar list (`multiple` string, integer, url, …).
   defp item(def, validation, path, {value, index}) do
     if blank?(value), do: [], else: scalar(def, validation, "#{path}[#{index}]", value)
   end

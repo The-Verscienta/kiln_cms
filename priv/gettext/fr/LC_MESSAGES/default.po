@@ -1667,6 +1667,11 @@ msgstr "Une seule ligne : les caractéristiques d’un produit, l’adresse d’
 msgid "A single short text — a name, a code."
 msgstr "Un seul texte court — un nom, un code."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A single value."
+msgstr "Une seule valeur."
+
 #: lib/kiln_cms/cms/field_types/range.ex
 #, elixir-autogen, elixir-format
 msgid "A span between two numbers or two dates, with either end optional. For a price band, an age bracket or a date window. Cannot be filtered or sorted."
@@ -2375,6 +2380,11 @@ msgstr "Ajoutez le premier lien ci-dessous."
 #, elixir-autogen, elixir-format
 msgid "Add the first one with the form above."
 msgstr "Ajoutez le premier avec le formulaire ci-dessus."
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Add to %{field}"
+msgstr "Ajouter à %{field}"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
@@ -3259,6 +3269,11 @@ msgstr "Autant d’expressions que l’éditeur en ajoute, chacune en texte libr
 #, elixir-autogen, elixir-format
 msgid "As many rows as the editor adds, in the order they arrange them — dosages, steps."
 msgstr "Autant de lignes que l’éditeur en ajoute, dans l’ordre qu’il choisit : posologies, étapes."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "As many values as the editor adds, each checked as a single one would be, in their order — dates, links, numbers."
+msgstr "Autant de valeurs que l'éditeur en ajoute, chacune vérifiée comme le serait une valeur seule, dans leur ordre — dates, liens, nombres."
 
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
@@ -10568,6 +10583,11 @@ msgstr "Liste"
 msgid "Listed with pg_restore after writing, so it is a real backup"
 msgstr "Vérifié avec pg_restore après écriture — c'est donc une vraie sauvegarde"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Lists already filled in keep their items as they are, not converted to the new type. An item the new type cannot hold is reported when that content is next saved; copy them into a new list field with mix kiln.fields.convert."
+msgstr "Les listes déjà remplies gardent leurs éléments tels quels, sans conversion vers le nouveau type. Un élément que le nouveau type ne peut pas contenir est signalé au prochain enregistrement de ce contenu ; copiez-les dans un nouveau champ liste avec mix kiln.fields.convert."
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Live claims"
@@ -13063,6 +13083,11 @@ msgstr "Un seul ensemble de valeurs"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "One value"
+msgstr "Une valeur"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "One-to-many: a chapter belongs to a single book."
 msgstr "Un-à-plusieurs : un chapitre appartient à un seul livre."
 
@@ -14124,6 +14149,11 @@ msgstr "Appuyez sur Entrée ou sur une virgule pour ajouter. Les nouveaux termes
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
+msgid "Press Enter to add."
+msgstr "Appuyez sur Entrée pour ajouter."
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
 msgid "Press Enter to add. Paste several lines to add one item per line."
 msgstr "Appuyez sur Entrée pour ajouter. Collez plusieurs lignes pour ajouter un élément par ligne."
 
@@ -14632,6 +14662,11 @@ msgstr "Lecture + écriture"
 #, elixir-autogen, elixir-format
 msgid "Read + write (MCP authoring)"
 msgstr "Lecture + écriture (création MCP)"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Read by a formula in %{fields}. A formula skips a list: sum, min, max and text leave this field out once it holds one."
+msgstr "Lu par une formule dans %{fields}. Une formule ignore les listes : sum, min, max et le texte laissent ce champ de côté dès qu'il en contient une."
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
@@ -23250,6 +23285,11 @@ msgstr "ne peut pas être stocké pour le moment : le serveur n'a plus d'espace 
 #, elixir-autogen, elixir-format
 msgid "can't be stored — video and audio metadata stripping isn't available on this server"
 msgstr "ne peut pas être stocké : la suppression des métadonnées vidéo et audio n'est pas disponible sur ce serveur"
+
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "can't compare %{field} with greater/less than: it holds a list"
+msgstr "impossible de comparer %{field} avec supérieur/inférieur à : il contient une liste"
 
 #: lib/kiln_cms/cms/validations/field_condition.ex
 #, elixir-autogen, elixir-format

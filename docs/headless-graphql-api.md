@@ -102,6 +102,12 @@ consumers never need the plain, credential-widened list.
 > "<id>"]}, related_posts: {has_none: ["<id>"]}}`. A target the caller may not
 > read (a draft, for an anonymous caller) neither matches nor counts.
 >
+> A list of values (`multiple` on a string, select, number, date, link, …
+> field) takes the same names for its items: `customFilter: {scores: {has:
+> [3, 7], count: {gte: 2}}, event_dates: "2026-03-01"}`. `has_none` matches a
+> record with no value; `not_eq` does not. See
+> [json-api.md → Lists of values](json-api.md#lists-of-values).
+>
 > `customFilter` also takes boolean groups: `customFilter: {_or: [{price: {gt:
 > 100}}, {color: "red"}]}`, `_and`, `_not: {color: "red"}`, and `_native: {title:
 > "Sale"}` inside a condition for built-in columns (snake_case names) — see
@@ -153,10 +159,19 @@ reads):
 - `contains` and `startsWith` ignore case and take their text literally: `%`,
   `_` and `\` are not wildcards. `customFilter` accepts them too, as
   `contains` / `starts_with`, on text-like fields.
-- Not in `customWhere`: a `multiple` field (except `string: {eq | in}`, which
-  means "the list contains"), and reference, media, group, geolocation and link
-  fields and the relationship operators. Use `customFilter` for those.
-  Sorting stays `customSort`.
+- A **list of values** (`multiple` on a string, select, number, date, link, …
+  field) takes the kind of its items, with the list's meaning: `eq` (contains),
+  `notEq` (does not contain), `in` (contains any) and `isNull`. A list of
+  integers is `int: {eq: 10}`, a list of dates `date: {in: ["2026-03-01",
+  "2026-03-08"]}`; a list of URLs, emails, phone numbers, colours, slugs or
+  times is `string`. Another kind is refused (`custom field "scores" is a
+  list of int values, not string; use the int condition`), as is any other
+  operator (`customWhere supports only eq, notEq, in and isNull on it
+  (customFilter also takes has, has_all, has_none and count)`).
+- Not in `customWhere`: `has`, `has_all`, `has_none` and `count` on a list,
+  other `multiple` fields, reference, media, group, geolocation and link
+  fields, and the relationship operators. Use `customFilter` for those.
+  Sorting stays `customSort`; a list is not sortable.
 - Limits: at most 10 conditions per query and 50 values in an `in`; each
   condition adds 5 to the query's [complexity](#query-cost).
 
@@ -169,7 +184,7 @@ How a custom field's `customFilter` / `customSort` differs from a column's
 | Operators | `eq`, `not_eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ilike` (text only), `contains`, `starts_with` (text only), `null` (`is_nil` is a synonym) | the generated filter input |
 | Unknown name | error `unknown custom field "x"` | rejected by the schema |
 | Sort nulls | last, both directions | plain `asc` / `desc` |
-| Relationship operators | `has`, `has_all`, `has_none`, `count` | not available |
+| Relationship operators | `has`, `has_all`, `has_none`, `count` (also on lists of values) | not available |
 
 ### Relationships: references and referencedBy
 
@@ -284,7 +299,9 @@ generated types [below](#generate-types-and-fragments-for-your-site).
 - Alias `value` per member (`asString: value`, `asFloat: value`): GraphQL does
   not allow one response key to have two types, and the generated fragments do
   the same.
-- A field with `multiple` is a `ListValue`, whatever its item type. A group
+- A field with `multiple` is a `ListValue`, whatever its item type: a list
+  of integers is a `ListValue` of `IntValue`s, a list of dates of
+  `DateValue`s, a list of URLs or emails of `StringValue`s. A group
   is a `GroupValue` of its sub-fields (a repeating group is a `ListValue` of
   `GroupValue`s), nested to depth 3.
 - A `geolocation` field is a `GeolocationValue`: `lat` and `lng` are floats,

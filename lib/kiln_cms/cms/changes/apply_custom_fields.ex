@@ -142,8 +142,12 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.PrivateFields
+  alias KilnCMS.CMS.ScalarLists
   alias KilnCMS.CMS.UniqueValues
   alias KilnCMS.CMS.WorkingCopy
+
+  @scalar_list_types ScalarLists.types()
+  @typed_list_types ScalarLists.typed()
 
   @impl true
   def change(changeset, opts, context) do
@@ -696,9 +700,14 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   defp constrain({:ok, value} = ok, def, stored, true) do
     cond do
-      value == stored -> ok
-      stored_item_list?(def, value, stored) -> ok
-      true -> constrain_problems(ok, FieldConstraints.check(def, value))
+      value == stored ->
+        ok
+
+      stored_item_list?(def, value, stored) ->
+        constrain_problems(ok, new_items(def, value, stored))
+
+      true ->
+        constrain_problems(ok, FieldConstraints.check(def, value))
     end
   end
 
@@ -707,14 +716,25 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp constrain_problems(ok, []), do: ok
   defp constrain_problems(_ok, problems), do: {:errors, problems}
 
-  # A `multiple` string field is checked per item; an item already stored is
-  # not re-litigated, so adding a tag to a list holding one now-too-long tag
-  # still saves.
-  defp stored_item_list?(%{multiple: true, field_type: :string}, value, stored)
-       when is_list(value) and is_list(stored),
-       do: Enum.all?(value, &(&1 in stored))
+  # A scalar list (`multiple` string, integer, date, …) is checked per item;
+  # an item already stored is not re-litigated, so adding a tag to a list
+  # holding one now-too-long tag — or a score to a list holding one above a
+  # since-tightened `max` — still saves. Only the items it did not hold are
+  # checked, each under its own position (`scores[2]`).
+  defp stored_item_list?(%{multiple: true, field_type: type}, value, stored)
+       when type in @scalar_list_types,
+       do: is_list(value) and is_list(stored)
 
   defp stored_item_list?(_def, _value, _stored), do: false
+
+  defp new_items(def, value, stored) do
+    value
+    |> Enum.with_index()
+    |> Enum.reject(fn {item, _index} -> item in stored end)
+    |> Enum.flat_map(fn {item, index} ->
+      FieldConstraints.check(def, item, "#{def.name}[#{index}]")
+    end)
+  end
 
   # --- link fields (R3) ----------------------------------------------------------
 
@@ -1019,10 +1039,12 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
        when type in [:media, :reference] and is_list(value),
        do: Enum.all?(value, &blank?/1)
 
-  # A multiple select's picker, and a list of phrases, post the same leading
-  # `""`, so the same rule — and a single one handed a list follows it too.
-  defp blank_for?(%{field_type: type}, value) when type in [:select, :string] and is_list(value),
-    do: Enum.all?(value, &blank?/1)
+  # A multiple select's picker, a list of phrases and every other scalar list
+  # post the same leading `""`, so the same rule — and a single one handed a
+  # list follows it too.
+  defp blank_for?(%{field_type: type}, value)
+       when type in @scalar_list_types and is_list(value),
+       do: Enum.all?(value, &blank?/1)
 
   defp blank_for?(_def, value), do: blank?(value)
 
@@ -1082,11 +1104,24 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     with {:ok, items} <- coerce_phrases(value), do: within_bounds(items, def)
   end
 
-  # A single select or string handed a list (stored while the field was
-  # multiple) keeps its first item, as a single media field does.
+  # A typed list (`ScalarLists.typed/0`: numbers, dates, links, …): each item
+  # coerced as the single field would coerce it, then counted.
+  defp coerce(value, %{field_type: type, multiple: true} = def, _read_opts)
+       when type in @typed_list_types do
+    with {:ok, items} <- coerce_items(value, def), do: within_bounds(items, def)
+  end
+
+  # A single scalar field handed a list (stored while the field was multiple —
+  # a working copy, a restored version — or an API client sending an array)
+  # keeps its first item, as a single media field does, rather than
+  # stringifying the whole list into one value.
   defp coerce(value, %{field_type: type} = def, _read_opts)
-       when type in [:select, :string] and is_list(value),
-       do: value |> Enum.reject(&blank?/1) |> List.first() |> coerce(def)
+       when type in @scalar_list_types and is_list(value) do
+    case value |> Enum.reject(&blank?/1) |> List.first() do
+      item when is_binary(item) or is_number(item) -> coerce(item, def)
+      other -> {:error, "must be a single value (got #{inspect(other)})"}
+    end
+  end
 
   defp coerce(value, def, _read_opts), do: coerce(value, def)
 
@@ -1111,6 +1146,18 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     |> KilnCMS.Accounts.Scoping.users_with_tier([:admin, :editor, :viewer])
     |> Enum.any?(&(&1.id == id))
   end
+
+  @doc """
+  One item of a typed list (`KilnCMS.CMS.ScalarLists.typed/0`) as the list
+  would store it — `{:ok, value}` or `{:error, message}` — so the content
+  editor can tell that a date-time picked as `T10:00` repeats a stored
+  `T10:00:00` (#2289). Any other definition gets the item back unchanged.
+  """
+  @spec coerce_item(map(), term()) :: {:ok, term()} | {:error, String.t()}
+  def coerce_item(%{field_type: type} = definition, item) when type in @typed_list_types,
+    do: coerce(item, Map.put(definition, :multiple, false))
+
+  def coerce_item(_definition, item), do: {:ok, item}
 
   # --- coercion to JSON-native values ----------------------------------------
 
@@ -1242,6 +1289,61 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       |> then(&{:ok, &1})
     end
   end
+
+  # A typed list's items: blanks dropped, a string item holding several lines
+  # split into one item per line (as a list of phrases is), each coerced by
+  # the single field's own rules (`multiple: false` — a built-in such as
+  # `:email` goes through its module's `cast/2`), repeats dropped *after*
+  # coercion (so `#FFF` and `#ffffff` are one colour) unless the type keeps
+  # them (numbers), order kept. An item that is not a string or a number, or
+  # a string holding a JSON-encoded list, is refused rather than stored.
+  defp coerce_items(value, %{field_type: type} = def) do
+    raw = value |> List.wrap() |> Enum.reject(&blank?/1)
+    {_items, others} = Enum.split_with(raw, &(is_binary(&1) or is_number(&1)))
+
+    cond do
+      others != [] ->
+        {:error, "must be a list of values (got #{inspect(hd(others))})"}
+
+      Enum.any?(raw, &json_list?(trim_item(&1))) ->
+        {:error, "holds a JSON-encoded list — send the items as a list instead"}
+
+      true ->
+        with {:ok, items} <- coerce_each(raw, Map.put(def, :multiple, false)) do
+          {:ok, if(ScalarLists.distinct?(type), do: Enum.uniq(items), else: items)}
+        end
+    end
+  end
+
+  # Each item coerced as the single field (`single`) would coerce it, in
+  # order; the first refusal is named by its position.
+  defp coerce_each(raw, single) do
+    raw
+    |> Enum.flat_map(&split_item/1)
+    |> Enum.with_index(1)
+    |> Enum.reduce_while({:ok, []}, fn {item, position}, {:ok, acc} ->
+      case coerce(item, single) do
+        {:ok, coerced} -> {:cont, {:ok, [coerced | acc]}}
+        {:error, message} -> {:halt, {:error, "item #{position} #{message}"}}
+      end
+    end)
+    |> case do
+      {:ok, items} -> {:ok, Enum.reverse(items)}
+      error -> error
+    end
+  end
+
+  defp split_item(item) when is_binary(item) do
+    item
+    |> String.split(~r/\R/u)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp split_item(item), do: [item]
+
+  defp trim_item(item) when is_binary(item), do: String.trim(item)
+  defp trim_item(item), do: item
 
   defp check_terms(terms, def) do
     line = KilnCMS.Limits.line()
