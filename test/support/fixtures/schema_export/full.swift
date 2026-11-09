@@ -1115,8 +1115,12 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public let accent: String?
         public let codeSample: String?
         public let contactEmail: String?
+        /// The items, in the order the editor arranged them.
+        public let contacts: [String]?
         /// Rows of this group, in the order the editor arranged them.
         public let dosages: [DosagesItem]?
+        /// The items, in the order the editor arranged them.
+        public let eventDates: [String]?
         public let extra: JSONValue?
         public let featured: Bool?
         /// Snapshots of the picked media items, in gallery order.
@@ -1142,6 +1146,8 @@ public struct PostDocument: Codable, Hashable, Sendable {
         ///
         /// Links to: `post`.
         public let related: [RelatedItem]?
+        /// The items, in the order the editor arranged them.
+        public let scores: [Int]?
         public let seo: Seo?
         public let source: Source?
         public let specs: [SpecsItem]?
@@ -1152,11 +1158,13 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public let tier: String?
         public let `where`: Where?
 
-        public init(accent: String? = nil, codeSample: String? = nil, contactEmail: String? = nil, dosages: [DosagesItem]? = nil, extra: JSONValue? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, handle: String? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, opensAt: String? = nil, parent: [String: JSONValue]? = nil, phone: String? = nil, priceBand: PriceBand? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, seo: Seo? = nil, source: Source? = nil, specs: [SpecsItem]? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
+        public init(accent: String? = nil, codeSample: String? = nil, contactEmail: String? = nil, contacts: [String]? = nil, dosages: [DosagesItem]? = nil, eventDates: [String]? = nil, extra: JSONValue? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, handle: String? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, opensAt: String? = nil, parent: [String: JSONValue]? = nil, phone: String? = nil, priceBand: PriceBand? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, scores: [Int]? = nil, seo: Seo? = nil, source: Source? = nil, specs: [SpecsItem]? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
             self.accent = accent
             self.codeSample = codeSample
             self.contactEmail = contactEmail
+            self.contacts = contacts
             self.dosages = dosages
+            self.eventDates = eventDates
             self.extra = extra
             self.featured = featured
             self.gallery = gallery
@@ -1173,6 +1181,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
             self.rating = rating
             self.readTime = readTime
             self.related = related
+            self.scores = scores
             self.seo = seo
             self.source = source
             self.specs = specs
@@ -1187,7 +1196,9 @@ public struct PostDocument: Codable, Hashable, Sendable {
             case accent
             case codeSample = "code_sample"
             case contactEmail = "contact_email"
+            case contacts
             case dosages
+            case eventDates = "event_dates"
             case extra
             case featured
             case gallery
@@ -1204,6 +1215,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
             case rating
             case readTime = "read_time"
             case related
+            case scores
             case seo
             case source
             case specs

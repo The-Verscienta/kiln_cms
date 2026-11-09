@@ -9,12 +9,14 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
       content type or dynamic type, or the same group), not the field itself,
       not private (a private value must not steer what a viewer sees), and a
       scalar type (`FieldDefinition.link_field_types/0`);
-    * `gt` / `lt` only test a number or a date;
+    * `gt` / `lt` only test a number or a date, and never a list of them
+      (`multiple`) — a list has no single value to order;
     * the rules form no cycle through this field.
 
   The other direction is guarded too. **Destroying** a field other rules read
-  is refused, naming them. **Retyping** or making **private** a field other
-  rules read is refused when a rule would no longer be valid. A **rename**
+  is refused, naming them. **Retyping**, making **private** or making
+  **multiple** a field other rules read is refused when a rule would no
+  longer be valid. A **rename**
   needs no guard: `Changes.SyncFieldValues` rewrites the rules that read it.
   """
   use Ash.Resource.Validation
@@ -146,6 +148,11 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
           field: target.name
         )
 
+      Enum.any?(ops, &(&1 in Conditions.ordering_ops())) and Map.get(target, :multiple) == true ->
+        gettext("can't compare %{field} with greater/less than: it holds a list",
+          field: target.name
+        )
+
       true ->
         nil
     end
@@ -184,19 +191,27 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
 
   # --- rules that read this field --------------------------------------------
 
-  # Retyping or privatising a field must not leave a rule that reads it
-  # invalid. (A rename is rewritten by `Changes.SyncFieldValues`.)
+  # Retyping, privatising or making a list of a field must not leave a rule
+  # that reads it invalid. (A rename is rewritten by
+  # `Changes.SyncFieldValues`.)
   defp check_dependents(%{action_type: :update} = changeset) do
-    if Enum.any?([:field_type, :private], &Ash.Changeset.changing_attribute?(changeset, &1)) do
+    changing = Enum.filter([:field_type, :private, :multiple], &changing?(changeset, &1))
+
+    if changing != [] do
       target = %{
         name: changeset.data.name,
         field_type: Ash.Changeset.get_attribute(changeset, :field_type),
-        private: Ash.Changeset.get_attribute(changeset, :private)
+        private: Ash.Changeset.get_attribute(changeset, :private),
+        multiple: Ash.Changeset.get_attribute(changeset, :multiple)
       }
+
+      # The error sits under the control that caused it: the list toggle when
+      # only `multiple` moved.
+      field = if changing == [:multiple], do: :multiple, else: :field_type
 
       changeset.data
       |> dependents(changeset.to_tenant)
-      |> Enum.find_value(:ok, &dependent_problem(&1, target))
+      |> Enum.find_value(:ok, &dependent_problem(&1, target, field))
     else
       :ok
     end
@@ -204,21 +219,28 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
 
   defp check_dependents(_changeset), do: :ok
 
-  defp dependent_problem(dependent, target) do
+  # `ClearMultiple` may force `multiple` back to what it was, which
+  # `changing_attribute?/2` still reports as a change.
+  defp changing?(changeset, :multiple),
+    do: Ash.Changeset.get_attribute(changeset, :multiple) != changeset.data.multiple
+
+  defp changing?(changeset, attr), do: Ash.Changeset.changing_attribute?(changeset, attr)
+
+  defp dependent_problem(dependent, target, field) do
     Enum.find_value(@rules, fn attr ->
       rule = Map.get(dependent, attr)
 
       if target.name in Conditions.references(rule) do
-        dependent_message(dependent, problem(target, ops_on(rule, target.name)))
+        dependent_message(dependent, problem(target, ops_on(rule, target.name)), field)
       end
     end)
   end
 
-  defp dependent_message(_dependent, nil), do: nil
+  defp dependent_message(_dependent, nil, _field), do: nil
 
-  defp dependent_message(dependent, message) do
+  defp dependent_message(dependent, message, field) do
     error(
-      :field_type,
+      field,
       gettext("%{field} reads this field in its condition: %{message}",
         field: dependent.label,
         message: message

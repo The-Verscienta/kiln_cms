@@ -103,7 +103,9 @@ UI" workflow, scoped to fields.
   never joins `options`; that list stays the admin's. A JSON-encoded list
   sent as a string (`"[\"a\",\"b\"]"`) is refused rather than stored as one
   term. `custom_filter[<field>]=<term>` asks whether the list contains the
-  term (`in` for any of several, `not_eq` for none); the field is not
+  term (`in` for any of several, `not_eq` for none; `has`, `has_all`,
+  `has_none` and `count` work too, see
+  [json-api.md](json-api.md#lists-of-values)); the field is not
   sortable. Flipping the setting reshapes stored values (one choice → a
   one-term list; a list → its first term). Only a record-level select can
   hold several terms — not a link field or a group sub-field. To move terms
@@ -117,11 +119,28 @@ UI" workflow, scoped to fields.
   several lines into the add box adds one item per line, and an item written
   with line breaks (an API client's `"a\nb"`) is stored as one item per line.
   Items are trimmed, blanks and repeats drop out, and a JSON-encoded list sent
-  as a string is refused. It filters by containment as a multiple select
-  does, is not sortable, and a `names_record` list names the record by each
+  as a string is refused. It filters as every list does (`eq` is "contains",
+  plus `has`, `has_all`, `has_none` and `count`; see
+  [json-api.md](json-api.md#lists-of-values)), is not sortable, and a
+  `names_record` list names the record by each
   of its items (a list of synonyms). Not a `:group` with one sub-field: that
   stores `[{"value": "fatigue"}]`, and every client would have to read it so.
   Record-level fields only, as for a multiple select.
+- **One value or a list of values**: an `:integer`, `:float`, `:date`,
+  `:datetime`, `:time`, `:url`, `:email`, `:telephone`, `:color` or `:slug`
+  field holds one value by default. With `multiple: true` it holds a **list**
+  of them — the dates of an event, a product's sizes, a clinic's phone
+  numbers — as a JSON array in the order the editor arranges them, bounded by
+  `min_items` / `max_items`. Each item is checked and tidied exactly as the
+  single field would be, and stored JSON-native: numbers as numbers, dates
+  and times as their ISO strings (`[3, 3, 7]`, `["2026-03-01",
+  "2026-03-08"]`). Numbers keep repeats; every other type drops an item that
+  repeats one already in the list once both are tidied (`#FFF` and `#ffffff`
+  are one colour). The full rules, the editor and the filters are in
+  [Make a field hold a list of values](#make-a-field-hold-a-list-of-values).
+  Record-level fields only. `:boolean`, `:text`, `:json`, `:user`,
+  `:computed`, `:recurrence`, the composite types and plugin types cannot be
+  lists; for a list of composite values use a repeating `:group`.
 - **Rich or plain text**: a `:text` field's `format` is `:rich` by default —
   the editor shows TipTap with a short toolbar (paragraphs, bold, italic,
   links, bulleted and numbered lists), and the HTML is sanitized on write to
@@ -276,7 +295,7 @@ UI" workflow, scoped to fields.
   apply. A held change is marked "goes live when *Source* is published", a
   source the editor may not change shows a lock, and a source someone else
   saved in the meantime fails on its own row.
-- **Item bounds**: on either kind of list (`multiple: true`), optional
+- **Item bounds**: on any list (`multiple: true`), optional
   `min_items` / `max_items` bound how many items a value holds once it holds
   any — an empty optional field is still allowed; `required` asks for at
   least one. They are checked when a record's field is written, so tightening
@@ -561,6 +580,136 @@ not be greater than the maximum*; *each line must be key=value*; *every value
 needs a key*; *has a repeated key (x)*; *a key may not contain "="*; *address
 must be an http(s) URL, a mailto: address, a /path or a #fragment*; *rel must be
 one or more of: noopener, noreferrer, nofollow, sponsored, ugc, external*.
+
+### Make a field hold a list of values
+
+A number, date, date-time, time, link, email, phone, colour or slug field can
+hold a list instead of one value: the dates an event runs on, the sizes a shoe
+comes in. You need the admin role to set it up; any editor who may edit the
+record fills it in.
+
+1. Open `/editor/fields`. Under **Add a field**, keep **This field holds** on
+   **A value**, tick the content types under **Content types**, and fill in
+   **Label** (`Event dates`) and **Machine name** (`event_dates`).
+2. Choose the **Field type**, here **Date**. A **Holds** choice appears with
+   **One value** and **A list**.
+3. Choose **A list**. A **How many items** box appears with **Minimum** and
+   **Maximum**; fill in either, both or neither (`10` as the maximum).
+4. Click **Add field**. Under **Defined fields** the new field carries a
+   **list** badge.
+5. Open a record of that type in the content editor. The field shows an add
+   box under its items.
+   - For a number, link, email address, phone number or slug, type a value
+     and press Enter. Pasting several lines adds one item per line.
+   - For a date, date-time, time or colour, pick or type a value, then press
+     Enter or click **Add** beside the box. Picking a date alone adds nothing,
+     so a half-picked date is never added. A colour is typed as a hex value
+     (`#ff8800`).
+
+   Each item appears as its own input, with a count above the list. Edit an
+   item in place, remove it with ×, or drag it by its handle to reorder. At
+   the **Maximum** the add box is replaced by *At the limit of 10 items.*
+6. Save. The record stores the items in screen order. A date or other item
+   that is already in the list is not added a second time; numbers may repeat.
+
+The same field through the code interface, and a write to it:
+
+```elixir
+CMS.create_field_definition!(%{
+  content_type: :post, name: "event_dates", label: "Event dates",
+  field_type: :date, multiple: true, max_items: 10
+}, actor: admin)
+
+CMS.update_post!(post, %{custom_fields: %{
+  "event_dates" => ["2026-03-08", "2026-03-01", "2026-03-08"]
+}}, actor: editor).custom_fields["event_dates"]
+#=> ["2026-03-08", "2026-03-01"]
+```
+
+How a list behaves:
+
+- **Each item is the single field's value.** It is checked and tidied as the
+  single field would be: a time `9:30` is stored `09:30`, a colour `#FFF`
+  `#ffffff`, an email's domain is lowercased, a date-time `T10:00` becomes
+  `T10:00:00`. Numbers are stored as JSON numbers, everything else as a
+  string.
+- **Repeats.** An integer or float list keeps repeats (`[3, 3, 7]`): a
+  quantity may repeat on purpose. Every other list drops an item equal to one
+  before it once both are tidied, so `#FFF` after `#ffffff` is dropped.
+- **Shapes a write may send.** A JSON array; a bare value (stored as a
+  one-item list); a string item with line breaks (one item per line). Blank
+  items drop out, and an empty list clears the field. An object or boolean
+  item, or a JSON-encoded list sent as one string (`"[1, 2]"`), is refused.
+- **Required and bounds.** **Required** asks for at least one item.
+  **Minimum** and **Maximum** count items once the field has any; tightening
+  them leaves stored lists alone until the field is next written.
+- **Value rules apply per item.** A `min`, `max`, length or `pattern` rule
+  ([Constrain the values of a field](#constrain-the-values-of-a-field))
+  checks each item and names it by its index from 0, `scores[1]` for the
+  second. Items the record already stored are not checked again. `unique`
+  cannot be set on a list.
+- **Turning a list on or off.** Choosing **A list** for a field that already
+  has values wraps each one in a one-item list. Going back to **One value**
+  keeps the first item of each list; the form warns before you save.
+- **Retyping a list.** Changing a list's **Field type** to another type that
+  can be a list (a list of strings into a list of dates) keeps every stored
+  item as it was, not converted, and the form says so. An item the new type
+  cannot hold is reported when that record is next saved. To convert the
+  items, add a **new** list field of the type you want and copy them into it
+  with [`mix kiln.fields.convert`](field-conversion.md#into-a-list-of-values),
+  which refuses to convert a field into itself.
+- **Formulas skip a list.** A computed field reads a list as no number and no
+  text: `sum`, `min` and `max` leave it out, and interpolation renders it
+  blank. The fields admin warns when you make a field a list that a formula
+  reads.
+- **Conditions.** A **Show when** / **Required when** rule may read a list
+  of numbers, dates, date-times or links (the types a rule can read at all).
+  **is** then holds when the list contains the value, and **is one of** when
+  it contains any of them. **is greater than** / **is less than** are
+  refused on a list, which has no single value to order, and making a field
+  a list is refused while such a rule reads it.
+- **Where it can be.** On a content type or dynamic type only, not on a
+  link field or a group sub-field. For a list of composite values (a
+  date range with a label), use a repeating `:group`.
+- **The content list.** A list field is not offered under **Columns**, so
+  it is not among the **Field conditions**, the field sorts or the export's
+  columns either.
+
+Reading and filtering it:
+
+- **JSON:API** carries the array as stored under `custom_fields`.
+  `custom_filter[event_dates]=2026-03-01` finds records whose list contains
+  that date; `has`, `has_all`, `has_none` and `count` work too. Comparing
+  items (`gt`, `lt`) and matching text in them are not supported yet, and a
+  list is not sortable. See [Lists of values](json-api.md#lists-of-values).
+- **GraphQL** serves a `ListValue` of `IntValue`, `DateValue`, … items, and
+  `customWhere` takes the item's kind (`int: {eq: 10}`); see
+  [headless-graphql-api.md](headless-graphql-api.md#typed-filters-customwhere).
+- **The schema export** describes it as an array of the single field's
+  schema, with `uniqueItems: true` except on integer and float lists, and
+  `x-kiln-min-items` / `x-kiln-max-items` when set:
+
+  ```json
+  "event_dates": {
+    "type": ["array", "null"],
+    "items": {"type": "string", "format": "date"},
+    "uniqueItems": true,
+    "x-kiln-max-items": 10,
+    "description": "The items, in the order the editor arranged them."
+  }
+  ```
+
+What can go wrong when saving (the field's label and name come first, as
+`Event dates (event_dates) …`):
+
+| Message | Meaning |
+|---|---|
+| `item 2 must be a date (YYYY-MM-DD)` | The second item, counting from 1, is not a value of the field's type. The rest of the message is the single field's own. |
+| `must be a list of values (got …)` | An item is an object, a boolean or another list. |
+| `holds a JSON-encoded list — send the items as a list instead` | A string such as `"[1, 2]"` was sent; send `[1, 2]`. |
+| `needs at least 2 items (has 1)` / `can have at most 10 items (has 11)` | Outside **Minimum** / **Maximum**. |
+| `(scores[1]) must be at most 10` | A value rule failed for the item at index 1 (the second). |
+| `can't compare … with greater/less than: it holds a list` | In the fields admin: a **Show when** / **Required when** rule orders on a list field, or the field is being made a list while one does. |
 
 ### Filter and sort the content list by custom fields
 
@@ -883,7 +1032,9 @@ How the rules behave:
 
 - **Blank values are not checked.** A blank optional field is simply empty;
   `required` is what makes it mandatory.
-- **A `multiple` string field is checked per item**, reported as `tags[1]`. A
+- **A list is checked per item**, reported by its index from 0 as `tags[1]`
+  (a list of strings, numbers, dates, links, …; see
+  [Make a field hold a list of values](#make-a-field-hold-a-list-of-values)). A
   `:group` field checks each row's sub-fields against their own `validation`
   (`dosages[2].unit`).
 - **A pattern must match the whole value.** `[0-9]+` accepts `123`, not
@@ -894,7 +1045,8 @@ How the rules behave:
 - **Stored values are grandfathered.** A value equal to what the record
   already holds is not re-checked, so tightening a rule never blocks an edit
   to some other field; it applies once that field's value changes. Adding a
-  tag to a list that holds one now-too-long tag still saves. Existing data is
+  tag to a list that holds one now-too-long tag still saves: on a list only
+  the items it did not already hold are checked. Existing data is
   not rewritten or reported.
 - **Restore, promote and copy skip the value rules.** A version restore, a
   dynamic type's promotion and a content copy carry values that were valid
@@ -1020,7 +1172,8 @@ CMS.create_field_definition!(%{
   `format_date`). A condition
   holds unless it is blank, `false`, `0`, the text `"false"`, or an empty list
   or map; a list or map value (a gallery, a reference) is empty only when it
-  holds nothing. `sum`, `min` and `max` skip non-numbers, but `product` is
+  holds nothing. `sum`, `min` and `max` skip non-numbers (a list of numbers
+  included: formulas do not read a list's items), but `product` is
   blank unless every factor is a number, and a blank is neither more nor less
   than anything. There is no `eval`: the allowlist *is* the sandbox, and an
   unknown function or wrong arity fails when the **field is defined**, not
@@ -1185,9 +1338,10 @@ If saving a definition fails, the message appears under **Conditions**:
 | `can't depend on X, a private field` | A private value may not steer what a viewer sees. |
 | `can't depend on X: a … field has no simple value to test` | Only text, number, date, yes/no and choice fields can be read. |
 | `can't compare X with greater/less than: it is not a number or a date` | `gt` / `lt` on another type. |
+| `can't compare X with greater/less than: it holds a list` | `gt` / `lt` on a list field (`multiple`). |
 | `is not available for a link field` / `… for a computed field` / `… for a group field` | These carry no conditions. |
 | `is used in the conditions of …; remove those conditions first` | Deleting a field other rules read. |
-| `… reads this field in its condition: …` | Changing the type of, or making private, a field another rule reads. |
+| `… reads this field in its condition: …` | Changing the type of, making private, or making a list of a field another rule reads in a way the change would break. |
 
 A rule nested beyond one level (set through the code interface) is shown in
 the admin UI with a note and a **Remove condition** button; it is left as it is

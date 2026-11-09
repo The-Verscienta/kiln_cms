@@ -33,6 +33,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.Changes.ApplyCustomFields
   alias KilnCMS.CMS.Changes.RestoreVersion
   alias KilnCMS.CMS.ContentLinks
   alias KilnCMS.CMS.ContentTree
@@ -43,6 +44,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS.Mentions
   alias KilnCMS.CMS.PreviewToken
   alias KilnCMS.CMS.ReverseFields
+  alias KilnCMS.CMS.ScalarLists
   alias KilnCMS.CMS.Severity
   alias KilnCMS.CMS.VersionDiff
   alias KilnCMS.CMS.VersionSnapshot
@@ -92,6 +94,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Bound the media picker window loaded on mount (newest first) so a large
   # library can't grow each open editor's heap without limit.
   @max_media 500
+
+  # The list fields whose items `list_item_add/remove/reorder` edit: a
+  # multiple select's terms and every scalar list (#2289).
+  @scalar_list_types ScalarLists.types()
 
   # Bound the tag picker the same way (#1149). The filter is a server round-trip
   # (the client-side TagFilter only stops form propagation and pushes the
@@ -4339,10 +4345,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
       else: socket
   end
 
-  # The same gate for any custom field whose definition passes `pred`.
+  # The same gate for any custom field whose definition passes `pred`. A
+  # field the editor's write grant leaves out (`read_only_fields`, #2281)
+  # renders disabled, and a forged event on it changes nothing either.
   defp custom_field_editable?(socket, name, pred) do
     socket.assigns.may_write? and
       Enum.any?(socket.assigns.field_definitions, &(&1.name == name and pred.(&1))) and
+      name not in Map.get(socket.assigns, :read_only_fields, []) and
       not (socket.assigns[:localization] &&
              KilnCMSWeb.ContentEditor.Localization.locked?(
                socket.assigns.localization,
@@ -4399,7 +4408,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Rewrite a list field's items through `fun` — given the items as posted
   # (or stored) less the leading blank sentinel, and the definition — and
-  # re-validate. A tag picker posts no other blank; a list of phrases keeps an
+  # re-validate. A tag picker posts no other blank; a scalar list keeps an
   # item emptied in place, so its indexes match the rows on screen. Only a
   # field this view may change (`custom_field_editable?/3`), as for a gallery.
   # The leading `""` keeps an emptied field present in the params.
@@ -4408,19 +4417,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
       custom_field_editable?(
         socket,
         name,
-        &match?(%{field_type: type, multiple: true} when type in [:select, :string], &1)
+        &match?(%{field_type: type, multiple: true} when type in @scalar_list_types, &1)
       )
 
     if editable? do
       definition = Enum.find(socket.assigns.field_definitions, &(&1.name == name))
 
-      # As posted, not cleaned: the cleaned value has dropped a list of
-      # phrases' emptied item, so its indexes would not be the rows on screen.
+      # As posted, not cleaned: the cleaned value has dropped a scalar list's
+      # emptied item, so its indexes would not be the rows on screen. A
+      # stored item that is no scalar (a snapshot left by a retype) has no row
+      # on screen either (`InspectorComponents`' `list_items/1`).
       terms =
         socket.assigns.form
         |> GroupRows.posted(name)
         |> List.wrap()
-        |> Enum.map(&to_string/1)
+        |> Enum.flat_map(fn
+          item when is_binary(item) or is_number(item) -> [to_string(item)]
+          _not_scalar -> []
+        end)
         |> drop_sentinel()
 
       put_custom_field_param(socket, name, ["" | fun.(terms, definition)])
@@ -4434,11 +4448,36 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # A blank item, a repeat, or one past `max_items` adds nothing; a term
   # outside a fixed vocabulary is added, and the field's validation names it.
+  # A repeat is judged as the list stores it (`same_item?/3`), and only where
+  # the list drops repeats: numbers keep them.
   defp add_item(items, item, definition) do
     cond do
-      item == "" or item in items -> items
-      is_integer(definition.max_items) and length(items) >= definition.max_items -> items
-      true -> items ++ [item]
+      item == "" ->
+        items
+
+      ScalarLists.distinct?(definition.field_type) and
+          Enum.any?(items, &same_item?(definition, &1, item)) ->
+        items
+
+      is_integer(definition.max_items) and length(items) >= definition.max_items ->
+        items
+
+      true ->
+        items ++ [item]
+    end
+  end
+
+  # Whether two items are the same once each is coerced as the field stores
+  # it — a date-time picked as `T10:00` is the stored `T10:00:00`, `#FFF` is
+  # `#ffffff`. An item that does not coerce is compared as typed; saving
+  # names it.
+  defp same_item?(definition, a, b),
+    do: a == b or stored_item(definition, a) == stored_item(definition, b)
+
+  defp stored_item(definition, item) do
+    case ApplyCustomFields.coerce_item(definition, item) do
+      {:ok, value} -> {:ok, value}
+      _error -> {:raw, item}
     end
   end
 

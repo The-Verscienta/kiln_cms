@@ -162,7 +162,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
         do: [],
         else: [{:rename, previous.name, definition.name}]
 
-    # A list field is a media or reference field with `multiple`; retyping
+    # A list field is any `ClearMultiple.list_types/0` field with `multiple`; retyping
     # one to another type narrows it too (ClearMultiple drops the flag), so it
     # keeps its first item like any other narrowing rather than leaving lists
     # under a key that cannot hold one.
@@ -174,12 +174,13 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
         was_list? == list? ->
           []
 
-        # Retyping a field *into* a multiple select or list of phrases (a `:text` holding JSON
-        # strings, say) is not a flip of the same values: wrapping each string
-        # in a list would store `["[\"a\",\"b\"]"]`. The values stay as they
-        # are — the next write of each reports them — and
+        # Retyping a field *into* a scalar list (a `:text` holding JSON
+        # strings made a multiple select, a `:string` made a list of dates) is
+        # not a flip of the same values: wrapping each string in a list would
+        # store `["[\"a\",\"b\"]"]`, or a phrase as a date. The values stay as
+        # they are — the next write of each reports them — and
         # `mix kiln.fields.convert` is the tool that moves them.
-        list? and definition.field_type in [:select, :string] and
+        list? and definition.field_type in KilnCMS.CMS.ScalarLists.types() and
             previous.field_type != definition.field_type ->
           []
 
@@ -286,8 +287,8 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     |> query([from, to | params], "moved #{inspect(from)} to #{inspect(to)} on")
   end
 
-  # Single → list wraps each stored snapshot (or select term) in a one-item
-  # list — lossless.
+  # Single → list wraps each stored snapshot (or select term, phrase, number,
+  # date, …) in a one-item list — lossless.
   # List → single keeps each list's first snapshot and clears an empty one;
   # the rest of a list has nowhere to go, which the fields admin says before
   # the admin saves. Only values already in the other shape are touched.
@@ -297,7 +298,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     UPDATE #{table}
        SET custom_fields = jsonb_set(custom_fields, ARRAY[$1::text],
                                      jsonb_build_array(custom_fields -> $1::text))
-     WHERE jsonb_typeof(custom_fields -> $1::text) IN ('object', 'string')#{filter.(1)}
+     WHERE jsonb_typeof(custom_fields -> $1::text) IN ('object', 'string', 'number')#{filter.(1)}
     """
     |> query([name | params], "made #{inspect(name)} a list on")
   end

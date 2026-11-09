@@ -246,12 +246,18 @@ defmodule KilnCMS.CMS.CustomFieldContainmentTest do
 
       seeded = seed!(name)
 
-      assert filter_ids(name, "red", seeded, admin) == [seeded.list_red]
-      assert filter_ids(name, %{"in" => ["red", "blue"]}, seeded, admin) == [seeded.list_red]
+      # A bare "red" stored before the field was a list reads as a one-item
+      # list (#2289), so it matches too; no other shape does.
+      red = Enum.sort([seeded.list_red, seeded.string_red])
+
+      assert filter_ids(name, "red", seeded, admin) == red
+      assert filter_ids(name, %{"in" => ["red", "blue"]}, seeded, admin) == red
 
       not_red = filter_ids(name, %{"not_eq" => "red"}, seeded, admin)
       refute seeded.list_red in not_red
+      refute seeded.string_red in not_red
       refute seeded.absent in not_red
+      refute seeded.json_null in not_red
     end
 
     test "a single media field matches the snapshot id", %{admin: admin} do

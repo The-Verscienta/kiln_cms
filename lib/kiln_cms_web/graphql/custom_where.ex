@@ -19,6 +19,10 @@ defmodule KilnCMSWeb.Graphql.CustomWhere do
   A condition on one custom field. Give `name` and exactly one of `string`,
   `int`, `float`, `boolean`, `date` or `dateTime`, which must be the kind of
   the field (`customString`, `customInt`, ...). Conditions in a list are ANDed.
+  A list of values (a `multiple` field of numbers, dates, text, ...) takes the
+  kind of its items with `eq` (contains), `notEq` (does not contain), `in`
+  (contains any) and `isNull`; `customFilter` also takes `has`, `has_all`,
+  `has_none` and `count` on it.
   """
   input_object :custom_field_condition do
     field :name, non_null(:string)

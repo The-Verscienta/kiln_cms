@@ -1268,6 +1268,18 @@
                 "null"
               ]
             },
+            "contacts": {
+              "description": "The items, in the order the editor arranged them.",
+              "items": {
+                "format": "email",
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ],
+              "uniqueItems": true
+            },
             "dosages": {
               "description": "Rows of this group, in the order the editor arranged them.",
               "items": {
@@ -1303,6 +1315,19 @@
                 "form",
                 "unit"
               ]
+            },
+            "event_dates": {
+              "description": "The items, in the order the editor arranged them.",
+              "items": {
+                "format": "date",
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ],
+              "uniqueItems": true,
+              "x-kiln-max-items": 10
             },
             "extra": {
               "type": [
@@ -1482,6 +1507,17 @@
               "x-kiln-target-types": [
                 "post"
               ]
+            },
+            "scores": {
+              "description": "The items, in the order the editor arranged them.",
+              "items": {
+                "type": "integer"
+              },
+              "type": [
+                "array",
+                "null"
+              ],
+              "x-kiln-min-items": 1
             },
             "seo": {
               "additionalProperties": false,

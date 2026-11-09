@@ -285,6 +285,9 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
   On a media **gallery** or a **list of references** (`multiple: true`) they
   test membership: `eq` matches a list holding that id, `not_eq` one that
   doesn't, `in` one holding any of the listed ids.
+- A **list of values** (`multiple` on a string, select, number, date, link,
+  … field) reads the same way for its items and also takes `has`,
+  `has_all`, `has_none` and `count`; see [Lists of values](#lists-of-values).
 - Records without the field are excluded by every comparison (they're SQL
   `NULL`), and a record whose stored value has another JSON type simply
   doesn't match — it can't error the query.
@@ -418,6 +421,79 @@ snake_case); `customWhere` has no groups.
 Custom sorts are always **nulls last**, ascending or descending. A native
 `sort=-x` is plain `desc`, which in Postgres puts nulls first.
 
+### Lists of values
+
+A custom field with `multiple: true` of a scalar type holds a JSON array: a
+list of strings or select terms, or a typed list of integers, floats, dates,
+date-times, times, URLs, emails, phone numbers, colours or slugs
+([extending-content.md](extending-content.md#make-a-field-hold-a-list-of-values)).
+Write it as an array; read it back as the array the field stored, tidied and
+in order:
+
+```bash
+curl -s -X PATCH http://localhost:4000/api/json/posts/$ID \
+  -H 'accept: application/vnd.api+json' \
+  -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -d '{"data": {"type": "post", "id": "'$ID'", "attributes": {
+        "custom_fields": {"scores": ["3", 5, 5], "event_dates": ["2026-03-08", "2026-03-01"]}}}}'
+```
+
+```json
+"custom_fields": {"scores": [3, 5, 5], "event_dates": ["2026-03-08", "2026-03-01"]}
+```
+
+On such a field `custom_filter` asks about the items:
+
+```
+GET /api/json/posts?custom_filter[scores]=5
+GET /api/json/posts?custom_filter[scores][has][]=3&custom_filter[scores][has][]=7
+GET /api/json/posts?custom_filter[event_dates][has_all][]=2026-03-01&custom_filter[event_dates][has_all][]=2026-03-08
+GET /api/json/posts?custom_filter[scores][count][gte]=2
+```
+
+| Operator | Matches a record whose list… | A record with no value |
+|---|---|---|
+| `eq` (or a bare value) | contains the value | no match |
+| `not_eq` | does not contain the value | no match |
+| `in` | contains any of the values | no match |
+| `has` | contains any of the values (one, or a list of at most 100) | no match |
+| `has_all` | contains every one of them | no match |
+| `has_none` | contains none of them | **matches** |
+| `count` | has that many items: a whole number (`eq`) or `eq` / `gt` / `gte` / `lt` / `lte` | counts as 0 |
+| `null` | has no value (`true`) or has one (`false`) | per the operand |
+
+- **`has_none` and `not_eq` differ on purpose.** `has_none` asks "is none of
+  these in the list", which an empty field answers yes, as a reference's
+  `has_none` does. `not_eq` compares against a value, and like every
+  comparison it leaves out a record without one.
+- **Operands are tidied as the items were.** On a typed list each operand is
+  checked and tidied as a stored item is, so `#FFF` finds `#ffffff`, `9:30`
+  finds `09:30`, `a@Example.com` finds `a@example.com`, `"10"` finds the
+  number `10` on an integer list, and `10` finds `10.0` on a float list. An
+  operand the field could never hold is a `400` (`invalid date value`).
+  (Single email, colour and time fields do not tidy their operands yet.)
+- **A value stored before the field was a list** (a field retyped, or
+  switched to a list while a reshape did not finish) is read as a one-item
+  list by every operator: `eq` matches it, `count` counts it as 1, and it
+  never makes the query fail.
+- **Not supported yet:** comparing items (`gt`, `gte`, `lt`, `lte`) and
+  matching text in them (`contains`, `starts_with`, `ilike`). They answer
+  `400`: `gt is not supported on custom field "scores" (a list): it supports
+  eq/not_eq/in/has/has_all/has_none/count/null`.
+- **Not sortable.** `custom_sort=scores` is a `400`: `custom field "scores"
+  (a list) is not sortable`.
+- **`has` / `has_all` / `has_none`** take one value or a non-empty list of at
+  most 100 (`has_all for "scores" needs at least one value`, `has for
+  "scores" takes at most 100 values`). `count` takes a whole number ≥ 0.
+- **Entries.** On `/api/json/entries` without `filter[type_name]`, a field
+  name that is a typed list on one dynamic type and a single value on another
+  is the same `400` as a type mismatch (`has a different type per content
+  type`); scope the query.
+- **A single field sent an array** keeps the array's first non-blank item,
+  so send one value. An object item there is refused (`must be a single
+  value`).
+
 ### Naming a custom field like a column
 
 In `filter[...]` and `sort=` on the
@@ -479,7 +555,7 @@ What differs between a custom field and a column, in one table:
 | Unknown name | `400` `invalid_argument`, `unknown custom field "x"` | native `400` |
 | Sort | nulls last in both directions; after built-in keys | plain `asc` / `desc` |
 | Sort on `media` / `reference` | not supported | n/a |
-| Relationship operators (`has`, `has_all`, `has_none`, `count`) | on `reference` fields and on `tags` / `related_<type>s` | not available |
+| Relationship operators (`has`, `has_all`, `has_none`, `count`) | on `reference` fields and on `tags` / `related_<type>s`; the same names on [lists of values](#lists-of-values) | not available |
 | Index | none (unindexed jsonb) | per column |
 
 ### Entries and search facets
@@ -512,15 +588,15 @@ matches the query comes first no longer holds. `/autocomplete` does not take
 
 Since #2291 a GIN index (`jsonb_path_ops`) on each content table's
 `custom_fields` serves the filters that ask "does this record hold exactly
-this value": `eq` (a bare value), `in`, membership in a multiple select,
-string, media or reference field (`eq`, `in`), and a single media or
-reference field matched by id. One index covers every field name of every
+this value": `eq` (a bare value), `in`, membership in a media or reference
+field (`eq`, `in`) or in a [list of values](#lists-of-values) (`eq`, `in`,
+`has`, `has_all`), and a single media or reference field matched by id. One index covers every field name of every
 dynamic type. The rows returned are the same as before; only the speed
 changes, and the planner still prefers a scan when a filter matches a large
 share of the table.
 
 These are **not** accelerated: `not_eq`, `gt`, `gte`, `lt`, `lte`, `ilike`,
-`null`, and `custom_sort`. `not_eq` stays on the older `->` form on purpose,
+`null`, `has_none` and `count` on a list of values, and `custom_sort`. `not_eq` stays on the older `->` form on purpose,
 because a record without the field must stay excluded from it. If a field
 needs fast range filters or sorting, make it a compiled attribute (the D4
 answer in [dynamic-content-types-plan.md](dynamic-content-types-plan.md)).
