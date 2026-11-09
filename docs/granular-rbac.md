@@ -408,6 +408,9 @@ reads `Scoping.effective_tier/2`. Semantics:
 - members get their membership tier; affiliated users have **no tier** on
   orgs they hold no membership for (fail-closed, like the scope axes);
 - accounts with no memberships at all keep `User.role` (pre-#336 data).
+- a membership that is not `:active` (a registration [awaiting approval](account-administration.md#approving-registrations),
+  or rejected, #2251) grants **no tier** on its org, and still makes the
+  account affiliated.
 
 So `/editor/team`'s tier select now *governs*: an org can promote a global
 viewer to site editor, or demote a global editor to site viewer, without

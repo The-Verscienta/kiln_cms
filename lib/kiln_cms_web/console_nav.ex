@@ -697,6 +697,26 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("What happens when a new password is in a known breach."),
             keywords: ["password", "breach", "pwned", "hibp", "leaked", "compromised", "security"]
           },
+          # Who has signed up and is waiting for an admin, and the switch that
+          # makes them wait (#2251). Beside Password policy: both decide what a
+          # sign-up gets.
+          %{
+            key: :registrations,
+            label: gettext("Registrations"),
+            path: ~p"/editor/registrations",
+            icon: "hero-user-plus",
+            description: gettext("Approve or reject people who sign up on this site."),
+            keywords: [
+              "registration",
+              "sign up",
+              "signup",
+              "approval",
+              "approve",
+              "pending",
+              "moderation",
+              "new users"
+            ]
+          },
           # The networks the console and sign-in may be reached from (#2248).
           %{
             key: :admin_allowlist,

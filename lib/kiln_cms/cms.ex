@@ -871,6 +871,14 @@ defmodule KilnCMS.CMS do
       define :reset_site_password_policy, action: :destroy
     end
 
+    # Per-org registration approval (#2251): whether a self-registration waits
+    # for a site admin. Resolved through `KilnCMS.Accounts.RegistrationPolicy`.
+    resource KilnCMS.CMS.SiteRegistration do
+      define :list_site_registration, action: :read
+      define :save_site_registration, action: :save
+      define :reset_site_registration, action: :destroy
+    end
+
     # Per-org idle timeout and "sign out everyone" (#2246). Enforced through
     # `KilnCMS.Accounts.IdleTimeout`; `sign_out_all_sessions` is admin-only.
     resource KilnCMS.CMS.SiteSessionPolicy do

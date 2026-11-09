@@ -115,6 +115,14 @@ hosts. A platform admin (`User.role == :admin`) is the exception and keeps
 admin everywhere. Details: [granular-rbac.md](granular-rbac.md), "Per-org
 capability tiers".
 
+A membership has a `status`. Every membership is `:active` unless it came from
+a password sign-up on a site that [requires approval](account-administration.md#approving-registrations):
+that row is `:pending` until a site admin approves it (it becomes `:active`) or
+rejects it (`:rejected`, kept). A row that is not active grants nothing on its
+site (no tier, no audiences, no scope) but still makes the account
+affiliated, so it has no access on any other site either. The `for_org` read
+and every roster list active rows only.
+
 API keys belong to a user, not an org. A headless request is scoped to the org
 its host resolves to, and the key's user is authorized there like any other
 actor.

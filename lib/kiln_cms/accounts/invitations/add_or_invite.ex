@@ -6,6 +6,8 @@ defmodule KilnCMS.Accounts.Invitations.AddOrInvite do
   | The address | Result |
   |---|---|
   | belongs to someone already on this site | refused, `:already_member` |
+  | has a registration here awaiting approval | refused, `:pending_registration` |
+  | has a registration here that was rejected | refused, `:rejected_registration` |
   | has a **confirmed** account | a membership now, and a notice mail (`:added`) |
   | has a live invitation here | refused, `:already_invited` |
   | has an expired invitation here | sent again with a new token (`:reinvited`) |
@@ -72,6 +74,10 @@ defmodule KilnCMS.Accounts.Invitations.AddOrInvite do
            Keyword.put(opts, :not_found_error?, false)
          ) do
       {:ok, nil} -> :ok
+      # A registration awaiting a decision is decided under Registrations
+      # (#2251), not overwritten by an add; a rejected one is not reopened by it.
+      {:ok, %{status: :pending}} -> refuse(:pending_registration)
+      {:ok, %{status: :rejected}} -> refuse(:rejected_registration)
       {:ok, _membership} -> refuse(:already_member)
       {:error, error} -> {:error, error}
     end

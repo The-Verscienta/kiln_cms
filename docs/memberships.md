@@ -336,7 +336,8 @@ The audience a reader holds is resolved **per organization**, from their
 
 | Reader | Result |
 |---|---|
-| member of this org | that membership's audiences |
+| member of this org (an active membership) | that membership's audiences |
+| registration on this org awaiting approval, or rejected (#2251) | `[]`, whatever the row holds |
 | member elsewhere, none here | `[]` — **fail-closed** |
 | no memberships at all | `[]` |
 | anonymous | `[]`, with no database lookup |
@@ -345,6 +346,11 @@ Fail-closed matters because the organization is resolved from a
 **client-controlled host**. Falling back to the global column for a foreign org
 would let a member of one site read another's gated content by switching hosts —
 the same reasoning the editorial scope axes already use.
+
+On a site that [requires registration approval](account-administration.md#approving-registrations),
+checkout is refused for an account not let in there yet, and the recompute
+below creates no viewer membership for one: paying is not a way past the
+queue ([Paying is not a way in](account-administration.md#paying-is-not-a-way-in)).
 
 ### The removed `User.audiences` fallback
 
