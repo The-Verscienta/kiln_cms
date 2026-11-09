@@ -1490,6 +1490,36 @@ The how-to is
   Residual: there is no bulk reject, and waiting rows never expire (a
   follow-up), so a wave stays in the unconfirmed list until rejected one by
   one.
+- **Notifying admins can't be turned into a mail flood.** Admins are told
+  only when an applicant confirms an address (a link mailed to it, a password
+  reset, or accepting an invitation), not on sign-up, so an unconfirmed wave
+  sends no notice at all. The `:registration_pending` notice collapses: one
+  unread row per admin and site, and the email goes only when a new row is
+  written (`Notifications.record_in_app_result/1`). A confirmed wave is one
+  notice and one email per admin until that admin opens the queue.
+- **No applicant data in the bell or the admin email.** The notice's title is
+  the site's name, with no excerpt and no actor; the email names the site and
+  links to the queue. An applicant's address and name stay in the queue,
+  behind its admin-only read, and do not end up in an inbox or a mail
+  provider's logs. Recipients are standing admins only
+  (`Notifications.Registrations.recipient?/2`): a temporary platform admin,
+  which may not decide, and an erased account are left out.
+- **Decision emails can't be aimed at strangers.** Rejecting is allowed
+  before confirmation, so the rejection is mailed only to a confirmed address
+  (`Changes.MailRegistrationDecision`): registering someone else's address
+  and getting it rejected does not make the site mail them. Approval already
+  requires confirmation. An erased account is mailed nothing, and approving
+  one is refused (`:erased`).
+- **Decision emails carry nothing an admin typed.** Approval is one sentence
+  and a sign-in link on the site's host; rejection is one neutral sentence
+  with no reason, no link and no name of who decided. There is no free-text
+  field, so the feature can't be used to send arbitrary content from the
+  site's address. Both, and the admin email, are sent for the site
+  (`org_id:`), so they leave through the site's own SMTP relay when it has one
+  (#1322), and the site's suppression list applies.
+- **Best effort, after commit.** Notices and mails run through
+  `KilnCMS.AfterCommit` once the confirmation or decision has committed; a
+  failure is logged and cannot roll it back or block it.
 - **Billing.** The entitlement recompute gives a paying reader a viewer
   membership on a site where it has none, which would let anyone pay past the
   queue. On a site that requires approval, `Billing.Membership` `:start` is
@@ -1524,11 +1554,18 @@ The how-to is
   tells a platform admin that an address has a waiting or rejected
   registration on the site; that is an admin of the site learning about its
   own applicants.
-- **Residuals.** (1) Admins are not notified and applicants are not emailed
-  (part two). (2) A rejected account is kept, not erased (part three). (3) An
-  invitation accepted over a waiting registration leaves it waiting (part
-  three). (4) A site admin whose admin tier is a temporary membership grant can
-  decide registrations; `StandingAdminOnly` constrains only platform grants.
+- **Residuals.** (1) A rejected account is kept, not erased (part three).
+  (2) An invitation accepted over a waiting registration leaves it waiting
+  (part three). (3) A site admin whose admin tier is a temporary membership
+  grant can decide registrations, and is told about them;
+  `StandingAdminOnly` constrains only platform grants. (4) A node on an older
+  release cannot load a `registration_pending` notification, so during a
+  rolling deploy or after a rollback an affected admin's bell there lists
+  nothing ([#2509](https://github.com/The-Verscienta/kiln_cms/issues/2509));
+  an availability gap, not an exposure. (5) A magic-link sign-in does not
+  confirm an account, so an applicant who only ever signs in that way is
+  never announced
+  ([#2516](https://github.com/The-Verscienta/kiln_cms/issues/2516)).
 
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;

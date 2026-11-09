@@ -33,8 +33,8 @@ your deployment.
 | Account email | `users` | Yes | Login identity; also the email recipient for workflow mail. |
 | Display name | `users.name` | Yes (optional) | Shown to other editors (presence) and as the JSON-LD author byline. Blank by default. |
 | RBAC role | `users.role` | No | `:admin` / `:editor` / `:viewer`. |
-| Notification preferences | `users.notify_on_*` | No | Per-user opt-out (issue #46). |
-| In-app notifications | `notifications` | Yes | One row per recipient (#1320): event, content title, a comment excerpt, and the acting user's display name (`actor_name`) plus `actor_id`. Readable only by the recipient — no admin bypass. Deleted with the recipient's account row; `actor_name`/`actor_id` nulled when the *actor* is erased. No retention purge yet. |
+| Notification preferences | `users.notify_on_*` | No | Per-user opt-out (issue #46): review requested, published, returned to draft, comments, and new registrations (`notify_on_registration`, #2251, offered to site admins). All are included in the self-export and reset to on by erasure. |
+| In-app notifications | `notifications` | Yes | One row per recipient (#1320): event, content title, a comment excerpt, and the acting user's display name (`actor_name`) plus `actor_id`. Readable only by the recipient — no admin bypass. Deleted with the recipient's account row; `actor_name`/`actor_id` nulled when the *actor* is erased. No retention purge yet. A "registrations waiting" row (#2251) is titled with the site's name and carries no applicant data: no address, name, excerpt or actor. |
 | Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry; for a session, browser and OS family, last use and the site it signed in on; for a revoked one, why. See [Auth tokens](#auth-token-retention-218). |
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
 | Security log | `security_events` | Yes | Admin-only audit log (#2241): the acting user's id and an **email snapshot** (known accounts only), the target, the **raw IP address** and **user agent** of the request, and a short allowlisted metadata map with no secrets. Kept 365 days by default (per-site setting, `0` keeps forever; then raw IPs are kept indefinitely). Scrubbed on erasure, purged on retention and by the staging scrub. See [Security log](security-events.md). |
@@ -97,7 +97,7 @@ authorization — anyone with the link can view that draft until it expires. The
 
 ### Transactional & workflow email
 
-Two kinds of email leave the system via the configured Swoosh adapter:
+Three kinds of email leave the system via the configured Swoosh adapter:
 
 - **Auth email** — confirmation, password reset, magic-link sign-in, and a
   site invitation or "you were added to a site" notice (#2135). An invitation
@@ -107,11 +107,26 @@ Two kinds of email leave the system via the configured Swoosh adapter:
   email).
 - **Workflow email** — review-requested / published / changes-requested
   notifications to the relevant admins or author.
+- **Registration email** (#2251), about a site's registration approval queue:
+  - to each of the site's admins, "Registrations are waiting for approval on
+    (site)", once an applicant has confirmed their address. It names the site
+    and links to the queue and to the setting that mutes it; it carries no
+    applicant's address or name. One per admin per unread notice, not one per
+    applicant.
+  - to the applicant, the decision: approved (with a sign-in link) or "wasn't
+    approved", one neutral sentence with no reason and no free text. A
+    rejection goes only to an address the applicant has confirmed, and
+    nothing goes to an erased account.
+
+  Both are sent for the site, so they go out through the site's own SMTP
+  relay when it has one switched on (#1322).
 
 The recipient address is, necessarily, the user's email. The **display name** in
 the body is the user's chosen `name`, never the email local-part (#214); with no
 name set it renders a neutral "An editor" / "A reviewer". Each user can mute
-workflow email per-event in `/editor/settings`.
+workflow email per-event in `/editor/settings`, and a site admin can mute the
+registration email there (**New registrations**); the in-app notice is still
+written.
 
 Configure the sender and adapter in `config/runtime.exs`
 (`config :kiln_cms, KilnCMS.Mailer, …` and `:email_from`).

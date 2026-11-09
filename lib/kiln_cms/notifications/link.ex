@@ -36,6 +36,13 @@ defmodule KilnCMS.Notifications.Link do
   the editor cannot open it. It links to the document's governance trail,
   which lists the failed delivery.
 
+  ## A registration notice links to the queue
+
+  `:registration_pending` (#2251) is about a site's registration queue, not a
+  document: its `content_id` is the site's id. It links to
+  `/editor/registrations`, and its URL opens on that site's own console host
+  when the subject carries the site (`:org`), as the email's does.
+
   ## Named `editor_path` / `editor_url`, not `path` / `url`
 
   `Phoenix.VerifiedRoutes` imports `path/2,3` and `url/2,3` as macros, and an
@@ -73,6 +80,8 @@ defmodule KilnCMS.Notifications.Link do
       "/editor/content/recipe/r1?comment=b2"
   """
   @spec editor_path(subject()) :: String.t()
+  def editor_path(%{event: :registration_pending}), do: ~p"/editor/registrations"
+
   def editor_path(%{event: :retraction_lost, content_type: content_type, content_id: content_id}),
     do: ~p"/editor/governance/#{to_string(content_type)}/#{content_id}"
 
@@ -91,6 +100,18 @@ defmodule KilnCMS.Notifications.Link do
 
   @doc "The absolute URL for the same link — what an email has to carry."
   @spec editor_url(subject()) :: String.t()
+  # On the site's own host when the subject carries the site; a bare row (no
+  # `:org`) can only say the endpoint's.
+  def editor_url(%{event: :registration_pending} = subject) do
+    case Map.get(subject, :org) do
+      %KilnCMS.Accounts.Organization{} = org ->
+        KilnCMSWeb.Plugs.ConsoleHost.org_url(editor_path(subject), org)
+
+      _no_site ->
+        KilnCMSWeb.Endpoint.url() <> editor_path(subject)
+    end
+  end
+
   def editor_url(%{event: :retraction_lost} = subject),
     do: KilnCMSWeb.Endpoint.url() <> editor_path(subject)
 

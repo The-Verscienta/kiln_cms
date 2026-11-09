@@ -33,9 +33,17 @@ defmodule KilnCMSWeb.RegistrationsLive do
   alias KilnCMS.Accounts.Errors.RegistrationRefused
   alias KilnCMS.Accounts.Registrations
   alias KilnCMS.CMS
+  alias KilnCMS.Notifications
 
   @impl true
   def mount(_params, _session, socket) do
+    # Opening the queue reads its notice (#2251), and BEFORE the lists load
+    # (`handle_params/3`), not after: an applicant who confirms in between
+    # then leaves a fresh unread notice behind. Marked after, the notice for
+    # someone this page never listed could be swept as read with them.
+    # Connected only, so the static render does not mark it twice.
+    if connected?(socket), do: mark_notice_read(socket)
+
     {:ok,
      socket
      |> assign(:page_title, gettext("Registrations"))
@@ -103,6 +111,15 @@ defmodule KilnCMSWeb.RegistrationsLive do
       when event in ~w(approve reject save_settings load_more),
       do: {:noreply, socket}
 
+  # As the signed-in user, on their own unread notice for this site only —
+  # `Notifications.mark_read_about/4` reads and marks as them. A failure costs
+  # an unread badge, so it is not the page's business.
+  defp mark_notice_read(%{assigns: %{current_user: user, current_org: %{id: org_id}}}) do
+    Notifications.mark_read_about(user, org_id, Notifications.Registrations.event(), org_id)
+  end
+
+  defp mark_notice_read(_socket), do: :ok
+
   # Re-authorized by the action itself: approving and rejecting are
   # `OrgMembership` actions whose policy admits only an admin of the row's org,
   # and the row is re-read and locked inside them, so a stale page cannot
@@ -165,7 +182,10 @@ defmodule KilnCMSWeb.RegistrationsLive do
   end
 
   defp decided_message(:approve, email),
-    do: gettext("Approved %{email}. They can now read this site as a viewer.", email: email)
+    do:
+      gettext("Approved %{email}. They can now read this site as a viewer. We'll email them.",
+        email: email
+      )
 
   defp decided_message(:reject, email), do: gettext("Rejected %{email}.", email: email)
 
@@ -176,6 +196,9 @@ defmodule KilnCMSWeb.RegistrationsLive do
 
       :unconfirmed ->
         gettext("That person hasn't confirmed their email address yet, so it can't be approved.")
+
+      :erased ->
+        gettext("That account was erased, so it can't be approved.")
 
       _other ->
         ash_error_message(error,
@@ -296,6 +319,9 @@ defmodule KilnCMSWeb.RegistrationsLive do
       <div class="min-w-0">
         <p class="truncate font-medium">{@entry.email}</p>
         <p :if={@entry.name} class="truncate text-sm text-base-content/70">{@entry.name}</p>
+        <p :if={@entry.erased?} id={"registration-erased-#{@entry.membership.id}"} class="mt-1">
+          <.badge variant="warning">{gettext("Account erased")}</.badge>
+        </p>
         <p class="mt-0.5 text-xs text-base-content/70">
           {gettext("Registered %{at}", at: format_time(@entry.registered_at))}
           <span :if={@entry.membership.decided_at}>
@@ -305,7 +331,7 @@ defmodule KilnCMSWeb.RegistrationsLive do
       </div>
       <div class="flex items-center gap-2">
         <.button
-          :if={@approvable?}
+          :if={@approvable? and not @entry.erased?}
           id={"approve-#{@entry.membership.id}"}
           type="button"
           size="sm"
@@ -323,12 +349,7 @@ defmodule KilnCMSWeb.RegistrationsLive do
           size="sm"
           phx-click="reject"
           phx-value-id={@entry.membership.id}
-          data-confirm={
-            gettext(
-              "Reject %{email}? The account is kept but gets no access to this site, and they can't register here again with this address.",
-              email: @entry.email
-            )
-          }
+          data-confirm={reject_confirm(@entry)}
         >
           <.icon name="hero-x-mark" class="size-4" /> {gettext("Reject")}
         </.button>
@@ -336,6 +357,22 @@ defmodule KilnCMSWeb.RegistrationsLive do
     </li>
     """
   end
+
+  # A confirmed applicant is mailed the rejection (#2251); an unconfirmed one is
+  # not, since the address was never proven theirs, and nor is an erased one.
+  defp reject_confirm(%{confirmed?: true, erased?: false, email: email}),
+    do:
+      gettext(
+        "Reject %{email}? The account is kept but gets no access to this site, and they can't register here again with this address. They'll be emailed that it wasn't approved.",
+        email: email
+      )
+
+  defp reject_confirm(%{email: email}),
+    do:
+      gettext(
+        "Reject %{email}? The account is kept but gets no access to this site, and they can't register here again with this address.",
+        email: email
+      )
 
   @impl true
   def render(assigns) do

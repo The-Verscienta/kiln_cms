@@ -372,7 +372,7 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
       }
     end
 
-    test "a site admin sees this site's applicants, and only their address, name and confirmation",
+    test "a site admin sees this site's applicants, and only their address, name, confirmation and erasure",
          %{site: site, applicant: applicant, row: row, unconfirmed_row: unconfirmed_row} do
       site_admin = user(:viewer)
       member!(site_admin, site.id, :admin)
@@ -385,10 +385,12 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
       entry = Enum.find(entries, &(&1.membership.id == row.id))
       assert entry.email == to_string(applicant.email)
       assert entry.confirmed?
+      refute entry.erased?
 
       assert Map.keys(entry) |> Enum.sort() == [
                :confirmed?,
                :email,
+               :erased?,
                :membership,
                :name,
                :registered_at
