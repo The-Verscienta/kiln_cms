@@ -63,6 +63,14 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
     end
   end
 
+  defp sent_mail(acc \\ []) do
+    receive do
+      {:email, mail} -> sent_mail([mail | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
   defp live_in(lineage_id),
     do: Accounts.list_live_api_keys_in_lineage!(lineage_id, authorize?: false)
 
@@ -147,11 +155,16 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
 
       drain_oban()
 
-      assert_email_sent(fn mail ->
-        assert mail.subject =~ "was used after it was rotated"
-        assert {_, to} = hd(mail.to)
-        to == to_string(ctx.admin.email)
-      end)
+      # Every platform admin is mailed (`mint/1`'s actor is one too), in no set
+      # order, so look through all of them rather than only the first.
+      mails = sent_mail()
+      assert mails != []
+      assert Enum.all?(mails, &(&1.subject =~ "was used after it was rotated"))
+
+      assert to_string(ctx.admin.email) in Enum.flat_map(
+               mails,
+               &Enum.map(&1.to, fn {_, to} -> to end)
+             )
     end
 
     test "a dead lineage alarms nobody: repeats send no more mail", ctx do
@@ -196,7 +209,9 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
         |> AshAuthentication.Base.bindecode62()
         |> elem(1)
 
-      token = :crypto.strong_rand_bytes(32) <> id
+      # `encode62` raises on a leading zero byte, so the first byte is never 0
+      # (otherwise this fails about 1 run in 256).
+      token = <<Enum.random(1..255)>> <> :crypto.strong_rand_bytes(31) <> id
 
       forged =
         "kiln_#{AshAuthentication.Base.encode62(token)}_" <>
