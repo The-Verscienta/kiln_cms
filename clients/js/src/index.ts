@@ -50,6 +50,7 @@ export type {
   Filter,
   FilterScalar,
   FilterSpec,
+  FormChallenge,
   FormField,
   FormSchema,
   FormSubmitResult,

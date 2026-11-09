@@ -27,7 +27,7 @@ import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
 import {FocusTrap} from "./focus_trap"
 import {PasskeyEnroll, PasskeySignIn} from "./passkeys"
-import {Challenge} from "./challenge"
+import {Challenge, mountAllWhenReady as mountFormChallenges} from "./challenge"
 import {PushToggle} from "./push"
 import {initAdvisoryJump} from "./advisory_jump"
 import {initRevealSection} from "./reveal_section"
@@ -1231,6 +1231,11 @@ document.addEventListener(
 // Clicking a finding in the editor's advisory panels scrolls to and
 // highlights what it is about — see assets/js/advisory_jump.js.
 initAdvisoryJump()
+
+// Human verification on public forms (#2249): the site's pages are dead
+// renders, so their widgets are mounted here rather than by a hook — see
+// `mountAll` in assets/js/challenge.js. The embed loads its own copy.
+mountFormChallenges()
 
 // A button carrying `data-kiln-reveal="<id>"` scrolls to and focuses that
 // section once its click has been answered — see assets/js/reveal_section.js.

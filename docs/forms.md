@@ -9,12 +9,16 @@ and review submissions in the same builder.
 
 - `Form` — name, public `slug`, description, `active` flag, success message,
   optional `notify_email`, optional submitter autoresponder (subject/body +
-  on/off toggle — see Side effects below).
+  on/off toggle — see Side effects below), and `challenge` (`:off`, the
+  default, or `:always`), whether visitors must complete a human-verification
+  check (#2249, see [Abuse protection](#abuse-protection)).
 - `FormField` — machine name (the key in each submission), label, type
   (`string`, `text`, `email`, `integer`, `boolean`, `date`, `select`),
   required flag, select options, help text, order.
 - `FormSubmission` — the coerced `data` map, a moderation `status`
-  (`new`/`reviewed`/`spam`) and `spam_score`, plus a timestamp.
+  (`new`/`reviewed`/`spam`) and `spam_score`, what the human-verification
+  check decided (`challenge`: `passed`, `missing`, `wrong_host`,
+  `unavailable`, or empty when the form asked for none), plus a timestamp.
   **Privacy-first: no IP, no user agent** (rate limiting uses the IP
   transiently). Admin-only to read, moderate, or delete; deleting a form
   removes its submissions.
@@ -36,11 +40,16 @@ The `:form` content block references a form by slug:
 - **On-site** pages render the live form server-side (inputs per field, a
   visually-hidden honeypot) POSTing to `/forms/<slug>`; a successful
   submission shows the form's success message. An inactive form renders
-  nothing (form and field edits clear the delivery cache immediately).
+  nothing (a form or field edit drops the site's cached pages on every node
+  at once, and a page that renders a form carries the form in its `ETag`, so
+  a revalidating client sees the edit too).
 - **Fired `:web` artifacts** carry `<div data-kiln-form="<slug>"></div>` —
   headless frontends fetch the schema from `GET /api/forms/<slug>` (fields,
-  labels, types, options, honeypot field name, submit URL) and POST JSON to
-  `/api/forms/<slug>` (`{ok: true}` or `{ok: false, errors: {...}}`).
+  labels, types, options, honeypot field name, submit URL, and the
+  human-verification widget's details in `challenge` when the form asks for
+  a check) and POST JSON to `/api/forms/<slug>` (`{ok: true}` or
+  `{ok: false, errors: {...}}`). The placeholder is the same whatever the
+  form's human-verification setting.
 - **The form's own page**, `GET /forms/<slug>` (#2138), renders an active
   form with no content around it: its name, description and fields inside the
   site's layout. See [below](#share-a-form-at-its-own-address).
@@ -354,6 +363,15 @@ fetched it in the preceding minute can keep replaying the older, more permissive
 policy after you narrow the list. There is no purge to issue; wait a minute
 before treating a revocation as in force.
 
+**An embedded form that asks for a human-verification check** (#2249) draws
+the widget inside the iframe and loads one small script of its own,
+`/assets/js/challenge_static.js` (the embed never loads `app.js`). Its
+policy then gains `https://challenges.cloudflare.com` in `script-src` and an
+explicit `frame-src 'self' https://challenges.cloudflare.com`, on the form,
+its thank-you page and a refused re-render; every other form's embed policy
+is unchanged. The iframe is served from the site's own host, so the token is
+solved there and the parent page's host needs no configuration.
+
 ## Abuse protection
 
 No CSRF on the submission endpoints (they're anonymous, and fired artifacts
@@ -362,7 +380,16 @@ couldn't carry a token). Instead:
 - **honeypot** — a hidden `website` input; a filled honeypot gets a *fake
   success* and stores nothing;
 - **rate limit** — the tight per-IP `form` bucket (20/min);
-- server-side validation of every declared field (unknown keys dropped).
+- server-side validation of every declared field (unknown keys dropped);
+- **human verification** (#2249), per form and off by default: with the
+  form's **General** tab's "Ask visitors to complete a human-verification
+  check" ticked, the form draws a Cloudflare Turnstile widget and every
+  submission must carry its token. Only after the fields validate and the
+  honeypot is empty is the token checked. A refused token gets the form back
+  (`422`); a submission with no token, one solved on a host the deployment
+  does not serve, or one Cloudflare could not check is **held**: stored as
+  `:spam` and never acted on. Needs the operator's provider; see
+  [Public forms](human-verification.md#public-forms).
 
 A browser submission that fails validation gets a `422` carrying the same form
 again (#1683), on-site inside the public layout and embedded inside the iframe
@@ -393,6 +420,15 @@ reaches the autoresponder or the `form.submitted` webhook (see Side effects
 below); everything else about it — CSV export inclusion, retention — is an
 admin decision, not automatic.
 
+A submission **held** by human verification (#2249) has the threshold added
+to its score, so it is always `:spam`. That is done by the scorer itself,
+not by a registry check, so a plugin cannot unregister or reweigh it; checks
+do see the outcome as the `:challenge` fact
+(`Kiln.Forms.SpamCheck.Context.fact/3`: `:passed`, `:missing`,
+`:wrong_host`, `:unavailable`, or `nil` when the form asked for none). The
+Entries tab marks each entry of a form that asks with a **Verified** or
+**Held** badge; the CSV export does not carry it.
+
 The builder's **Entries** tab filters by status, marks a submission
 spam/reviewed individually or in bulk, and exports a CSV
 (`/editor/forms/:id/entries/export.csv`, admin-gated, `?status=` filterable).
@@ -406,7 +442,8 @@ module, declared from the plugin's `spam_checks/0` callback — see
 
 ## Side effects
 
-Each accepted submission that wasn't scored `:spam` optionally mails
+Each accepted submission that wasn't scored `:spam` (held submissions
+included, above) optionally mails
 `notify_email` (Oban `:mail` queue, HTML-escaped), optionally autoresponds to
 the submitter (below), and fires the `form.submitted` webhook event
 (selectable per endpoint at `/editor/webhooks`) with `{form: slug, data: {...}}`.

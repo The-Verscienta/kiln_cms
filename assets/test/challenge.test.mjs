@@ -3,7 +3,7 @@
 import {test} from "node:test"
 import assert from "node:assert/strict"
 
-import {mountChallenge, loadScript} from "../js/challenge.js"
+import {mountChallenge, loadScript, mountAll, holdSubmitForToken} from "../js/challenge.js"
 
 // Element stand-ins: just what the hook touches.
 function fakeWidget(data) {
@@ -170,4 +170,204 @@ test("a hidden widget waits until it is visible", async () => {
 test("loadScript resolves at once when the global is already there", async () => {
   const api = fakeApi()
   assert.equal(await loadScript("https://x.test/a.js", "g7", {g7: api}, fakeDocument()), api)
+})
+
+// ── public forms (#2249) ────────────────────────────────────────────────────
+
+// A form element that records listeners and re-submits.
+function fakeForm() {
+  const listeners = []
+  const form = {
+    dataset: {},
+    submitted: [],
+    addEventListener: (type, fn) => listeners.push({type, fn}),
+    requestSubmit(submitter) {
+      form.submitted.push(submitter)
+      // A real requestSubmit fires the submit event again.
+      return fire(form)
+    },
+  }
+  form.listeners = listeners
+  return form
+}
+
+function fire(form, submitter) {
+  const event = {
+    submitter,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true
+    },
+  }
+  for (const {type, fn} of form.listeners) if (type === "submit") fn(event)
+  return event
+}
+
+function formWidget(form, data = {}) {
+  const widget = fakeWidget({waitingText: "Finishing", ...data})
+  widget.el.closest = (selector) => (selector === "form" ? form : null)
+  return widget
+}
+
+// Timers the test runs by hand.
+function fakeTimers() {
+  const queue = []
+  return {
+    setTimeout: (fn) => queue.push(fn),
+    run() {
+      while (queue.length) queue.shift()()
+    },
+    queue,
+  }
+}
+
+test("mountAll mounts each public-form widget once", async () => {
+  const api = fakeApi()
+  const win = {g8: api}
+  const form = fakeForm()
+  const {el} = formWidget(form, {global: "g8"})
+  el.dataset.kilnChallenge = ""
+  const root = {querySelectorAll: () => [el]}
+
+  assert.equal(mountAll(root, {win, doc: fakeDocument()}).length, 1)
+  assert.equal(el.dataset.kilnChallengeMounted, "true")
+  assert.equal(mountAll(root, {win, doc: fakeDocument()}).length, 0, "already mounted")
+
+  await tick()
+  assert.equal(api.calls.render.length, 1)
+  assert.equal(api.calls.render[0].options.action, "sign_in")
+  assert.equal(form.listeners.length, 1, "one submit guard")
+})
+
+test("a submit with a token goes straight through", () => {
+  const form = fakeForm()
+  const {el, parts} = formWidget(form)
+  parts["challenge-token"].value = "tok"
+  holdSubmitForToken(el, {win: fakeTimers()})
+
+  assert.equal(fire(form).defaultPrevented, false)
+})
+
+test("a submit without a token waits for one, then submits once", () => {
+  const timers = fakeTimers()
+  const form = fakeForm()
+  const {el, parts} = formWidget(form)
+  holdSubmitForToken(el, {win: timers, waitMs: 60_000})
+
+  const button = {name: "send"}
+  assert.equal(fire(form, button).defaultPrevented, true)
+  assert.equal(parts["challenge-status"].textContent, "Finishing")
+  assert.equal(form.submitted.length, 0)
+
+  parts["challenge-token"].value = "late-token"
+  timers.run()
+
+  assert.deepEqual(form.submitted, [button])
+  assert.equal(form.dataset.kilnChallengeSubmitting, undefined, "flag cleared after the re-fire")
+})
+
+test("a later submit without a token waits again (Back, or a blocked re-request)", () => {
+  const timers = fakeTimers()
+  const form = fakeForm()
+  const {el, parts} = formWidget(form)
+  holdSubmitForToken(el, {win: timers, waitMs: 60_000})
+
+  fire(form)
+  parts["challenge-token"].value = "tok"
+  timers.run()
+  assert.equal(form.submitted.length, 1)
+
+  parts["challenge-token"].value = ""
+  assert.equal(fire(form).defaultPrevented, true, "held again")
+  assert.equal(timers.queue.length, 1)
+})
+
+test("the re-fired submit passes the guard, so it can never wait on itself", () => {
+  const timers = fakeTimers()
+  const form = fakeForm()
+  const {el} = formWidget(form)
+  holdSubmitForToken(el, {win: timers, waitMs: 0})
+
+  assert.equal(fire(form).defaultPrevented, true)
+  timers.run()
+
+  // Submitted once, and the re-fired event was not held again.
+  assert.equal(form.submitted.length, 1)
+  assert.equal(timers.queue.length, 0)
+})
+
+test("past the wait it submits anyway, without a token", () => {
+  const timers = fakeTimers()
+  const form = fakeForm()
+  const {el, parts} = formWidget(form)
+  holdSubmitForToken(el, {win: timers, waitMs: 0})
+
+  fire(form)
+  timers.run()
+
+  assert.equal(form.submitted.length, 1)
+  assert.equal(parts["challenge-token"].value, "")
+})
+
+test("a widget that already failed does not hold the submit", () => {
+  const form = fakeForm()
+  const {el, parts} = formWidget(form)
+  parts["challenge-fallback"].hidden = false
+  holdSubmitForToken(el, {win: fakeTimers()})
+
+  assert.equal(fire(form).defaultPrevented, false)
+})
+
+test("a form whose submit cannot be re-requested falls back to submit()", () => {
+  const timers = fakeTimers()
+  const form = fakeForm()
+  form.requestSubmit = undefined
+  form.submit = () => form.submitted.push("submit()")
+  const {el} = formWidget(form)
+  holdSubmitForToken(el, {win: timers, waitMs: 0})
+
+  fire(form)
+  timers.run()
+  assert.deepEqual(form.submitted, ["submit()"])
+})
+
+test("a second click while waiting does not submit twice", () => {
+  const timers = fakeTimers()
+  const form = fakeForm()
+  const {el, parts} = formWidget(form)
+  holdSubmitForToken(el, {win: timers, waitMs: 60_000})
+
+  assert.equal(fire(form).defaultPrevented, true)
+  assert.equal(fire(form).defaultPrevented, true)
+  assert.equal(timers.queue.length, 1, "one wait")
+
+  parts["challenge-token"].value = "tok"
+  timers.run()
+  assert.equal(form.submitted.length, 1)
+})
+
+test("a page restored from the back/forward cache drops its spent token", async () => {
+  const api = fakeApi()
+  api.resets = []
+  api.reset = (id) => api.resets.push(id)
+  const handlers = {}
+  const win = {
+    g9: api,
+    addEventListener: (type, fn) => (handlers[type] = fn),
+    removeEventListener: (type) => delete handlers[type],
+  }
+  const {el, parts} = fakeWidget({global: "g9"})
+  const challenge = mountChallenge(el, {win, doc: fakeDocument()})
+  await tick()
+
+  parts["challenge-token"].value = "spent"
+  handlers.pageshow({persisted: false})
+  assert.equal(parts["challenge-token"].value, "spent", "an ordinary load keeps it")
+
+  handlers.pageshow({persisted: true})
+  assert.equal(parts["challenge-token"].value, "")
+  assert.equal(api.resets.length, 1)
+
+  challenge.destroy()
+  assert.equal(handlers.pageshow, undefined)
 })

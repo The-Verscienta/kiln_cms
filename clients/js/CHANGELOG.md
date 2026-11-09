@@ -5,6 +5,19 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `client-js-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+- **Human verification on forms (kiln_cms#2249):** `FormSchema` gains an
+  optional `challenge` (`FormChallenge | null`, new exported type), what a
+  front end needs to draw the form's Turnstile widget: `provider`,
+  `site_key`, `script_url`, `action` and `field` (`"_kiln_challenge"`).
+  `FormSubmitResult` gains an optional `challenge`, `"verified"` or
+  `"held"` (stored for review, not acted on). Relay the widget's token in
+  `submitForm`'s values under `challenge.field`; a refused token is a
+  `KilnValidationError` whose `fieldErrors()` name `_kiln_challenge`. Both
+  fields are absent from servers older than this and from forms that do not
+  ask, so nothing changes for existing callers.
+
 ## 0.4.0
 
 - `textSearch` / `semanticSearch` take `customSort` (kiln_cms#2292). The server

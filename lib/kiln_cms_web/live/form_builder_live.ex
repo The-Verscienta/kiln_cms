@@ -66,6 +66,10 @@ defmodule KilnCMSWeb.FormBuilderLive do
          # The Embed tab's origins box as last typed, kept only while a save is
          # being refused (#648); nil means "render what is stored".
          |> assign(:embed_origins_draft, nil)
+         |> assign(
+           :challenge_available,
+           KilnCMS.Challenge.forms_available?(KilnCMS.Challenge.config())
+         )
          |> assign_embed_policy(form)
          |> reload_fields()}
 
@@ -410,6 +414,19 @@ defmodule KilnCMSWeb.FormBuilderLive do
   defp status_label(:new), do: gettext("New")
   defp status_label(:reviewed), do: gettext("Reviewed")
   defp status_label(:spam), do: gettext("Spam")
+
+  # What human verification decided for a submission (#2249).
+  defp challenge_label(:passed), do: gettext("Verified")
+  defp challenge_label(_held), do: gettext("Held")
+
+  defp challenge_title(:passed), do: gettext("Passed the human-verification check.")
+  defp challenge_title(:missing), do: gettext("Held: sent without completing the check.")
+
+  defp challenge_title(:wrong_host),
+    do: gettext("Held: the check was completed on a site this deployment doesn't serve.")
+
+  defp challenge_title(:unavailable),
+    do: gettext("Held: the verification service couldn't be reached.")
 
   # --- data --------------------------------------------------------------------
 
@@ -1180,6 +1197,50 @@ defmodule KilnCMSWeb.FormBuilderLive do
                 />
                 {gettext("Active (accepting submissions)")}
               </label>
+              <%!-- Human verification (#2249). While no form can ask for it the
+                    box is disabled and not submitted at all, so a save of this
+                    tab leaves the setting as it is — unless it is on, when it
+                    stays editable so the admin can still switch it off (the
+                    validation only refuses switching it on). --%>
+              <div class="sm:col-span-2 space-y-1">
+                <label class="flex items-center gap-2 text-sm">
+                  <input
+                    :if={@challenge_available or @form.challenge == :always}
+                    type="hidden"
+                    name="form[challenge]"
+                    value="off"
+                  />
+                  <input
+                    id="gf-challenge"
+                    type="checkbox"
+                    name="form[challenge]"
+                    value="always"
+                    checked={@form.challenge == :always}
+                    disabled={!@challenge_available and @form.challenge != :always}
+                    aria-describedby="gf-challenge-help"
+                    class="size-4 rounded border border-base-content/30 accent-primary"
+                  />
+                  {gettext("Ask visitors to complete a human-verification check")}
+                </label>
+                <p
+                  :if={!@challenge_available}
+                  id="gf-challenge-help"
+                  class="text-xs text-base-content/70"
+                >
+                  {gettext(
+                    "Human verification isn't available on this deployment. Ask the operator to configure it."
+                  )}
+                </p>
+                <p
+                  :if={@challenge_available}
+                  id="gf-challenge-help"
+                  class="text-xs text-base-content/70"
+                >
+                  {gettext(
+                    "Submissions without a completed check are kept in Spam for review instead of being sent on. Headless sites must send the check's token as _kiln_challenge, and their hostnames must be listed by the operator, or everything they send lands in Spam. Submissions from pages loaded before you switch this on also land in Spam."
+                  )}
+                </p>
+              </div>
               <div class="sm:col-span-2">
                 <.button type="submit" variant="primary">{gettext("Save")}</.button>
               </div>
@@ -1489,6 +1550,13 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     </span>
                     <span :if={submission.spam_score > 0} class="text-xs text-base-content/50">
                       {gettext("score %{score}", score: submission.spam_score)}
+                    </span>
+                    <span
+                      :if={submission.challenge}
+                      class="inline-flex items-center rounded-full bg-base-content/10 px-2 py-0.5 text-xs font-medium text-base-content/70"
+                      title={challenge_title(submission.challenge)}
+                    >
+                      {challenge_label(submission.challenge)}
                     </span>
                   </div>
                   <time

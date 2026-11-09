@@ -5,6 +5,20 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `kiln_client-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+### Added
+
+- **Human verification on forms (kiln_cms#2249):** `form/2` and
+  `submit_form/3` document the new response keys. A form's schema may carry
+  `"challenge"`, `nil` or the widget's `"provider"`, `"site_key"`,
+  `"script_url"`, `"action"` and `"field"` (`"_kiln_challenge"`); relay the
+  visitor's token in the params under that name. The submit result then
+  carries `"challenge" => "verified"` or `"held"` (stored for review, not
+  acted on); a refused token is `reason: :validation` with
+  `"_kiln_challenge"` in its field errors. Documentation only: the client
+  passes both through unchanged, and servers older than this send neither.
+
 ## 0.7.0
 
 ### Added
