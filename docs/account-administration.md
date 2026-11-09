@@ -416,7 +416,8 @@ While open registration is on (`:registration_enabled`, the default), anyone
 can create an account with a password at `/register`. A site can make those
 sign-ups wait for an administrator: the account is still created, but it gets
 no access on the site until an admin approves it on the **Registrations** page.
-Rejecting keeps the account and keeps it out.
+Rejecting keeps the account and keeps it out, unless the site
+[erases unconfirmed applicants it rejects](#erase-unconfirmed-applicants-you-reject).
 
 The site's admins are told when someone who has confirmed their address is
 waiting ([Get told when someone is waiting](#get-told-when-someone-is-waiting)),
@@ -548,13 +549,15 @@ of another site is refused, whichever host they ask from.
    approved." (For an applicant who hasn't confirmed their address, or whose
    account was erased, the last sentence is missing, because they get no
    email.) You see "Rejected (address)." and they move to the **Rejected**
-   tab.
+   tab. If the site erases unconfirmed applicants it rejects, the dialog for
+   an unconfirmed row says so instead
+   ([Erase unconfirmed applicants you reject](#erase-unconfirmed-applicants-you-reject)).
 
 A rejected account can still sign in, reads only what's public on every site,
 and its account page says "Your registration on (site) wasn't approved." To
 remove the account itself, a platform admin uses
-[Removing an account](#removing-an-account). Removing rejected accounts
-automatically is a later part of #2251.
+[Removing an account](#removing-an-account), or the site
+[erases unconfirmed applicants it rejects](#erase-unconfirmed-applicants-you-reject).
 
 Approving gives exactly the *Viewer* tier on this site and nothing on other
 sites. Without approval, a password sign-up is a viewer on the **default
@@ -564,6 +567,81 @@ site** only, whichever host it signed up on.
 while it waited, its row shows an **Account erased** badge and has no
 **Approve**: there is nobody left to let in. Reject it to clear it; no email
 is sent.
+
+### Erase unconfirmed applicants you reject
+
+By default a rejected account is kept. On a site that gets waves of bot
+sign-ups, that leaves a pile of accounts nobody ever proved they owned. A third
+setting erases the account when you reject someone whose address was never
+confirmed.
+
+You need the admin tier on the site: a site admin, or a platform admin.
+
+1. Open **Registrations** (`/editor/registrations`).
+2. Under **Settings**, set **When you reject someone** to **Erase the account
+   if the email address was never confirmed**. (The default is **Keep the
+   account**.)
+3. Click **Save**. You see "Registration settings saved."
+4. Under **Email not confirmed yet**, click **Reject** on a row. The
+   confirmation now reads "Reject (address) and erase the account? This
+   address was never confirmed, so the account is erased, unless it's used for
+   anything besides this registration. Erasing can't be undone, and the
+   address can register again."
+5. Confirm. You see one of:
+   - "Rejected (address) and erased the account." The row moves to the
+     **Rejected** tab with an **Account erased** badge.
+   - "Rejected (address). The account was kept, because it's more than this
+     registration or it can't be erased right now." The rejection stands and
+     the account is kept, as with **Keep the account**.
+
+No email goes out either way: an applicant who never confirmed their address
+is never mailed. Rows under **Waiting for approval** have confirmed their
+address, so their **Reject** dialog is the usual one and the account is kept.
+
+**When an account is erased.** All of these must hold, checked when you
+confirm; if any fails, the account is kept:
+
+- the site's setting is **Erase the account if the email address was never
+  confirmed**, and the dialog you confirmed said the account would be erased;
+- you are a **standing** admin of the site, or a standing platform admin. A
+  temporary admin sees the ordinary dialog and can reject, but the account is
+  kept: an erasure would outlast the grant that allowed it;
+- the address was never confirmed;
+- this registration created the account (a password sign-up, or a new account
+  from the site's own single sign-on), so it is not someone's existing account
+  that applied;
+- the account is nothing but this application: its account-wide role is
+  *Viewer*, it holds no temporary role and no audiences, it has no other
+  membership on any site (waiting, rejected or active), and nothing points
+  at it: no paid membership, API key (revoked ones included), newsletter
+  subscription, content, version, comment, task, media item, release,
+  invitation it sent, recorded consent, logged editing event, or
+  notification it caused in someone else's inbox.
+
+Erasing is the same [anonymization](#removing-an-account) a platform admin
+runs, done in the rejection's own transaction: if the erasure fails, the
+rejection is undone too, the row stays waiting, and you see an error. The security log records
+*Registration rejected* with `outcome` `erased` and no target, or `outcome`
+`kept` naming the applicant.
+
+**Keeping is what makes a rejection stick.** A kept account still holds the
+address, so the same address can't register on this site again. An erased
+account frees it: whoever owns it can sign up again and wait in the queue
+like anyone new. That is why a confirmed rejection is always kept, whatever
+the setting: someone who proved the address is theirs and was turned away
+should not be able to come straight back. An unconfirmed sign-up proves
+nothing, so erasing it loses little, and clearing it means the address's real
+owner is not locked out by a stranger's sign-up.
+
+**If a confirmation races your click.** If the applicant confirms their
+address, starts a paid membership, or is given a membership on another site
+at the moment you reject, one of the two waits for the other. Either the
+erasure goes first and the other write is refused, or the other write goes
+first and the account is kept.
+
+Operators: turn this on only once every node runs the release that has it.
+An older node doesn't take the account lock that keeps those writes from
+racing an erasure.
 
 ### Get told when someone is waiting
 
@@ -813,7 +891,20 @@ Accounts.approve_registration(entry.membership, %{}, actor: admin)
   who is not an admin of the site gets `{:error, %Ash.Error.Forbidden{}}`
   from `page/2`, never an empty queue.
 - `Accounts.reject_registration/3` takes the same arguments as
-  `approve_registration/3`.
+  `approve_registration/3`, plus `erase` (boolean, default `false`): ask to
+  erase the account too
+  ([Erase unconfirmed applicants you reject](#erase-unconfirmed-applicants-you-reject)).
+  It is only a request; the site's setting, a standing admin actor and
+  `KilnCMS.Accounts.Registrations.Erasure.check/1` decide. The returned
+  membership says what happened in its metadata:
+
+  ```elixir
+  {:ok, row} = Accounts.reject_registration(entry.membership, %{erase: true}, actor: admin)
+  row.status                              #=> :rejected
+  row.__metadata__[:registration_outcome] #=> :erased (or :kept)
+  ```
+
+  A failed erasure returns its error and nothing is rejected.
 - A refused decision is `{:error, %Ash.Error.Invalid{}}` carrying a
   `KilnCMS.Accounts.Errors.RegistrationRefused`. `RegistrationRefused.reason/1`
   returns `:not_pending` (already decided), `:unconfirmed` or `:erased`
@@ -822,11 +913,20 @@ Accounts.approve_registration(entry.membership, %{}, actor: admin)
   carries `:settings_unavailable` on a refused sign-up and `:not_approved` on
   a refused paid-membership start.
 - `save_site_registration/2` also takes `approval_for_site_sso`, the
-  [single sign-on switch](#hold-new-single-sign-on-accounts-too).
-  `KilnCMS.Accounts.RegistrationPolicy.settings/1` reads both switches as
+  [single sign-on switch](#hold-new-single-sign-on-accounts-too), and
+  `rejected_accounts` (`:keep`, the default, or `:erase_unconfirmed`).
+  `KilnCMS.Accounts.RegistrationPolicy.settings/1` reads all three as
   the system, `{:ok, %{approval_required: boolean, approval_for_site_sso:
-  boolean}}` (both `false` for a site with no row) or
-  `{:error, :unavailable}`.
+  boolean, rejected_accounts: :keep | :erase_unconfirmed}}` (`false`, `false`
+  and `:keep` for a site with no row) or `{:error, :unavailable}`. Rejecting
+  reads it too, and there an unreadable row means keep.
+- A write that would attach something to an erased account (a membership, a
+  paid membership `:start` or `:comp`, an API key, or one of the three
+  updates that confirm an account) is refused with
+  `KilnCMS.Accounts.Errors.AccountErased`, "belongs to an account that was
+  erased". Each takes the account's row first
+  (`KilnCMS.Accounts.AccountLock`), so it can't land on an account erased
+  while it waited.
 - `Accounts.queue_registration/2` is system-only: it is the sign-up's own
   write, and every person, a platform admin included, is refused it. Its
   `method` argument (`:password`, the default, or `:site_sso`) is recorded on

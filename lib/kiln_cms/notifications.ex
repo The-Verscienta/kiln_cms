@@ -334,6 +334,50 @@ defmodule KilnCMS.Notifications do
     :ok
   end
 
+  @doc """
+  Delete every notification addressed to `user_id`, on every org — the
+  recipient's side of erasure (`KilnCMS.Accounts.Changes.AnonymizeUser`,
+  #2514), where `anonymize_actor/1` is the actor's.
+
+  Same shape and failure handling as `anonymize_actor/1`: one org at a time
+  (notifications are tenant-scoped and have no tenant-bypassing action, so a
+  delete per site is the cost of an erasure),
+  the query not authorized as a read (it is self-only), the destroy's own
+  system-only policy deciding, and any failed org raising at the end.
+  """
+  @spec forget_recipient(String.t()) :: :ok
+  def forget_recipient(user_id) when is_binary(user_id) do
+    failed =
+      Enum.reject(KilnCMS.Accounts.list_org_ids(), fn org_id ->
+        try do
+          Notification
+          |> Ash.Query.filter(user_id == ^user_id)
+          |> Ash.bulk_destroy!(:forget_recipient, %{},
+            tenant: org_id,
+            authorize_query?: false,
+            strategy: [:atomic, :atomic_batches, :stream],
+            return_records?: false,
+            return_errors?: true
+          )
+
+          true
+        rescue
+          error ->
+            Logger.error(
+              "notification forget_recipient failed for org #{org_id}: #{inspect(error)}"
+            )
+
+            false
+        end
+      end)
+
+    if failed != [] do
+      raise "notification forget_recipient failed for orgs: #{Enum.join(failed, ", ")}"
+    end
+
+    :ok
+  end
+
   @type event ::
           :submitted_for_review
           | :published

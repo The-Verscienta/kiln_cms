@@ -73,6 +73,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (`org_memberships.created_account`, `site_registration.approval_for_site_sso`, both `NOT NULL DEFAULT false`). Turn on Registrations → "New accounts from this site's single sign-on wait for approval too" only once every node runs this release: an older node makes those accounts active viewers.**
   ([#2519](https://github.com/The-Verscienta/kiln_cms/pull/2519) · [long form](docs/changelog/unreleased.md#registration-invitations-sso-upgrade))
 
+- **Run `mix ash.migrate` (`site_registration.rejected_accounts`, `NOT NULL DEFAULT 'keep'`). Set Registrations → "When you reject someone" to erase only once every node runs this release: an older node takes no account lock, so an erasure can race its membership, billing, key and confirmation writes.**
+  Rolling the pin back is safe; accounts already erased stay erased.
+  ([long form](docs/changelog/unreleased.md#registration-erasure-upgrade))
+
 - **Before rolling back to a build that has the security log but predates sign-in unlock links, delete the `sign_in_unlock_requested`, `sign_in_unlocked` and `sign_in_unlock_refused` security events, or roll forward.**
   No migration. An older build cannot load those rows, which breaks that site's security log and CSV, and erasing a person named in one (#2509). v1.8.0 has no security log and is unaffected.
   ([#2510](https://github.com/The-Verscienta/kiln_cms/pull/2510) · [long form](docs/changelog/unreleased.md#sign-in-unlock-upgrade))
@@ -188,6 +192,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Accepting an invitation, or Team's Add or invite, now approves the person's waiting or rejected registration on that site (an invitation overrides a rejection only if it is newer), and a site can hold new accounts from its own single sign-on for approval.**
   The SSO switch is on Registrations, separate from password sign-ups. Guide: [docs/account-administration.md](docs/account-administration.md#invitations-and-registrations).
   ([#2519](https://github.com/The-Verscienta/kiln_cms/pull/2519) · [long form](docs/changelog/unreleased.md#registration-invitations-sso))
+
+- **A site can erase the account of an applicant it rejects whose email address was never confirmed: Registrations → Settings → "When you reject someone".**
+  Off by default; only a standing admin's rejection erases, and only an account that is nothing but that registration. A confirmed rejection is always kept. Guide: [docs/account-administration.md](docs/account-administration.md#erase-unconfirmed-applicants-you-reject).
+  ([long form](docs/changelog/unreleased.md#registration-erasure))
 
 - **Someone whose sign-in is paused after too many attempts can have a link emailed that lifts the pause: "Email me an unlock link" on the sign-in page.**
   The link lasts 15 minutes, works once and goes only to confirmed members of that site (3 an hour). It clears only the account pause, and the sign-in page still never says an account is paused. Guide: [docs/account-administration.md](docs/account-administration.md#lift-a-sign-in-pause-by-email).
@@ -352,6 +360,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2256](https://github.com/The-Verscienta/kiln_cms/issues/2256) · [long form](docs/changelog/unreleased.md#robots-flags))
 
 ### Changed
+
+- **Erasing an account also deletes its Web Push subscriptions, its private saved views and the notifications addressed to it, and now always clears its audiences.**
+  ([long form](docs/changelog/unreleased.md#erasure-deletes-more))
 
 - **Lists of strings and multiple selects now take `has`, `has_all`, `has_none` and `count` in `custom_filter`, and read a bare value stored before the field became a list as a one-item list (`eq` matches it, `not_eq` leaves it out).**
   `has_none` matches a record with no value; `not_eq` does not. An unsupported operator's `400` now lists the supported ones.

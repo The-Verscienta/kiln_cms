@@ -73,6 +73,7 @@ defmodule KilnCMS.Billing.Entitlements do
   require Logger
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.AccountLock
   alias KilnCMS.Accounts.LegacyAffiliation
   alias KilnCMS.Billing
   alias KilnCMS.Billing.Membership
@@ -133,10 +134,12 @@ defmodule KilnCMS.Billing.Entitlements do
         }) :: :ok | {:error, term()}
   def persist(user, before, desired, managed, by_org) do
     KilnCMS.Repo.transaction(fn ->
-      with {:ok, _user} <- write_user(user, before, desired),
+      with :ok <- lock_account(user.id),
+           {:ok, _user} <- write_user(user, before, desired),
            :ok <- write_org_memberships(user, managed, by_org) do
         :ok
       else
+        :erased -> :ok
         {:error, reason} -> KilnCMS.Repo.rollback(reason)
       end
     end)
@@ -155,6 +158,25 @@ defmodule KilnCMS.Billing.Entitlements do
         )
 
         {:error, reason}
+    end
+  end
+
+  # The account's row before any membership row (#2514,
+  # `KilnCMS.Accounts.AccountLock`'s lock order): the memberships written below
+  # take it too, and taking it only there, after a membership row is already
+  # held, could deadlock with an erasure of a rejected registration, which
+  # takes the account first.
+  #
+  # An erased account writes nothing (`:erased`, answered `:ok` by `persist/5`):
+  # `desired` was computed before the lock, possibly before the erasure
+  # committed, and writing it would put audiences back on the tombstone and on
+  # its rejected membership. Not an error either, so a late webhook for an
+  # erased account settles instead of retrying forever.
+  defp lock_account(user_id) do
+    case AccountLock.share(user_id) do
+      :ok -> :ok
+      {:error, :erased} -> :erased
+      {:error, :not_found} -> {:error, :user_not_found}
     end
   end
 

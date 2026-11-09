@@ -18,6 +18,13 @@ defmodule KilnCMS.CMS.SiteRegistration do
   people straight in while holding password sign-ups, or the other way round.
   An account that already exists is admitted as it always was.
 
+  `rejected_accounts` decides what rejecting a registration does to the
+  account (#2514): `:keep` (the default) keeps it, so the address cannot
+  register here again; `:erase_unconfirmed` erases it when the address was
+  never confirmed and the account is nothing but that application
+  (`KilnCMS.Accounts.Registrations.Erasure`). A confirmed rejection is always
+  kept.
+
   The site decides; there is no operator default (ADR 0018 only constrains a
   site against a ceiling, and this has none). `KilnCMS.Accounts.RegistrationPolicy`
   resolves it, failing **closed**: a row that cannot be read refuses the
@@ -30,9 +37,9 @@ defmodule KilnCMS.CMS.SiteRegistration do
   """
   use KilnCMS.CMS.OrgSettings,
     table: "site_registration",
-    accept: [:approval_required, :approval_for_site_sso],
+    accept: [:approval_required, :approval_for_site_sso, :rejected_accounts],
     read: :admin,
-    admin_columns: [:approval_required, :approval_for_site_sso, :updated_at],
+    admin_columns: [:approval_required, :approval_for_site_sso, :rejected_accounts, :updated_at],
     system_actions: [read: :registrations]
 
   attributes do
@@ -48,6 +55,15 @@ defmodule KilnCMS.CMS.SiteRegistration do
       default false
       allow_nil? false
       public? true
+    end
+
+    # What rejecting does to the account (#2514). Kept by default; erased only
+    # for an unconfirmed address, when nothing else hangs off the account.
+    attribute :rejected_accounts, :atom do
+      default :keep
+      allow_nil? false
+      public? true
+      constraints one_of: [:keep, :erase_unconfirmed]
     end
   end
 end

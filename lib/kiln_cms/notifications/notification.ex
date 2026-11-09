@@ -201,6 +201,13 @@ defmodule KilnCMS.Notifications.Notification do
       change set_attribute(:actor_name, nil)
       change set_attribute(:actor_id, nil)
     end
+
+    # The erased account's own inbox (#2514): the rows are addressed to it and
+    # name what it was told, so erasure deletes them rather than leaving them
+    # on a tombstone nobody can sign in to read.
+    destroy :forget_recipient do
+      description "Delete an erased account's own notifications (system-only — see the moduledoc)."
+    end
   end
 
   policies do
@@ -228,10 +235,11 @@ defmodule KilnCMS.Notifications.Notification do
       authorize_if expr(user_id == ^actor(:id))
     end
 
-    # Erasure (`KilnCMS.Notifications.anonymize_actor/1`): the rows belong to
-    # other recipients, so like `:notify` it is the system's, and refused to
-    # any request carrying an actor.
-    policy action(:forget_actor) do
+    # Erasure (`KilnCMS.Notifications.anonymize_actor/1` and
+    # `forget_recipient/1`): the first rewrites rows that belong to other
+    # recipients, the second deletes an erased account's own; both are the
+    # system's, like `:notify`, and refused to any request carrying an actor.
+    policy action([:forget_actor, :forget_recipient]) do
       forbid_if actor_present()
       authorize_if always()
     end

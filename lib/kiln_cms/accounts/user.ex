@@ -416,6 +416,11 @@ defmodule KilnCMS.Accounts.User do
       # two lines below is declared first.
       validate {KilnCMS.Accounts.Validations.NotLastAdmin, demotes?: true}
 
+      # The registrations system actor may erase only the account a rejection
+      # in this transaction has just turned away (#2514). Before the scrub, so
+      # a refusal leaves the account untouched.
+      change KilnCMS.Accounts.Changes.GuardRegistrationErasure
+
       change KilnCMS.Accounts.Changes.AnonymizeUser
 
       # The erasure revokes tokens, which stops new connections; the live ones
@@ -1233,9 +1238,15 @@ defmodule KilnCMS.Accounts.User do
     end
 
     # Erasure is an operator action — admins only (covered by the admin bypass
-    # above; this makes the intent explicit and forbids everyone else).
+    # above; this makes the intent explicit and forbids everyone else). And
+    # the erasure of an unconfirmed, rejected registration (#2514), from
+    # `Changes.EraseRejectedAccount` inside the rejection: the deciding admin
+    # may be a site admin, who may not erase accounts, so it runs as the
+    # registrations system actor, held by `Changes.GuardRegistrationErasure`
+    # to that one rejection's account.
     policy action(:anonymize) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :registrations, action: :anonymize}
     end
 
     # First-run bootstrap (#1317): anyone may create the first admin while no
@@ -1315,6 +1326,22 @@ defmodule KilnCMS.Accounts.User do
     # rather than on `:confirm_new_user` alone, because three actions confirm
     # an unconfirmed account (see the change).
     change KilnCMS.Accounts.Changes.AnnouncePendingRegistration, on: [:update]
+
+    # The three updates that confirm an unconfirmed account take its row
+    # first and refuse an erased one (#2514): an erasure of a rejected,
+    # unconfirmed registration may have committed while one of them waited,
+    # and a confirmation, a new password or a session must not land on the
+    # tombstone. The erasure checks `confirmed_at` under the same lock, so
+    # one that waits for a confirmation keeps the account.
+    change {KilnCMS.Accounts.Changes.LockAccount, user_id: :id},
+      on: [:update],
+      where: [
+        action_is([
+          :confirm_new_user,
+          :reset_password_with_token,
+          :accept_invitation_with_password
+        ])
+      ]
   end
 
   attributes do

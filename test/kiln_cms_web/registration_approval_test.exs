@@ -327,6 +327,146 @@ defmodule KilnCMSWeb.RegistrationApprovalTest do
     end
   end
 
+  describe "erasing unconfirmed rejections (#2514)" do
+    setup do
+      site = org("regerase")
+      unconfirmed = seed_user(:viewer, %{confirmed_at: nil})
+
+      row =
+        Ash.Seed.seed!(OrgMembership, %{
+          user_id: unconfirmed.id,
+          organization_id: site.id,
+          role: :viewer,
+          status: :pending,
+          created_account: true
+        })
+
+      confirmed = seed_user()
+      row(confirmed, site.id, :viewer, :pending)
+
+      %{site: site, unconfirmed: unconfirmed, row: row, confirmed: confirmed}
+    end
+
+    defp erase_unconfirmed!(site) do
+      CMS.save_site_registration!(
+        %{approval_required: true, rejected_accounts: :erase_unconfirmed},
+        actor: seed_user(:admin),
+        tenant: site.id
+      )
+    end
+
+    test "the settings form saves the choice, and says what erasing means", %{conn: conn} = ctx do
+      {:ok, lv, html} =
+        conn
+        |> org_conn(ctx.site)
+        |> log_in(site_admin(ctx.site))
+        |> live(~p"/editor/registrations")
+
+      assert html =~ "Erasing can&#39;t be undone"
+      assert html =~ "who confirmed their address is always kept"
+      assert html =~ "An erased address can register again"
+
+      html =
+        lv
+        |> form("#registration-settings-form",
+          registration: %{
+            "approval_required" => "true",
+            "rejected_accounts" => "erase_unconfirmed"
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "Registration settings saved."
+
+      assert {:ok, [%{rejected_accounts: :erase_unconfirmed, approval_required: true}]} =
+               CMS.list_site_registration(tenant: ctx.site.id, authorize?: false)
+
+      # Anything else a client sends keeps.
+      lv
+      |> element("#registration-settings-form")
+      |> render_submit(%{"registration" => %{"rejected_accounts" => "erase_everything"}})
+
+      assert {:ok, [%{rejected_accounts: :keep}]} =
+               CMS.list_site_registration(tenant: ctx.site.id, authorize?: false)
+    end
+
+    test "the unconfirmed row's confirmation warns of the erasure, and rejecting erases",
+         %{conn: conn} = ctx do
+      erase_unconfirmed!(ctx.site)
+
+      {:ok, lv, _html} =
+        conn
+        |> org_conn(ctx.site)
+        |> log_in(site_admin(ctx.site))
+        |> live(~p"/editor/registrations")
+
+      button = lv |> element("#reject-#{ctx.row.id}") |> render()
+      assert button =~ ~s(phx-value-erase="true")
+      assert button =~ "erase the account?"
+      assert button =~ "Erasing can&#39;t be undone, and the address can register again."
+
+      # A confirmed applicant is never erased, so its dialog does not say so.
+      confirmed_row =
+        Accounts.get_org_membership!(ctx.confirmed.id, ctx.site.id, authorize?: false)
+
+      confirmed_button = lv |> element("#reject-#{confirmed_row.id}") |> render()
+      assert confirmed_button =~ ~s(phx-value-erase="false")
+      refute confirmed_button =~ "erase the account"
+
+      html = lv |> element("#reject-#{ctx.row.id}") |> render_click()
+
+      assert html =~ "Rejected #{ctx.unconfirmed.email} and erased the account."
+      assert %DateTime{} = Accounts.get_user!(ctx.unconfirmed.id, authorize?: false).anonymized_at
+      assert status_of(ctx.unconfirmed, ctx.site) == :rejected
+    end
+
+    test "with the site keeping rejected accounts, the dialog and the click erase nothing",
+         %{conn: conn} = ctx do
+      {:ok, lv, _html} =
+        conn
+        |> org_conn(ctx.site)
+        |> log_in(site_admin(ctx.site))
+        |> live(~p"/editor/registrations")
+
+      button = lv |> element("#reject-#{ctx.row.id}") |> render()
+      assert button =~ ~s(phx-value-erase="false")
+      refute button =~ "erase the account"
+
+      # A pushed `erase` is only a request: the site's setting keeps.
+      html = render_click(lv, "reject", %{"id" => ctx.row.id, "erase" => "true"})
+      assert html =~ "The account was kept"
+      assert Accounts.get_user!(ctx.unconfirmed.id, authorize?: false).anonymized_at == nil
+    end
+
+    test "a temporary site admin sees the ordinary confirmation, and the account is kept",
+         %{conn: conn} = ctx do
+      erase_unconfirmed!(ctx.site)
+      temporary = seed_user()
+
+      Ash.Seed.seed!(OrgMembership, %{
+        user_id: temporary.id,
+        organization_id: ctx.site.id,
+        role: :editor,
+        granted_role: :admin,
+        granted_role_expires_at: DateTime.add(DateTime.utc_now(), 3600)
+      })
+
+      {:ok, lv, _html} =
+        conn
+        |> org_conn(ctx.site)
+        |> log_in(temporary)
+        |> live(~p"/editor/registrations")
+
+      button = lv |> element("#reject-#{ctx.row.id}") |> render()
+      assert button =~ ~s(phx-value-erase="false")
+
+      html = render_click(lv, "reject", %{"id" => ctx.row.id, "erase" => "true"})
+      assert html =~ "The account was kept"
+      assert status_of(ctx.unconfirmed, ctx.site) == :rejected
+      assert Accounts.get_user!(ctx.unconfirmed.id, authorize?: false).anonymized_at == nil
+    end
+  end
+
   describe "a pending account against its approved twin" do
     setup do
       org_id = Accounts.default_org_id()

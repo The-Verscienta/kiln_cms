@@ -1487,6 +1487,9 @@ The how-to is
   page on a keyset, with counts capped at 100, so an unconfirmed wave neither
   loads unbounded nor pushes approvable applicants off the first page.
   Registration's own per-address throttle and human verification apply first.
+  A site that erases unconfirmed applicants it rejects (#2514, below) also
+  removes the wave's accounts as it rejects them, rather than keeping a pile
+  of accounts for addresses nobody proved they own.
   Residual: there is no bulk reject, and waiting rows never expire (a
   follow-up), so a wave stays in the unconfirmed list until rejected one by
   one.
@@ -1585,6 +1588,77 @@ The how-to is
   setting is read only when an account would be provisioned, before the
   transaction, and fails closed: an unreadable row refuses the sign-in
   (`:registration_settings_unavailable`) and creates nothing.
+- **Erasing a rejected account is a site's opt-in, limited to unconfirmed
+  applicants (#2514).** `SiteRegistration.rejected_accounts` is `:keep` by
+  default; with `:erase_unconfirmed`, rejecting an applicant whose address was
+  never confirmed erases the account (`User.:anonymize`) in the rejection's
+  transaction (`Changes.EraseRejectedAccount`). A confirmed rejection is always
+  kept: the kept account holds the address, which is what stops the same
+  person registering on the site again, and erasing it would hand them a fresh
+  start. An unconfirmed sign-up proves nothing about who owns the address, so
+  erasing it gives up little, and it frees an address a stranger may have
+  registered in its owner's name. Nobody is mailed, since an unconfirmed
+  applicant never is. An unreadable setting means keep: erasure cannot be
+  undone, so it needs the site's known consent.
+- **Only an account that is nothing but its application can be erased.** A
+  site admin may not erase accounts, and this does not let them: the account
+  must have been created by this registration (`created_account`), be
+  unconfirmed, unerased, a standing *Viewer* with no live grant and no
+  audiences, with no other membership of any status on any site, and nothing
+  may reference it (paid membership, API key, content, version, comment, task,
+  media, release, invitation sent, consent, newsletter row or logged event:
+  `Accounts.Registrations.Erasure`, one query). The referencing tables are a
+  static list, and a test holds every foreign key to `users` to it, so a new
+  table cannot silently stop blocking. Anything else keeps the account. So a
+  site admin can erase only an account that exists solely because someone
+  applied to *their* site and has done nothing since.
+- **Who may erase.** A **standing** admin of the site, or a standing platform
+  admin (`Erasure.standing_admin?/2`), and only when the console's dialog
+  said the account would be erased (`erase: true`; a client pushing the
+  argument without it is still bound by the setting and the check). A
+  temporary admin may reject, but the account is kept: an erasure would
+  outlast the grant that allowed it.
+- **The system actor's grant is held to one erasure.** The deciding admin may
+  be a site admin, who is refused `:anonymize`, so the erasure runs as
+  `SystemActor.new(:registrations)`, which the `User` policy now admits to
+  `:anonymize`. A policy can only name the subsystem, so
+  `Changes.GuardRegistrationErasure` on the action narrows it: the changeset
+  context must name a membership of this account on that site that is
+  `:rejected`, with `created_account`, and with exactly the `decided_at` this
+  transaction wrote; a transaction must be open; the account's row is locked
+  `FOR UPDATE`; and the erasable check must pass again. Anything else is
+  refused (`ErasureRefused`) before the scrub touches anything. Any other
+  caller that ever obtains the `:registrations` actor cannot use it to erase
+  an arbitrary account.
+- **A row lock, not a check alone, against races.** Under READ COMMITTED the
+  erasable check cannot see a membership, key or confirmation that another
+  transaction is writing. So the rejection takes the account's `users` row
+  `FOR UPDATE` before it locks the membership (only when it will try to
+  erase), and every path that would give the account a footprint or confirm
+  it takes the same row `FOR KEY SHARE` first (`Accounts.AccountLock`): every
+  `OrgMembership` create (resource-wide), both approvals, `Billing.Membership`
+  `:start` and `:comp`, the entitlement recompute's write, `ApiKey` `:create`
+  and `:rotate`, and the three `User` updates that confirm an account
+  (`:confirm_new_user`, `:reset_password_with_token`,
+  `:accept_invitation_with_password`). Whichever locks first goes first. An
+  erasure that waited checks against what the other committed, a
+  confirmation included, and keeps the account. A writer that waited reads
+  `anonymized_at` and is refused (`AccountErased`), so no membership, key,
+  password or session lands on the tombstone, and the entitlement recompute
+  writes nothing to an erased account. Lock order is the users row, then any
+  membership row, on every path, so they cannot deadlock. A foreign-key
+  insert alone would only make a writer wait and then succeed against the
+  tombstone, which is why the listed paths lock and re-read explicitly.
+- **One transaction.** A failed erasure rolls the rejection back, so a
+  rejection never claims an erasure that did not happen. The security event
+  is recorded after the erasure: `registration_rejected` with
+  `outcome: erased` and no target (it would name only a tombstone), or
+  `outcome: kept` naming the applicant.
+- **Erasure itself deletes more (every erasure).** Web Push subscriptions (an
+  endpoint that reaches the person's device), private saved views, and the
+  notifications addressed to the account are deleted, and stored audiences
+  are cleared in their own statement, which a stale copy of the account
+  could previously skip ([data flows](data-flows.md#subject-rights-workflows)).
 - **Enumeration.** The sign-up page says nothing about waiting, and a
   registration for an existing address answers as before. Single sign-on
   answers a new and an existing account the same way whether or not the new
@@ -1593,8 +1667,17 @@ The how-to is
   registration on the site (the outcome names it); for an unconfirmed address
   it says nothing and invites. That is an admin of the site learning about
   its own applicants, and a platform admin can read every account anyway.
-- **Residuals.** (1) A rejected account is kept, not erased (part three,
-  c2). (2) A site admin whose admin tier is a temporary membership
+  Erasing (#2514) adds one bit: "erased" or "kept" after rejecting an
+  unconfirmed applicant tells a site admin whether that account is more than
+  its application here (another membership, content, a key) without saying
+  what. The account was created by a registration on their site, so the bit
+  is about their own applicant, and the event records the same outcome.
+- **Residuals.** (1) The erasable check scans several referencing columns
+  that have no index while the account's row is locked `FOR UPDATE`, so an
+  erasing rejection on a large site is slower, and holds that one account's
+  writers (its memberships, billing, keys and confirmation) for as long. It
+  runs only on a rejection that will try to erase; indexes are a follow-up.
+  (2) A site admin whose admin tier is a temporary membership
   grant can decide registrations, and is told about them;
   `StandingAdminOnly` constrains only platform grants. (3) A node on an older
   release cannot load a `registration_pending` notification, so during a
@@ -1614,6 +1697,12 @@ The how-to is
   `registration_rejected` shows it. (7) A node on an older release ignores
   `approval_for_site_sso` and provisions single sign-on accounts as active
   viewers; operators turn it on only once every node runs the release.
+  (8) A node on an older release takes no account lock on its membership,
+  billing, key and confirmation writes, so during a rolling deploy an
+  erasure can race one of them and attach it to a tombstone, or erase an
+  account that has just been confirmed. Operators turn `erase_unconfirmed`
+  on only once every node runs the release
+  ([ADR 0024](decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md#upgrade-notes)).
 
 ### Security posture (`/editor/security-posture`, #2252)
 
