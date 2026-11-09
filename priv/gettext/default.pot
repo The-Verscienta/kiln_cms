@@ -1749,6 +1749,11 @@ msgstr ""
 msgid "A task for %{person}, due %{date}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A third of a row"
+msgstr ""
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "A tier's audience can't change — existing members would keep an entitlement nothing would revoke. Retire this tier and create a new one instead."
@@ -1989,6 +1994,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
 msgid "Accessible"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Accordion: a heading that opens and closes"
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
@@ -2888,6 +2898,11 @@ msgstr ""
 msgid "An OpenAPI spec and a browsable API explorer"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "An accordion is a heading editors open and close; a fieldset is always open; tabs show one section at a time, and every tab section of the type joins one tab set at the place of the first. Sections keep the order of their first field."
+msgstr ""
+
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
 msgid "An account with this address already exists — accept the invitation with it."
@@ -3608,6 +3623,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Auto-fills each entry's multi-segment canonical URL. Same tokens plus [slug]; segments that expand empty drop out. Blank = flat URLs."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Automatically (open when it holds a value)"
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
@@ -4728,6 +4748,11 @@ msgstr ""
 msgid "Closed"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Closed (collapsed)"
+msgstr ""
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Clustering %{count} published document."
@@ -5753,6 +5778,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't save the new order."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the section layout."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -8508,6 +8538,11 @@ msgstr ""
 msgid "Fields whose edits must say how much they matter. Nothing is listed until you choose."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Fieldset: always open, under its heading"
+msgstr ""
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -8967,6 +9002,11 @@ msgstr ""
 msgid "Full editor"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Full row"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Full — %{count} of %{max} connected"
@@ -9287,6 +9327,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Half"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Half a row"
 msgstr ""
 
 #: lib/kiln_cms_web/live/federation_live.ex
@@ -11664,6 +11709,11 @@ msgstr ""
 msgid "Names the record (search finds it by this value)"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Narrow fields of the same section sit side by side in the editor; on a small screen each takes the full row."
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nav items"
@@ -13364,6 +13414,11 @@ msgstr ""
 msgid "Only admins of this site can open it. Your account has a different role."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only an accordion opens and closes."
+msgstr ""
+
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
 msgid "Only an admin can archive content on this site."
@@ -13505,6 +13560,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Open %{type}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Open (expanded)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -17039,6 +17099,11 @@ msgstr ""
 msgid "Section title"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sections of %{type}"
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
@@ -17647,6 +17712,11 @@ msgstr ""
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "Shown after the number"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shown as"
 msgstr ""
 
 #: lib/kiln_cms_web/live/site_sso_live.ex
@@ -18313,6 +18383,11 @@ msgstr ""
 msgid "Starting…"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Starts"
+msgstr ""
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/organize_live.ex
@@ -18690,6 +18765,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "TXT value"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Tab: one tab of the type's tab set"
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -22822,6 +22902,7 @@ msgstr ""
 msgid "Why this was blocked"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Width"

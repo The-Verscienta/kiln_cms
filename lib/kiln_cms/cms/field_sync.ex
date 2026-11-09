@@ -18,8 +18,9 @@ defmodule KilnCMS.CMS.FieldSync do
         "format": "kiln-field-definitions",
         "version": 1,
         "owners": [
-          {"kind": "compiled", "type": "page", "fields": [ … ]},
-          {"kind": "dynamic", "type": "recipe", "definition": { … }, "fields": [ … ]}
+          {"kind": "compiled", "type": "page", "fields": [ … ], "sections": [ … ]},
+          {"kind": "dynamic", "type": "recipe", "definition": { … }, "fields": [ … ],
+           "sections": [ … ]}
         ]
       }
 
@@ -31,6 +32,16 @@ defmodule KilnCMS.CMS.FieldSync do
   leaves out takes the attribute's default, so a file means the same thing to
   every environment. Role and membership field *grants* are not field
   attributes — they live on roles and are not part of this document.
+
+  An owner's `"sections"` lists how its sections are laid out in the editor
+  (`KilnCMS.CMS.FieldSection`, #2280): `name`, `display` and `initially`, one
+  entry per stored layout of a section some field of the owner carries. A
+  section with no entry is the default accordion. The key is optional on
+  import: an owner without it (a file written before layouts existed) leaves
+  that owner's layouts as they are, even with `prune?: true`; an owner with
+  it, `[]` included, declares all its layouts. A file this release writes
+  cannot be imported by a release that predates #2280: every field carries
+  `"width"`, a key such a release refuses as unknown.
 
   ## Import
 
@@ -59,6 +70,8 @@ defmodule KilnCMS.CMS.FieldSync do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Changes.SyncFieldValues
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.FieldSection
+  alias KilnCMS.CMS.SectionLayouts
   alias KilnCMS.CMS.TypeDefinition
   alias KilnCMS.Repo
 
@@ -68,6 +81,7 @@ defmodule KilnCMS.CMS.FieldSync do
   @owner_keys ~w(content_type type_definition_id link_of_id group_of_id)a
   @rules ~w(visible_when required_when)
   @child_lists [{"link_fields", :reference}, {"group_fields", :group}]
+  @section_owner_keys ~w(content_type type_definition_id)a
 
   @type report :: map()
 
@@ -89,6 +103,20 @@ defmodule KilnCMS.CMS.FieldSync do
     |> Ash.Resource.Info.action(:create)
     |> Map.fetch!(:accept)
     |> Enum.reject(&(&1 in @owner_keys))
+    |> Enum.map(&Atom.to_string/1)
+    |> Enum.sort()
+  end
+
+  @doc """
+  The section-layout attributes a document carries (strings), read from the
+  `KilnCMS.CMS.FieldSection` create action like `field_keys/0`.
+  """
+  @spec section_keys() :: [String.t()]
+  def section_keys do
+    FieldSection
+    |> Ash.Resource.Info.action(:create)
+    |> Map.fetch!(:accept)
+    |> Enum.reject(&(&1 in @section_owner_keys))
     |> Enum.map(&Atom.to_string/1)
     |> Enum.sort()
   end
@@ -119,16 +147,23 @@ defmodule KilnCMS.CMS.FieldSync do
     with :ok <- authorize(scope) do
       types = CMS.list_type_definitions!(scope)
       fields = CMS.list_field_definitions!(scope)
+      sections = CMS.list_field_sections!(scope)
 
       children = Enum.group_by(fields, &FieldDefinition.parent_id/1)
       top = Enum.filter(fields, &is_nil(FieldDefinition.parent_id(&1)))
 
+      compiled_sections = compiled_by_type(sections)
+
       compiled =
         top
-        |> Enum.reject(&(is_nil(&1.content_type) or FieldDefinition.orphaned?(&1)))
-        |> Enum.group_by(&Atom.to_string(&1.content_type))
+        |> compiled_by_type()
         |> Enum.map(fn {type, fs} ->
-          %{"kind" => "compiled", "type" => type, "fields" => field_docs(fs, children)}
+          %{
+            "kind" => "compiled",
+            "type" => type,
+            "fields" => field_docs(fs, children),
+            "sections" => section_docs(Map.get(compiled_sections, type, []), fs)
+          }
         end)
 
       dynamic =
@@ -139,13 +174,35 @@ defmodule KilnCMS.CMS.FieldSync do
             "kind" => "dynamic",
             "type" => type.name,
             "definition" => attrs_doc(type, type_keys()),
-            "fields" => field_docs(fs, children)
+            "fields" => field_docs(fs, children),
+            "sections" =>
+              sections |> Enum.filter(&(&1.type_definition_id == type.id)) |> section_docs(fs)
           }
         end)
 
       owners = Enum.sort_by(compiled ++ dynamic, &{&1["kind"], &1["type"]})
       {:ok, %{"format" => @format, "version" => @version, "owners" => owners}}
     end
+  end
+
+  # Rows of a compiled type that still exists, by its name. A field's and a
+  # section's owner columns are the same, so `FieldDefinition.orphaned?/1`
+  # judges both.
+  defp compiled_by_type(rows) do
+    rows
+    |> Enum.reject(&(is_nil(&1.content_type) or FieldDefinition.orphaned?(&1)))
+    |> Enum.group_by(&Atom.to_string(&1.content_type))
+  end
+
+  # Only the layouts of sections a field of the owner still carries: a row a
+  # renamed or deleted section left behind lays nothing out.
+  defp section_docs(sections, fields) do
+    carried = MapSet.new(fields, & &1.section)
+
+    sections
+    |> Enum.filter(&MapSet.member?(carried, &1.name))
+    |> Enum.sort_by(& &1.name)
+    |> Enum.map(&attrs_doc(&1, section_keys()))
   end
 
   defp field_docs(fields, children) do
@@ -268,10 +325,15 @@ defmodule KilnCMS.CMS.FieldSync do
        when kind in ["compiled", "dynamic"] and is_binary(type) and is_list(fields) do
     {def_result, def_problems} = parse_definition(kind, owner["definition"], path)
     {fields, problems} = parse_fields(fields, "#{path}.#{type}", [])
+    {sections, section_problems} = parse_sections(owner["sections"], "#{path}.#{type}")
 
-    case def_problems ++ problems do
-      [] -> {:ok, %{kind: kind, type: type, definition: def_result, fields: fields}}
-      list -> {:error, list}
+    case def_problems ++ problems ++ section_problems do
+      [] ->
+        {:ok,
+         %{kind: kind, type: type, definition: def_result, fields: fields, sections: sections}}
+
+      list ->
+        {:error, list}
     end
   end
 
@@ -368,6 +430,38 @@ defmodule KilnCMS.CMS.FieldSync do
     end
   end
 
+  # No `"sections"` key: a file from before layouts existed. It says nothing
+  # about them, so the import leaves them alone (`nil`, not `[]`).
+  defp parse_sections(nil, _path), do: {nil, []}
+
+  defp parse_sections(sections, path) when is_list(sections) do
+    results = Enum.map(sections, &parse_section(&1, "#{path}.sections"))
+    parsed = for {:ok, section} <- results, do: section
+
+    dups =
+      parsed
+      |> Enum.frequencies_by(& &1["name"])
+      |> Enum.filter(fn {_name, n} -> n > 1 end)
+      |> Enum.map(fn {name, _n} -> "#{path}.sections: section #{inspect(name)} appears twice" end)
+
+    {parsed, Enum.flat_map(results, &section_problems/1) ++ dups}
+  end
+
+  defp parse_sections(_other, path), do: {[], ["#{path}: \"sections\" must be a list"]}
+
+  defp section_problems({:error, problems}), do: problems
+  defp section_problems({:ok, _section}), do: []
+
+  defp parse_section(%{"name" => name} = section, path) when is_binary(name) do
+    case Map.keys(section) -- section_keys() do
+      [] -> {:ok, fill(section, FieldSection, section_keys())}
+      unknown -> {:error, ["#{path}.#{name}: unknown key(s) #{Enum.join(unknown, ", ")}"]}
+    end
+  end
+
+  defp parse_section(_other, path),
+    do: {:error, ["#{path}: a section must be an object with a \"name\""]}
+
   # A key the file leaves out takes the attribute's default.
   defp fill(map, resource, keys) do
     Map.new(keys, fn key ->
@@ -393,6 +487,7 @@ defmodule KilnCMS.CMS.FieldSync do
   defp plan(owners, scope, prune?) do
     types = Map.new(CMS.list_type_definitions!(scope), &{&1.name, &1})
     fields = CMS.list_field_definitions!(scope)
+    sections = CMS.list_field_sections!(scope)
     by_children = Enum.group_by(fields, &FieldDefinition.parent_id/1)
 
     type_ops = Enum.flat_map(owners, &type_op(&1, types))
@@ -404,7 +499,60 @@ defmodule KilnCMS.CMS.FieldSync do
         top
       end)
 
-    type_ops ++ field_ops
+    section_ops =
+      Enum.flat_map(owners, fn owner ->
+        section_ops(owner, existing_owned(owner, types, sections), prune?)
+      end)
+
+    type_ops ++ field_ops ++ section_ops
+  end
+
+  # An owner without a `"sections"` key declares no layouts: none is touched.
+  defp section_ops(%{sections: nil}, _existing, _prune?), do: []
+
+  # Matched by name within the owner, as fields are. The path cannot collide
+  # with a field's: a field name never holds a `/`.
+  defp section_ops(owner, existing, prune?) do
+    by_name = Map.new(existing, &{&1.name, &1})
+    file_names = MapSet.new(owner.sections, & &1["name"])
+    path = &"#{owner.type}/section/#{&1}"
+    keys = section_keys() -- ["name"]
+
+    present =
+      for section <- owner.sections do
+        here = path.(section["name"])
+
+        case Map.get(by_name, section["name"]) do
+          nil ->
+            %{
+              op: :create,
+              kind: :section,
+              path: here,
+              attrs: section,
+              changes: %{},
+              existing: nil
+            }
+
+          record ->
+            op_for(:section, here, section, record, diff(record, section, keys))
+        end
+        |> Map.put(:owner, owner.type)
+      end
+
+    extra =
+      for record <- existing, not MapSet.member?(file_names, record.name) do
+        %{
+          op: if(prune?, do: :delete, else: :untouched),
+          kind: :section,
+          path: path.(record.name),
+          attrs: nil,
+          changes: %{},
+          existing: record,
+          owner: owner.type
+        }
+      end
+
+    present ++ extra
   end
 
   defp type_op(%{kind: "dynamic", definition: %{} = definition, type: type}, types) do
@@ -422,21 +570,21 @@ defmodule KilnCMS.CMS.FieldSync do
 
   defp type_op(_owner, _types), do: []
 
-  defp existing_top(%{kind: "compiled", type: type}, _types, fields) do
-    for f <- fields,
-        is_nil(FieldDefinition.parent_id(f)),
-        is_atom(f.content_type) and not is_nil(f.content_type),
-        Atom.to_string(f.content_type) == type,
-        do: f
+  defp existing_top(owner, types, fields),
+    do: existing_owned(owner, types, Enum.filter(fields, &is_nil(FieldDefinition.parent_id(&1))))
+
+  # The stored rows (fields or section layouts) the owner holds.
+  defp existing_owned(%{kind: "compiled", type: type}, _types, rows) do
+    for row <- rows,
+        is_atom(row.content_type) and not is_nil(row.content_type),
+        Atom.to_string(row.content_type) == type,
+        do: row
   end
 
-  defp existing_top(%{kind: "dynamic", type: type}, types, fields) do
+  defp existing_owned(%{kind: "dynamic", type: type}, types, rows) do
     case Map.get(types, type) do
-      nil ->
-        []
-
-      %{id: id} ->
-        for f <- fields, f.type_definition_id == id, is_nil(FieldDefinition.parent_id(f)), do: f
+      nil -> []
+      %{id: id} -> for row <- rows, row.type_definition_id == id, do: row
     end
   end
 
@@ -553,6 +701,9 @@ defmodule KilnCMS.CMS.FieldSync do
   # Does this op drop values a record holds?
   defp guard(op), do: Map.put(op, :blocked, data_loss(op))
 
+  # A layout holds no values.
+  defp data_loss(%{kind: :section}), do: nil
+
   defp data_loss(%{op: :delete, existing: record}),
     do: if(holds_data?(record), do: "deleting it drops the values records hold", else: nil)
 
@@ -650,10 +801,35 @@ defmodule KilnCMS.CMS.FieldSync do
           do: {path, existing}
 
     with {:ok, ids} <- run_phase(ops, :types, ids, opts),
+         {:ok, ids} <- run_phase(ops, :sections, ids, opts),
          {:ok, ids} <- run_phase(ops, :fields, ids, opts),
-         {:ok, ids} <- run_phase(ops, :rules, ids, opts) do
-      run_phase(ops, :deletes, ids, opts)
+         {:ok, ids} <- run_phase(ops, :rules, ids, opts),
+         {:ok, ids} <- run_phase(ops, :deletes, ids, opts) do
+      drop_section_layouts(ops, ids, opts)
     end
+  end
+
+  # A deleted field that was the last of its section takes the section's
+  # layout with it, as a delete in the fields admin does. Read after every
+  # delete has run, so a section op's own delete is already done.
+  defp drop_section_layouts(ops, ids, opts) do
+    ops
+    |> Enum.filter(
+      &match?(%{kind: :field, op: :delete, existing: %{section: s}} when is_binary(s), &1)
+    )
+    |> Enum.flat_map(fn %{existing: record} ->
+      case SectionLayouts.owner_of(record) do
+        nil -> []
+        owner -> [{owner, record.section}]
+      end
+    end)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Enum.reduce_while({:ok, ids}, fn {owner, names}, {:ok, ids} ->
+      case SectionLayouts.prune(owner, [only: names] ++ opts) do
+        :ok -> {:cont, {:ok, ids}}
+        {:error, error} -> {:halt, {:error, [%{path: "sections", messages: messages(error)}]}}
+      end
+    end)
   end
 
   defp run_phase(ops, phase, ids, opts) do
@@ -673,11 +849,17 @@ defmodule KilnCMS.CMS.FieldSync do
   # A field other fields' rules read cannot go first: delete the readers.
   defp order(ops, :deletes),
     do:
-      Enum.sort_by(ops, &(is_nil(&1.existing.visible_when) and is_nil(&1.existing.required_when)))
+      Enum.sort_by(
+        ops,
+        &(is_nil(Map.get(&1.existing, :visible_when)) and
+            is_nil(Map.get(&1.existing, :required_when)))
+      )
 
   defp order(ops, _phase), do: ops
 
   defp in_phase?(%{kind: :type, op: op}, :types), do: op in [:create, :update]
+  defp in_phase?(%{kind: :section, op: op}, :sections), do: op in [:create, :update]
+  defp in_phase?(%{kind: :section, op: :delete}, :deletes), do: true
   defp in_phase?(%{kind: :field, op: op}, :fields), do: op in [:create, :update]
   defp in_phase?(%{kind: :field, op: op} = o, :rules), do: op in [:create, :update] and rules?(o)
   defp in_phase?(%{kind: :field, op: :delete}, :deletes), do: true
@@ -737,6 +919,33 @@ defmodule KilnCMS.CMS.FieldSync do
     with {:ok, field} <- CMS.update_field_definition(record, params, opts) do
       {:ok, Map.put(ids, op.path, field)}
     end
+  end
+
+  defp run_op(
+         %{kind: :section, op: :create, attrs: attrs, owner: type} = op,
+         :sections,
+         ids,
+         opts
+       ) do
+    owner =
+      case Map.get(ids, "type:#{type}") do
+        %{id: id} -> %{"type_definition_id" => id}
+        nil -> %{"content_type" => type}
+      end
+
+    with {:ok, section} <- CMS.create_field_section(Map.merge(attrs, owner), opts) do
+      {:ok, Map.put(ids, op.path, section)}
+    end
+  end
+
+  defp run_op(%{kind: :section, op: :update, existing: record} = op, :sections, ids, opts) do
+    with {:ok, section} <- CMS.update_field_section(record, wanted(op.changes), opts) do
+      {:ok, Map.put(ids, op.path, section)}
+    end
+  end
+
+  defp run_op(%{kind: :section, op: :delete, existing: record}, :deletes, ids, opts) do
+    with :ok <- CMS.destroy_field_section(record, opts), do: {:ok, ids}
   end
 
   defp run_op(%{kind: :field, op: :delete, existing: record}, :deletes, ids, opts) do
@@ -821,6 +1030,9 @@ defmodule KilnCMS.CMS.FieldSync do
 
     Enum.join(lines ++ [summary] ++ blocked ++ errors, "\n")
   end
+
+  defp line(%{op: :create, kind: :section, path: path, attrs: attrs}),
+    do: "+ #{path} (#{attrs["display"]})"
 
   defp line(%{op: :create, path: path, attrs: attrs}),
     do: "+ #{path} (#{attrs["field_type"] || "type"})"

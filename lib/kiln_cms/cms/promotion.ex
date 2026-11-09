@@ -342,6 +342,17 @@ defmodule KilnCMS.CMS.Promotion do
       [to_string(target.type), Ecto.UUID.dump!(definition.id)]
     )
 
+    # The type's section layouts (#2280) are keyed by the same owner, so they
+    # follow its fields; left behind they'd describe an archived definition.
+    Repo.query!(
+      """
+      UPDATE field_sections
+      SET content_type = $1, type_definition_id = NULL
+      WHERE type_definition_id = $2
+      """,
+      [to_string(target.type), Ecto.UUID.dump!(definition.id)]
+    )
+
     :ok
   end
 

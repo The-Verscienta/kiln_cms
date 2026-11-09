@@ -1025,6 +1025,22 @@ defmodule KilnCMS.CMS do
         args: [{:optional, :today}]
     end
 
+    # How each section of a type's custom fields is laid out in the editor
+    # (#2280): accordion, fieldset or tab. Presentation only — the fields'
+    # `section` string is the grouping itself.
+    resource KilnCMS.CMS.FieldSection do
+      define :list_field_sections, action: :read
+      define :field_sections_for, action: :for_type, args: [:content_type]
+
+      define :field_sections_for_definition,
+        action: :for_definition,
+        args: [:type_definition_id]
+
+      define :create_field_section, action: :create
+      define :update_field_section, action: :update
+      define :destroy_field_section, action: :destroy
+    end
+
     # Admin-defined (dynamic) content types — rows, not modules (decision D17,
     # `docs/dynamic-content-types-plan.md`). Their schema is FieldDefinition
     # rows scoped by `type_definition_id`; their entries live in the shared

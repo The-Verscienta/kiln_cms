@@ -303,6 +303,13 @@ defmodule KilnCMS.SchemaExport do
         tenant: org_id
       )
     )
+    |> put_section_displays(
+      CMS.field_sections_for_definition!(definition.id,
+        actor: system(),
+        authorize_with: :error,
+        tenant: org_id
+      )
+    )
     |> put_reverse(org_id)
   end
 
@@ -312,7 +319,21 @@ defmodule KilnCMS.SchemaExport do
       :field_definitions,
       CMS.field_definitions_for!(type, actor: system(), authorize_with: :error, tenant: org_id)
     )
+    |> put_section_displays(
+      CMS.field_sections_for!(type, actor: system(), authorize_with: :error, tenant: org_id)
+    )
     |> put_reverse(org_id)
+  end
+
+  # How each section of the type is laid out (#2280), by name — only the ones
+  # that are not the default accordion, which is all the export reports.
+  defp put_section_displays(ct, sections) do
+    displays =
+      for %{display: display, name: name} <- sections, display != :accordion, into: %{} do
+        {name, to_string(display)}
+      end
+
+    Map.put(ct, :section_displays, displays)
   end
 
   # The reverse fields records of this type show (R4): the other side of
@@ -485,7 +506,8 @@ defmodule KilnCMS.SchemaExport do
         "title" => %{"type" => ["string", "null"]},
         "slug" => %{"type" => ["string", "null"]},
         "locale" => %{"type" => ["string", "null"]},
-        "custom_fields" => custom_fields_schema(ct.field_definitions),
+        "custom_fields" =>
+          custom_fields_schema(ct.field_definitions, Map.get(ct, :section_displays, %{})),
         "blocks" => %{"type" => "array", "items" => JsonSchema.block_ref()},
         # Optional: present only when the document sets a robots flag (#2256).
         "robots" => %{
@@ -519,7 +541,7 @@ defmodule KilnCMS.SchemaExport do
   #
   # A private field (#2044) is not described at all: it is never in a
   # delivered payload (`KilnCMS.CMS.PrivateFields`), and this schema is public.
-  defp custom_fields_schema(definitions) do
+  defp custom_fields_schema(definitions, section_displays) do
     definitions = Enum.reject(definitions, &(Map.get(&1, :private) == true))
 
     %{
@@ -528,12 +550,13 @@ defmodule KilnCMS.SchemaExport do
         "Admin-defined custom fields (`KilnCMS.CMS.FieldDefinition`). Open: a " <>
           "point-in-time read (`?as_of=`) serves the values stored at that " <>
           "instant, which may include fields since removed from the registry.",
-      "properties" => Map.new(definitions, &{&1.name, custom_field_schema(&1)}),
+      "properties" => Map.new(definitions, &{&1.name, custom_field_schema(&1, section_displays)}),
       "additionalProperties" => true
     }
   end
 
-  defp custom_field_schema(definition) do
+  # A link field or group sub-field has no section, so it reads no layout.
+  defp custom_field_schema(definition, section_displays \\ %{}) do
     definition.field_type
     |> base_custom_field_schema(definition)
     |> put_constraints(definition)
@@ -542,7 +565,8 @@ defmodule KilnCMS.SchemaExport do
     |> put_inverse(definition)
     |> put_link_fields(definition)
     |> put_localization(Map.get(definition, :localization))
-    |> put_section(Map.get(definition, :section))
+    |> put_section(Map.get(definition, :section), section_displays)
+    |> put_width(Map.get(definition, :width))
     |> put_widget(definition)
   end
 
@@ -659,10 +683,25 @@ defmodule KilnCMS.SchemaExport do
 
   # The editor heading a field is filed under, for a client that builds its
   # own form from the schema (absent when the field has none).
-  defp put_section(schema, section) when is_binary(section),
-    do: Map.put(schema, "x-kiln-section", section)
+  # With `x-kiln-section-display` beside it when that section is laid out as
+  # a `fieldset` or a `tab` (#2280); absent for the default accordion.
+  defp put_section(schema, section, displays) when is_binary(section) do
+    schema = Map.put(schema, "x-kiln-section", section)
 
-  defp put_section(schema, _none), do: schema
+    case Map.fetch(displays, section) do
+      {:ok, display} -> Map.put(schema, "x-kiln-section-display", display)
+      :error -> schema
+    end
+  end
+
+  defp put_section(schema, _none, _displays), do: schema
+
+  # How much of its section's row the field's input takes in the editor
+  # (#2280): absent for the default, the whole row.
+  defp put_width(schema, width) when width in [:half, :third],
+    do: Map.put(schema, "x-kiln-width", to_string(width))
+
+  defp put_width(schema, _full), do: schema
 
   # The editor input a field was set to (#2284), for a client building its
   # own form: absent while the field uses its type's default. Only while the

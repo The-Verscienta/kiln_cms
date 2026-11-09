@@ -580,6 +580,93 @@ defmodule KilnCMS.SchemaExportTest do
     end
   end
 
+  describe "editor layout annotations (#2280)" do
+    test "a non-full width and a fieldset or tab section are reported; defaults are not",
+         %{actor: actor, org: org} do
+      for attrs <- [
+            %{name: "dose", label: "Dose", section: "Clinical", width: :half},
+            %{name: "route", label: "Route", section: "Clinical", width: :third},
+            %{name: "note", label: "Note", section: "Notes"},
+            %{name: "loose", label: "Loose"}
+          ] do
+        CMS.create_field_definition!(Map.put(attrs, :content_type, :page),
+          actor: actor,
+          tenant: org
+        )
+      end
+
+      CMS.create_field_section!(%{content_type: :page, name: "Clinical", display: :tab},
+        actor: actor,
+        tenant: org
+      )
+
+      CMS.create_field_section!(%{content_type: :page, name: "Notes", initially: :collapsed},
+        actor: actor,
+        tenant: org
+      )
+
+      fields = custom_fields(org, "content_page")["properties"]
+
+      assert fields["dose"]["x-kiln-width"] == "half"
+      assert fields["dose"]["x-kiln-section-display"] == "tab"
+      assert fields["route"]["x-kiln-width"] == "third"
+      assert fields["route"]["x-kiln-section-display"] == "tab"
+
+      assert fields["note"]["x-kiln-section"] == "Notes"
+      refute Map.has_key?(fields["note"], "x-kiln-section-display")
+      refute Map.has_key?(fields["note"], "x-kiln-width")
+      refute Map.has_key?(fields["loose"], "x-kiln-section-display")
+    end
+
+    test "a dynamic type's fieldset is reported, and another site's layout is not",
+         %{actor: actor, org: org} do
+      name = type_name()
+      type = CMS.create_type_definition!(%{name: name, label: "W"}, actor: actor, tenant: org)
+
+      CMS.create_field_definition!(
+        %{type_definition_id: type.id, name: "size", label: "Size", section: "Specs"},
+        actor: actor,
+        tenant: org
+      )
+
+      CMS.create_field_section!(
+        %{type_definition_id: type.id, name: "Specs", display: :fieldset},
+        actor: actor,
+        tenant: org
+      )
+
+      CMS.create_field_definition!(
+        %{content_type: :page, name: "dose", label: "Dose", section: "Clinical"},
+        actor: actor,
+        tenant: org
+      )
+
+      CMS.create_field_section!(%{content_type: :page, name: "Clinical", display: :tab},
+        actor: actor,
+        tenant: org("sx-other")
+      )
+
+      def_name = SchemaExport.content_def_name(name)
+
+      assert custom_fields(org, def_name)["properties"]["size"]["x-kiln-section-display"] ==
+               "fieldset"
+
+      refute Map.has_key?(
+               custom_fields(org, "content_page")["properties"]["dose"],
+               "x-kiln-section-display"
+             )
+    end
+
+    test "a refused layout read fails the export rather than dropping the annotation",
+         %{org: org} do
+      assert_raise Ash.Error.Forbidden, fn ->
+        SchemaExport.with_actor(KilnCMS.SystemActor.new(:firing), fn ->
+          SchemaExport.json_schema(org_id: org.id, types: ["page"])
+        end)
+      end
+    end
+  end
+
   describe "a field's editor widget (#2284)" do
     test "x-kiln-widget names a chosen widget and is absent for the default",
          %{actor: actor, org: org} do

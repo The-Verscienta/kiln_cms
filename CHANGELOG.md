@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (new column `field_definitions.width`, new table `field_sections`). Field sync files exported from now on carry `width`, which builds from before this change refuse.** Rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#field-layout-upgrade))
+
 - **Run `mix ash.migrate` (new nullable `field_definitions.widget`, no backfill). Field-sync files now carry `"widget"`, which an older release's import refuses: upgrade the target first.** Rolling the pin back is safe.
   ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets-upgrade))
 
@@ -158,6 +161,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
 
 ### Added
+
+- **Admins can lay out a type's custom fields as tabs, fieldsets or accordions, and set a field's width (full, half, a third), at Fields → Sections of.**
+  Keyboard-accessible tabs in the editor; `GET /api/schema` adds `x-kiln-section-display` and `x-kiln-width`. Guide: [docs/extending-content.md](docs/extending-content.md#lay-out-custom-fields-as-tabs-fieldsets-or-columns).
+  ([long form](docs/changelog/unreleased.md#field-layout))
 
 - **Admins can choose each custom field's editor input: radios or buttons for a select, checkboxes, one-line text, a reference dropdown, or a plugin type's own (`widget`).**
   Editor-only; nothing stored or delivered changes. Guide: [docs/extending-content.md](docs/extending-content.md#choose-how-editors-fill-in-a-field).
