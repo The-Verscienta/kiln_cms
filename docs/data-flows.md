@@ -34,12 +34,14 @@ your deployment.
 | Display name | `users.name` | Yes (optional) | Shown to other editors (presence) and as the JSON-LD author byline. Blank by default. |
 | RBAC role | `users.role` | No | `:admin` / `:editor` / `:viewer`. |
 | Notification preferences | `users.notify_on_*` | No | Per-user opt-out (issue #46): review requested, published, returned to draft, comments, and new registrations (`notify_on_registration`, #2251, offered to site admins). All are included in the self-export and reset to on by erasure. |
-| In-app notifications | `notifications` | Yes | One row per recipient (#1320): event, content title, a comment excerpt, and the acting user's display name (`actor_name`) plus `actor_id`. Readable only by the recipient — no admin bypass. Deleted with the recipient's account row; `actor_name`/`actor_id` nulled when the *actor* is erased. No retention purge yet. A "registrations waiting" row (#2251) is titled with the site's name and carries no applicant data: no address, name, excerpt or actor. |
+| In-app notifications | `notifications` | Yes | One row per recipient (#1320): event, content title, a comment excerpt, and the acting user's display name (`actor_name`) plus `actor_id`. Readable only by the recipient — no admin bypass. Deleted when the recipient is erased (#2514); `actor_name`/`actor_id` nulled when the *actor* is erased. No retention purge yet. A "registrations waiting" row (#2251) is titled with the site's name and carries no applicant data: no address, name, excerpt or actor. |
 | Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry; for a session, browser and OS family, last use and the site it signed in on; for a revoked one, why. See [Auth tokens](#auth-token-retention-218). |
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
 | Security log | `security_events` | Yes | Admin-only audit log (#2241): the acting user's id and an **email snapshot** (known accounts only), the target, the **raw IP address** and **user agent** of the request, and a short allowlisted metadata map with no secrets. Kept 365 days by default (per-site setting, `0` keeps forever; then raw IPs are kept indefinitely). Scrubbed on erasure, purged on retention and by the staging scrub. See [Security log](security-events.md). |
 | Site invitations | `invitations` | Yes | One row per address a platform admin invited to a site (#2135): the **email address**, the site, the tier and custom role, who sent it, when it expires and how often it was sent, and the SHA-256 of the link's token (never the token). The person may have no account. Removed when the invitation is accepted or revoked; otherwise usable for 7 days and deleted by the daily prune 30 days after that, so an address is kept at most about 37 days. Not touched by erasure (see below); deleted by the staging scrub. |
 | Recorded search queries | `search_queries` | Possibly | Query text only — **no** actor/IP. See *Search query retention (#213) + disclosure (#220)* below. |
+| Web Push subscriptions | `push_subscriptions` | Yes | One row per browser a user turned push notifications on in: the push service endpoint and its keys, a coarse browser label, and which VAPID key it was made against. Deleted on erasure (#2514). |
+| Saved views | `saved_views` | Pseudonymous | A named content-list filter and its owner's id. A private view is deleted on erasure (#2514); a shared one is the team's and stays, pointing at the anonymized account. |
 | Consumer audiences | `users.audiences`, `org_memberships.audiences` | No | Which gated content a reader may see. Granted by an admin or by an active paid membership. Cleared on erasure. |
 | Paid memberships | `billing_memberships` | Pseudonymous | Status, period end, and the payment provider's customer/subscription ids. See [Paid memberships](memberships.md). |
 | Entitlement audit trail | `billing_membership_events` | Pseudonymous | Status transitions and the audience delta, with the causing provider event id. `actor_id` nulled on erasure. |
@@ -305,9 +307,20 @@ request arrived on. Programmatically this is
 ### Erasure (GDPR Art. 17) — anonymization
 
 Erasure is implemented as **anonymization**, not row deletion, so it reconciles
-with audit-retention obligations (below). An **admin** runs
-`KilnCMS.Accounts.anonymize_user(user, actor: admin)` (the `:anonymize` action).
-It:
+with audit-retention obligations (below). It is the `:anonymize` action, and it
+runs in two ways:
+
+- **A platform admin** runs `KilnCMS.Accounts.anonymize_user(user, actor: admin)`
+  ([Removing an account](account-administration.md#removing-an-account)).
+- **Rejecting a registration** (#2514), on a site whose **When you reject
+  someone** setting is **Erase the account if the email address was never
+  confirmed**, erases an applicant who never confirmed their address and whose
+  account is nothing but that application. A standing site or platform admin
+  rejects; the erasure runs in the same transaction as the `:registrations`
+  system actor, which may erase that one account and no other
+  ([Erase unconfirmed applicants you reject](account-administration.md#erase-unconfirmed-applicants-you-reject)).
+
+Either way, it:
 
 1. Replaces the email with a unique non-routable tombstone
    (`anonymized-<id>@deleted.invalid`) and clears the display name.
@@ -322,7 +335,11 @@ It:
    *who*.
 7. **Clears `audiences`**, so a tombstoned account keeps no read access. (Before
    #337 Phase 2 this was missed: credentials were destroyed while access
-   survived.)
+   survived.) Since #2514 it is cleared in its own statement: before, the
+   cleared value was dropped when the caller's copy of the account already
+   read `[]` while the stored row had audiences (granted by a billing
+   recompute after that copy was read), so the stored audiences survived until
+   the next recompute.
 8. **Cancels every paid membership** and drops the stored provider customer and
    subscription ids. Without this, a late webhook or the nightly reconcile would
    recompute entitlements and re-grant access to the erased account.
@@ -338,6 +355,14 @@ It:
     it nulls `target_id`; and it empties `metadata` on every event it touches. The
     event itself (type and time) stays. If any site's sweep fails, the erasure
     raises so it can be retried. See [Security log](security-events.md#privacy-ip-addresses-erasure-and-staging).
+11. **Deletes its Web Push subscriptions** (#2514): each is a way to reach the
+    person's device, and nothing needs it once they are gone.
+12. **Deletes its private saved views** (#2514), on every site. Shared views
+    are the team's filters and stay, as authored content does; their owner is
+    the anonymized account, which names nobody.
+13. **Deletes the notifications addressed to it** (#2514), on every site: its
+    own inbox, which nobody can sign in to read any more. If any site's delete
+    fails, the erasure raises so it can be retried.
 
 Erasure works on an account, and an invitation is not one: an invitation to
 the person's address is left as it is. To remove one, revoke it on **Team**

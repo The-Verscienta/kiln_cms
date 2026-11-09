@@ -91,6 +91,11 @@ defmodule KilnCMS.Accounts.ApiKey do
 
       validate KilnCMS.Accounts.Validations.DraftWriteKey
 
+      # The owner's row first, refusing an erased account (#2514). The foreign
+      # key alone would wait for an erasure of a rejected registration and then
+      # mint a key for the tombstone.
+      change KilnCMS.Accounts.Changes.LockAccount
+
       change {AshAuthentication.Strategy.ApiKey.GenerateApiKey,
               prefix: @prefix, hash: :api_key_hash}
 
@@ -119,6 +124,11 @@ defmodule KilnCMS.Accounts.ApiKey do
       # The same mint-time rules as `:create`: the owner is re-checked, so an
       # owner promoted to editor since the original mint cannot rotate.
       validate KilnCMS.Accounts.Validations.DraftWriteKey
+
+      # The owner's row first, refusing an erased account (#2514). The foreign
+      # key alone would wait for an erasure of a rejected registration and then
+      # mint a key for the tombstone.
+      change KilnCMS.Accounts.Changes.LockAccount
 
       change {AshAuthentication.Strategy.ApiKey.GenerateApiKey,
               prefix: @prefix, hash: :api_key_hash}

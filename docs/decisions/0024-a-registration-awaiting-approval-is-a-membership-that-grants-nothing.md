@@ -1,7 +1,8 @@
 # 0024. A registration awaiting approval is a membership that grants nothing
 
 - **Status** — accepted (2026-11-09). Part one of three, extended by part two
-  (who is told, below); part three extends it further.
+  (who is told, below) and part three (invitations, a site's own single
+  sign-on, and erasing unconfirmed rejected accounts).
 - **References** — [#2251](https://github.com/The-Verscienta/kiln_cms/issues/2251),
   building on #336 (memberships), #419 (per-site tiers) and
   [ADR 0018](0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md)
@@ -178,10 +179,55 @@ may pay there as before, and becomes a viewer member of that site only.
   registration created the account (a password sign-up, or a provisioned
   single sign-on account), for the erasure that follows.
 
+## Part three (c2): erasing unconfirmed rejected accounts
+
+- **Unconfirmed only.** `site_registration.rejected_accounts` is `keep` (the
+  default) or `erase_unconfirmed`. With the second, rejecting an applicant
+  whose address was **never confirmed** erases the account
+  (`User.:anonymize`) in the rejection's transaction. A confirmed rejection is
+  always kept: it is what stops the same person registering on the site
+  again, and erasing it would free the address. Nobody is mailed, since an
+  unconfirmed applicant never is.
+- **Only an account that is nothing but the application**
+  (`Accounts.Registrations.Erasure`): the registration created it
+  (`created_account`), it is not erased, its standing role is viewer, it holds
+  no live grant and no audiences, it has no other membership of any status,
+  and nothing references it — no paid membership, API key, content, version,
+  comment, task, media item, release, invitation sent, consent or logged
+  event. The tables are a static list; a test classifies every foreign key to
+  `users` against it. Anything else, an unreadable setting included, keeps
+  the account.
+- **Asked for, by a standing admin.** The action erases only with
+  `erase: true`, which the console sends only when its confirmation said the
+  account would be erased. A temporary admin may reject, and the account is
+  kept.
+- **A user-row lock, not a check alone.** Under READ COMMITTED the check
+  cannot see a membership another transaction is creating. The rejection
+  takes the account's `users` row `FOR UPDATE` (only when it will try to
+  erase) before it locks the membership; every membership create,
+  `Billing.Membership` `:start`/`:comp`, `ApiKey` `:create`, the entitlement
+  recompute and the three updates that confirm an account take it
+  `FOR KEY SHARE` first (`Accounts.AccountLock`). Whichever locks first goes
+  first: an erasure that waited sees what the other committed (a confirmation
+  included) and keeps; a writer that waited sees the tombstone and is
+  refused. Lock order everywhere: the account, then the membership.
+- **The system actor, guarded.** The rejecting admin may be a site admin, who
+  may not erase accounts, so the erasure runs as
+  `SystemActor.new(:registrations)`, newly admitted to `:anonymize`.
+  `Changes.GuardRegistrationErasure` holds that actor to the one erasure: the
+  context must name a membership of the account that is `:rejected` with the
+  `decided_at` this rejection wrote, and the check must pass under the lock.
+- **One transaction.** A failed erasure rolls the rejection back. The event
+  is recorded after the erasure: `registration_rejected` with
+  `outcome: erased` and no target, or `outcome: kept` naming the applicant.
+- **Erasure deletes more** (every erasure, not only these): the account's Web
+  Push subscriptions, its private saved views and the notifications
+  addressed to it. Shared saved views stay, like authored content.
+
 ## Not in this part
 
-- Erasing rejected accounts (part three, c2), and queueing an existing
-  account the first time a site's own single sign-on admits it.
+- Queueing an existing account the first time a site's own single sign-on
+  admits it.
 - Recording a membership for every registration whatever the setting, and
   expiring old pending rows (follow-up issues).
 
@@ -209,4 +255,10 @@ may pay there as before, and becomes a viewer member of that site only.
   older node provisions single sign-on accounts as active viewers. New values
   an older node may read: the `registration_queued` method `site_sso` and the
   `registration_approved` vias `invitation` and `added`, all strings in event
+  metadata.
+- Part three (c2) adds `site_registration.rejected_accounts`
+  (`NOT NULL DEFAULT 'keep'`). Turn `erase_unconfirmed` on only once every
+  node runs this release: an older node neither erases nor takes the account
+  lock on its membership and billing writes. New value an older node may
+  read: the `registration_rejected` outcome `erased`, a string in event
   metadata.

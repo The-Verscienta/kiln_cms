@@ -85,6 +85,12 @@ defmodule KilnCMS.Billing.Membership do
       upsert? true
       upsert_identity :one_per_user_and_tier
       upsert_fields [:status]
+
+      # The account's row first, refusing an erased one (#2514): `user_id` has
+      # no foreign key, so nothing else would make an erasure of a rejected
+      # registration wait for this row, or this row for it.
+      change KilnCMS.Accounts.Changes.LockAccount
+
       change set_attribute(:status, :incomplete)
 
       # Nothing to sell to an account whose registration here awaits approval
@@ -119,6 +125,10 @@ defmodule KilnCMS.Billing.Membership do
       upsert? true
       upsert_identity :one_per_user_and_tier
       upsert_fields [:status, :note]
+
+      # As `:start`: the account's row first, refusing an erased one (#2514).
+      change KilnCMS.Accounts.Changes.LockAccount
+
       change set_attribute(:status, :comped)
       change KilnCMS.Billing.Changes.RecordTransition
     end

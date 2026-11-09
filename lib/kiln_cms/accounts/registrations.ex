@@ -10,7 +10,8 @@ defmodule KilnCMS.Accounts.Registrations do
   grants nothing through a row that is not `:active`, so until it is approved
   the account can sign in and read only what anyone can. Approving makes the row
   an ordinary `:viewer` membership; rejecting keeps the account and marks the
-  row `:rejected`.
+  row `:rejected`, unless the site erases unconfirmed rejected accounts and
+  this one qualifies (`Registrations.Erasure`, #2514).
 
   ## Who sees whom
 

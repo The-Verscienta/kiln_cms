@@ -251,6 +251,7 @@ everyone, the anonymous visitor included (published `:public` content, a
 | `CMS.SitePasswordPolicy` | `read` **only** | `read`: `:accounts` | The breached-password check (`Accounts.PasswordPolicy`, #2240) reads the site's off / warn / block stance while a registration, a reset or a first-run setup is under way, none of which has an admin actor. A refused read is `authorize_with: :error`, so it fails open to `warn` and is logged, rather than reading as "no row" and handing the decision to the operator default. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
 | `CMS.SiteRegistration` | `read` **only** | `read`: `:registrations` | Registration approval (#2251). `Changes.QueueRegistration` reads whether a self-registration on this site waits for an admin (`Accounts.RegistrationPolicy`) while the registration is under way, which has no admin actor. A refused read is `authorize_with: :error` and fails **closed**: the registration is refused with a retryable error and nothing is created, because "no approval needed" is the direction that lets an unreviewed account in. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
 | `Accounts.OrgMembership` | `queue_registration`, `approve_registration_by_invitation` **only** | `queue_registration`: `:registrations` · `approve_registration_by_invitation`: `:invitations` | The registration's own write (#2251): `Changes.QueueRegistration` records the `:pending` membership inside the new account's create, and `SiteSso.Admission` for a new account a site's own single sign-on provisions while the site's `approval_for_site_sso` is on (#2514); neither has an actor of its own. No person may queue one — the platform-admin bypass forbids this action, so the system-only policy decides it for an admin too. `approve_registration_by_invitation` (#2514) is `Invitations.grant_membership/4` honouring an accepted invitation over a waiting or rejected registration on its site; a rejected one only when the invitation was sent after the rejection. Every other membership write stays a platform admin's, and approving or rejecting under Registrations is an admin of the row's own org. |
+| `Accounts.User` | `anonymize` **only** | `anonymize`: `:registrations` | Erasing an unconfirmed, rejected registration (#2514). When a site's `SiteRegistration.rejected_accounts` is `:erase_unconfirmed` and a standing admin of that site rejects with `erase: true`, `Changes.EraseRejectedAccount` erases the applicant inside the rejection's transaction; the deciding admin may be a site admin, who may not erase accounts, so it runs as `SystemActor.new(:registrations)`. The policy admits the subsystem; `Changes.GuardRegistrationErasure` on the action holds it to the one erasure: the context must name a membership of that account that this transaction has just rejected (`:rejected`, its `decided_at`, `created_account`), the account's row is re-locked `FOR UPDATE`, and `Registrations.Erasure.check/1` must pass (never confirmed, nothing but that application). Anything else is refused and the account is untouched. Every other erasure stays a platform admin's. |
 | `CMS.SiteSessionPolicy` | `read` **only** | `read`: `:accounts` | The idle timeout (`Accounts.IdleTimeout`, #2246) reads the site's timeouts and its "sign out everyone" watermark on signed-in requests and LiveView mounts, none of which has an admin actor. A refused read is `authorize_with: :error`, so it fails open (no timeout, no watermark), is logged and is not cached, rather than reading as "no row". Saving the row and `sign_out_all` stay admin acts. Granted through `OrgSettings`' `system_actions:`. |
 | `CMS.SiteBotBudgets` | `read` **only** | `read`: `:bot_budgets` | The delivery rate limiter (`BotBudgets`, #2243) reads a site's per-class ceilings while answering an anonymous public request, which has no admin actor. A refused read is `authorize_with: :error`, so it is logged and answered with the operator's values (never wider than the operator allowed), reused for 20 seconds, rather than cached for five minutes as "no row". Browser requests never read it. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
 | `CMS.SiteSecurityLog` | `read` **only** | `read`: `:security` | `Security.PruneWorker` reads each site's security-log retention window (#2241) through `Security.retention_days/1`, with no admin actor. A refused or failed read answers `0` (keep everything) and is logged, so a lost grant never deletes on a window nobody confirmed. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
@@ -526,7 +527,7 @@ by name; see [The system actor](#the-system-actor).
 | read | ✅ all | 🔎 own record | 🔎 filtered out | ❌ |
 | `change_password` | ✅ | ✅ (own) | ❌ | ❌ |
 | `manage_access`, `grant_temporary_role`, `send_password_reset` | ✅ | ❌ | ❌ | ❌ |
-| `anonymize` | ✅ | ❌ | ❌ | ❌ |
+| `anonymize` | ✅ | ❌ | ❌ | ❌ (⚙️ system actor, `:registrations`, guarded) |
 | `expire_role_grant` | ✅ | ❌ | ❌ | ❌ (⚙️ AshOban sweep) |
 | auth flows (sign-in, register, reset) | ✅ | ✅ | ✅ | ✅ (AshAuthentication bypass) |
 
@@ -677,6 +678,14 @@ policy names its actions rather than an `action_type`, so neither the self-only
 read nor the blanket write refusal applies to them. A temporary platform admin
 passes the bypass and is refused by `StandingAdminOnly`, as on every other
 membership write.
+
+`reject_registration` takes `erase` (#2514). It changes nothing about who may
+reject: it asks to erase the applicant's account as well, which happens only
+on a site whose `rejected_accounts` is `:erase_unconfirmed`, for a **standing**
+admin of the row's site, and for an account `Registrations.Erasure.check/1`
+passes. The erasure runs as the `:registrations` system actor (see
+[The system actor](#the-system-actor)), so a site admin, who is refused
+`User` `anonymize`, erases nothing else through it.
 
 The AshOban grant is an **unconditional** `bypass AshOban.Checks.AshObanInteraction`
 at the top of the policies, not one scoped to `expire_role_grant`: the scheduler
@@ -1197,6 +1206,7 @@ document, drafts included — so they are simply editor-and-up.
 | `mark_read`, `mark_unread` | ✅ | ❌ | ❌ |
 | `notify` (create) | ❌ | ❌ | ⚙️ actor-less only |
 | `unread_about` (the notifier's duplicate check, #1785) | ❌ | ❌ | ⚙️ actor-less only |
+| `forget_actor`, `forget_recipient` (erasure: blank the actor on others' rows; delete the erased account's own, #2514) | ❌ | ❌ | ⚙️ actor-less only |
 
 `authorize_if expr(user_id == ^actor(:id))` is the whole read policy, and this
 is the one resource in the tree with **no admin bypass at all**. A notification
@@ -1242,7 +1252,9 @@ resource: `forbid_unless OrgEditor` heads every policy. An editor manages their
 own private views; sharing a view with the whole site, and editing or deleting
 a shared one, is an admin's (`OrgAdmin` bypass), so the team's view cannot be
 renamed out from under it by one member. Org-scoped like every console row: a
-view saved on one site is never listed on another.
+view saved on one site is never listed on another. Erasing an account deletes
+its private views on every site as part of the erasure (`authorize?: false`,
+filtered to that owner, #2514); its shared views stay.
 
 ## Webhook deliveries — `WebhookDelivery`
 
