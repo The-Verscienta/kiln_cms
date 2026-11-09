@@ -1031,6 +1031,43 @@ defmodule KilnCMSWeb.JsonApiTest do
       assert {400, _} = api_get("/api/json/posts?custom_filter[#{refs}][count][gt]=x")
     end
 
+    test "a list of numbers: has / has_all / count from the query string (#2289)" do
+      admin = user(:admin)
+      scores = "scores#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :post,
+          name: scores,
+          label: "Scores",
+          field_type: :integer,
+          multiple: true
+        },
+        actor: admin
+      )
+
+      three = published_post(%{title: "3", custom_fields: %{scores => [3, 5]}}, admin)
+      _seven = published_post(%{title: "7", custom_fields: %{scores => [7]}}, admin)
+
+      q = fn params ->
+        assert {200, body} = api_get("/api/json/posts?" <> params)
+        Enum.sort(ids(body))
+      end
+
+      assert q.("custom_filter[#{scores}][has][]=3") == [three.id]
+      assert q.("custom_filter[#{scores}]=5") == [three.id]
+
+      assert q.("custom_filter[#{scores}][has_all][]=3&custom_filter[#{scores}][has_all][]=5") ==
+               [three.id]
+
+      assert q.("custom_filter[#{scores}][count]=2") == [three.id]
+
+      assert {400, body} = api_get("/api/json/posts?custom_filter[#{scores}][gt]=4")
+      assert inspect(body) =~ "eq/not_eq/in/has/has_all/has_none/count/null"
+
+      assert {400, _} = api_get("/api/json/posts?custom_sort=#{scores}")
+    end
+
     test "an unknown custom field name is a 400" do
       assert {400, _body} =
                api_get(

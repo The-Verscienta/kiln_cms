@@ -473,4 +473,111 @@ defmodule KilnCMS.CMS.FieldConversionTest do
       assert message =~ "make it a list first"
     end
   end
+
+  describe "into a typed list (#2289)" do
+    setup ctx do
+      dates =
+        field!(ctx.admin, %{
+          name: "event_dates_#{System.unique_integer([:positive])}",
+          label: "Event dates",
+          field_type: :date,
+          multiple: true
+        })
+
+      Map.put(%{ctx | group: dates.name}, :dates, dates)
+    end
+
+    test "writes a JSON array of dates as the items, in order, without repeats", ctx do
+      post = post!(ctx, ~s(["2026-03-08","2026-03-01","2026-03-08"]))
+
+      assert %{written: 1, terms: terms} = convert(ctx, dry_run?: false)
+      assert terms == %{}
+      assert reload(post).custom_fields[ctx.group] == ["2026-03-08", "2026-03-01"]
+    end
+
+    test "an item that is not a date is reported by its position; nothing is written", ctx do
+      post = post!(ctx, ~s(["2026-03-01","not a date"]))
+
+      assert %{blocked?: true, written: 0, problems: [%{kind: :invalid, messages: messages}]} =
+               convert(ctx, dry_run?: false)
+
+      assert Enum.any?(messages, &(&1 =~ "item 2"))
+      assert reload(post).custom_fields[ctx.group] in [nil, []]
+    end
+
+    test "an integer list keeps the numbers JSON-native, repeats included", ctx do
+      scores =
+        field!(ctx.admin, %{
+          name: "scores_#{System.unique_integer([:positive])}",
+          label: "Scores",
+          field_type: :integer,
+          multiple: true
+        })
+
+      ctx = %{ctx | group: scores.name}
+      post = post!(ctx, ~s([3, "5", 3]))
+
+      assert %{written: 1} = convert(ctx, dry_run?: false)
+      assert reload(post).custom_fields[ctx.group] == [3, 5, 3]
+    end
+
+    test "--lines reads one link per line into a url list", ctx do
+      links =
+        field!(ctx.admin, %{
+          name: "links_#{System.unique_integer([:positive])}",
+          label: "Links",
+          field_type: :url,
+          multiple: true
+        })
+
+      ctx = %{ctx | group: links.name}
+      post = post!(ctx, "https://a.example\n\n  https://b.example  ")
+
+      assert %{problems: [%{kind: :unparseable}]} = convert(ctx)
+      assert %{written: 1} = convert(ctx, dry_run?: false, lines?: true)
+
+      assert reload(post).custom_fields[ctx.group] == [
+               "https://a.example",
+               "https://b.example"
+             ]
+    end
+
+    test "refuses a single typed field, and --map", ctx do
+      org = KilnCMS.Accounts.default_org_id()
+
+      single =
+        field!(ctx.admin, %{
+          name: "count_#{System.unique_integer([:positive])}",
+          label: "Count",
+          field_type: :integer
+        })
+
+      assert {:error, message} = FieldConversion.run(org, "post", ctx.source, single.name)
+      assert message == "#{single.name} is a single integer field — make it a list first"
+
+      assert {:error, message} =
+               FieldConversion.run(org, "post", ctx.source, ctx.group, renames: %{"a" => "b"})
+
+      assert message =~ "holds items, which have none"
+    end
+
+    test "a type that cannot be a list is still not a target", ctx do
+      flag =
+        field!(ctx.admin, %{
+          name: "flag_#{System.unique_integer([:positive])}",
+          label: "Flag",
+          field_type: :boolean
+        })
+
+      assert {:error, message} =
+               FieldConversion.run(
+                 KilnCMS.Accounts.default_org_id(),
+                 "post",
+                 ctx.source,
+                 flag.name
+               )
+
+      assert message =~ "is a boolean field, not a group, a multiple select or a list"
+    end
+  end
 end

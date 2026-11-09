@@ -436,7 +436,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     # Same for `multiple`: only a `:media` field (a gallery), a `:reference`
     # field (a list of references), a `:group` (repeating rows) or a
-    # top-level `:select` (several terms) can hold a list, so the flag — and
+    # top-level scalar list type (`ScalarLists.types/0`: terms, phrases,
+    # numbers, dates, links, …) can hold a list, so the flag — and
     # `allow_custom` with it — and the
     # `min_items`/`max_items` bounds that go with it — drop on any other type
     # rather than lingering on a field they mean nothing to.
@@ -657,7 +658,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # snapshots — or a `:reference` field a **list of references** (ordered
     # `{id, type, slug, title}` snapshots), or a `:group` **repeating rows**
     # (a list of objects), or a `:select` **several terms** (a list of
-    # strings), rather than a single one. Off by default, so every
+    # strings), or a top-level scalar field a **list of its values** (phrases,
+    # numbers, dates, links…, `KilnCMS.CMS.ScalarLists`), rather than a
+    # single one. Off by default, so every
     # existing field keeps its single-value shape. Ignored
     # (and cleared, see `Changes.ClearMultiple`) on every other type. Flipping
     # it on an existing field reshapes the stored values

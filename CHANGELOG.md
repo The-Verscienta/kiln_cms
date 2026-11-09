@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Lists on number, date, link and other scalar custom fields: no migration, but before rolling back, don't edit those list fields or their records on the older release.**
+  It clears `multiple` on such a field's definition when saved, keeping each list's first item, and stringifies a list written there.
+  ([long form](docs/changelog/unreleased.md#scalar-list-fields-upgrade))
+
 - **In-app backups whose off-site copy fails now finish `Failed`, and both paths re-hash each file just before its off-site copy and refuse one that changed; check your rclone remote and credentials if backups turn red.** No migration; rolling back is safe.
   ([long form](docs/changelog/unreleased.md#backup-offsite-rehash-upgrade))
 
@@ -127,6 +131,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
 
 ### Added
+
+- **Integer, float, date, date-time, time, URL, email, telephone, colour and slug custom fields can hold a list (Holds → A list in `/editor/fields`).**
+  Stored as a JSON array of tidied values, one typed input per item in the editor; `custom_filter` takes `eq`/`in`/`has`/`has_all`/`has_none`/`count`. Guide: [docs/extending-content.md](docs/extending-content.md#make-a-field-hold-a-list-of-values).
+  ([long form](docs/changelog/unreleased.md#scalar-list-fields))
 
 - **Optional smart 404 blocking: an address that racks up delivery 404s or probes `/wp-login.php`-style bait paths is blocked for an hour.**
   Off by default; turn on with `KILN_SCANNER_BLOCKING=1`. Guide: [docs/ip-blocking.md](docs/ip-blocking.md#block-scanners-automatically).
@@ -260,6 +268,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Lists of strings and multiple selects now take `has`, `has_all`, `has_none` and `count` in `custom_filter`, and read a bare value stored before the field became a list as a one-item list (`eq` matches it, `not_eq` leaves it out).**
+  `has_none` matches a record with no value; `not_eq` does not. An unsupported operator's `400` now lists the supported ones.
+  ([long form](docs/changelog/unreleased.md#scalar-list-filters-changed))
+
 - **Backup retention keeps the newest good backup of each component, honours `kiln-<stamp>.keep` recovery points, ages a stamp's dump and media separately, and deletes nothing when it can't read what it needs.**
   `BACKUP_KEEP_DAYS` unchanged; no migration. Local disk use may grow by up to two backups per component, plus pinned ones.
   ([long form](docs/changelog/unreleased.md#backup-retention-by-component))
@@ -314,6 +326,12 @@ Every summary line below that was shortened links to its own entry there.
   ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
 
 ### Fixed
+
+- **A single scalar custom field sent a list keeps its first item: a single URL field sent two URLs no longer stores them run together.**
+  ([long form](docs/changelog/unreleased.md#single-field-handed-a-list))
+
+- **The content editor ignores list, gallery and repeating-group edits on a field the editor's field grant leaves read-only.**
+  ([long form](docs/changelog/unreleased.md#read-only-list-events))
 
 - **Three dead links in the docs now resolve (the `KilnCMS.Keys` link in Memberships and Ghost's schema in both comparison pages), and a docs test refuses relative `.html` links.** ([#2167](https://github.com/The-Verscienta/kiln_cms/issues/2167))
 

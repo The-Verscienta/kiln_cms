@@ -1,7 +1,8 @@
 defmodule KilnCMS.CMS.FieldConversion do
   @moduledoc """
   Moves JSON-in-text custom-field values into a `:group` field, a multiple
-  `:select` (several terms) or a multiple `:string` (a list of phrases) —
+  `:select` (several terms), a multiple `:string` (a list of phrases) or a
+  typed list (a multiple `:integer`, `:date`, `:url`, … — #2289) —
   `mix kiln.fields.convert`
   (docs/field-conversion.md).
 
@@ -24,8 +25,12 @@ defmodule KilnCMS.CMS.FieldConversion do
   add them as options or open the vocabulary. Renames do not apply.
 
   A multiple `:string` target takes the same JSON arrays of strings, with no
-  vocabulary to check. With `lines?: true` (`--lines`), a source that is not
-  JSON is read as **one item per line** instead of being refused — the
+  vocabulary to check. A typed list takes a JSON array of its items
+  (`["2026-03-01","2026-03-08"]`, `[3, 5]`), each coerced as the field's own
+  save would coerce it, so an item that does not fit is reported with its
+  position (`item 2 …`). With `lines?: true` (`--lines`), for any of these
+  lists, a source that is not JSON is read as **one item per line** instead
+  of being refused — the
   convention some importers used for a list kept in a text field
   ("One service per line"). It is opt-in because prose would otherwise
   become a one-item list without a word.
@@ -68,9 +73,13 @@ defmodule KilnCMS.CMS.FieldConversion do
   alias KilnCMS.CMS.Changes.ApplyCustomFields
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.ScalarLists
   alias KilnCMS.CMS.WorkingCopy
 
   @batch 100
+
+  @scalar_lists ScalarLists.types()
+  @typed_lists ScalarLists.typed()
 
   # A string still decoding to a string after this many passes is not a list
   # that was encoded twice by accident.
@@ -92,7 +101,7 @@ defmodule KilnCMS.CMS.FieldConversion do
   multiple `:select` target, `terms` counts each distinct term across the
   convertible and invalid records' values (live and held), and `new_terms`
   lists the ones not in the field's `options`, most used first; both are
-  empty for a group.
+  empty for any other target.
   """
   @type report :: %{
           type: String.t(),
@@ -116,11 +125,11 @@ defmodule KilnCMS.CMS.FieldConversion do
   `org_id`.
 
   Options: `dry_run?` (default `true`), `skip_invalid?`, `overwrite?`,
-  `renames` (`%{"old_key" => "new_key"}`), `lines?` (a multiple `:string`
-  target only: read non-JSON text as one item per line) and `:batch` (read
-  page size).
+  `renames` (`%{"old_key" => "new_key"}`), `lines?` (a list target only:
+  read non-JSON text as one item per line) and `:batch` (read page size).
   Returns `{:error, message}` when the fields themselves do not fit (no such
-  type or field, a target that is not a group, a rename to no sub-field).
+  type or field, a target that is not a group or a list, a rename to no
+  sub-field).
   """
   @spec run(Ash.UUID.t(), String.t(), String.t(), String.t(), keyword()) ::
           {:ok, report()} | {:error, String.t()}
@@ -131,7 +140,7 @@ defmodule KilnCMS.CMS.FieldConversion do
          {:ok, group} <- target_definition(definitions, target),
          renames = Map.new(Keyword.get(opts, :renames, %{})),
          :ok <- check_renames(renames, group) do
-      # `group` is the target either way: a group, or a multiple select.
+      # `group` is the target whatever it is: a group, a multiple select or a list.
       plan = %{
         descriptor: descriptor,
         org_id: org_id,
@@ -319,31 +328,40 @@ defmodule KilnCMS.CMS.FieldConversion do
          "No field #{inspect(target)} on this type (#{names(definitions)}) — " <>
            "create the group and its sub-fields first"}
 
-      %{field_type: :group} = group ->
-        if FieldDefinition.group_fields(group) == [],
-          do: {:error, "The group #{target} has no sub-fields yet"},
-          else: {:ok, group}
-
-      %{field_type: :select, multiple: true} = select ->
-        {:ok, select}
-
-      %{field_type: :select} ->
-        {:error, "#{target} is a select that holds one choice — make it hold several terms first"}
-
-      %{field_type: :string, multiple: true} = list ->
-        {:ok, list}
-
-      %{field_type: :string} ->
-        {:error, "#{target} is a string field that holds one line — make it a list first"}
-
-      %{field_type: type} ->
-        {:error, "#{target} is a #{type} field, not a group, a multiple select or a list"}
+      definition ->
+        target_kind(definition, target)
     end
   end
 
+  defp target_kind(%{field_type: :group} = group, target) do
+    if FieldDefinition.group_fields(group) == [],
+      do: {:error, "The group #{target} has no sub-fields yet"},
+      else: {:ok, group}
+  end
+
+  defp target_kind(%{field_type: :select, multiple: true} = select, _target), do: {:ok, select}
+
+  defp target_kind(%{field_type: :select}, target),
+    do: {:error, "#{target} is a select that holds one choice — make it hold several terms first"}
+
+  defp target_kind(%{field_type: :string, multiple: true} = list, _target), do: {:ok, list}
+
+  defp target_kind(%{field_type: :string}, target),
+    do: {:error, "#{target} is a string field that holds one line — make it a list first"}
+
+  defp target_kind(%{field_type: type, multiple: true} = list, _target)
+       when type in @typed_lists,
+       do: {:ok, list}
+
+  defp target_kind(%{field_type: type}, target) when type in @typed_lists,
+    do: {:error, "#{target} is a single #{type} field — make it a list first"}
+
+  defp target_kind(%{field_type: type}, target),
+    do: {:error, "#{target} is a #{type} field, not a group, a multiple select or a list"}
+
   defp check_renames(renames, _select) when map_size(renames) == 0, do: :ok
 
-  defp check_renames(_renames, %{field_type: type} = list) when type in [:select, :string],
+  defp check_renames(_renames, %{field_type: type} = list) when type in @scalar_lists,
     do: {:error, "--map renames the keys of rows; #{list.name} holds items, which have none"}
 
   defp check_renames(renames, group) do
@@ -428,7 +446,9 @@ defmodule KilnCMS.CMS.FieldConversion do
 
   defp record_published?(record), do: Map.get(record, :state) == :published
 
-  defp terms(_record, %{group: %{field_type: type}}) when type in [:group, :string], do: []
+  # Terms are a select's alone: a group holds rows, and every other list
+  # holds items with no vocabulary to report them against.
+  defp terms(_record, %{group: %{field_type: type}}) when type != :select, do: []
 
   defp terms(record, plan) do
     held =
@@ -496,9 +516,10 @@ defmodule KilnCMS.CMS.FieldConversion do
     end
   end
 
-  # `--lines`: a list of phrases kept as plain text, one item per line.
-  defp lines(value, %{lines?: true, group: %{field_type: :string}}, _error)
-       when is_binary(value) do
+  # `--lines`: a list kept as plain text, one item per line — phrases, dates,
+  # numbers, links. Each line is then coerced as an item of the target.
+  defp lines(value, %{lines?: true, group: %{field_type: type}}, _error)
+       when type in @scalar_lists and is_binary(value) do
     case value |> String.split(~r/\R/u) |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
       [] -> :empty
       items -> {:ok, items}
