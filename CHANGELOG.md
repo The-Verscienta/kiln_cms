@@ -416,7 +416,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **A webhook delivery whose endpoint was deleted shows its URL marked "(deleted endpoint)" and no Redeliver button, and a stale click says the endpoint was deleted.**
-  ([#2330](https://github.com/The-Verscienta/kiln_cms/issues/2330) · [long form](docs/changelog/unreleased.md#redeliver-deleted-endpoint))
+  ([#2524](https://github.com/The-Verscienta/kiln_cms/pull/2524) · [long form](docs/changelog/unreleased.md#redeliver-deleted-endpoint))
 
 - **A single scalar custom field sent a list keeps its first item: a single URL field sent two URLs no longer stores them run together.**
   ([long form](docs/changelog/unreleased.md#single-field-handed-a-list))
