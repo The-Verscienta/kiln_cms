@@ -313,6 +313,13 @@ Stated rather than discovered later.
   declares `@behaviour` instead of using the `use` form gets missing-callback
   warnings when a callback is added, which `--warnings-as-errors` turns into a
   failed build. The `use` form is what makes additions safe; prefer it.
+- **An update action you add to a content resource refuses a trashed row.**
+  `use KilnCMS.CMS.Content` registers `KilnCMS.CMS.Changes.RefuseTrashed` on
+  every update action (#2332), yours included, so a write to a record in the
+  trash fails with `Ash.Error.Changes.StaleRecord`. Only the actions in
+  `KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0` (`:restore`,
+  `:clear_reference_target`) may write one, and an overlay cannot add to that
+  list today.
 
 ## Status of this document
 

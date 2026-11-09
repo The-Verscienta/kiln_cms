@@ -822,6 +822,73 @@ defmodule KilnCMSWeb.WriteApiTest do
     end
   end
 
+  # Regression pins for #2332, not proof of it: these already passed before
+  # the fix, because an API write re-reads the record through the trash-
+  # filtered read and answers not-found. What #2332 closed is the race
+  # between that read and the write, which the domain guard
+  # (`KilnCMS.CMS.TrashedRowGuardTest`) covers. These hold the answer an API
+  # client sees for a trashed id.
+  describe "a trashed post (regression pins, #2332)" do
+    setup do
+      admin = user(:admin)
+      post = CMS.create_post!(%{title: "Trashed", slug: slug()}, actor: admin)
+      CMS.destroy_post!(post, actor: admin)
+      %{post: post, key: mint(admin, :read_write)}
+    end
+
+    # Raw, so the trash's read filter does not hide the row.
+    defp post_row(post) do
+      %{rows: [row]} =
+        KilnCMS.Repo.query!(
+          "SELECT title, state, lock_version, updated_at, archived_at FROM posts WHERE id = $1",
+          [Ecto.UUID.dump!(post.id)]
+        )
+
+      row
+    end
+
+    test "PATCH is a 404 and writes nothing", %{post: post, key: key} do
+      before = post_row(post)
+
+      assert {404, _} =
+               patch_json("/api/json/posts/#{post.id}", post.id, %{title: "Into the trash"},
+                 type: "post",
+                 bearer: key
+               )
+
+      assert post_row(post) == before
+    end
+
+    test "PATCH …/publish is a 404 and writes nothing", %{post: post, key: key} do
+      before = post_row(post)
+
+      assert {404, _} =
+               patch_json("/api/json/posts/#{post.id}/publish", post.id, %{},
+                 type: "post",
+                 bearer: key
+               )
+
+      assert post_row(post) == before
+      refute_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"id" => post.id})
+    end
+
+    test "GraphQL updatePost answers not-found and writes nothing", %{post: post, key: key} do
+      before = post_row(post)
+
+      query = """
+      mutation ($id: ID!, $input: UpdatePostInput!) {
+        updatePost(id: $id, input: $input) { result { id } errors { message code } }
+      }
+      """
+
+      body = gql(query, %{id: post.id, input: %{title: "Into the trash"}}, bearer: key)
+
+      assert %{"updatePost" => %{"result" => nil, "errors" => [error | _]}} = body["data"]
+      assert error["code"] == "not_found"
+      assert post_row(post) == before
+    end
+  end
+
   describe "GraphQL mutations" do
     test "createPost with a :read_write editor key creates a draft" do
       owner = user(:editor)

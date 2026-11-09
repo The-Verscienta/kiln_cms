@@ -63,6 +63,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMSWeb.ContentEditor.ReferenceValues
   alias KilnCMSWeb.ContentTrash
   alias KilnCMSWeb.EditorTelemetry
+  alias KilnCMSWeb.InlineEditing
   alias KilnCMSWeb.Presence
   alias KilnCMSWeb.VersionDiffComponents
 
@@ -372,6 +373,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:comments_reload_timer, nil)
     # Set when an optimistic-lock conflict blocks saving until reload.
     |> assign(:conflict, false)
+    # Set, with `:conflict`, when the record was trashed or deleted while open
+    # (#2332): there is nothing to reload, so saving stays paused for good.
+    |> assign(:gone, false)
     # Bumped on server-driven form replacement (conflict reload, version
     # restore) so rich-text blocks remount and reload TipTap from the new
     # content — `phx-update="ignore"` otherwise keeps the stale editor (#135).
@@ -1602,19 +1606,46 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # --- generic dispatch to the per-kind code interfaces (via the registry) ---
 
   defp fetch!(kind, id, actor, org) do
-    # Scope the load to the current site's org (epic #336) so an editor on one
-    # site's subdomain can only open that site's content.
-    ContentTypes.get_record!(kind, id,
+    kind
+    |> ContentTypes.get_record!(id, record_opts(kind, actor, org))
+    # The pickers show the working copy's tags and related content (#1815);
+    # the attributes stay the row's, which every save is judged against.
+    |> WorkingCopy.with_held_relationships(actor: actor, tenant: org)
+  end
+
+  # `fetch!/4` for a record that may have gone from under an open editor: a
+  # peer moved it to the trash or purged it (#2332). `:gone` when the read
+  # finds nothing; any other failure is returned for the caller to decide.
+  @doc false
+  def fetch(kind, id, actor, org) do
+    case ContentTypes.get_record(kind, id, record_opts(kind, actor, org)) do
+      {:ok, record} ->
+        {:ok, WorkingCopy.with_held_relationships(record, actor: actor, tenant: org)}
+
+      {:error, error} ->
+        if InlineEditing.not_found?(error), do: :gone, else: {:error, error}
+    end
+  end
+
+  # Whether this session's record is gone (#2332). Asked after a write was
+  # refused as stale, to tell "someone else saved" from "someone trashed it".
+  @doc false
+  def gone?(socket) do
+    %{kind: kind, record: record, actor: actor, current_org: org} = socket.assigns
+    fetch(kind, record.id, actor, org) == :gone
+  end
+
+  # Scope the load to the current site's org (epic #336) so an editor on one
+  # site's subdomain can only open that site's content.
+  defp record_opts(kind, actor, org) do
+    [
       actor: actor,
       tenant: org,
       # `health`/`due_at` are expression calculations, so they cost a couple of
       # columns in the same SELECT rather than a second query
       # (docs/content-lifecycles.md).
       load: [:category, :featured_image, :tags, :health, :due_at, related_name(kind)]
-    )
-    # The pickers show the working copy's tags and related content (#1815);
-    # the attributes stay the row's, which every save is judged against.
-    |> WorkingCopy.with_held_relationships(actor: actor, tenant: org)
+    ]
   end
 
   # `<select>` options for the consumer-facing audience (KilnCMS.CMS.Audiences):
@@ -3540,11 +3571,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Discard local changes and reload the latest saved version, clearing the
   # conflict. (The simplest safe resolution — a merge UI is future work.)
+  # A record gone from under the editor (#2332) has no latest version; the
+  # banner no longer offers this, and `reload_latest/1` keeps the form.
   def handle_event("reload_conflict", _params, socket) do
-    {:noreply,
-     socket
-     |> reload_latest()
-     |> put_flash(:info, gettext("Reloaded the latest version."))}
+    socket = reload_latest(socket)
+
+    if socket.assigns.gone,
+      do: {:noreply, socket},
+      else: {:noreply, put_flash(socket, :info, gettext("Reloaded the latest version."))}
   end
 
   # Somebody published this document while a collab room was open (#1061). The
@@ -3561,23 +3595,30 @@ defmodule KilnCMSWeb.ContentEditorLive do
     if socket.assigns.record.state == :published do
       {:noreply, socket}
     else
-      record =
-        fetch!(
-          socket.assigns.kind,
-          socket.assigns.record.id,
-          socket.assigns.actor,
-          socket.assigns.current_org
-        )
+      case fetch(
+             socket.assigns.kind,
+             socket.assigns.record.id,
+             socket.assigns.actor,
+             socket.assigns.current_org
+           ) do
+        {:ok, record} ->
+          {:noreply,
+           socket
+           |> assign_record(record)
+           |> reset_editors()
+           |> mark_saved()
+           |> put_flash(
+             :info,
+             gettext("This was published. Your collaborative edits were saved with it.")
+           )}
 
-      {:noreply,
-       socket
-       |> assign_record(record)
-       |> reset_editors()
-       |> mark_saved()
-       |> put_flash(
-         :info,
-         gettext("This was published. Your collaborative edits were saved with it.")
-       )}
+        # Published, then trashed before this arrived (#2332).
+        :gone ->
+          {:noreply, flag_gone(socket)}
+
+        {:error, error} ->
+          raise Ash.Error.to_error_class(error)
+      end
     end
   end
 
@@ -3671,8 +3712,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
            |> put_flash(:info, gettext("Marked reviewed — the freshness clock is reset."))}
 
         {:error, error} ->
-          {:noreply,
-           put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("mark_reviewed", error))}
+          {:noreply, mark_reviewed_refused(socket, error)}
       end
     else
       {:noreply, socket}
@@ -3903,7 +3943,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> put_flash(:info, gettext("Restored that version."))
 
       {:error, error} ->
-        put_flash(socket, :error, restore_error_message(error))
+        if gone_after_stale?(socket, error),
+          do: flag_gone(socket),
+          else: put_flash(socket, :error, restore_error_message(error))
 
       _ ->
         put_flash(socket, :error, gettext("Couldn't restore that version."))
@@ -5275,8 +5317,29 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> push_navigate(to: ~p"/editor")
 
       {:error, error} ->
-        put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("trash", error))
+        # Someone trashed it first (#2332): `:destroy` refuses a row that is
+        # already in the trash, and what was asked for is done.
+        if gone_after_stale?(socket, error) do
+          socket
+          |> put_flash(
+            :info,
+            gettext("Someone else already moved this to the trash or deleted it.")
+          )
+          |> push_navigate(to: ~p"/editor")
+        else
+          put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("trash", error))
+        end
     end
+  end
+
+  # A write refused as stale because the record is no longer there (#2332):
+  # moved to the trash or purged by someone else since this session loaded it.
+  defp gone_after_stale?(socket, error), do: stale_conflict?(error) and gone?(socket)
+
+  defp mark_reviewed_refused(socket, error) do
+    if gone_after_stale?(socket, error),
+      do: flag_gone(socket),
+      else: put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("mark_reviewed", error))
   end
 
   defp settle_before_workflow(%{assigns: %{save_state: state}} = socket)
@@ -5337,9 +5400,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
       # Described by the error returned, not by the button pressed — see
       # WorkflowMessages; the content list shares the copy.
       {:error, error} ->
-        if action == "publish" and severity_missing?(error_list(error)),
-          do: severity_asked(socket, "publish", nil),
-          else: put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error(action, error))
+        cond do
+          action == "publish" and severity_missing?(error_list(error)) ->
+            severity_asked(socket, "publish", nil)
+
+          gone_after_stale?(socket, error) ->
+            flag_gone(socket)
+
+          true ->
+            put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error(action, error))
+        end
     end
   end
 
@@ -5679,24 +5749,34 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # through the `editor_version` bump). The conflict reload
   # (`reload_conflict`) and a lock takeover that went through (`Session`'s
   # `{:lock_granted, _, _}`) both come here; both have decided there is
-  # nothing of this session's own worth keeping. Raises if the record cannot be read — a conflict reload with a
-  # record gone from under it should say so, not carry on with the old one.
+  # nothing of this session's own worth keeping.
+  #
+  # A record moved to the trash or purged in the meantime (#2332) has nothing
+  # to reload onto, so the session keeps its form and unsaved text and goes
+  # into the gone state (`flag_gone/1`) rather than crashing or carrying on
+  # with the old record. Any other read failure raises.
   @doc false
   def reload_latest(socket) do
-    record =
-      fetch!(
-        socket.assigns.kind,
-        socket.assigns.record.id,
-        socket.assigns.actor,
-        socket.assigns.current_org
-      )
+    case fetch(
+           socket.assigns.kind,
+           socket.assigns.record.id,
+           socket.assigns.actor,
+           socket.assigns.current_org
+         ) do
+      {:ok, record} ->
+        socket
+        |> assign_record(record)
+        |> reset_editors()
+        |> assign(:conflict, false)
+        |> assign(:save_state, :saved)
+        |> assign(:settings_dirty?, false)
 
-    socket
-    |> assign_record(record)
-    |> reset_editors()
-    |> assign(:conflict, false)
-    |> assign(:save_state, :saved)
-    |> assign(:settings_dirty?, false)
+      :gone ->
+        flag_gone(socket)
+
+      {:error, error} ->
+        raise Ash.Error.to_error_class(error)
+    end
   end
 
   # Re-read the persisted record and everything derived from it. See the
@@ -7089,12 +7169,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
         class="mb-4 flex flex-wrap items-center gap-3 rounded border border-warning/40 bg-warning/10 px-4 py-3 text-sm"
       >
         <.icon name="hero-exclamation-triangle" class="size-5 text-warning" />
-        <span class="flex-1">
+        <span :if={@gone} class="flex-1">
+          {gettext(
+            "This content was moved to the trash or deleted, so your changes can't be saved. Copy anything you need before leaving."
+          )}
+        </span>
+        <span :if={!@gone} class="flex-1">
           {gettext(
             "Someone else saved changes to this content. Saving is paused so you don't overwrite their work."
           )}
         </span>
+        <.link :if={@gone} navigate={~p"/editor"} class="btn btn-sm btn-warning-fill">
+          {gettext("Back to content")}
+        </.link>
         <button
+          :if={!@gone}
           type="button"
           phx-click="reload_conflict"
           data-confirm={gettext("Reload and discard your unsaved changes?")}
@@ -7311,6 +7400,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           tier={@tier}
           editors_can_publish={@editors_can_publish}
           conflict={@conflict}
+          gone={@gone}
           editors={@editors}
           actor={@actor}
           word_count={@seo_body_stats.word_count}

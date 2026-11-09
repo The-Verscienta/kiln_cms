@@ -217,6 +217,14 @@ mirror must re-ingest it); otherwise it sends the tombstone too.
 The trash is a soft delete. A hard purge from the trash, or the nightly
 auto-purge, sends nothing more: the receiver already heard `deleted`.
 
+After `deleted`, a document sends nothing until `restored` (#2332). An editor,
+API client or job that loaded it before the trash can no longer write to it,
+so no `updated`, `unpublished` or `archived` follows a `deleted`. Trashing it
+twice sends one `deleted`, and restoring it twice sends one `restored`. When a
+purge clears the purged document out of another document's reference field,
+a referrer that is itself in the trash is cleared silently; a live referrer
+still sends `updated`.
+
 `unpublished` fires for both an explicit unpublish **and** archiving a
 published document (#914) — both remove it from delivery, and a receiver
 watching for content leaving delivery should not have to subscribe to two

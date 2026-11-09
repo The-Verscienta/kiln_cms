@@ -169,7 +169,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       page = CMS.create_page!(Map.put(original, :blocks, block("Original")), actor: admin)
       [create_version | _] = versions(page, admin)
 
-      _edited =
+      edited =
         CMS.update_page!(
           page,
           %{
@@ -191,7 +191,13 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
           actor: admin
         )
 
-      restored = CMS.restore_page_version!(page, %{version_id: create_version.id}, actor: admin)
+      # Restored onto the edited record, not the struct from before the edit:
+      # a restore from that stale struct changes nothing Ash can see (every
+      # value already equals its data) and used to return the struct as if it
+      # had landed. With the trash guard's row filter (#2332) the no-op reads
+      # the row back, which still holds the edit.
+      restored =
+        CMS.restore_page_version!(edited, %{version_id: create_version.id}, actor: admin)
 
       for {field, value} <- original do
         assert Map.fetch!(restored, field) == value,
@@ -310,14 +316,15 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       at_create = page.custom_fields
       refute at_create["sale"] == true
 
-      _page =
+      edited =
         CMS.update_page!(
           page,
           %{custom_fields: %{"price" => "19", "sale" => true}},
           actor: admin
         )
 
-      restored = CMS.restore_page_version!(page, %{version_id: create_version.id}, actor: admin)
+      restored =
+        CMS.restore_page_version!(edited, %{version_id: create_version.id}, actor: admin)
 
       # The compare view reports `sale` as *added* between these two versions; a
       # key-wise merge would leave it behind and make that report a lie.
@@ -343,9 +350,12 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
         )
 
       [create_version | _] = versions(page, admin)
-      _page = CMS.update_page!(page, %{category_id: nil, featured_image_id: nil}, actor: admin)
 
-      restored = CMS.restore_page_version!(page, %{version_id: create_version.id}, actor: admin)
+      edited =
+        CMS.update_page!(page, %{category_id: nil, featured_image_id: nil}, actor: admin)
+
+      restored =
+        CMS.restore_page_version!(edited, %{version_id: create_version.id}, actor: admin)
 
       assert restored.category_id == category.id
       assert restored.featured_image_id == image.id

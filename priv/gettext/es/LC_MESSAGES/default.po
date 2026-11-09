@@ -3798,6 +3798,13 @@ msgstr "En espera de aprobación del administrador"
 msgid "Back"
 msgstr "Volver"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#: lib/kiln_cms_web/live/presentation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Back to content"
+msgstr "Volver al contenido"
+
 #: lib/kiln_cms_web/controllers/sign_in_unlock_html/invalid.html.heex
 #: lib/kiln_cms_web/controllers/sign_in_unlock_html/new.html.heex
 #: lib/kiln_cms_web/controllers/sign_in_unlock_html/show.html.heex
@@ -18623,6 +18630,11 @@ msgstr "Alguien"
 msgid "Someone changed the live page after you saved your draft"
 msgstr "Alguien cambió la página publicada después de que guardaras tu borrador"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Someone else already moved this to the trash or deleted it."
+msgstr "Otra persona ya movió esto a la papelera o lo eliminó."
+
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
 msgid "Someone else changed this item's status first — reload to see where it stands."
@@ -21099,6 +21111,25 @@ msgstr "Este contenido cambió en otro lugar. Recargue para obtener la última v
 #, elixir-autogen, elixir-format
 msgid "This content no longer exists — the release will not publish as it stands."
 msgstr "Este contenido ya no existe: el lanzamiento no se publicará tal como está."
+
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "This content was moved to the trash or deleted, so it can't be saved."
+msgstr "Este contenido se movió a la papelera o se eliminó, así que no se puede guardar."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#: lib/kiln_cms_web/live/presentation_live.ex
+#, elixir-autogen, elixir-format
+msgid "This content was moved to the trash or deleted, so your changes can't be saved. Copy anything you need before leaving."
+msgstr "Este contenido se movió a la papelera o se eliminó, así que tus cambios no se pueden guardar. Copia lo que necesites antes de salir."
+
+#: lib/kiln_cms_web/live/content_editor/session.ex
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#: lib/kiln_cms_web/live/presentation_live.ex
+#, elixir-autogen, elixir-format
+msgid "This content was moved to the trash or deleted."
+msgstr "Este contenido se movió a la papelera o se eliminó."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format

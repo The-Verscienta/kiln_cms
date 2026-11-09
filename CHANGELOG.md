@@ -361,6 +361,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Every update action on a content resource, an overlay's own included, refuses a trashed row with `StaleRecord`; only `:restore` and `:clear_reference_target` are exempt.**
+  ([#2528](https://github.com/The-Verscienta/kiln_cms/pull/2528) · [long form](docs/changelog/unreleased.md#trashed-row-update-actions-refuse))
+
 - **Erasing an account also deletes its Web Push subscriptions, its private saved views and the notifications addressed to it, and now always clears its audiences.**
   ([#2527](https://github.com/The-Verscienta/kiln_cms/pull/2527) · [long form](docs/changelog/unreleased.md#erasure-deletes-more))
 
@@ -425,6 +428,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
 
 ### Fixed
+
+- **A document in the trash takes no more writes: an editor, API client or job still holding it is refused, so no `updated`, `unpublished` or `archived` follows `deleted`.**
+  Open editors keep the unsaved text and say it was trashed; a second trash or restore is refused.
+  ([#2528](https://github.com/The-Verscienta/kiln_cms/pull/2528) · [long form](docs/changelog/unreleased.md#trashed-row-updates-refused))
 
 - **A webhook delivery whose endpoint was deleted shows its URL marked "(deleted endpoint)" and no Redeliver button, and a stale click says the endpoint was deleted.**
   ([#2524](https://github.com/The-Verscienta/kiln_cms/pull/2524) · [long form](docs/changelog/unreleased.md#redeliver-deleted-endpoint))

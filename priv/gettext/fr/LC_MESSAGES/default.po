@@ -3798,6 +3798,13 @@ msgstr "En attente d'approbation"
 msgid "Back"
 msgstr "Retour"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#: lib/kiln_cms_web/live/presentation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Back to content"
+msgstr "Retour au contenu"
+
 #: lib/kiln_cms_web/controllers/sign_in_unlock_html/invalid.html.heex
 #: lib/kiln_cms_web/controllers/sign_in_unlock_html/new.html.heex
 #: lib/kiln_cms_web/controllers/sign_in_unlock_html/show.html.heex
@@ -18623,6 +18630,11 @@ msgstr "Quelqu'un"
 msgid "Someone changed the live page after you saved your draft"
 msgstr "Quelqu’un a modifié la page en ligne après l’enregistrement de votre brouillon"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Someone else already moved this to the trash or deleted it."
+msgstr "Quelqu’un d’autre a déjà placé ceci dans la corbeille ou l’a supprimé."
+
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
 msgid "Someone else changed this item's status first — reload to see where it stands."
@@ -21099,6 +21111,25 @@ msgstr "Ce contenu a été modifié ailleurs. Rechargez pour obtenir la dernièr
 #, elixir-autogen, elixir-format
 msgid "This content no longer exists — the release will not publish as it stands."
 msgstr "Ce contenu n'existe plus : le lancement ne pourra pas être publié en l'état."
+
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "This content was moved to the trash or deleted, so it can't be saved."
+msgstr "Ce contenu a été placé dans la corbeille ou supprimé : il ne peut pas être enregistré."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#: lib/kiln_cms_web/live/presentation_live.ex
+#, elixir-autogen, elixir-format
+msgid "This content was moved to the trash or deleted, so your changes can't be saved. Copy anything you need before leaving."
+msgstr "Ce contenu a été placé dans la corbeille ou supprimé : vos modifications ne peuvent pas être enregistrées. Copiez ce dont vous avez besoin avant de partir."
+
+#: lib/kiln_cms_web/live/content_editor/session.ex
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#: lib/kiln_cms_web/live/presentation_live.ex
+#, elixir-autogen, elixir-format
+msgid "This content was moved to the trash or deleted."
+msgstr "Ce contenu a été placé dans la corbeille ou supprimé."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format

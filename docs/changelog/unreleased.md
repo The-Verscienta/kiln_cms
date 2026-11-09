@@ -2373,11 +2373,11 @@ carries the reasoning.
     fails, nothing is trashed and the error says why. On a published
     document, Settings-tab changes held for **Save** are not saved first, as
     with the other workflow buttons.
-  - **Known limitation.** Another session still open on the document (another
-    editor tab, the in-context editor, the API or MCP) can keep writing into
-    the trashed row, and **Publish changes** on a held live page can publish
-    it again. Tracked in
-    [#2332](https://github.com/The-Verscienta/kiln_cms/issues/2332).
+  - **Another session still open on the document** can no longer write into
+    the trashed row, and **Publish changes** on a held live page no longer
+    publishes it again: fixed by
+    [#2332](https://github.com/The-Verscienta/kiln_cms/issues/2332), see
+    [the Fixed entry](#trashed-row-updates-refused).
   - **Developers.** New `KilnCMS.CMS.ContentTypes.can_destroy?/4` asks the
     destroy policy for one record (`tenant:` in the options), and
     `KilnCMSWeb.ContentTrash` holds the write and the copy both screens share.
@@ -2814,6 +2814,32 @@ carries the reasoning.
   - Guide: [Constrain the values of a field](../extending-content.md#constrain-the-values-of-a-field).
 
 ## Changed
+
+<a id="trashed-row-update-actions-refuse"></a>
+
+- **Every update action on a content resource refuses a trashed row,
+  including update actions an overlay adds (#2332).** The new
+  `KilnCMS.CMS.Changes.RefuseTrashed` is registered `on: [:update]` in the
+  `changes` block that `use KilnCMS.CMS.Content` generates, so it applies to
+  every update action on Page, Post, Entry and an overlay's own content
+  types, today's and any added later. It adds a filter on the row,
+  `is_nil(archived_at)`, rather than checking the struct the caller holds,
+  which was loaded before the trash. A refused write raises
+  `Ash.Error.Changes.StaleRecord`, and nothing after it runs: no artifacts
+  fired, no webhook, no job enqueued.
+  - **Exempt** (`KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0`):
+    `:restore`, which now requires the opposite (the row must still be
+    trashed), and `:clear_reference_target`, which a purge runs on every
+    referrer, trashed ones included. `:destroy` now also refuses a row that
+    is already trashed.
+  - **Overlays.** An update action you defined on a content resource that
+    writes trashed rows on purpose now fails with `StaleRecord`. There is no
+    opt-out today; if you need one, open an issue. Code that writes
+    records it has just read through the ordinary read is unaffected, since
+    that read never returns a trashed row; only a trash landing between the
+    read and the write now refuses it, which is the point.
+  - **A no-op bulk update** (stream strategy, nothing changed) on a trashed
+    row returns the record without consulting the filter. It writes nothing.
 
 <a id="erasure-deletes-more"></a>
 
@@ -3377,6 +3403,56 @@ carries the reasoning.
     has a new name; delete superseded items in the media library.
 
 ## Fixed
+
+<a id="trashed-row-updates-refused"></a>
+
+- **Nothing can write into a document after it is moved to the trash (#2332).**
+  Trashing is a soft delete: it stamps `archived_at`, and the read filter
+  hides the row from every ordinary read. It did nothing for updates, so an
+  editor, API client or background job that had loaded the document before
+  someone trashed it could still save into the trashed row. An autosave went
+  into the trash; a **Publish changes** from an editor still open on a live
+  page re-fired its artifacts and sent an `updated` webhook after the
+  `deleted` one; a transition or a held oEmbed refresh did the same. Now every
+  such write is refused.
+  - **Editors.** The content editor, the in-context editor and the
+    Presentation console notice on their next write (an autosave, **Save**, a
+    workflow button, **Reload latest**), not the moment the document is
+    trashed. The flash reads *This content was moved to the trash or
+    deleted.* and the banner *This content was moved to the trash or deleted,
+    so your changes can't be saved. Copy anything you need before leaving.*
+    with **Back to content** in place of **Reload latest**. The unsaved text
+    stays on screen; autosave stops and Save stays disabled. **Move to
+    trash** in the editor's Settings tab, on a document someone else has
+    already trashed or deleted, says *Someone else already moved this to the
+    trash or deleted it.* and returns to the content list. Guide:
+    [If someone is still editing it](../trash.md#if-someone-is-still-editing-it).
+  - **Webhooks.** After `deleted`, a document sends nothing until
+    `restored`: no `updated`, `unpublished` or `archived`. Trashing a held
+    document a second time is refused, so there is one `deleted`; restoring
+    it a second time is refused, so there is one `restored` (on the Trash
+    page the second admin sees *Couldn't restore that item.*). When a purge
+    clears a reference to the purged document, a referrer that is itself in
+    the trash still has the value cleared but is no longer re-fired or
+    announced with `updated`.
+  - **Scheduled publishing.** A trashed draft is never published by its
+    schedule. Restored with a **Scheduled publish at** already past, it
+    publishes on the scheduler's next run (every minute).
+  - **APIs.** Unchanged for a trashed id: JSON:API, GraphQL and MCP already
+    answered not-found. What changed is the race between their read and
+    someone else's trash: the write used to land in the trashed row and is now
+    refused. JSON:API and GraphQL answer not-found, MCP returns a tool error,
+    and a revision restore (`POST /api/content/:type/:id/revisions/:version_id/restore`)
+    answers `422 restore_failed`. Not a breaking change: the request was
+    already one that could answer not-found.
+  - **Background jobs.** The embedding and oEmbed workers, caught in the same
+    race, get `Ash.Error.Changes.StaleRecord`, retry, find no record and end
+    `:ok`.
+  - **Operators.** No migration, no config, nothing to run. Rolling the pin
+    back is safe and brings the old behaviour back.
+  - **Developers.** See
+    [the Changed entry](#trashed-row-update-actions-refuse) for overlay
+    update actions.
 
 <a id="redeliver-deleted-endpoint"></a>
 
