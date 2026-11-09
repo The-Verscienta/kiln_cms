@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (new nullable `field_definitions.widget`, no backfill). Field-sync files now carry `"widget"`, which an older release's import refuses: upgrade the target first.** Rolling the pin back is safe.
+  ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets-upgrade))
+
 - **Run `mix ash.migrate` (new table `site_registration`; `org_memberships` gains `status` and `decided_at`). Turn registration approval on only once every node runs this release: an older node reads a waiting registration as an active viewer.**
   Before rolling back, anonymize the waiting and rejected accounts you don't want (don't delete their rows) and delete the three `registration_*` security events (#2509), or roll forward.
   ([#2512](https://github.com/The-Verscienta/kiln_cms/pull/2512) · [long form](docs/changelog/unreleased.md#registration-approval-upgrade))
@@ -158,6 +161,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
 
 ### Added
+
+- **Admins can choose each custom field's editor input: radios or buttons for a select, checkboxes, one-line text, a reference dropdown, or a plugin type's own (`widget`).**
+  Editor-only; nothing stored or delivered changes. Guide: [docs/extending-content.md](docs/extending-content.md#choose-how-editors-fill-in-a-field).
+  ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets))
 
 - **A site can hold new password sign-ups for an admin's approval: Sign-in & access → Registrations, then Approve or Reject each applicant.**
   Until approved an account can sign in but reads only what's public, on every site, and can't pay its way in. Guide: [docs/account-administration.md](docs/account-administration.md#approving-registrations).

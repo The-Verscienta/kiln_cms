@@ -722,6 +722,8 @@ defmodule KilnCMS.CMS.FieldSync do
         {:ok, Map.put(ids, op.path, record)}
 
       params ->
+        params = with_widget(params, op.attrs)
+
         with {:ok, field} <- CMS.update_field_definition(record, params, opts) do
           {:ok, Map.put(ids, op.path, field)}
         end
@@ -749,6 +751,18 @@ defmodule KilnCMS.CMS.FieldSync do
   end
 
   defp wanted(changes), do: Map.new(changes, fn {key, {_from, to}} -> {key, to} end)
+
+  # The file's editor widget (#2284) goes with every update of its field,
+  # even when it equals the stored one: left out, a change the widget no
+  # longer suits (`multiple` on a radios select) would silently clear it
+  # (`Changes.ClearWidget`) instead of being refused, and the next import
+  # would see the file and the site disagree again.
+  defp with_widget(params, attrs) do
+    case Map.fetch(attrs, "widget") do
+      {:ok, widget} -> Map.put_new(params, "widget", widget)
+      :error -> params
+    end
+  end
 
   # The ids that tie a new field to its owner, resolved from what the earlier
   # ops created (or the stored owner).

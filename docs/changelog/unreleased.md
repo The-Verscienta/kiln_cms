@@ -7,6 +7,25 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="field-widgets-upgrade"></a>
+
+- **Field definitions gain a nullable `widget` column (#2284).** Run
+  `mix ash.migrate`. `field_definitions.widget` is `text`, nullable, with no
+  backfill: every existing field reads `nil`, which is its type's default and
+  the input it had before, so nothing changes in the editor until an admin
+  picks an input. Additive, and it does not touch the `kiln_reporting_v1`
+  views. Rolling the pin back is safe: the previous release ignores the column,
+  and editors see the default inputs again until you upgrade.
+  - **Field sync across versions.** A field-sync file exported by this release
+    carries `"widget"` on every field, which an older release's
+    `mix kiln.fields.import` refuses as `unknown key(s) widget`: upgrade the
+    target first. A file exported before this release has no `"widget"`, so
+    importing it here sets every chosen input back to the default; export again
+    after upgrading. See [field-sync.md](../field-sync.md#editor-inputs-widget).
+  - **Plugins.** A plugin field type that implements the new optional
+    `widgets/1` needs `{:kiln_plugin, "~> 1.4"}`. Nothing changes for one that
+    doesn't.
+
 <a id="registration-approval-upgrade"></a>
 
 - **Run `mix ash.migrate` for registration approval (#2251, first part). Turn
@@ -755,6 +774,18 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="field-widgets"></a>
+
+- **Admins can choose the editor input a custom field uses: radio buttons or a row of buttons for a select, checkboxes for several terms, one line for plain text, a dropdown list for a reference, or a plugin type's own (#2284).**
+  In `/editor/fields`, a field that has a choice shows an **Editor input** group of cards, its type's default first and checked; the list of fields badges a field that uses anything else. The choice is stored in the field definition's new `widget` attribute (a string; `nil` is the default, today's input). It is editor-only: what is stored, validated and delivered does not change. Guide: [Choose how editors fill in a field](../extending-content.md#choose-how-editors-fill-in-a-field).
+  - **What is offered.** A single select: `dropdown` (default), `radios`, `buttons`. Several terms: `tags` (default), `checkboxes`, but not while editors may add new terms (`allow_custom`); the fields admin disables whichever of the two is not in use and says why. Plain text: `textarea` (default), `single_line`. A single reference: `autocomplete` (default), `dropdown`. Rich text, lists of references, link fields, group sub-fields and every other core type offer no choice.
+  - **Safe by construction.** Radios and checkboxes show a stored value that is no longer among the options as its own checked input, so a save keeps it. A one-line field whose value already holds a line break opens as a textarea, so a save keeps the breaks. A field with more than 50 options keeps the dropdown or tags in the editor whatever is chosen, and the fields admin warns on those cards. A radio group required by a **Required when** rule is required the way a browser requires one (`required` on its first radio, `aria-required` on the group).
+  - **Checkboxes reorder.** Saving a record whose field uses checkboxes stores its terms in the field's option order, with terms outside the options after them.
+  - **The reference dropdown** lists the targets the editor could find by searching, in the editor's own site, sorted by title and grouped by type on a field with several target types, at most 100 in all. Past 100 the editor keeps the search box and says *Too many to list — search instead.* A target full under `max_sources` is listed disabled, the current pick is always listed (as *Unavailable* when the editor can't read it), and **Add new** still works. The list is read once when the editor opens.
+  - **Changing the field resets, a write that names a widget is refused.** A retype, `multiple`, rich text or `allow_custom` clears a stored widget the field no longer offers, unless the same write names one; then it is refused (`radios is not an editor input for this field (use one of: …)`). Field sync sends the file's widget with every update, so a file whose settings no longer suit its widget is refused rather than silently corrected.
+  - **API and export.** Field definitions carry `widget` on JSON:API (`?include=field_definitions`, and in `docs/api/openapi.json`) and in field-sync files. The schema export adds `x-kiln-widget` only to a field whose chosen widget it still offers. GraphQL does not expose field definitions and is unchanged.
+  - **Plugins.** `Kiln.FieldType` gains the optional `widgets/1` (not defaulted by `use`) and `Kiln.FieldType.widget/2` to read the pick back inside `input_attrs/1`, `input_parts/1` or `input_hook/1` (`kiln_plugin` 1.4). `input_type/0` takes no definition, so a widget cannot change the input's HTML `type`. `mix kiln.plugins.doctor` reports a `widgets/1` that raises, returns a non-list, or lists a malformed or repeated name.
 
 <a id="registration-approval"></a>
 

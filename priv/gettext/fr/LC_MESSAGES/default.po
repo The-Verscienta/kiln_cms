@@ -1117,6 +1117,11 @@ msgstr "%{who} — échéance le %{date}%{note}"
 msgid "%{who}%{note}"
 msgstr "%{who}%{note}"
 
+#: lib/kiln_cms/cms/validations/field_widget.ex
+#, elixir-autogen, elixir-format
+msgid "%{widget} is not an editor input for this field (use one of: %{allowed})"
+msgstr "%{widget} n'est pas une saisie d'éditeur pour ce champ (utilisez l'une de : %{allowed})"
+
 #: lib/kiln_cms_web/live/nav_badge.ex
 #, elixir-autogen, elixir-format
 msgid "(%{count} open)"
@@ -1360,6 +1365,16 @@ msgstr "Une ligne vide entre les paragraphes et un retour à la ligne pour chaqu
 msgid "A block"
 msgstr "Un bloc"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A box that grows with the text."
+msgstr "Une zone qui s'agrandit avec le texte."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A box to tick beside every option."
+msgstr "Une case à cocher à côté de chaque option."
+
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "A browser that does nothing on this site for this long is signed out, even if it chose “remember me”. Reading a page, clicking or typing counts as activity; a tab left open does not."
@@ -1539,6 +1554,11 @@ msgstr "Une adresse mailto:, https:// ou tel:. Obligatoire pour publier le fichi
 msgid "A media library"
 msgstr "Une médiathèque"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A menu that opens on click — compact for any number of options."
+msgstr "Un menu qui s'ouvre au clic — compact quel que soit le nombre d'options."
+
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "A note in your inbox each time content goes live."
@@ -1644,6 +1664,11 @@ msgstr "Une icône de même origine doit provenir de la médiathèque. Téléver
 msgid "A sample title"
 msgstr "Un titre d’exemple"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A search box that finds the record by its title."
+msgstr "Une zone de recherche qui trouve l'enregistrement par son titre."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "A shareable link showing the site as this release would leave it."
@@ -1688,6 +1713,11 @@ msgstr "Un seul texte court — un nom, un code."
 #, elixir-autogen, elixir-format
 msgid "A single value."
 msgstr "Une seule valeur."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A single-line box. Text that already has line breaks still opens on several."
+msgstr "Une zone d'une seule ligne. Un texte qui contient déjà des sauts de ligne s'ouvre toujours sur plusieurs."
 
 #: lib/kiln_cms/cms/field_types/range.ex
 #, elixir-autogen, elixir-format
@@ -4010,6 +4040,11 @@ msgstr "Bouton"
 msgid "Button label"
 msgstr "Libellé du bouton"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Buttons"
+msgstr "Boutons"
+
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "By"
@@ -4315,6 +4350,16 @@ msgstr "Consultez votre boîte de réception : vous y trouverez un lien de confi
 #, elixir-autogen, elixir-format
 msgid "Checkbox"
 msgstr "Case à cocher"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checkboxes"
+msgstr "Cases à cocher"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checkboxes show only the options. Pick Tags as the editor input to allow new terms."
+msgstr "Les cases à cocher n'affichent que les options. Choisissez Étiquettes comme saisie d'éditeur pour autoriser de nouveaux termes."
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
@@ -7095,10 +7140,16 @@ msgstr "Glisser pour réorganiser %{label}"
 msgid "Drag to reorder row %{position}"
 msgstr "Faites glisser pour réordonner la ligne %{position}"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Dropdown"
 msgstr "Liste déroulante"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Dropdown list"
+msgstr "Liste déroulante complète"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -7384,6 +7435,11 @@ msgstr "Éditeur"
 #, elixir-autogen, elixir-format
 msgid "Editor checks"
 msgstr "Vérifications de l'éditeur"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editor input"
+msgstr "Saisie dans l'éditeur"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -7967,6 +8023,16 @@ msgstr "Chaque document porte au moins une étiquette."
 msgid "Every field"
 msgstr "Tous les champs"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every option on view as a row of buttons — for a few short ones."
+msgstr "Toutes les options visibles sous forme d'une rangée de boutons — pour quelques options courtes."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every option on view, one per line."
+msgstr "Toutes les options visibles, une par ligne."
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every published document has at least one link in."
@@ -7976,6 +8042,11 @@ msgstr "Chaque document publié reçoit au moins un lien."
 #, elixir-autogen, elixir-format
 msgid "Every published page, post and entry that anyone can read without signing in is copied to that Meilisearch instance: its title, excerpt and full text. It is kept up to date as you publish, edit and unpublish. Members-only and passphrase-protected content is never sent. Whoever runs that instance can read everything in it."
 msgstr "Chaque page, article et entrée publiés que n'importe qui peut lire sans se connecter est copié vers cette instance Meilisearch : son titre, son extrait et son texte intégral. La copie suit vos publications, modifications et dépublications. Le contenu réservé aux membres ou protégé par phrase secrète n'est jamais envoyé. Quiconque gère cette instance peut lire tout ce qu'elle contient."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every record to link to in one list — for a short one. Past 100, the editor searches instead."
+msgstr "Tous les enregistrements à lier dans une seule liste — pour une liste courte. Au-delà de 100, l'éditeur propose une recherche."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -12767,6 +12838,11 @@ msgstr "Utilisée par aucun document publié."
 msgid "Not verified"
 msgstr "Non vérifié"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not while editors can add new terms."
+msgstr "Pas tant que les éditeurs peuvent ajouter de nouveaux termes."
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not yet anchored — anchors are minted at publish"
@@ -13737,6 +13813,16 @@ msgstr "Le courrier sortant n’a pas pu être enregistré."
 msgid "Outgoing mail saved."
 msgstr "Courrier sortant enregistré."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Over %{count} options — the editor shows a dropdown instead."
+msgstr "Plus de %{count} options — l'éditeur affiche une liste déroulante à la place."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Over %{count} options — the editor shows tags instead."
+msgstr "Plus de %{count} options — l'éditeur affiche des étiquettes à la place."
+
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -14170,6 +14256,11 @@ msgstr "Choisissez-en une pour remplir le formulaire ci-dessous — rien n’est
 #, elixir-autogen, elixir-format
 msgid "Pick what this field should work out"
 msgstr "Choisissez ce que ce champ doit calculer"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Picked terms as chips, with a search box."
+msgstr "Les termes choisis sous forme de pastilles, avec une zone de recherche."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -14818,6 +14909,11 @@ msgstr "Citation"
 #, elixir-autogen, elixir-format
 msgid "RFC 9116 recommends an expiry less than a year ahead, so a forgotten file goes stale."
 msgstr "La RFC 9116 recommande une expiration à moins d'un an, pour qu'un fichier oublié devienne périmé."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Radio buttons"
+msgstr "Boutons radio"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -16800,6 +16896,11 @@ msgstr "Rechercher"
 msgid "Search Unsplash photos"
 msgstr "Rechercher des photos Unsplash"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search as you type"
+msgstr "Recherche à la saisie"
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "Search built in"
@@ -17370,6 +17471,11 @@ msgstr "Plusieurs images avec légendes, publiées en données structurées de g
 #, elixir-autogen, elixir-format
 msgid "Several images, in the order the editor arranges them."
 msgstr "Plusieurs images, dans l’ordre choisi par la personne qui rédige."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Several lines"
+msgstr "Plusieurs lignes"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -18656,6 +18762,7 @@ msgstr "%{ok} étiquetés ; %{failed} n'ont pas pu être mis à jour."
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -19553,6 +19660,11 @@ msgstr "Le domaine n'a pas pu être enregistré."
 #, elixir-autogen, elixir-format
 msgid "The editing console, as your team uses it every day."
 msgstr "La console d'édition, telle que votre équipe l'utilise au quotidien."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "The editor input it uses"
+msgstr "La saisie d'éditeur qu'il utilise"
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
@@ -21195,6 +21307,11 @@ msgstr "Trop de requêtes. Réessayez dans %{seconds} s."
 #, elixir-autogen, elixir-format
 msgid "Too many suggestions requested. Try again in %{seconds}s."
 msgstr "Trop de suggestions demandées. Réessayez dans %{seconds} s."
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Too many to list — search instead."
+msgstr "Trop nombreux pour être listés — faites une recherche."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -23750,6 +23867,11 @@ msgstr "catégorie"
 msgid "check"
 msgstr "à vérifier"
 
+#: lib/kiln_cms/cms/validations/field_widget.ex
+#, elixir-autogen, elixir-format
+msgid "checkboxes can't take terms of their own: use tags, or turn off new terms"
+msgstr "les cases à cocher n'acceptent pas de termes propres : utilisez des étiquettes ou désactivez les nouveaux termes"
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "checked %{at}"
@@ -25081,6 +25203,11 @@ msgstr "donne la deuxième valeur lorsque la condition est remplie, sinon la tro
 #, elixir-autogen, elixir-format
 msgid "these counters look wrong"
 msgstr "ces compteurs semblent erronés"
+
+#: lib/kiln_cms/cms/validations/field_widget.ex
+#, elixir-autogen, elixir-format
+msgid "this field has no choice of editor input"
+msgstr "ce champ ne propose pas de choix de saisie d'éditeur"
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format

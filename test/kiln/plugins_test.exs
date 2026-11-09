@@ -769,6 +769,67 @@ defmodule Kiln.PluginsTest do
       refute error.message =~ "Lookup.Suggest"
     end
 
+    # #2284: the fixture's `Rating` type declares well-formed widgets, so
+    # "passes for the fixture plugin" above covers the clean case.
+    test "flags a field type whose widgets/1 is malformed, repeats a name, or raises" do
+      defmodule BadEntryWidgetsType do
+        use Kiln.FieldType
+        def cast(value, _definition), do: {:ok, value}
+        def widgets(_definition), do: [:fine, "string_name", {:labelled, :not_a_string}, :BadName]
+      end
+
+      defmodule DuplicateWidgetsType do
+        use Kiln.FieldType
+        def cast(value, _definition), do: {:ok, value}
+        def widgets(_definition), do: [:twice, {:twice, "Twice"}]
+      end
+
+      defmodule NotAListWidgetsType do
+        use Kiln.FieldType
+        def cast(value, _definition), do: {:ok, value}
+        def widgets(_definition), do: :stars
+      end
+
+      defmodule RaisingWidgetsType do
+        use Kiln.FieldType
+        def cast(value, _definition), do: {:ok, value}
+        def widgets(_definition), do: raise("no widgets for you")
+      end
+
+      defmodule EmptyWidgetsType do
+        use Kiln.FieldType
+        def cast(value, _definition), do: {:ok, value}
+        def widgets(_definition), do: []
+      end
+
+      defmodule WidgetsPlugin do
+        use Kiln.Plugin
+
+        def field_types,
+          do: [
+            BadEntryWidgetsType,
+            DuplicateWidgetsType,
+            NotAListWidgetsType,
+            RaisingWidgetsType,
+            EmptyWidgetsType,
+            KilnCMS.FixturePlugin.FieldTypes.Rating
+          ]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [WidgetsPlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+      assert error.message =~ ~s(widgets/1 has entry "string_name")
+      assert error.message =~ ~s(widgets/1 has entry {:labelled, :not_a_string})
+      assert error.message =~ ~s(widgets/1 has entry :BadName)
+      refute error.message =~ "entry :fine"
+      assert error.message =~ ~s(widgets/1 names :twice more than once)
+      assert error.message =~ "widgets/1 returned :stars"
+      assert error.message =~ "raised while listing its widgets/1 (no widgets for you)"
+      refute error.message =~ "empty_widgets_type"
+      refute error.message =~ ":rating"
+    end
+
     test "flags queue redefinitions and malformed paths" do
       defmodule RudePlugin do
         use Kiln.Plugin
