@@ -177,6 +177,14 @@ Notes:
   log-out-everywhere) takes effect immediately.
 - The browser `/sign-in` LiveView remains the path for the interactive
   admin/editor UI (it establishes a session, not a bearer token).
+- When the site has an [admin allowlist](admin-allowlist.md) turned on, both
+  `/api/auth/sign_in` and `/api/auth/sign_in/verify` answer **403**
+  `network_not_allowed` to a caller outside the listed networks, before the
+  credentials are looked at, and **503** `temporarily_unavailable` (with
+  `retry-after: 30`) when the list cannot be read. This applies to every
+  account, members included, so a single-page app or a mobile app that signs
+  people in from their own devices only works from listed networks while a
+  list is on. Tokens already issued and API keys are not affected.
 
 ### Accounts with two-factor authentication
 

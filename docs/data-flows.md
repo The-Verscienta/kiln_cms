@@ -35,7 +35,7 @@ your deployment.
 | RBAC role | `users.role` | No | `:admin` / `:editor` / `:viewer`. |
 | Notification preferences | `users.notify_on_*` | No | Per-user opt-out (issue #46). |
 | In-app notifications | `notifications` | Yes | One row per recipient (#1320): event, content title, a comment excerpt, and the acting user's display name (`actor_name`) plus `actor_id`. Readable only by the recipient — no admin bypass. Deleted with the recipient's account row; `actor_name`/`actor_id` nulled when the *actor* is erased. No retention purge yet. |
-| Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry; for a session, browser and OS family and last use. See [Auth tokens](#auth-token-retention-218). |
+| Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry; for a session, browser and OS family, last use and the site it signed in on; for a revoked one, why. See [Auth tokens](#auth-token-retention-218). |
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
 | Security log | `security_events` | Yes | Admin-only audit log (#2241): the acting user's id and an **email snapshot** (known accounts only), the target, the **raw IP address** and **user agent** of the request, and a short allowlisted metadata map with no secrets. Kept 365 days by default (per-site setting, `0` keeps forever; then raw IPs are kept indefinitely). Scrubbed on erasure, purged on retention and by the staging scrub. See [Security log](security-events.md). |
 | Site invitations | `invitations` | Yes | One row per address a platform admin invited to a site (#2135): the **email address**, the site, the tier and custom role, who sent it, when it expires and how often it was sent, and the SHA-256 of the link's token (never the token). The person may have no account. Removed when the invitation is accepted or revoked; otherwise usable for 7 days and deleted by the daily prune 30 days after that, so an address is kept at most about 37 days. Not touched by erasure (see below); deleted by the staging scrub. |
@@ -186,6 +186,17 @@ when the session was last used (written at most every five minutes), and the
 jti of the remember-me cookie issued to the same browser, so signing that
 session out retires the cookie too. No IP address is recorded. These fields
 live and die with the row: the nightly sweep below removes them with it.
+
+Since #2246 a session's row and its remember-me row also record the site
+(`org_id`) they signed in on, and a revoked row records why (`revoked_reason`:
+`idle` for the site's idle timeout, `admin_sign_out_all` for an admin's "sign
+out everyone", empty otherwise), so the sign-in page can tell the person.
+`last_used_at` is now also written on the remember-me row, and by signed-in
+page requests and console clicks as well as page loads: at most every five
+minutes, or every tenth of the site's idle timeout when it has one (never more
+often than every 30 seconds). The site's own settings row
+(`site_session_policy`) holds two timeouts, when they last changed and when an
+admin last signed everyone out; it names no person.
 
 One row in that table is **not** an issued token: `purpose: "pending_sign_in"`
 (#743), written once per completed *headless* two-factor sign-in to make the

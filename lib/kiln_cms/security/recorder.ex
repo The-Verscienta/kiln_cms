@@ -26,9 +26,10 @@ defmodule KilnCMS.Security.Recorder do
     * `record_after_commit/2` - best-effort via `KilnCMS.AfterCommit`. Never
       raises into the caller; a failure is logged and counted on the
       `[:kiln_cms, :security, :event_failed]` telemetry event.
-    * `record_sampled/2` - best-effort, for `:sign_in_failed`: a per-IP cap
-      (`KilnCMS.Accounts.ThrottleStore`) keeps a password-guessing flood from
-      filling the log. Excess is dropped and counted on
+    * `record_sampled/2` - best-effort, for `:sign_in_failed` and
+      `:admin_access_refused` (#2248), which anyone can trigger: a per-tenant,
+      per-IP cap (`KilnCMS.Accounts.ThrottleStore`) keeps a flood from filling
+      the log. Excess is dropped and counted on
       `[:kiln_cms, :security, :event_sampled_out]`. `:sign_in_locked` is never
       sampled away. `ThrottleStore.hit/5` refuses to run inside a transaction,
       so call this from outside one (a read action's hook, `after_transaction`).
@@ -65,7 +66,11 @@ defmodule KilnCMS.Security.Recorder do
 
   @default_sample_limit 5
   @default_sample_scale :timer.minutes(15)
-  @sample_bucket "security_sign_in_failed"
+  # One bucket per sampled type, so a flood of one cannot spend the other's.
+  @sample_buckets %{
+    sign_in_failed: "security_sign_in_failed",
+    admin_access_refused: "security_admin_access_refused"
+  }
 
   @typedoc "The request facts an event records."
   @type request :: %{ip: String.t() | nil, user_agent: String.t() | nil}
@@ -182,16 +187,18 @@ defmodule KilnCMS.Security.Recorder do
   end
 
   @doc """
-  Best-effort record with a per-IP cap for `:sign_in_failed`. Every other type
-  (`:sign_in_locked` in particular) is recorded as `record_after_commit/2`
-  does, never sampled away.
+  Best-effort record with a per-IP cap for `:sign_in_failed` and
+  `:admin_access_refused`. Every other type (`:sign_in_locked` in particular)
+  is recorded as `record_after_commit/2` does, never sampled away.
 
   Extra options: `:limit` (events per window per IP, default
-  #{@default_sample_limit}) and `:scale` (window in ms, default 15 minutes).
-  Returns `:ok` (recorded or dropped) or `:skipped`.
+  #{@default_sample_limit}), `:scale` (window in ms, default 15 minutes) and
+  `:sample_key` (what the cap counts per, instead of the request's ip — the
+  admin allowlist passes an IPv6 client's `/64`, which one client can rotate
+  through). Returns `:ok` (recorded or dropped) or `:skipped`.
   """
   @spec record_sampled(atom(), keyword()) :: :ok | :skipped
-  def record_sampled(:sign_in_failed = type, opts) do
+  def record_sampled(type, opts) when is_map_key(@sample_buckets, type) do
     run_after_commit(type, opts, fn -> record_if_admitted(type, opts) end)
   end
 
@@ -211,7 +218,7 @@ defmodule KilnCMS.Security.Recorder do
   end
 
   defp record_if_admitted(type, opts) do
-    if admit?(opts) do
+    if admit?(type, opts) do
       record(type, opts)
     else
       :telemetry.execute([:kiln_cms, :security, :event_sampled_out], %{count: 1}, %{type: type})
@@ -220,14 +227,19 @@ defmodule KilnCMS.Security.Recorder do
     end
   end
 
-  defp admit?(opts) do
-    ip = get_in(opts, [:request, :ip]) || "unknown"
+  defp admit?(type, opts) do
+    key = Keyword.get(opts, :sample_key) || get_in(opts, [:request, :ip]) || "unknown"
     limit = Keyword.get(opts, :limit, @default_sample_limit)
     scale = Keyword.get(opts, :scale, @default_sample_scale)
 
     match?(
       {:allow, _},
-      ThrottleStore.hit(@sample_bucket, "#{Keyword.fetch!(opts, :tenant)}:#{ip}", scale, limit)
+      ThrottleStore.hit(
+        Map.fetch!(@sample_buckets, type),
+        "#{Keyword.fetch!(opts, :tenant)}:#{key}",
+        scale,
+        limit
+      )
     )
   end
 

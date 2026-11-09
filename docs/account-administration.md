@@ -425,7 +425,7 @@ API; the password never leaves your server. Signing in is not checked.
 
 Requires the admin role.
 
-1. Open **Password policy** under **Organization** in the console sidebar (or go to
+1. Open **Password policy** under **Sign-in & access** in the console sidebar (or go to
    `/editor/password-policy`).
 2. In **When a new password is in a known breach**, pick one of the three options:
    - **Off - don't warn.** The check result is ignored.
@@ -476,6 +476,169 @@ for the two operator settings.
   connected right now, which no token revocation reaches.
 
 Either alone leaves the account signed in somewhere.
+
+That is one account, on every site. A site admin can also act on one site:
+sign browsers out after a stretch of inactivity
+([Sign people out when idle](#sign-people-out-when-idle)), or end every browser
+session there at once ([Sign everyone out](#sign-everyone-out)).
+
+## Sign people out when idle
+
+Requires the admin role on the site (an org admin, or a platform admin). The
+setting is per site and off by default: until you set it, a browser stays
+signed in until it signs out, and "remember me" keeps it signed in for 30 days.
+
+1. Open **Sessions** under **Configure → Sign-in & access** in the console sidebar
+   (or go to `/editor/sessions`). Under **Sign out when idle**, the page reads
+   "No idle timeout is set: browsers stay signed in until they sign out."
+2. In **Everyone**, pick how long a browser may sit unused: from **15
+   minutes** to **24 hours**. **Never** turns the timeout off.
+3. Optionally, in **Administrators**, pick a shorter time for the site's
+   admins. **Same as everyone** holds them to the time above. You can set only
+   this one, which leaves editors and viewers without a timeout.
+4. Click **Save**. You see "Session settings saved." and the line under the
+   form reads "This site signs idle browsers out."
+
+The clock starts at the save: turning the timeout on, or shortening it, signs
+nobody out for time they spent idle before. Pages already open pick the change
+up within a few seconds.
+
+"Administrator" means the account's tier on this site, worked out again at
+every check, so a temporary admin grant counts while it lasts. A person who is
+an admin here and an editor on another site gets this site's admin time here
+only. Each person can see the time that applies to them under **Active
+sessions** on **Your settings**: "This site signs a browser out after 30
+minutes without activity."
+
+### What counts as activity
+
+| Counts | Does not count |
+|---|---|
+| Loading any page of this site while signed in, public pages included | A tab left open with nobody using it |
+| Clicking, typing or submitting on a console page | A page reconnecting after a network drop or a deploy |
+| Moving within a console page (a LiveView patch, such as a tab or filter change) | Replies a page sends on its own (`body_flushed`, `push_state`, `push_unsupported`) |
+| | Requests with an API key or a bearer token, and image transforms (`/media/:id/t/…`) |
+| | Activity on another site |
+
+Activity is written down at most once per tenth of the timeout, clamped to
+between 30 seconds and 5 minutes, so a browser is signed out after between 90% and 100% of the timeout without
+activity. An open page checks a few seconds after its deadline; a closed one is
+checked at its next request.
+
+The timeout wins over "remember me". A browser that goes idle loses its
+remember-me cookie with its session, and a remember-me cookie that sat unused
+longer than the timeout no longer signs the browser in: the cookie is deleted
+and the person signs in again.
+
+### What people see
+
+- **An open console page** goes to `/sign-in` with "You were signed out after a
+  period of inactivity."
+- **The next click on a sign-in or console page** shows the same message on
+  the sign-in page.
+- **A public page** is served as to a signed-out visitor, with no message:
+  public pages may be stored by a shared cache, so they never change cookies.
+- **The site's security log** records **Signed out after inactivity**
+  (`session_idle_expired`) for each one; see
+  [Security events](security-events.md#what-is-recorded).
+
+### When the timeout does nothing
+
+- **The setting cannot be read** (a database fault): the timeout is off for
+  that minute and a warning is logged. It fails open rather than signing every
+  account out during an outage. There is no operator ceiling and no
+  environment variable: the site decides.
+- **API keys, bearer tokens and headless app tokens** are not browser sessions
+  and never expire for idleness.
+- **Clicks inside some components** (a LiveComponent handling its own events)
+  do not count on their own. Every page that has them also sends page-level
+  events, but a page driven only by such clicks can sign out the person using
+  it.
+
+### Errors you can hit
+
+- "The time for administrators can't be longer than the time for everyone."
+  The **Administrators** time must be the same or shorter.
+- "Choose one of the listed times." The form sent a value that is not a number.
+- "You don't have permission to change this site's session settings." Your
+  admin role on the site ended after you opened the page.
+- Editors and viewers who open `/editor/sessions` are sent to the access-denied
+  page.
+
+## Sign everyone out
+
+For a suspected breach on one site. Requires the admin role on the site.
+
+1. Open **Sessions** under **Configure → Sign-in & access** (`/editor/sessions`)
+   and scroll to **Sign out everyone**.
+2. Leave **Keep me signed in on this browser** ticked to stay signed in here,
+   or untick it to sign yourself out too.
+3. Click **Sign out everyone** and confirm "Sign out everyone on this site
+   now?". You see "Signed out 12 sessions on this site."
+
+What it ends, on this site only:
+
+- every browser session, including platform admins' sessions on this site;
+- every "remember me" cookie issued on this site;
+- every sign-in waiting at the two-factor prompt. A person who enters the code
+  afterwards is signed out again on their next page.
+
+Every open page of those sessions goes to `/sign-in` with "An administrator
+signed everyone out of this site. Sign in again to continue." Sessions on other
+sites, including the same people's, are not affected. **Keep me signed in on
+this browser** spares only the browser you clicked from (and its remember-me
+cookie), not your sessions on other devices.
+
+The count covers sessions known to belong to this site. Sessions signed in
+before the upgrade that added this page record no site yet; they are not
+counted, and each is signed out the first time it is used on this site again.
+
+What it does **not** end:
+
+- **API keys.** Revoke them on the **API keys** page.
+- **Headless app tokens** (`POST /api/auth/sign_in`), including any minted
+  with a stolen password. Reset the account's password, or have a platform
+  admin use **Sign out everywhere** on the account in `/editor/accounts`
+  ([Signing an account out](#signing-an-account-out)).
+- **Already-connected collaborative-editing and GraphQL subscription sockets**
+  (`/ws/collab`, `/ws/gql`). They are keyed per account rather than per
+  browser, and close at their next reconnect or re-check.
+
+The site's security log records **Everyone signed out**
+(`all_sessions_revoked`) with the number of sessions and whether you kept your
+own. If the log entry cannot be written, nothing is signed out and the page says
+"Nobody was signed out. Try again."
+
+### From code
+
+`KilnCMS.CMS.sign_out_all_sessions/2` is the same action. It needs the site as
+the tenant and an admin of that site as the actor, and returns the number of
+browser sessions it ended:
+
+```elixir
+{:ok, count} =
+  KilnCMS.CMS.sign_out_all_sessions(%{},
+    actor: admin,
+    tenant: org
+  )
+```
+
+Pass `except_session_jti:` to keep one session. It must be one of the actor's
+own sessions on this site; anything else is refused with "is not one of your
+sessions on this site" and nothing is signed out. Without a tenant the call is
+refused. The idle timeouts are saved with
+`KilnCMS.CMS.save_site_session_policy/2`
+(`%{idle_timeout_minutes: 60, admin_idle_timeout_minutes: 15}`, each `nil` or
+10 to 1440); `KilnCMS.Accounts.IdleTimeout` enforces them.
+
+## Restrict sign-in to your networks
+
+A site admin can limit the console and every sign-in page on the site to a
+list of IP addresses and ranges, such as an office or a VPN, at **Configure →
+Sign-in & access → Admin allowlist** (`/editor/admin-allowlist`). Members and
+apps that sign people in are restricted too while the list is on. The full
+guide, including how an operator gets admins back in after a lock-out, is
+[Restricting sign-in to your networks](admin-allowlist.md).
 
 ## Removing an account
 

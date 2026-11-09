@@ -110,6 +110,11 @@ defmodule KilnCMSWeb.Router do
     # header it widens.
     plug KilnCMSWeb.Plugs.SiteStorageCsp
     plug :load_from_session
+    # The site's idle timeout and "sign out everyone" (#2246): a session that
+    # is no longer good is served signed out. After `load_from_session`, whose
+    # user it judges, and writing no session or cookie — this pipeline serves
+    # public pages a shared cache may store (#699).
+    plug KilnCMSWeb.Plugs.IdleTimeout, :session
   end
 
   # Dev-only browser tooling (AshAdmin, LiveDashboard, API explorers) ships its
@@ -257,8 +262,18 @@ defmodule KilnCMSWeb.Router do
     # Ahead of `load_from_session` so the sign-in is resolved within the same
     # request. Safe there because the plug is a no-op when the session already
     # names a user, so it cannot swap a live session for a stale cookie.
+    #
+    # The idle timeout (#2246) is judged first: an idle remember-me cookie, or
+    # one older than the site's last "sign out everyone", does not sign in.
+    plug KilnCMSWeb.Plugs.IdleTimeout, :remember_me
     plug :sign_in_with_remember_me
+    # Says why, when the session names a token revoked for inactivity or by
+    # "sign out everyone" — read before `load_from_session` drops it (#2246).
+    plug KilnCMSWeb.Plugs.IdleTimeout, :notice
     plug :load_from_session
+    # As on `:browser`, and this pipeline may write: the token leaves the
+    # session and the remember-me cookie is deleted (#2246).
+    plug KilnCMSWeb.Plugs.IdleTimeout, {:session, writes_session?: true}
     # After the two above, because it needs whichever of them resolved the user
     # — and it covers the remember-me path, which never reaches
     # `AuthController.complete_sign_in/3` (#675).
@@ -306,6 +321,9 @@ defmodule KilnCMSWeb.Router do
     plug :protect_from_forgery
     plug :load_from_session
     plug :read_only_session
+    # A session no longer good under the site's idle timeout or "sign out
+    # everyone" (#2246) is served as anonymous. Reads only.
+    plug KilnCMSWeb.Plugs.IdleTimeout, :read_only
   end
 
   pipeline :delivery do
@@ -390,6 +408,20 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :delivery
   end
 
+  # The site's admin allowlist (#2248): the console, `/setup` and every
+  # sign-in route are refused outside the networks a site admin listed. FIRST
+  # in each gated `pipe_through`, ahead of `fetch_session`, so a refused
+  # request reads no session and is never signed in by a remember-me cookie.
+  # Which routes carry it is pinned by `admin_allowlist_routes_test.exs`.
+  pipeline :admin_allowlist do
+    plug KilnCMSWeb.Plugs.AdminAllowlist, :html
+  end
+
+  # The same gate on the headless password sign-in, answering in JSON.
+  pipeline :admin_allowlist_api do
+    plug KilnCMSWeb.Plugs.AdminAllowlist, :json
+  end
+
   # Per-IP ceiling for unauthenticated infra/SEO endpoints (`/up` runs a DB
   # query; sitemap cache-misses do a table scan). Generous enough never to
   # throttle real probes/crawlers — see the `:probe` bucket.
@@ -397,8 +429,11 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :probe
   end
 
+  # The console and `/setup`, behind the admin allowlist (#2248). The scope
+  # below this one holds the signed-in routes that are not the console
+  # (`/account`, the billing handoffs), which the allowlist leaves alone.
   scope "/", KilnCMSWeb do
-    pipe_through :browser
+    pipe_through [:admin_allowlist, :browser]
 
     # First-run setup wizard (#1317). Anonymous by necessity — it exists to
     # create the account everything else authenticates as. The route-level gate
@@ -406,30 +441,18 @@ defmodule KilnCMSWeb.Router do
     # is the `:bootstrap_admin` policy + advisory lock in
     # `KilnCMS.Accounts.Bootstrap`, which hold for url-less joins and every
     # other path the router never sees.
+    #
+    # `session:` carries the address the allowlist admitted into the page's
+    # signed LiveView session (#2248), as `ash_authentication_live_session`'s
+    # own `"context"` does for the sessions below.
     live_session :first_run,
-      on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}] do
+      session: {KilnCMSWeb.AdminAllowlist, :live_session, []},
+      on_mount: [
+        {KilnCMSWeb.AdminAllowlist, :gated},
+        {KilnCMSWeb.LiveUserAuth, :assign_current_org}
+      ] do
       live "/setup", SetupLive, :index
     end
-
-    # Signed in, but NOT necessarily an editor — the reader-facing surface (#337
-    # Phase 2). Gated at the router rather than per-LiveView, like the editor and
-    # admin sessions below.
-    ash_authentication_live_session :authenticated_routes,
-      on_mount: [
-        {KilnCMSWeb.LiveUserAuth, :current_user},
-        {KilnCMSWeb.LiveUserAuth, :assign_current_org},
-        {KilnCMSWeb.LiveUserAuth, :live_user_required},
-        {KilnCMSWeb.LiveUserAuth, :restore_locale}
-      ] do
-      live "/account", AccountLive, :show
-    end
-
-    # Member payment handoffs. Plain CSRF-protected posts rather than LiveView
-    # events: both end in a redirect to a provider-hosted page on another origin,
-    # which a LiveView cannot navigate to. Two segments, so they must be declared
-    # before the `/:type/:slug` delivery catch-all far below.
-    post "/billing/checkout", BillingController, :checkout
-    post "/billing/portal", BillingController, :portal
 
     # The pre-generic editor URLs, removed at 1.0 (#1543): a 301 to
     # `/editor/content/page|post/:id` for bookmarks and mail sent by older
@@ -441,6 +464,8 @@ defmodule KilnCMSWeb.Router do
     # Authoring UIs — editors and admins only.
     ash_authentication_live_session :editor_routes,
       on_mount: [
+        # The admin allowlist (#2248), for a plugin view with no module hook.
+        {KilnCMSWeb.AdminAllowlist, :gated},
         {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :assign_current_org},
         {KilnCMSWeb.LiveUserAuth, :live_editor_required},
@@ -511,6 +536,7 @@ defmodule KilnCMSWeb.Router do
     # just in each LiveView's mount/3, so non-admins can't mount the route.
     ash_authentication_live_session :admin_routes,
       on_mount: [
+        {KilnCMSWeb.AdminAllowlist, :gated},
         {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :assign_current_org},
         {KilnCMSWeb.LiveUserAuth, :live_admin_required},
@@ -571,6 +597,10 @@ defmodule KilnCMSWeb.Router do
       # and admin-only: it decides whether the site's administrators can be
       # refused a password.
       live "/editor/password-policy", PasswordPolicyLive, :index
+      # The site's idle timeout and "sign out everyone" (#2246). Org-scoped and
+      # admin-only by the tier gate AND the resource policy; enforcement is
+      # `KilnCMSWeb.Plugs.IdleTimeout` and `KilnCMSWeb.IdleSession`.
+      live "/editor/sessions", SessionPolicyLive, :index
       # Per-site custom head/footer HTML for the DELIVERY site (#490). Admin-only
       # by the live session's tier gate AND the resource policy; the snippet is
       # rendered only by the `:delivery` pipeline, never here.
@@ -578,6 +608,10 @@ defmodule KilnCMSWeb.Router do
       # The site's IP/CIDR block list (#2242). Admin-only by the tier gate AND the
       # resource policy; enforcement is `KilnCMSWeb.Plugs.IpBlock` and the sockets.
       live "/editor/ip-blocks", IpBlockLive, :index
+      # The networks this site's console and sign-in may be reached from (#2248).
+      # Admin-only by the tier gate AND the resource policy; enforcement is
+      # `KilnCMSWeb.Plugs.AdminAllowlist` and `KilnCMSWeb.AdminAllowlist`.
+      live "/editor/admin-allowlist", AdminAllowlistLive, :index
       # Per-class delivery ceilings by user agent (#2243). Admin-only by the tier
       # gate AND the resource policy; enforcement is `KilnCMSWeb.Plugs.RateLimit`
       # on the `:delivery` pipeline.
@@ -697,6 +731,32 @@ defmodule KilnCMSWeb.Router do
     get "/editor/translations/export.xlf", TranslationsExportController, :export
   end
 
+  # Signed in, but not the console: the allowlist (#2248) leaves these alone.
+  # Declared before the delivery catch-alls far below, like the scope above.
+  scope "/", KilnCMSWeb do
+    pipe_through :browser
+
+    # Signed in, but NOT necessarily an editor — the reader-facing surface (#337
+    # Phase 2). Gated at the router rather than per-LiveView, like the editor and
+    # admin sessions above.
+    ash_authentication_live_session :authenticated_routes,
+      on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :current_user},
+        {KilnCMSWeb.LiveUserAuth, :assign_current_org},
+        {KilnCMSWeb.LiveUserAuth, :live_user_required},
+        {KilnCMSWeb.LiveUserAuth, :restore_locale}
+      ] do
+      live "/account", AccountLive, :show
+    end
+
+    # Member payment handoffs. Plain CSRF-protected posts rather than LiveView
+    # events: both end in a redirect to a provider-hosted page on another origin,
+    # which a LiveView cannot navigate to. Two segments, so they must be declared
+    # before the `/:type/:slug` delivery catch-all far below.
+    post "/billing/checkout", BillingController, :checkout
+    post "/billing/portal", BillingController, :portal
+  end
+
   # Headless GraphQL — always available; the interactive playground is dev-only
   # (see the `dev_routes` block below).
   #
@@ -771,8 +831,11 @@ defmodule KilnCMSWeb.Router do
   # account's password alone gets a pending token here, not a JWT, and the code
   # is redeemed at the second route. Same `:auth` bucket, and the code itself is
   # charged the per-account second-factor budget the browser prompt charges.
+  #
+  # Behind the admin allowlist (#2248): it exchanges a password for a token with
+  # the account's full role, so leaving it open would undo the list.
   scope "/api/auth", KilnCMSWeb do
-    pipe_through :api_auth
+    pipe_through [:admin_allowlist_api, :api_auth]
 
     post "/sign_in", ApiAuthController, :sign_in
     post "/sign_in/verify", ApiAuthController, :verify
@@ -1157,8 +1220,33 @@ defmodule KilnCMSWeb.Router do
     get "/locale/:locale", LocaleController, :update
   end
 
+  # Signing out is never gated: giving up access is always allowed (#2248).
+  # Its own scope, ahead of the gated one below, which keeps every option it had.
   scope "/", KilnCMSWeb do
     pipe_through :browser_auth
+
+    # Two routes, not one: a `DELETE` to the controller *and* a `live` route in
+    # its own `live_session`. The second is easy to miss and is joinable at the
+    # channel with a scraped session blob like any other, so it needs the same
+    # wrapper as the token pages below (#701).
+    #
+    # `layout:` / `on_mount:` / `overrides:` mirror the token routes below: this
+    # route defaulted `overrides:` to the library's `Default`, so Kiln's
+    # `SignOutLive` / `Components.SignOut` overrides never applied and the page
+    # shipped the library's `dark:` classes instead of Kiln's `data-theme` ones,
+    # and it drew no white-label banner (#884).
+    sign_out_route AuthController, "/sign-out",
+      live_view: KilnCMSWeb.SignOutLive,
+      layout: {KilnCMSWeb.Layouts, :auth},
+      on_mount: [{KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}],
+      overrides: [KilnCMSWeb.AuthOverrides]
+  end
+
+  # Every sign-in route, behind the admin allowlist (#2248): an outsider reaches
+  # no password form, magic link, passkey, single sign-on, second factor, reset
+  # or invitation.
+  scope "/", KilnCMSWeb do
+    pipe_through [:admin_allowlist, :browser_auth]
 
     # Passkey (WebAuthn) sign-in ceremony (#331) — JSON two-step driven by
     # progressive-enhancement JS on /sign-in; same :auth rate limit + CSRF.
@@ -1182,26 +1270,15 @@ defmodule KilnCMSWeb.Router do
     # included, is still logged, as for `/magic_link` and `/password-reset`.
     live_session :invitation,
       layout: {KilnCMSWeb.Layouts, :auth},
-      on_mount: [{KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}] do
+      session: {KilnCMSWeb.AdminAllowlist, :live_session, []},
+      on_mount: [
+        {KilnCMSWeb.AdminAllowlist, :gated},
+        {KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}
+      ] do
       live "/auth/invite/:invite_token", InviteLive, :show
     end
 
     auth_routes AuthController, KilnCMS.Accounts.User, path: "/auth"
-    # Two routes, not one: a `DELETE` to the controller *and* a `live` route in
-    # its own `live_session`. The second is easy to miss and is joinable at the
-    # channel with a scraped session blob like any other, so it needs the same
-    # wrapper as the token pages below (#701).
-    #
-    # `layout:` / `on_mount:` / `overrides:` mirror the token routes below: this
-    # route defaulted `overrides:` to the library's `Default`, so Kiln's
-    # `SignOutLive` / `Components.SignOut` overrides never applied and the page
-    # shipped the library's `dark:` classes instead of Kiln's `data-theme` ones,
-    # and it drew no white-label banner (#884).
-    sign_out_route AuthController, "/sign-out",
-      live_view: KilnCMSWeb.SignOutLive,
-      layout: {KilnCMSWeb.Layouts, :auth},
-      on_mount: [{KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}],
-      overrides: [KilnCMSWeb.AuthOverrides]
 
     # Second-factor (TOTP) prompt after the first factor for a 2FA-enabled
     # account (#331). Gated by the signed :pending_2fa session token, not a login.
@@ -1230,6 +1307,7 @@ defmodule KilnCMSWeb.Router do
                     live_view: KilnCMSWeb.SignInLive,
                     layout: {KilnCMSWeb.Layouts, :auth},
                     on_mount: [
+                      {KilnCMSWeb.AdminAllowlist, :gated},
                       {KilnCMSWeb.LiveUserAuth,
                        [:restore_locale, :assign_current_org, :live_no_user]}
                     ],
@@ -1240,6 +1318,7 @@ defmodule KilnCMSWeb.Router do
                     live_view: KilnCMSWeb.SignInLive,
                     layout: {KilnCMSWeb.Layouts, :auth},
                     on_mount: [
+                      {KilnCMSWeb.AdminAllowlist, :gated},
                       {KilnCMSWeb.LiveUserAuth,
                        [:restore_locale, :assign_current_org, :live_no_user]}
                     ],
@@ -1257,21 +1336,30 @@ defmodule KilnCMSWeb.Router do
     reset_route auth_routes_prefix: "/auth",
                 live_view: KilnCMSWeb.ResetLive,
                 layout: {KilnCMSWeb.Layouts, :auth},
-                on_mount: [{KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}],
+                on_mount: [
+                  {KilnCMSWeb.AdminAllowlist, :gated},
+                  {KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}
+                ],
                 overrides: [KilnCMSWeb.AuthOverrides]
 
     confirm_route KilnCMS.Accounts.User, :confirm_new_user,
       auth_routes_prefix: "/auth",
       live_view: KilnCMSWeb.ConfirmLive,
       layout: {KilnCMSWeb.Layouts, :auth},
-      on_mount: [{KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}],
+      on_mount: [
+        {KilnCMSWeb.AdminAllowlist, :gated},
+        {KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}
+      ],
       overrides: [KilnCMSWeb.AuthOverrides]
 
     magic_sign_in_route(KilnCMS.Accounts.User, :magic_link,
       auth_routes_prefix: "/auth",
       live_view: KilnCMSWeb.MagicSignInLive,
       layout: {KilnCMSWeb.Layouts, :auth},
-      on_mount: [{KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}],
+      on_mount: [
+        {KilnCMSWeb.AdminAllowlist, :gated},
+        {KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}
+      ],
       overrides: [KilnCMSWeb.AuthOverrides]
     )
   end

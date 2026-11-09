@@ -325,6 +325,9 @@ build if a resource is ever registered without that authorizer.
   LiveViews (`SessionEviction.evict_session/2`). It does not reach a
   `/ws/collab` or `/ws/gql` socket already connected from that browser: those
   are keyed per user, and close at their next reconnect or re-check.
+  Since #2246 a site admin can also end sessions on one site: after a
+  configurable idle time, or all at once with *Sign out everyone*; see
+  [Idle timeout and sign out everyone](#idle-timeout-and-sign-out-everyone-2246).
 
   **Remember-me and the second factor.** The cookie is a completed sign-in in a
   cookie — the read plug hands it to `store_in_session/2` directly, so it never
@@ -644,6 +647,83 @@ An admin (#2242) can refuse an address or range per site from `/editor/ip-blocks
 - **Limits.** Matching is per source address: it does not stop a distributed
   source, and a visitor can change address. Expired rules are not swept.
 
+### Admin allowlist (#2248)
+
+`KilnCMS.Security.AdminAllowlist`, `KilnCMSWeb.Plugs.AdminAllowlist`,
+`KilnCMSWeb.AdminAllowlist`. A site admin can restrict the console and every
+sign-in route to listed networks at `/editor/admin-allowlist`; see
+[admin-allowlist.md](admin-allowlist.md) and
+[ADR 0019](decisions/0019-the-admin-allowlist-fails-closed-and-only-the-operator-lifts-it-from-outside.md).
+
+- **What it stops.** A stolen admin (or any) password, session cookie or
+  remember-me cookie used from outside the listed networks to reach the
+  console, its exports, `/setup` or any sign-in route, including the headless
+  password exchange `POST /api/auth/sign_in`. The password form checks the
+  password over its LiveView socket (`SignInLive`), so the socket join is gated
+  as well as the HTTP request; otherwise an outsider could test passwords.
+- **Gated by route, not by path.** The HTTP gate is the router pipelines
+  `:admin_allowlist` and `:admin_allowlist_api`, first in each gated
+  `pipe_through`, ahead of `fetch_session`: a refused request reads no session
+  and is never signed in by a remember-me cookie. The socket gate is an
+  `on_mount` hook on every LiveView module and in every gated `live_session`,
+  acting for exactly the `live_session`s behind the pipeline.
+  `test/kiln_cms_web/admin_allowlist_routes_test.exs` pins the gated route set
+  route by route, so a new console or sign-in route cannot land ungated by
+  accident.
+- **Fails closed.** An unreadable list answers `503` and refuses joins, and is
+  not cached. The exception is a site this node last read as off, which stays
+  off through a failed read (per node, a day, replaced by any save), so a
+  database blip does not take every site's console down. A host that resolves
+  no site refuses a gated join. Public delivery never reads the list.
+- **Cannot lock the saver out.** A save that does not admit the address the
+  page was loaded from (and the socket's own address, when it has one) is
+  refused, as is one made while a forwarding header arrives that nothing
+  trusts. Loopback, and ranges wider than `/8` or `/16`, cannot be listed.
+- **Break-glass only widens or clears.** `KilnCMS.Release.admin_allowlist/1`
+  runs `operator_override` as the `:operator` system actor and records
+  `admin_allowlist_overridden`; adding to a list that is off is refused. An org
+  admin is refused that action.
+- **The block list wins.** `KilnCMSWeb.Plugs.IpBlock` runs at the endpoint
+  before any gated pipeline.
+- **No platform-admin exemption.** The gate runs before anyone is known, so
+  an exemption would make a stolen platform credential the bypass.
+- **Sampled, address-free telemetry.** `admin_access_refused` is sampled per
+  site and address (an IPv6 address per `/64`) because anyone outside can
+  cause it. The counter `kiln_cms.admin_allowlist.refused.count` carries
+  surface and reason, never the address.
+- **Residual risks.**
+  1. **Stamp-vouched socket joins on Fly.io and App Platform.** Where the
+     socket cannot see the client (`Fly-Client-IP`, `do-connecting-ip`, or a
+     proxy that sets only `Forwarded:`), a join is admitted on the address the
+     HTTP gate stamped into the page's signed LiveView session. A session
+     token carried to another network, or scraped from a page, can join for up
+     to **5 minutes** after the HTTP load that stamped it; after that the join
+     is refused and the page must reload over HTTP.
+  2. **Platform-header spoofing from inside the platform.** `CLIENT_IP_HEADER`
+     trusts the platform's header with no peer check. A machine inside the
+     platform's private network (another app in the same Fly.io organization,
+     a Railway project's private network) can reach the app directly, set the
+     header to a listed address and bypass the list.
+  3. **Long-poll keeps its first connect info.** The LiveView long-poll
+     transport evaluates `connect_info` on the first poll; later polls from a
+     different address are not re-checked until the session reconnects.
+  4. **A session cookie carried outside still reaches the ungated signed-in
+     routes**: `/account` (the reader's own settings) and the media routes
+     (`/media/:id/download` and its siblings), which serve what the session
+     may read. It cannot reach the console.
+  5. **Issued JWTs and API keys keep working anywhere**, including a JWT
+     obtained from a listed network before the attacker left it. A per-key
+     allowlist is a follow-up.
+  6. **The kill switch is not in the security log.** `KILN_ADMIN_ALLOWLIST_DISABLED`
+     has no site and no person; the boot log warns and the allowlist page
+     shows a banner, and the platform's environment history is the only trail.
+     The direct SQL recovery is not recorded either.
+  7. **Rolling back turns the control off silently.** A release before #2248
+     has no gate; the table stays and is ignored. The upgrade notes say so.
+  8. **Members are gated with admins.** While a list is on, members, readers
+     and apps that sign people in from their own devices can only sign in from
+     listed networks. Gating only the console host is a follow-up.
+
 ### Scanner 404 blocking (#2253)
 
 An opt-in control on top of the block list above: `KilnCMS.Security.ScannerGuard`
@@ -895,6 +975,66 @@ password leaves the server.
   corpus.
 - **Telemetry.** `[:kiln_cms, :password, :breach_check]`; see
   [observability.md](observability.md#breached-password-checks).
+
+### Idle timeout and sign out everyone (#2246)
+
+`KilnCMS.Accounts.IdleTimeout`, `KilnCMS.Accounts.SignOutAll`. A site admin
+can sign browsers out after a stretch of inactivity, and end every browser
+session on the site at once. Admin guide:
+[account administration](account-administration.md#sign-people-out-when-idle).
+
+Configured at `/editor/sessions`.
+
+- **Sessions are bound to a site.** A session's token row, and its remember-me
+  row, record the site (`tokens.org_id`) they signed in on, or the first site
+  that uses them if they predate #2246. The cookies are host-only, so a row
+  bound to site A arriving on a host of site B was copied there: it is served
+  signed out on B and nothing is written to it, so it can neither be used on B
+  nor kept awake from B. A remember-me cookie's signature is verified before
+  its row is looked at, and every write is also filtered on the account
+  (`subject`), so a forged or foreign jti changes no one's row.
+- **Last activity is the database's clock.** `last_used_at` is written by and
+  compared with Postgres `now()`, never a node's clock, and the expiring
+  UPDATE repeats the idle test in its `WHERE`, so a tab that kept the session
+  awake a moment earlier wins the race. Idle time is measured from no earlier
+  than the policy's last save (`policy_changed_at`), so enabling or shortening
+  the timeout signs no one out for past inactivity. That stamp is the saving
+  node's clock: skew between nodes shifts the grace by the skew.
+- **Public pages stay cache-safe.** On `:browser` an expired session is served
+  signed out without writing the session or a cookie (#699); the session and
+  remember-me cookies are dropped only on `:browser_auth`. On
+  `:media_transform` the check only reads.
+- **Sign out everyone.** One transaction revokes every session, remember-me and
+  two-factor hold row bound to the site, writes a watermark
+  (`SiteSessionPolicy.sessions_revoked_at`) and records `all_sessions_revoked`.
+  A row bound to no site that predates the watermark is revoked the next time
+  it is used on this site's host, for 30 days (the remember-me lifetime). The
+  token writes that bind a row to a site read the watermark in the same
+  statement, so such a row cannot escape by being used first. Other sites are
+  never reached.
+- **Fails open.** An unreadable `SiteSessionPolicy` row is logged and treated as
+  "no timeout, no watermark" for that request, uncached; an unreadable token
+  row leaves the request as it was, and an open page looks again in a minute.
+  The site decides the timeout; there is no operator ceiling
+  ([ADR 0018](decisions/0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md)
+  constrains a site only against one).
+- **Cost.** Every signed-in browser request and LiveView mount reads the
+  session's token row by primary key, whether or not the site has a timeout,
+  because the cross-site rule needs it.
+- **Residual risks.** (1) Not covered: API keys and headless bearer tokens,
+  including a token minted with a phished password. A breach response needs a
+  password reset or *Sign out everywhere* as well. (2) `/ws/collab` (a 24-hour
+  per-account token, behind a flag that is off by default) and `/ws/gql`
+  sockets are keyed per account and survive both idle expiry and sign out
+  everyone until their next reconnect or re-check. (3) Events a LiveComponent
+  handles itself (`phx-target={@myself}`) do not count as activity on their
+  own. (4) A node holding a cached policy from before a sign out everyone may,
+  for up to the cache's minute and until the cluster-wide bust lands, let an
+  unbound pre-watermark session through on a request; binding still refuses
+  it, and the next check catches it. (5) Activity is written at most once per
+  tenth of the timeout (30 seconds to 5 minutes), so a session can end after
+  as little as 90% of the timeout since its real last use. (6) Fail-open,
+  above.
 
 ### Site invitations (`/auth/invite/:invite_token`, #2135)
 

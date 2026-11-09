@@ -66,6 +66,7 @@ defmodule KilnCMSWeb.ConsoleNavTest do
                :delivery,
                :outbound,
                :integrations,
+               :access,
                :organization,
                :account,
                :operations
@@ -181,6 +182,7 @@ defmodule KilnCMSWeb.ConsoleNavTest do
                :delivery,
                :outbound,
                :integrations,
+               :access,
                :organization,
                :account
              ]
@@ -448,6 +450,7 @@ defmodule KilnCMSWeb.ConsoleNavTest do
             :capture,
             :delivery,
             :integrations,
+            :access,
             :organization,
             :account,
             :operations

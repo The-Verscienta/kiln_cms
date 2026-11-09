@@ -152,4 +152,107 @@ defmodule KilnCMS.Security.CidrTest do
       assert Cidr.blockable("x") == {:error, :invalid}
     end
   end
+
+  describe "allowable/1 (#2248)" do
+    test "normalises an entry: /32 for a host, masked, compressed, mapped folded to IPv4" do
+      assert Cidr.allowable("203.0.113.7") == {:ok, "203.0.113.7/32"}
+      assert Cidr.allowable("198.51.100.77/24") == {:ok, "198.51.100.0/24"}
+      assert Cidr.allowable("2001:DB8:0:0::1/64") == {:ok, "2001:db8::/64"}
+      assert Cidr.allowable("::ffff:203.0.113.0/120") == {:ok, "203.0.113.0/24"}
+    end
+
+    test "refuses wider than the floor, loopback, and anything that is not an address" do
+      assert Cidr.allowable("0.0.0.0/7") == {:error, :too_broad}
+      assert Cidr.allowable("::/15") == {:error, :too_broad}
+      assert Cidr.allowable("127.0.0.1") == {:error, :loopback}
+      assert Cidr.allowable("::1") == {:error, :loopback}
+      assert Cidr.allowable("010.0.0.1") == {:error, :invalid}
+      assert Cidr.allowable("fe80::1%en0") == {:error, :invalid}
+      assert Cidr.allowable("office") == {:error, :invalid}
+    end
+  end
+
+  describe "any_contains?/2 (#2248)" do
+    test "the first and last address of a /24 match, their neighbours do not" do
+      cidrs = ["198.51.100.0/24"]
+
+      assert Cidr.any_contains?(cidrs, {198, 51, 100, 0})
+      assert Cidr.any_contains?(cidrs, {198, 51, 100, 255})
+      refute Cidr.any_contains?(cidrs, {198, 51, 99, 255})
+      refute Cidr.any_contains?(cidrs, {198, 51, 101, 0})
+    end
+
+    test "a /32 is exactly one address" do
+      assert Cidr.any_contains?(["203.0.113.7/32"], {203, 0, 113, 7})
+      refute Cidr.any_contains?(["203.0.113.7/32"], {203, 0, 113, 8})
+    end
+
+    test "an IPv6 /64 holds its first and last address and nothing past them" do
+      cidrs = ["2001:db8:1:2::/64"]
+
+      assert Cidr.any_contains?(cidrs, {0x2001, 0xDB8, 1, 2, 0, 0, 0, 0})
+      assert Cidr.any_contains?(cidrs, {0x2001, 0xDB8, 1, 2, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF})
+      refute Cidr.any_contains?(cidrs, {0x2001, 0xDB8, 1, 3, 0, 0, 0, 0})
+    end
+
+    test "an IPv4-mapped client matches the IPv4 entry it carries" do
+      assert Cidr.any_contains?(["203.0.113.0/24"], {0, 0, 0, 0, 0, 0xFFFF, 0xCB00, 0x7105})
+    end
+
+    test "families do not cross" do
+      refute Cidr.any_contains?(["2001:db8::/32"], {203, 0, 113, 5})
+      refute Cidr.any_contains?(["203.0.113.0/24"], {0x2001, 0xDB8, 0, 0, 0, 0, 0, 1})
+    end
+
+    test "nothing is in an empty list, and an unknown address is in no list" do
+      refute Cidr.any_contains?([], {203, 0, 113, 5})
+      refute Cidr.any_contains?(["0.0.0.0/8", "203.0.113.0/24"], nil)
+    end
+  end
+
+  describe "client_range/1 (#2248)" do
+    test "an IPv4 address is itself, a mapped one is folded, an IPv6 one is its /64" do
+      assert Cidr.client_range({203, 0, 113, 7}) == "203.0.113.7/32"
+      assert Cidr.client_range({0, 0, 0, 0, 0, 0xFFFF, 0xCB00, 0x7107}) == "203.0.113.7/32"
+
+      assert Cidr.client_range({0x2001, 0xDB8, 1, 2, 0xA, 0xB, 0xC, 0xD}) ==
+               "2001:db8:1:2::/64"
+    end
+
+    test "the range it gives is one a save accepts" do
+      for ip <- [{203, 0, 113, 7}, {0x2001, 0xDB8, 1, 2, 3, 4, 5, 6}] do
+        range = Cidr.client_range(ip)
+        assert Cidr.allowable(range) == {:ok, range}
+        assert Cidr.any_contains?([range], ip)
+      end
+    end
+  end
+
+  describe "shared_space?/1 (#2248)" do
+    test "private, carrier-grade NAT, unique local and link-local space" do
+      for ip <- [
+            {10, 1, 2, 3},
+            {172, 16, 0, 1},
+            {172, 31, 255, 255},
+            {192, 168, 1, 1},
+            {100, 64, 0, 1},
+            {169, 254, 1, 1},
+            {0xFD00, 0, 0, 0, 0, 0, 0, 1},
+            {0xFE80, 0, 0, 0, 0, 0, 0, 1}
+          ] do
+        assert Cidr.shared_space?(ip), inspect(ip)
+      end
+    end
+
+    test "public addresses are not" do
+      for ip <- [
+            {203, 0, 113, 7},
+            {172, 32, 0, 1},
+            {100, 128, 0, 1},
+            {0x2001, 0xDB8, 0, 0, 0, 0, 0, 1}
+          ] do
+        refute Cidr.shared_space?(ip), inspect(ip)
+      end
+    end
+  end
 end

@@ -340,6 +340,71 @@ defmodule KilnCMSWeb.MediaTransformControllerTest do
       assert header(conn, "cache-control") == "private, no-store"
     end
 
+    test "a holder whose session is past the site's idle timeout gets nothing, and nothing is written",
+         %{conn: conn} do
+      item = image!(%{audience: :member})
+      org_id = KilnCMS.Accounts.default_org_id()
+
+      KilnCMS.CMS.save_site_session_policy!(%{idle_timeout_minutes: 15},
+        authorize?: false,
+        tenant: org_id
+      )
+
+      KilnCMS.Repo.query!(
+        "UPDATE site_session_policy SET policy_changed_at = (now() AT TIME ZONE 'utc') - interval '1 day' WHERE org_id = $1",
+        [Ecto.UUID.dump!(org_id)]
+      )
+
+      KilnCMS.Cache.bust_session_policy(org_id)
+
+      holder =
+        %{role: :viewer} |> signed_in_user() |> KilnCMS.OrgFixtures.grant_audiences([:member])
+
+      conn = log_in(conn, holder)
+      jti = KilnCMS.Accounts.Token.peeked_jti(get_session(conn, :user_token))
+      url = "/media/#{item.id}/t/w_640,v_#{ImageTransform.version(item)}"
+
+      # Active: the image.
+      assert get(conn, url).status == 200
+
+      KilnCMS.Repo.query!(
+        "UPDATE tokens SET last_used_at = (now() AT TIME ZONE 'utc') - interval '1 hour' WHERE jti = $1",
+        [jti]
+      )
+
+      idle = get(conn, url)
+      assert idle.status == 404
+      assert get_resp_header(idle, "set-cookie") == []
+      # Read only: the row is not revoked here, nor touched.
+      assert %{purpose: "user"} =
+               KilnCMS.Accounts.IdleTimeout.read(jti, KilnCMS.Accounts.IdleTimeout.off())
+               |> elem(1)
+    end
+
+    test "a holder whose session predates the site's sign-out-everyone gets nothing", %{
+      conn: conn
+    } do
+      item = image!(%{audience: :member})
+      org_id = KilnCMS.Accounts.default_org_id()
+
+      holder =
+        %{role: :viewer} |> signed_in_user() |> KilnCMS.OrgFixtures.grant_audiences([:member])
+
+      conn = log_in(conn, holder)
+      url = "/media/#{item.id}/t/w_640,v_#{ImageTransform.version(item)}"
+      assert get(conn, url).status == 200
+
+      KilnCMS.CMS.record_sessions_revoked!(%{at: DateTime.add(DateTime.utc_now(), 60)},
+        authorize?: false,
+        tenant: org_id
+      )
+
+      KilnCMS.Cache.bust_session_policy(org_id)
+      on_exit(fn -> KilnCMS.Cache.bust_session_policy(org_id) end)
+
+      assert get(conn, url).status == 404
+    end
+
     test "a quarantined item is a 404 even to an editor", %{conn: conn} do
       item = image!(%{quarantined: true})
 
