@@ -137,6 +137,79 @@ defmodule KilnCMS.Accounts.ThrottleStore do
     end
   end
 
+  @peek_sql """
+  SELECT c.count FROM throttle_counters AS c
+  WHERE c.bucket = $1 AND c.key_hash = $2
+    AND c.window_index = floor(extract(epoch FROM clock_timestamp()) * 1000 / $3::bigint)::bigint
+  """
+
+  @doc """
+  How much of `key`'s budget in `bucket` the **current** window has spent,
+  charging nothing (#2249).
+
+  For a decision that must not cost the thing it is deciding about: the
+  human-verification gate (`KilnCMS.Challenge.Gate`) asks whether an address's
+  sign-in attempts have reached the point where a challenge is required, and
+  answering that with `hit/5` would spend a unit of the very budget a refused
+  attempt must not spend.
+
+  It is a read, so it is not a gate: a burst can all read the same count. That
+  is acceptable for what it is used for, which is choosing whether to *ask* for
+  a challenge, never whether to admit — `hit/5` stays the only gate, and every
+  attempt the challenge admits still pays it.
+
+  The window is computed from the database clock with the same arithmetic
+  `hit/5` uses, so the two agree on which row is current. When the database
+  cannot answer, the node-local fallback is read instead (the bound `hit/5`
+  would be counting against meanwhile); when that has nothing either, `0` —
+  which leans toward *not* asking for a challenge, the direction that cannot
+  lock anyone out. Allowed inside a transaction: a read refunds nothing.
+  """
+  @spec peek(String.t(), String.t(), pos_integer()) :: non_neg_integer()
+  def peek(bucket, key, scale)
+      when is_binary(bucket) and is_binary(key) and is_integer(scale) and scale > 0 do
+    hash = key_hash(key)
+
+    case shared(fn -> Repo.query!(@peek_sql, [bucket, hash, scale], timeout: @timeout) end) do
+      {:ok, %{rows: [[count]]}} -> count
+      {:ok, %{rows: []}} -> 0
+      {:unavailable, _reason} -> local_peek(bucket, hash, scale)
+    end
+  end
+
+  @refund_sql """
+  UPDATE throttle_counters AS c SET count = greatest(c.count - 1, 0)
+  WHERE c.bucket = $1 AND c.key_hash = $2
+    AND c.window_index = floor(extract(epoch FROM clock_timestamp()) * 1000 / $3::bigint)::bigint
+  """
+
+  @doc """
+  Hands one unit of `key`'s **current** window in `bucket` back, never below
+  zero (#2249).
+
+  For a counter whose units are reserved up front by `hit/5` and released when
+  the thing they were reserved for turns out not to count — the
+  human-verification gate reserves a "free" sign-in per client address before
+  the password is checked, and a sign-in that succeeds gives it back, so an
+  office behind one address is not challenged for its own successful sign-ins.
+  A window that has rolled since is left alone: there is nothing in it to give
+  back. Best-effort on the node-local fallback, which has no decrement.
+  """
+  @spec refund(String.t(), String.t(), pos_integer()) :: :ok
+  def refund(bucket, key, scale)
+      when is_binary(bucket) and is_binary(key) and is_integer(scale) and scale > 0 do
+    hash = key_hash(key)
+    shared(fn -> Repo.query!(@refund_sql, [bucket, hash, scale], timeout: @timeout) end)
+    :ok
+  end
+
+  defp local_peek(bucket, hash, scale) do
+    Local.get({bucket, hash}, scale)
+  rescue
+    # The fallback table does not exist until `Local` has started.
+    ArgumentError -> 0
+  end
+
   @doc """
   Clears every window of `key` in `bucket` — on this node's fallback too.
 

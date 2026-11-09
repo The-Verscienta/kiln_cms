@@ -3992,6 +3992,31 @@ msgstr "Leyenda del calendario"
 msgid "Calendar view"
 msgstr "Vista de calendario"
 
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Ask a site administrator to invite you instead."
+msgstr "¿No puedes completar la comprobación? Pide a un administrador del sitio que te invite."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Use a passkey instead."
+msgstr "¿No puedes completar la comprobación? Usa una llave de acceso."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Use a passkey or email yourself a sign-in link."
+msgstr "¿No puedes completar la comprobación? Usa una llave de acceso o envíate un enlace de inicio de sesión por correo."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Use a passkey or your site's single sign-on."
+msgstr "¿No puedes completar la comprobación? Usa una llave de acceso o el inicio de sesión único de tu sitio."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Use a passkey, email yourself a sign-in link, or use your site's single sign-on."
+msgstr "¿No puedes completar la comprobación? Usa una llave de acceso, envíate un enlace de inicio de sesión por correo o usa el inicio de sesión único de tu sitio."
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Can't reschedule into the past."
@@ -4182,6 +4207,11 @@ msgstr "Caracteres"
 #, elixir-autogen, elixir-format
 msgid "Check again"
 msgstr "Comprobar de nuevo"
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Check complete."
+msgstr "Comprobación completada."
 
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
 #, elixir-autogen, elixir-format
@@ -4754,6 +4784,16 @@ msgstr "Comparado con"
 #, elixir-autogen, elixir-format
 msgid "Complete it"
 msgstr "Completarla"
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Complete the human-verification check below, then register again."
+msgstr "Completa la comprobación de verificación humana de abajo y vuelve a registrarte."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Complete the human-verification check below, then sign in again."
+msgstr "Completa la comprobación de verificación humana de abajo y vuelve a iniciar sesión."
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -10596,6 +10636,11 @@ msgstr "Publicado, sin cambios sin publicar — nada que publicar"
 #, elixir-autogen, elixir-format
 msgid "Load more"
 msgstr "Cargar más"
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Loading the human-verification check…"
+msgstr "Cargando la comprobación de verificación humana…"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -19046,6 +19091,11 @@ msgstr "No se pudo registrar la campaña: compruebe los detalles."
 msgid "The change could not be saved."
 msgstr "No se pudo guardar el cambio."
 
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "The check expired. Complete it again."
+msgstr "La comprobación ha caducado. Vuelve a completarla."
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "The claims vocabulary the editor panel checks against."
@@ -19257,6 +19307,21 @@ msgstr "El contenido restringido que esta cuenta puede leer en este sitio. Cada 
 #, elixir-autogen, elixir-format
 msgid "The home page could not be created."
 msgstr "No se pudo crear la página de inicio."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "The human-verification check could not load."
+msgstr "No se pudo cargar la comprobación de verificación humana."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "The human-verification check didn't pass. Complete it again."
+msgstr "La comprobación de verificación humana no se superó. Vuelve a completarla."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "The human-verification check is unavailable right now. Try again in a moment."
+msgstr "La comprobación de verificación humana no está disponible ahora. Vuelve a intentarlo en un momento."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -19952,6 +20017,11 @@ msgstr "Esta compilación no informa de una versión utilizable, por lo que no p
 #, elixir-autogen, elixir-format
 msgid "This change touches a safety field. Open it in the editor to publish and say how much it matters."
 msgstr "Este cambio toca un campo de seguridad. Ábrelo en el editor para publicarlo e indicar cuánto importa."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "This check needs JavaScript."
+msgstr "Esta comprobación necesita JavaScript."
 
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format

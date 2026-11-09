@@ -2,7 +2,9 @@ defmodule KilnCMS.Security.Preparations.AuditSignIn do
   @moduledoc """
   Records the refusals of `:sign_in_with_password` in the security audit log
   (#2241): a wrong password or unknown address (`:sign_in_failed`, sampled per
-  IP) and the two throttle lockouts (`:sign_in_locked`, scope `"account"` or
+  IP), a human-verification token that did not pass or could not be checked
+  (`:sign_in_failed`, reason `challenge_failed` / `challenge_unavailable`,
+  #2249) and the two throttle lockouts (`:sign_in_locked`, scope `"account"` or
   `"address"`).
 
   It sits on the action rather than at a controller because the browser form
@@ -23,6 +25,7 @@ defmodule KilnCMS.Security.Preparations.AuditSignIn do
   use Ash.Resource.Preparation
 
   alias AshAuthentication.Errors.AuthenticationFailed
+  alias KilnCMS.Accounts.Errors.ChallengeRequired
   alias KilnCMS.Accounts.Preparations.ThrottleSignIn
   alias KilnCMS.Security.AuthEvents
   alias KilnCMS.Security.Recorder
@@ -40,22 +43,30 @@ defmodule KilnCMS.Security.Preparations.AuditSignIn do
 
     if is_map(context[Recorder.context_key()]) do
       email = Ash.Query.get_argument(query, :email)
-
-      case refusal(error) do
-        :account_locked ->
-          AuthEvents.password_locked(context, email && to_string(email), "account")
-
-        :address_locked ->
-          AuthEvents.password_locked(context, email && to_string(email), "address")
-
-        :invalid ->
-          AuthEvents.sign_in_failed(context, email, "password", "invalid_credentials")
-
-        :other ->
-          :ok
-      end
+      record(refusal(error), context, email)
     end
   end
+
+  defp record(:account_locked, context, email),
+    do: AuthEvents.password_locked(context, email && to_string(email), "account")
+
+  defp record(:address_locked, context, email),
+    do: AuthEvents.password_locked(context, email && to_string(email), "address")
+
+  defp record(:invalid, context, email),
+    do: AuthEvents.sign_in_failed(context, email, "password", "invalid_credentials")
+
+  # Human verification (#2249). A token the provider refused is a failed
+  # attempt like a wrong password; a refusal because the provider could not be
+  # asked is recorded so an outage shows in the site's log. A challenge merely
+  # being asked for (`:required`) is not a failure and records nothing.
+  defp record({:challenge, :failed}, context, email),
+    do: AuthEvents.sign_in_failed(context, email, "password", "challenge_failed")
+
+  defp record({:challenge, :unavailable}, context, email),
+    do: AuthEvents.sign_in_failed(context, email, "password", "challenge_unavailable")
+
+  defp record(_required_or_other, _context, _email), do: :ok
 
   # What `error` is: the account lock, the per-address lock, any other refused
   # sign-in, or a failure that is not one (bad input, a crash).
@@ -70,6 +81,9 @@ defmodule KilnCMS.Security.Preparations.AuditSignIn do
 
       %AuthenticationFailed{} ->
         :invalid
+
+      %ChallengeRequired{reason: reason} ->
+        {:challenge, reason}
 
       _other ->
         nil

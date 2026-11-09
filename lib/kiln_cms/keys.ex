@@ -50,8 +50,19 @@ defmodule KilnCMS.Keys do
   key and inbound-webhook signing secret (#337 Phase 2). Provider choice and
   config live on the `KilnCMS.Billing.Settings` singleton, one pair of columns
   per secret so the two can be sourced and rotated independently.
+
+  `:challenge_secret` — the human-verification provider's secret key (#2249).
+  Operator config only (`config :kiln_cms, KilnCMS.Challenge, secret_key:
+  {:env, …} | {:file, …}`, from `CHALLENGE_SECRET_KEY` or
+  `CHALLENGE_SECRET_KEY_FILE`); the database provider is refused.
   """
-  @spec fetch(:dkim | :provenance | :billing_secret_key | :billing_webhook_secret) ::
+  @spec fetch(
+          :dkim
+          | :provenance
+          | :billing_secret_key
+          | :billing_webhook_secret
+          | :challenge_secret
+        ) ::
           {:ok, binary()} | {:error, term()}
   def fetch(:dkim) do
     case KilnCMS.Mail.get_settings() do
@@ -64,6 +75,18 @@ defmodule KilnCMS.Keys do
     case KilnCMS.Billing.get_settings() do
       nil -> {:error, :not_configured}
       settings -> fetch_billing(settings, name)
+    end
+  end
+
+  # The human-verification provider's secret (#2249). Operator config only —
+  # `config :kiln_cms, KilnCMS.Challenge, secret_key: {:env, …} | {:file, …}` —
+  # and never the database provider: there is no settings row for it, and a
+  # secret a site could write would be a secret a site could read back.
+  def fetch(:challenge_secret) do
+    case Keyword.get(Application.get_env(:kiln_cms, KilnCMS.Challenge, []), :secret_key) do
+      {provider, config} when provider in [:env, :file] -> provider!(provider).fetch(config)
+      nil -> {:error, :not_configured}
+      other -> {:error, {:invalid_key_source, other}}
     end
   end
 
