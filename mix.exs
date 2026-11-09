@@ -361,6 +361,7 @@ defmodule KilnCMS.MixProject do
       "docs/sso.md": [],
       "docs/threat-model.md": [],
       "docs/ip-blocking.md": [title: "Blocking addresses"],
+      "docs/admin-allowlist.md": [title: "Restricting sign-in to your networks"],
       "docs/bot-budgets.md": [title: "Bot budgets"],
       "docs/security-events.md": [title: "The security log"],
       "docs/secrets-rotation.md": [],
@@ -542,6 +543,7 @@ defmodule KilnCMS.MixProject do
         "docs/sso.md",
         "docs/threat-model.md",
         "docs/ip-blocking.md",
+        "docs/admin-allowlist.md",
         "docs/bot-budgets.md",
         "docs/security-events.md",
         "docs/secrets-rotation.md"

@@ -105,7 +105,7 @@ which class it was put in.
 
 You need the admin role. An editor does not see the page.
 
-1. Open **Bot budgets** under **Organization** in the console sidebar, next to
+1. Open **Bot budgets** under **Sign-in & access** in the console sidebar, next to
    **Blocked addresses**, or go to `/editor/bot-budgets`. The page starts with
    the browser line, for example
    "**Browsers** - 300 requests a minute per address. This is the delivery limit,

@@ -59,6 +59,14 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new nullable `field_definitions.widget`, no backfill). Field-sync files now carry `"widget"`, which an older release's import refuses: upgrade the target first.** Rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#field-widgets-upgrade))
 
+- **Run `mix ash.migrate` (new table `site_admin_allowlist`). Rolling the pin back turns every site's admin allowlist off without a word; while a list is on, members and apps calling `/api/auth/sign_in` sign in only from listed networks.**
+  Nothing changes until a site admin saves a list. Lock-out: `bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(clear: true)'`.
+  ([long form](docs/changelog/unreleased.md#admin-allowlist-upgrade))
+
+- **Run `mix ash.migrate` (new table `site_session_policy`; `tokens` gains two nullable columns and an index built concurrently). Every signed-in browser request now reads its session's token row once.**
+  Idle timeout is off by default; existing sessions stay signed in. Rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#session-idle-timeout-upgrade))
+
 - **In-app backups whose off-site copy fails now finish `Failed`, and both paths re-hash each file just before its off-site copy and refuse one that changed; check your rclone remote and credentials if backups turn red.** No migration; rolling back is safe.
   ([long form](docs/changelog/unreleased.md#backup-offsite-rehash-upgrade))
 
@@ -134,6 +142,14 @@ Every summary line below that was shortened links to its own entry there.
 - **Admins can choose each custom field's editor input: radios or buttons for a select, checkboxes, one-line text, a reference dropdown, or a plugin type's own (`widget`).**
   Editor-only; nothing stored or delivered changes. Guide: [docs/extending-content.md](docs/extending-content.md#choose-how-editors-fill-in-a-field).
   ([long form](docs/changelog/unreleased.md#field-widgets))
+
+- **Site admins can restrict the console and every sign-in route, members' and `/api/auth/sign_in` included, to listed IPv4/IPv6 networks, at Configure → Sign-in & access → Admin allowlist.**
+  Off by default; fails closed; API keys and issued tokens are not affected. Guide: [docs/admin-allowlist.md](docs/admin-allowlist.md).
+  ([long form](docs/changelog/unreleased.md#admin-allowlist))
+
+- **Site admins can sign idle browsers out after 15 minutes to 24 hours (shorter for admins) and sign everyone out of the site at once, at Configure → Integrations → Sessions.**
+  Off by default; idle wins over "remember me"; API keys and headless tokens are not affected. Guide: [docs/account-administration.md](docs/account-administration.md#sign-people-out-when-idle).
+  ([long form](docs/changelog/unreleased.md#session-idle-timeout))
 
 - **Optional smart 404 blocking: an address that racks up delivery 404s or probes `/wp-login.php`-style bait paths is blocked for an hour.**
   Off by default; turn on with `KILN_SCANNER_BLOCKING=1`. Guide: [docs/ip-blocking.md](docs/ip-blocking.md#block-scanners-automatically).
@@ -266,6 +282,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2256](https://github.com/The-Verscienta/kiln_cms/issues/2256) · [long form](docs/changelog/unreleased.md#robots-flags))
 
 ### Changed
+
+- **Single sign-on, Sessions, Password policy, Blocked addresses and Bot budgets moved to a new Configure → Sign-in & access section; their addresses are unchanged.**
+  ([long form](docs/changelog/unreleased.md#console-sign-in-access-section))
 
 - **Backup retention keeps the newest good backup of each component, honours `kiln-<stamp>.keep` recovery points, ages a stamp's dump and media separately, and deletes nothing when it can't read what it needs.**
   `BACKUP_KEEP_DAYS` unchanged; no migration. Local disk use may grow by up to two backups per component, plus pinned ones.

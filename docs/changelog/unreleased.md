@@ -26,6 +26,70 @@ carries the reasoning.
     `widgets/1` needs `{:kiln_plugin, "~> 1.4"}`. Nothing changes for one that
     doesn't.
 
+<a id="admin-allowlist-upgrade"></a>
+
+- **Run `mix ash.migrate` for the admin allowlist (#2248): one new table,
+  `site_admin_allowlist`. Nothing changes until a site admin saves a list.
+  Rolling back to an earlier release turns every site's allowlist off without
+  a word, and while a list is on, members and apps sign in only from listed
+  networks.**
+  - **What the migration does.** `20261109005539_add_site_admin_allowlist`
+    creates `site_admin_allowlist` (one row per site, `cidrs text[] NOT NULL
+    DEFAULT '{}'`, unique on `org_id`). Additive; no existing table changes.
+  - **Rolling back is not neutral.** An earlier release has no gate and
+    ignores the table: every site that turned the allowlist on is open to
+    every network again, with nothing on the page or in the log to say so. Roll
+    forward again to restore it; the lists are still stored.
+  - **Who is affected when a site turns it on.** Every sign-in route is gated,
+    not only the console's: members and readers who sign in on the public site,
+    and `POST /api/auth/sign_in`, which single-page apps and native or mobile
+    apps call from the user's device. Those sign-ins work only from listed
+    networks. Tokens already issued and API keys are not affected.
+  - **Behind a proxy, set `TRUSTED_PROXIES` (or `CLIENT_IP_HEADER` on Fly.io,
+    Railway and App Platform) first.** The allowlist page refuses to save a
+    list while forwarded requests arrive that nothing trusts.
+  - **Know the way back in.** `bin/kiln_cms rpc
+    'KilnCMS.Release.admin_allowlist(clear: true)'` (or `add: "<address>"`), or
+    `KILN_ADMIN_ALLOWLIST_DISABLED=1` and a restart. See
+    [Recovering from a lock-out](../admin-allowlist.md#recovering-from-a-lock-out).
+  - **The console menu moved.** Single sign-on and Sessions (from
+    Integrations) and Password policy, Blocked addresses and Bot budgets (from
+    Organization) are now under the new **Sign-in & access** section, with the
+    new Admin allowlist page. The addresses are unchanged.
+  See also [the Added entry](#admin-allowlist).
+
+<a id="session-idle-timeout-upgrade"></a>
+
+- **Run `mix ash.migrate` for the idle timeout and "sign out everyone" (#2246).
+  Two migrations, both additive; one builds an index on `tokens` concurrently.**
+  Nothing changes for anyone until a site admin sets a timeout: the setting is
+  off by default and there is no environment variable.
+  - **What the migrations do.**
+    `20261108223445_add_session_org_and_idle_timeout` adds two nullable columns
+    to `tokens` (`org_id`, `revoked_reason`) and creates the table
+    `site_session_policy` (one row per site, created when an admin first saves
+    the setting). `20261108223446_add_session_org_and_idle_timeout_1` builds
+    `tokens_org_id_purpose_index` with `CREATE INDEX CONCURRENTLY`, outside a
+    transaction, so sign-ins keep working while it builds. On a large `tokens`
+    table it takes a while. If the build fails it leaves an `INVALID` index:
+    run `DROP INDEX CONCURRENTLY tokens_org_id_purpose_index;` and migrate
+    again.
+  - **Existing sessions stay signed in.** Their rows have no site yet. Each is
+    bound to the site it is next used on, unless that site's admin has since
+    used **Sign out everyone**, in which case it is signed out there instead.
+  - **One more read per signed-in request.** Every signed-in browser request
+    and every signed-in LiveView mount now reads the session's token row by
+    primary key, timeout or not: it is how a session cookie copied to another
+    site's host is refused there. Signed-in page requests also update
+    `last_used_at` at most once every five minutes per session (LiveView
+    mounts already did). Anonymous traffic is unaffected.
+  - **Rolling back.** Safe: the older release ignores the new columns and
+    table. Sites lose their idle timeout and the effect of a later "sign out
+    everyone" until you upgrade again; sessions already revoked stay revoked.
+  - **Overlays.** Nothing to run unless your overlay carries its own copy of
+    `KilnCMS.Accounts.Token`; core ships both migrations.
+  See also [the Added entry](#session-idle-timeout).
+
 <a id="backup-offsite-rehash-upgrade"></a>
 
 - **An in-app backup whose off-site copy fails now fails, and every file is
@@ -536,6 +600,114 @@ carries the reasoning.
   - **Changing the field resets, a write that names a widget is refused.** A retype, `multiple`, rich text or `allow_custom` clears a stored widget the field no longer offers, unless the same write names one; then it is refused (`radios is not an editor input for this field (use one of: …)`). Field sync sends the file's widget with every update, so a file whose settings no longer suit its widget is refused rather than silently corrected.
   - **API and export.** Field definitions carry `widget` on JSON:API (`?include=field_definitions`, and in `docs/api/openapi.json`) and in field-sync files. The schema export adds `x-kiln-widget` only to a field whose chosen widget it still offers. GraphQL does not expose field definitions and is unchanged.
   - **Plugins.** `Kiln.FieldType` gains the optional `widgets/1` (not defaulted by `use`) and `Kiln.FieldType.widget/2` to read the pick back inside `input_attrs/1`, `input_parts/1` or `input_hook/1` (`kiln_plugin` 1.4). `input_type/0` takes no definition, so a widget cannot change the input's HTML `type`. `mix kiln.plugins.doctor` reports a `widgets/1` that raises, returns a non-list, or lists a malformed or repeated name.
+
+<a id="admin-allowlist"></a>
+
+- **Site admins can restrict the console and sign-in to listed networks: the
+  admin allowlist (#2248).** A new page, **Configure → Sign-in & access →
+  Admin allowlist** (`/editor/admin-allowlist`, admins only). Off until an
+  admin adds an entry.
+  - **What it gates.** From an address not on the list: every `/editor/**`
+    page and export, `/media`, `/setup`, and every sign-in route (password,
+    registration, reset, magic link, passkeys, single sign-on, the two-factor
+    prompt, confirmation and invitations) answer a `403` page "Not available
+    from this network" that shows the visitor their own address;
+    `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` answer `403`
+    `network_not_allowed`. The pages' LiveView joins and `/ws/collab` are
+    refused too, and open console and sign-in pages leave as soon as a save
+    excludes them. The public site, `/account`, media downloads, previews,
+    health checks and every API used with an API key or an already-issued
+    token are not affected. A block-list rule still wins.
+  - **Entries.** IPv4 and IPv6 addresses and ranges, one per line, at most
+    100. Ranges wider than `/8` (IPv4) or `/16` (IPv6) and loopback are
+    refused. **Add my address** adds the address Kiln sees (its `/64` for
+    IPv6), and both addresses on a dual-stack connection.
+  - **Lock-out check.** A save is refused when the list does not admit the
+    address the page was loaded from (and the socket's own, when it differs),
+    or while a forwarding header arrives that nothing trusts. Turning it off
+    is always allowed. There is no "save anyway".
+  - **Fails closed.** If the list cannot be read, the gated routes answer `503`
+    and joins are refused, uncached; a site the node last read as off stays
+    off through a failed read. The public site never reads the list.
+  - **Behind Fly.io and App Platform proxies,** a page's socket cannot see the
+    client, so it is admitted on the address its HTTP load was admitted from,
+    for 5 minutes; after that a reconnect or navigation reloads the page.
+    `/ws/collab` is refused there while a list is on.
+  - **Recovery.** `KilnCMS.Release.admin_allowlist/1` (through `bin/kiln_cms
+    rpc`) lists, adds one entry to a list that is on, or clears it, and records
+    it in the security log; it can never lock anyone out. The kill switch
+    `KILN_ADMIN_ALLOWLIST_DISABLED=1` stops a node enforcing any site's list
+    after a restart, with a boot warning; it is not in any security log.
+  - **Security log and metrics.** Three new event types:
+    `admin_access_refused` ("Refused outside the admin allowlist"; `surface`;
+    sampled at 5 per address per 15 minutes per site, IPv6 per `/64`),
+    `admin_allowlist_changed` ("Admin allowlist changed"; `state`, `count`,
+    `added`, `removed`, never the entries; replaces `org_setting_changed` for
+    this setting) and `admin_allowlist_overridden` ("Admin allowlist changed
+    from the server"; `change`, `count`). New counter
+    `kiln_cms.admin_allowlist.refused.count`, tagged `surface` and `reason`.
+  - **Developers.** `CMS.SiteAdminAllowlist` is a new org-scoped settings
+    resource (`CMS.list_site_admin_allowlist/1`, `save_site_admin_allowlist/2`,
+    and the operator-only `override_site_admin_allowlist/3`). `:destroy` is
+    refused to everyone: off is saving `[]`. Not on JSON:API, GraphQL or MCP.
+    A new `:admin_allowlist` system actor reads it for the gates. Router
+    pipelines `:admin_allowlist` and `:admin_allowlist_api`, and the
+    `{KilnCMSWeb.AdminAllowlist, :gated}` hook in each gated `live_session`; an
+    overlay or plugin adding a console or sign-in route should use them.
+    `KilnCMS.CMS.OrgSettings` accepts `audit: {:change, module}`.
+  - Guide: [Restricting sign-in to your networks](../admin-allowlist.md).
+    Threat model: [Admin allowlist](../threat-model.md#admin-allowlist-2248).
+    Decision: [ADR 0019](../decisions/0019-the-admin-allowlist-fails-closed-and-only-the-operator-lifts-it-from-outside.md).
+
+<a id="session-idle-timeout"></a>
+
+- **Site admins can sign idle browsers out, and sign everyone out of the site
+  at once (#2246).** A new page, **Configure → Integrations → Sessions**
+  (`/editor/sessions`, admins only).
+  - **Sign out when idle.** Pick a time for **Everyone** (15 minutes to 24
+    hours, or **Never**, the default) and, optionally, a shorter one for
+    **Administrators**. The resource accepts 10 to 1440 minutes, and the
+    administrators' time may not be longer than everyone's. Turning it on or
+    shortening it starts the clock from the save. Activity is loading a page of
+    this site while signed in (public pages included), clicking or typing on a
+    console page, and moving within one; a tab left open, a reconnect and
+    automatic replies (`body_flushed`, `push_state`, `push_unsupported`) are
+    not. A browser is signed out between 90% and 100% of the timeout after its
+    last activity. The timeout wins over "remember me": an idle browser loses
+    its remember-me cookie too. Open pages go to `/sign-in` with "You were
+    signed out after a period of inactivity." Each person sees the time that
+    applies to them under **Active sessions** on **Your settings**.
+  - **Sign out everyone.** Ends every browser session, remember-me cookie and
+    sign-in waiting for a two-factor code on this site, platform admins'
+    sessions on it included, and sends their open pages to sign-in. **Keep me
+    signed in on this browser** (ticked by default) spares only the clicking
+    admin's current browser. Other sites are not affected. API keys, headless
+    app tokens and already-connected `/ws/collab` and `/ws/gql` sockets are not
+    ended: for a compromised account, reset its password or use **Sign out
+    everywhere** on `/editor/accounts` as well.
+  - **Sessions belong to a site.** Each browser session and remember-me cookie
+    now records the site it signed in on. One copied to another site's host is
+    served signed out there and never refreshed from it.
+  - **Fails open.** If the setting cannot be read, no timeout applies for that
+    request and a warning is logged. The site decides: there is no operator
+    ceiling and no environment variable.
+  - **Security log.** Two new event types, `session_idle_expired` ("Signed out
+    after inactivity"; `timeout_minutes`, `tier`, `surface`) and
+    `all_sessions_revoked` ("Everyone signed out"; `count`, `except_self`).
+    Saving the setting is `org_setting_changed` (`site_session_policy`).
+  - **Known limits.** A click handled only inside a LiveComponent
+    (`phx-target={@myself}`) does not count as activity on its own.
+  - **Developers.** `CMS.SiteSessionPolicy` is a new org-scoped settings
+    resource (`CMS.list_site_session_policy/1`, `save_site_session_policy/2`,
+    and the admin-only generic action `sign_out_all_sessions/2`, which returns
+    the number of sessions ended). It has no reset: its row holds the "sign out
+    everyone" watermark, so `:destroy` is refused to everyone. It is not
+    exposed over JSON:API, GraphQL or MCP. `Token` gains `org_id`,
+    `revoked_reason` and five system-only actions; see
+    [the policy matrix](../policy-matrix.md).
+  - Guide: [Sign people out when idle](../account-administration.md#sign-people-out-when-idle)
+    and [Sign everyone out](../account-administration.md#sign-everyone-out).
+    Threat model: [Idle timeout and sign out everyone](../threat-model.md#idle-timeout-and-sign-out-everyone-2246).
 
 <a id="scanner-404-blocking"></a>
 
@@ -1592,6 +1764,14 @@ carries the reasoning.
   - Guide: [Constrain the values of a field](../extending-content.md#constrain-the-values-of-a-field).
 
 ## Changed
+
+<a id="console-sign-in-access-section"></a>
+
+- **The console's Configure menu has a new section, Sign-in & access (#2248).**
+  Single sign-on and Sessions moved there from Integrations; Password policy,
+  Blocked addresses and Bot budgets from Organization; and the new Admin
+  allowlist joined them. Integrations and Organization were both at the
+  seven-item cap. Every page keeps its address.
 
 <a id="backup-retention-by-component"></a>
 

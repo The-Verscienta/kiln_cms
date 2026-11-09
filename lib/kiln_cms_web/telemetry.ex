@@ -243,6 +243,13 @@ defmodule KilnCMSWeb.Telemetry do
             "(#2242), tagged http / live / gql / collab / bridge. The address is " <>
             "deliberately not a tag or a log field."
       ),
+      counter("kiln_cms.admin_allowlist.refused.count",
+        tags: [:surface, :reason],
+        description:
+          "Requests, LiveView joins and collab connects refused by a site's admin " <>
+            "allowlist (#2248), tagged surface (http / api / live / collab) and reason " <>
+            "(not_listed / unavailable). The address is deliberately not a tag."
+      ),
       counter("kiln_cms.scanner_guard.blocked.count",
         tags: [:reason],
         description:

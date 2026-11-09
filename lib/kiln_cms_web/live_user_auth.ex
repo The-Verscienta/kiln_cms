@@ -87,7 +87,7 @@ defmodule KilnCMSWeb.LiveUserAuth do
   # that editor LiveViews pass as the `tenant:` on writes. That tier check is
   # still the authorization boundary — this makes the assign mean what its
   # callers already assumed, it does not replace authorizing against it.
-  def on_mount(:assign_current_org, _params, _session, socket) do
+  def on_mount(:assign_current_org, _params, session, socket) do
     # `request_org!` first: it is what judges the client's claim, and it reads
     # `socket.host_uri` to do so. Vouching before it would erase the very claim
     # `refuse_foreign_claim!/3` exists to catch.
@@ -99,7 +99,12 @@ defmodule KilnCMSWeb.LiveUserAuth do
     # setting) is logged with (#2241). `connect_info` is readable only while
     # mounting, so it is captured here once and passed to the actions as their
     # Ash `context:`.
-    {:cont, assign(socket, :security_context, KilnCMS.Security.AuthEvents.context(socket))}
+    socket = assign(socket, :security_context, KilnCMS.Security.AuthEvents.context(socket))
+
+    # Now the site is known: a session idle there, older than its last "sign
+    # out everyone", or bound to another site is not signed in here (#2246) —
+    # on the disconnected render too, and on anonymous-tolerant pages.
+    {:cont, KilnCMSWeb.IdleSession.screen(socket, session)}
   end
 
   def on_mount(:live_user_optional, _params, _session, socket) do
@@ -147,16 +152,28 @@ defmodule KilnCMSWeb.LiveUserAuth do
         # Every signed-in page may render the console shell, whose sidebar
         # carries the preset switch — see `KilnCMSWeb.NavPreset`. And every one
         # is tied to the session it was mounted from, so signing that session
-        # out from another device closes it (#1823).
+        # out from another device closes it (#1823). The site's idle timeout
+        # and "sign out everyone" (#2246) are checked first, and may send the
+        # page to sign-in instead.
         {:cont, socket} ->
-          {:cont,
-           socket
-           |> KilnCMSWeb.NavPreset.attach()
-           |> KilnCMSWeb.SessionTracking.attach(session)}
+          attach_signed_in(socket, session)
 
         halt ->
           halt
       end
+    end
+  end
+
+  defp attach_signed_in(socket, session) do
+    case KilnCMSWeb.IdleSession.attach(socket, session) do
+      {:cont, socket} ->
+        {:cont,
+         socket
+         |> KilnCMSWeb.NavPreset.attach()
+         |> KilnCMSWeb.SessionTracking.attach(session)}
+
+      halt ->
+        halt
     end
   end
 

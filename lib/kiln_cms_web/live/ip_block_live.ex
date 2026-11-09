@@ -34,7 +34,10 @@ defmodule KilnCMSWeb.IpBlockLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    {client_ip, untrusted?} = client_context(socket)
+    # Only a connected ROOT mount has a handshake to read (see
+    # `KilnCMSWeb.SignInLive`); anywhere else the address is unknown, which the
+    # action treats as "needs confirming".
+    {client_ip, untrusted?} = ClientIp.from_socket(socket)
 
     {:ok,
      socket
@@ -210,25 +213,6 @@ defmodule KilnCMSWeb.IpBlockLive do
       end
 
     assign(socket, :rules, rules)
-  end
-
-  # Only a connected ROOT mount has a handshake to read (see
-  # `KilnCMSWeb.SignInLive`); anywhere else the address is unknown, which the
-  # action treats as "needs confirming".
-  defp client_context(socket) do
-    if connected?(socket) and is_nil(socket.parent_pid) do
-      x_headers = get_connect_info(socket, :x_headers) || []
-
-      peer_address =
-        case get_connect_info(socket, :peer_data) do
-          %{address: address} -> address
-          _none -> nil
-        end
-
-      {ClientIp.resolve(x_headers, peer_address), ClientIp.untrusted_forwarding?(x_headers)}
-    else
-      {nil, false}
-    end
   end
 
   defp forbidden_message,

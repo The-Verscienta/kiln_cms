@@ -456,7 +456,11 @@ defmodule KilnCMSWeb.CollabChannel do
     %{actor: actor, org: org, topic_key: key, doc_key: doc_key} = socket.assigns
 
     with {:ok, %{} = actor} <- SocketReauth.reload_actor(actor),
-         {:ok, ^doc_key, _org_id} <- authorize(key, actor, org) do
+         {:ok, ^doc_key, _org_id} <- authorize(key, actor, org),
+         # The admin allowlist (#2248), against the address the socket
+         # connected from: a list saved since then closes the room.
+         :allowed <-
+           KilnCMS.Security.AdminAllowlist.check(org.id, socket.assigns[:client_ip]) do
       {:ok, assign(socket, :actor, actor)}
     else
       _refused ->

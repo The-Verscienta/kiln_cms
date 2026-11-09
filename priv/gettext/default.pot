@@ -203,6 +203,7 @@ msgstr[1] ""
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
+#: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} hour"
 msgid_plural "%{count} hours"
@@ -284,6 +285,7 @@ msgstr[1] ""
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
+#: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} minute"
 msgid_plural "%{count} minutes"
@@ -637,6 +639,21 @@ msgstr ""
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{email} (%{role}) — you"
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{entry} includes loopback (127.0.0.0/8 or ::1), which can't be listed."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{entry} is not an IP address or range."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{entry} is too broad: use at least /8 for IPv4 or /16 for IPv6."
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -1341,6 +1358,11 @@ msgstr ""
 msgid "A box to tick beside every option."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "A browser that does nothing on this site for this long is signed out, even if it chose “remember me”. Reading a page, clicking or typing counts as activity; a tab left open does not."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A calendar date with no time of day. For a deadline, a birthday or a release date."
@@ -1850,6 +1872,11 @@ msgstr ""
 msgid "API keys"
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "API keys and app tokens keep working. If an account may be compromised, reset its password; a platform admin can also use “Sign out everywhere” on the Accounts page."
+msgstr ""
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "API keys · %{count} plugins active"
@@ -2276,6 +2303,11 @@ msgstr ""
 msgid "Add item"
 msgstr ""
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add my address"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Add new %{type}"
@@ -2511,6 +2543,32 @@ msgctxt "role"
 msgid "Admin"
 msgstr ""
 
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Admin allowlist"
+msgstr ""
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Admin allowlist changed"
+msgstr ""
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Admin allowlist changed from the server"
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Admin allowlist saved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Admin allowlist turned off."
+msgstr ""
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Admin on every site through their account role, so there is no site tier to set here."
@@ -2524,6 +2582,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Administrator accounts cannot use a breached password. Block applies to administrators; editors and everyone else are warned instead, so a visitor is never locked out of signing up."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Administrators"
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Administrators can be given a shorter time than everyone else, never a longer one. Turning this on, or shortening it, starts the clock from now: nobody is signed out for time they spent idle before."
 msgstr ""
 
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -2686,6 +2754,11 @@ msgstr ""
 msgid "Allow sending page text to an external AI provider"
 msgstr ""
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Allowed addresses and ranges"
+msgstr ""
+
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "Allowed origins"
@@ -2811,6 +2884,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "An administrator can switch it on."
+msgstr ""
+
+#: lib/kiln_cms_web/idle_session.ex
+#, elixir-autogen, elixir-format
+msgid "An administrator signed everyone out of this site. Sign in again to continue."
 msgstr ""
 
 #: lib/kiln_cms/branding/app_icon.ex
@@ -4373,6 +4451,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "Choose one of the listed options."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose one of the listed times."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -7782,6 +7865,11 @@ msgstr ""
 msgid "Events marked “includes unpublished content” send the full body of drafts and embargoed documents. They are off by default: select them only if this receiver should see content before it is published."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every browser signed in to this site is signed out now, including “remember me” and sign-ins waiting for a two-factor code. Open pages go to the sign-in page. Other sites on this server are not affected."
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every checkpoint has been published to the witness."
@@ -7858,6 +7946,11 @@ msgstr ""
 msgid "Every variant is over the floor and no arm leads outright."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Everyone"
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Everyone registered on this instance, and their access."
@@ -7866,6 +7959,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Everyone registered on this instance. Roles here are the platform role; per-site tiers live on each site's team page."
+msgstr ""
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Everyone signed out"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -8691,6 +8789,11 @@ msgstr ""
 msgid "From address"
 msgstr ""
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected."
+msgstr ""
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "From date"
@@ -8879,6 +8982,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/error_html/500.html.heex
 #, elixir-autogen, elixir-format
 msgid "Go to the homepage"
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
+#, elixir-autogen, elixir-format
+msgid "Go to the site"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
@@ -9279,6 +9387,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "How it works"
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "How long a browser can sit unused on this site before it is signed out, and a way to sign everyone out at once."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -10002,6 +10115,11 @@ msgstr ""
 msgid "Keep events for (days)"
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keep me signed in on this browser"
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Keep paragraph breaks"
@@ -10081,6 +10199,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Keywords applied. The slug was left unchanged because this content is live."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Kiln can't see your real address."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Kiln is seeing a proxy's address, not yours: a forwarding header arrived that nothing is configured to trust. Either Kiln runs behind a proxy that TRUSTED_PROXIES (or CLIENT_IP_HEADER) does not name, or a proxy on your side added the header. Fix that before turning on the admin allowlist."
 msgstr ""
 
 #: lib/kiln_cms_web/live/social_live.ex
@@ -10573,6 +10701,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Locales %{locale} falls back to"
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Locked out? An operator can widen or clear the list from the server: see docs/admin-allowlist.md, \"Recovering from a lock-out\"."
 msgstr ""
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
@@ -11376,6 +11509,21 @@ msgstr ""
 msgid "Network"
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
+#, elixir-autogen, elixir-format
+msgid "Network not allowed"
+msgstr ""
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Networks that can open the console and sign in."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Never"
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Never published or withdrawn."
@@ -11893,6 +12041,11 @@ msgstr ""
 msgid "No headings — there's no outline to navigate by, so the page can only be read start to finish."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "No idle timeout is set: browsers stay signed in until they sign out."
+msgstr ""
+
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "No image backend is selected. New images go to this server's storage."
@@ -12316,6 +12469,11 @@ msgstr ""
 msgid "Nobody follows this site yet."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody was signed out. Try again."
+msgstr ""
+
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nobody would receive this — the audience has no confirmed subscribers. Add subscribers below and confirm them first."
@@ -12345,6 +12503,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not available"
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
+#, elixir-autogen, elixir-format
+msgid "Not available from this network"
 msgstr ""
 
 #: lib/kiln_cms_web/live/organize_live.ex
@@ -12735,6 +12898,11 @@ msgstr ""
 msgid "Off-site"
 msgstr ""
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Off: people can sign in from any network."
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Offer this provider on the sign-in page"
@@ -12812,6 +12980,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "On-site searches that returned nothing. Each is a reader who looked for something this site doesn't cover."
 msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "On: %{count} network can open the console and sign in."
+msgid_plural "On: %{count} networks can open the console and sign in."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -12900,6 +13075,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "One per line. Suggested to editors, who can also add their own; may be left empty."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "One per line: an IPv4 or IPv6 address, or a range like 198.51.100.0/24. Leave empty to turn the allowlist off."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -14727,6 +14907,11 @@ msgstr ""
 msgid "Refuse to publish a document containing a blocking claim"
 msgstr ""
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Refused outside the admin allowlist"
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
 msgid "Refused: this site's provider is set but can't be used"
@@ -15942,6 +16127,11 @@ msgstr ""
 msgid "Safety fields saved."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Same as everyone"
+msgstr ""
+
 #: lib/kiln_cms/cms/field_types/link.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -15963,6 +16153,7 @@ msgstr ""
 msgid "Sat"
 msgstr ""
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
@@ -15980,6 +16171,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/security_txt_live.ex
+#: lib/kiln_cms_web/live/session_policy_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
@@ -16196,6 +16388,7 @@ msgid "Saving this sends this site's content to the URL below."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -16209,6 +16402,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/security_txt_live.ex
+#: lib/kiln_cms_web/live/session_policy_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
@@ -16791,6 +16985,17 @@ msgstr ""
 msgid "Server setting"
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Session settings saved."
+msgstr ""
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sessions"
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set KILN_CONSOLE_HOST to a host no organization controls, such as console under your main host, point it and every subdomain of it at Kiln in DNS and TLS, and restart. Each organization's console then gets its own host, its slug followed by the console host. Otherwise, grant organization admin only to people you would trust with the console."
@@ -17177,14 +17382,34 @@ msgstr ""
 msgid "Sign out every other browser and device? This one stays signed in."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out everyone"
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out everyone on this site now?"
+msgstr ""
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sign out everywhere"
 msgstr ""
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out idle browsers, or everyone signed in to this site."
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sign out of all other sessions"
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out when idle"
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -17197,9 +17422,25 @@ msgstr ""
 msgid "Sign-in"
 msgstr ""
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in & access"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/two_factor_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Sign-in could not be completed right now. Try again in a moment."
+msgstr ""
+
+#: lib/kiln_cms_web/plugs/admin_allowlist.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in is not available from this network."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
+#: lib/kiln_cms_web/plugs/admin_allowlist.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in is temporarily unavailable. Try again in a minute."
 msgstr ""
 
 #: lib/kiln_cms_web/security_log.ex
@@ -17233,6 +17474,18 @@ msgstr ""
 msgid "Signed in with a passkey."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signed out %{count} session on this site."
+msgid_plural "Signed out %{count} sessions on this site."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Signed out after inactivity"
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Signed out of %{count} other session."
@@ -17260,6 +17513,7 @@ msgstr ""
 msgid "Signing key generated. New publishes are signed; re-fire existing content to sign it too."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Signing out…"
@@ -18233,6 +18487,11 @@ msgstr ""
 msgid "Tells search engines not to list this page, or not to follow its links. If the page is already published, the change goes live when you publish."
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
+#, elixir-autogen, elixir-format
+msgid "Temporarily unavailable"
+msgstr ""
+
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Temporary elevation granted"
@@ -18793,6 +19052,11 @@ msgstr ""
 msgid "The account is erased: the email is replaced with a tombstone, the password destroyed, passkeys and sign-in links deleted, every session revoked. The row itself stays, because the audit trail and every byline reference it — nothing personal is left on it."
 msgstr ""
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "The admin allowlist could not be saved."
+msgstr ""
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "The app icon must be a PNG or JPEG image."
@@ -19151,6 +19415,11 @@ msgstr ""
 msgid "The limit is reached. Remove one to connect another."
 msgstr ""
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "The list can hold at most %{max} entries."
+msgstr ""
+
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "The log could not be loaded."
@@ -19189,6 +19458,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "The name and colour visitors see in your site's header."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "The networks this site's console and sign-in can be reached from, such as your office or VPN. Applies to this site only."
 msgstr ""
 
 #: lib/kiln_cms/cms/computed.ex
@@ -19353,6 +19627,11 @@ msgstr ""
 msgid "The server's operator has turned it off for the whole deployment (BREACHED_PASSWORD_CHECK=false). No password is looked up, and this setting has no effect until they turn it back on."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "The session settings could not be saved."
+msgstr ""
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "The shipped pack deliberately leaves out bare marketing words — \"best\", \"free\", \"proven\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
@@ -19487,6 +19766,11 @@ msgstr ""
 #: lib/kiln_cms/cms/computed.ex
 #, elixir-autogen, elixir-format
 msgid "The text without leading or trailing spaces."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "The time for administrators can't be longer than the time for everyone."
 msgstr ""
 
 #: lib/kiln_cms_web/components/seo_components.ex
@@ -19699,6 +19983,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
 msgid "This address already has an account. Accept to add this site to it; nothing else about the account changes."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "This also applies to members and readers who sign in to this site, and to sign-in through the API: a website's own sign-in form or a mobile app that signs people in only works from listed networks too."
 msgstr ""
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
@@ -19947,6 +20236,21 @@ msgstr ""
 msgid "This link is no longer valid"
 msgstr ""
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "This list doesn't include your current address, %{ip}. Add it, or a range that contains it, so you aren't locked out."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "This list must include both of your current addresses, %{ip} and %{socket_ip}. Add them, or ranges that contain them, so you aren't locked out."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "This looks like a private or shared address, which may be your proxy's or your provider's: adding it admits everyone behind it."
+msgstr ""
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "This member already holds the highest tier on this site."
@@ -20078,6 +20382,11 @@ msgstr ""
 msgid "This segment has no confirmed subscribers. Pick another segment, or add and confirm subscribers first."
 msgstr ""
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "This server isn't enforcing the admin allowlist (KILN_ADMIN_ALLOWLIST_DISABLED is set). The list is saved but not applied."
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This session"
@@ -20141,6 +20450,11 @@ msgstr ""
 msgid "This site only"
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
+#, elixir-autogen, elixir-format
+msgid "This site only allows sign-in and its admin console from networks its administrators have approved. Connect through your organisation's network or VPN, or ask a site administrator."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "This site publishes its content over two headless API surfaces — GraphQL and JSON:API — plus a rendered-artifact endpoint for full page bodies. Anonymous requests read published content; a bearer token unlocks drafts."
@@ -20149,6 +20463,18 @@ msgstr ""
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site sets its own policy. Without it the default would be: %{policy}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site signs a browser out after %{count} minute without activity."
+msgid_plural "This site signs a browser out after %{count} minutes without activity."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site signs idle browsers out."
 msgstr ""
 
 #: lib/kiln_cms_web/live/site_push_live.ex
@@ -20640,6 +20966,7 @@ msgstr ""
 msgid "Tue"
 msgstr ""
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #: lib/kiln_cms_web/live/link_report_live.ex
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #: lib/kiln_cms_web/live/task_live.ex
@@ -20671,6 +20998,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "Turn on outbound checking"
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Turn the admin allowlist off? Anyone will be able to sign in from any network."
 msgstr ""
 
 #: lib/kiln_cms_web/live/link_report_live.ex
@@ -22257,6 +22589,11 @@ msgstr ""
 msgid "You don't have permission to change this site's AI provider."
 msgstr ""
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's admin allowlist."
+msgstr ""
+
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's blocked addresses."
@@ -22342,6 +22679,11 @@ msgstr ""
 msgid "You don't have permission to change this site's security.txt."
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's session settings."
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's single sign-on."
@@ -22371,6 +22713,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to restore media."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to sign everyone out of this site."
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_log_live.ex
@@ -22433,6 +22780,11 @@ msgstr ""
 msgid "You were mentioned"
 msgstr ""
 
+#: lib/kiln_cms_web/idle_session.ex
+#, elixir-autogen, elixir-format
+msgid "You were signed out after a period of inactivity."
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "You weren't signed in anywhere else."
@@ -22446,6 +22798,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "You'll also get a draft home page to write. Once you publish it, it's what visitors see at your site's address."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "You're connected over IPv4. If your network also uses IPv6, add its range too, or you may be refused when your browser switches."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "You're connected over IPv6. If your network also uses IPv4, add its address too, or you may be refused when your browser switches."
 msgstr ""
 
 #: lib/kiln_cms_web/live/account_live.ex
@@ -22536,6 +22898,31 @@ msgstr ""
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your account is ready — sign in to %{site}."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
+#, elixir-autogen, elixir-format
+msgid "Your address appears as %{ip}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your address could not be determined yet."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your address could not be determined, so this list can't be checked against it. Reload the page and try again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your address: %{ip} (included)"
+msgstr ""
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your address: %{ip} (not included)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex

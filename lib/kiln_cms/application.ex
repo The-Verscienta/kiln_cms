@@ -25,6 +25,7 @@ defmodule KilnCMS.Application do
     warn_if_ask_egresses()
     warn_if_semantic_without_ml()
     warn_if_media_unwritable()
+    warn_if_admin_allowlist_disabled()
 
     # Ensure custom AshPhoenix form error impls (e.g. for StaleRecord) are
     # loaded so they register with the protocol and prevent unhandled errors.
@@ -734,6 +735,22 @@ defmodule KilnCMS.Application do
 
       :ok
     end
+  end
+
+  # The kill switch is a recovery step, not a setting to leave on: while it is
+  # set, no site's admin allowlist is enforced on this node (#2248).
+  defp warn_if_admin_allowlist_disabled do
+    if KilnCMS.Security.AdminAllowlist.disabled?() do
+      KilnCMS.Config.Report.warn(
+        "admin_allowlist_disabled",
+        "KILN_ADMIN_ALLOWLIST_DISABLED is set, so this server is not enforcing any site's " <>
+          "admin allowlist: the console and sign-in are open to every network. Unset it and " <>
+          "restart once the lock-out is fixed (bin/kiln_cms rpc " <>
+          "'KilnCMS.Release.admin_allowlist()' shows a site's list)."
+      )
+    end
+
+    :ok
   end
 
   # The Local storage adapter's directories must be writable by the release's

@@ -3,33 +3,36 @@ defmodule KilnCMSWeb.SessionTracking do
   Ties a signed-in LiveView to the one session it was mounted from (#1823).
 
   Attached by `KilnCMSWeb.LiveUserAuth` to every signed-in mount. It does
-  three things:
+  two things:
 
     * assigns `:current_session_jti` — the jti of the token in this browser's
       session, which is how the settings page marks "This session" and keeps
       it out of "Sign out of all other sessions";
-    * on a connected mount, notes that the session was used
-      (`KilnCMS.Accounts.Sessions.record_use/2`, at most one write per
-      interval), with the browser the socket was opened from;
     * on a connected mount, listens on the session's own topic
       (`KilnCMS.Accounts.SessionEviction.session_topic/1`) and, when that
       session is signed out from another device, sends this page to sign-in.
 
-  The last is what makes "Sign out" on one session end it *now* rather than at
+  Noting that the session was used, with the browser the socket was opened
+  from, is `KilnCMSWeb.IdleSession`'s, which runs just before this (#2246):
+  on the first mount only, and on every event.
+
+  The topic is what makes "Sign out" on one session end it *now* rather than at
   its next full page load. The LiveView socket's `live_socket_id` is per user —
   `SessionEviction.evict/2` drops every session at once, which is right for a
   demotion and wrong here — so each LiveView subscribes to its own session
   instead. The redirect is a courtesy to the person in front of that page; the
   control is the revoked token, which the rejoin and every later request are
-  refused on.
+  refused on. The flash says why, from the row's `revoked_reason`: signed out
+  from another device, after inactivity, or by an admin's "sign out everyone"
+  (#2246).
   """
   use KilnCMSWeb, :verified_routes
   use Gettext, backend: KilnCMSWeb.Gettext
 
   import Phoenix.Component, only: [assign: 3]
 
+  alias KilnCMS.Accounts.IdleTimeout
   alias KilnCMS.Accounts.SessionEviction
-  alias KilnCMS.Accounts.Sessions
   alias KilnCMS.Accounts.Token
   alias Phoenix.LiveView
 
@@ -41,7 +44,6 @@ defmodule KilnCMSWeb.SessionTracking do
 
     if is_binary(jti) and LiveView.connected?(socket) do
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, SessionEviction.session_topic(jti))
-      Sessions.record_use(jti, KilnCMSWeb.UserAgent.parse(user_agent(socket)))
       LiveView.attach_hook(socket, :session_eviction, :handle_info, &handle_info/2)
     else
       socket
@@ -51,16 +53,22 @@ defmodule KilnCMSWeb.SessionTracking do
   defp handle_info({:session_revoked, jti}, %{assigns: %{current_session_jti: jti}} = socket) do
     {:halt,
      socket
-     |> LiveView.put_flash(:info, gettext("This session was signed out from another device."))
+     |> LiveView.put_flash(:info, message(jti))
      |> LiveView.redirect(to: ~p"/sign-in")}
   end
 
   defp handle_info(_message, socket), do: {:cont, socket}
 
-  defp user_agent(socket) do
-    LiveView.get_connect_info(socket, :user_agent)
-  rescue
-    # Only readable during mount, and only when the endpoint declares it.
-    _not_available -> nil
+  # Why the row was revoked; a row that cannot be read gets the message this
+  # page always showed.
+  defp message(jti) do
+    reason =
+      case IdleTimeout.read(jti, IdleTimeout.off()) do
+        {:ok, row} -> IdleTimeout.revoked_reason(row)
+        :error -> :revoked
+      end
+
+    KilnCMSWeb.IdleSession.reason_message(reason) ||
+      gettext("This session was signed out from another device.")
   end
 end

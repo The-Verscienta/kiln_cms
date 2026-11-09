@@ -66,3 +66,16 @@ if config_env() != :test do
       default_policy: %{"off" => :off, "warn" => :warn, "block" => :block}[policy]
   end
 end
+
+# Admin allowlist kill switch (#2248). KILN_ADMIN_ALLOWLIST_DISABLED=1 stops this
+# node enforcing any site's admin allowlist (`KilnCMS.Security.AdminAllowlist`):
+# the way back in for an operator who can set variables and restart but cannot
+# run `bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(clear: true)'`. The
+# lists stay saved and the boot log says the switch is on. Only an explicit
+# "on" writes anything. Skipped in :test so an exported value cannot change what
+# the suite asserts.
+if config_env() != :test do
+  if KilnCMS.Config.Env.fetch("KILN_ADMIN_ALLOWLIST_DISABLED") == {:ok, true} do
+    config :kiln_cms, :admin_allowlist, disabled: true
+  end
+end

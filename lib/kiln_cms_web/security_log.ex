@@ -154,6 +154,14 @@ defmodule KilnCMSWeb.SecurityLog do
   def type_label(:sso_config_changed), do: gettext("Single sign-on changed")
   def type_label(:org_setting_changed), do: gettext("Site setting changed")
   def type_label(:ip_auto_blocked), do: gettext("Address blocked automatically")
+  def type_label(:session_idle_expired), do: gettext("Signed out after inactivity")
+  def type_label(:all_sessions_revoked), do: gettext("Everyone signed out")
+  def type_label(:admin_access_refused), do: gettext("Refused outside the admin allowlist")
+  def type_label(:admin_allowlist_changed), do: gettext("Admin allowlist changed")
+
+  def type_label(:admin_allowlist_overridden),
+    do: gettext("Admin allowlist changed from the server")
+
   def type_label(other), do: to_string(other)
 
   @doc "`{label, value}` options for the type filter, in `Event.types/0` order."
