@@ -56,7 +56,7 @@ defmodule KilnCMSWeb.SecurityPostureLiveTest do
     {:ok, lv, _html} =
       conn |> org_conn(site) |> log_in(user) |> live(~p"/editor/security-posture")
 
-    {lv, render_async(lv)}
+    {lv, render_async(lv, 2_000)}
   end
 
   describe "access" do
@@ -158,7 +158,7 @@ defmodule KilnCMSWeb.SecurityPostureLiveTest do
 
     CMS.save_site_session_policy!(%{idle_timeout_minutes: 30}, actor: admin, tenant: site.id)
     lv |> element("#security-posture-rerun") |> render_click()
-    render_async(lv)
+    render_async(lv, 2_000)
 
     assert has_element?(lv, "#posture-core-idle_timeout", "OK")
   end
@@ -188,7 +188,7 @@ defmodule KilnCMSWeb.SecurityPostureLiveTest do
     {lv, _html} = open(conn, site, admin)
 
     refute lv |> element("#security-posture-rerun") |> render_click() =~ "just ran"
-    render_async(lv)
+    render_async(lv, 2_000)
 
     assert lv |> element("#security-posture-rerun") |> render_click() =~
              "The checks just ran. Try again in a few seconds."
