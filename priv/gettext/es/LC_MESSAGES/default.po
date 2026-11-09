@@ -1675,6 +1675,11 @@ msgstr "Una tarea puede anclarse a un bloque de un documento, como un párrafo o
 msgid "A task for %{person}, due %{date}"
 msgstr "Una tarea para %{person}, con vencimiento el %{date}"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A third of a row"
+msgstr "Un tercio de fila"
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "A tier's audience can't change — existing members would keep an entitlement nothing would revoke. Retire this tier and create a new one instead."
@@ -1911,6 +1916,11 @@ msgstr "Accesibilidad"
 #, elixir-autogen, elixir-format
 msgid "Accessible"
 msgstr "Accesible"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Accordion: a heading that opens and closes"
+msgstr "Acordeón: un encabezado que se abre y se cierra"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/console_nav.ex
@@ -2753,6 +2763,11 @@ msgstr "Siempre cifrado, y el certificado del servidor siempre se comprueba."
 msgid "An OpenAPI spec and a browsable API explorer"
 msgstr "Una especificación OpenAPI y un explorador de API navegable"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "An accordion is a heading editors open and close; a fieldset is always open; tabs show one section at a time, and every tab section of the type joins one tab set at the place of the first. Sections keep the order of their first field."
+msgstr "Un acordeón es un encabezado que los editores abren y cierran; un grupo de campos siempre está abierto; las pestañas muestran una sección a la vez, y todas las secciones en pestaña del tipo forman un único conjunto de pestañas en el lugar de la primera. Las secciones siguen el orden de su primer campo."
+
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
 msgid "An account with this address already exists — accept the invitation with it."
@@ -3438,6 +3453,11 @@ msgstr "Desactivado automáticamente tras %{count} entregas fallidas"
 #, elixir-autogen, elixir-format
 msgid "Auto-fills each entry's multi-segment canonical URL. Same tokens plus [slug]; segments that expand empty drop out. Blank = flat URLs."
 msgstr "Rellena automáticamente la URL canónica de varios segmentos de cada entrada. Los mismos tokens más [slug]; los segmentos que se expanden vacíos se descartan. En blanco = URL planas."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Automatically (open when it holds a value)"
+msgstr "Automáticamente (abierta si contiene un valor)"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/console_nav.ex
@@ -4504,6 +4524,11 @@ msgstr "Cerrar"
 msgid "Closed"
 msgstr "Cerrados"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Closed (collapsed)"
+msgstr "Cerrada (plegada)"
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Clustering %{count} published document."
@@ -5515,6 +5540,11 @@ msgstr "No se pudo guardar el nuevo orden de los campos."
 #, elixir-autogen, elixir-format
 msgid "Couldn't save the new order."
 msgstr "No se pudo guardar el nuevo orden."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the section layout."
+msgstr "No se pudo guardar la disposición de la sección."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -8211,6 +8241,11 @@ msgstr "Campos de %{type} que se pueden cambiar"
 msgid "Fields whose edits must say how much they matter. Nothing is listed until you choose."
 msgstr "Campos cuyas ediciones deben indicar su importancia. No se lista nada hasta que lo elijas."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Fieldset: always open, under its heading"
+msgstr "Grupo de campos: siempre abierto, bajo su encabezado"
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -8660,6 +8695,11 @@ msgstr "El contenido completo entrega el artículo entero."
 msgid "Full editor"
 msgstr "Editor completo"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Full row"
+msgstr "Fila completa"
+
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Full — %{count} of %{max} connected"
@@ -8976,6 +9016,11 @@ msgstr "Solo HTTPS. Se rechazan las direcciones privadas e internas."
 #, elixir-autogen, elixir-format
 msgid "Half"
 msgstr "Mitad"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Half a row"
+msgstr "Media fila"
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
@@ -11248,6 +11293,11 @@ msgstr "Figuran como colaboradores de la página en sus datos estructurados."
 msgid "Names the record (search finds it by this value)"
 msgstr "Da nombre al registro (la búsqueda lo encuentra por este valor)"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Narrow fields of the same section sit side by side in the editor; on a small screen each takes the full row."
+msgstr "Los campos estrechos de una misma sección se colocan uno al lado del otro en el editor; en una pantalla pequeña cada uno ocupa la fila completa."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nav items"
@@ -12861,6 +12911,11 @@ msgstr "Solo se pueden importar archivos .xlf, .xliff y .xml."
 msgid "Only admins of this site can open it. Your account has a different role."
 msgstr "Solo los administradores de este sitio pueden abrirla. Tu cuenta tiene otro rol."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only an accordion opens and closes."
+msgstr "Solo un acordeón se abre y se cierra."
+
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
 msgid "Only an admin can archive content on this site."
@@ -13003,6 +13058,11 @@ msgstr "Abrir %{title} en una pestaña nueva"
 #, elixir-autogen, elixir-format
 msgid "Open %{type}"
 msgstr "Abrir %{type}"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Open (expanded)"
+msgstr "Abierta (desplegada)"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -16382,6 +16442,11 @@ msgstr "Separador de sección — sin campos editables."
 msgid "Section title"
 msgstr "Título de sección"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sections of %{type}"
+msgstr "Secciones de %{type}"
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
@@ -16974,6 +17039,11 @@ msgstr "Visible"
 #, elixir-autogen, elixir-format
 msgid "Shown after the number"
 msgstr "Se muestra después del número"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shown as"
+msgstr "Se muestra como"
 
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
@@ -17570,6 +17640,11 @@ msgstr "Empezaste con «%{recipe}». Cambia lo que quieras y luego añade la reg
 msgid "Starting…"
 msgstr "Iniciando…"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Starts"
+msgstr "Empieza"
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/organize_live.ex
@@ -17943,6 +18018,11 @@ msgstr "Nombre TXT"
 #, elixir-autogen, elixir-format
 msgid "TXT value"
 msgstr "Valor TXT"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Tab: one tab of the type's tab set"
+msgstr "Pestaña: una pestaña del conjunto de pestañas del tipo"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/search_palette_live.ex
@@ -21874,6 +21954,7 @@ msgstr "Años completos desde una fecha, como la edad de una persona. Se actuali
 msgid "Why this was blocked"
 msgstr "Por qué se bloqueó"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Width"

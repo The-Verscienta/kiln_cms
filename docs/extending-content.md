@@ -17,7 +17,7 @@ UI" workflow, scoped to fields.
 
 - **Define**: `KilnCMS.CMS.FieldDefinition` rows describe each field
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
-  `allow_custom`, `format`, `option_labels`, `section`,
+  `allow_custom`, `format`, `option_labels`, `section`, `width`,
   `target_type`, `target_types`, `multiple`, `min_items`, `max_items`,
   `max_sources`, `on_target_delete`, `inverse_label`, `inverse_name`,
   `schema_org_property`,
@@ -58,18 +58,30 @@ UI" workflow, scoped to fields.
   gallery, and a gallery keeps only its first image.
 - **Sections**: a field's `section` files it under a heading in the content
   editor's Custom fields panel ("Identity", "TCM properties", "Safety"), so a
-  type with many fields reads as a few collapsible sections instead of one
-  long scroll. Every field naming the same section sits under one heading,
-  at the place of the section's first field in `position` order; a field
-  with no section renders bare where it falls. A section starts open when its
-  fields already hold a stored value (on a record with none, the first
-  section does), always when one of its fields has an error, and closed
-  otherwise; each heading counts its filled fields, and *Expand all* /
-  *Collapse all* act on every section. A collapsed section's inputs still
-  submit. Editor-only: the value, its delivery and its validation are
-  unchanged, and the schema export reports the section as `x-kiln-section`.
+  type with many fields reads as a few sections instead of one long scroll.
+  Every field naming the same section sits under one heading, at the place of
+  the section's first field in `position` order; a field with no section
+  renders bare where it falls. By default a section is a collapsible
+  **accordion**: it starts open when its fields already hold a stored value
+  (on a record with none, the first section does), always when one of its
+  fields has an error, and closed otherwise; each heading counts its filled
+  fields, and *Expand all* / *Collapse all* act on every accordion. An admin
+  can lay a section out instead as an always-open **fieldset** or as one
+  **tab** of the type's tab set, and pin when an accordion starts open
+  (`KilnCMS.CMS.FieldSection`, see "Lay out custom fields as tabs,
+  fieldsets or columns" below). A collapsed section's or unselected tab's
+  inputs still submit. Editor-only: the value, its delivery and its
+  validation are unchanged, and the schema export reports the section as
+  `x-kiln-section` (with `x-kiln-section-display` for a fieldset or a tab).
   Record-level fields only — a link field or group sub-field sits inside its
   parent.
+- **Width**: a field's `width` (`:full`, the default, `:half` or `:third`) is
+  how much of its section's row its input takes in the content editor, so
+  short inputs can sit side by side. Below the small breakpoint every field
+  takes the full row. Editor-only like `section`, and record-level fields
+  only: a link field or group sub-field is always `:full`. It is not part of
+  the JSON:API or GraphQL field-definition shape; the schema export reports a
+  narrower field as `x-kiln-width`.
 - **Option labels**: a `:select` field's `options` are the stored values —
   often codes such as `transforming_phlegm` — and `option_labels` maps any of
   them to what an editor reads (`%{"transforming_phlegm" => "Transforming
@@ -1235,6 +1247,131 @@ What to know before relying on it:
   clears the fixed default. A copy must name another top-level, single-valued
   field of the same type that does not itself copy, and a private field can
   only be copied into another private one.
+
+### Lay out custom fields as tabs, fieldsets or columns
+
+A type with thirty fields is easier to fill when its Custom fields panel is
+split into a few tabs, with short inputs side by side. You need the admin
+role. You start from a content type (compiled or dynamic) that already has
+some custom fields; nothing about the stored values changes.
+
+1. Open **Fields** (`/editor/fields`) and choose **Edit** on a field of the
+   type. In **Section**, type the heading it belongs under, for example
+   `Clinical`, then **Save**. Do the same for every field of that section,
+   and for the type's other sections. Fields with the same section name are
+   one section; the sections appear in the order of their first field, so
+   drag a field (or use its arrow buttons) to move a whole section.
+2. Below the type's list of fields, a panel headed **Sections of** *type*
+   now lists each section in use, in the order the editor shows them. It
+   appears once at least one field of the type has a section.
+3. For each section, pick **Shown as**:
+   - **Accordion: a heading that opens and closes** — the default, and what
+     every section was before.
+   - **Fieldset: always open, under its heading** — a bordered group with no
+     toggle.
+   - **Tab: one tab of the type's tab set** — every tab section of the type
+     joins **one** tab set, placed where the first of them would be, with
+     the tabs in section order. Fields with no section, and accordion or
+     fieldset sections, stay outside the tab set, where they fall.
+
+   The choice is saved as soon as you change the select; there is no Save
+   button.
+4. For an accordion, pick when it **Starts**: **Automatically (open when it
+   holds a value)**, **Open (expanded)** or **Closed (collapsed)**. The select
+   is disabled for a fieldset or a tab ("Only an accordion opens and
+   closes."), and the choice you made is kept for when the section is an
+   accordion again.
+5. To put short fields side by side, **Edit** a field and set **Width** to
+   **Full row** (the default), **Half a row** or **A third of a row**, then
+   **Save**. Two half-width fields, or three third-width ones, share a row
+   within their section; on a small screen each takes the full row.
+6. Open a document of the type in the editor. The **Custom fields** panel
+   shows the layout: the tab set with the first tab selected (or the first
+   tab holding an error, after a refused save), fieldsets open, accordions
+   opening as you set them, narrow fields side by side. Editors see the same
+   layout; they cannot change it.
+
+In the tab set, the keyboard works like any WAI-ARIA tab list: **Tab** moves
+onto the selected tab, **Left** and **Right** move to the previous or next
+tab and select it (wrapping at the ends), **Home** and **End** go to the first
+and last, and **Tab** again moves to the selected tab's panel, then into its
+fields.
+
+The same layout as code interface calls (admin actor; for a dynamic type, pass
+`type_definition_id:` instead of `content_type:`):
+
+```elixir
+CMS.update_field_definition!(dose, %{section: "Clinical", width: :half}, actor: admin)
+CMS.update_field_definition!(route, %{section: "Clinical", width: :half}, actor: admin)
+
+CMS.create_field_section!(
+  %{content_type: :post, name: "Clinical", display: :tab},
+  actor: admin
+)
+```
+
+`display` is `:accordion` (the default), `:fieldset` or `:tab`; `initially` is
+`:auto` (the default), `:expanded` or `:collapsed` and is read only for an
+accordion. A section with no `FieldSection` row is an `:auto` accordion, and
+the fields admin deletes a row you set back to that default.
+
+`GET /api/schema` (and `mix kiln.export.schema`) reports the layout on each
+field, for a client that builds its own form from the schema. Defaults are
+left out: `x-kiln-section-display` appears only for a `fieldset` or `tab`
+section, and `x-kiln-width` only for a `half` or `third` field. The fields
+above export as:
+
+```json
+"dose": {
+  "type": ["string", "null"],
+  "x-kiln-section": "Clinical",
+  "x-kiln-section-display": "tab",
+  "x-kiln-width": "half"
+}
+```
+
+A client should gather every field whose section is a `tab` into one tab set,
+as the editor does. When an accordion starts open is not exported. Neither
+`width` nor the section layouts are part of the JSON:API, GraphQL or MCP
+shapes, and they travel between environments with the field definitions
+([field-sync.md](field-sync.md)).
+
+What to know before relying on it:
+
+- **Hidden inputs still save.** A field in an unselected tab or a collapsed
+  accordion is only hidden: its value submits with the rest of the form.
+- **A required field you cannot see is shown on save.** If a required field
+  in another tab or a collapsed accordion is empty, saving switches to that
+  tab or opens that section so the browser can point at the field.
+- **After a refused save the error tab is marked, but may not be selected.**
+  Every tab holding an error shows a red exclamation icon, and while you
+  have not picked a tab yourself the panel selects the first of them. Once
+  you have clicked or arrowed to a tab, a save the server refuses keeps your
+  tab selected; look for the icon.
+- **Renaming a section.** Rename it on each of its fields. When you rename
+  the last field still carrying the old name, the layout moves to the new
+  name, unless the new name has one already. Deleting a section's last field
+  deletes its layout.
+- **Width is per section.** A narrow field shares a row only with the
+  fields of its own section, and with neighbours in `position` order. A
+  conditional field that is hidden leaves no gap.
+- **Promoting a dynamic type keeps its layout.** `mix kiln.promote_data`
+  moves the type's fields (with their `section` and `width`) and its section
+  layouts to the compiled type together.
+- **Two admins at once.** The **Sections of** panel saves the row you
+  change, then deletes layouts no field names any more, reading both fresh,
+  so a section another admin has just added keeps its layout.
+
+If something does not save, the page shows one of these:
+
+| Message | Meaning |
+|---|---|
+| `You can't change custom fields.` | You are no longer an admin of this site (the role was changed after the page loaded). Nothing was written. |
+| `Couldn't save the section layout.` | The layout write failed, typically because another admin saved the same section's layout at the same moment. Reload the page and set it again. The same message after a field **Save** or **Delete** means the field was saved but its section's layout did not follow the rename or the delete. |
+
+The page lists the sections as they were when it loaded. A layout you set for
+a section another admin has since emptied (by renaming or deleting its last
+field) is not kept; reload to see the current list.
 
 ## 2. Relations that carry data
 

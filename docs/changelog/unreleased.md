@@ -7,6 +7,30 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="field-layout-upgrade"></a>
+
+- **Run `mix ash.migrate` for custom-field layouts: one new column,
+  `field_definitions.width`, and one new table, `field_sections` (#2280).**
+  The migration (`20261108231057_add_field_sections_and_field_width`) adds
+  `width` as `text NOT NULL DEFAULT 'full'`, so every existing field is full
+  width and the editor looks as it did, and creates `field_sections` (one row
+  per section an admin lays out, keyed by site, type and section name). It is
+  expand-only and copies no data. Rolling the pin back is safe: the previous
+  release ignores the table and the column, and its inserts get `'full'`;
+  any tabs or fieldsets set up meanwhile show as accordions until you upgrade
+  again.
+  - **Field sync files.** A file `mix kiln.fields.export` writes from now on
+    carries `"width"` on every field and a `"sections"` list per type. A
+    build of Kiln from before this change refuses such a file
+    (`unknown key(s) width`), so after a rollback export again from the
+    rolled-back instance, or strip the key as shown in
+    [field-sync.md](../field-sync.md#moving-a-file-to-an-older-build). Files
+    from before this change import unchanged: fields are full width and the
+    target's layouts are left alone, even with `--prune`.
+  - **Overlays.** Nothing to run: core's migration ships the table and the
+    column, and `FieldSection` is in the existing `KilnCMS.CMS` domain.
+  ([#2280](https://github.com/The-Verscienta/kiln_cms/issues/2280))
+
 <a id="backup-offsite-rehash-upgrade"></a>
 
 - **An in-app backup whose off-site copy fails now fails, and every file is
@@ -505,6 +529,53 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="field-layout"></a>
+
+- **Admins can lay out a content type's custom fields as tabs, fieldsets or
+  accordions, and set a field's width so short inputs sit side by side
+  (#2280).** For types with many fields, where one long scroll of inputs is
+  hard to fill. Grouping stays what it was, the field's **Section**; this adds
+  how each section is shown. Guide:
+  [Lay out custom fields as tabs, fieldsets or columns](../extending-content.md#lay-out-custom-fields-as-tabs-fieldsets-or-columns).
+  - **Admins.** At **Fields** (`/editor/fields`), each type with sections gets
+    a **Sections of** *type* panel: **Shown as** accordion (the default),
+    fieldset (always open, no toggle) or tab, and, for an accordion, when it
+    **Starts** (automatically, open or closed). Each change saves at once.
+    The field forms gain **Width**: full row, half or a third.
+  - **Editors.** The **Custom fields** panel shows the layout. All the tab
+    sections of a type form one tab set, at the place of the first of them,
+    using the WAI-ARIA tabs pattern (Left/Right, Home/End). A tab holding an
+    error shows an icon; a required empty field in a hidden tab or collapsed
+    accordion is brought into view when the browser blocks the save. Hidden
+    inputs still submit. Narrow fields share a row within their section and
+    stack below the small breakpoint. A type with no layout set renders as
+    before.
+  - **Known limits.** Once the writer has picked a tab, a save the server
+    refuses does not switch to the tab holding the error (its icon marks it).
+  - **Promotion.** `mix kiln.promote_data` moves a dynamic type's section
+    layouts to the compiled type along with its fields.
+  - **Schema export.** `GET /api/schema` and `mix kiln.export.schema` add
+    `x-kiln-section-display` (`fieldset` or `tab`; absent for an accordion)
+    and `x-kiln-width` (`half` or `third`; absent for full) to each custom
+    field. Additive. JSON:API, GraphQL, MCP and the OpenAPI document are
+    unchanged: `width` is not a public attribute and the layouts have no
+    API route.
+  - **Field sync.** Each field carries `width`; each owner carries a
+    `sections` list (`name`, `display`, `initially`) of the layouts its fields
+    still use. An owner without the key leaves the target's layouts alone; with
+    it, `--prune` deletes layouts it does not list. Deleting a section's last
+    field, in the console or by a pruning import, deletes its layout. See
+    [field-sync.md](../field-sync.md).
+  - **Developers.** New resource `KilnCMS.CMS.FieldSection` (admin writes,
+    editor and `:schema_export` reads; code interfaces
+    `CMS.create_field_section`, `update_field_section`,
+    `destroy_field_section`, `list_field_sections`, `field_sections_for`
+    and `field_sections_for_definition`), helper module
+    `KilnCMS.CMS.SectionLayouts`, and `FieldDefinition.width`
+    (`:full | :half | :third`, forced to `:full` on link fields and group
+    sub-fields).
+  ([#2280](https://github.com/The-Verscienta/kiln_cms/issues/2280))
 
 <a id="scanner-404-blocking"></a>
 

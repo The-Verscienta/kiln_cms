@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (new column `field_definitions.width`, new table `field_sections`). Field sync files exported from now on carry `width`, which builds from before this change refuse.** Rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#field-layout-upgrade))
+
 - **In-app backups whose off-site copy fails now finish `Failed`, and both paths re-hash each file just before its off-site copy and refuse one that changed; check your rclone remote and credentials if backups turn red.** No migration; rolling back is safe.
   ([long form](docs/changelog/unreleased.md#backup-offsite-rehash-upgrade))
 
@@ -127,6 +130,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
 
 ### Added
+
+- **Admins can lay out a type's custom fields as tabs, fieldsets or accordions, and set a field's width (full, half, a third), at Fields → Sections of.**
+  Keyboard-accessible tabs in the editor; `GET /api/schema` adds `x-kiln-section-display` and `x-kiln-width`. Guide: [docs/extending-content.md](docs/extending-content.md#lay-out-custom-fields-as-tabs-fieldsets-or-columns).
+  ([long form](docs/changelog/unreleased.md#field-layout))
 
 - **Optional smart 404 blocking: an address that racks up delivery 404s or probes `/wp-login.php`-style bait paths is blocked for an hour.**
   Off by default; turn on with `KILN_SCANNER_BLOCKING=1`. Guide: [docs/ip-blocking.md](docs/ip-blocking.md#block-scanners-automatically).

@@ -3,8 +3,9 @@
 Custom fields are rows an admin sets up in the console, so moving a model from
 staging to production used to mean clicking it through again. `mix
 kiln.fields.export` and `mix kiln.fields.import` move the **definitions** — the
-fields, their link fields and group sub-fields, and the admin-defined content
-types that own some of them — as one JSON file. They never move content.
+fields, their link fields and group sub-fields, how each type's sections are
+laid out in the editor, and the admin-defined content types that own some of
+them — as one JSON file. They never move content.
 
 The import goes through the same actions an admin's click does, so every rule
 applies (value constraints, conditional rules, private-field limits, name
@@ -40,11 +41,14 @@ mix kiln.fields.import fields.json --apply
 + post.rating (integer)
 ~ post.kind: options, help_text
 + recipe.serves (integer)
-2 to create, 1 to update, 0 to delete, 14 unchanged
+~ post/section/Clinical: display
+2 to create, 2 to update, 0 to delete, 14 unchanged
 ```
 
 `+` creates, `~` lists the attributes that differ, `-` deletes (only with
-`--prune`), `?` is a field the target has that the file does not list.
+`--prune`), `?` is a field the target has that the file does not list. A
+section layout is listed as `type/section/Name`, with its display in brackets
+when it is created (`+ post/section/Clinical (tab)`).
 
 A dry run is more than a diff: it runs the whole import inside a transaction
 and rolls it back, so a write the real run would refuse — a bad regex, a
@@ -69,7 +73,7 @@ must fail on a refused import.
 | Flag | Effect |
 | --- | --- |
 | `--apply` | Write. Without it the run is a dry run. |
-| `--prune` | Also delete fields the file does not list (in the owners it does list). |
+| `--prune` | Also delete fields the file does not list (in the owners it does list), and section layouts the file does not list (in the owners that carry a `"sections"` key). |
 | `--allow-data-loss` | Proceed with a change that would drop stored values (below). |
 | `--actor EMAIL` | Act as this admin (default: the first admin). |
 | `--org SLUG` | The organization (default: the default one). |
@@ -77,7 +81,14 @@ must fail on a refused import.
 ### What is never done without being asked
 
 - **Fields absent from the file are kept.** They are listed as `?`; `--prune`
-  deletes them.
+  deletes them. Deleting the last field of a section also deletes that
+  section's layout, as deleting it in the console does.
+- **Section layouts are left alone by a file that does not mention them.** An
+  owner with no `"sections"` key (a file written before layouts existed)
+  changes none of that type's layouts, even with `--prune`. An owner with the
+  key, `[]` included, declares all of them: a layout it does not list is `?`,
+  or deleted with `--prune`. A layout holds no values, so its delete is never
+  blocked.
 - **Types are never deleted or archived** by an import. A dynamic type in the
   file is created, or has its settings updated; the type's `name` never changes.
 - **Dropping stored values is blocked.** A field is *blocked* when records hold
@@ -98,8 +109,10 @@ must fail on a refused import.
   "format": "kiln-field-definitions",
   "version": 1,
   "owners": [
-    { "kind": "compiled", "type": "post", "fields": [ { "name": "rating", "label": "Rating", "field_type": "integer", "validation": {"min": 1, "max": 5}, "…": "…" } ] },
-    { "kind": "dynamic", "type": "recipe", "definition": { "name": "recipe", "label": "Recipe", "…": "…" }, "fields": [ ] }
+    { "kind": "compiled", "type": "post",
+      "fields": [ { "name": "rating", "label": "Rating", "field_type": "integer", "section": "Clinical", "width": "half", "validation": {"min": 1, "max": 5}, "…": "…" } ],
+      "sections": [ { "name": "Clinical", "display": "tab", "initially": "auto" } ] },
+    { "kind": "dynamic", "type": "recipe", "definition": { "name": "recipe", "label": "Recipe", "…": "…" }, "fields": [ ], "sections": [ ] }
   ]
 }
 ```
@@ -111,12 +124,50 @@ must fail on a refused import.
   a field attribute added in a later release is exported without a change here.
 - A `:reference` field holds its link fields under `link_fields`; a `:group`
   its sub-fields under `group_fields`.
+- An owner's `sections` lists how its sections are laid out in the editor
+  (`KilnCMS.CMS.FieldSection`): `name` (the `section` its fields carry),
+  `display` (`accordion`, `fieldset` or `tab`) and `initially` (`auto`,
+  `expanded` or `collapsed`). The export writes only the layouts that are
+  stored and that some field of the owner still carries; a section with no
+  entry is a default accordion. On import, a section name may appear once per
+  owner, and the same unknown-key rule applies as for fields. See
+  [Lay out custom fields as tabs, fieldsets or columns](extending-content.md#lay-out-custom-fields-as-tabs-fieldsets-or-columns).
 - A key you leave out of a hand-written file takes the attribute's default; an
   unknown key is refused (a typo would otherwise be silently ignored).
 - A dynamic type's `definition` is optional on import if the type exists in
   the target already.
 - `version` is bumped only for a change old readers cannot understand; a file
-  with a newer version is refused rather than half-read.
+  with a newer version is refused rather than half-read. A new field
+  attribute does not bump it, so an older build refuses such a file by the
+  unknown key instead (below).
+
+### Moving a file to an older build
+
+A file is read by the build that wrote it and by any later one. Going the
+other way can fail, because every field in an export carries every attribute
+the writing build knows, and an older build refuses a key it does not know.
+For example, a file exported once fields gained `width` is refused by a build
+from before it, with one error per field:
+
+```text
+ERROR document: owners[0].post.rating: unknown key(s) width
+```
+
+Nothing is written. Export from the older build instead, or, if you must use
+the newer file, remove the key first and accept that the target keeps its own
+value for it:
+
+```bash
+jq 'walk(if type == "object" and has("field_type") then del(.width) else . end)' \
+  fields.json > fields-for-older.json
+```
+
+The owners' `sections` key needs no such edit: a build from before section
+layouts ignores it (and the layouts it describes are not imported).
+
+A file from an older build imports into a newer one as it is: a field without
+`width` is full width, and an owner without `sections` keeps the target's
+layouts.
 
 ### What it does not carry
 

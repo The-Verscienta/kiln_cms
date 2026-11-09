@@ -8,7 +8,7 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
   registered block plus `post` and `page`, with a `post` custom field of each
   kind (a `:string` list, both `:text` formats with `deliver_plain`, single and multiple
   `:select`/`:media`/`:reference`, a single and a repeating `:group`, a
-  `Kiln.FieldType`). Checked in rather than built per run, so the goldens
+  `Kiln.FieldType`), two of them in a tab section at less than full width. Checked in rather than built per run, so the goldens
   change only when someone regenerates them and the diff shows what moved.
 
   After a deliberate change to the export or an emitter:
@@ -28,11 +28,11 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
   @dir Path.expand("../../support/fixtures/schema_export", __DIR__)
 
   @fields [
-    {"subtitle", :string, %{}},
+    {"subtitle", :string, %{section: "Overview", width: :half}},
     {"synonyms", :string, %{multiple: true}},
     {"summary", :text, %{deliver_plain: true}},
     {"code_sample", :text, %{format: :plain}},
-    {"read_time", :integer, %{}},
+    {"read_time", :integer, %{section: "Overview", width: :third}},
     {"rating", :float, %{}},
     {"featured", :boolean, %{}},
     {"launch_date", :date, %{}},
@@ -96,6 +96,12 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
 
     for {name, type} <- [{"title", :string}, {"no_index", :boolean}],
         do: define.(%{name: name, label: name, field_type: type, group_of_id: seo.id})
+
+    # The editor layout annotations (#2280): `x-kiln-width` and
+    # `x-kiln-section-display` on the two "Overview" fields.
+    CMS.create_field_section!(%{content_type: :post, name: "Overview", display: :tab},
+      actor: actor
+    )
 
     document =
       SchemaExport.json_schema(

@@ -59,6 +59,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   alias KilnCMS.CMS.DynamicDefaults
   alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.FieldSection
+  alias KilnCMS.CMS.SectionLayouts
   alias KilnCMS.CMS.Validations.FieldCondition
   alias KilnCMSWeb.ComputedBuilder
   alias KilnCMSWeb.ConditionsBuilder
@@ -239,9 +241,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       params |> normalize() |> put_rules(conds, params["field_type"], old.cond_siblings)
 
     case AshPhoenix.Form.submit(old.form, params: submitted) do
-      {:ok, _definition} ->
+      {:ok, definition} ->
+        before = Enum.find(socket.assigns.definitions, &(&1.id == definition.id))
+
         {:noreply,
-         socket |> assign(:edit, nil) |> load_definitions() |> put_flash(:info, gettext("Saved."))}
+         socket
+         |> carry_section_layout(before, definition)
+         |> assign(:edit, nil)
+         |> load_definitions()
+         |> put_flash(:info, gettext("Saved."))}
 
       {:error, form} ->
         {:noreply,
@@ -258,7 +266,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     socket =
       with {:ok, definition} <- CMS.get_field_definition(id, actor: actor, tenant: org),
            :ok <- CMS.destroy_field_definition(definition, actor: actor, tenant: org) do
-        socket |> load_definitions() |> put_flash(:info, gettext("Field deleted."))
+        socket
+        |> drop_section_layout(definition)
+        |> load_definitions()
+        |> put_flash(:info, gettext("Field deleted."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't delete that field."))
       end
@@ -453,6 +464,198 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     else
       {:noreply, socket}
     end
+  end
+
+  # --- section layout (#2280) ------------------------------------------------
+
+  # One row of a type's Sections panel, saved as its selects change. The type
+  # and the section must be ones this page lists for this site: a stale page
+  # or a hand-made event naming another site's type, or a section no field of
+  # the type carries, writes nothing.
+  def handle_event("section_layout", %{"scope" => scope, "name" => name} = params, socket)
+      when is_binary(scope) and is_binary(name) do
+    assigns = socket.assigns
+
+    if CMS.can_create_field_section?(assigns.actor, %{}, tenant: assigns.current_org) do
+      layout = if is_map(params["section"]), do: params["section"], else: %{}
+      {:noreply, apply_section_layout(socket, scope, name, layout)}
+    else
+      {:noreply, put_flash(socket, :error, gettext("You can't change custom fields."))}
+    end
+  end
+
+  # A forged scope, a section the type doesn't carry or a value outside the
+  # closed sets writes nothing.
+  defp apply_section_layout(socket, scope, name, layout) do
+    assigns = socket.assigns
+
+    with {owner, definitions} <-
+           Enum.find(assigns.grouped, fn {owner, _} -> owner_param(owner) == scope end),
+         true <- name in section_names(definitions),
+         {:ok, display} <- layout_value(layout["display"], FieldSection.displays()),
+         {:ok, initially} <- initially_value(layout["initially"], assigns, owner, name) do
+      save_section_layout(socket, owner, name, display, initially)
+    else
+      _ -> socket
+    end
+  end
+
+  # --- section layout helpers (#2280) ----------------------------------------
+
+  # A section back at the default (an accordion opening by the panel's own
+  # heuristic) keeps no row: no row renders exactly that, and the field
+  # sync export then carries only the sections that differ. Every save also
+  # prunes the type's rows that no field names any more. Both read the type's
+  # rows and fields now, not from this page: another admin may have added a
+  # section (and set its layout) since it loaded.
+  defp save_section_layout(socket, owner, name, display, initially) do
+    opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
+
+    result =
+      with {:ok, rows} <- SectionLayouts.layouts(owner, opts),
+           true <- written?(write_section_layout(rows, owner, name, display, initially, opts)) do
+        SectionLayouts.prune(owner, opts)
+      end
+
+    socket = load_definitions(socket)
+
+    if written?(result),
+      do: socket,
+      else: put_flash(socket, :error, gettext("Couldn't save the section layout."))
+  end
+
+  defp write_section_layout(rows, owner, name, display, initially, opts) do
+    case {Enum.find(rows, &(&1.name == name)), display, initially} do
+      {nil, :accordion, :auto} ->
+        :ok
+
+      {nil, display, initially} ->
+        owner
+        |> owner_attrs()
+        |> Map.merge(%{name: name, display: display, initially: initially})
+        |> CMS.create_field_section(opts)
+
+      {row, :accordion, :auto} ->
+        CMS.destroy_field_section(row, opts)
+
+      {row, display, initially} ->
+        CMS.update_field_section(row, %{display: display, initially: initially}, opts)
+    end
+  end
+
+  # A field renamed out of a section it was the last field of takes the
+  # section's layout to its new name, unless that name already has one: the
+  # admin renamed the section, one field at a time.
+  defp carry_section_layout(socket, %{section: old} = before, %{section: new})
+       when is_binary(old) and is_binary(new) and old != new do
+    owner = scope_key(before)
+    rows = Map.get(socket.assigns.field_sections, owner, [])
+    row = Enum.find(rows, &(&1.name == old))
+
+    left_behind? =
+      Enum.any?(
+        socket.assigns.definitions,
+        &(&1.id != before.id and scope_key(&1) == owner and &1.section == old)
+      )
+
+    if row && !left_behind? && !Enum.any?(rows, &(&1.name == new)) do
+      opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
+
+      carried =
+        with {:ok, _} <-
+               owner
+               |> owner_attrs()
+               |> Map.merge(%{name: new, display: row.display, initially: row.initially})
+               |> CMS.create_field_section(opts) do
+          CMS.destroy_field_section(row, opts)
+        end
+
+      if written?(carried),
+        do: socket,
+        else: put_flash(socket, :error, gettext("Couldn't save the section layout."))
+    else
+      socket
+    end
+  end
+
+  defp carry_section_layout(socket, _before, _after), do: socket
+
+  # The last field of a section takes the section's layout with it: nothing
+  # is left for it to lay out, and the export would otherwise carry it.
+  defp drop_section_layout(socket, %{section: section} = definition) when is_binary(section) do
+    opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
+
+    with owner when not is_nil(owner) <- SectionLayouts.owner_of(definition),
+         {:error, _error} <- SectionLayouts.prune(owner, [only: [section]] ++ opts) do
+      put_flash(socket, :error, gettext("Couldn't save the section layout."))
+    else
+      _pruned -> socket
+    end
+  end
+
+  defp drop_section_layout(socket, _definition), do: socket
+
+  defp written?(:ok), do: true
+  defp written?({:ok, _}), do: true
+  defp written?(_error), do: false
+
+  # The sections in use on one type, in the order the editor shows them:
+  # each at the place of its first field.
+  defp section_names(definitions) do
+    definitions
+    |> Enum.map(& &1.section)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
+
+  defp layout_value(value, allowed) when is_binary(value) do
+    case Enum.find(allowed, &(Atom.to_string(&1) == value)) do
+      nil -> :error
+      atom -> {:ok, atom}
+    end
+  end
+
+  defp layout_value(_value, _allowed), do: :error
+
+  # The "Opens" select is disabled unless the section is an accordion, and a
+  # disabled select posts nothing: the stored choice then stands, so it is
+  # still there when the section is an accordion again.
+  defp initially_value(nil, assigns, owner, name),
+    do: {:ok, section_layout(assigns.field_sections, owner, name).initially}
+
+  defp initially_value(value, _assigns, _owner, _name),
+    do: layout_value(value, FieldSection.initial_states())
+
+  # A section's stored layout, or the default a section without a row has.
+  defp section_layout(field_sections, owner, name) do
+    field_sections
+    |> Map.get(owner, [])
+    |> Enum.find(%{display: :accordion, initially: :auto}, &(&1.name == name))
+  end
+
+  defp owner_attrs({:compiled, type}), do: %{content_type: type}
+  defp owner_attrs({:dynamic, id}), do: %{type_definition_id: id}
+
+  defp owner_param({:compiled, type}), do: to_string(type)
+  defp owner_param({:dynamic, id}), do: "def:#{id}"
+
+  defp field_section_owner(%{type_definition_id: nil, content_type: type}), do: {:compiled, type}
+  defp field_section_owner(%{type_definition_id: id}), do: {:dynamic, id}
+
+  defp display_options do
+    [
+      {gettext("Accordion: a heading that opens and closes"), "accordion"},
+      {gettext("Fieldset: always open, under its heading"), "fieldset"},
+      {gettext("Tab: one tab of the type's tab set"), "tab"}
+    ]
+  end
+
+  defp initially_options do
+    [
+      {gettext("Automatically (open when it holds a value)"), "auto"},
+      {gettext("Open (expanded)"), "expanded"},
+      {gettext("Closed (collapsed)"), "collapsed"}
+    ]
   end
 
   # --- conditions helpers (#2277) ---------------------------------------------
@@ -1068,6 +1271,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     )
     |> assign(:link_fields, Enum.group_by(links, &FieldDefinition.parent_id/1))
     |> assign(:grouped, grouped)
+    # Each type's section layouts (#2280), by owner, for its Sections panel.
+    |> assign(
+      :field_sections,
+      CMS.list_field_sections!(actor: socket.assigns.actor, tenant: socket.assigns.current_org)
+      |> Enum.group_by(&field_section_owner/1)
+    )
     |> assign(:orphaned, Enum.sort_by(orphaned, &{to_string(&1.content_type), &1.name}))
   end
 
@@ -3333,6 +3542,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <% end %>
             <.input field={@form[:help_text]} label={gettext("Help text")} />
             <.section_input field={@form[:section]} names={@section_names} />
+            <.width_input field={@form[:width]} />
             <.localization_input field={@form[:localization]} />
             <.options_field form={@form} id="new-field-options" />
             <.default_field form={@form} siblings={@cond_siblings} dynamic />
@@ -3411,7 +3621,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             )}
           </p>
 
-          <div :for={{scope, definitions} <- @grouped} class="space-y-3">
+          <div
+            :for={{scope, definitions} <- @grouped}
+            data-field-group={group_heading(scope, @dynamic_types)}
+            class="space-y-3"
+          >
             <h3
               id={"fields-heading-#{group_dom_id(scope)}"}
               class="text-sm font-semibold text-base-content/80"
@@ -3712,6 +3926,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   <% end %>
                   <.input field={@edit.form[:help_text]} label={gettext("Help text")} />
                   <.section_input field={@edit.form[:section]} names={@section_names} />
+                  <.width_input field={@edit.form[:width]} />
                   <.localization_input field={@edit.form[:localization]} />
                   <.options_field form={@edit.form} id={"edit-field-options-#{@edit.id}"} />
                   <.default_field form={@edit.form} siblings={@edit.cond_siblings} dynamic />
@@ -3767,6 +3982,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                 </.form>
               </li>
             </ul>
+            <.section_layouts
+              :if={section_names(definitions) != []}
+              id={"sections-#{group_dom_id(scope)}"}
+              scope={owner_param(scope)}
+              heading={group_heading(scope, @dynamic_types)}
+              names={section_names(definitions)}
+              layouts={Map.get(@field_sections, scope, [])}
+            />
           </div>
         </section>
 
@@ -4092,6 +4315,105 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       hint={
         gettext(
           "Shared values are copied to every translation when the default-locale version publishes."
+        )
+      }
+    />
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :scope, :string, required: true, doc: "the type's owner, as its checkbox value"
+  attr :heading, :string, required: true, doc: "the type's name, for the panel's label"
+  attr :names, :list, required: true, doc: "the sections in use, in editor order"
+  attr :layouts, :list, required: true, doc: "the type's stored `FieldSection` rows"
+
+  # A type's Sections panel (#2280): how each section in use is laid out in
+  # the content editor. Each row saves as its selects change.
+  defp section_layouts(assigns) do
+    rows =
+      for {name, index} <- Enum.with_index(assigns.names) do
+        layout =
+          Enum.find(assigns.layouts, %{display: :accordion, initially: :auto}, &(&1.name == name))
+
+        %{name: name, index: index, display: layout.display, initially: layout.initially}
+      end
+
+    assigns = assign(assigns, :rows, rows)
+
+    ~H"""
+    <section id={@id} aria-labelledby={"#{@id}-heading"} class="card card-pad space-y-3">
+      <div class="space-y-1">
+        <h4 id={"#{@id}-heading"} class="text-sm font-semibold">
+          {gettext("Sections of %{type}", type: @heading)}
+        </h4>
+        <p class="text-xs text-base-content/70">
+          {gettext(
+            "An accordion is a heading editors open and close; a fieldset is always open; tabs show one section at a time, and every tab section of the type joins one tab set at the place of the first. Sections keep the order of their first field."
+          )}
+        </p>
+      </div>
+      <ul class="divide-y divide-base-content/10">
+        <li
+          :for={row <- @rows}
+          id={"#{@id}-#{row.index}"}
+          data-field-section={row.name}
+          class="py-3 first:pt-0 last:pb-0"
+        >
+          <form
+            id={"#{@id}-#{row.index}-form"}
+            phx-change="section_layout"
+            class="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_14rem_14rem]"
+          >
+            <input type="hidden" name="scope" value={@scope} />
+            <input type="hidden" name="name" value={row.name} />
+            <p class="self-center font-medium break-words">{row.name}</p>
+            <.input
+              type="select"
+              id={"#{@id}-#{row.index}-display"}
+              name="section[display]"
+              label={gettext("Shown as")}
+              value={to_string(row.display)}
+              options={display_options()}
+            />
+            <.input
+              type="select"
+              id={"#{@id}-#{row.index}-initially"}
+              name="section[initially]"
+              label={gettext("Starts")}
+              value={to_string(row.initially)}
+              options={initially_options()}
+              disabled={row.display != :accordion}
+              title={
+                row.display != :accordion &&
+                  gettext("Only an accordion opens and closes.")
+              }
+            />
+          </form>
+        </li>
+      </ul>
+    </section>
+    """
+  end
+
+  attr :field, Phoenix.HTML.FormField, required: true
+
+  # How much of its section's row the field's input takes in the content
+  # editor (`width`). Only on these forms: a link field or a group sub-field
+  # sits inside its parent's input and keeps the whole of it.
+  defp width_input(assigns) do
+    ~H"""
+    <.input
+      field={@field}
+      type="select"
+      label={gettext("Width")}
+      options={[
+        {gettext("Full row"), "full"},
+        {gettext("Half a row"), "half"},
+        {gettext("A third of a row"), "third"}
+      ]}
+      hint={
+        gettext(
+          "Narrow fields of the same section sit side by side in the editor; on a small screen each takes the full row."
         )
       }
     />

@@ -625,6 +625,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:tag_sections_seen, MapSet.new())
     |> assign(:audiences, audience_options())
     |> assign(:field_definitions, field_definitions)
+    # How the type's sections are laid out (#2280); read only when a field
+    # is filed under one.
+    |> assign(:field_sections, field_sections(content_type, field_definitions, actor, org))
     |> assign(:read_only_fields, read_only_fields)
     |> assign(:hidden_fields, hidden_fields)
     # Who a `:user` field may name (#2044); read only when the type has one.
@@ -1746,6 +1749,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       ct ->
         CMS.field_definitions_for!(ct.type, actor: actor, tenant: org)
+    end
+  end
+
+  # The layout rows of the type's custom-field sections (`FieldSection`,
+  # #2280), scoped like the definitions and read as the editor. None when no
+  # field is filed under a section: there is nothing for a row to lay out.
+  defp field_sections(content_type, definitions, actor, org) do
+    cond do
+      not Enum.any?(definitions, & &1.section) ->
+        []
+
+      content_type.source == :dynamic ->
+        CMS.field_sections_for_definition!(content_type.definition.id,
+          actor: actor,
+          tenant: org
+        )
+
+      true ->
+        CMS.field_sections_for!(content_type.type, actor: actor, tenant: org)
     end
   end
 
@@ -7864,6 +7886,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <KilnCMSWeb.ContentEditor.CustomFieldsPanel.custom_fields_panel
               form={@form}
               field_definitions={@field_definitions}
+              field_sections={@field_sections}
               read_only={@read_only_fields}
               localization={@localization}
               kind={@kind}

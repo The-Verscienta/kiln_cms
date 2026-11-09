@@ -127,6 +127,43 @@ defmodule KilnCMSWeb.SchemaControllerTest do
            )
   end
 
+  # A section layout (#2280) is not a field or a type, so it has its own bust
+  # (`Changes.BustFieldLayout`); without it a tab layout would stay out of the
+  # cached document for the TTL.
+  test "a cached document is evicted by a section layout write", %{conn: conn} do
+    actor = admin()
+
+    CMS.create_field_definition!(
+      %{content_type: :page, name: "dosage", label: "Dosage", section: "Clinical"},
+      actor: actor
+    )
+
+    warm = conn |> get(~p"/api/schema") |> json_response(200)
+    dosage = warm["$defs"]["content_page"]["properties"]["custom_fields"]["properties"]["dosage"]
+    refute Map.has_key?(dosage, "x-kiln-section-display")
+
+    section =
+      CMS.create_field_section!(%{content_type: :page, name: "Clinical", display: :tab},
+        actor: actor
+      )
+
+    body = build_conn() |> unique_ip() |> get(~p"/api/schema") |> json_response(200)
+    dosage = body["$defs"]["content_page"]["properties"]["custom_fields"]["properties"]["dosage"]
+    assert dosage["x-kiln-section-display"] == "tab"
+
+    CMS.update_field_section!(section, %{display: :fieldset}, actor: actor)
+
+    body = build_conn() |> unique_ip() |> get(~p"/api/schema") |> json_response(200)
+    dosage = body["$defs"]["content_page"]["properties"]["custom_fields"]["properties"]["dosage"]
+    assert dosage["x-kiln-section-display"] == "fieldset"
+
+    CMS.destroy_field_section!(section, actor: actor)
+
+    body = build_conn() |> unique_ip() |> get(~p"/api/schema") |> json_response(200)
+    dosage = body["$defs"]["content_page"]["properties"]["custom_fields"]["properties"]["dosage"]
+    refute Map.has_key?(dosage, "x-kiln-section-display")
+  end
+
   describe "format" do
     defp private_and_public_fields(suffix) do
       actor = admin()

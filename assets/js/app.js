@@ -30,6 +30,7 @@ import {PasskeyEnroll, PasskeySignIn} from "./passkeys"
 import {PushToggle} from "./push"
 import {initAdvisoryJump} from "./advisory_jump"
 import {initRevealSection} from "./reveal_section"
+import {initRevealInvalidField} from "./reveal_invalid_field"
 import {FlashAutoDismiss} from "./flash_auto_dismiss"
 import {SavedTicker} from "./saved_ticker"
 import {TabKeys} from "./tab_keys"
@@ -1306,6 +1307,10 @@ function focusEditorField(name) {
 window.addEventListener("phx:kiln:focus-field", ({detail}) => {
   if (detail && detail.field) requestAnimationFrame(() => focusEditorField(detail.field))
 })
+
+// A required custom field in a hidden tab or collapsed section is shown when
+// the browser refuses a save over it — see assets/js/reveal_invalid_field.js.
+initRevealInvalidField(liveSocket)
 
 // connect if there are any LiveViews on the page
 liveSocket.connect()

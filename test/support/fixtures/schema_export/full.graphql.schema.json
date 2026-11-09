@@ -1460,7 +1460,10 @@
                 "integer",
                 "null"
               ],
-              "x-kiln-graphql-kind": "int"
+              "x-kiln-graphql-kind": "int",
+              "x-kiln-section": "Overview",
+              "x-kiln-section-display": "tab",
+              "x-kiln-width": "third"
             },
             "related": {
               "description": "Write-time snapshots of the referenced records, in the order the editor arranged them.",
@@ -1590,7 +1593,10 @@
                 "string",
                 "null"
               ],
-              "x-kiln-graphql-kind": "string"
+              "x-kiln-graphql-kind": "string",
+              "x-kiln-section": "Overview",
+              "x-kiln-section-display": "tab",
+              "x-kiln-width": "half"
             },
             "summary": {
               "contentMediaType": "text/html",

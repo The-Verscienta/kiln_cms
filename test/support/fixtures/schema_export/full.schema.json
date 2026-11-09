@@ -1439,7 +1439,10 @@
               "type": [
                 "integer",
                 "null"
-              ]
+              ],
+              "x-kiln-section": "Overview",
+              "x-kiln-section-display": "tab",
+              "x-kiln-width": "third"
             },
             "related": {
               "description": "Write-time snapshots of the referenced records, in the order the editor arranged them.",
@@ -1564,7 +1567,10 @@
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "x-kiln-section": "Overview",
+              "x-kiln-section-display": "tab",
+              "x-kiln-width": "half"
             },
             "summary": {
               "contentMediaType": "text/html",

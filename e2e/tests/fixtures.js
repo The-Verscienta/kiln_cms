@@ -185,7 +185,7 @@ async function newDraftContent(page, kind = "page") {
   await page.waitForURL(new RegExp(`/editor/content/${kind}/new$`));
   await page.click("#new-draft-save");
   await page.waitForURL(new RegExp(`/editor/content/${kind}/[0-9a-f-]{36}$`));
-  await base.expect(page.locator('form[id$="-editor"] [role="tablist"]')).toBeVisible();
+  await base.expect(page.locator('form[id$="-editor"] #inspector-tabs')).toBeVisible();
   // Save draft says "Saved.", like any Save. Dismiss it the way `save()` does:
   // the flash group sits over the top-right of the page, so leaving it up
   // intercepts the caller's next click there (the image picker's first button
@@ -221,7 +221,7 @@ async function saveDraft(page, { title, slug }) {
 // still finds it visible.
 async function fillSlug(page, slug) {
   const input = page.locator('input[name$="[slug]"]');
-  const selected = page.locator('button[role="tab"][aria-selected="true"]');
+  const selected = page.locator('#inspector-tabs button[role="tab"][aria-selected="true"]');
   const tab = await selected.getAttribute("phx-value-tab");
   if (!(await input.isVisible())) await page.click("#edit-url");
   await base.expect(input).toBeVisible();

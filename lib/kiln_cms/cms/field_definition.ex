@@ -305,6 +305,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :help_text,
       :position,
       :section,
+      :width,
       :default,
       :default_source,
       :default_field,
@@ -774,6 +775,22 @@ defmodule KilnCMS.CMS.FieldDefinition do
     attribute :section, :string,
       public?: true,
       constraints: [max_length: KilnCMS.Limits.line()]
+
+    # How much of its section's row the field's input takes in the content
+    # editor (#2280): the whole row (the default), half or a third — so short
+    # inputs can sit side by side. Below the small breakpoint every field is
+    # full width. Editor-only, like `section`; record-level fields only
+    # (`Changes.ClearLinkFieldOptions`).
+    #
+    # Not `public?`, as `localization`: the JSON:API and GraphQL field schemas
+    # stay what they were, and `KilnCMS.SchemaExport` reports a non-default
+    # width as `x-kiln-width` instead.
+    attribute :width, :atom do
+      allow_nil? false
+      default :full
+      constraints one_of: [:full, :half, :third]
+      public? false
+    end
 
     # Whether this field's value is another *name* for the record — a Latin
     # name, a pinyin spelling, a trade name — so that a query containing it
