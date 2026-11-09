@@ -87,6 +87,15 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
   simulated bcrypt — see `refuse_address/1` for why the timing argument that
   governs the account refusal does not apply to it, and why paying it anyway
   would forfeit most of what this control is for.
+
+  ## Human verification sits between the two (#2249)
+
+  After the per-IP charge and before the account budget,
+  `KilnCMS.Challenge.Gate.sign_in/3` decides whether this attempt needs a
+  challenge and whether its `challenge_token` passes. Its refusal
+  (`KilnCMS.Accounts.Errors.ChallengeRequired`) spends nothing of the account's
+  budget, and every credential failure is counted against the client address
+  after the read, for the gate's address axis.
   """
   use Ash.Resource.Preparation
 
@@ -94,7 +103,9 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
   alias AshAuthentication.Errors.AuthenticationFailed
   alias AshAuthentication.Info
   alias KilnCMS.Accounts.AccountThrottle
+  alias KilnCMS.Accounts.Errors.ChallengeRequired
   alias KilnCMS.Accounts.SignInAlert
+  alias KilnCMS.Challenge.Gate
 
   # Named here rather than at the caller so the two ends cannot drift into
   # writing and reading different keys — which would fail silently, as "no IP in
@@ -125,7 +136,9 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
 
   @impl true
   def prepare(query, opts, context) do
-    Query.before_action(query, &charge(&1, opts, context))
+    query
+    |> Query.before_action(&charge(&1, opts, context))
+    |> Query.after_transaction(&count_failure/2)
   end
 
   # Everything is charged from a `before_action` hook rather than from
@@ -139,9 +152,61 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
   defp charge(query, opts, context) do
     case charge_client_ip(query) do
       {:deny, _retry_after} -> refuse_address(query)
-      :allow -> throttle_account(query, opts, context)
+      :allow -> challenge(query, opts, context)
     end
   end
+
+  # Human verification (#2249), between the per-IP charge and the account
+  # budget. Decided by atomic "free attempt" buckets (never the account's own
+  # budget), so a refusal here spends nothing of the
+  # account's budget and burns no bcrypt — see `KilnCMS.Challenge.Gate`. No
+  # simulated hash is needed for the timing argument either: whether a
+  # challenge is required depends on counters keyed on the submitted address and
+  # the caller's own, never on whether the address has an account.
+  defp challenge(query, opts, context) do
+    token = Query.get_argument(query, :challenge_token)
+
+    case Gate.sign_in(query.context, identifier(query), token) do
+      :ok -> throttle_account(query, opts, context)
+      {:refuse, reason} -> Query.add_error(query, ChallengeRequired.exception(reason: reason))
+    end
+  end
+
+  # Counts a credential failure against the client address for the challenge's
+  # address axis, and hands a success's free attempt back (#2249). After the transaction — `ThrottleStore.hit/5` must
+  # never run inside one — and only for a wrong password or an unknown address:
+  # a challenge refusal or a throttle is not a guess that reached the password.
+  defp count_failure(query, {:error, error} = result) do
+    if credential_failure?(error), do: Gate.record_sign_in_failure(query.context)
+    result
+  end
+
+  # The password was right — a completed sign-in, or a first factor before the
+  # second — so the address's free attempt is handed back: the address axis
+  # counts failures, not people signing in.
+  defp count_failure(query, {:ok, records} = result) do
+    if Enum.any?(List.wrap(records), &signed_in?/1),
+      do: Gate.record_sign_in_success(query.context)
+
+    result
+  end
+
+  defp count_failure(_query, result), do: result
+
+  defp credential_failure?(error) do
+    error
+    |> flatten_errors()
+    |> Enum.any?(fn
+      %AuthenticationFailed{caused_by: %{module: __MODULE__}} -> false
+      %AuthenticationFailed{} -> true
+      _other -> false
+    end)
+  end
+
+  defp flatten_errors(%{errors: errors}) when is_list(errors),
+    do: Enum.flat_map(errors, &flatten_errors/1)
+
+  defp flatten_errors(error), do: [error]
 
   defp throttle_account(query, opts, context) do
     case identifier(query) do

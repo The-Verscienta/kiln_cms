@@ -909,12 +909,20 @@ config :phoenix, :json_library, Jason
 # accepts the invitation for whoever holds it. This filters the logged params
 # map only; Phoenix.Logger still logs the request path, token included, as it
 # does for `/magic_link` and `/password-reset` tokens.
+# Human verification (#2249). Off until the operator names a provider and its
+# keys (config/runtime/console.exs); the secret defaults to CHALLENGE_SECRET_KEY.
+config :kiln_cms, KilnCMS.Challenge, secret_key: {:env, %{"var" => "CHALLENGE_SECRET_KEY"}}
+
 config :phoenix, :filter_parameters, [
   "password",
   "passphrase",
   "preview_token",
   "unlock",
-  "invite_token"
+  "invite_token",
+  # Human-verification tokens (#2249): ours, and the field Turnstile's own
+  # markup would post if it were ever rendered with its default input.
+  "challenge_token",
+  "cf-turnstile-response"
 ]
 
 # Error tracking (Sentry). The DSN is only set in config/runtime.exs from the

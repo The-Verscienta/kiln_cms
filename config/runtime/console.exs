@@ -79,3 +79,62 @@ if config_env() != :test do
     config :kiln_cms, :admin_allowlist, disabled: true
   end
 end
+
+# Human verification on password sign-in and registration (#2249) —
+# `KilnCMS.Challenge`. Operator-only and deployment-wide: an account is global,
+# so no site may turn its own sign-in challenges off.
+#
+#   CHALLENGE_PROVIDER           turnstile (the one built-in)
+#   CHALLENGE_SITE_KEY           the widget's public site key
+#   CHALLENGE_SECRET_KEY         the secret, or CHALLENGE_SECRET_KEY_FILE for a
+#                                mounted file (resolved through KilnCMS.Keys)
+#   CHALLENGE_SIGN_IN            off | adaptive (default adaptive)
+#   CHALLENGE_REGISTRATION       off | adaptive | always (default adaptive)
+#   CHALLENGE_HOSTNAMES          extra hostnames a token may have been solved on
+#                                (space- or comma-separated), beyond the hosts
+#                                the deployment serves itself
+#   CHALLENGE_API_SIGN_IN        challenge POST /api/auth/sign_in too
+#                                (default false: that contract is unchanged)
+#   KILN_CHALLENGE_DISABLED      kill switch: nothing is required anywhere, no
+#                                widget is drawn and the CSP is not widened
+#
+# Nothing is required until a provider, a site key and a secret are all set.
+# Skipped in :test so an exported value cannot change what the suite asserts.
+if config_env() != :test do
+  with {:ok, provider} <- KilnCMS.Config.Env.one_of("CHALLENGE_PROVIDER", ~w(turnstile)) do
+    config :kiln_cms, KilnCMS.Challenge, provider: provider
+  end
+
+  case System.get_env("CHALLENGE_SITE_KEY", "") |> String.trim() do
+    "" -> :ok
+    site_key -> config :kiln_cms, KilnCMS.Challenge, site_key: site_key
+  end
+
+  case System.get_env("CHALLENGE_SECRET_KEY_FILE", "") |> String.trim() do
+    "" -> :ok
+    path -> config :kiln_cms, KilnCMS.Challenge, secret_key: {:file, %{"path" => path}}
+  end
+
+  with {:ok, mode} <- KilnCMS.Config.Env.one_of("CHALLENGE_SIGN_IN", ~w(off adaptive)) do
+    config :kiln_cms, KilnCMS.Challenge, sign_in: %{"off" => :off, "adaptive" => :adaptive}[mode]
+  end
+
+  with {:ok, mode} <-
+         KilnCMS.Config.Env.one_of("CHALLENGE_REGISTRATION", ~w(off adaptive always)) do
+    config :kiln_cms, KilnCMS.Challenge,
+      registration: %{"off" => :off, "adaptive" => :adaptive, "always" => :always}[mode]
+  end
+
+  case System.get_env("CHALLENGE_HOSTNAMES", "") |> String.split([" ", ","], trim: true) do
+    [] -> :ok
+    hostnames -> config :kiln_cms, KilnCMS.Challenge, hostnames: hostnames
+  end
+
+  with {:ok, api?} <- KilnCMS.Config.Env.fetch("CHALLENGE_API_SIGN_IN") do
+    config :kiln_cms, KilnCMS.Challenge, api_sign_in: api?
+  end
+
+  if KilnCMS.Config.Env.fetch("KILN_CHALLENGE_DISABLED") == {:ok, true} do
+    config :kiln_cms, KilnCMS.Challenge, disabled: true
+  end
+end

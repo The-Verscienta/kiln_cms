@@ -39,7 +39,9 @@ into whichever one holds the read.
 >
 > Several more are read in every environment **except `:test`**, where they are
 > skipped so the suite cannot depend on a developer's exported shell:
-> `BREACHED_PASSWORD_POLICY`, `KILN_ADMIN_ALLOWLIST_DISABLED`, `KILN_ENV_LABEL` / `KILN_ENV_COLOR`, `EMBED_ORIGINS` / `EMBED_ORIGINS_LOCKED`,
+> `BREACHED_PASSWORD_POLICY`, `KILN_ADMIN_ALLOWLIST_DISABLED`, the `CHALLENGE_*`
+> group (except `CHALLENGE_SECRET_KEY`, which only matters once a provider is
+> named) and `KILN_CHALLENGE_DISABLED`, `KILN_ENV_LABEL` / `KILN_ENV_COLOR`, `EMBED_ORIGINS` / `EMBED_ORIGINS_LOCKED`,
 > `KILN_AUDIT_ANCHORS_ENABLED`, `KILN_AUDIT_ANCHOR_EVERY_WRITE`, the
 > `KILN_GOVERNANCE_WITNESS*` group (plus `KILN_GOVERNANCE_CHECKPOINT_CRON`), and
 > the `KILN_PROVENANCE_*` group, the `KILN_DEMO_*` group, and the `KILN_BOT_BUDGET_*` group. `MIX_TEST_PARTITION` and `KILN_STRICT_TEST`
@@ -856,6 +858,27 @@ locked every admin out and `bin/kiln_cms rpc` cannot be run.
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `KILN_ADMIN_ALLOWLIST_DISABLED` | off | `1` (any on-spelling, see [On/off variables](#boolean-variables)) stops this node enforcing **any** site's admin allowlist after a restart: the console and sign-in are open to every network. The lists stay saved and can still be edited, the allowlist page shows a banner saying the server is not enforcing it, and the boot log warns (`admin_allowlist_disabled`). It is not recorded in any site's security log. Set it on every node, fix the list, then unset it and restart. Prefer `bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(clear: true)'`, which is per site and recorded ([Recovering from a lock-out](admin-allowlist.md#recovering-from-a-lock-out)). Skipped in `:test`. | [`config/runtime/console.exs:78`](../config/runtime/console.exs#L78) |
+
+### human verification (#2249)
+
+An adaptive Cloudflare Turnstile check on password sign-in and registration;
+see [human-verification.md](human-verification.md). **Off until
+`CHALLENGE_PROVIDER`, `CHALLENGE_SITE_KEY` and a secret are all set**; nothing
+here is required. Operator-only and deployment-wide: there is no per-site
+setting. The thresholds and timeouts are Elixir config only
+([Thresholds and timeouts](human-verification.md#thresholds-and-timeouts)).
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `CHALLENGE_PROVIDER` | unset (off) | `turnstile`, the one provider. Any other value is ignored with a boot warning, which leaves challenges off. Skipped in `:test`. | [`config/runtime/console.exs:104`](../config/runtime/console.exs#L104) |
+| `CHALLENGE_SITE_KEY` | unset | The Turnstile widget's public site key. With a provider set and this missing, nothing is required and the log says so (at most once a minute per node). Skipped in `:test`. | [`config/runtime/console.exs:108`](../config/runtime/console.exs#L108) |
+| `CHALLENGE_SECRET_KEY` | unset | The widget's secret key, read only when a token is verified and never logged. Leading and trailing whitespace is trimmed. A wrong value is not caught at boot: every verification then counts as the provider being unavailable, which lets sign-ins through within the bounds in [When the provider is down](human-verification.md#when-the-provider-is-down). | [`config/config.exs:914`](../config/config.exs#L914) |
+| `CHALLENGE_SECRET_KEY_FILE` | unset | Path to a file holding the secret, for a mounted secret. Wins over `CHALLENGE_SECRET_KEY`. Only the path is checked at boot; a file that cannot be read when a token is verified counts as the provider being unavailable, not as challenges off. Skipped in `:test`. | [`config/runtime/console.exs:113`](../config/runtime/console.exs#L113) |
+| `CHALLENGE_SIGN_IN` | `adaptive` | `off` or `adaptive`. `adaptive` asks for a check once an email address has had 3 attempts, or an IP address 5 failed sign-ins, in 15 minutes. Passkeys, magic links, reset, two-factor and SSO are never challenged. An unrecognized value keeps the default with a boot warning. Skipped in `:test`. | [`config/runtime/console.exs:118`](../config/runtime/console.exs#L118) |
+| `CHALLENGE_REGISTRATION` | `adaptive` | `off`, `adaptive` (a check once an IP address has made 2 registration attempts in an hour) or `always` (every registration; every visitor to the registration form then loads Cloudflare's script). An unrecognized value keeps the default with a boot warning. Skipped in `:test`. | [`config/runtime/console.exs:123`](../config/runtime/console.exs#L123) |
+| `CHALLENGE_API_SIGN_IN` | off | On (any on-spelling, see [On/off variables](#boolean-variables)) also challenges `POST /api/auth/sign_in`: `401` `challenge_required` / `challenge_failed` with the widget's details in `meta`, `503` `challenge_unavailable`. Off, that endpoint is never challenged and its contract is unchanged. Turn it on only when every client can draw the widget ([For API clients](human-verification.md#for-api-clients)). Skipped in `:test`. | [`config/runtime/console.exs:133`](../config/runtime/console.exs#L133) |
+| `CHALLENGE_HOSTNAMES` | unset | Extra hostnames a token may have been solved on, separated by spaces or commas, matched case-insensitively. Every host the deployment serves (the canonical host, the console host, every site's subdomain, custom domain and console host) is accepted already, so most deployments never set this. The request's own `Host` header never counts. Skipped in `:test`. | [`config/runtime/console.exs:128`](../config/runtime/console.exs#L128) |
+| `KILN_CHALLENGE_DISABLED` | off | `1` (any on-spelling) is the kill switch: after a restart nothing is required anywhere, no widget is drawn and the auth pages' Content-Security-Policy is not widened. The keys can stay set. Skipped in `:test`. | [`config/runtime/console.exs:137`](../config/runtime/console.exs#L137) |
 
 ### environment indicator
 

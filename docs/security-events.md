@@ -110,7 +110,7 @@ a type may carry only the keys below; anything else is dropped.
 | Type (CSV `type`) | Label on the page | Written when | `metadata` keys |
 |---|---|---|---|
 | `sign_in` | Sign-in | A sign-in completed, every factor passed | `method` |
-| `sign_in_failed` | Failed sign-in | A wrong password, or a wrong second-factor code. Sampled: see below | `method`, `reason` |
+| `sign_in_failed` | Failed sign-in | A wrong password, a wrong second-factor code, or a password sign-in refused by [human verification](human-verification.md) (a token that did not pass, or the provider down past the point where sign-ins are let through). Sampled: see below | `method`, `reason` |
 | `sign_in_locked` | Sign-in locked out | A throttle refused an attempt. First refusal per subject and scope each 15 minutes | `method`, `scope` |
 | `second_factor_enrolled` | Second factor added | An authenticator app was confirmed | `kind` |
 | `second_factor_removed` | Second factor removed | Two-factor sign-in was turned off | `kind` |
@@ -134,8 +134,11 @@ a type may carry only the keys below; anything else is dropped.
 | `admin_allowlist_overridden` | Admin allowlist changed from the server | An operator widened or cleared the list with [`KilnCMS.Release.admin_allowlist/1`](admin-allowlist.md#recovering-from-a-lock-out). No person and no IP address; the target is the site (target type `organization`) | `change`, `count` |
 
 `method` is `password`, `password_reset`, `magic_link`, `sso`, `passkey`,
-`second_factor` or `other`. `reason` is `invalid_credentials` or
-`invalid_code`. `scope` is `account`, `address`, `second_factor` or
+`second_factor` or `other`. `reason` is `invalid_credentials`,
+`invalid_code`, `challenge_failed` (the human-verification provider refused
+the token) or `challenge_unavailable` (the provider could not be reached and
+the attempt was refused anyway). A sign-in that was merely asked for a check,
+with no token, records nothing: it is not a failed attempt. `scope` is `account`, `address`, `second_factor` or
 `settings`. `change` is `created`, `updated` or `removed`; `provider` is
 `site_oidc` or `site_sso_domain`. `setting` is the settings resource's short
 name, for example `site_mail_relay`; it names the setting and never its value.
@@ -223,6 +226,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sign_in` | `lib/kiln_cms_web/controllers/passkey_controller.ex`: `verify/2` | after commit; `method: "passkey"` |
 | `sign_in` | `lib/kiln_cms_web/controllers/api_auth_controller.ex`: `issue_token/2` (the headless token API, `sign_in/2` and `verify/2`) | after commit; `method: "password"` |
 | `sign_in_failed` (wrong password) | `lib/kiln_cms/security/preparations/audit_sign_in.ex`, on `User` `:sign_in_with_password` (`lib/kiln_cms/accounts/user.ex`) | sampled, after commit; `method: "password"`, `reason: "invalid_credentials"` |
+| `sign_in_failed` (human verification) | `audit_sign_in.ex`, when `ThrottleSignIn` refuses with `KilnCMS.Accounts.Errors.ChallengeRequired` (`KilnCMS.Challenge.Gate`) | sampled, after commit; `method: "password"`, `reason: "challenge_failed"` or `"challenge_unavailable"` |
 | `sign_in_failed` (wrong code) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` (`audit_failure/3`), used by `TwoFactorController.verify` and `ApiAuthController.verify` | sampled; `method: "second_factor"`, `reason: "invalid_code"` |
 | `sign_in_locked` (account, address) | `audit_sign_in.ex`, via `AuthEvents.password_locked/3`, when `ThrottleSignIn` refuses | after commit; `method: "password"`, `scope: "account"` or `"address"` |
 | `sign_in_locked` (second factor at sign-in) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` on a denied budget | after commit; `scope: "second_factor"` |

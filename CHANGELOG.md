@@ -147,6 +147,10 @@ Every summary line below that was shortened links to its own entry there.
   Editor-only; nothing stored or delivered changes. Guide: [docs/extending-content.md](docs/extending-content.md#choose-how-editors-fill-in-a-field).
   ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets))
 
+- **Operators can turn on an adaptive Cloudflare Turnstile check for password sign-in and registration with `CHALLENGE_PROVIDER`, `CHALLENGE_SITE_KEY` and `CHALLENGE_SECRET_KEY`; `/api/auth/sign_in` is only challenged with `CHALLENGE_API_SIGN_IN=true`.**
+  Off until configured; deployment-wide; no migration. Guide: [docs/human-verification.md](docs/human-verification.md).
+  ([long form](docs/changelog/unreleased.md#human-verification))
+
 - **Integer, float, date, date-time, time, URL, email, telephone, colour and slug custom fields can hold a list (Holds → A list in `/editor/fields`).**
   Stored as a JSON array of tidied values, one typed input per item in the editor; `custom_filter` takes `eq`/`in`/`has`/`has_all`/`has_none`/`count`. Guide: [docs/extending-content.md](docs/extending-content.md#make-a-field-hold-a-list-of-values).
   ([long form](docs/changelog/unreleased.md#scalar-list-fields))

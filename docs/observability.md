@@ -154,6 +154,52 @@ accepted unchecked. The counter `kiln_cms.password.breach_check.count`
 [`KilnCMSWeb.Telemetry.metrics/0`](../lib/kiln_cms_web/telemetry.ex); alert on
 the `result="error"` share.
 
+## Human verification
+
+The adaptive sign-in and registration check
+([human-verification.md](human-verification.md), #2249) emits two events. No
+address, account, token or anything the provider echoed is ever in either.
+
+| Event | Fired by | Measurements | Metadata |
+|-------|----------|--------------|----------|
+| `[:kiln_cms, :challenge, :decision]` | `KilnCMS.Challenge.Gate`, once per password sign-in or registration that the check applies to | `count` (always `1`) | `action`, `decision` |
+| `[:kiln_cms, :challenge, :verify, :stop]` | `KilnCMS.Challenge.verify/4`, once per token check (only when a check is required) | `duration` (native units) | `provider`, `action`, `result` |
+
+- `:action` -- `:sign_in` or `:register`.
+- `:decision` -- `:not_required` (under both thresholds), `:passed`,
+  `:missing` (a check was required and no token came), `:failed` (the provider
+  refused the token), `:fail_open` (the provider could not be asked and the
+  attempt was let through) or `:fail_closed` (could not be asked, and this
+  sign-in was refused because its address is past `ip_closed_after`).
+  Registration is never `:fail_closed`. A `POST /api/auth/sign_in` with
+  `CHALLENGE_API_SIGN_IN` off, or anything with the feature off, emits nothing.
+- `:provider` -- `"turnstile"`.
+- `:result` -- `:passed`; a refusal: `:missing`, `:malformed`, `:invalid`,
+  `:expired`, `:hostname_mismatch`, `:action_mismatch`; or why the provider
+  could not be asked: `:timeout`, `:transport`, `:http_status`,
+  `:malformed_response`, `:not_configured` (the secret is unreadable or
+  Cloudflare rejected it), `:crashed`.
+
+Metrics, in [`KilnCMSWeb.Telemetry.metrics/0`](../lib/kiln_cms_web/telemetry.ex):
+
+- `kiln_cms.challenge.decision.count`, tagged `action` and `decision`;
+- `kiln_cms.challenge.verify.stop.count`, tagged `provider`, `action` and
+  `result`;
+- `kiln_cms.challenge.verify.stop.duration`, a distribution in milliseconds,
+  tagged `provider`.
+
+Useful Grafana panel:
+`sum(rate(kiln_cms_challenge_decision_count[5m])) by (action, decision)`.
+
+Alert on a sustained `decision="fail_open"` share: tokens are not being
+checked, and sign-ins that needed a check are getting through without one.
+`result="not_configured"` in the verify counter is the secret (wrong or
+unreadable); `timeout` or `transport` is the network path to
+`challenges.cloudflare.com`. Any `fail_closed` means password sign-in is being
+refused for some addresses, and the log says "Human verification is
+unavailable (...); refusing password sign-ins from client addresses past the
+failure threshold until the provider answers." at most once a minute per node.
+
 ## Where the metrics go
 
 The matching `Telemetry.Metrics` definitions live in
