@@ -164,9 +164,12 @@ What deleting does:
   (`unpublished`, `archived`, `deleted`), which disabling an endpoint does not
   stop ([Retractions are exempt](#retractions-are-exempt)).
 - **The history stays.** Past deliveries keep their ledger rows under the
-  usual [retention](#delivery-history), with an empty endpoint column in
-  **Recent deliveries**. They can't be redelivered: there is no endpoint to
-  send them to.
+  usual [retention](#delivery-history). In **Recent deliveries** each row
+  still shows the URL it was sent to, followed by "(deleted endpoint)", and
+  has no **Redeliver** button: there is no endpoint to send it to, and the
+  signing secret went with it. A failed retraction in a document's
+  **Retractions not delivered** panel on the governance trail is shown the
+  same way.
 - **It can't be undone.** The signing secret goes with the endpoint. To
   deliver to the same URL again, add it as a new endpoint and give the
   receiver its new secret.
@@ -176,8 +179,13 @@ What can go wrong:
 - **"Couldn't delete that webhook."**: the endpoint was not found (another
   admin deleted it first, or the page was stale) or the delete was refused.
   Reload the page to see the current list.
-- **"Couldn't redeliver that webhook."** on a delivery whose endpoint column
-  is empty: its endpoint was deleted, so there is nothing to replay it to.
+- **"That delivery's endpoint was deleted, so it can't be redelivered."**
+  after clicking **Redeliver**: the endpoint was deleted after your page
+  loaded (by another admin, or in another tab). Nothing is sent, and the row
+  updates to "(deleted endpoint)" without the button. A deleted endpoint's
+  deliveries can't be replayed; to reach the same receiver again, add its URL
+  as a new endpoint and give the receiver the new secret. Events from then on
+  go there.
 
 ## Event names & payload
 
@@ -566,6 +574,9 @@ is an ordinary delivery.)
     the identity only.
 
 Fix the receiver, then press **Redeliver** on the row in the trail's panel.
+A row whose endpoint has since been deleted keeps its URL, marked
+"(deleted endpoint)", and has no **Redeliver** button
+([Delete an endpoint](#delete-an-endpoint)).
 `/editor/webhooks` lists only the 25 newest deliveries, and a retraction is
 given up on about a day after it was sent.
 
@@ -577,7 +588,9 @@ given up on about a day after it was sent.
   off).
 - **Redeliver** replays a recorded delivery — same endpoint, event, and
   payload — as a **new** ledger row. History is immutable; a redelivery never
-  overwrites the original failed attempt.
+  overwrites the original failed attempt. A delivery whose endpoint was
+  deleted can't be redelivered and shows no button
+  ([Delete an endpoint](#delete-an-endpoint)).
 
 ## Delivery history
 
