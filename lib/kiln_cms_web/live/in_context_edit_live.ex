@@ -99,6 +99,9 @@ defmodule KilnCMSWeb.InContextEditLive do
     |> assign(:autosave_timer, nil)
     |> assign(:save_state, :saved)
     |> assign(:conflict, false)
+    # Set, with `:conflict`, when the record was trashed or deleted while open
+    # (#2332): nothing to reload, so saving stays paused.
+    |> assign(:gone, false)
     |> assign(:moved_announcement, nil)
     # Bumped on server-driven form replacement (save/restore/reload) so the
     # `phx-update="ignore"` editable regions remount and reload from the
@@ -294,23 +297,37 @@ defmodule KilnCMSWeb.InContextEditLive do
   end
 
   # Discard local edits and reload the latest saved version, clearing a conflict.
+  # A record trashed or deleted meanwhile (#2332) has no latest version: the
+  # edits stay on the page and the bar says what happened.
   def handle_event("reload", _params, socket) do
-    {:noreply,
-     socket
-     |> cancel_autosave_timer()
-     |> assign_record(reload(socket, socket.assigns.record.id))
-     |> reset_regions()
-     |> assign(:new_block_ids, MapSet.new())
-     |> assign(:add_at, nil)
-     |> assign(:conflict, false)
-     |> assign(:save_state, :saved)
-     |> put_flash(:info, gettext("Reloaded the latest version."))}
+    case fetch(socket, socket.assigns.record.id) do
+      {:ok, record} ->
+        {:noreply,
+         socket
+         |> cancel_autosave_timer()
+         |> assign_record(record)
+         |> reset_regions()
+         |> assign(:new_block_ids, MapSet.new())
+         |> assign(:add_at, nil)
+         |> assign(:conflict, false)
+         |> assign(:save_state, :saved)
+         |> put_flash(:info, gettext("Reloaded the latest version."))}
+
+      :gone ->
+        {:noreply, flag_gone(socket)}
+
+      {:error, error} ->
+        raise Ash.Error.to_error_class(error)
+    end
   end
 
   @impl true
   def handle_info(:autosave, socket), do: {:noreply, perform_autosave(socket)}
 
   # ── save-state machine (mirrors ContentEditorLive) ──────────────────────────
+
+  # A record gone from under the page (#2332) takes no autosave.
+  defp mark_dirty(%{assigns: %{gone: true}} = socket), do: assign(socket, :save_state, :unsaved)
 
   defp mark_dirty(socket) do
     if draft?(socket) do
@@ -322,6 +339,9 @@ defmodule KilnCMSWeb.InContextEditLive do
       assign(socket, :save_state, :unsaved)
     end
   end
+
+  defp perform_autosave(%{assigns: %{gone: true}} = socket),
+    do: assign(socket, :autosave_timer, nil)
 
   defp perform_autosave(%{assigns: %{save_state: :saving}} = socket) do
     socket = assign(socket, :autosave_timer, nil)
@@ -397,15 +417,33 @@ defmodule KilnCMSWeb.InContextEditLive do
     end
   end
 
+  # A stale write is also what a record trashed or purged since load gets
+  # (#2332); reloading cannot help then, so look for it first.
   defp flag_conflict(socket) do
+    if fetch(socket, socket.assigns.record.id) == :gone do
+      flag_gone(socket)
+    else
+      socket
+      |> cancel_autosave_timer()
+      |> assign(:conflict, true)
+      |> assign(:save_state, :unsaved)
+      |> put_flash(
+        :error,
+        gettext("This content changed elsewhere. Reload to get the latest before saving.")
+      )
+    end
+  end
+
+  # The record was moved to the trash or deleted while open (#2332). The edits
+  # stay on the page to copy; `@conflict` keeps Save disabled, and `@gone`
+  # swaps the bar's "Reload latest" for a way back to the content list.
+  defp flag_gone(socket) do
     socket
     |> cancel_autosave_timer()
     |> assign(:conflict, true)
+    |> assign(:gone, true)
     |> assign(:save_state, :unsaved)
-    |> put_flash(
-      :error,
-      gettext("This content changed elsewhere. Reload to get the latest before saving.")
-    )
+    |> put_flash(:error, gettext("This content was moved to the trash or deleted."))
   end
 
   defp cancel_autosave_timer(socket) do
@@ -423,6 +461,18 @@ defmodule KilnCMSWeb.InContextEditLive do
         actor: socket.assigns.actor,
         tenant: socket.assigns.current_org
       )
+
+  # `reload/2` for a record that may be gone (#2332): `:gone` when the read
+  # finds nothing, any other failure returned.
+  defp fetch(socket, id) do
+    case ContentTypes.get_record(socket.assigns.kind, id,
+           actor: socket.assigns.actor,
+           tenant: socket.assigns.current_org
+         ) do
+      {:ok, record} -> {:ok, record}
+      {:error, error} -> if InlineEditing.not_found?(error), do: :gone, else: {:error, error}
+    end
+  end
 
   defp draft?(socket), do: socket.assigns.record.state == :draft
 
@@ -578,6 +628,7 @@ defmodule KilnCMSWeb.InContextEditLive do
         ct={@ct}
         save_state={@save_state}
         conflict={@conflict}
+        gone={@gone}
       />
 
       <article
@@ -677,6 +728,7 @@ defmodule KilnCMSWeb.InContextEditLive do
   attr :ct, :map, required: true
   attr :save_state, :atom, required: true
   attr :conflict, :boolean, required: true
+  attr :gone, :boolean, required: true
 
   defp edit_bar(assigns) do
     ~H"""
@@ -734,10 +786,19 @@ defmodule KilnCMSWeb.InContextEditLive do
         role="alert"
         class="w-full rounded border border-warning/50 bg-warning/10 px-3 py-2 text-sm"
       >
-        {gettext("Someone else saved changes to this content.")}
-        <button type="button" phx-click="reload" class="btn-link ml-2 font-medium underline">
-          {gettext("Reload latest")}
-        </button>
+        <%= if @gone do %>
+          {gettext(
+            "This content was moved to the trash or deleted, so your changes can't be saved. Copy anything you need before leaving."
+          )}
+          <.link navigate={~p"/editor"} class="btn-link ml-2 font-medium underline">
+            {gettext("Back to content")}
+          </.link>
+        <% else %>
+          {gettext("Someone else saved changes to this content.")}
+          <button type="button" phx-click="reload" class="btn-link ml-2 font-medium underline">
+            {gettext("Reload latest")}
+          </button>
+        <% end %>
       </div>
     </div>
     """

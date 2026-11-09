@@ -400,6 +400,31 @@ defmodule KilnCMSWeb.RevisionControllerTest do
       assert {401, _, _} = req(:post, "#{rev_path(:page, page.id)}/#{first.id}/restore")
       assert CMS.get_page!(page.id, actor: admin).title == "Three"
     end
+
+    # A regression pin for #2332, not proof of it: this already passed before
+    # the fix, because the route re-reads the document through the trash-
+    # filtered read. The read-to-write race #2332 closed is covered by the
+    # domain guard (`KilnCMS.CMS.TrashedRowGuardTest`).
+    test "restoring a version of a trashed page is a 404 and writes nothing (regression pin)",
+         %{admin: admin, page: page} do
+      [first | _] = versions(page, admin)
+      CMS.destroy_page!(page, actor: admin)
+      key = mint(admin, :read_write)
+
+      row = fn ->
+        KilnCMS.Repo.query!(
+          "SELECT title, lock_version, updated_at, archived_at FROM pages WHERE id = $1",
+          [Ecto.UUID.dump!(page.id)]
+        ).rows
+      end
+
+      before = row.()
+
+      assert {404, _, _} =
+               req(:post, "#{rev_path(:page, page.id)}/#{first.id}/restore", key: key)
+
+      assert row.() == before
+    end
   end
 
   describe "custom fields in a revision" do

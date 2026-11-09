@@ -351,6 +351,11 @@ defmodule KilnCMSWeb.ContentEditor.Session do
     socket = refresh_preview(socket)
 
     cond do
+      # The record is gone (#2332): nothing here can be saved, so no autosave
+      # is scheduled to be refused again. The edit stays in the form.
+      socket.assigns.gone ->
+        assign(socket, :save_state, :unsaved)
+
       published?(socket) and scope == :settings ->
         assign(socket, :settings_dirty?, true)
 
@@ -389,6 +394,10 @@ defmodule KilnCMSWeb.ContentEditor.Session do
       socket.assigns.editors |> Enum.map(& &1.id) |> Enum.min()
   end
 
+  # A timer scheduled before the record went (#2332): there is no row to save to.
+  defp perform_autosave(%{assigns: %{gone: true}} = socket),
+    do: assign(socket, :autosave_timer, nil)
+
   defp perform_autosave(%{assigns: %{save_state: :pending}} = socket) do
     cond do
       not autosaves?(socket) ->
@@ -410,21 +419,47 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   # Stop autosaving and put the editor into a conflict state until the user
   # reloads. Surface a flash so a blocked Save gets immediate feedback (#137) —
   # the Save button is also disabled while `@conflict` is set.
+  #
+  # A write is also refused with `StaleRecord` when the record was moved to the
+  # trash or purged since this session loaded it (#2332). Reloading cannot help
+  # then, so the record is looked for first and a gone one gets `flag_gone/1`.
   def flag_conflict(socket) do
+    if ContentEditorLive.gone?(socket) do
+      flag_gone(socket)
+    else
+      socket
+      |> cancel_autosave_timer()
+      |> assign(:conflict, true)
+      |> assign(:save_state, :unsaved)
+      |> put_flash(
+        :error,
+        gettext("This content changed elsewhere. Reload to get the latest before saving.")
+      )
+    end
+  end
+
+  # The record was moved to the trash or deleted while this session had it
+  # open (#2332). The form and its unsaved text stay, so the person can copy
+  # what they need. `@conflict` stays set, so every guard that pauses a
+  # conflicted editor holds here too, and `@gone` swaps the banner's "Reload
+  # latest" (there is nothing to reload) for a way back to the content list
+  # and stops the autosave (`mark_dirty/2`).
+  def flag_gone(socket) do
     socket
     |> cancel_autosave_timer()
     |> assign(:conflict, true)
+    |> assign(:gone, true)
     |> assign(:save_state, :unsaved)
-    |> put_flash(
-      :error,
-      gettext("This content changed elsewhere. Reload to get the latest before saving.")
-    )
+    |> put_flash(:error, gettext("This content was moved to the trash or deleted."))
   end
 
   # True when a failed submit was rejected by the optimistic lock (the record
   # changed underneath us), as opposed to ordinary validation errors. The
   # `StaleRecord` error has no form-field representation, so unwrap the
   # Phoenix.HTML.Form → AshPhoenix.Form → Ash.Changeset to read its errors.
+  # A code interface's error (a workflow transition, a version restore, a
+  # trash) is read directly.
+  def stale_conflict?(%{__exception__: true} = error), do: stale_error?(error)
   def stale_conflict?(form), do: form |> changeset_errors() |> Enum.any?(&stale_error?/1)
 
   defp stale_error?(%Ash.Error.Changes.StaleRecord{}), do: true

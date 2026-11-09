@@ -85,12 +85,12 @@ defmodule KilnCMS.CMS.TrashPurgeTest do
     month_ago = DateTime.add(DateTime.utc_now(), -31, :day)
     :ok = CMS.destroy_page!(linked, actor: admin)
 
+    # Backdated the way `trashed_page/1` seeds one: no update action takes a
+    # trashed row (#2332).
     linked =
       CMS.list_trashed_pages!(authorize?: false)
       |> Enum.find(&(&1.id == linked.id))
-      |> Ash.Changeset.for_update(:update, %{})
-      |> Ash.Changeset.force_change_attribute(:archived_at, month_ago)
-      |> Ash.update!(authorize?: false)
+      |> Ash.Seed.update!(%{archived_at: month_ago})
 
     old = trashed_page(month_ago)
 

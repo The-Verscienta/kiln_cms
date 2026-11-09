@@ -66,6 +66,12 @@ The document comes back in the state it was trashed in. A published document
 goes straight back on the live site: its rendered pages are rebuilt and the
 search index picks it up again. A draft comes back as a draft.
 
+A trashed draft is never published by its schedule. If its **Scheduled
+publish at** time passed while it was in the trash, restoring it publishes it
+on the scheduler's next run, within about a minute. A trashed document can't
+be edited, so the date can't be cleared beforehand: if it should not go live,
+unpublish it once it has.
+
 ## Delete permanently
 
 On the Trash page, **Delete permanently** removes one document and **Empty
@@ -91,15 +97,43 @@ removed ([extending-content.md](extending-content.md)).
   document has edits that autosave doesn't cover: it is in review or archived,
   which don't autosave, or the editor is showing a save conflict. Save the
   edits (or reload after a conflict) and try again.
+- *Someone else already moved this to the trash or deleted it.* (editor) You
+  clicked **Move to trash** on a document another admin had already trashed
+  or deleted since you opened it. Nothing more was done, and the editor takes
+  you back to the content list.
+- *This content was moved to the trash or deleted.* (any editor) Someone
+  trashed or permanently deleted the document while you had it open. See
+  [If someone is still editing it](#if-someone-is-still-editing-it).
+- *Couldn't restore that item.* (Trash page) The restore was refused. When
+  two admins restore the same document, the second one gets this: it was
+  already out of the trash, and restoring it again would rebuild its pages
+  and send `restored` twice. Reload the Trash page; if the row is gone, the
+  document is back in the content list.
 
-## Known limitation
+## If someone is still editing it
 
-Trashing a document does not stop a writer that still has it open. Another
-editor session, the in-context editor, the API or MCP can keep saving into a
-trashed row, and **Publish changes** in an editor still open on a live
-document can publish it again. The fix is tracked in
-[#2332](https://github.com/The-Verscienta/kiln_cms/issues/2332). Until then,
-check that nobody else is editing a document before you trash it.
+Trashing a document does not close it in other people's editors, but nothing
+they do afterwards can write into it (#2332). This holds for the content
+editor, the in-context editor, the Presentation console, the API, MCP and
+background jobs. A live document trashed under an open editor stays off the
+site: **Publish changes** cannot put it back.
+
+The other editor finds out the next time it tries to write: an autosave after
+they type, **Save**, a workflow button such as **Publish changes**, or
+**Reload latest** on a save conflict. Until then their screen looks as it did.
+When it happens:
+
+1. The flash reads *This content was moved to the trash or deleted.* and a
+   banner says *This content was moved to the trash or deleted, so your
+   changes can't be saved. Copy anything you need before leaving.*
+2. The text they typed stays on screen. Autosave stops and **Save** stays
+   disabled. The banner offers **Back to content** (the content list) instead
+   of **Reload latest**, since there is no saved version to reload.
+3. They copy what they need and click **Back to content**.
+
+To get the document back, an admin restores it from Trash (see
+[Restore a document](#restore-a-document)). The edits made after the trash
+were never saved, so paste them in again after the restore.
 
 ## For operators
 
@@ -108,7 +142,10 @@ check that nobody else is editing a document before you trash it.
   prompts above show the configured number, except the bulk prompt, which
   always says 30 days.
 - Trashing fires the `<type>.deleted` webhook with a tombstone payload, and
-  restoring fires `<type>.restored` (see [webhooks.md](webhooks.md)).
+  restoring fires `<type>.restored` (see [webhooks.md](webhooks.md)). Between
+  the two, the document sends nothing: no `updated`, `unpublished` or
+  `archived` from an editor or job still holding it, no second `deleted` and
+  no second `restored`.
 - No migration or environment variable is involved.
 
 ## For developers
@@ -129,3 +166,23 @@ check that nobody else is editing a document before you trash it.
   the Settings-tab note, the flashes and `retention_days/0`.
 - Over the API, the same soft delete is `DELETE` on the record
   ([json-api.md](json-api.md)).
+- A trashed row takes no update. `KilnCMS.CMS.Changes.RefuseTrashed` is
+  registered `on: [:update]` in the `changes` block of every resource built
+  with `use KilnCMS.CMS.Content`, so it covers every update action, including
+  ones an overlay adds. It filters the write on the row
+  (`is_nil(archived_at)`), not on the struct the caller holds, so a struct
+  loaded before the trash is refused too. A refused write raises
+  `Ash.Error.Changes.StaleRecord`, and nothing after it runs: no artifacts
+  fired, no webhook, no job enqueued.
+- Two update actions are exempt, listed by
+  `KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0`: `:restore`, which
+  instead requires the row to still be trashed (a second restore is refused),
+  and `:clear_reference_target`, which a purge uses to clear the purged record
+  out of every referrer, trashed ones included, without re-firing or
+  announcing a trashed referrer. `:destroy` (the trash itself) also refuses a
+  row that is already trashed. An overlay action that must write a trashed
+  row has no opt-out.
+- The API answers for a trashed id did not change: JSON:API, GraphQL and MCP
+  read the record first, find nothing and answer not-found. Only a write that
+  lands between that read and someone else's trash is now refused instead of
+  written.

@@ -25,6 +25,8 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
   attr :tier, :atom, required: true
   attr :editors_can_publish, :boolean, default: false
   attr :conflict, :boolean, required: true
+  # The record was trashed or deleted while open (#2332): no reload helps.
+  attr :gone, :boolean, default: false
   attr :editors, :list, required: true
   attr :actor, :any, required: true
   attr :word_count, :integer, required: true
@@ -198,7 +200,18 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
             disabled={@conflict}
             data-flush-body
             phx-disable-with={gettext("Saving…")}
-            title={@conflict && gettext("Reload to resolve the edit conflict before saving.")}
+            title={
+              cond do
+                @gone ->
+                  gettext("This content was moved to the trash or deleted, so it can't be saved.")
+
+                @conflict ->
+                  gettext("Reload to resolve the edit conflict before saving.")
+
+                true ->
+                  nil
+              end
+            }
           >
             {gettext("Save draft")}
           </.button>

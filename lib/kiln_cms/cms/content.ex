@@ -2785,6 +2785,10 @@ defmodule KilnCMS.CMS.Content do
           # read. A no-op without either.
           argument :expected_lock_version, :integer
           change KilnCMS.CMS.Changes.CheckExpectedVersion
+          # Compare-and-swap on the row (#2332): a second trash of a struct
+          # loaded before the first is refused (`StaleRecord`), so it neither
+          # re-runs `DeleteArtifacts` nor sends a second `deleted`.
+          change filter(expr(is_nil(^ref(:archived_at))))
           change KilnCMS.CMS.Changes.DeleteArtifacts
           # A mirror has to hear about a deletion or it keeps serving the
           # document. A tombstone, not the body: a trashed draft was never
@@ -2998,7 +3002,9 @@ defmodule KilnCMS.CMS.Content do
         # publish landing between load and write would sail past it — which is
         # exactly the race, not a hypothetical. A miss raises `StaleRecord`,
         # which `ContentEditorLive` already turns into "this content changed
-        # elsewhere, reload" (#137).
+        # elsewhere, reload" (#137). The global `Changes.RefuseTrashed` adds
+        # the same kind of row filter for the trash (#2332): an editor still
+        # open on a record someone trashed cannot autosave into it.
         update :autosave do
           require_atomic? false
           change filter(expr(^ref(:state) == :draft))
@@ -3124,7 +3130,10 @@ defmodule KilnCMS.CMS.Content do
         # (an autosave landed from another tab) fails the lock rather than
         # publishing an older draft. The gates are the `:update` pair
         # (`only_new: true`) rather than `:publish`'s, because this is an edit
-        # to a live page in every way that matters to them.
+        # to a live page in every way that matters to them. A held struct of a
+        # page someone has since trashed is refused by the global
+        # `Changes.RefuseTrashed` (#2332): no re-fire, no `updated` after the
+        # `deleted`.
         update :publish_changes do
           require_atomic? false
           accept []
@@ -3628,6 +3637,11 @@ defmodule KilnCMS.CMS.Content do
         update :restore do
           accept []
           require_atomic? false
+          # Exempt from `Changes.RefuseTrashed`, and its mirror image: the row
+          # must still be trashed (#2332), so a second restore of a held
+          # struct is refused rather than re-firing and sending `restored`
+          # twice.
+          change filter(expr(not is_nil(^ref(:archived_at))))
           change set_attribute(:archived_at, nil)
 
           # While it sat in the trash another record may have taken a
@@ -3687,8 +3701,17 @@ defmodule KilnCMS.CMS.Content do
           change optimistic_lock(:lock_version)
           change KilnCMS.CMS.Changes.ClearReferenceTarget
           change KilnCMS.CMS.Changes.SetSearchText
-          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
-          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
+          # Exempt from `Changes.RefuseTrashed`: a trashed referrer is cleared
+          # too, so it cannot come back naming the purged record. It is not
+          # re-fired or announced, though (#2332): its artifacts were purged
+          # when it was trashed and its subscribers already heard `deleted`.
+          # A struct check is safe here: `TargetDelete` read it inside the
+          # purge's transaction.
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published},
+            where: [attribute_equals(:archived_at, nil)]
+
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published},
+            where: [attribute_equals(:archived_at, nil)]
         end
 
         # Background-maintained semantic embedding, written by
@@ -4005,6 +4028,14 @@ defmodule KilnCMS.CMS.Content do
       # (applies to every create/update/destroy action; no-ops for draft-only
       # writes — see the change module).
       changes do
+        # A trashed row takes no update (#2332): every update action gets a
+        # row filter `is_nil(archived_at)`, so a struct loaded before someone
+        # trashed the record can no longer write into it (an autosave, a
+        # *Publish changes* that re-fires and announces `updated` after
+        # `deleted`). `:restore` and `:clear_reference_target` are exempt;
+        # see the change module.
+        change KilnCMS.CMS.Changes.RefuseTrashed, on: [:update]
+
         change KilnCMS.CMS.Changes.BustContentCache, on: [:create, :update, :destroy]
 
         # Per-field write scoping for editors (granular RBAC #332, slice 3):
