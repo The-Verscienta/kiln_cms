@@ -26,8 +26,8 @@ your CDN, reverse proxy or firewall.
 
 You need the admin role. An editor does not see the page.
 
-1. Open **Blocked addresses** in the console sidebar (it sits with the security
-   settings), or go to `/editor/ip-blocks`.
+1. Open **Blocked addresses** under **Sign-in & access** in the console
+   sidebar, or go to `/editor/ip-blocks`.
 2. Under **Address or range**, type an IPv4 or IPv6 address, with an optional
    `/prefix`: `203.0.113.7`, `203.0.113.0/24`, `2001:db8::/32`. A bare address
    blocks just that address.
@@ -279,6 +279,10 @@ never blocked.
   key can neither read nor edit them. Only an organization admin, in the console.
 - **Upgrading** adds a table, `ip_block_rules`; nothing existing changes. Rolling
   back leaves the table in place and unused.
+
+To do the opposite, and admit only listed networks to the console and sign-in,
+see [Restricting sign-in to your networks](admin-allowlist.md). A block always
+wins: an address that is both blocked and allowlisted is blocked.
 
 To slow a client down rather than refuse it, by what its user agent says it is
 (a crawler, a script, no user agent), see [Bot budgets](bot-budgets.md).

@@ -47,7 +47,9 @@ defmodule KilnCMS.OrgSettings do
 
   `read` is the code-interface list for the resource, called with the org id;
   it returns `{:ok, rows}` or `{:error, _}` (or raises). `build` receives the
-  row or `nil`. `label` names the setting in the degrade log line.
+  row or `nil`. `label` names the setting in the degrade log line, and `warn`
+  (optional) replaces `Logger.warning/1` for it — a resolver read on every
+  request of a surface anyone can reach rate-limits its own line (#2248).
 
   ## Who the row is read as (#1659)
 
@@ -111,7 +113,8 @@ defmodule KilnCMS.OrgSettings do
           read: (Ash.UUID.t() -> {:ok, [struct()]} | {:error, term()}),
           build: (struct() | nil -> term()),
           fallback: (-> term()),
-          label: String.t()
+          label: String.t(),
+          warn: (String.t() -> term())
         ]
 
   @doc """
@@ -164,8 +167,12 @@ defmodule KilnCMS.OrgSettings do
 
   defp degrade(opts, detail) do
     label = Keyword.get(opts, :label, "settings")
+    message = "#{label} lookup failed, serving the fallback for this request: #{detail}"
 
-    Logger.warning("#{label} lookup failed, serving the fallback for this request: #{detail}")
+    case Keyword.get(opts, :warn) do
+      nil -> Logger.warning(message)
+      warn -> warn.(message)
+    end
 
     :error
   end

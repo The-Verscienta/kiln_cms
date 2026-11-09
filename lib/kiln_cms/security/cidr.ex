@@ -1,8 +1,9 @@
 defmodule KilnCMS.Security.Cidr do
   @moduledoc """
-  Pure IP/CIDR parsing, normalisation and matching for operator-defined block
-  rules (#2242). No I/O, no config: the same input always gives the same answer,
-  so the matcher and the write-time validation cannot disagree.
+  Pure IP/CIDR parsing, normalisation and matching, shared by the operator's
+  block list (#2242) and the admin allowlist (#2248). No I/O, no config: the
+  same input always gives the same answer, so the matcher and the write-time
+  validation cannot disagree.
 
   A CIDR is the parsed triple `{family, network, prefix}` — `family` is `:inet`
   or `:inet6`, `network` the address as an integer with the host bits already
@@ -167,6 +168,75 @@ defmodule KilnCMS.Security.Cidr do
       {:ok, format(cidr)}
     end
   end
+
+  @doc """
+  Write-time guard for an admin allowlist entry (#2248): the same rule as
+  `blockable/1`. A range wider than the floor would admit a large part of the
+  internet and defeat the list; loopback would admit everyone behind a
+  same-host proxy that `TRUSTED_PROXIES` does not name, where every request
+  arrives from `127.0.0.1`.
+
+      iex> KilnCMS.Security.Cidr.allowable("198.51.100.7")
+      {:ok, "198.51.100.7/32"}
+
+      iex> KilnCMS.Security.Cidr.allowable("::1")
+      {:error, :loopback}
+  """
+  @spec allowable(term()) :: {:ok, String.t()} | {:error, :invalid | :too_broad | :loopback}
+  def allowable(input), do: blockable(input)
+
+  @doc """
+  Is `ip` inside any of `cidrs` (strings or parsed)? `false` for an empty list
+  and for an address that does not parse.
+  """
+  @spec any_contains?([String.t() | t()], ip() | String.t() | nil) :: boolean()
+  def any_contains?(_cidrs, nil), do: false
+  def any_contains?(cidrs, ip) when is_list(cidrs), do: Enum.any?(cidrs, &contains?(&1, ip))
+
+  @doc """
+  The range to add for "this address" (#2248): the address itself for IPv4
+  (`/32`, an IPv4-mapped address folded to IPv4), and its `/64` for IPv6, since
+  a host's IPv6 address changes within its network's `/64` as privacy
+  extensions rotate it.
+
+      iex> KilnCMS.Security.Cidr.client_range({203, 0, 113, 7})
+      "203.0.113.7/32"
+
+      iex> KilnCMS.Security.Cidr.client_range({0x2001, 0xDB8, 1, 2, 3, 4, 5, 6})
+      "2001:db8:1:2::/64"
+  """
+  @spec client_range(ip()) :: String.t() | nil
+  def client_range(ip) when is_tuple(ip) do
+    case address_forms(ip) do
+      [{:inet, int} | _] -> format({:inet, int, 32})
+      [{:inet6, int}] -> format(mask({:inet6, int, 64}))
+      [] -> nil
+    end
+  end
+
+  def client_range(_), do: nil
+
+  # Private, shared and link-local space: an address here is usually a proxy's
+  # or a NAT's as seen from the app, not one person's.
+  @shared_ranges [
+    {:inet, 10 <<< 24, 8},
+    {:inet, 172 <<< 24 ||| 16 <<< 16, 12},
+    {:inet, 192 <<< 24 ||| 168 <<< 16, 16},
+    {:inet, 100 <<< 24 ||| 64 <<< 16, 10},
+    {:inet, 169 <<< 24 ||| 254 <<< 16, 16},
+    {:inet6, 0xFC00 <<< 112, 7},
+    {:inet6, 0xFE80 <<< 112, 10}
+  ]
+
+  @doc """
+  Is `ip` in private (RFC 1918), carrier-grade NAT (`100.64.0.0/10`), unique
+  local (`fc00::/7`) or link-local space? Seen as a client's address, such an
+  address is usually a proxy's or a NAT's, so listing it admits everyone
+  behind it.
+  """
+  @spec shared_space?(ip() | nil) :: boolean()
+  def shared_space?(ip) when is_tuple(ip), do: any_contains?(@shared_ranges, ip)
+  def shared_space?(_), do: false
 
   defp check_floor(family, prefix) do
     if prefix < @min_prefix[family], do: {:error, :too_broad}, else: :ok

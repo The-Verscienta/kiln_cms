@@ -7,6 +7,38 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="admin-allowlist-upgrade"></a>
+
+- **Run `mix ash.migrate` for the admin allowlist (#2248): one new table,
+  `site_admin_allowlist`. Nothing changes until a site admin saves a list.
+  Rolling back to an earlier release turns every site's allowlist off without
+  a word, and while a list is on, members and apps sign in only from listed
+  networks.**
+  - **What the migration does.** `20261109005539_add_site_admin_allowlist`
+    creates `site_admin_allowlist` (one row per site, `cidrs text[] NOT NULL
+    DEFAULT '{}'`, unique on `org_id`). Additive; no existing table changes.
+  - **Rolling back is not neutral.** An earlier release has no gate and
+    ignores the table: every site that turned the allowlist on is open to
+    every network again, with nothing on the page or in the log to say so. Roll
+    forward again to restore it; the lists are still stored.
+  - **Who is affected when a site turns it on.** Every sign-in route is gated,
+    not only the console's: members and readers who sign in on the public site,
+    and `POST /api/auth/sign_in`, which single-page apps and native or mobile
+    apps call from the user's device. Those sign-ins work only from listed
+    networks. Tokens already issued and API keys are not affected.
+  - **Behind a proxy, set `TRUSTED_PROXIES` (or `CLIENT_IP_HEADER` on Fly.io,
+    Railway and App Platform) first.** The allowlist page refuses to save a
+    list while forwarded requests arrive that nothing trusts.
+  - **Know the way back in.** `bin/kiln_cms rpc
+    'KilnCMS.Release.admin_allowlist(clear: true)'` (or `add: "<address>"`), or
+    `KILN_ADMIN_ALLOWLIST_DISABLED=1` and a restart. See
+    [Recovering from a lock-out](../admin-allowlist.md#recovering-from-a-lock-out).
+  - **The console menu moved.** Single sign-on and Sessions (from
+    Integrations) and Password policy, Blocked addresses and Bot budgets (from
+    Organization) are now under the new **Sign-in & access** section, with the
+    new Admin allowlist page. The addresses are unchanged.
+  See also [the Added entry](#admin-allowlist).
+
 <a id="session-idle-timeout-upgrade"></a>
 
 - **Run `mix ash.migrate` for the idle timeout and "sign out everyone" (#2246).
@@ -537,6 +569,64 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="admin-allowlist"></a>
+
+- **Site admins can restrict the console and sign-in to listed networks: the
+  admin allowlist (#2248).** A new page, **Configure → Sign-in & access →
+  Admin allowlist** (`/editor/admin-allowlist`, admins only). Off until an
+  admin adds an entry.
+  - **What it gates.** From an address not on the list: every `/editor/**`
+    page and export, `/media`, `/setup`, and every sign-in route (password,
+    registration, reset, magic link, passkeys, single sign-on, the two-factor
+    prompt, confirmation and invitations) answer a `403` page "Not available
+    from this network" that shows the visitor their own address;
+    `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` answer `403`
+    `network_not_allowed`. The pages' LiveView joins and `/ws/collab` are
+    refused too, and open console and sign-in pages leave as soon as a save
+    excludes them. The public site, `/account`, media downloads, previews,
+    health checks and every API used with an API key or an already-issued
+    token are not affected. A block-list rule still wins.
+  - **Entries.** IPv4 and IPv6 addresses and ranges, one per line, at most
+    100. Ranges wider than `/8` (IPv4) or `/16` (IPv6) and loopback are
+    refused. **Add my address** adds the address Kiln sees (its `/64` for
+    IPv6), and both addresses on a dual-stack connection.
+  - **Lock-out check.** A save is refused when the list does not admit the
+    address the page was loaded from (and the socket's own, when it differs),
+    or while a forwarding header arrives that nothing trusts. Turning it off
+    is always allowed. There is no "save anyway".
+  - **Fails closed.** If the list cannot be read, the gated routes answer `503`
+    and joins are refused, uncached; a site the node last read as off stays
+    off through a failed read. The public site never reads the list.
+  - **Behind Fly.io and App Platform proxies,** a page's socket cannot see the
+    client, so it is admitted on the address its HTTP load was admitted from,
+    for 5 minutes; after that a reconnect or navigation reloads the page.
+    `/ws/collab` is refused there while a list is on.
+  - **Recovery.** `KilnCMS.Release.admin_allowlist/1` (through `bin/kiln_cms
+    rpc`) lists, adds one entry to a list that is on, or clears it, and records
+    it in the security log; it can never lock anyone out. The kill switch
+    `KILN_ADMIN_ALLOWLIST_DISABLED=1` stops a node enforcing any site's list
+    after a restart, with a boot warning; it is not in any security log.
+  - **Security log and metrics.** Three new event types:
+    `admin_access_refused` ("Refused outside the admin allowlist"; `surface`;
+    sampled at 5 per address per 15 minutes per site, IPv6 per `/64`),
+    `admin_allowlist_changed` ("Admin allowlist changed"; `state`, `count`,
+    `added`, `removed`, never the entries; replaces `org_setting_changed` for
+    this setting) and `admin_allowlist_overridden` ("Admin allowlist changed
+    from the server"; `change`, `count`). New counter
+    `kiln_cms.admin_allowlist.refused.count`, tagged `surface` and `reason`.
+  - **Developers.** `CMS.SiteAdminAllowlist` is a new org-scoped settings
+    resource (`CMS.list_site_admin_allowlist/1`, `save_site_admin_allowlist/2`,
+    and the operator-only `override_site_admin_allowlist/3`). `:destroy` is
+    refused to everyone: off is saving `[]`. Not on JSON:API, GraphQL or MCP.
+    A new `:admin_allowlist` system actor reads it for the gates. Router
+    pipelines `:admin_allowlist` and `:admin_allowlist_api`, and the
+    `{KilnCMSWeb.AdminAllowlist, :gated}` hook in each gated `live_session`; an
+    overlay or plugin adding a console or sign-in route should use them.
+    `KilnCMS.CMS.OrgSettings` accepts `audit: {:change, module}`.
+  - Guide: [Restricting sign-in to your networks](../admin-allowlist.md).
+    Threat model: [Admin allowlist](../threat-model.md#admin-allowlist-2248).
+    Decision: [ADR 0019](../decisions/0019-the-admin-allowlist-fails-closed-and-only-the-operator-lifts-it-from-outside.md).
 
 <a id="session-idle-timeout"></a>
 
@@ -1643,6 +1733,14 @@ carries the reasoning.
   - Guide: [Constrain the values of a field](../extending-content.md#constrain-the-values-of-a-field).
 
 ## Changed
+
+<a id="console-sign-in-access-section"></a>
+
+- **The console's Configure menu has a new section, Sign-in & access (#2248).**
+  Single sign-on and Sessions moved there from Integrations; Password policy,
+  Blocked addresses and Bot budgets from Organization; and the new Admin
+  allowlist joined them. Integrations and Organization were both at the
+  seven-item cap. Every page keeps its address.
 
 <a id="backup-retention-by-component"></a>
 

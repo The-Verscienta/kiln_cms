@@ -378,7 +378,7 @@ frontend can honour them.
 
 How fast a crawler may fetch pages is a separate setting: search engines get
 the browser rate limit by default, and a site admin can lower it at
-**Organization → Bot budgets**; see [bot-budgets.md](bot-budgets.md).
+**Sign-in & access → Bot budgets**; see [bot-budgets.md](bot-budgets.md).
 
 The flags are part of the document's working copy: while a published document
 has a pending working copy, changing them takes effect on the live page when

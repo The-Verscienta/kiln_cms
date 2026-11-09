@@ -246,6 +246,7 @@ everyone, the anonymous visitor included (published `:public` content, a
 | `Security.Event` | `record`, `by_actor`, `older_than`, `sign_in_from_ip`, `anonymize_actor`, `prune` **only** | `record`, `by_actor`, `older_than`, `anonymize_actor`, `prune`: `:security` · `sign_in_from_ip`: `:scanner_guard` | The security audit log (#2241). The recorder appends an event as `Security.system/0`; GDPR erasure (`Security.anonymize_actor/1`) scrubs the events a user acted in or is the target of (a bulk update authorizes its query as a read, hence `by_actor`); retention (`Security.prune/1`) deletes events past their window in keyset chunks (hence `older_than`). `sign_in_from_ip` is the scanner guard's one read (#2253): it will not auto-block an address a person signed in from recently. The plain `read` and `list` are not admitted: nothing system-side lists the log. No person, admin included, may record, rewrite or delete an event. Erasure and prune fail closed (`authorize_query_with: :error`, `authorize_with: :error`): a refused bulk query would match nothing and report success. |
 | `CMS.FeedSettings` | `read` **only** | `read`: `:feeds` | `KilnCMS.Feeds` resolves a site's syndication policy for anonymous feed readers (#1659). A refused read would be "no row", the operator config, cached for the TTL, which can turn full content on for a site that switched it off, so the read fails closed to `Feeds.unavailable/0`, uncached. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
 | `CMS.SiteCompliance` | `read` **only** | `read`: `:compliance` | `Compliance.Settings` resolves a site's claim-checking rules and publish gate for the editor panel and the publish path (#1659). Fails closed to `Settings.unavailable/0`, uncached, for the same reason as `FeedSettings`. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
+| `CMS.SiteAdminAllowlist` | `read`, `operator_override` **only** | `read`: `:admin_allowlist`, `:operator` · `operator_override`: `:operator` | The admin allowlist (#2248). The gates (`Security.AdminAllowlist`, on every console and sign-in request, LiveView join and collab connect) read a site's list as the `:admin_allowlist` actor and cache it; the read passes `authorize_with: :error`, so a refused read is an infrastructure failure that fails closed (503, uncached) rather than reading as "no list". The save's audit change reads the previous list as the same actor, in the transaction. `:operator` is `KilnCMS.Release.admin_allowlist/1`, the way back in when a list has locked the admins out: it lists, and runs `operator_override`, which can only add an entry to a list that is on or empty it, and records `admin_allowlist_overridden`. An org admin is refused `operator_override`; saving the list stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
 | `CMS.SitePasswordPolicy` | `read` **only** | `read`: `:accounts` | The breached-password check (`Accounts.PasswordPolicy`, #2240) reads the site's off / warn / block stance while a registration, a reset or a first-run setup is under way, none of which has an admin actor. A refused read is `authorize_with: :error`, so it fails open to `warn` and is logged, rather than reading as "no row" and handing the decision to the operator default. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
 | `CMS.SiteSessionPolicy` | `read` **only** | `read`: `:accounts` | The idle timeout (`Accounts.IdleTimeout`, #2246) reads the site's timeouts and its "sign out everyone" watermark on signed-in requests and LiveView mounts, none of which has an admin actor. A refused read is `authorize_with: :error`, so it fails open (no timeout, no watermark), is logged and is not cached, rather than reading as "no row". Saving the row and `sign_out_all` stay admin acts. Granted through `OrgSettings`' `system_actions:`. |
 | `CMS.SiteBotBudgets` | `read` **only** | `read`: `:bot_budgets` | The delivery rate limiter (`BotBudgets`, #2243) reads a site's per-class ceilings while answering an anonymous public request, which has no admin actor. A refused read is `authorize_with: :error`, so it is logged and answered with the operator's values (never wider than the operator allowed), reused for 20 seconds, rather than cached for five minutes as "no row". Browser requests never read it. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
@@ -977,6 +978,27 @@ because the row carries the watermark, and deleting it would let every session
 the watermark still catches back in; "Never" on the page saves empty timeouts
 instead. `except_session_jti` must be one of the caller's own sessions on the
 site, or nothing is revoked.
+
+## Admin allowlist — `SiteAdminAllowlist` (#2248)
+
+| Action | org admin (incl. platform admin) | editor | viewer | anonymous | `:admin_allowlist` system actor | `:operator` system actor |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| `read` | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| `save`, `update` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `operator_override` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `destroy` | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+The networks a site's console and sign-in may be reached from, at
+`/editor/admin-allowlist` ([guide](admin-allowlist.md)). Saving is an org-admin
+act through the `OrgSettings` write policy, and the save's own
+`RefuseAdminLockout` change then refuses a list that does not admit the
+address of the admin saving it. `operator_override` carries a second policy
+that admits only the `:operator` system actor; policies are ANDed, so an org
+admin (who passes the write policy) is still refused. It can add one entry to a
+list that is on, or empty the list, and nothing else. `destroy` is
+`forbid_if always()` to everyone: off is `save` with an empty list, so turning
+it off has one path and one audit trail. The resource is not on JSON:API,
+GraphQL or MCP.
 
 ## Content types — `TypeDefinition`
 

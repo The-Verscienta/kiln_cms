@@ -335,7 +335,9 @@ it must:
   to `https://…` — which the proxy terminates and forwards again, forever
   (nginx does not add the header by default; Caddy and Traefik do);
 - forward `X-Forwarded-For`, and name the proxy in `TRUSTED_PROXIES` (above),
-  or rate limiting keys on the proxy's address;
+  or rate limiting keys on the proxy's address and a site's
+  [admin allowlist](admin-allowlist.md) sees everyone at the proxy's address
+  (its page refuses to save a list while forwarded requests arrive untrusted);
 - pass WebSocket upgrades on `/live`, `/ws/*` — the editor is LiveView, and
   collaboration, GraphQL subscriptions and the visual-editing bridge are
   channels;
@@ -538,6 +540,10 @@ is the canonical list; in deploy order:
 - Database TLS on (default), with `DATABASE_SSL_CACERTFILE` when the provider
   publishes a CA bundle.
 - `TRUSTED_PROXIES` set behind a proxy.
+- If the console should only be reachable from your own networks, a site
+  admin turns on the [admin allowlist](admin-allowlist.md); know how to
+  [recover from a lock-out](admin-allowlist.md#recovering-from-a-lock-out)
+  before they do.
 - `PHX_HOST` correct; `CHECK_ORIGINS` for any additional hostnames.
 - `CORS_ORIGINS` unset unless a separate front end reads the headless API —
   the write API and the visual-editing bridge are inert cross-origin until it
