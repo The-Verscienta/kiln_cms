@@ -4324,6 +4324,18 @@
                   }
                 ],
                 "description": "Field included by default."
+              },
+              "widget": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
               }
             },
             "required": [
@@ -4657,6 +4669,9 @@
           },
           "visible_when": {
             "$ref": "#/components/schemas/field_definition-filter-visible_when"
+          },
+          "widget": {
+            "$ref": "#/components/schemas/field_definition-filter-widget"
           }
         },
         "type": "deepObject"
@@ -6460,6 +6475,60 @@
           },
           "not_eq": {
             "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-widget": {
+        "additionalProperties": false,
+        "properties": {
+          "contains": {
+            "type": "string"
+          },
+          "eq": {
+            "type": "string"
+          },
+          "greater_than": {
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "type": "string"
+          },
+          "ilike": {
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "type": "string"
+          },
+          "like": {
+            "type": "string"
+          },
+          "not_eq": {
+            "type": "string"
+          },
+          "string_ends_with": {
+            "type": "string"
+          },
+          "string_starts_with": {
+            "type": "string"
           }
         },
         "type": "object"

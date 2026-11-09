@@ -44,6 +44,11 @@ defmodule KilnCMS.CMS.FieldDefinition do
   Not every field is editor-filled: a `:computed` definition carries a
   `compute` formula (`KilnCMS.CMS.Computed`) and derives its value from the
   rest of the document instead (#429).
+
+  How a field is edited can be chosen per field too (#2284): `widget` picks
+  the editor input — a select's radio buttons, plain text on one line, a
+  plugin type's own — from what `KilnCMS.CMS.FieldWidgets` offers for the
+  field's settings. It never changes what is stored or delivered.
   """
   use Ash.Resource,
     domain: KilnCMS.CMS,
@@ -295,6 +300,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :option_labels,
       :allow_custom,
       :format,
+      :widget,
       :target_type,
       :target_types,
       :multiple,
@@ -465,6 +471,13 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # any other type, on a `:plain` one, and on a link or group sub-field.
     change KilnCMS.CMS.Changes.ClearDeliverPortable
 
+    # The editor input (#2284) is picked from what the field's settings offer
+    # (`KilnCMS.CMS.FieldWidgets`), so one those settings no longer offer —
+    # after a type change, a `multiple` flip, rich text — drops, unless this
+    # write names the widget itself (then `Validations.FieldWidget` refuses).
+    # After `ClearMultiple`, which settles `multiple` and `allow_custom`.
+    change KilnCMS.CMS.Changes.ClearWidget
+
     # The other side's name (R4) belongs to a top-level `:reference` field,
     # and a label alone suggests its machine name, as a field's label does.
     change KilnCMS.CMS.Changes.ClearInverse
@@ -515,6 +528,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     # A :select field is meaningless without choices.
     validate KilnCMS.CMS.Validations.SelectOptions
+
+    # A widget the write names must be one the field offers (#2284).
+    validate KilnCMS.CMS.Validations.FieldWidget
 
     # A :reference field must target known content types (compiled or
     # dynamic): one through `target_type`, or several through `target_types`.
@@ -640,6 +656,17 @@ defmodule KilnCMS.CMS.FieldDefinition do
       constraints one_of: [:rich, :plain]
       public? true
     end
+
+    # Which editor input the field uses (#2284): `"radios"` for a select,
+    # `"single_line"` for plain text, a plugin type's own (`"stars"`). `nil`
+    # is the type's default, today's input. Editor-only — storage, coercion
+    # and delivery never read it. Chosen from `KilnCMS.CMS.FieldWidgets.allowed/1`
+    # (`Validations.FieldWidget`), cleared when the field's settings stop
+    # offering it (`Changes.ClearWidget`); read it through
+    # `FieldWidgets.resolve/1`, never directly. A string, not an atom: a
+    # plugin's widget names are the registry's today, and a name a plugin
+    # later drops must not fail every read of the definitions that stored it.
+    attribute :widget, :string, public?: true, constraints: [max_length: 64]
 
     # The content type a `:reference` field points at — a type name string
     # ("page", "recipe", …), compiled or dynamic (ignored otherwise).

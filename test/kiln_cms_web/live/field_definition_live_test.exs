@@ -2174,6 +2174,188 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     end
   end
 
+  # #2284: a choice of editor input, from what the field's settings offer.
+  describe "the editor input" do
+    defp widget_cards(lv, id \\ "new-field-widget") do
+      lv
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("##{id} input[type=radio]")
+      |> Enum.map(&LazyHTML.attribute(&1, "id"))
+      |> List.flatten()
+      |> Enum.map(&String.replace_prefix(&1, id <> "-", ""))
+    end
+
+    # Straight to the event: the inputs a change posts depend on the change.
+    defp create_change(lv, params),
+      do: lv |> element("#new-field-form") |> render_change(%{"field_definition" => params})
+
+    test "offers the inputs each type takes, and none where there is no choice", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      type_change(lv, "select")
+      assert widget_cards(lv) == ~w(dropdown radios buttons)
+      assert lv |> element("label[for=new-field-widget-radios]") |> render() =~ "Radio buttons"
+      # The default's card posts no widget: nil is "the type's default".
+      assert has_element?(lv, "#new-field-widget-dropdown[value=''][checked]")
+
+      create_change(lv, %{field_type: "select", multiple: "true"})
+      assert widget_cards(lv) == ~w(tags checkboxes)
+
+      create_change(lv, %{field_type: "text", format: "plain"})
+      assert widget_cards(lv) == ~w(textarea single_line)
+      assert lv |> element("label[for=new-field-widget-single_line]") |> render() =~ "One line"
+
+      create_change(lv, %{field_type: "text", format: "rich"})
+      refute has_element?(lv, "#new-field-widget")
+
+      create_change(lv, %{kind: "relationship", field_type: "reference", multiple: "false"})
+      assert widget_cards(lv) == ~w(autocomplete dropdown)
+
+      assert lv |> element("label[for=new-field-widget-autocomplete]") |> render() =~
+               "Search as you type"
+
+      assert lv |> element("label[for=new-field-widget-dropdown]") |> render() =~ "Dropdown list"
+
+      create_change(lv, %{kind: "relationship", field_type: "reference", multiple: "true"})
+      refute has_element?(lv, "#new-field-widget")
+
+      for type <- ~w(string integer boolean media date) do
+        type_change(lv, type)
+        refute has_element?(lv, "#new-field-widget"), "editor input offered for #{type}"
+      end
+    end
+
+    test "a plugin type offers its own inputs, by its own labels", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      type_change(lv, "rating")
+      assert widget_cards(lv) == ~w(number stars)
+      assert lv |> element("label[for=new-field-widget-stars]") |> render() =~ "Stars"
+      assert lv |> element("label[for=new-field-widget-number]") |> render() =~ "Number"
+    end
+
+    test "a chosen input is saved, badged in the list, and reset by the default's card", %{
+      conn: conn
+    } do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      lv
+      |> element("#new-field-form")
+      |> render_submit(%{
+        "field_definition" => %{
+          "scopes" => ["page"],
+          "name" => "mood",
+          "label" => "Mood",
+          "field_type" => "select",
+          "options" => "calm\nbright",
+          "widget" => "radios"
+        }
+      })
+
+      field =
+        :page
+        |> CMS.field_definitions_for!(authorize?: false)
+        |> Enum.find(&(&1.name == "mood"))
+
+      assert field.widget == "radios"
+      assert lv |> element("#field-#{field.id}-widget") |> render() =~ "Radio buttons"
+
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+      assert has_element?(lv, "#edit-field-widget-#{field.id}-radios[checked]")
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{widget: ""})
+      |> render_submit()
+
+      assert CMS.get_field_definition!(field.id, authorize?: false).widget == nil
+      refute has_element?(lv, "#field-#{field.id}-widget")
+    end
+
+    test "a retype drops the cards and the stored input with them", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      field =
+        CMS.create_field_definition!(
+          %{
+            content_type: :page,
+            name: "mood",
+            label: "Mood",
+            field_type: :select,
+            options: ["calm", "bright"],
+            widget: "buttons"
+          },
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+      id = "edit-field-widget-#{field.id}"
+      assert widget_cards(lv, id) == ~w(dropdown radios buttons)
+
+      lv
+      |> element("#edit-field-#{field.id}")
+      |> render_change(%{"field_definition" => %{"field_type" => "text", "format" => "plain"}})
+
+      assert widget_cards(lv, id) == ~w(textarea single_line)
+      # The stored widget isn't one of these: the default's card is checked.
+      assert has_element?(lv, "##{id}-textarea[checked]")
+
+      # A card from before the retype, still posted, is dropped, not refused.
+      lv
+      |> element("#edit-field-#{field.id}")
+      |> render_submit(%{
+        "field_definition" => %{
+          "field_type" => "text",
+          "format" => "plain",
+          "widget" => "buttons"
+        }
+      })
+
+      saved = CMS.get_field_definition!(field.id, authorize?: false)
+      assert saved.field_type == :text
+      assert saved.widget == nil
+    end
+
+    test "checkboxes and editors' own terms exclude each other, saying why", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      create_change(lv, %{field_type: "select", multiple: "true", allow_custom: "true"})
+      assert has_element?(lv, "#new-field-widget-checkboxes[disabled]")
+      assert lv |> element("#new-field-widget-checkboxes-conflict") |> render() =~ "new terms"
+
+      create_change(lv, %{
+        field_type: "select",
+        multiple: "true",
+        allow_custom: "false",
+        widget: "checkboxes"
+      })
+
+      refute has_element?(lv, "#new-field-widget-checkboxes[disabled]")
+      assert has_element?(lv, "#new-field-widget-checkboxes[checked]")
+      assert has_element?(lv, "#new-field-multiple-allow-custom[disabled]")
+      assert lv |> element("#new-field-multiple-allow-custom-conflict") |> render() =~ "Tags"
+    end
+
+    test "a per-option input warns when the field lists too many options", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+      cap = KilnCMS.CMS.FieldWidgets.option_cap()
+
+      create_change(lv, %{field_type: "select", options: Enum.map_join(1..cap, "\n", &"o#{&1}")})
+      refute has_element?(lv, "#new-field-widget-radios-cap")
+
+      options = Enum.map_join(1..(cap + 1), "\n", &"o#{&1}")
+      create_change(lv, %{field_type: "select", options: options})
+      assert lv |> element("#new-field-widget-radios-cap") |> render() =~ "dropdown instead"
+      assert has_element?(lv, "#new-field-widget-buttons-cap")
+      refute has_element?(lv, "#new-field-widget-dropdown-cap")
+
+      create_change(lv, %{field_type: "select", multiple: "true", options: options})
+      assert lv |> element("#new-field-widget-checkboxes-cap") |> render() =~ "tags instead"
+    end
+  end
+
   defp link_ids(group) do
     group
     |> Ash.load!(:group_fields, authorize?: false)

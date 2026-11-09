@@ -34,6 +34,15 @@ Releases are tagged `kiln_plugin-vX.Y.Z` in the
   should require `{:kiln_plugin, "~> 1.4"}`; publish this version to Hex before
   a plugin does. Additive: no callback or return shape changed.
 
+- **`c:Kiln.FieldType.widgets/1` and `Kiln.FieldType.widget/2`, a choice of
+  editor input per field (kiln_cms#2284).** A type lists the inputs an admin
+  may pick between, default first (`[:number, {:stars, "Stars"}]`); the pick
+  is stored on the field definition as a string, and `widget/2` reads it back
+  inside `input_attrs/1`, `input_parts/1` or `input_hook/1`. Storage and
+  delivery do not change. It has no default and is not required: a type
+  without it offers no choice. A plugin that implements it should require
+  `{:kiln_plugin, "~> 1.4"}`. Additive: no callback or return shape changed.
+
 ## 1.3.1
 
 ### Changed

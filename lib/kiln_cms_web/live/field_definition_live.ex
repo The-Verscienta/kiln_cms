@@ -59,6 +59,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   alias KilnCMS.CMS.DynamicDefaults
   alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.FieldTypes
+  alias KilnCMS.CMS.FieldWidgets
   alias KilnCMS.CMS.Validations.FieldCondition
   alias KilnCMSWeb.ComputedBuilder
   alias KilnCMSWeb.ConditionsBuilder
@@ -218,7 +220,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       | form:
           AshPhoenix.Form.validate(
             old.form,
-            params |> normalize() |> put_rules(conds, params["field_type"], old.cond_siblings)
+            params
+            |> normalize(nil, old.form.source.data)
+            |> put_rules(conds, params["field_type"], old.cond_siblings)
           ),
         builder: builder,
         conds: conds
@@ -236,7 +240,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     conds = ConditionsBuilder.apply_params(old.conds, params["conditions"], old.cond_siblings)
 
     submitted =
-      params |> normalize() |> put_rules(conds, params["field_type"], old.cond_siblings)
+      params
+      |> normalize(nil, old.form.source.data)
+      |> put_rules(conds, params["field_type"], old.cond_siblings)
 
     case AshPhoenix.Form.submit(old.form, params: submitted) do
       {:ok, _definition} ->
@@ -1133,7 +1139,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # picked, so whatever they held is dropped here rather than saved unseen: a
   # field that is no longer a select keeps no options, and a type with no
   # default keeps none. A select's default must still be one of its options.
-  defp normalize(params, scope \\ nil) do
+  # The editor input (#2284) is held to what the posted settings offer, read
+  # over `record` — the stored definition being edited, nil for a new one.
+  defp normalize(params, scope \\ nil, record \\ nil) do
     type = params["field_type"]
     pairs = if type in [nil, "select"], do: parse_option_pairs(params["options"]), else: []
     options = Enum.map(pairs, &elem(&1, 0))
@@ -1158,8 +1166,73 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> unpack_targets()
     |> unpack_sources_limit()
     |> unpack_inverse()
+    |> unpack_widget(record)
     |> unpack_scope(scope)
   end
+
+  # The widget cards (#2284) are only those the posted settings offer, and
+  # change with them: a card checked before a retype, a `multiple` flip or a
+  # switch to rich text leaves the page, so a widget the field no longer
+  # offers is dropped here rather than refused on save. Worked out as the
+  # save's `Validations.FieldWidget` will: the posted settings over the
+  # stored ones. The default's card posts `""`, which is no widget stored.
+  defp unpack_widget(%{"widget" => widget} = params, record) do
+    widget = if widget in [nil, ""], do: nil, else: widget
+    offered = params |> widget_subject(record) |> FieldWidgets.allowed()
+
+    Map.put(params, "widget", if(widget in offered, do: widget))
+  end
+
+  defp unpack_widget(params, _record), do: params
+
+  # The definition the widget allow-list is asked about: the posted settings
+  # it reads (options already split) over the stored definition, or a new
+  # one's. A setting the form didn't post keeps its stored value, as the
+  # save's changeset does.
+  defp widget_subject(params, record) do
+    base = record || %FieldDefinition{}
+
+    struct(base,
+      field_type: posted_type(params["field_type"], base.field_type),
+      multiple: posted_bool(params, "multiple", base.multiple),
+      allow_custom: posted_bool(params, "allow_custom", base.allow_custom),
+      format: posted_format(params["format"], base.format),
+      options: if(is_list(params["options"]), do: params["options"], else: base.options),
+      widget: posted_widget(params, base.widget)
+    )
+  end
+
+  # A registered type's atom for a posted name; never a new atom.
+  defp posted_type(type, fallback) when is_binary(type),
+    do: Enum.find(FieldTypes.names(), fallback, &(Atom.to_string(&1) == type))
+
+  defp posted_type(type, _fallback) when is_atom(type) and not is_nil(type), do: type
+  defp posted_type(_type, fallback), do: fallback
+
+  defp posted_bool(params, key, fallback) do
+    case params[key] do
+      value when value in [true, "true"] -> true
+      value when value in [false, "false"] -> false
+      _absent -> fallback
+    end
+  end
+
+  defp posted_format(format, _fallback) when format in ["plain", :plain], do: :plain
+  defp posted_format(format, _fallback) when format in ["rich", :rich], do: :rich
+  defp posted_format(_format, fallback), do: fallback
+
+  defp posted_widget(params, fallback) do
+    case Map.fetch(params, "widget") do
+      {:ok, widget} when widget in [nil, ""] -> nil
+      {:ok, widget} -> widget
+      :error -> fallback
+    end
+  end
+
+  # The widget subject for a rendered form: what it last validated over the
+  # definition it edits.
+  defp form_widget_subject(%Phoenix.HTML.Form{source: %AshPhoenix.Form{} = source}),
+    do: widget_subject(source.params || %{}, source.data)
 
   # The Validation fieldset posts every constraint as text (#2276). Blank
   # ones are dropped, numbers parsed, and the keys that mean nothing for the
@@ -1590,6 +1663,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> assign(:multiple?, multiple?)
       |> assign(:target, target)
       |> assign(:choices, multiple_choices(type, target))
+      # Checkboxes draw only the options (#2284): while they are the chosen
+      # input, the open vocabulary is off and says why.
+      |> assign(
+        :checkboxes?,
+        type == :select and multiple? and
+          FieldWidgets.resolve(form_widget_subject(assigns.form)) == "checkboxes"
+      )
       |> assign(
         :narrowing,
         if(stored_type && (type != stored_type or not multiple?), do: stored_type)
@@ -1676,14 +1756,25 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             id={"#{@id}-allow-custom"}
             name={@form[:allow_custom].name}
             value="true"
-            checked={@form[:allow_custom].value in [true, "true"]}
-            class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
+            checked={@form[:allow_custom].value in [true, "true"] and not @checkboxes?}
+            disabled={@checkboxes?}
+            aria-describedby={if @checkboxes?, do: "#{@id}-allow-custom-conflict"}
+            class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary disabled:cursor-not-allowed disabled:opacity-60"
           />
           <span>
             {gettext("Editors can add new terms")}
             <span class="block text-xs text-base-content/70">
               {gettext(
                 "For a vocabulary that grows, like properties or keywords. The options become suggestions, and terms already used on this type are suggested too. A new term does not join the options."
+              )}
+            </span>
+            <span
+              :if={@checkboxes?}
+              id={"#{@id}-allow-custom-conflict"}
+              class="mt-0.5 block text-xs text-base-content/70"
+            >
+              {gettext(
+                "Checkboxes show only the options. Pick Tags as the editor input to allow new terms."
               )}
             </span>
           </span>
@@ -2703,6 +2794,173 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :form, :any, required: true
   attr :id, :string, required: true
 
+  # Which editor input the field uses (`widget`, #2284): a card per input its
+  # settings offer (`FieldWidgets.allowed/1`), the type's default first and
+  # posting `""`. Shown only when there is a choice, so it follows the type,
+  # `multiple` and `format` above it. Checkboxes stay listed, disabled, while
+  # editors may add terms of their own; a card drawing one input per option
+  # says when the field lists too many for it.
+  defp widget_field(assigns) do
+    subject = form_widget_subject(assigns.form)
+    allowed = FieldWidgets.allowed(subject)
+    # The cards a choice of `allow_custom` would offer: checkboxes stay on
+    # view, disabled, so the conflict is named rather than hidden.
+    listed = FieldWidgets.allowed(%{subject | allow_custom: false})
+    default = List.first(listed)
+
+    assigns =
+      assigns
+      |> assign(:selected, FieldWidgets.resolve(subject) || default)
+      |> assign(:default, default)
+      # A refused widget (a plugin's list changed between render and save)
+      # must say why, even when the field no longer offers a choice at all.
+      |> assign(:errors, Enum.map(assigns.form[:widget].errors, &translate_error/1))
+      |> assign(:cap_hint, if(FieldWidgets.too_many_options?(subject), do: cap_hint(subject)))
+      |> assign(
+        :choices,
+        for name <- listed do
+          {title, hint, icon} = widget_choice(subject, name)
+          {name, title, hint, icon, name not in allowed}
+        end
+      )
+
+    ~H"""
+    <fieldset :if={length(@choices) > 1 or @errors != []} id={@id} class="sm:col-span-2">
+      <legend class="mb-1 block text-sm font-medium">{gettext("Editor input")}</legend>
+      <div :if={length(@choices) > 1} class="grid gap-2 sm:grid-cols-3">
+        <label
+          :for={{name, title, hint, icon, disabled?} <- @choices}
+          for={"#{@id}-#{name}"}
+          class={[
+            "flex items-start gap-3 rounded-lg border p-3 transition-colors",
+            cond do
+              disabled? -> "cursor-not-allowed border-base-content/10 opacity-70"
+              @selected == name -> "cursor-pointer border-primary bg-primary/5"
+              true -> "cursor-pointer border-base-content/15 hover:border-base-content/30"
+            end
+          ]}
+        >
+          <input
+            type="radio"
+            id={"#{@id}-#{name}"}
+            name={@form[:widget].name}
+            value={if name == @default, do: "", else: name}
+            checked={@selected == name and not disabled?}
+            disabled={disabled?}
+            class="mt-0.5 size-4 accent-primary"
+          />
+          <span class="min-w-0">
+            <span class="flex items-center gap-1.5 text-sm font-medium">
+              <.icon name={icon} class="size-4 text-base-content/70" />
+              {title}
+            </span>
+            <span :if={hint} class="mt-0.5 block text-xs text-base-content/70">{hint}</span>
+            <span
+              :if={disabled?}
+              id={"#{@id}-#{name}-conflict"}
+              class="mt-0.5 block text-xs text-base-content/70"
+            >
+              {gettext("Not while editors can add new terms.")}
+            </span>
+            <span
+              :if={@cap_hint && FieldWidgets.per_option?(name) && not disabled?}
+              id={"#{@id}-#{name}-cap"}
+              class="mt-0.5 flex items-start gap-1 text-xs text-warning-ink"
+            >
+              <.icon name="hero-exclamation-triangle" class="mt-px size-3.5 shrink-0" />
+              {@cap_hint}
+            </span>
+          </span>
+        </label>
+      </div>
+      <p :for={error <- @errors} class="mt-1 flex items-center gap-1.5 text-sm text-error">
+        <.icon name="hero-exclamation-circle" class="size-4 shrink-0" />{error}
+      </p>
+    </fieldset>
+    """
+  end
+
+  # What a radios, buttons or checkboxes card says on a field listing more
+  # options than the editor draws one input each for (`FieldWidgets.effective/1`).
+  defp cap_hint(%{multiple: true}),
+    do:
+      gettext("Over %{count} options — the editor shows tags instead.",
+        count: FieldWidgets.option_cap()
+      )
+
+  defp cap_hint(_subject),
+    do:
+      gettext("Over %{count} options — the editor shows a dropdown instead.",
+        count: FieldWidgets.option_cap()
+      )
+
+  # The card for one widget: its title, a line on when to pick it, an icon.
+  # Core widgets are named here (translated); a plugin's by its own label,
+  # or its machine name humanized.
+  defp widget_choice(%{field_type: :select, multiple: true}, "tags"),
+    do: {gettext("Tags"), gettext("Picked terms as chips, with a search box."), "hero-tag"}
+
+  defp widget_choice(%{field_type: :select, multiple: true}, "checkboxes"),
+    do:
+      {gettext("Checkboxes"), gettext("A box to tick beside every option."), "hero-check-circle"}
+
+  defp widget_choice(%{field_type: :select}, "dropdown"),
+    do:
+      {gettext("Dropdown"),
+       gettext("A menu that opens on click — compact for any number of options."),
+       "hero-chevron-up-down"}
+
+  defp widget_choice(%{field_type: :select}, "radios"),
+    do:
+      {gettext("Radio buttons"), gettext("Every option on view, one per line."),
+       "hero-list-bullet"}
+
+  defp widget_choice(%{field_type: :select}, "buttons"),
+    do:
+      {gettext("Buttons"),
+       gettext("Every option on view as a row of buttons — for a few short ones."),
+       "hero-squares-2x2"}
+
+  defp widget_choice(%{field_type: :text}, "textarea"),
+    do:
+      {gettext("Several lines"), gettext("A box that grows with the text."),
+       "hero-bars-3-bottom-left"}
+
+  defp widget_choice(%{field_type: :text}, "single_line"),
+    do:
+      {gettext("One line"),
+       gettext("A single-line box. Text that already has line breaks still opens on several."),
+       "hero-minus"}
+
+  defp widget_choice(%{field_type: :reference}, "autocomplete"),
+    do:
+      {gettext("Search as you type"), gettext("A search box that finds the record by its title."),
+       "hero-magnifying-glass"}
+
+  defp widget_choice(%{field_type: :reference}, "dropdown"),
+    do:
+      {gettext("Dropdown list"),
+       gettext(
+         "Every record to link to in one list — for a short one. Past 100, the editor searches instead."
+       ), "hero-chevron-up-down"}
+
+  defp widget_choice(subject, name) do
+    label = Map.get(FieldWidgets.plugin_labels(subject), name) || Phoenix.Naming.humanize(name)
+    {label, nil, "hero-puzzle-piece"}
+  end
+
+  # The label of the widget a stored definition uses, for its row in the list
+  # of fields — only when it isn't the type's default.
+  defp widget_badge(definition) do
+    widget = FieldWidgets.resolve(definition)
+
+    if widget && widget != FieldWidgets.default(definition),
+      do: definition |> widget_choice(widget) |> elem(0)
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+
   # Whether delivery carries a plain-text rendition beside a `:text` field's
   # value (`deliver_plain`). Shown only for that type: on any other, nothing
   # is submitted and `Changes.ClearDeliverPlain` drops a stored `true`.
@@ -3337,6 +3595,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <.options_field form={@form} id="new-field-options" />
             <.default_field form={@form} siblings={@cond_siblings} dynamic />
             <.text_format_field form={@form} id="new-field-format" />
+            <.widget_field form={@form} id="new-field-widget" />
             <.deliver_plain_field form={@form} id="new-field-deliver-plain" />
             <.deliver_portable_field form={@form} id="new-field-deliver-portable" />
             <.validation_field form={@form} id="new-field-validation" />
@@ -3487,6 +3746,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                         class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
                       >
                         {gettext("unformatted")}
+                      </span>
+                      <span
+                        :if={widget_badge(definition)}
+                        id={"field-#{definition.id}-widget"}
+                        title={gettext("The editor input it uses")}
+                        class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
+                      >
+                        {widget_badge(definition)}
                       </span>
                       <span
                         :if={definition.field_type == :text and definition.deliver_plain}
@@ -3716,6 +3983,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   <.options_field form={@edit.form} id={"edit-field-options-#{@edit.id}"} />
                   <.default_field form={@edit.form} siblings={@edit.cond_siblings} dynamic />
                   <.text_format_field form={@edit.form} id={"edit-field-format-#{@edit.id}"} />
+                  <.widget_field form={@edit.form} id={"edit-field-widget-#{@edit.id}"} />
                   <.deliver_plain_field
                     form={@edit.form}
                     id={"edit-field-deliver-plain-#{@edit.id}"}

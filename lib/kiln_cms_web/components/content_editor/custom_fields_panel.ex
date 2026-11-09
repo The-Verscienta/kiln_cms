@@ -21,6 +21,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
 
   import KilnCMSWeb.ContentEditor.Shared, only: [custom_field_errors: 2, custom_field_value: 2]
 
+  alias KilnCMS.CMS.FieldWidgets
   alias KilnCMSWeb.ContentEditor.Conditional
   alias KilnCMSWeb.ContentEditor.GroupRows
   alias KilnCMSWeb.ContentEditor.Localization
@@ -363,6 +364,14 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   defp stored_fields(%{data: %{custom_fields: %{} = stored}}), do: stored
   defp stored_fields(_form), do: %{}
 
+  defp stored_terms(form, name) do
+    case Map.get(stored_fields(form), name) do
+      terms when is_list(terms) -> terms |> Enum.map(&to_string/1) |> Enum.reject(&(&1 == ""))
+      term when is_binary(term) and term != "" -> [term]
+      _none -> []
+    end
+  end
+
   defp filled?(value) when value in [nil, "", [], %{}], do: false
   defp filled?(value) when is_binary(value), do: String.trim(value) != ""
   defp filled?(value) when is_list(value), do: Enum.any?(value, &filled?/1)
@@ -386,11 +395,17 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
 
   # What a field's input offers: the site's people for a `:user` field (#2044),
   # the field's options then the terms in use for a multiple select, the
-  # library for a media field.
+  # library for a media field. Checkboxes (#2284) draw a box per option, not
+  # per term anyone has used: the options, then the terms this record holds
+  # outside them, so a stray term stays on view (and can be ticked again)
+  # until the record is saved without it.
   defp field_options(%{field_type: :user}, assigns), do: assigns.people
 
-  defp field_options(%{field_type: :select, multiple: true} = definition, assigns),
-    do: Enum.uniq(definition.options ++ Map.get(assigns.select_terms, definition.name, []))
+  defp field_options(%{field_type: :select, multiple: true} = definition, assigns) do
+    if FieldWidgets.effective(definition) == "checkboxes",
+      do: Enum.uniq(definition.options ++ stored_terms(assigns.form, definition.name)),
+      else: Enum.uniq(definition.options ++ Map.get(assigns.select_terms, definition.name, []))
+  end
 
   defp field_options(definition, assigns), do: custom_field_options(definition, assigns.media)
 

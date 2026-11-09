@@ -1090,6 +1090,11 @@ msgstr ""
 msgid "%{who}%{note}"
 msgstr ""
 
+#: lib/kiln_cms/cms/validations/field_widget.ex
+#, elixir-autogen, elixir-format
+msgid "%{widget} is not an editor input for this field (use one of: %{allowed})"
+msgstr ""
+
 #: lib/kiln_cms_web/live/nav_badge.ex
 #, elixir-autogen, elixir-format
 msgid "(%{count} open)"
@@ -1328,6 +1333,16 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "A box that grows with the text."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A box to tick beside every option."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "A calendar date with no time of day. For a deadline, a birthday or a release date."
 msgstr ""
 
@@ -1500,6 +1515,11 @@ msgstr ""
 msgid "A media library"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A menu that opens on click — compact for any number of options."
+msgstr ""
+
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "A note in your inbox each time content goes live."
@@ -1605,6 +1625,11 @@ msgstr ""
 msgid "A sample title"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A search box that finds the record by its title."
+msgstr ""
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "A shareable link showing the site as this release would leave it."
@@ -1643,6 +1668,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A single short text — a name, a code."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A single-line box. Text that already has line breaks still opens on several."
 msgstr ""
 
 #: lib/kiln_cms/cms/field_types/range.ex
@@ -3861,6 +3891,11 @@ msgstr ""
 msgid "Button label"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Buttons"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "By"
@@ -4135,6 +4170,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Checkbox"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checkboxes"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checkboxes show only the options. Pick Tags as the editor input to allow new terms."
 msgstr ""
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
@@ -6896,9 +6941,15 @@ msgstr ""
 msgid "Drag to reorder row %{position}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Dropdown"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Dropdown list"
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -7184,6 +7235,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editor checks"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editor input"
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -7746,6 +7802,16 @@ msgstr ""
 msgid "Every field"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every option on view as a row of buttons — for a few short ones."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every option on view, one per line."
+msgstr ""
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every published document has at least one link in."
@@ -7754,6 +7820,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every published page, post and entry that anyone can read without signing in is copied to that Meilisearch instance: its title, excerpt and full text. It is kept up to date as you publish, edit and unpublish. Members-only and passphrase-protected content is never sent. Whoever runs that instance can read everything in it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every record to link to in one list — for a short one. Past 100, the editor searches instead."
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -12357,6 +12428,11 @@ msgstr ""
 msgid "Not verified"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not while editors can add new terms."
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not yet anchored — anchors are minted at publish"
@@ -13295,6 +13371,16 @@ msgstr ""
 msgid "Outgoing mail saved."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Over %{count} options — the editor shows a dropdown instead."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Over %{count} options — the editor shows tags instead."
+msgstr ""
+
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -13706,6 +13792,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #, elixir-autogen, elixir-format
 msgid "Pick what this field should work out"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Picked terms as chips, with a search box."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -14349,6 +14440,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
 msgid "RFC 9116 recommends an expiry less than a year ahead, so a forgotten file goes stale."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Radio buttons"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -16234,6 +16330,11 @@ msgstr ""
 msgid "Search Unsplash photos"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search as you type"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Search built in"
@@ -16791,6 +16892,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Several images, in the order the editor arranges them."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Several lines"
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -18004,6 +18110,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -18870,6 +18977,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "The editing console, as your team uses it every day."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "The editor input it uses"
 msgstr ""
 
 #: lib/kiln_cms_web/live/organize_live.ex
@@ -20380,6 +20492,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Too many suggestions requested. Try again in %{seconds}s."
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Too many to list — search instead."
 msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
@@ -22829,6 +22946,11 @@ msgstr ""
 msgid "check"
 msgstr ""
 
+#: lib/kiln_cms/cms/validations/field_widget.ex
+#, elixir-autogen, elixir-format
+msgid "checkboxes can't take terms of their own: use tags, or turn off new terms"
+msgstr ""
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "checked %{at}"
@@ -24159,6 +24281,11 @@ msgstr ""
 #: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "these counters look wrong"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/field_widget.ex
+#, elixir-autogen, elixir-format
+msgid "this field has no choice of editor input"
 msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
