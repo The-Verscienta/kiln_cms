@@ -528,7 +528,7 @@ field policies cover only public fields, which is why they are not listed beside
 is allowed to see is always the standing one.
 
 The three admin levers above are the account console's
-([`account-administration.md`](account-administration.md)). Four are refused for
+([`account-administration.md`](account-administration.md)). Six are refused for
 everyone, admins included:
 
 | Action | Why nobody may call it |
@@ -536,6 +536,7 @@ everyone, admins included:
 | `:sign_in_with_passkey` | Mints a session token; only the verified WebAuthn ceremony reaches it (`authorize?: false`), and the preparation refuses any actor-carrying call — so not even an admin can mint a token for another account |
 | `:sync_billing_audiences` | Entitlements are recomputed by `KilnCMS.Billing.Entitlements` alone; the change module refuses an actor-carrying call, so no authorized path grants an audience by hand |
 | `:register_with_invitation`, `:accept_invitation_with_password` | Accepting a site invitation (#2135): the first creates a confirmed account, the second sets a new password over an unconfirmed one and revokes its tokens. The emailed token is the credential, so only `KilnCMSWeb.InviteLive` calls them (`authorize?: false`), and `Changes.AcceptInvitation` refuses any actor-carrying call, since the admin bypass would pass `forbid_if always()`. Neither checks `:registration_enabled`: an invite-only site is where invitations are how accounts arrive |
+| `:request_sign_in_unlock`, `:redeem_sign_in_unlock` | The emailed link that lifts a sign-in pause (#2250): the first mails a link to a paused account, if there is one, and the second clears the account's sign-in counter. An anonymous request and the emailed token are the only ways in, so only `KilnCMSWeb.SignInUnlockController` calls them (`authorize?: false`, the request host's site in `context:`), and `SignInUnlockAction` refuses any actor-carrying call, since the admin bypass would pass `forbid_if always()`. No signed-in person, an operator included, can mint or spend a link. See [Lift a sign-in pause by email](account-administration.md#lift-a-sign-in-pause-by-email) |
 
 `NotLastAdmin` sits on `:manage_access` and `:anonymize` as a **validation**, not
 a policy: admins bypass `User`'s policies wholesale, so a `forbid_if` would never

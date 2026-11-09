@@ -753,6 +753,33 @@ defmodule KilnCMS.Accounts.User do
       get_by :email
     end
 
+    # The emailed link that lifts a sign-in pause (#2250). Both system-only:
+    # only `KilnCMSWeb.SignInUnlockController` calls them (`authorize?: false`,
+    # no actor), the policy below forbids every authorized caller, and
+    # `SignInUnlockAction` refuses an actor-carrying call itself because the
+    # admin bypass would pass that policy. The org they bind to comes from the
+    # action context, never from an argument. See `KilnCMS.Accounts.SignInUnlock`.
+    action :request_sign_in_unlock do
+      description "Email an unlock link to a paused account, if there is one (system-only)."
+
+      argument :email, :ci_string do
+        allow_nil? false
+      end
+
+      run {KilnCMS.Accounts.SignInUnlockAction, step: :request}
+    end
+
+    action :redeem_sign_in_unlock do
+      description "Lift the sign-in pause an emailed unlock link names (system-only)."
+
+      argument :token, :string do
+        allow_nil? false
+        sensitive? true
+      end
+
+      run {KilnCMS.Accounts.SignInUnlockAction, step: :redeem}
+    end
+
     # Passkey sign-in (#331): returns the verified account with its session
     # token minted (metadata), mirroring the built-in strategies. Performs NO
     # authentication itself — only KilnCMS.Accounts.WebAuthn.authenticate/2
@@ -1236,6 +1263,13 @@ defmodule KilnCMS.Accounts.User do
     # `KilnCMSWeb.InviteLive` calls them (`authorize?: false`), and the emailed
     # token is the credential.
     policy action([:register_with_invitation, :accept_invitation_with_password]) do
+      forbid_if always()
+    end
+
+    # The sign-in unlock link (#2250): the same shape again. Forbidden to every
+    # authorized caller; `SignInUnlockAction` refuses an actor-carrying call,
+    # since the admin bypass above would pass this. The link is the credential.
+    policy action([:request_sign_in_unlock, :redeem_sign_in_unlock]) do
       forbid_if always()
     end
 

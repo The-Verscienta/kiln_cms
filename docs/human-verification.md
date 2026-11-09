@@ -719,6 +719,13 @@ deployment.
 - **A refused attempt costs nothing.** An attempt refused for want of a check
   does not use up the account's sign-in budget, so an attacker who never
   solves one cannot lock the owner out with it.
+- **An unlock link does not give back the free attempts.** An emailed
+  [unlock link](account-administration.md#lift-a-sign-in-pause-by-email)
+  lifts the account's sign-in pause, but the address keeps the attempts it has
+  already used toward the check. After an unlock the next password sign-in
+  usually asks for a check: the link proves the mailbox, not that a person is
+  at the keyboard. A successful sign-in or a completed password reset resets
+  the count, as before.
 - **Security log.** A token that did not pass is a **Failed sign-in**
   (`sign_in_failed`) with reason `challenge_failed`; a refusal because the
   provider was down is reason `challenge_unavailable`. Both are sampled like
