@@ -36,6 +36,7 @@ defmodule KilnCMS.Accounts.Invitations.AcceptExisting do
   alias KilnCMS.Accounts.Errors.InvitationRefused
   alias KilnCMS.Accounts.Invitation
   alias KilnCMS.Accounts.Invitations
+  alias KilnCMS.AfterCommit
   alias KilnCMS.Security.Recorder
 
   @impl true
@@ -51,7 +52,14 @@ defmodule KilnCMS.Accounts.Invitations.AcceptExisting do
     end
   end
 
+  # `deferring/1`: approving a registration on the way (#2514) evicts the
+  # applicant's sessions through `KilnCMS.AfterCommit`; held here, that leaves
+  # after this transaction commits and not at all if it rolls back.
   defp accept(token, write_context) do
+    AfterCommit.deferring(fn -> accept_in_transaction(token, write_context) end)
+  end
+
+  defp accept_in_transaction(token, write_context) do
     KilnCMS.Repo.transaction(fn ->
       with {:ok, invitation} <- locked(token),
            true <- Invitations.inviter_still_admin?(invitation) || invalid(),

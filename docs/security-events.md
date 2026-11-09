@@ -135,8 +135,8 @@ a type may carry only the keys below; anything else is dropped.
 | `sign_in_unlock_requested` | Sign-in unlock link sent | An [unlock link](account-administration.md#lift-a-sign-in-pause-by-email) was mailed to a paused account. Only once the mail is queued: a request that sends nothing records nothing. The person is the account mailed | `surface` |
 | `sign_in_unlocked` | Sign-in pause lifted by email | An unlock link was redeemed and the account's sign-in pause cleared. The person is the account | `was_locked` |
 | `sign_in_unlock_refused` | Sign-in unlock link refused | An unlock link was not redeemed. The person is named only when the link's signature verified and the account belongs to this site. Sampled: see below | `reason` |
-| `registration_queued` | Registration awaiting approval | A password sign-up on a site that [requires approval](account-administration.md#approving-registrations) was queued. No acting person (the sign-up's own system write); the target is the new account | `method` |
-| `registration_approved` | Registration approved | A site admin approved a waiting or rejected registration. The person is the admin; the target is the applicant | `role`, `via` |
+| `registration_queued` | Registration awaiting approval | A password sign-up on a site that [requires approval](account-administration.md#approving-registrations) was queued, or a new account from the site's own single sign-on on a site that [holds those](account-administration.md#hold-new-single-sign-on-accounts-too). No acting person (the registration's own system write); the target is the new account | `method` |
+| `registration_approved` | Registration approved | A waiting or rejected registration was approved: by a site admin on Registrations, by the applicant accepting an invitation to the site (no person), or by a platform admin adding the address on Team. The target is the applicant | `role`, `via` |
 | `registration_rejected` | Registration rejected | A site admin rejected a waiting registration. The person is the admin; the target is the applicant | `outcome` |
 
 `method` is `password`, `password_reset`, `magic_link`, `sso`, `passkey`,
@@ -186,13 +186,27 @@ host; the link is not spent and still works on its own site) or
 The person sees one page for all of them. Opening a link without pressing the
 button records nothing.
 
-For `registration_queued`, `method` is `password`, the only kind of sign-up
-that is queued. For `registration_approved`, `role` is the tier the membership
-now grants (`viewer`) and `via` is `queue` (decided on the Registrations
-page). For `registration_rejected`, `outcome` is `kept`: the account and its
-row stay. Neither the queued row nor its approval writes a `role_granted` as
-well. Turning approval on or off is `org_setting_changed` with `setting`
-`site_registration`.
+For `registration_queued`, `method` is `password` (a sign-up at `/register`)
+or `site_sso` (a new account the site's own single sign-on provisioned; the
+event carries the address the sign-in came from). For `registration_approved`,
+`role` is the tier the membership now grants and `via` says how:
+
+- `queue`: a site admin approved it on the Registrations page, always as
+  `viewer`. The person is that admin;
+- `invitation`: the applicant accepted an invitation to the site, which
+  approves the registration with the invited tier
+  ([Invitations and registrations](account-administration.md#invitations-and-registrations)).
+  No person: the system honours the invitation (`SystemActor` `:invitations`);
+- `added`: a platform admin entered the address in Team's **Add or invite**,
+  approving it with the tier they picked. The person is that admin. This is
+  also how a rejection is overridden from Team, so a `registration_approved`
+  with `via` `added` after a `registration_rejected` for the same target is
+  that override.
+
+For `registration_rejected`, `outcome` is `kept`: the account and its
+row stay. Neither the queued row nor any approval writes a `role_granted` as
+well. Turning either approval switch on or off is `org_setting_changed` with
+`setting` `site_registration`.
 
 For `ip_auto_blocked`, `reason` is `miss_threshold` or `bait_path`, `count` is
 the threshold that was crossed, and `window_minutes` and `block_minutes` are the
@@ -206,7 +220,9 @@ had expired. The two invitation events target the invitation (target type
 `invitation`), never the invited address, which is not stored in the log. When
 the invitee accepts, the membership that creates is recorded as `role_granted`
 with no person, because nobody signed in did it; the target is the new or
-existing account.
+existing account. When the invitee had a waiting or rejected registration on
+the site, accepting approves that row instead, recorded as
+`registration_approved` with `via` `invitation` and no `role_granted`.
 
 ### Failed sign-ins, allowlist and unlock refusals are sampled, lockouts are not
 
@@ -283,7 +299,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sign_in_unlock_requested` | `lib/kiln_cms/accounts/sign_in_unlock.ex`: the request's background task, via `AuthEvents.sign_in_unlock_requested/2`, once `SendSignInUnlock` has queued the mail | after commit, off the request path; tenant is the site the request was made on; `surface: "browser"` |
 | `sign_in_unlocked` | `sign_in_unlock.ex`: `redeem/2`, after the token's atomic revoke succeeded and the counter was cleared (`AuthEvents.sign_in_unlocked/3`) | after commit; `was_locked` |
 | `sign_in_unlock_refused` | `sign_in_unlock.ex`: `redeem/2` on every refusal, including the loser of two concurrent redeems (`AuthEvents.sign_in_unlock_refused/3`) | sampled, after commit; `reason` |
-| `registration_queued`, `registration_approved`, `registration_rejected` | `lib/kiln_cms/security/changes/record_registration.ex`, on `OrgMembership` `:queue_registration` (from `Changes.QueueRegistration` inside `User` `:register_with_password`), `:approve_registration` and `:reject_registration` (`lib/kiln_cms/accounts/org_membership.ex`) | in txn; tenant is the membership's site |
+| `registration_queued`, `registration_approved`, `registration_rejected` | `lib/kiln_cms/security/changes/record_registration.ex`, on `OrgMembership` `:queue_registration` (from `Changes.QueueRegistration` inside `User` `:register_with_password`, and from `SiteSso.Admission` for a new site single sign-on account), `:approve_registration`, `:approve_registration_by_invitation` (from `Invitations.grant_membership/4` when an invitation is accepted, and from `Invitations.AddOrInvite`) and `:reject_registration` (`lib/kiln_cms/accounts/org_membership.ex`) | in txn; tenant is the membership's site |
 
 `org_setting_changed` covers every resource built with `use
 KilnCMS.CMS.OrgSettings`, so a new settings resource cannot forget it:

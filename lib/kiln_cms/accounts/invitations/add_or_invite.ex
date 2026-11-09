@@ -6,8 +6,8 @@ defmodule KilnCMS.Accounts.Invitations.AddOrInvite do
   | The address | Result |
   |---|---|
   | belongs to someone already on this site | refused, `:already_member` |
-  | has a registration here awaiting approval | refused, `:pending_registration` |
-  | has a registration here that was rejected | refused, `:rejected_registration` |
+  | has a **confirmed** account with a registration here awaiting approval | the registration approved with the chosen tier, and a notice mail (`:approved`) |
+  | has a **confirmed** account with a registration here that was rejected | the same, said as overriding the rejection (`:approved_over_rejection`) |
   | has a **confirmed** account | a membership now, and a notice mail (`:added`) |
   | has a live invitation here | refused, `:already_invited` |
   | has an expired invitation here | sent again with a new token (`:reinvited`) |
@@ -15,7 +15,15 @@ defmodule KilnCMS.Accounts.Invitations.AddOrInvite do
 
   An unconfirmed account is invited, not added: anyone can register an
   unconfirmed account for any address, so adding it would hand a site role to
-  whoever did. The invitee proves the address by clicking.
+  whoever did. The invitee proves the address by clicking. That holds for an
+  unconfirmed account with a registration here too: accepting the invitation
+  approves the registration (`Invitations.grant_membership/4`).
+
+  Approving a registration by adding the address (#2514) is the admin's
+  decision, made now, so it overrides a rejection whenever that was made
+  (`OrgMembership.:approve_registration_by_invitation`, `via: :added`). The
+  outcome names that case, so the Team page can say a rejection was reversed
+  rather than let it pass as an ordinary add.
 
   ## As the actor, all the way down
 
@@ -53,8 +61,13 @@ defmodule KilnCMS.Accounts.Invitations.AddOrInvite do
     ]
 
     with {:ok, user} <- find_user(args.email, opts),
-         :ok <- not_a_member(user, args.organization_id, opts) do
-      if confirmed?(user), do: add(user, args, opts), else: invite(args, opts)
+         {:ok, membership} <- membership(user, args.organization_id, opts) do
+      cond do
+        match?(%{status: :active}, membership) -> refuse(:already_member)
+        not confirmed?(user) -> invite(args, opts)
+        is_nil(membership) -> add(user, args, opts)
+        true -> approve(user, membership, args, opts)
+      end
     end
   end
 
@@ -65,23 +78,12 @@ defmodule KilnCMS.Accounts.Invitations.AddOrInvite do
     end
   end
 
-  defp not_a_member(nil, _org_id, _opts), do: :ok
+  # The address's row on this site, if any: an active membership, or a
+  # registration waiting or rejected (#2251).
+  defp membership(nil, _org_id, _opts), do: {:ok, nil}
 
-  defp not_a_member(user, org_id, opts) do
-    case Accounts.get_org_membership(
-           user.id,
-           org_id,
-           Keyword.put(opts, :not_found_error?, false)
-         ) do
-      {:ok, nil} -> :ok
-      # A registration awaiting a decision is decided under Registrations
-      # (#2251), not overwritten by an add; a rejected one is not reopened by it.
-      {:ok, %{status: :pending}} -> refuse(:pending_registration)
-      {:ok, %{status: :rejected}} -> refuse(:rejected_registration)
-      {:ok, _membership} -> refuse(:already_member)
-      {:error, error} -> {:error, error}
-    end
-  end
+  defp membership(user, org_id, opts),
+    do: Accounts.get_org_membership(user.id, org_id, Keyword.put(opts, :not_found_error?, false))
 
   defp confirmed?(%{confirmed_at: %DateTime{}}), do: true
   defp confirmed?(_none_or_unconfirmed), do: false
@@ -106,6 +108,29 @@ defmodule KilnCMS.Accounts.Invitations.AddOrInvite do
       {:ok, %{outcome: :added, membership: membership}}
     end
   end
+
+  # --- a confirmed account with a registration here: approved now ----------
+
+  defp approve(user, registration, args, opts) do
+    with {:ok, membership} <-
+           Accounts.approve_registration_by_invitation(
+             registration,
+             %{
+               role: args.role,
+               role_id: args.role_id,
+               invited_at: DateTime.utc_now(),
+               via: :added
+             },
+             opts
+           ) do
+      retire_pending(args, opts)
+      notify(user, membership, opts)
+      {:ok, %{outcome: approved_outcome(registration), membership: membership}}
+    end
+  end
+
+  defp approved_outcome(%{status: :rejected}), do: :approved_over_rejection
+  defp approved_outcome(_pending), do: :approved
 
   # An invitation for an address that has just been added directly is moot;
   # left behind, its link would still work and show a page for a membership

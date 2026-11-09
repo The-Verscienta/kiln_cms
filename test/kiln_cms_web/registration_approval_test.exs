@@ -250,6 +250,74 @@ defmodule KilnCMSWeb.RegistrationApprovalTest do
       assert {:ok, []} = CMS.list_site_registration(tenant: other.id, authorize?: false)
     end
 
+    test "the settings form saves the single sign-on switch on its own", %{conn: conn} = ctx do
+      {:ok, lv, html} =
+        conn
+        |> org_conn(ctx.site)
+        |> log_in(site_admin(ctx.site))
+        |> live(~p"/editor/registrations")
+
+      assert html =~ "Applies only if this site has its own single sign-on"
+
+      html =
+        lv
+        |> form("#registration-settings-form",
+          registration: %{"approval_required" => "false", "approval_for_site_sso" => "true"}
+        )
+        |> render_submit()
+
+      assert html =~ "Registration settings saved."
+
+      assert {:ok, [%{approval_required: false, approval_for_site_sso: true}]} =
+               CMS.list_site_registration(tenant: ctx.site.id, authorize?: false)
+
+      assert lv
+             |> element("#registration-settings-form input[type=checkbox][checked]")
+             |> render() =~
+               "approval_for_site_sso"
+    end
+
+    test "adding a waiting applicant's address on the Team page approves them",
+         %{conn: conn} = ctx do
+      {:ok, lv, _html} =
+        conn |> org_conn(ctx.site) |> log_in(seed_user(:admin)) |> live(~p"/editor/team")
+
+      html =
+        lv
+        |> form("#add-member-form", %{
+          "member" => %{"email" => to_string(ctx.applicant.email), "role" => "editor"}
+        })
+        |> render_submit()
+
+      assert html =~ "Their registration on this site is approved, and they are now a member."
+      assert status_of(ctx.applicant, ctx.site) == :active
+      assert html =~ "1 registration is waiting for approval"
+    end
+
+    test "adding a rejected applicant's address says the rejection was overridden",
+         %{conn: conn} = ctx do
+      rejected = seed_user()
+
+      Ash.Seed.seed!(OrgMembership, %{
+        user_id: rejected.id,
+        organization_id: ctx.site.id,
+        role: :viewer,
+        status: :rejected,
+        decided_at: DateTime.add(DateTime.utc_now(), -60)
+      })
+
+      {:ok, lv, _html} =
+        conn |> org_conn(ctx.site) |> log_in(seed_user(:admin)) |> live(~p"/editor/team")
+
+      html =
+        lv
+        |> form("#add-member-form", %{"member" => %{"email" => to_string(rejected.email)}})
+        |> render_submit()
+
+      assert html =~ "had been rejected; it&#39;s now approved"
+      assert status_of(rejected, ctx.site) == :active
+    end
+
     test "the Team page points at the queue", %{conn: conn} = ctx do
       {:ok, _lv, html} =
         conn |> org_conn(ctx.site) |> log_in(seed_user(:admin)) |> live(~p"/editor/team")

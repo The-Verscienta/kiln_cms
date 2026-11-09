@@ -7,14 +7,24 @@ defmodule KilnCMS.Accounts.Validations.RoleBelongsToOrg do
   crafted submit could bind an org-A membership to org-B's role bundle —
   applying a foreign org's scope axes, editable at any time by that org's
   admins.
+
+  `argument: name` checks that argument instead of the `role_id` attribute,
+  for an action that writes the role in a hook after validations have run
+  (`OrgMembership.:approve_registration_by_invitation`, #2514). The org is the
+  row's own either way.
   """
   use Ash.Resource.Validation
 
   alias KilnCMS.Accounts
 
   @impl true
-  def validate(changeset, _opts, _context) do
-    role_id = Ash.Changeset.get_attribute(changeset, :role_id)
+  def validate(changeset, opts, _context) do
+    role_id =
+      case Keyword.get(opts, :argument) do
+        nil -> Ash.Changeset.get_attribute(changeset, :role_id)
+        argument -> Ash.Changeset.get_argument(changeset, argument)
+      end
+
     org_id = Ash.Changeset.get_attribute(changeset, :organization_id)
 
     cond do

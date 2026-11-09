@@ -64,6 +64,9 @@ Every summary line below that was shortened links to its own entry there.
   Before rolling back, run `DELETE FROM notifications WHERE event = 'registration_pending'`, or roll forward.
   ([#2517](https://github.com/The-Verscienta/kiln_cms/pull/2517) · [long form](docs/changelog/unreleased.md#registration-notifications-upgrade))
 
+- **Run `mix ash.migrate` (`org_memberships.created_account`, `site_registration.approval_for_site_sso`, both `NOT NULL DEFAULT false`). Turn on Registrations → "New accounts from this site's single sign-on wait for approval too" only once every node runs this release: an older node makes those accounts active viewers.**
+  ([long form](docs/changelog/unreleased.md#registration-invitations-sso-upgrade))
+
 - **Before rolling back to a build that has the security log but predates sign-in unlock links, delete the `sign_in_unlock_requested`, `sign_in_unlocked` and `sign_in_unlock_refused` security events, or roll forward.**
   No migration. An older build cannot load those rows, which breaks that site's security log and CSV, and erasing a person named in one (#2509). v1.8.0 has no security log and is unaffected.
   ([#2510](https://github.com/The-Verscienta/kiln_cms/pull/2510) · [long form](docs/changelog/unreleased.md#sign-in-unlock-upgrade))
@@ -163,6 +166,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Site admins get one bell notice and email per site when a confirmed applicant is waiting, and applicants are emailed when they're approved or rejected.**
   The notice collapses while unread, names no applicant, and is read by opening Registrations; mute the email under Your settings → Email notifications. Guide: [docs/account-administration.md](docs/account-administration.md#get-told-when-someone-is-waiting).
   ([#2517](https://github.com/The-Verscienta/kiln_cms/pull/2517) · [long form](docs/changelog/unreleased.md#registration-notifications))
+
+- **Accepting an invitation, or Team's Add or invite, now approves the person's waiting or rejected registration on that site (an invitation overrides a rejection only if it is newer), and a site can hold new accounts from its own single sign-on for approval.**
+  The SSO switch is on Registrations, separate from password sign-ups. Guide: [docs/account-administration.md](docs/account-administration.md#invitations-and-registrations).
+  ([long form](docs/changelog/unreleased.md#registration-invitations-sso))
 
 - **Someone whose sign-in is paused after too many attempts can have a link emailed that lifts the pause: "Email me an unlock link" on the sign-in page.**
   The link lasts 15 minutes, works once and goes only to confirmed members of that site (3 an hour). It clears only the account pause, and the sign-in page still never says an account is paused. Guide: [docs/account-administration.md](docs/account-administration.md#lift-a-sign-in-pause-by-email).

@@ -105,6 +105,26 @@ defmodule KilnCMSWeb.TeamLive do
         {:noreply,
          socket |> load_data() |> put_flash(:info, gettext("Member added to this site."))}
 
+      {:ok, %{outcome: :approved}} ->
+        {:noreply,
+         socket
+         |> load_data()
+         |> put_flash(
+           :info,
+           gettext("Their registration on this site is approved, and they are now a member.")
+         )}
+
+      {:ok, %{outcome: :approved_over_rejection}} ->
+        {:noreply,
+         socket
+         |> load_data()
+         |> put_flash(
+           :info,
+           gettext(
+             "Their registration on this site had been rejected; it's now approved, and they are a member."
+           )
+         )}
+
       {:ok, %{outcome: outcome}} when outcome in [:invited, :reinvited] ->
         {:noreply,
          socket
@@ -540,14 +560,6 @@ defmodule KilnCMSWeb.TeamLive do
 
       :already_invited ->
         gettext("That address is already invited — resend it from Pending invitations.")
-
-      :pending_registration ->
-        gettext(
-          "That address has registered on this site and is waiting for approval — approve it under Registrations."
-        )
-
-      :rejected_registration ->
-        gettext("That address registered on this site and was rejected.")
 
       :suppressed ->
         gettext(

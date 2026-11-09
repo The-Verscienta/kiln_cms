@@ -98,7 +98,7 @@ defmodule KilnCMS.Accounts.Changes.QueueRegistration do
 
   defp queue_membership(changeset, org_id, user) do
     case Accounts.queue_registration(
-           %{organization_id: org_id, user_id: user.id},
+           %{organization_id: org_id, user_id: user.id, new_account?: true, method: :password},
            actor: KilnCMS.SystemActor.new(:registrations),
            context: Map.take(changeset.context, [Recorder.context_key()])
          ) do
