@@ -137,4 +137,11 @@ if config_env() != :test do
   if KilnCMS.Config.Env.fetch("KILN_CHALLENGE_DISABLED") == {:ok, true} do
     config :kiln_cms, KilnCMS.Challenge, disabled: true
   end
+
+  # CHALLENGE_FORMS (default true): whether a public form may ask for a check
+  # at all. Each form opts in on its own (`Form.challenge`, off by default);
+  # false turns every form off in effect without touching one.
+  with {:ok, forms?} <- KilnCMS.Config.Env.fetch("CHALLENGE_FORMS") do
+    config :kiln_cms, KilnCMS.Challenge, forms: forms?
+  end
 end

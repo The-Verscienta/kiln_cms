@@ -424,6 +424,29 @@ export interface FormSchema {
   /** The form-encoded browser route; `submitForm` posts JSON to `/api/forms/:slug`. */
   submit_url: string;
   fields: FormField[];
+  /**
+   * The human-verification check this form asks for, or `null` (absent from
+   * older servers). When present, draw the provider's widget
+   * and send its token as `field`; a submission without one is accepted but
+   * held for review.
+   */
+  challenge?: FormChallenge | null;
+}
+
+/** What a front end needs to draw a form's human-verification widget. */
+export interface FormChallenge {
+  required: true;
+  /** The provider's id, e.g. `"turnstile"`. */
+  provider: string;
+  site_key: string;
+  /** The provider's script, for explicit rendering. */
+  script_url: string;
+  /** The action the widget must be drawn for. */
+  action: string;
+  /** The value name the token is submitted under: `_kiln_challenge`. */
+  field: string;
+  /** What happens to a submission sent without a token. */
+  without_token: "held";
 }
 
 export interface SubmitFormOptions extends RequestOptions {
@@ -434,6 +457,14 @@ export interface SubmitFormOptions extends RequestOptions {
 export interface FormSubmitResult {
   ok: true;
   message: string | null;
+  /**
+   * Present only when the form asks for a human-verification check:
+   * `"verified"`, or `"held"` when the submission was kept for review
+   * instead of being acted on (no token, a token solved on a host the
+   * server does not accept, or a provider it could not reach). A token the
+   * provider refused is a `KilnValidationError` naming `_kiln_challenge`.
+   */
+  challenge?: "verified" | "held";
 }
 
 // ── sync (delta) API ────────────────────────────────────────────────────────

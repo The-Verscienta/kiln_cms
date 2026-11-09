@@ -535,8 +535,10 @@ defmodule KilnClient do
   "success_message", "submit_label", "honeypot_field", "submit_url",
   "fields"}`, each field with `"name"`, `"label"`, `"type"`, `"required"`,
   `"options"`, `"help_text"`, `"placeholder"`, `"default_value"` and
-  `"width"`. An unknown or inactive form is `reason: :not_found`.
-  Options: `:req`.
+  `"width"`. Newer servers add `"challenge"`: `nil`, or the form's
+  human-verification check (`"provider"`, `"site_key"`, `"script_url"`,
+  `"action"`, `"field"`). An unknown or inactive form is
+  `reason: :not_found`. Options: `:req`.
   """
   @spec form(String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def form(slug, opts \\ []), do: json_get("/api/forms/" <> segment(slug), [], opts)
@@ -554,6 +556,11 @@ defmodule KilnClient do
   submission, pass the honeypot field (`form/2`'s `"honeypot_field"`) and
   `"_kiln_rendered_at"` through untouched. A filled honeypot is discarded
   and still answers success, so never set it yourself.
+
+  A form whose schema has a `"challenge"` wants the visitor's
+  human-verification token as `"_kiln_challenge"`: relay it untouched as
+  well. Without it the submission is accepted but held for review, and the
+  result carries `"challenge" => "held"` (`"verified"` when it passed).
 
   Options: `:locale` (recorded on the submission), `:req`.
   """

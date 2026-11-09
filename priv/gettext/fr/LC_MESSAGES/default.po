@@ -3310,6 +3310,11 @@ msgstr "AshGraphql et AshJsonApi exposent votre modèle de contenu à n'importe 
 msgid "Ask a site admin to send you a new one."
 msgstr "Demandez à un administrateur du site de vous en envoyer une nouvelle."
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Ask visitors to complete a human-verification check"
+msgstr "Demander aux visiteurs de passer une vérification humaine"
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -8541,6 +8546,11 @@ msgstr "Trouver des pages connexes"
 msgid "Finish"
 msgstr "Terminer"
 
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Finishing the human-verification check…"
+msgstr "Fin de la vérification humaine…"
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "First number"
@@ -9292,10 +9302,30 @@ msgstr "Pastilles d’état"
 msgid "Health says whether published content still needs a check. It is due when its review date arrives and overdue a week later; expired means it has passed its unpublish date. Pick one to find the content that needs attention."
 msgstr "L'état indique si un contenu publié doit être revérifié. Il est attendu quand sa date de révision arrive, et en retard une semaine plus tard ; expiré signifie que sa date de dépublication est passée. Choisissez-en un pour trouver les contenus qui demandent de l'attention."
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Held"
+msgstr "Retenu"
+
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "Held by the backend"
 msgstr "Détenues par le service"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Held: sent without completing the check."
+msgstr "Retenu : envoyé sans avoir passé la vérification."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Held: the check was completed on a site this deployment doesn't serve."
+msgstr "Retenu : la vérification a été passée sur un site que ce déploiement ne sert pas."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Held: the verification service couldn't be reached."
+msgstr "Retenu : le service de vérification était injoignable."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -9528,6 +9558,11 @@ msgstr "Comment construire la formule"
 msgid "How your name appears to readers and to the people you work with."
 msgstr "La façon dont votre nom apparaît aux lecteurs et aux personnes avec qui vous travaillez."
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Human verification isn't available on this deployment. Ask the operator to configure it."
+msgstr "La vérification humaine n'est pas disponible sur ce déploiement. Demandez à l'opérateur de la configurer."
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "I have a team — review before publishing"
@@ -9572,6 +9607,11 @@ msgstr "Si le compte utilise l'authentification à deux facteurs, la connexion r
 #, elixir-autogen, elixir-format
 msgid "If the breach service can't be reached the password is accepted, so an outage never stops anyone setting one. Signing in is never checked. This applies to registering, changing or resetting a password, and the first-run setup."
 msgstr "Si le service de fuites est injoignable, le mot de passe est accepté : une panne n’empêche jamais d’en définir un. La connexion n’est jamais vérifiée. Cela s’applique à l’inscription, au changement ou à la réinitialisation d’un mot de passe et à la configuration initiale."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "If the check doesn't load, you can still send this form — it will be reviewed before it's acted on."
+msgstr "Si la vérification ne se charge pas, vous pouvez quand même envoyer ce formulaire : il sera examiné avant d'être traité."
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
@@ -13706,6 +13746,11 @@ msgstr "Élément parent"
 #, elixir-autogen, elixir-format
 msgid "Part"
 msgstr "Partie"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Passed the human-verification check."
+msgstr "A passé la vérification humaine."
 
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
@@ -18158,6 +18203,11 @@ msgstr "Objet"
 msgid "Subject: %{subject}"
 msgstr "Objet : %{subject}"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Submissions without a completed check are kept in Spam for review instead of being sent on. Headless sites must send the check's token as _kiln_challenge, and their hostnames must be listed by the operator, or everything they send lands in Spam. Submissions from pages loaded before you switch this on also land in Spam."
+msgstr "Les envois sans vérification passée sont gardés dans Spam pour examen au lieu d'être transmis. Les sites headless doivent envoyer le jeton de la vérification sous le nom _kiln_challenge, et leurs noms d'hôte doivent être déclarés par l'opérateur, sinon tout ce qu'ils envoient finit dans Spam. Les envois depuis des pages chargées avant l'activation finissent aussi dans Spam."
+
 #: lib/kiln_cms_web/components/block_components.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -19392,6 +19442,11 @@ msgstr "La page d'accueil n'a pas pu être créée."
 #, elixir-autogen, elixir-format
 msgid "The human-verification check could not load."
 msgstr "La vérification humaine n’a pas pu se charger."
+
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "The human-verification check didn't pass. Complete it again, then send the form."
+msgstr "La vérification humaine a échoué. Recommencez-la, puis envoyez le formulaire."
 
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
@@ -21768,6 +21823,7 @@ msgid "Variants"
 msgstr "Variantes"
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Verified"

@@ -1047,6 +1047,27 @@ defmodule KilnCMS.Cache do
   defp localized(_scope, _locale), do: nil
 
   @doc """
+  Drop a site's cached delivery payloads on every node, after a form or
+  form-field write (`KilnCMS.CMS.Changes.BustFormCache`, #2249).
+
+  The payload is the one shape that embeds forms (the controller enriches its
+  `:form` blocks), and a form names no page, so the site's payloads go by
+  prefix. Records, head-generation tokens, other sites and the fired-artifact
+  cache are left alone. `nil` (a write whose site could not be read) drops
+  every site's payloads.
+  """
+  @spec bust_form_payloads(Ash.UUID.t() | nil) :: :ok
+  def bust_form_payloads(org_id) do
+    if enabled?() do
+      ClusterBust.broadcast_prefix(
+        if org_id, do: "published:payload:#{org_id}:", else: "published:payload:"
+      )
+    end
+
+    :ok
+  end
+
+  @doc """
   Drop all cached published content. The blunt fallback for writes whose blast
   radius isn't a single `{type, slug}` (e.g. a media-item edit that may be
   referenced by any number of pages); prefer `bust/2` where the affected record

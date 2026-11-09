@@ -102,6 +102,50 @@ defmodule KilnCMSWeb.Plugs.ChallengeCspTest do
     end
   end
 
+  describe "widen_for_forms/2 (#2249)" do
+    @page "script-src 'self' 'nonce-abc'; default-src 'self'; frame-src 'self' https://www.youtube.com"
+
+    defp page_conn,
+      do: put_resp_header(build_conn(), "content-security-policy", @page)
+
+    test "adds the provider while a form can ask" do
+      enable!()
+      conn = ChallengeCsp.widen_for_forms(page_conn(), Challenge.config())
+
+      assert policy(conn) ==
+               "script-src 'self' 'nonce-abc' #{@origin}; default-src 'self'; " <>
+                 "frame-src 'self' https://www.youtube.com #{@origin}"
+    end
+
+    test "is idempotent" do
+      enable!()
+      config = Challenge.config()
+      once = ChallengeCsp.widen_for_forms(page_conn(), config)
+
+      assert policy(ChallengeCsp.widen_for_forms(once, config)) == policy(once)
+    end
+
+    test "leaves the policy byte for byte while no form can ask" do
+      for opts <- [[provider: nil], [disabled: true], [forms: false]] do
+        enable!(opts)
+        assert policy(ChallengeCsp.widen_for_forms(page_conn(), Challenge.config())) == @page
+      end
+    end
+
+    test "leaves a conn with no policy alone" do
+      enable!()
+      assert policy(ChallengeCsp.widen_for_forms(build_conn(), Challenge.config())) == nil
+    end
+  end
+
+  test "forms being available does not widen the auth pages", %{conn: conn} do
+    baseline = conn |> get(~p"/sign-in") |> policy() |> scrub()
+
+    enable!(sign_in: :off, registration: :off, forms: true)
+    assert Challenge.forms_available?(Challenge.config())
+    assert build_conn() |> get(~p"/sign-in") |> policy() |> scrub() == baseline
+  end
+
   test "the plug leaves a conn untouched when nothing is configured" do
     conn =
       build_conn()

@@ -1,6 +1,7 @@
 defmodule KilnCMS.Challenge do
   @moduledoc """
-  Adaptive human verification for password sign-in and registration (#2249).
+  Adaptive human verification for password sign-in and registration, and
+  opt-in verification on public forms (#2249).
 
   A challenge (Cloudflare Turnstile — `KilnCMS.Challenge.Providers.Turnstile`)
   is asked for only when an attempt looks like part of a guessing run, so most
@@ -26,6 +27,8 @@ defmodule KilnCMS.Challenge do
         sign_in: :adaptive,               # :off | :adaptive
         registration: :adaptive,          # :off | :adaptive | :always
         api_sign_in: false,               # challenge POST /api/auth/sign_in too
+        forms: true,                      # CHALLENGE_FORMS: let a form ask for
+                                          # one (`KilnCMS.CMS.Form.challenge`)
         hostnames: [],                    # CHALLENGE_HOSTNAMES: extra hosts a
                                           # token may be solved on
         disabled: false                   # KILN_CHALLENGE_DISABLED
@@ -35,6 +38,17 @@ defmodule KilnCMS.Challenge do
   is on depends on its *source* being configured, so a secret file that cannot
   be read makes verification unavailable (bounded fail-open) rather than
   switching challenges off.
+
+  ## Public forms
+
+  Forms are the one place a *site* chooses: each `KilnCMS.CMS.Form` carries
+  `challenge: :off | :always` (`:off` by default), because a form that turns
+  it off exposes only that site's own inbox. The operator still holds the
+  ceiling — `forms: false` (`CHALLENGE_FORMS=false`), the kill switch or an
+  unusable provider makes every form `:off` in effect (`form_required?/2`),
+  and an admin cannot switch a form to `:always` while that is so
+  (`KilnCMS.CMS.Validations.ChallengeAvailable`). What a form submission's
+  answer does is `KilnCMS.Challenge.Gate.form/3`'s to decide.
 
   ## When nothing is required
 
@@ -79,14 +93,14 @@ defmodule KilnCMS.Challenge do
 
   @type mode :: :off | :adaptive | :always
   @type surface :: :browser | :api
-  @type action :: :sign_in | :register
+  @type action :: :sign_in | :register | :form
 
   defmodule Config do
     @moduledoc """
     The resolved configuration: `provider` is `nil` whenever nothing may be
     required (see `KilnCMS.Challenge`), and both modes are then `:off`.
     """
-    @enforce_keys [:provider, :site_key, :sign_in, :registration, :api_sign_in]
+    @enforce_keys [:provider, :site_key, :sign_in, :registration, :api_sign_in, :forms]
     defstruct @enforce_keys
 
     @type t :: %__MODULE__{
@@ -94,7 +108,8 @@ defmodule KilnCMS.Challenge do
             site_key: String.t() | nil,
             sign_in: :off | :adaptive,
             registration: :off | :adaptive | :always,
-            api_sign_in: boolean()
+            api_sign_in: boolean(),
+            forms: boolean()
           }
   end
 
@@ -114,7 +129,8 @@ defmodule KilnCMS.Challenge do
           site_key: site_key,
           sign_in: mode(opts[:sign_in], [:off, :adaptive], :adaptive),
           registration: mode(opts[:registration], [:off, :adaptive, :always], :adaptive),
-          api_sign_in: opts[:api_sign_in] == true
+          api_sign_in: opts[:api_sign_in] == true,
+          forms: opts[:forms] != false
         }
 
       :off ->
@@ -135,20 +151,56 @@ defmodule KilnCMS.Challenge do
   @spec widget(Config.t(), action()) :: map() | nil
   def widget(%Config{provider: nil}, _action), do: nil
 
-  def widget(%Config{} = config, action) when action in [:sign_in, :register] do
-    if mode_for(config, action) == :off do
-      nil
-    else
-      provider = config.provider
+  def widget(%Config{} = config, :form) do
+    if forms_available?(config), do: widget_map(config, :form)
+  end
 
-      %{
-        provider: provider.id(),
-        script_url: provider.script_url(),
-        global: provider.global(),
-        site_key: config.site_key,
-        action: action_name(action)
-      }
-    end
+  def widget(%Config{} = config, action) when action in [:sign_in, :register] do
+    if mode_for(config, action) != :off, do: widget_map(config, action)
+  end
+
+  defp widget_map(config, action) do
+    provider = config.provider
+
+    %{
+      provider: provider.id(),
+      script_url: provider.script_url(),
+      global: provider.global(),
+      site_key: config.site_key,
+      action: action_name(action)
+    }
+  end
+
+  @doc """
+  Whether a form may ask for a challenge at all: a usable provider, and the
+  operator has not turned forms off (`forms: false`, `CHALLENGE_FORMS`). The
+  kill switch and an unusable provider both leave `provider` `nil`.
+  """
+  @spec forms_available?(Config.t()) :: boolean()
+  def forms_available?(%Config{provider: nil}), do: false
+  def forms_available?(%Config{forms: forms}), do: forms == true
+
+  @doc """
+  Whether `form`'s submissions need a challenge right now: the form asks for
+  one (`challenge: :always`) and `forms_available?/1`. The form's own setting
+  is clamped here on every read, so turning the operator's switch off takes
+  effect everywhere at once without touching a single row.
+  """
+  @spec form_required?(Config.t(), map() | nil) :: boolean()
+  def form_required?(%Config{} = config, %{challenge: :always}), do: forms_available?(config)
+  def form_required?(%Config{}, _form), do: false
+
+  @doc """
+  What a page that draws a form's widget depends on beyond the form itself:
+  the provider and the site key, as `"provider:site_key"` — or `""` when no
+  form can ask for a challenge. Part of a delivered page's ETag, so changing
+  either moves it.
+  """
+  @spec forms_fingerprint(Config.t()) :: String.t()
+  def forms_fingerprint(%Config{} = config) do
+    if forms_available?(config),
+      do: "#{provider_id(config)}:#{config.site_key}",
+      else: ""
   end
 
   @doc "The mode `action` runs under."
@@ -164,8 +216,23 @@ defmodule KilnCMS.Challenge do
   def csp_sources(%Config{} = config) do
     if enabled?(config),
       do: config.provider.csp_sources(),
-      else: %{script_src: [], frame_src: [], connect_src: []}
+      else: no_sources()
   end
+
+  @doc """
+  The origins a page drawing a form's widget must add — empty lists unless
+  `forms_available?/1`. Only for a response that actually renders a form that
+  needs one (`KilnCMSWeb.Plugs.ChallengeCsp.widen_for_forms/2`,
+  `KilnCMSWeb.Embed.content_security_policy/2`).
+  """
+  @spec csp_sources(Config.t(), :forms) :: KilnCMS.Challenge.Provider.csp_sources()
+  def csp_sources(%Config{} = config, :forms) do
+    if forms_available?(config),
+      do: config.provider.csp_sources(),
+      else: no_sources()
+  end
+
+  defp no_sources, do: %{script_src: [], frame_src: [], connect_src: []}
 
   @doc """
   The Ash context naming where an attempt came from, merged into a sign-in's or
@@ -282,7 +349,13 @@ defmodule KilnCMS.Challenge do
       end
 
     with {:error, {:unavailable, reason}} <- result do
-      note_outage()
+      # A form check never opens the outage window: that window is what lets a
+      # tokenless *sign-in* through within its budget, and form posts are
+      # anonymous and unthrottled per account — a burst of junk tokens drawing
+      # 429s from the provider must not switch sign-in's fail-open on (#2249).
+      # Forms hold everything the provider could not answer, so they need no
+      # window of their own.
+      if action != :form, do: note_outage()
       if reason == :not_configured, do: log_secret_refused(config)
     end
 
@@ -360,6 +433,7 @@ defmodule KilnCMS.Challenge do
 
   defp action_name(:sign_in), do: "sign_in"
   defp action_name(:register), do: "register"
+  defp action_name(:form), do: "form"
 
   defp off,
     do: %Config{
@@ -367,7 +441,8 @@ defmodule KilnCMS.Challenge do
       site_key: nil,
       sign_in: :off,
       registration: :off,
-      api_sign_in: false
+      api_sign_in: false,
+      forms: false
     }
 
   # Off without a word when the kill switch is on or no provider is named —

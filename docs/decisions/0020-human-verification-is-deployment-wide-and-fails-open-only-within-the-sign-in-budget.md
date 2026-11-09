@@ -121,7 +121,9 @@ The work is split so each part ships on its own:
 
 1. This part: password sign-in and registration, Turnstile, operator config.
 2. Public forms: a forms mode, what a form without a token does, the delivery
-   and embed page policies.
+   and embed page policies. Shipped as a per-form setting under an operator
+   ceiling, with unverified submissions held for review: see
+   [ADR 0021](0021-a-form-opts-in-to-human-verification-and-an-unverified-submission-is-held-not-refused.md).
 3. Per-site keys and a settings page (sign-in stays deployment-wide),
    reCAPTCHA v2, and a plugin SDK callback for providers once the shape is
    proven.

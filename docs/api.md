@@ -1507,6 +1507,49 @@ submission is deliberately CSRF-free. See [forms.md](forms.md#embedding-on-anoth
 Inactive or unknown slugs render a framable "Form not found" page (HTTP 404)
 rather than a blank iframe.
 
+### Human verification on forms
+
+A site admin can make a form ask for a Cloudflare Turnstile check (#2249;
+[Public forms](human-verification.md#public-forms)). Nothing below changes
+for a form that does not ask: its schema has `"challenge": null` and its
+answers carry no `challenge` key.
+
+**`GET /api/forms/:slug`** gains `challenge`, `null` or:
+
+| Key | Value |
+|---|---|
+| `required` | `true` |
+| `provider` | `"turnstile"` |
+| `site_key` | The widget's public site key |
+| `script_url` | The provider's script, for explicit rendering: `https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit` |
+| `action` | `"form"`. Render the widget with it; a token drawn for another action is refused. |
+| `field` | `"_kiln_challenge"`, the name to send the token under |
+| `without_token` | `"held"`: what happens to a submission without one |
+
+`challenge` is `null` too while the operator has forms off
+(`CHALLENGE_FORMS=false`), the kill switch on, or no provider configured,
+whatever the form's own setting.
+
+**`POST /api/forms/:slug`** reads the token from `_kiln_challenge`, or from
+`cf-turnstile-response` when that is absent or empty. Send it as a string.
+For a form that asks, the answer gains `challenge`:
+
+| Status | Body | Meaning |
+|---|---|---|
+| `200` | `{"ok": true, "message": "…", "challenge": "verified"}` | Passed; acted on as usual. |
+| `200` | `{"ok": true, "message": "…", "challenge": "held"}` | Stored for review in Spam, and not acted on: no token, a token solved on a host this deployment does not serve, or the provider could not be asked. |
+| `422` | `{"ok": false, "errors": {"_kiln_challenge": "did not pass the human-verification check"}, "challenge": "failed"}` | The provider refused the token (wrong, expired, already used, malformed, another action). Nothing stored. Draw a fresh widget and send again. |
+
+Field errors come first and do not spend the token: a `422` without
+`challenge` is the usual per-field map. A tripped honeypot answers `200` in
+the same shape as a real submission (`"verified"` when a token was sent,
+`"held"` when not), but nothing is stored and the provider is not asked.
+
+The page that draws the widget must be on a host the deployment serves, or
+one in `CHALLENGE_HOSTNAMES`, and in the Turnstile widget's hostnames in
+Cloudflare. Otherwise every submission comes back `"held"`, and the server
+log names the host.
+
 ## Image transforms
 
 Any processed image can be resized, cropped and re-encoded on request:
@@ -1907,7 +1950,10 @@ Three responses on these paths are deliberately **not** this envelope:
   spec's `id`, `title` and `source.pointer`.
 - **Field-level validation errors** from `POST /api/forms/:slug` are
   `{"ok": false, "errors": {"<field>": "…"}}` — a per-field map. The envelope
-  says the request failed; this says which input was wrong.
+  says the request failed; this says which input was wrong. A refused
+  human-verification token is reported the same way, under
+  `_kiln_challenge`, with `"challenge": "failed"` beside it
+  ([Human verification on forms](#human-verification-on-forms)).
 - **`GET /api/resolve`**'s 200/301-equivalent and 404 responses are a verdict,
   not an error: `{"status": "ok" | "moved" | "not_found"}`. That `status` is
   the verdict and is *not* an HTTP code. A missing/malformed `?path=` **is**
