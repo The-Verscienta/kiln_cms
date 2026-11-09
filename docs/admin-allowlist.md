@@ -19,7 +19,7 @@ address that is not on it. The second column is never affected.
 | The console: every `/editor/**` page, `/media` (the media library), editor previews under `/editor/preview/...`, and plugin console pages | The public site, `/membership`, forms, feeds and search |
 | The console's downloads: the content, fields, translations, forms entries, analytics, governance and security-log exports, and `/editor/account/export.json` | `/account` (a reader's own settings page) and `/sign-out` |
 | `/setup` (the first-run wizard) | Media downloads, transforms and streams (`/media/:id/...`), `/uploads/*` and static assets |
-| Every sign-in route, for **everyone**, members included: `/sign-in`, `/register`, password reset, magic links, passkeys, single sign-on (`/auth/*`), the two-factor prompt `/sign-in/verify`, account confirmation and invitations (`/auth/invite/...`) | `/preview/...` links (token preview) |
+| Every sign-in route, for **everyone**, members included: `/sign-in`, `/register`, password reset, magic links, passkeys, single sign-on (`/auth/*`), the two-factor prompt `/sign-in/verify`, sign-in unlock links (`/sign-in/unlock`, `/auth/unlock/...`), account confirmation and invitations (`/auth/invite/...`) | `/preview/...` links (token preview) |
 | Headless sign-in: `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` | JSON:API, GraphQL (`/gql`, `/ws/gql`), MCP, REST and `/ws/bridge`, with an API key or a token already issued |
 | Opening a console or sign-in page's live connection (LiveView), and pages already open when the list changes | `/up` and `/ready` health checks |
 | The collaborative-editing socket, `/ws/collab` | |

@@ -26,8 +26,9 @@ defmodule KilnCMS.Security.Recorder do
     * `record_after_commit/2` - best-effort via `KilnCMS.AfterCommit`. Never
       raises into the caller; a failure is logged and counted on the
       `[:kiln_cms, :security, :event_failed]` telemetry event.
-    * `record_sampled/2` - best-effort, for `:sign_in_failed` and
-      `:admin_access_refused` (#2248), which anyone can trigger: a per-tenant,
+    * `record_sampled/2` - best-effort, for `:sign_in_failed`,
+      `:admin_access_refused` (#2248) and `:sign_in_unlock_refused` (#2250),
+      which anyone can trigger: a per-tenant,
       per-IP cap (`KilnCMS.Accounts.ThrottleStore`) keeps a flood from filling
       the log. Excess is dropped and counted on
       `[:kiln_cms, :security, :event_sampled_out]`. `:sign_in_locked` is never
@@ -69,7 +70,8 @@ defmodule KilnCMS.Security.Recorder do
   # One bucket per sampled type, so a flood of one cannot spend the other's.
   @sample_buckets %{
     sign_in_failed: "security_sign_in_failed",
-    admin_access_refused: "security_admin_access_refused"
+    admin_access_refused: "security_admin_access_refused",
+    sign_in_unlock_refused: "security_sign_in_unlock_refused"
   }
 
   @typedoc "The request facts an event records."
@@ -187,8 +189,8 @@ defmodule KilnCMS.Security.Recorder do
   end
 
   @doc """
-  Best-effort record with a per-IP cap for `:sign_in_failed` and
-  `:admin_access_refused`. Every other type (`:sign_in_locked` in particular)
+  Best-effort record with a per-IP cap for `:sign_in_failed`,
+  `:admin_access_refused` and `:sign_in_unlock_refused`. Every other type (`:sign_in_locked` in particular)
   is recorded as `record_after_commit/2` does, never sampled away.
 
   Extra options: `:limit` (events per window per IP, default

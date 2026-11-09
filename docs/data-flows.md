@@ -159,8 +159,8 @@ out — which is also why the two will not sum to the same number.
 Every mail is queued as an Oban job whose args hold the rendered message,
 recipient included. Oban's Pruner deletes finished jobs after 7 days
 (`config/config.exs`). Until then the job holds any link the mail carried: a
-magic link, a password reset, or a site invitation (#2135), whose token is
-otherwise stored only as a hash. Backups taken in that window hold them too.
+magic link, a password reset, a sign-in unlock link (#2250), or a site
+invitation (#2135), whose token is otherwise stored only as a hash. Backups taken in that window hold them too.
 
 ### Security log retention (#2241)
 
@@ -205,6 +205,16 @@ not a JWT — but it is still a timestamped record that a given account complete
 a second factor, so it counts as personal data for a DSAR or an erasure review.
 It is written independently of `store_all_tokens?`, expires 301 seconds after
 the sign-in, and is removed by the same nightly sweep below.
+
+A sign-in unlock link (#2250) is a stored token with `purpose:
+"sign_in_unlock"`, written when the link is mailed. Its `extra_data` holds
+`act` (`"sign_in_unlock"`), `org` (the id of the site it was asked for on) and
+`ed`, an HMAC-SHA256 of the account's email address keyed from the endpoint's
+`secret_key_base`. Keyed, so the stored value cannot be matched against a list
+of addresses without the server secret. It expires 15 minutes after it is
+minted, is revoked when redeemed or when the password is changed or reset, and is
+removed by the same nightly sweep. The mailed link itself also sits in the
+mail job's args (see *Mail job retention*).
 
 Without cleanup these rows would accumulate forever, so the nightly
 `:expunge_expired` trigger (`lib/kiln_cms/accounts/token.ex`) deletes every token

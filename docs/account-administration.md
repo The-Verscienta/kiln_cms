@@ -413,6 +413,120 @@ means the mail reached the queue; an enqueue failure is reported, not crashed on
 Erased accounts are refused: their password hash has no matching plaintext and
 their address is a `@deleted.invalid` tombstone.
 
+## Lift a sign-in pause by email
+
+After 20 password attempts on one email address in 15 minutes, Kiln pauses
+password sign-in for that address until the window ends. Anyone can cause
+the pause by typing someone's address, so the person who is paused is often
+the owner, after mistyping a password. They can wait, reset their password
+(which lifts the pause too), or have a link emailed that lifts only the pause.
+No admin is involved and there is nothing to turn on.
+
+Anyone can follow these steps; they need access to the account's mailbox.
+
+1. On the sign-in page (`/sign-in`), under the sign-in options, click **Email
+   me an unlock link** (after "Paused after too many attempts?"). The page
+   **Lift a sign-in pause** opens (`/sign-in/unlock`).
+2. Enter the address you sign in with in **Email** and click **Email me an
+   unlock link**. The page reads: "If an account with that address is paused
+   after too many sign-in attempts, we've emailed it a link to lift the pause.
+   The link works once, within 15 minutes."
+3. Open the mail **Lift the sign-in pause on your (site) account** and click
+   **Lift the pause**. The page **Lift the sign-in pause** opens, with a
+   **Lift the pause** button. Opening the link has not used it yet.
+4. Click **Lift the pause**. You are back on the sign-in page with: "The
+   sign-in pause on your account is lifted. You may be asked to complete a
+   check, or to wait a minute if your network is busy."
+5. Sign in as usual, with your password and, if you have one, your second
+   factor.
+
+The "Unusual sign-in activity on your (site) account" mail that Kiln sends
+the owner when the pause starts also links to the page in step 1. It never
+carries an unlock link itself: that mail goes out on a pause anyone can
+cause, so it would be a link minted whenever an attacker liked.
+
+### Why the sign-in page never says an account is paused
+
+A paused account answers exactly as a wrong password does: "Email or password
+was incorrect". The unlock link on the sign-in page is shown to everyone,
+paused or not, and the request page answers every address with the same
+sentence. If any of these changed when an account was paused, a stranger could
+type an address and learn that it has an account, and that someone is
+guessing at it. The account owner is told by mail instead.
+
+### It adds no new trust
+
+The link goes only to the account's own address. Whoever can read that mailbox
+can already ask for a password reset, which lifts the pause and changes the
+password as well. The unlock link does less: it clears the pause and nothing
+else. It does not sign anyone in.
+
+### What it lifts and what it does not
+
+It clears the account's sign-in counter, so the account gets its 20 attempts
+back. It does not clear:
+
+- the per-network limits: the sign-in pages allow 40 requests a minute from
+  one IP address, and the human-verification check counts failed sign-ins per
+  IP address too;
+- the [human-verification](human-verification.md) budget: the free attempts
+  before a check are not given back, so if the operator turned the check on,
+  the next sign-in is likely to ask for one;
+- the two-factor code budget (5 codes in 15 minutes). If the person also ran
+  that out, their code is still refused until its window ends, or until they
+  reset their password.
+
+### Who gets a link
+
+A link is mailed only when all of these are true:
+
+- the address belongs to a confirmed account that has not been erased, and
+  is not the demo's shared account;
+- sign-in for that account is paused right now;
+- the account is a member of the site the request was made on (or is a
+  legacy account with no membership, on the default site). Ask on the site
+  you sign in to: the mail is in that site's name and the link works only on
+  that site's host;
+- fewer than 3 unlock links have gone to that address this hour.
+
+Otherwise nothing is sent, and the page says the same sentence anyway.
+
+The link works once and for 15 minutes. It stops working when the account's
+password is changed or reset, or its email address changes. A newer link does
+not cancel an older one.
+
+### Errors you can hit
+
+- "Enter the email address you sign in with." The **Email** field was empty.
+- No mail arrives. One of the conditions above was not met: the pause may
+  already have ended, the request was made on another site, or 3 links were
+  already sent this hour. Wait for the pause to end, or reset your password.
+- "This link has already been used or is no longer valid. If you still can't
+  sign in, request a new one." The link was used, is older than 15 minutes,
+  was opened on another site's host, or was cancelled by a password or email
+  change. Some mail security scanners click links as well as open them; if
+  yours does, the scanner may have used it. Click **Request a new link**.
+- "Too many requests" after submitting. Your IP address made more than 40
+  requests to the sign-in pages in a minute. Wait for the time it shows.
+- The sign-in still fails after the pause is lifted. Check the password. If
+  attempts continue, someone else may be guessing it and has paused the
+  account again: reset the password and turn on two-factor authentication or
+  a passkey.
+
+Admins see each link sent, used or refused in the site's
+[security log](security-events.md#what-is-recorded).
+
+For developers: the two actions behind these pages,
+`KilnCMS.Accounts.request_sign_in_unlock/2` and
+`KilnCMS.Accounts.redeem_sign_in_unlock/2`, are system-only. Only
+`KilnCMSWeb.SignInUnlockController` calls them, with `authorize?: false` and
+the request's site in `context:` (`KilnCMS.Security.AuthEvents.context/2`); a
+call that carries an actor is refused, an admin's included. The link's
+lifetime is `config :kiln_cms, KilnCMS.Accounts.SignInUnlock, ttl: {15,
+:minutes}`, and the hourly mail budget is `config :kiln_cms,
+KilnCMS.Accounts.AccountThrottle, unlock_mail_budget: 3`. The reasoning is in
+[ADR 0023](decisions/0023-an-unlock-link-lifts-only-the-account-pause-and-the-pause-stays-undisclosed.md).
+
 ## Breached passwords
 
 Whenever someone sets a password on your site (registers, changes it, resets

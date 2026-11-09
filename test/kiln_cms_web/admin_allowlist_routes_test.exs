@@ -15,8 +15,8 @@ defmodule KilnCMSWeb.AdminAllowlistRoutesTest do
   # (password, magic link, confirmation, the operator's OIDC provider).
   @gated ~w(
     /auth /auth/invite/:invite_token /auth/passkey/options /auth/passkey/verify /auth/site-sso
-    /auth/site-sso/callback /confirm_new_user/:token /magic_link/:token /password-reset/:token
-    /register /reset /setup /sign-in /sign-in/verify
+    /auth/site-sso/callback /auth/unlock/:unlock_token /confirm_new_user/:token /magic_link/:token
+    /password-reset/:token /register /reset /setup /sign-in /sign-in/unlock /sign-in/verify
   )
 
   @gated_api ~w(/api/auth/sign_in /api/auth/sign_in/verify)

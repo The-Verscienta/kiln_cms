@@ -1,0 +1,20 @@
+<div class="auth-page">
+  <div class="auth-card py-12">
+    <h2 class="auth-title mb-2">{gettext("Lift the sign-in pause")}</h2>
+    <%!-- One page for every refusal (#2250), including a link a mail scanner
+          has already clicked through. --%>
+    <p id="sign-in-unlock-invalid" role="alert" class="auth-muted mb-6">
+      {gettext(
+        "This link has already been used or is no longer valid. If you still can't sign in, request a new one."
+      )}
+    </p>
+
+    <a href={~p"/sign-in/unlock"} class="btn btn-primary btn-block">
+      {gettext("Request a new link")}
+    </a>
+
+    <p class="mt-6 text-center">
+      <a href={~p"/sign-in"} class="link auth-muted">{gettext("Back to sign in")}</a>
+    </p>
+  </div>
+</div>

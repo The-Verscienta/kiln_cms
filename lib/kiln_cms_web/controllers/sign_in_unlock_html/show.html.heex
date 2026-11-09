@@ -1,0 +1,22 @@
+<div class="auth-page">
+  <div class="auth-card py-12">
+    <h2 class="auth-title mb-2">{gettext("Lift the sign-in pause")}</h2>
+    <%!-- The same page for any token: opening the link spends nothing, so a
+          mail scanner that follows it cannot use it up (#2250). --%>
+    <p id="sign-in-unlock-confirm-help" class="auth-muted mb-6">
+      {gettext(
+        "This lifts the pause on signing in to your account. It doesn't sign you in: you sign in as usual afterwards."
+      )}
+    </p>
+
+    <.form for={%{}} id="sign-in-unlock-confirm-form" action={@action} method="post">
+      <button type="submit" class="btn btn-primary btn-block">
+        {gettext("Lift the pause")}
+      </button>
+    </.form>
+
+    <p class="mt-6 text-center">
+      <a href={~p"/sign-in"} class="link auth-muted">{gettext("Back to sign in")}</a>
+    </p>
+  </div>
+</div>
