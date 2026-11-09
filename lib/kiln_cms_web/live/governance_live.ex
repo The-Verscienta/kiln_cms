@@ -116,6 +116,17 @@ defmodule KilnCMSWeb.GovernanceLive do
          |> assign(:trail, Governance.trail(item.type, item.id, item.org_id))
          |> put_flash(:info, gettext("Redelivery queued."))}
 
+      # The page is stale: the endpoint was deleted after it rendered
+      # (#2330). Refresh the trail so the row loses its button.
+      {:error, :endpoint_deleted} ->
+        {:noreply,
+         socket
+         |> assign(:trail, Governance.trail(item.type, item.id, item.org_id))
+         |> put_flash(
+           :error,
+           gettext("That delivery's endpoint was deleted, so it can't be redelivered.")
+         )}
+
       _error ->
         {:noreply, put_flash(socket, :error, gettext("Couldn't redeliver that webhook."))}
     end
@@ -793,7 +804,15 @@ defmodule KilnCMSWeb.GovernanceLive do
         <li :for={lost <- @lost} id={"lost-retraction-" <> lost.id} class="space-y-0.5 py-2 text-sm">
           <div class="flex flex-wrap items-center gap-2">
             <code class="text-xs">{lost.event}</code>
-            <span class="truncate font-medium">{lost.endpoint_url || gettext("deleted endpoint")}</span>
+            <span :if={lost.endpoint_url} class="truncate font-medium">{lost.endpoint_url}</span>
+            <%!-- The row keeps its URL copy after the endpoint is deleted (#2330). --%>
+            <span
+              :if={is_nil(lost.endpoint_id)}
+              data-role="deleted-endpoint"
+              class="text-xs italic text-base-content/70"
+            >
+              ({gettext("deleted endpoint")})
+            </span>
             <span
               :if={lost.recovered_at}
               class="rounded bg-success/15 px-1.5 py-0.5 text-xs font-medium text-success-ink"

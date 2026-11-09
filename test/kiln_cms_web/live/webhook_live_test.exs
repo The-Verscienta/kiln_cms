@@ -641,6 +641,65 @@ defmodule KilnCMSWeb.WebhookLiveTest do
       assert Enum.any?(rows, &(&1.status == :pending))
     end
 
+    # #2330: deleting an endpoint nilifies its deliveries' endpoint_id; the
+    # rows stay as history but have nowhere to be redelivered to.
+    test "a delivery whose endpoint was deleted shows it and offers no redelivery",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      endpoint = seed_endpoint()
+
+      orphaned =
+        seed_delivery(endpoint, %{
+          endpoint_url: endpoint.url,
+          status: :failed,
+          attempts: 5,
+          last_error: "endpoint returned HTTP 503"
+        })
+
+      :ok = CMS.destroy_webhook_endpoint(endpoint, actor: admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/webhooks")
+
+      row = "#delivery-#{orphaned.id}"
+      assert has_element?(lv, row, "https://hooks.test/existing")
+      assert has_element?(lv, ~s(#{row} [data-role="deleted-endpoint"]), "(deleted endpoint)")
+      refute has_element?(lv, ~s(button[phx-click="redeliver"][phx-value-id="#{orphaned.id}"]))
+    end
+
+    test "with no URL copy, the row still says its endpoint was deleted", %{conn: conn} do
+      admin = authed_user(:admin)
+      endpoint = seed_endpoint()
+      orphaned = seed_delivery(endpoint, %{status: :failed, attempts: 5})
+      :ok = CMS.destroy_webhook_endpoint(endpoint, actor: admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/webhooks")
+
+      row = "#delivery-#{orphaned.id}"
+      assert has_element?(lv, ~s(#{row} [data-role="deleted-endpoint"]), "(deleted endpoint)")
+      refute has_element?(lv, "#{row} code", "https://hooks.test/existing")
+    end
+
+    # Another admin deletes the endpoint after this page rendered.
+    test "redelivering on a stale page says the endpoint was deleted", %{conn: conn} do
+      admin = authed_user(:admin)
+      endpoint = seed_endpoint()
+
+      failed =
+        seed_delivery(endpoint, %{endpoint_url: endpoint.url, status: :failed, attempts: 5})
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/webhooks")
+      button = ~s(button[phx-click="redeliver"][phx-value-id="#{failed.id}"])
+      assert has_element?(lv, button)
+
+      :ok = CMS.destroy_webhook_endpoint(endpoint, actor: admin)
+
+      html = lv |> element(button) |> render_click()
+
+      assert html =~ "That delivery&#39;s endpoint was deleted, so it can&#39;t be redelivered."
+      refute has_element?(lv, button)
+      assert has_element?(lv, ~s(#delivery-#{failed.id} [data-role="deleted-endpoint"]))
+    end
+
     test "ping queues a test delivery", %{conn: conn} do
       endpoint = seed_endpoint()
 

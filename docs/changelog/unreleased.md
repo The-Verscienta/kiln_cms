@@ -3378,6 +3378,24 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="redeliver-deleted-endpoint"></a>
+
+- **A delivery whose endpoint was deleted no longer offers a Redeliver button
+  that can only fail, and shows the URL it was sent to (#2330).** Deleting an
+  endpoint keeps its delivery history, but **Recent deliveries** on
+  `/editor/webhooks` showed those rows with an empty endpoint column and a
+  Redeliver button whose every click said "Couldn't redeliver that webhook."
+  Now each such row shows the URL the delivery was sent to, followed by
+  "(deleted endpoint)", and has no button. The **Retractions not delivered**
+  panel on a document's governance trail already hid the button; it now shows
+  the URL with the same "(deleted endpoint)" mark instead of the label alone.
+  If the endpoint is deleted after the page loaded, clicking Redeliver in
+  either place says "That delivery's endpoint was deleted, so it can't be
+  redelivered." and the row updates; other failures keep the old message.
+  A deleted endpoint's deliveries can't be replayed, because the signing
+  secret went with it: to reach the same receiver, add its URL as a new
+  endpoint ([Delete an endpoint](../webhooks.md#delete-an-endpoint)).
+
 <a id="single-field-handed-a-list"></a>
 
 - **A single number, date, link or other scalar custom field sent a list now

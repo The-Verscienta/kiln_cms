@@ -229,8 +229,15 @@ defmodule KilnCMSWeb.WebhookLive do
       case CMS.get_webhook_delivery(id, actor: actor, tenant: socket.assigns.current_org) do
         {:ok, delivery} ->
           case Webhooks.redeliver(delivery) do
+            # The page is stale: the endpoint was deleted after it rendered
+            # (#2330). Reload so the row loses its button.
             {:error, :endpoint_deleted} ->
-              put_flash(socket, :error, gettext("Couldn't redeliver that webhook."))
+              socket
+              |> load_deliveries()
+              |> put_flash(
+                :error,
+                gettext("That delivery's endpoint was deleted, so it can't be redelivered.")
+              )
 
             _queued ->
               socket |> load_deliveries() |> put_flash(:info, gettext("Redelivery queued."))
@@ -637,7 +644,20 @@ defmodule KilnCMSWeb.WebhookLive do
                   </td>
                   <td><code class="text-xs">{delivery.event}</code></td>
                   <td class="max-w-48 truncate">
-                    <code class="text-xs">{delivery.endpoint && delivery.endpoint.url}</code>
+                    <code :if={delivery.endpoint_id} class="text-xs">
+                      {delivery.endpoint && delivery.endpoint.url}
+                    </code>
+                    <%!-- The endpoint was deleted; the row keeps its URL copy (#2330). --%>
+                    <code :if={is_nil(delivery.endpoint_id) and delivery.endpoint_url} class="text-xs">
+                      {delivery.endpoint_url}
+                    </code>
+                    <span
+                      :if={is_nil(delivery.endpoint_id)}
+                      data-role="deleted-endpoint"
+                      class="text-xs italic text-base-content/70"
+                    >
+                      ({gettext("deleted endpoint")})
+                    </span>
                   </td>
                   <td>
                     <span class={[
@@ -656,7 +676,7 @@ defmodule KilnCMSWeb.WebhookLive do
                   </td>
                   <td class="text-right">
                     <button
-                      :if={delivery.status != :pending}
+                      :if={delivery.status != :pending and not is_nil(delivery.endpoint_id)}
                       type="button"
                       phx-click="redeliver"
                       phx-value-id={delivery.id}
