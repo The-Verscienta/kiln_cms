@@ -346,6 +346,11 @@ msgid_plural "%{count} open tasks anchored to a block"
 msgstr[0] "%{count} tâche ouverte rattachée à un bloc"
 msgstr[1] "%{count} tâches ouvertes rattachées à un bloc"
 
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} or more registrations are waiting for approval"
+msgstr "%{count} inscriptions ou plus attendent une approbation"
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} other record links here. Readers will no longer be able to follow that link. Unpublish?"
@@ -615,6 +620,11 @@ msgid "%{count} worker"
 msgid_plural "%{count} workers"
 msgstr[0] "%{count} processus"
 msgstr[1] "%{count} processus"
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count}+"
+msgstr "%{count}+"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -1277,6 +1287,13 @@ msgid "1 published document is in no menu."
 msgid_plural "%{count} published documents are in no menu."
 msgstr[0] "1 document publié n'est dans aucun menu."
 msgstr[1] "%{count} documents publiés ne sont dans aucun menu."
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 registration is waiting for approval"
+msgid_plural "%{count} registrations are waiting for approval"
+msgstr[0] "1 inscription attend une approbation"
+msgstr[1] "%{count} inscriptions attendent une approbation"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -3142,6 +3159,11 @@ msgstr "Appliqué"
 msgid "Applied when a new record leaves this field empty — never on later edits."
 msgstr "S'applique quand un nouvel enregistrement laisse ce champ vide, jamais lors des modifications ultérieures."
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Applies to people who sign up with a password on this site. Invitations, this site's single sign-on and existing accounts are not affected. Turning it off doesn't approve anyone already waiting."
+msgstr "S'applique aux personnes qui s'inscrivent avec un mot de passe sur ce site. Les invitations, l'authentification unique de ce site et les comptes existants ne sont pas concernés. Le désactiver n'approuve personne parmi ceux qui attendent déjà."
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
@@ -3169,6 +3191,7 @@ msgid "Applying renames…"
 msgstr "Application des renommages…"
 
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Approve"
 msgstr "Approuver"
@@ -3178,10 +3201,25 @@ msgstr "Approuver"
 msgid "Approve & publish"
 msgstr "Approuver et publier"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Approve or reject people who sign up on this site."
+msgstr "Approuver ou refuser les personnes qui s'inscrivent sur ce site."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Approved %{email}. They can now read this site as a viewer."
+msgstr "%{email} approuvé. Cette personne peut maintenant lire ce site en tant que lecteur."
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Approver"
 msgstr "Approbateur"
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Approving…"
+msgstr "Approbation…"
 
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
@@ -7496,6 +7534,11 @@ msgstr "E-mail non confirmé"
 msgid "Email not confirmed doesn't affect the role or password sign-in. A site's own single sign-on won't sign in to this account until the email is confirmed."
 msgstr "Un e-mail non confirmé n'affecte ni le rôle ni la connexion par mot de passe. L'authentification unique propre à un site ne se connectera pas à ce compte tant que l'e-mail n'est pas confirmé."
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Email not confirmed yet"
+msgstr "Adresse e-mail pas encore confirmée"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Email notifications"
@@ -10729,6 +10772,7 @@ msgstr "En ligne, aucune modification non publiée — rien à publier"
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
+#: lib/kiln_cms_web/live/registrations_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
@@ -11731,6 +11775,11 @@ msgstr "Nouvelle position en attente"
 msgid "New recovery codes generated — the old ones no longer work."
 msgstr "Nouveaux codes de récupération générés — les anciens ne fonctionnent plus."
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "New registrations wait for an administrator's approval"
+msgstr "Les nouvelles inscriptions attendent l'approbation d'un administrateur"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "New release"
@@ -12560,6 +12609,16 @@ msgstr "N° %{position} dans sa liste"
 #, elixir-autogen, elixir-format
 msgid "Nobody follows this site yet."
 msgstr "Personne ne suit encore ce site."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody has been rejected."
+msgstr "Personne n'a été refusé."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody is waiting."
+msgstr "Personne n'attend."
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -13407,6 +13466,11 @@ msgstr "Ouvrir la boîte de réception"
 msgid "Open it"
 msgstr "L’ouvrir"
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Open registration is switched off for this deployment, so nobody can sign up and this setting has no effect. People join through invitations."
+msgstr "L'inscription ouverte est désactivée pour ce déploiement : personne ne peut s'inscrire et ce réglage n'a aucun effet. Les personnes rejoignent le site par invitation."
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Open search"
@@ -13910,6 +13974,12 @@ msgstr "Paiement en retard"
 msgid "Pending"
 msgstr "En attente"
 
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgctxt "role"
+msgid "Pending approval"
+msgstr "En attente d'approbation"
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Pending invitations"
@@ -13920,6 +13990,11 @@ msgstr "Invitations en attente"
 #, elixir-autogen, elixir-format
 msgid "People viewing"
 msgstr "Personnes en train de consulter"
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "People who signed up on this site and are waiting for an administrator. Until approved they can sign in, but can only read what's public."
+msgstr "Les personnes inscrites sur ce site qui attendent un administrateur. Tant qu'elles ne sont pas approuvées, elles peuvent se connecter mais ne lisent que ce qui est public."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -15054,6 +15129,37 @@ msgstr "Région"
 msgid "Register this callback URL with your provider:"
 msgstr "Enregistrez cette URL de retour auprès de votre fournisseur :"
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Registered %{at}"
+msgstr "Inscrit le %{at}"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Registration approved"
+msgstr "Inscription approuvée"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Registration awaiting approval"
+msgstr "Inscription en attente d'approbation"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Registration rejected"
+msgstr "Inscription refusée"
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Registration settings saved."
+msgstr "Réglages d'inscription enregistrés."
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Registrations"
+msgstr "Inscriptions"
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reindex now"
@@ -15063,6 +15169,37 @@ msgstr "Réindexer maintenant"
 #, elixir-autogen, elixir-format
 msgid "Reindexing this site."
 msgstr "Réindexation de ce site en cours."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reject"
+msgstr "Refuser"
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reject %{email}? The account is kept but gets no access to this site, and they can't register here again with this address."
+msgstr "Refuser %{email} ? Le compte est conservé mais n'a aucun accès à ce site, et cette adresse ne pourra plus s'inscrire ici."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rejected"
+msgstr "Refusées"
+
+#: lib/kiln_cms_web/components/role_display.ex
+#, elixir-autogen, elixir-format
+msgctxt "role"
+msgid "Rejected"
+msgstr "Refusé"
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rejected %{at}"
+msgstr "Refusé le %{at}"
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rejected %{email}."
+msgstr "%{email} refusé."
 
 #: lib/kiln_cms/cms/field_types/link.ex
 #, elixir-autogen, elixir-format
@@ -16270,6 +16407,7 @@ msgstr "sam."
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
+#: lib/kiln_cms_web/live/registrations_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/security_txt_live.ex
@@ -16500,6 +16638,7 @@ msgstr "En enregistrant ceci, le contenu de ce site est envoyé à l'URL ci-dess
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #: lib/kiln_cms_web/live/password_policy_live.ex
+#: lib/kiln_cms_web/live/registrations_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
@@ -17162,6 +17301,7 @@ msgstr "Configuration…"
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
+#: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Settings"
 msgstr "Paramètres"
@@ -18808,6 +18948,11 @@ msgstr "Cette adresse a reçu trop d’invitations au cours de la dernière heur
 
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
+msgid "That address has registered on this site and is waiting for approval — approve it under Registrations."
+msgstr "Cette adresse s'est inscrite sur ce site et attend une approbation : approuvez-la dans Inscriptions."
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
 msgid "That address is already invited — resend it from Pending invitations."
 msgstr "Cette adresse est déjà invitée — renvoyez l’invitation depuis Invitations en attente."
 
@@ -18815,6 +18960,11 @@ msgstr "Cette adresse est déjà invitée — renvoyez l’invitation depuis Inv
 #, elixir-autogen, elixir-format
 msgid "That address is on the mail suppression list, so the invitation would not arrive. Clear it under Mail first."
 msgstr "Cette adresse figure sur la liste de suppression des e-mails, l’invitation n’arriverait donc pas. Retirez-la d’abord dans E-mail."
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "That address registered on this site and was rejected."
+msgstr "Cette adresse s'est inscrite sur ce site et a été refusée."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -18996,6 +19146,11 @@ msgstr "Ce chemin est déjà l'URL propre de la cible."
 msgid "That path is no longer listed."
 msgstr "Ce chemin n'est plus dans la liste."
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "That person hasn't confirmed their email address yet, so it can't be approved."
+msgstr "Cette personne n'a pas encore confirmé son adresse e-mail, l'inscription ne peut donc pas être approuvée."
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "That person is already on this site."
@@ -19025,6 +19180,11 @@ msgstr "Cette plage est déjà bloquée."
 #, elixir-autogen, elixir-format
 msgid "That range is too broad: use at least /8 for IPv4 or /16 for IPv6."
 msgstr "Cette plage est trop large : utilisez au moins /8 pour IPv4 ou /16 pour IPv6."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "That registration has already been decided."
+msgstr "Cette inscription a déjà été traitée."
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -19697,6 +19857,16 @@ msgstr "Le serveur de messagerie destinataire a refusé %{to}. Vérifiez l'adres
 msgid "The records this field is on. Each ticked type gets its own copy."
 msgstr "Les enregistrements qui portent ce champ. Chaque type coché en reçoit sa propre copie."
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "The registration could not be updated."
+msgstr "L'inscription n'a pas pu être mise à jour."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "The registration settings could not be saved."
+msgstr "Les réglages d'inscription n'ont pas pu être enregistrés."
+
 #: lib/kiln_cms_web/components/compliance_components.ex
 #, elixir-autogen, elixir-format
 msgid "The required disclaimer is missing. Add it verbatim: “%{disclaimer}”"
@@ -20026,6 +20196,11 @@ msgstr "Il n’y a pas encore de contenu de ce type pour l’essayer."
 msgid "These addresses hard-bounced and are skipped on future sends. Remove one to let it receive mail again."
 msgstr "Ces adresses ont renvoyé un rejet définitif et sont ignorées lors des prochains envois. Supprimez-en une pour qu'elle puisse de nouveau recevoir des e-mails."
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "These can't be approved until they confirm their address, since anyone can sign up with an address they don't own. You can reject them now."
+msgstr "Elles ne peuvent pas être approuvées avant d'avoir confirmé leur adresse, car n'importe qui peut s'inscrire avec une adresse qui ne lui appartient pas. Vous pouvez les refuser dès maintenant."
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "These custom fields will be discarded"
@@ -20120,6 +20295,11 @@ msgstr "Ce compte n'a rien écrit."
 #, elixir-autogen, elixir-format
 msgid "This account was erased on %{when}. Nothing personal remains on it."
 msgstr "Ce compte a été effacé le %{when}. Il n'y reste rien de personnel."
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "This account's registration on this site has not been approved, so it reads nothing gated here. What you save applies once it is approved."
+msgstr "L'inscription de ce compte sur ce site n'a pas été approuvée : il ne lit ici aucun contenu réservé. Ce que vous enregistrez s'appliquera une fois l'inscription approuvée."
 
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
@@ -22022,10 +22202,25 @@ msgstr "Visuel"
 msgid "Visual separator between sections"
 msgstr "Séparateur visuel entre les sections"
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting"
+msgstr "En attente"
+
 #: lib/kiln_cms_web/controllers/sign_in_unlock_html/new.html.heex
 #, elixir-autogen, elixir-format
 msgid "Waiting also works: the pause lifts on its own after a few minutes."
 msgstr "Attendre fonctionne aussi : la pause se lève d’elle-même après quelques minutes."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting for approval"
+msgstr "En attente d'approbation"
+
+#: lib/kiln_cms_web/live/account_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting for approval on %{site}. You can sign in, but you can only read what's public here until an administrator approves your registration."
+msgstr "En attente d'approbation sur %{site}. Vous pouvez vous connecter, mais vous ne lirez ici que ce qui est public jusqu'à ce qu'un administrateur approuve votre inscription."
 
 #: lib/kiln_cms/notifications.ex
 #, elixir-autogen, elixir-format
@@ -22821,6 +23016,11 @@ msgstr "Vous n’avez pas la permission de modifier la politique de mots de pass
 msgid "You don't have permission to change this site's push key."
 msgstr "Vous n'avez pas l'autorisation de modifier la clé push de ce site."
 
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's registration."
+msgstr "Vous n'avez pas l'autorisation de modifier l'inscription de ce site."
+
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's safety fields."
@@ -22850,6 +23050,11 @@ msgstr "Vous n'avez pas l'autorisation de modifier l'authentification unique de 
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this."
 msgstr "Vous n'avez pas la permission de modifier ceci."
+
+#: lib/kiln_cms_web/live/registrations_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to decide registrations on this site."
+msgstr "Vous n'avez pas l'autorisation de traiter les inscriptions de ce site."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -23179,6 +23384,16 @@ msgstr "Votre fournisseur ne peut connecter que des adresses de ces domaines, un
 #, elixir-autogen, elixir-format
 msgid "Your recovery codes — save them now, they won't be shown again."
 msgstr "Vos codes de récupération — enregistrez-les maintenant, ils ne seront plus affichés."
+
+#: lib/kiln_cms_web/live/account_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your registration on %{site} wasn't approved."
+msgstr "Votre inscription sur %{site} n'a pas été approuvée."
+
+#: lib/kiln_cms_web/controllers/billing_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Your registration on this site hasn't been approved, so you can't join yet."
+msgstr "Votre inscription sur ce site n'a pas été approuvée, vous ne pouvez donc pas encore adhérer."
 
 #: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #, elixir-autogen, elixir-format

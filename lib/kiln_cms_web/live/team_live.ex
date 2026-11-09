@@ -40,6 +40,7 @@ defmodule KilnCMSWeb.TeamLive do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Errors.InvitationRefused
   alias KilnCMS.Accounts.Invitations
+  alias KilnCMS.Accounts.Registrations
   alias KilnCMS.Accounts.Role
   alias KilnCMS.Accounts.RoleGrant
   alias KilnCMSWeb.RoleDisplay
@@ -486,6 +487,7 @@ defmodule KilnCMSWeb.TeamLive do
     |> assign(:access, access(members, site_admins, org))
     |> assign(:roles, roles)
     |> assign(:invitations, invitations)
+    |> assign(:pending_registrations, Registrations.pending_count(org, actor: actor))
   end
 
   # Platform admins — `User.role == :admin`, or a live admin grant — reach every
@@ -538,6 +540,14 @@ defmodule KilnCMSWeb.TeamLive do
 
       :already_invited ->
         gettext("That address is already invited — resend it from Pending invitations.")
+
+      :pending_registration ->
+        gettext(
+          "That address has registered on this site and is waiting for approval — approve it under Registrations."
+        )
+
+      :rejected_registration ->
+        gettext("That address registered on this site and was rejected.")
 
       :suppressed ->
         gettext(
@@ -752,6 +762,26 @@ defmodule KilnCMSWeb.TeamLive do
           <h2 class="text-lg font-medium">
             {gettext("Members")} ({length(@members) + length(@site_admins)})
           </h2>
+
+          <%!-- Registrations awaiting approval (#2251) are not members, so the
+                list below leaves them out; this says where they are. --%>
+          <p :if={@pending_registrations > 0} id="team-pending-registrations" class="text-sm">
+            <.link navigate={~p"/editor/registrations"} class="link">
+              <%!-- A bounded count (`Registrations.count_cap/0`): at the cap
+                    it says "or more" rather than a number it did not read. --%>
+              {if @pending_registrations >= Registrations.count_cap(),
+                do:
+                  gettext("%{count} or more registrations are waiting for approval",
+                    count: @pending_registrations
+                  ),
+                else:
+                  ngettext(
+                    "1 registration is waiting for approval",
+                    "%{count} registrations are waiting for approval",
+                    @pending_registrations
+                  )}
+            </.link>
+          </p>
 
           <form phx-submit="add_member" class="card card-pad space-y-4" id="add-member-form">
             <div class="grid gap-4 sm:grid-cols-3">

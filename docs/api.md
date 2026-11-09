@@ -150,7 +150,8 @@ curl -s -X POST http://localhost:4000/api/auth/sign_in \
 resolved to** — the same per-org authorization boundary the server enforces
 (#419), not a single global role. It therefore **changes with the host you dial**
 (`acme.example.com` vs `beta.example.com`), and is `"none"` on an org where the
-account has no tier. Shape UI on it only for the org you signed in against.
+account has no tier. That includes an org where the account's registration is
+awaiting approval or was rejected (#2251). Shape UI on it only for the org you signed in against.
 
 > The account must already exist with an `:editor` or `:admin` role — signup
 > always creates a `:viewer`. See

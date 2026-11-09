@@ -42,6 +42,8 @@ defmodule KilnCMS.Accounts.OrgMembership do
     # auto-index FK columns, so add one to avoid a sequential scan.
     custom_indexes do
       index [:organization_id]
+      # The registration queue (#2251) lists one org's rows by status.
+      index [:organization_id, :status]
     end
   end
 
@@ -154,16 +156,101 @@ defmodule KilnCMS.Accounts.OrgMembership do
       filter expr(user_id == ^arg(:user_id))
     end
 
+    # Active rows only (#2251): a registration awaiting approval, or a rejected
+    # one kept, is not a member. The rosters built on this read (the Team page,
+    # the mention roster, `CMS.ReadGrants.named?/3`) must not count it, and
+    # `:registration_queue` below is where those rows are listed. `:for_user`
+    # and `get_org_membership` stay unfiltered: affiliation needs every row.
     read :for_org do
       description "The members of an org (backs per-org RBAC administration)."
       argument :organization_id, :uuid, allow_nil?: false
-      filter expr(organization_id == ^arg(:organization_id))
+      filter expr(organization_id == ^arg(:organization_id) and status == :active)
+    end
+
+    # ── registration approval (#2251) ──────────────────────────────────────
+    #
+    # A self-registration on a site that requires approval records a `:pending`
+    # membership here; `KilnCMS.Accounts.Scoping` grants nothing through a row
+    # that is not `:active`. `status` is in no `accept` list: these three
+    # actions are the only writes that set it.
+
+    # The registration's own write, from `Changes.QueueRegistration` inside the
+    # user's create. System-only (see the policies): a person cannot queue
+    # anyone, themselves included.
+    create :queue_registration do
+      description "Record a self-registration awaiting a site admin's approval (system-only)."
+      accept [:organization_id, :user_id]
+      change set_attribute(:status, :pending)
+      change set_attribute(:role, :viewer)
+      change set_attribute(:audiences, [])
+      change KilnCMS.Security.Changes.RecordRegistration
+    end
+
+    # A site admin lets the applicant in: the row becomes an ordinary `:viewer`
+    # membership, with the role and audiences it was queued with. A `:rejected`
+    # row may be approved too, so a mistaken rejection is not final. Re-read and
+    # locked first, so two admins deciding at once (or a stale page) cannot both
+    # win: `DecideRegistration` refuses a row that is no longer `:pending`.
+    update :approve_registration do
+      description "Approve a registration awaiting a decision on this site."
+      accept []
+      require_atomic? false
+      change get_and_lock_for_update()
+      change {KilnCMS.Accounts.Changes.DecideRegistration, outcome: :approve}
+
+      # After the commit, so the reconnect it causes is re-authorized against
+      # the decided row, not the pending one still visible before COMMIT.
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :registration_approved, user_id: :user_id, after_commit?: true}
+
+      change KilnCMS.Security.Changes.RecordRegistration
+    end
+
+    # A site admin turns the applicant away. The account and the row are kept
+    # (`:rejected`), so the address cannot simply register here again; erasing
+    # a rejected account is a later change. Allowed on an unconfirmed row too,
+    # so a wave of bot sign-ups can be cleared without waiting for them.
+    update :reject_registration do
+      description "Reject a registration awaiting a decision on this site."
+      accept []
+      require_atomic? false
+      change get_and_lock_for_update()
+      change {KilnCMS.Accounts.Changes.DecideRegistration, outcome: :reject}
+
+      # After the commit, so the reconnect it causes is re-authorized against
+      # the decided row, not the pending one still visible before COMMIT.
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :registration_rejected, user_id: :user_id, after_commit?: true}
+
+      change KilnCMS.Security.Changes.RecordRegistration
+    end
+
+    # The queue a site admin works through: one org's `:pending` rows, or its
+    # `:rejected` ones. Admitted to an admin of the org the argument names (the
+    # policies); `KilnCMS.Accounts.Registrations.queue/2` adds the applicant's
+    # address to each row.
+    read :registration_queue do
+      description "One site's registrations awaiting a decision, or the rejected ones kept."
+      argument :organization_id, :uuid, allow_nil?: false
+
+      argument :status, :atom do
+        constraints one_of: [:pending, :rejected]
+        default :pending
+        allow_nil? false
+      end
+
+      filter expr(organization_id == ^arg(:organization_id) and status == ^arg(:status))
+      prepare build(sort: [inserted_at: :asc, id: :asc])
     end
   end
 
   policies do
     # Managing memberships is a platform-operator task for now — admins only.
+    # Except queueing a registration (#2251), which is the registration's own
+    # system write and no person's: the bypass does not grant it, so the
+    # system-only policy below decides it for an admin too.
     bypass KilnCMS.Accounts.Checks.PlatformAdmin do
+      forbid_if action(:queue_registration)
       authorize_if always()
     end
 
@@ -176,17 +263,35 @@ defmodule KilnCMS.Accounts.OrgMembership do
       authorize_if always()
     end
 
+    # Each policy below names its actions rather than an `action_type`, so the
+    # registration actions (#2251) are decided by their own policies alone: Ash
+    # ANDs every policy that applies, and the blanket write refusal or the
+    # self-only read would otherwise refuse (or filter to nothing) a site admin
+    # deciding a registration. An action no policy names is refused outright.
+
     # A user may read their own memberships (to populate their org switcher).
-    policy action_type(:read) do
+    policy action([:read, :for_user, :for_org]) do
       authorize_if expr(user_id == ^actor(:id))
     end
 
-    # Creating/changing/removing memberships is admin-only. Scoped to write
-    # actions ONLY — a bare `policy always()` would also match `:read` and, since
-    # Ash AND-combines every applicable policy, would nullify the self-read grant
-    # above (a hard forbid, not a filter).
-    policy action_type([:create, :update, :destroy]) do
+    # Creating/changing/removing memberships is admin-only (the bypass above).
+    policy action([:create, :update, :destroy, :grant_temporary_role, :expire_role_grant]) do
       forbid_if always()
+    end
+
+    # The registration's own write — system code only, from
+    # `Changes.QueueRegistration`.
+    policy action(:queue_registration) do
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: :registrations, action: :queue_registration}
+    end
+
+    # Listing and deciding registrations: an admin of the org the row (or, for
+    # the queue, the argument) names — never the request's host, so another
+    # site's admin is refused whichever host they ask from. A temporary platform
+    # admin passes the bypass and is refused by `StandingAdminOnly` below.
+    policy action([:registration_queue, :approve_registration, :reject_registration]) do
+      authorize_if KilnCMS.Accounts.Checks.AdminOfMembershipOrg
     end
   end
 
@@ -277,6 +382,23 @@ defmodule KilnCMS.Accounts.OrgMembership do
       default %{}
       allow_nil? false
       public? false
+    end
+
+    # Whether this row grants anything (#2251). `:active` is every membership
+    # that predates registration approval and every one written since by any
+    # path but a queued registration; `:pending` awaits a site admin; `:rejected`
+    # was turned away and is kept. `KilnCMS.Accounts.Scoping` treats a row that is
+    # not `:active` as no tier, no audiences and no scope on its site.
+    attribute :status, :atom do
+      constraints one_of: [:active, :pending, :rejected]
+      default :active
+      allow_nil? false
+      public? true
+    end
+
+    # When a registration was approved or rejected; nil for every other row.
+    attribute :decided_at, :utc_datetime_usec do
+      public? true
     end
 
     timestamps()

@@ -52,7 +52,7 @@ defmodule KilnCMS.Accounts.SiteAudiences do
   Where the account's audiences on a site come from — the three affiliation branches of
   `KilnCMS.Accounts.Scoping.audiences/2`.
   """
-  @type source :: :membership | :legacy | :none
+  @type source :: :membership | :legacy | :none | :pending | :rejected
 
   @doc """
   The audiences `user` reads on `org_id`, and which branch they come from, given
@@ -65,11 +65,17 @@ defmodule KilnCMS.Accounts.SiteAudiences do
   `User.audiences` column: what a save — or the post-deploy
   `KilnCMS.Accounts.LegacyAudiencesWorker` — will carry onto a membership. Until
   then `Scoping` grants such an account nothing (1.0 removed the fallback, #1543).
+
+  A membership that is not `:active` — a registration awaiting approval or
+  rejected (#2251) — answers `{:pending, []}` or `{:rejected, []}`: `Scoping`
+  grants nothing through it, whatever audiences the row holds.
   """
   @spec for_site(map(), [map()], String.t()) :: {source(), [atom()]}
   def for_site(user, memberships, org_id) when is_list(memberships) do
     case Enum.find(memberships, &(&1.organization_id == org_id)) do
-      %{} = membership -> {:membership, list(membership.audiences)}
+      %{status: :active} = membership -> {:membership, list(membership.audiences)}
+      %{status: :rejected} -> {:rejected, []}
+      %{} -> {:pending, []}
       nil when memberships == [] -> {:legacy, list(Map.get(user, :audiences))}
       nil -> {:none, []}
     end

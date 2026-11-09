@@ -343,7 +343,8 @@ expired invitation sent again, with `invitation:`). A refusal is
 `{:error, %Ash.Error.Invalid{}}` carrying a
 `KilnCMS.Accounts.Errors.InvitationRefused`;
 `InvitationRefused.reason/1` returns `:already_member`, `:already_invited`,
-`:suppressed` or `:mail_budget`. Every read and write runs as `actor`, so an
+`:pending_registration`, `:rejected_registration`, `:suppressed` or
+`:mail_budget`. Every read and write runs as `actor`, so an
 editor, a viewer or no actor gets `Ash.Error.Forbidden` before the address is
 looked up. `invite_to_org/2`, `resend_invitation/3`, `revoke_invitation/2` and
 `list_invitations_for_org/2` are the single steps. The accept actions are
@@ -358,6 +359,13 @@ On the Team page:
 - **"That address is already invited — resend it from Pending invitations."**
   A live invitation exists. Use **Resend**, or revoke it and invite again with a
   different tier.
+- **"That address has registered on this site and is waiting for approval —
+  approve it under Registrations."** The person signed up here while the site
+  [requires approval](#approving-registrations). Approve them on
+  **Registrations**, then change their tier on their Team row.
+- **"That address registered on this site and was rejected."** An admin
+  turned their registration down. To let them in after all, approve them from
+  the **Rejected** tab ([Undo a rejection](#undo-a-rejection)).
 - **"That address is on the mail suppression list, so the invitation would not
   arrive. Clear it under Mail first."** The address hard-bounced before. Remove
   it from the suppression list on **Mail** (`/editor/mail`, instance-wide) or
@@ -393,6 +401,285 @@ On the invitation page:
 
 Accepting *through* single sign-on is not supported: the invitee accepts with a
 password or with an account they already have.
+
+## Approving registrations
+
+While open registration is on (`:registration_enabled`, the default), anyone
+can create an account with a password at `/register`. A site can make those
+sign-ups wait for an administrator: the account is still created, but it gets
+no access on the site until an admin approves it on the **Registrations** page.
+Rejecting keeps the account and keeps it out.
+
+This is the first of three parts of
+[#2251](https://github.com/The-Verscienta/kiln_cms/issues/2251). Two things
+are **not built yet**:
+
+- **Admins are not notified** when someone registers. Check the
+  **Registrations** page yourself. Platform admins also see a count on
+  **Team**.
+- **The applicant gets no email** when you approve or reject them. If they
+  need to know, tell them yourself. The account page says it on their next
+  visit ([What an applicant can do while they wait](#what-an-applicant-can-do-while-they-wait)).
+
+The reasoning is in
+[ADR 0024](decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md).
+
+### Turn approval on
+
+You need the admin tier on the site: a site admin, or a platform admin.
+
+1. Open the console on the site's host, then **Registrations** under
+   **Sign-in & access** in the sidebar (`/editor/registrations`).
+2. Scroll to **Settings** at the foot of the page and tick
+   **New registrations wait for an administrator's approval**.
+3. Click **Save**. You see "Registration settings saved."
+
+The next password sign-up on this site waits for approval. Approval is off by
+default, set per site, and has no environment variable. Saving the setting is
+recorded in the [security log](security-events.md) as *Site setting changed*
+(`setting` `site_registration`).
+
+Only password sign-ups at `/register` on this site's host wait. These are
+never queued:
+
+- an accepted [invitation](#invite-someone-to-a-site), which an admin chose;
+- a sign-in through this site's own single sign-on, or through the
+  deployment's single sign-on (`OIDC_*`);
+- an account that already exists, and the first admin created in `/setup`.
+
+Turning approval off again approves nobody: everyone already waiting keeps
+waiting until an admin decides. If the deployment has switched open
+registration off, the page says "Open registration is switched off for this
+deployment, so nobody can sign up and this setting has no effect. People join
+through invitations."
+
+### What an applicant can do while they wait
+
+The sign-up page looks and works as it always has, and does not say the
+account is waiting. While their registration waits:
+
+- **They can sign in.** **Your account** (`/account`) says "Waiting for
+  approval on (site). You can sign in, but you can only read what's public
+  here until an administrator approves your registration."
+- **They read only what an anonymous visitor reads**, on every surface: pages,
+  JSON:API, GraphQL, MCP and media. No members-only content and no drafts,
+  whatever audiences the waiting row holds.
+- **They have no access on any other site either**, the default site
+  included. An account that registered on site A and waits there is not a
+  viewer anywhere.
+- **The console turns them away**, as it does any reader.
+  `POST /api/auth/sign_in` succeeds and reports `"role": "none"`.
+- **They cannot comment** where viewers may.
+- **They cannot buy a paid membership on this site.** Checkout sends them back
+  to `/account` with "Your registration on this site hasn't been approved, so
+  you can't join yet." On a site that requires approval this applies to any
+  account not let in there yet, not only applicants: paying is not a way past
+  the queue ([Paying is not a way in](#paying-is-not-a-way-in)).
+- **They are on no roster**: not in Team's member list, not offered as a
+  mention, not counted in "who has this tier".
+
+On `/editor/accounts/(id)`, their entry under **Sites** reads
+**On this site:** *Pending approval* (or *Rejected*) rather than a tier.
+
+### Approve or reject someone
+
+You need the admin tier on the site whose registrations these are. An admin
+of another site is refused, whichever host they ask from.
+
+1. Open **Registrations** (`/editor/registrations`). The **Waiting** tab lists
+   people who signed up here, oldest first, under
+   **Waiting for approval (n)**: the address, the name if they gave one, and
+   "Registered (date and time) UTC". With nobody waiting, you see "Nobody is
+   waiting."
+2. To let someone in, click **Approve** on their row. You see "Approved
+   (address). They can now read this site as a viewer." They leave the list,
+   appear in Team's member list as a *Viewer* with no audiences, and any page
+   they have open reconnects with the new access. Change their tier, custom
+   role or audiences afterwards as for any member.
+3. To turn someone away, click **Reject** and confirm "Reject (address)? The
+   account is kept but gets no access to this site, and they can't register
+   here again with this address." You see "Rejected (address)." and they move
+   to the **Rejected** tab.
+
+A rejected account can still sign in, reads only what's public on every site,
+and its account page says "Your registration on (site) wasn't approved." To
+remove the account itself, a platform admin uses
+[Removing an account](#removing-an-account). Removing rejected accounts
+automatically is a later part of #2251.
+
+Approving gives exactly the *Viewer* tier on this site and nothing on other
+sites. Without approval, a password sign-up is a viewer on the **default
+site** only, whichever host it signed up on.
+
+### Unconfirmed addresses cannot be approved
+
+Below the waiting list, **Email not confirmed yet (n)** lists people who
+haven't confirmed their address. Each row has **Reject** and no **Approve**:
+"These can't be approved until they confirm their address, since anyone can
+sign up with an address they don't own. You can reject them now."
+
+Approving an address nobody has proved they own would give the site to
+whoever typed it. Once the person confirms, they move up to
+**Waiting for approval** the next time the page loads. The two lists are paged
+separately, so a wave of unconfirmed sign-ups never pushes the people you can
+approve off the first page. Rejecting does not wait
+for confirmation, so a wave of bot sign-ups can be cleared straight away.
+
+### Undo a rejection
+
+A rejection is not final.
+
+1. On **Registrations**, click the **Rejected** tab
+   (`/editor/registrations?status=rejected`). Each row adds
+   "Rejected (date and time) UTC".
+2. Click **Approve** on the row. It is offered only for a confirmed address.
+   You see "Approved (address). They can now read this site as a viewer."
+
+A rejected registration cannot be put back to waiting or rejected again; the
+**Rejected** tab only offers **Approve**.
+
+### Long queues
+
+**Waiting for approval**, **Email not confirmed yet** and **Rejected** each
+show 50 registrations at a time, oldest first, with their own **Load more**
+for the next 50. The counts in the two waiting headings are the whole queue,
+up to 100: from there they read "100+". Approving or rejecting removes only
+that row, so the rest of what you have loaded stays where it was.
+
+**Team** (`/editor/team`, platform admins) shows a link above the member list
+while anyone is waiting: "1 registration is waiting for approval",
+"(n) registrations are waiting for approval", or "100 or more registrations
+are waiting for approval" once it reaches 100 (it stops counting there).
+
+### Invitations and waiting registrations
+
+An invitation is never queued. Accepting one gives the invited tier on the
+site, even on a site that requires approval.
+
+**Add or invite** on Team refuses an address that has a registration on the
+site:
+
+- waiting: approve it on **Registrations**, then change the tier on Team;
+- rejected: approve it from the **Rejected** tab, then change the tier.
+
+If someone was invited, then signed up with a password on the same site before
+accepting, their registration waits. Accepting the invitation afterwards
+leaves it waiting: approve it on **Registrations**. Accepting an invitation
+over a waiting registration is a later part of #2251.
+
+### Sign-ups on another site's host
+
+Every site's setting applies to sign-ups on its own host, with one exception
+for the **default site**. An account with no membership anywhere is a viewer on
+the default site. So a sign-up on site B, where approval is off, would
+otherwise be a default-site viewer that no one reviewed:
+
+| Site signed up on requires approval | Default site requires approval | The registration |
+|---|---|---|
+| yes | either | waits on the site signed up on |
+| no (a site other than the default) | yes | waits on the **default site**, in its admins' queue |
+| no | no | is not queued: a viewer on the default site, as before |
+
+While it waits on the default site, the account has no access on site B either
+(it never had any there). `/account` lists every site where the account waits
+or was rejected, on any host, so the applicant sees "Waiting for approval on
+(default site name)" on B's host too.
+
+### Paying is not a way in
+
+A paid membership grants its audiences through a membership on the site, and
+buying one used to create a *Viewer* membership on a site where the buyer had
+none. On a site that requires approval that would let anyone pay past the
+queue, so there:
+
+- checkout is refused for an account that has not been let in: one with a
+  waiting or rejected registration here, or with no access here at all. It
+  sees "Your registration on this site hasn't been approved, so you can't join
+  yet.";
+- "let in" means any access on the site: a membership an admin approved or
+  made, or, on the default site, the membership-less viewer every account was
+  before approval existed. Turning approval on does not stop existing readers
+  paying;
+- a paid membership reached another way (an admin's comp, one that predates
+  the setting) creates no membership for such an account. Once an admin
+  approves or adds it, the next billing update puts its audiences on that
+  membership.
+
+On a site that does not require approval, nothing changes: an account waiting
+on another site can pay here, and becomes a viewer member of this site only.
+
+### When the setting cannot be read
+
+If the site's setting (or the default site's, when it applies) cannot be read
+from the database, the sign-up is refused rather than let in unreviewed, even
+on a site with approval off, since it can't be known to be off. The person sees
+"registration is unavailable for a moment — try again shortly" on the form, and
+nothing is created, so trying again is safe.
+
+### Errors you can hit
+
+On **Registrations**:
+
+- **"That registration has already been decided."** Another admin, or another
+  tab of yours, decided it first. The list reloads with the current state.
+- **"That person hasn't confirmed their email address yet, so it can't be
+  approved."** The address was unconfirmed when you clicked. Reject it, or
+  wait for them to confirm.
+- **"You don't have permission to decide registrations on this site."** You
+  are not an admin of this site, for example because your tier was lowered
+  since the page loaded.
+- **An error saying the tier "can only be granted by a standing admin".** Your
+  platform admin role is temporary. You can see the queue but not decide it.
+  Ask a standing platform admin or a site admin.
+- **"You don't have permission to change this site's registration."** On
+  **Save**: you are not an admin of this site.
+
+On the public site, the applicant can hit "registration is unavailable for a
+moment — try again shortly" (above), and at checkout "Your registration on
+this site hasn't been approved, so you can't join yet."
+
+### Decide registrations from code
+
+The page calls the `OrgMembership` actions through the `Accounts` code
+interface, as the signed-in admin, so the same policies apply from a release
+shell (`bin/kiln_cms remote`):
+
+```elixir
+alias KilnCMS.Accounts
+alias KilnCMS.Accounts.Registrations
+
+admin = Accounts.get_user_by_email!("you@example.com", authorize?: false)
+site = Accounts.default_org_id()
+
+# Turn approval on for the site.
+{:ok, _row} = KilnCMS.CMS.save_site_registration(%{approval_required: true}, actor: admin, tenant: site)
+
+# The first page of the queue: 50 rows, oldest first.
+{:ok, %{entries: entries, more?: more?}} = Registrations.page(site, actor: admin)
+#=> entries: [%{membership: %OrgMembership{status: :pending}, email: "new@example.com",
+#              name: nil, confirmed?: true, registered_at: ~U[...]}, ...]
+
+[entry | _] = entries
+Accounts.approve_registration(entry.membership, %{}, actor: admin)
+#=> {:ok, %KilnCMS.Accounts.OrgMembership{status: :active, role: :viewer, decided_at: ~U[...]}}
+```
+
+- `Registrations.page/2` takes `:status` (`:pending`, the default, or
+  `:rejected`), `:confirmed` (`true` or `false` for only confirmed or only
+  unconfirmed applicants; both when omitted), `:limit` (default 50) and
+  `:after` (the last entry of the previous page). `Registrations.queue/2` returns the first page as a list,
+  and `Registrations.pending_count/2` counts waiting rows up to 100 (it takes `:confirmed` too). A caller
+  who is not an admin of the site gets `{:error, %Ash.Error.Forbidden{}}`
+  from `page/2`, never an empty queue.
+- `Accounts.reject_registration/3` takes the same arguments as
+  `approve_registration/3`.
+- A refused decision is `{:error, %Ash.Error.Invalid{}}` carrying a
+  `KilnCMS.Accounts.Errors.RegistrationRefused`. `RegistrationRefused.reason/1`
+  returns `:not_pending` (already decided) or `:unconfirmed`. The same error
+  carries `:settings_unavailable` on a refused sign-up and `:not_approved` on
+  a refused paid-membership start.
+- `Accounts.queue_registration/2` is system-only: it is the sign-up's own
+  write, and every person, a platform admin included, is refused it.
 
 ## Password resets
 

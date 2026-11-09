@@ -60,6 +60,21 @@ defmodule KilnCMSWeb.RoleDisplay do
   defp tier("editor"), do: :editor
   defp tier("viewer"), do: :viewer
 
+  @doc """
+  The label for the tier in `access`: `role_label/1`, except on a membership
+  that grants nothing because its registration is awaiting approval or was
+  rejected (#2251) — "Pending approval" or "Rejected", which say why there is
+  no access rather than only that there is none.
+  """
+  @spec access_label(access()) :: String.t()
+  def access_label(%{source: :member, record: %{status: :pending}}),
+    do: pgettext("role", "Pending approval")
+
+  def access_label(%{source: :member, record: %{status: :rejected}}),
+    do: pgettext("role", "Rejected")
+
+  def access_label(%{tier: tier}), do: role_label(tier)
+
   @doc "The tiers as `{label, tier}` select options, low to high."
   @spec role_options() :: [{String.t(), atom()}]
   def role_options, do: Enum.map(RoleGrant.tiers(), &{role_label(&1), &1})
@@ -170,7 +185,7 @@ defmodule KilnCMSWeb.RoleDisplay do
         <span class="text-base-content/70">{@label}</span>
         <span id={"#{@id}-tier"} aria-describedby={@grant_text && "#{@id}-grant"}>
           <.badge variant={badge_variant(@access, @grant_text)}>
-            {role_label(@access.tier)}
+            {access_label(@access)}
           </.badge>
         </span>
         <span :if={@note != []} class="text-xs text-base-content/60">{render_slot(@note)}</span>

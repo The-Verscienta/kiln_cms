@@ -86,6 +86,10 @@ defmodule KilnCMS.Billing.Membership do
       upsert_identity :one_per_user_and_tier
       upsert_fields [:status]
       change set_attribute(:status, :incomplete)
+
+      # Nothing to sell to an account whose registration here awaits approval
+      # or was rejected (#2251): its membership row grants nothing.
+      validate KilnCMS.Billing.Validations.RegistrationApproved
     end
 
     # The single write path for provider-driven state. Recomputes entitlements and
