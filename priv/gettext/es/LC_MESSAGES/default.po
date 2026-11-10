@@ -5374,6 +5374,11 @@ msgstr "Confirmar nueva contraseña"
 msgid "Confirm your email"
 msgstr "Confirmar su correo electrónico"
 
+#: lib/kiln_cms_web/live/account_live.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm your email address first: an administrator can't approve your registration until you do."
+msgstr "Confirma primero tu dirección de correo: un administrador no puede aprobar tu registro hasta que lo hagas."
+
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
@@ -14338,6 +14343,11 @@ msgstr "O escribe un nombre abajo para añadir una."
 msgid "Or until (UTC)"
 msgstr "O hasta el (UTC)"
 
+#: lib/kiln_cms_web/live/account_live.ex
+#, elixir-autogen, elixir-format
+msgid "Or use the link in the confirmation email we sent, if it's still valid."
+msgstr "O usa el enlace del correo de confirmación que te enviamos, si aún es válido."
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "Order among siblings"
@@ -16660,6 +16670,11 @@ msgstr "Restablecer valores predeterminados"
 #, elixir-autogen, elixir-format
 msgid "Reset your password"
 msgstr "Restablecer su contraseña"
+
+#: lib/kiln_cms_web/live/account_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reset your password to confirm it."
+msgstr "Restablece tu contraseña para confirmarla."
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format

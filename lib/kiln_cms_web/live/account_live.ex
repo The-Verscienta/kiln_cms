@@ -56,13 +56,15 @@ defmodule KilnCMSWeb.AccountLive do
   @impl true
   def mount(_params, _session, socket) do
     tier = KilnCMSWeb.LiveUserAuth.effective_tier(socket)
+    registrations = registrations(socket)
 
     {:ok,
      socket
      |> assign(:page_title, gettext("Your account"))
      |> assign(:reconciling?, false)
      |> assign(:editorial_tier, tier)
-     |> assign(:registrations, registrations(socket))
+     |> assign(:registrations, registrations)
+     |> assign(:confirm_first?, confirm_first?(socket.assigns.current_user, registrations))
      |> load_memberships()
      |> load_subscriber()}
   end
@@ -250,6 +252,15 @@ defmodule KilnCMSWeb.AccountLive do
     end
   end
 
+  # A pending registration waits on the applicant, not on an administrator,
+  # while the address is unconfirmed: approving one is refused (#2516).
+  # `confirmed_at` is not public, but it is selected on the session's user like
+  # every other attribute.
+  defp confirm_first?(%{confirmed_at: nil}, registrations),
+    do: Enum.any?(registrations, &match?({:pending, _site}, &1))
+
+  defp confirm_first?(_user, _registrations), do: false
+
   defp status_variant(:active), do: "success"
   defp status_variant(:comped), do: "info"
   defp status_variant(:past_due), do: "warning"
@@ -308,6 +319,25 @@ defmodule KilnCMSWeb.AccountLive do
                 {gettext("Your registration on %{site} wasn't approved.", site: site)}
               <% end %>
             </p>
+            <%!-- An administrator can't approve an unconfirmed account
+                  (`KilnCMS.Accounts.Changes.DecideRegistration`), and a
+                  magic-link sign-in doesn't confirm one (#2516). A password
+                  reset always does: every unconfirmed account registered with
+                  a password. The confirmation link expires and can't be
+                  resent, so it comes second. --%>
+            <div :if={@confirm_first?} id="confirm-first" class="space-y-1 pt-1">
+              <p class="font-medium">
+                {gettext(
+                  "Confirm your email address first: an administrator can't approve your registration until you do."
+                )}
+              </p>
+              <p>
+                <.link href={~p"/reset"} class="link font-medium">
+                  {gettext("Reset your password to confirm it.")}
+                </.link>
+                {gettext("Or use the link in the confirmation email we sent, if it's still valid.")}
+              </p>
+            </div>
           </div>
         </div>
 

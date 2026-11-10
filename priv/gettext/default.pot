@@ -5374,6 +5374,11 @@ msgstr ""
 msgid "Confirm your email"
 msgstr ""
 
+#: lib/kiln_cms_web/live/account_live.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm your email address first: an administrator can't approve your registration until you do."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
@@ -14338,6 +14343,11 @@ msgstr ""
 msgid "Or until (UTC)"
 msgstr ""
 
+#: lib/kiln_cms_web/live/account_live.ex
+#, elixir-autogen, elixir-format
+msgid "Or use the link in the confirmation email we sent, if it's still valid."
+msgstr ""
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "Order among siblings"
@@ -16659,6 +16669,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/auth_page_title.ex
 #, elixir-autogen, elixir-format
 msgid "Reset your password"
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reset your password to confirm it."
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
