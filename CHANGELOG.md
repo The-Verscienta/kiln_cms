@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Before rolling back to v1.8.0, run `DELETE FROM notifications WHERE event = 'registration_pending';` and `DELETE FROM api_keys WHERE access = 'draft_write';` (re-mint those keys after rolling forward; never `UPDATE` them). Check #2605 first if any site has `key_value` or `telephone` fields.**
+  ([#2606](https://github.com/The-Verscienta/kiln_cms/pull/2606) · [long form](docs/changelog/unreleased.md#rollback-to-1-8-0-upgrade))
+
 - **Every `/api/content` `ETag` and every Kiln-rendered page's `ETag` changes once on this deploy, so revalidating clients and CDNs get one round of `200`s. Page tags now also change on every deploy whose code or assets differ.**
   No migration; rolling the pin back is safe (another one-time round of `200`s).
   ([#2583](https://github.com/The-Verscienta/kiln_cms/pull/2583) · [long form](docs/changelog/unreleased.md#render-etags-upgrade))
@@ -489,6 +492,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
 
 ### Fixed
+
+- **A security event type or notification event written by a newer release no longer breaks the security log, its CSV export, account erasure, the notification bell, the inbox or mark-all-read on an older one; the log shows "Unrecognized event (name)".**
+  No migration. Columns that will gain values must switch to `KilnCMS.Types.KnownAtom` a release first ([releasing.md](docs/releasing.md#new-values-in-an-atom-column)).
+  ([#2606](https://github.com/The-Verscienta/kiln_cms/pull/2606) · [long form](docs/changelog/unreleased.md#unknown-atom-values-load))
 
 - **A media edit, a content-type promotion, a portability import, a bulk media action, the delivery-cache flush or the cache's 10k-entry eviction no longer moves a site's `<head>` and menus tokens back, which could answer `304` with an old `<head>` or navigation.**
   An unsaved site's `ETag` now differs per node and per restart until its next settings save: extra `200`s, never a stale `304`.

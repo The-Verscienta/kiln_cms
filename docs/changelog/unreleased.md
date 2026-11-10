@@ -7,6 +7,29 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="rollback-to-1-8-0-upgrade"></a>
+
+- **Before rolling back to v1.8.0, delete the rows v1.8.0 cannot read (#2509).**
+  Nothing to do when upgrading. v1.8.0 loads an atom column with
+  `String.to_existing_atom/1` and fails the whole read on a value it does not
+  know, and two columns gained values since:
+  ```sql
+  DELETE FROM notifications WHERE event = 'registration_pending';
+  DELETE FROM api_keys WHERE access = 'draft_write';
+  ```
+  Without the first, the bell, the inbox and "mark all read" fail on v1.8.0
+  for everyone holding a registration notice. Draft-write keys stop working on
+  v1.8.0 whatever you do (it has no such scope); left in place, the key's own
+  lookup and the site's API keys page fail, so delete them and mint new ones
+  after rolling forward. Never `UPDATE` them to `'read'`: that silently
+  changes what a key someone already holds can do. Security events need
+  nothing, since v1.8.0 has no security log. Field definitions of type
+  `key_value` or `telephone` also break v1.8.0's reads, and deleting them
+  loses data: check
+  [#2605](https://github.com/The-Verscienta/kiln_cms/issues/2605) before
+  rolling back if any site uses them. Details in
+  [New values in an atom column](../releasing.md#new-values-in-an-atom-column).
+
 <a id="render-etags-upgrade"></a>
 
 - **Every fired-artifact `ETag` (`/api/content/…`, every surface) and every
@@ -3960,6 +3983,38 @@ carries the reasoning.
     has a new name; delete superseded items in the media library.
 
 ## Fixed
+
+<a id="unknown-atom-values-load"></a>
+
+- **A security event type or notification event a newer release wrote no
+  longer breaks the release reading it (#2509).** `Security.Event.type` and
+  `Notification.event` were plain `:atom` columns, and Ash loads one with
+  `String.to_existing_atom/1`: a stored value the running release did not
+  know failed the whole read, not just its row. During a rolling deploy, or
+  after a rollback, one such row took down the security log page, its CSV
+  export, `Security.anonymize_actor/1` (and so account erasure), the
+  notification bell, the inbox and "mark all read".
+
+  Both columns are now `KilnCMS.Types.KnownAtom`, which loads a value outside
+  the column's `one_of` as `%KilnCMS.Types.UnknownAtom{value: "the_name"}`
+  and never creates an atom from database text. What readers do with it:
+  - **Security log:** the row shows as "Unrecognized event (name)" in a
+    neutral badge; the CSV export carries the raw name in `type`; filtering
+    by a known type excludes it; erasure still scrubs its actor, IP address,
+    user agent and metadata, and the retention prune still deletes it.
+  - **Notifications:** the row shows the generic "Notification" headline and
+    links to `/editor/inbox`; marking it read or unread works.
+
+  Writes stay strict: recording or notifying with a value outside the list is
+  refused, an `UnknownAtom` included. No migration: the storage is still text.
+  This protects only from this release on. A release that predates it still
+  fails on a newer value, which is why a column has to switch to `KnownAtom`
+  at least one release before it gains a value
+  ([New values in an atom column](../releasing.md#new-values-in-an-atom-column)),
+  and why rolling back to v1.8.0 needs the
+  [one-time cleanup](#rollback-to-1-8-0-upgrade). `ApiKey.access` is still
+  a plain `:atom` column
+  ([#2604](https://github.com/The-Verscienta/kiln_cms/issues/2604)).
 
 <a id="generation-tokens-survive-clears"></a>
 
