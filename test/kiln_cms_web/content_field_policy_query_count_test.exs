@@ -26,6 +26,7 @@ defmodule KilnCMSWeb.ContentFieldPolicyQueryCountTest do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
+  alias KilnCMS.Test.QueryCounting
 
   @accept "application/vnd.api+json"
 
@@ -99,39 +100,14 @@ defmodule KilnCMSWeb.ContentFieldPolicyQueryCountTest do
     |> post("/gql", Jason.encode!(%{query: query}))
   end
 
-  # The Repo queries `fun` issues, by source table — Ecto's telemetry, so
-  # nothing a log-scraping proxy could miss. Starts from a cold `Scoping` memo,
-  # the way a fresh request process does.
+  # The Repo queries `fun` issues on this test's behalf, by source table —
+  # Ecto's telemetry, so nothing a log-scraping proxy could miss. Starts from a
+  # cold `Scoping` memo, the way a fresh request process does.
   defp queries(fun) do
     for {Scoping, _, _} = key <- Process.get_keys(), do: Process.delete(key)
 
-    handler = "fp-cost-#{System.unique_integer([:positive])}"
-    parent = self()
-
-    :telemetry.attach(
-      handler,
-      [:kiln_cms, :repo, :query],
-      fn _event, _measurements, meta, _config ->
-        send(parent, {:fp_cost_query, meta[:source]})
-      end,
-      nil
-    )
-
-    try do
-      fun.()
-    after
-      :telemetry.detach(handler)
-    end
-
-    drain([])
-  end
-
-  defp drain(acc) do
-    receive do
-      {:fp_cost_query, source} -> drain([source | acc])
-    after
-      0 -> Enum.frequencies(acc)
-    end
+    {_result, queries} = QueryCounting.queries(fun)
+    QueryCounting.by_source(queries)
   end
 
   defp with_production_memo(fun) do

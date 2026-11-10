@@ -14,6 +14,7 @@ defmodule KilnCMS.CMS.TaskBlockPerformanceTest do
   use KilnCMS.DataCase, async: false
 
   alias KilnCMS.CMS
+  alias KilnCMS.Test.QueryCounting
 
   defp user(role) do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -26,36 +27,14 @@ defmodule KilnCMS.CMS.TaskBlockPerformanceTest do
 
   defp drain, do: KilnCMS.DataCase.drain_oban()
 
-  # Counts the SELECTs a function issues, via Ecto's telemetry rather than a
-  # log-scraping proxy for it.
+  # Counts the `comments` and `tasks` queries a function issues on this test's
+  # behalf, via Ecto's telemetry rather than a log-scraping proxy for it.
   defp count_queries(fun) do
-    handler = "perf-#{System.unique_integer([:positive])}"
-    parent = self()
+    {_result, queries} = QueryCounting.queries(fun)
 
-    :telemetry.attach(
-      handler,
-      [:kiln_cms, :repo, :query],
-      fn _event, _measure, meta, _config ->
-        if meta[:source] in ["comments", "tasks"], do: send(parent, {:query, meta[:source]})
-      end,
-      nil
-    )
-
-    try do
-      fun.()
-    after
-      :telemetry.detach(handler)
-    end
-
-    drain_queries([])
-  end
-
-  defp drain_queries(acc) do
-    receive do
-      {:query, source} -> drain_queries([source | acc])
-    after
-      0 -> Enum.frequencies(acc)
-    end
+    queries
+    |> Enum.filter(&(&1.source in ["comments", "tasks"]))
+    |> QueryCounting.by_source()
   end
 
   test "reading a document's discussions costs two queries, whatever the block count" do
@@ -140,7 +119,8 @@ defmodule KilnCMS.CMS.TaskBlockPerformanceTest do
       handler,
       [:kiln_cms, :repo, :query],
       fn _event, _measure, meta, _config ->
-        if meta[:source] == "tasks", do: send(parent, {:sql, meta[:query], meta[:params]})
+        if meta[:source] == "tasks" and QueryCounting.on_behalf_of?(parent),
+          do: send(parent, {:sql, meta[:query], meta[:params]})
       end,
       nil
     )

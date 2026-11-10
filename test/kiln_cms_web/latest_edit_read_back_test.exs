@@ -16,6 +16,7 @@ defmodule KilnCMSWeb.LatestEditReadBackTest do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.LatestEdit
+  alias KilnCMS.Test.QueryCounting
 
   @accept "application/vnd.api+json"
   @schema KilnCMSWeb.GraphqlSchema
@@ -339,33 +340,9 @@ defmodule KilnCMSWeb.LatestEditReadBackTest do
     end
   end
 
+  # The `pages_versions` reads `fun` makes on this test's behalf.
   defp count_version_queries(fun) do
-    handler = "le-#{System.unique_integer([:positive])}"
-    parent = self()
-
-    :telemetry.attach(
-      handler,
-      [:kiln_cms, :repo, :query],
-      fn _event, _measure, meta, _config ->
-        if meta[:source] == "pages_versions", do: send(parent, :version_query)
-      end,
-      nil
-    )
-
-    try do
-      fun.()
-    after
-      :telemetry.detach(handler)
-    end
-
-    count_messages(0)
-  end
-
-  defp count_messages(n) do
-    receive do
-      :version_query -> count_messages(n + 1)
-    after
-      0 -> n
-    end
+    {_result, queries} = QueryCounting.queries(fun)
+    Enum.count(queries, &(&1.source == "pages_versions"))
   end
 end

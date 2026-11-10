@@ -11,6 +11,7 @@ defmodule KilnCMS.Security.IpBlocklistTest do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.IpBlockRule
   alias KilnCMS.Security.IpBlocklist
+  alias KilnCMS.Test.QueryCounting
 
   @moduletag :capture_log
 
@@ -110,42 +111,29 @@ defmodule KilnCMS.Security.IpBlocklistTest do
   describe "the cache" do
     test "a warm check runs no database query" do
       add!("203.0.113.9")
+      # The rule's bust reaches this node twice; the second must not land
+      # after the warm-up.
+      QueryCounting.settle_busts()
       assert IpBlocklist.blocked?(org_id(), {203, 0, 113, 9})
 
-      test_pid = self()
-      handler = "ipbl-queries-#{System.unique_integer([:positive])}"
+      {_, queries} =
+        QueryCounting.queries(fn ->
+          assert IpBlocklist.blocked?(org_id(), {203, 0, 113, 9})
+          refute IpBlocklist.blocked?(org_id(), {203, 0, 113, 10})
+        end)
 
-      :telemetry.attach(
-        handler,
-        [:kiln_cms, :repo, :query],
-        fn _event, _measurements, _meta, _config -> send(test_pid, :query) end,
-        nil
-      )
-
-      on_exit(fn -> :telemetry.detach(handler) end)
-
-      assert IpBlocklist.blocked?(org_id(), {203, 0, 113, 9})
-      refute IpBlocklist.blocked?(org_id(), {203, 0, 113, 10})
-      refute_received :query
+      assert queries == []
     end
 
     test "an org with no rules is cached too: the second check reads nothing" do
+      # A bust an earlier test sent must not land after the warm-up.
+      QueryCounting.settle_busts()
       refute IpBlocklist.blocked?(org_id(), {203, 0, 113, 9})
 
-      test_pid = self()
-      handler = "ipbl-empty-#{System.unique_integer([:positive])}"
+      {_, queries} =
+        QueryCounting.queries(fn -> refute IpBlocklist.blocked?(org_id(), {203, 0, 113, 9}) end)
 
-      :telemetry.attach(
-        handler,
-        [:kiln_cms, :repo, :query],
-        fn _event, _measurements, _meta, _config -> send(test_pid, :query) end,
-        nil
-      )
-
-      on_exit(fn -> :telemetry.detach(handler) end)
-
-      refute IpBlocklist.blocked?(org_id(), {203, 0, 113, 9})
-      refute_received :query
+      assert queries == []
     end
 
     test "adding and removing a rule busts the cached list" do
