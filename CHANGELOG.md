@@ -454,6 +454,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Release images no longer ship `priv/static/images/logo-lockup.png` (234 KB), which nothing in Kiln referenced. An overlay that linked `/images/logo-lockup.png` must ship its own copy.**
+  ([#2401](https://github.com/The-Verscienta/kiln_cms/issues/2401))
+
 - **A custom-field range filter (`gt`, `gte`, `lt`, `lte`) no longer matches a record whose stored value is a JSON `null`, array or object.**
   They compare as "no value", as `custom_sort` already read them; before, JSON ordering made an array greater than every number. Only rows whose field was retyped or written off-type are affected.
   ([#2359](https://github.com/The-Verscienta/kiln_cms/issues/2359) · [#2551](https://github.com/The-Verscienta/kiln_cms/pull/2551) · [long form](docs/changelog/unreleased.md#custom-field-range-index-changed))
