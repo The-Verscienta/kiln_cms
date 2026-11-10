@@ -598,6 +598,17 @@ account is waiting. While their registration waits:
 - **They can sign in.** **Your account** (`/account`) says "Waiting for
   approval on (site). You can sign in, but you can only read what's public
   here until an administrator approves your registration."
+- **An applicant who hasn't confirmed their address is told to do that
+  first.** An administrator can't approve them until they do
+  ([Unconfirmed addresses cannot be approved](#unconfirmed-addresses-cannot-be-approved)),
+  so under the waiting line **Your account** adds "Confirm your email address
+  first: an administrator can't approve your registration until you do.",
+  then a **Reset your password to confirm it.** link to the reset request page
+  (`/reset`) and "Or use the link in the confirmation email we sent, if it's
+  still valid." A password reset always works: every unconfirmed account
+  signed up with a password, and finishing the reset confirms the address.
+  The confirmation link lasts 3 days and can't be sent again. Signing in with
+  a magic link does not confirm the address, so it doesn't get them unstuck.
 - **They read only what an anonymous visitor reads**, on every surface: pages,
   JSON:API, GraphQL, MCP and media. No members-only content and no drafts,
   whatever audiences the waiting row holds.
@@ -807,7 +818,11 @@ sign up with an address they don't own. You can reject them now."
 
 Approving an address nobody has proved they own would give the site to
 whoever typed it. Once the person confirms, they move up to
-**Waiting for approval** the next time the page loads. The two lists are paged
+**Waiting for approval** the next time the page loads. The applicant's own
+**Your account** page tells them how: reset their password, or follow the
+confirmation link while it is still valid
+([What an applicant can do while they wait](#what-an-applicant-can-do-while-they-wait)).
+The two lists are paged
 separately, so a wave of unconfirmed sign-ups never pushes the people you can
 approve off the first page. Rejecting does not wait
 for confirmation, so a wave of bot sign-ups can be cleared straight away.

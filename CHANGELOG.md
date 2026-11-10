@@ -490,6 +490,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **An applicant waiting for approval who hasn't confirmed their address is now told on `/account` to confirm first, by resetting their password or following the confirmation link; a magic-link sign-in never confirmed an address, and the setting that claimed it did is gone.**
+  ([#2516](https://github.com/The-Verscienta/kiln_cms/issues/2516) · [long form](docs/changelog/unreleased.md#unconfirmed-applicant-confirm-first))
+
 - **A media edit, a content-type promotion, a portability import, a bulk media action, the delivery-cache flush or the cache's 10k-entry eviction no longer moves a site's `<head>` and menus tokens back, which could answer `304` with an old `<head>` or navigation.**
   An unsaved site's `ETag` now differs per node and per restart until its next settings save: extra `200`s, never a stale `304`.
   ([#2601](https://github.com/The-Verscienta/kiln_cms/pull/2601) · [long form](docs/changelog/unreleased.md#generation-tokens-survive-clears))

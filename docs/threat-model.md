@@ -1471,9 +1471,12 @@ creates an account and grants a site tier.
   upgrading such a link raises a demoted member back (and, as before, re-adds
   a removed one). Admins check **Pending invitations** on Team. (6) *The
   same takeover by another route keeps the stranger's credentials.*
-  `:confirm_new_user`, `:reset_password_with_token` and
-  `:sign_in_with_magic_link` on an unconfirmed account do not run the wipe
-  above; a follow-up. (7) *What the takeover does not touch:* memberships on
+  `:confirm_new_user` and `:reset_password_with_token` confirm an
+  unconfirmed account without running the wipe above. A magic-link sign-in
+  (`:sign_in_with_magic_link`, a read) neither confirms the account nor takes
+  it over (#2516), so the stranger keeps a working password on an account the
+  address's owner now shares and that stays unconfirmed. Both are the general
+  pre-hijack residual, tracked in #2594. (7) *What the takeover does not touch:* memberships on
   other sites, billing, and newsletter subscriptions stay as the first
   registrant left them. (8) *Erasure leaves the TOTP columns.*
   `Changes.AnonymizeUser` removes passkeys and identities but not

@@ -201,9 +201,10 @@ defmodule KilnCMS.Accounts.RegistrationNotificationsTest do
       assert notices(ctx.admin, ctx.site.id) == []
     end
 
-    # Pins today's behaviour: `:sign_in_with_magic_link` is a read (magic-link
-    # registration is off), so its `auto_confirm_actions` entry confirms
-    # nothing, and no notice follows a magic-link sign-in.
+    # Pins today's behaviour (#2516): `:sign_in_with_magic_link` is a read
+    # (magic-link registration is off) and is not among the confirmation
+    # add-on's `auto_confirm_actions`, so it confirms nothing, and no notice
+    # follows a magic-link sign-in. Confirming there is #2594's.
     test "a magic-link sign-in neither confirms the address nor announces", ctx do
       {applicant, _row} = applicant(ctx.site.id)
       strategy = AshAuthentication.Info.strategy!(User, :magic_link)

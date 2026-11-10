@@ -3961,6 +3961,36 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="unconfirmed-applicant-confirm-first"></a>
+
+- **An applicant whose registration waits for approval and who hasn't
+  confirmed their address is now told on `/account` to confirm it first, and
+  how (#2516).** An administrator can't approve an unconfirmed address, and
+  nothing told the applicant that, so they could wait for an approval that
+  could never come. Under "Waiting for approval on (site)", **Your account**
+  now adds "Confirm your email address first: an administrator can't approve
+  your registration until you do.", a **Reset your password to confirm it.**
+  link to `/reset`, and "Or use the link in the confirmation email we sent,
+  if it's still valid." The reset comes first because it always works: every
+  unconfirmed account signed up with a password, and finishing a reset
+  confirms the address. The confirmation link lasts 3 days and can't be sent
+  again. A confirmed applicant, or an unconfirmed account with no waiting
+  registration, sees no change.
+
+  A magic-link sign-in does not confirm an address, and never did. The
+  confirmation settings on `User` listed `:sign_in_with_magic_link` among the
+  actions that confirm, but with magic-link registration off that action is
+  a read, and confirmation runs only on a create or an update, so the entry
+  did nothing. It is removed, so the code no longer claims otherwise. Behavior
+  is unchanged: the confirmation link, a password reset, single sign-on and
+  site single sign-on registration, accepting an invitation, and the
+  first-run admin still confirm. Confirming on a magic-link sign-in has to
+  settle what happens to credentials an earlier registrant of the address
+  set up (forgetting them would also delete a genuine registrant's own
+  password), so it is left to #2594.
+
+  No migration and no setting; rolling back is safe.
+
 <a id="generation-tokens-survive-clears"></a>
 
 - **Clearing or evicting the delivery cache no longer moves a site's
