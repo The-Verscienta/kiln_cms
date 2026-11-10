@@ -213,7 +213,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Security posture gains a Security notices for Kiln line (`core.security_notices`): Fix now, at any severity, when a published notice's affected range covers the running Kiln. System's Updates card shows the same.**
   Off with `KILN_UPDATE_CHECK=false`; shares the plugin check's notices fetch, which `KILN_PLUGIN_HEALTH_CHECK=false` no longer stops. Guide: [docs/security-posture.md](docs/security-posture.md#security-notices-for-kiln).
-  ([long form](docs/changelog/unreleased.md#core-security-notices))
+  ([#2628](https://github.com/The-Verscienta/kiln_cms/pull/2628) · [long form](docs/changelog/unreleased.md#core-security-notices))
 
 - **`mix kiln.refire_all --notify` (`KilnCMS.Firing.Sweep.run(notify: true)`) announces each re-fired document to webhook endpoints and the change feed as `<type>.updated` with `"reason": "refire"`, which `Firing.refire/3`'s `updated` now carries too.**
   Not to automation, federation or the CDN purge. Guide: [docs/releasing.md](docs/releasing.md#re-render-published-content-after-an-upgrade).
