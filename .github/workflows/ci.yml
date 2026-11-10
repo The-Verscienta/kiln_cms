@@ -1736,6 +1736,12 @@ jobs:
     # An empty image runs the leg on the runner itself.
     container: ${{ matrix.container }}
     timeout-minutes: 20
+    # A container's default `run` shell is `sh`, which can't parse the bash
+    # arrays below (the first trixie run failed on exactly that). bash is
+    # essential in Debian, so both legs use it.
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -1774,6 +1780,13 @@ jobs:
       - name: Install ImageMagick 6 and webp (Ubuntu)
         if: matrix.container == ''
         timeout-minutes: 10
+        # A cold cache has to fetch the full package lists into the script's
+        # private lists dir; the 60 s default ceiling was too short for that
+        # here (three attempts each killed at 60 s on the first run). The test
+        # job's step almost always restores a warm cache, so it keeps the default.
+        env:
+          APT_UPDATE_TIMEOUT: 240
+          APT_DOWNLOAD_TIMEOUT: 240
         run: scripts/ci/apt_install_cached.sh "$HOME/.cache/kiln-apt" imagemagick webp
 
       - name: Save the apt package cache
