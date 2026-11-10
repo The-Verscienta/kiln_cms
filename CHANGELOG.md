@@ -57,7 +57,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Upgrade notes
 
 - **Update the host's copy of `scripts/backup.sh` so cron's prune honors the new `kiln-<stamp>.good` marker, which the app keeps on the newest verified backup of each component (part of #2219).** No migration; rolling back is safe.
-  ([long form](docs/changelog/unreleased.md#backup-last-good-marker-upgrade))
+  ([#2552](https://github.com/The-Verscienta/kiln_cms/pull/2552) · [long form](docs/changelog/unreleased.md#backup-last-good-marker-upgrade))
 
 - **Run `mix ash.migrate` (new tables `backup_locks`, `backup_node_beats`; `backup_runs` gains `chain_id` and status `canceled`). Backups run on a new Oban queue `backup_steps` (1 per node; add 1 to `POOL_SIZE`); drain the `backups` queue before the next minor. Node names must be unique.**
   Mid-deploy, don't start backups from an old node. Before rolling back, cancel running backups, then relabel `canceled` runs and delete `backup_canceled` events (#2509), or roll forward.
