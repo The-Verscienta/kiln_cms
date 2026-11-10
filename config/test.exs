@@ -1,11 +1,6 @@
 import Config
 config :kiln_cms, Oban, testing: :manual
 
-# Range/sort index test (#2359): the query inlines these names as literals.
-# The test creates the matching btrees itself (`@moduletag :table_lock`); the
-# migrations do not carry them, as in any site that has not opted in.
-config :kiln_cms, :indexed_custom_fields, ["idx_price", "idx_rating"]
-
 # No backup heartbeat process (#2218): it would beat and sweep the lock on a
 # timer against the sandbox. Tests drive `KilnCMS.Backups.Heartbeat.tick/1`.
 config :kiln_cms, KilnCMS.Backups, heartbeat?: false
@@ -423,3 +418,8 @@ config :kiln_cms, KilnCMS.Challenge,
 # `:async_analytics` above, so they stay on the test's sandbox connection;
 # `KilnCMS.Accounts.SignInUnlockAsyncTest` turns the hand-off back on.
 config :kiln_cms, KilnCMS.Accounts.SignInUnlock, async: false
+
+# Range/sort index test (#2359): the query inlines these names as literals.
+# The test creates the matching btrees itself (`@moduletag :table_lock`); the
+# migrations do not carry them, as in any site that has not opted in.
+config :kiln_cms, :indexed_custom_fields, ["idx_price", "idx_rating"]
