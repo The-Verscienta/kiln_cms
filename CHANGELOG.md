@@ -491,8 +491,8 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **A media edit, a content-type promotion, a portability import, a bulk media action, the delivery-cache flush or the cache's 10k-entry eviction no longer moves a site's `<head>` and menus tokens back, which could answer `304` with an old `<head>` or navigation.**
-  An unsaved site's `ETag` now differs per node and per restart until its next settings save: extra `200`s, never a stale `304` ([#2502](https://github.com/The-Verscienta/kiln_cms/issues/2502)).
-  ([long form](docs/changelog/unreleased.md#generation-tokens-survive-clears))
+  An unsaved site's `ETag` now differs per node and per restart until its next settings save: extra `200`s, never a stale `304`.
+  ([#2601](https://github.com/The-Verscienta/kiln_cms/pull/2601) · [long form](docs/changelog/unreleased.md#generation-tokens-survive-clears))
 
 - **A refused workflow action now says why: "Only an admin …" only to an editor (publish, unpublish, archive: where only admins publish; return: any site), "You can't edit this content type." to an editor scoped away from the type (never for the trash), the plain sentence to everyone else.**
   ([#2600](https://github.com/The-Verscienta/kiln_cms/pull/2600) · [long form](docs/changelog/unreleased.md#refusal-wording-names-the-reason))
