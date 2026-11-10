@@ -23139,6 +23139,11 @@ msgstr "Las comprobaciones de actualización están desactivadas (KILN_UPDATE_CH
 msgid "Update command"
 msgstr "Comando de actualización"
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Update your receiver now: deliveries already use this secret."
+msgstr "Actualice su receptor ahora: los envíos ya usan este secreto."
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Updated"

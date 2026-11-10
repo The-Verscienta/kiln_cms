@@ -298,6 +298,23 @@ defmodule KilnCMSWeb.WebhookLiveTest do
       assert has_element?(lv, "#copy-secret-#{endpoint.id}")
     end
 
+    test "says under the new secret that deliveries already use it (#2384)", %{conn: conn} do
+      endpoint = seed_endpoint(@long_secret)
+      {lv, _html} = admin_live(conn)
+      hint = "#webhook-#{endpoint.id}-rotated-hint"
+
+      lv |> element("#reveal-secret-#{endpoint.id}") |> render_click()
+      refute has_element?(lv, hint)
+
+      lv |> element("#rotate-secret-#{endpoint.id}") |> render_click()
+
+      assert lv |> element(hint) |> render() =~
+               "Update your receiver now: deliveries already use this secret."
+
+      lv |> element("#reveal-secret-#{endpoint.id}") |> render_click()
+      refute has_element?(lv, hint)
+    end
+
     test "the button confirms and disables itself", %{conn: conn} do
       endpoint = seed_endpoint()
       {lv, _html} = admin_live(conn)

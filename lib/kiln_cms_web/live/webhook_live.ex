@@ -11,7 +11,8 @@ defmodule KilnCMSWeb.WebhookLive do
   masks it again. Revealed state lasts for this LiveView session only. A newly
   added endpoint's secret starts revealed, so it can be copied into the
   receiver straight away. Rotate secret (#2347) replaces it and reveals the
-  new one the same way.
+  new one the same way, with a hint under it that deliveries already use the
+  new secret (#2384). Hiding the secret drops the hint.
 
   A new endpoint starts with `WebhookEndpoint.default_events/1` ticked, which
   leaves out the events that carry unpublished content; those are marked in
@@ -36,6 +37,7 @@ defmodule KilnCMSWeb.WebhookLive do
      |> assign(:default_events, WebhookEndpoint.default_events(socket.assigns.current_org))
      |> assign(:edit, nil)
      |> assign(:revealed, MapSet.new())
+     |> assign(:rotated, MapSet.new())
      |> assign(:form, create_form(actor, socket.assigns.current_org))
      |> load_endpoints()
      |> load_deliveries()}
@@ -159,6 +161,7 @@ defmodule KilnCMSWeb.WebhookLive do
         socket
         |> load_endpoints()
         |> update(:revealed, &MapSet.put(&1, rotated.id))
+        |> update(:rotated, &MapSet.put(&1, rotated.id))
         |> put_flash(
           :info,
           gettext(
@@ -172,8 +175,12 @@ defmodule KilnCMSWeb.WebhookLive do
     {:noreply, socket}
   end
 
-  def handle_event("hide_secret", %{"id" => id}, socket) when is_binary(id),
-    do: {:noreply, update(socket, :revealed, &MapSet.delete(&1, id))}
+  def handle_event("hide_secret", %{"id" => id}, socket) when is_binary(id) do
+    {:noreply,
+     socket
+     |> update(:revealed, &MapSet.delete(&1, id))
+     |> update(:rotated, &MapSet.delete(&1, id))}
+  end
 
   # Pushed by the `Clipboard` hook on a revealed secret's Copy button.
   def handle_event("copied", _params, socket),
@@ -283,6 +290,7 @@ defmodule KilnCMSWeb.WebhookLive do
     socket
     |> assign(:endpoints, endpoints)
     |> update(:revealed, &MapSet.intersection(&1, listed))
+    |> update(:rotated, &MapSet.intersection(&1, listed))
   end
 
   defp load_deliveries(socket) do
@@ -497,6 +505,7 @@ defmodule KilnCMSWeb.WebhookLive do
                   <.signing_secret
                     endpoint={endpoint}
                     revealed={MapSet.member?(@revealed, endpoint.id)}
+                    rotated={MapSet.member?(@rotated, endpoint.id)}
                   />
                 </div>
                 <div class="flex shrink-0 flex-wrap items-center gap-1">
@@ -697,6 +706,7 @@ defmodule KilnCMSWeb.WebhookLive do
 
   attr :endpoint, :map, required: true
   attr :revealed, :boolean, required: true
+  attr :rotated, :boolean, default: false
 
   # The plaintext secret is rendered only while revealed; masked, the page
   # carries at most its last four characters (#2140).
@@ -737,6 +747,14 @@ defmodule KilnCMSWeb.WebhookLive do
             <.icon name="hero-eye-slash" class="size-3.5" />
             {gettext("Hide")}
           </button>
+          <p
+            :if={@rotated}
+            id={"webhook-#{@endpoint.id}-rotated-hint"}
+            class="basis-full text-warning-ink"
+          >
+            <.icon name="hero-exclamation-triangle" class="size-3.5" />
+            {gettext("Update your receiver now: deliveries already use this secret.")}
+          </p>
         <% true -> %>
           <span id={"webhook-#{@endpoint.id}-secret-masked"} class="font-mono">
             {mask_secret(@secret)}

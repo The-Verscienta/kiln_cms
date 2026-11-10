@@ -23139,6 +23139,11 @@ msgstr "Les vérifications de mise à jour sont désactivées (KILN_UPDATE_CHECK
 msgid "Update command"
 msgstr "Commande de mise à jour"
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Update your receiver now: deliveries already use this secret."
+msgstr "Mettez à jour votre récepteur maintenant : les envois utilisent déjà ce secret."
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Updated"

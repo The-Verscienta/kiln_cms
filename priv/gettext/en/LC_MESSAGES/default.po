@@ -23139,6 +23139,11 @@ msgstr ""
 msgid "Update command"
 msgstr ""
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Update your receiver now: deliveries already use this secret."
+msgstr ""
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Updated"
