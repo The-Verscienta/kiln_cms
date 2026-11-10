@@ -89,6 +89,14 @@ config :kiln_cms, :unsplash, req_options: [plug: {Req.Test, KilnCMS.Unsplash}]
 # both be exercised by overriding this per-test.
 config :kiln_cms, Kiln.Updates, req_options: [plug: {Req.Test, Kiln.Updates}]
 
+# The plugin health check (#2244) is off by default here: it inherits the
+# update check's `enabled: true`, and with the dependency fixture plugin
+# installed every System or Security posture test would otherwise ask the
+# stub. Its tests enable it per case; requests go to a Req.Test stub.
+config :kiln_cms, Kiln.Plugins.Health,
+  enabled: false,
+  req_options: [plug: {Req.Test, Kiln.Plugins.Health}]
+
 # The HTTP governance witness (#733) reaches an operator-configured transparency
 # log. Never dialled for real in tests; the stub stands in for the log.
 config :kiln_cms, KilnCMS.Governance.Witness.HTTP,

@@ -60,6 +60,10 @@ Every summary line below that was shortened links to its own entry there.
   `/api/sync` mirrors and clients revalidating with `If-None-Match` keep the old body until a document is edited (#2463). Rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#twitter-card-upgrade))
 
+- **New on by default: with a plugin from Hex installed, opening System or Security posture asks hex.pm about it, which tells hex.pm that plugin's package name and version. Opt out with `KILN_PLUGIN_HEALTH_CHECK=false` (`KILN_UPDATE_CHECK=false` also does, unless the first is set).**
+  No migration; rolling the pin back is safe.
+  ([#2562](https://github.com/The-Verscienta/kiln_cms/pull/2562) · [long form](docs/changelog/unreleased.md#plugin-health-egress-upgrade))
+
 - **Run `mix ash.migrate` (new tables `backup_locks`, `backup_node_beats`; `backup_runs` gains `chain_id` and status `canceled`). Backups run on a new Oban queue `backup_steps` (1 per node; add 1 to `POOL_SIZE`); drain the `backups` queue before the next minor. Node names must be unique.**
   Mid-deploy, don't start backups from an old node. Before rolling back, cancel running backups, then relabel `canceled` runs and delete `backup_canceled` events (#2509), or roll forward.
   ([#2537](https://github.com/The-Verscienta/kiln_cms/pull/2537) · [long form](docs/changelog/unreleased.md#backup-step-chain-upgrade))
@@ -183,6 +187,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Site admins can set the site's X (Twitter) username under Branding, sent as `twitter:site`. Link-preview tags never go out empty, images are absolute on the site's own host, and the `json` artifact gains `social`.**
   Guide: [docs/seo.md](docs/seo.md#link-previews-open-graph-and-x-twitter-cards). Remove any `twitter:site` added under Code injection, or it appears twice.
   ([long form](docs/changelog/unreleased.md#twitter-card-tags))
+
+- **Operations → System → Plugins shows whether each plugin still checks out: changed on Hex since this build, a security notice, retired or unmaintained on Hex, or a `kiln_plugin` requirement this Kiln doesn't meet. Security posture gains an Installed plugins line.**
+  Unknown is never OK; git and path plugins can't be verified against Hex. `mix kiln.plugins.list --health` runs it too. Guide: [docs/security-posture.md](docs/security-posture.md#check-your-installed-plugins).
+  ([#2562](https://github.com/The-Verscienta/kiln_cms/pull/2562) · [long form](docs/changelog/unreleased.md#plugin-health-checks))
 
 - **A Slug field can now be marked unique: no two records of a content type (and language) may hold the same slug, on every way of saving.**
   Compared after the slug is tidied, so `Hello World` and `hello-world` collide; a record keeps its own value on update. Follow-up to the Slug field type.
@@ -451,6 +459,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
 
 ### Fixed
+
+- **Field locks: an idle or takeover-flush timeout that fires just as it is reset is now ignored. Two narrow races: a keystroke at the idle limit lost the field, and a stale flush timeout granted the next takeover unflushed.**
+  ([#2556](https://github.com/The-Verscienta/kiln_cms/pull/2556) · [long form](docs/changelog/unreleased.md#field-lock-stale-timers))
 
 - **A form's CSV export keeps values stored under a renamed or removed field's old machine name, in a column headed `<key> (renamed or removed)`; forms never renamed export the same columns as before.**
   ([#2555](https://github.com/The-Verscienta/kiln_cms/pull/2555) · [long form](docs/changelog/unreleased.md#form-export-renamed-field-keys))

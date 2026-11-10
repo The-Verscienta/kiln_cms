@@ -15,6 +15,7 @@ defmodule KilnCMSWeb.SystemLiveTest do
 
   import Phoenix.LiveViewTest
 
+  alias Kiln.Plugins.Health
   alias Kiln.Updates
   alias KilnCMS.Accounts.User
 
@@ -469,6 +470,194 @@ defmodule KilnCMSWeb.SystemLiveTest do
       assert panel =~ "mix kiln.plugins.doctor"
       # An install button would be the same lie an update button would be.
       refute panel =~ "phx-click"
+    end
+  end
+
+  # Plugin health (#2244). Remote answers come from the `Kiln.Plugins.Health`
+  # Req.Test stub; checks are off in this suite unless a case turns them on.
+  describe "plugin health" do
+    setup %{conn: conn} do
+      Req.Test.stub(Updates, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+
+      original = Application.get_env(:kiln_cms, Health, [])
+      Health.clear_cache()
+
+      on_exit(fn ->
+        Application.put_env(:kiln_cms, Health, original)
+        Health.clear_cache()
+      end)
+
+      %{conn: log_in(conn, authed_user(:admin))}
+    end
+
+    test "with checks off, each plugin still gets a badge and nothing is asked", %{conn: conn} do
+      stub_health()
+      {:ok, _lv, html} = live(conn, ~p"/editor/system")
+
+      assert health_of(html, "KilnCMS.FixturePlugin") == "not_applicable"
+      assert health_of(html, "KilnDepFixture.Plugin") == "unverifiable"
+      assert plugins_panel(html) =~ "Built from this project"
+      assert plugins_panel(html) =~ "Can&#39;t verify"
+      assert plugins_panel(html) =~ "Plugin checks are off."
+      assert html |> Floki.parse_document!() |> Floki.find("#check-plugins-now") == []
+      refute_received {:health_request, _path}
+    end
+
+    test "with checks on, the page checks in the background and badges each plugin",
+         %{conn: conn} do
+      enable_health()
+      stub_health()
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+      html = render_async(lv, 2000)
+
+      assert_received {:health_request, "/api/json/entries/published"}
+      assert health_of(html, "KilnCMS.FixturePlugin") == "not_applicable"
+      assert health_of(html, "KilnDepFixture.Plugin") == "unverifiable"
+      assert plugins_panel(html) =~ "Checked "
+      assert has_element?(lv, "#check-plugins-now")
+    end
+
+    test "a matched security notice names itself and links the advisory", %{conn: conn} do
+      enable_health()
+
+      stub_health(
+        notices: [
+          notice(%{
+            "package" => "kiln_dep_fixture",
+            "affected_versions" => ">= 0.0.1",
+            "severity" => "high",
+            "advisory_id" => "KILN-2026-0042",
+            "advisory_url" => "https://kilncms.dev/security/kiln-2026-0042"
+          })
+        ]
+      )
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+      html = render_async(lv, 2000)
+
+      assert health_of(html, "KilnDepFixture.Plugin") == "fail"
+      panel = plugins_panel(html)
+      assert panel =~ "Security notice"
+      assert panel =~ "security notice KILN-2026-0042 (high)"
+      assert panel =~ ~s(href="https://kilncms.dev/security/kiln-2026-0042")
+    end
+
+    # The fetch turns a crashing source into "did not answer", so the check
+    # still finishes: the project's own plugin is known offline, the path
+    # plugin's notices are unknown, and nothing reads as OK.
+    test "a source that crashed renders unknown, never OK", %{conn: conn} do
+      enable_health()
+      Req.Test.stub(Health, fn _conn -> exit(:boom) end)
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+      html = render_async(lv, 2000)
+
+      assert health_of(html, "KilnCMS.FixturePlugin") == "not_applicable"
+      assert health_of(html, "KilnDepFixture.Plugin") == "unknown"
+      refute html =~ ~s(data-health="ok")
+      assert plugins_panel(html) =~ "these results are unknown, not OK"
+    end
+
+    test "check plugins now asks again, past the cache", %{conn: conn} do
+      enable_health()
+      stub_health()
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+      render_async(lv, 2000)
+      assert_received {:health_request, _path}
+
+      lv |> element("#check-plugins-now") |> render_click()
+      render_async(lv, 2000)
+      assert_received {:health_request, _path}
+    end
+
+    test "check plugins now with checks off asks nothing", %{conn: conn} do
+      stub_health()
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+
+      render_hook(lv, "check-plugins-now", %{})
+      render_async(lv, 500)
+      refute_received {:health_request, _path}
+    end
+
+    # The route stops these principals before a socket exists, so the handler
+    # is driven directly: it is the guard that matters, since it makes
+    # outbound requests and takes no actor a policy could refuse.
+    test "the handler refuses an editor, and asks nothing" do
+      enable_health()
+      stub_health()
+
+      socket = health_socket(authed_user(:editor))
+
+      {:noreply, socket} =
+        KilnCMSWeb.SystemLive.handle_event("check-plugins-now", %{}, socket)
+
+      assert socket.assigns.flash["error"] =~ "admin access"
+      assert %Health.Report{} = socket.assigns.plugin_health
+      refute_received {:health_request, _path}
+    end
+
+    test "the handler refuses a platform admin whose temporary grant has expired" do
+      enable_health()
+      stub_health()
+
+      # Mounted while the grant was live; it ran out before the press.
+      expired = %{
+        authed_user(:editor)
+        | granted_role: :admin,
+          granted_role_expires_at: DateTime.add(DateTime.utc_now(), -60, :second)
+      }
+
+      {:noreply, socket} =
+        KilnCMSWeb.SystemLive.handle_event("check-plugins-now", %{}, health_socket(expired))
+
+      assert socket.assigns.flash["error"] =~ "admin access"
+      refute_received {:health_request, _path}
+    end
+  end
+
+  defp enable_health do
+    Application.put_env(
+      :kiln_cms,
+      Health,
+      Keyword.put(Application.get_env(:kiln_cms, Health, []), :enabled, true)
+    )
+  end
+
+  # Answers like kilncms.dev's published-entries endpoint (the only request a
+  # suite with no Hex plugin makes), and tells the test about every request.
+  defp stub_health(opts \\ []) do
+    test = self()
+    notices = %{"data" => Keyword.get(opts, :notices, [])}
+
+    Req.Test.stub(Health, fn conn ->
+      send(test, {:health_request, conn.request_path})
+      Req.Test.json(conn, notices)
+    end)
+  end
+
+  defp notice(fields) do
+    %{"id" => "1", "attributes" => %{"title" => "A notice", "custom_fields" => fields}}
+  end
+
+  defp health_socket(user) do
+    report = %Health.Report{plugins: [], state: :fresh, checked_at: DateTime.utc_now()}
+
+    %Phoenix.LiveView.Socket{
+      assigns: %{__changed__: %{}, current_user: user, plugin_health: report, flash: %{}}
+    }
+  end
+
+  # The `data-health` key of the badge on the row for `module_name`.
+  defp health_of(html, module_name) do
+    html
+    |> Floki.parse_document!()
+    |> Floki.find("#plugins > ul > li")
+    |> Enum.find(&(&1 |> Floki.raw_html() |> String.contains?(module_name)))
+    |> case do
+      nil -> flunk("no row for #{module_name}")
+      row -> row |> Floki.attribute(".plugin-health", "data-health") |> List.first()
     end
   end
 

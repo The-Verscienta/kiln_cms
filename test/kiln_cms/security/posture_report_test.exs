@@ -62,6 +62,9 @@ defmodule KilnCMS.Security.PostureReportTest do
     assert scopes(report) == [:site]
     assert Enum.any?(report.entries, &(&1.id == "core.second_factor"))
     refute Enum.any?(report.entries, &(&1.id == "core.transport"))
+    # Which plugins are installed, and what is wrong with them, is about the
+    # whole deployment (#2244).
+    refute Enum.any?(report.entries, &(&1.id == "core.plugin_health"))
 
     # The dependency fixture's site check runs beside the core's.
     assert %{status: :pass, source: {:plugin, "kiln_dep_fixture"}} =
@@ -81,6 +84,8 @@ defmodule KilnCMS.Security.PostureReportTest do
     assert report.scopes == [:site, :deployment]
     assert Enum.sort(scopes(report)) == [:deployment, :site]
     assert %{status: :pass} = Enum.find(report.entries, &(&1.id == "core.release"))
+    # Plugin checks are off in this suite (`config/test.exs`), so it asks nothing.
+    assert %{status: :n_a} = Enum.find(report.entries, &(&1.id == "core.plugin_health"))
     # Every core check produced an answer: none crashed or overran.
     refute Enum.any?(report.entries, &(&1.status == :error))
   end

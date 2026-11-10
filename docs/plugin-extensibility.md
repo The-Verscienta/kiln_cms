@@ -126,6 +126,14 @@ policies or web layer is an overlay.
    registered, and names each plugin's source.
 4. **Discover what's installed** — `mix kiln.plugins.list` prints every
    installed plugin with its catalog metadata and contribution surface.
+5. **Keep checking it after it ships** — **Operations → System → Plugins**
+   compares each plugin from Hex with hex.pm (has the package changed there
+   since this build, is the release retired or long unreleased) and with the
+   security notices feed, and the Security posture page summarizes it (#2244).
+   `mix kiln.plugins.list --health` does the same from the command line.
+   There is no registry behind it: hex.pm and kilncms.dev's notices are the
+   sources. See [Check your installed plugins](security-posture.md#check-your-installed-plugins)
+   and [Plugin system §7](plugin-system-plan.md#7-plugin-health-checks-2244).
 
 The `mix kiln.gen.plugin <Name>` scaffold produces a distribution-shaped
 skeleton in `projects/<name>/`; an overlay plugin is that directory, filled in

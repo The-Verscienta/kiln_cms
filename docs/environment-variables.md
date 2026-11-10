@@ -789,10 +789,12 @@ service, and the page reports the running version and the update command
 without the comparison. To keep the check but skip kilncms.dev, set
 `KILN_UPDATE_FEED_URL=false` (GitHub only).
 
-**This is the only outbound integration that is on by default.** Unlike
-Meilisearch, S3, Unsplash and mail, it needs no credential to work, so there is
-no unset-secret that implicitly disables it — set `KILN_UPDATE_CHECK=false` if
-your deployment must make no third-party requests at all.
+**This and the [plugin health check](#plugin-health-check-2244) are the
+outbound integrations that are on by default.** Unlike Meilisearch, S3,
+Unsplash and mail, they need no credential to work, so there is no
+unset-secret that implicitly disables them. Set `KILN_UPDATE_CHECK=false` if
+your deployment must make no third-party requests at all: it turns off both,
+unless `KILN_PLUGIN_HEALTH_CHECK` is set.
 
 **If you run a fork, set `KILN_UPDATE_REPO`.** The default compares this build
 against `The-Verscienta/kiln_cms`, which for a fork is an answer about someone
@@ -816,13 +818,60 @@ reports the version alone.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `KILN_UPDATE_CHECK` | enabled | Set to an off-spelling for an instance that must make no outbound requests: neither the kilncms.dev feed nor GitHub is asked. | [`config/runtime/updates.exs:43`](../config/runtime/updates.exs#L43) |
+| `KILN_UPDATE_CHECK` | enabled | Set to an off-spelling for an instance that must make no outbound requests: neither the kilncms.dev feed nor GitHub is asked, and the plugin health check is off too unless `KILN_PLUGIN_HEALTH_CHECK` is set. | [`config/runtime/updates.exs:43`](../config/runtime/updates.exs#L43) |
 | `KILN_UPDATE_REPO` | `The-Verscienta/kiln_cms` | The `owner/name` this build compares itself against. **Forks must set this.** Left at the default, a fork is told about upstream's releases — and a fork *ahead* of upstream compares as newer, so the page reports "Up to date" forever and the fork's own security releases never surface. A value that isn't `owner/name` is rejected, not ignored. | [`config/runtime/updates.exs:73`](../config/runtime/updates.exs#L73), [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_UPDATE_RELEASES_URL` | derived from `KILN_UPDATE_REPO` | Full releases-API endpoint, for GitHub Enterprise or an internal mirror that can't reach `api.github.com`. Overrides the endpoint only — set `KILN_UPDATE_REPO` alongside it so the release link has a fallback. | [`config/runtime/updates.exs:79`](../config/runtime/updates.exs#L79), [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_UPDATE_FEED_URL` | `https://kilncms.dev/api/json/entries/published`, only while `KILN_UPDATE_REPO` and `KILN_UPDATE_RELEASES_URL` are unset | The release feed tried before GitHub: a Kiln site's published-entries endpoint, read for its `release` entries (`custom_fields.version` etc.); Kiln adds the query. Sends only the bare `KilnCMS` user-agent and a fixed query — no version or instance identifier — and kilncms.dev keeps no client IPs for it. Any failure falls back to GitHub. An off-spelling (`false`, `off`, …) makes the check GitHub-only; blank means unset. A value that isn't an absolute http(s) URL is logged and the check uses GitHub. A fork sets this to its own site to use a feed at all — see above. | [`config/runtime/updates.exs:92`](../config/runtime/updates.exs#L92), [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_PIN_PATH` | unset | Path to this project's pinned Kiln checkout (`kiln/upstream`, `upstream`, …). Display only: the update page prefixes its `mix kiln.update` command with a matching `cd`. Unset by default because the pin's path is a downstream choice — see [`projects/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md). | [`config/runtime/updates.exs:56`](../config/runtime/updates.exs#L56), [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_GIT_SHA` | unset | Commit the image was built from. Set via `--build-arg GIT_SHA`, else `--build-arg SOURCE_COMMIT` (what Coolify passes). | [`Kiln.Version`](../lib/kiln/version.ex) |
 | `KILN_BUILD_DATE` | unset | ISO-8601 UTC build timestamp. Set via `--build-arg BUILD_DATE`. | [`Kiln.Version`](../lib/kiln/version.ex) |
+
+### plugin health check (#2244)
+
+**Operations → System → Plugins** and the **Installed plugins** line of
+Security posture say whether each plugin built into this release still
+checks out: its package against hex.pm, security notices that cover the
+installed version, retired or long-unreleased packages, and its
+`kiln_plugin` requirement ([how to read it](security-posture.md#check-your-installed-plugins)).
+
+**When it asks.** Only when a platform admin opens System, or Security
+posture with nothing cached, or selects **Check plugins now** (at most one
+round a minute), and only when some plugin comes from Hex, git or a path. A
+deployment whose plugins are all built from `projects/`, or that has none,
+makes no request. The answer is cached on each node for 24 hours (15 minutes
+after a failed request) and dies with the VM: nothing is stored, nothing is
+scheduled, and nothing is asked at boot.
+
+**What is sent.** Unauthenticated GETs through `KilnCMS.SafeFetch`, with the
+bare `KilnCMS` user-agent:
+
+- for each plugin locked from hex.pm, `https://hex.pm/api/packages/<name>`
+  and `https://hex.pm/api/packages/<name>/releases/<version>`. **These tell
+  hex.pm the plugin's package name and version, from this server's IP.** It
+  is the first request on by default that says something about the
+  installation;
+- one GET to the security notices feed (more if it pages, at most five
+  pages, all on the configured URL's origin; a list longer than that reads
+  as unknown), with a fixed type filter, field list and page size. It sends
+  nothing about this installation.
+
+**What the feed covers.** kilncms.dev publishes notices for Kiln and the
+Kiln project's own plugins only. For a third-party plugin the notices are
+the ones Hex lists on the installed release.
+
+**Unknown is never OK.** A request that fails, times out or answers
+something unreadable makes the plugins it concerns **Unknown**, never **OK**.
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_PLUGIN_HEALTH_CHECK` | follows `KILN_UPDATE_CHECK` | Turns the plugin health check on or off. Unset, it follows `KILN_UPDATE_CHECK`, so one switch still means "no outbound requests"; an explicit on- or off-spelling wins either way. Off, System shows "Plugin checks are off." and Security posture **Not applicable**; the local `kiln_plugin` requirement check still runs. `mix kiln.plugins.list --health` asks even when this is off. | [`config/runtime/updates.exs:117`](../config/runtime/updates.exs#L117), [`Kiln.Plugins.Health`](../lib/kiln/plugins/health.ex) |
+| `KILN_SECURITY_NOTICES_URL` | `https://kilncms.dev/api/json/entries/published`, only while the update check's feed is kilncms.dev's | A Kiln site's published-entries endpoint, read for its `security_notice` entries; Kiln adds the query. Unset, kilncms.dev's feed is asked only while `KILN_UPDATE_FEED_URL` resolves to it: a fork (`KILN_UPDATE_REPO`), a mirror (`KILN_UPDATE_RELEASES_URL`), `KILN_UPDATE_FEED_URL=false`, or a feed pointed at another site asks no notices feed. An off-spelling turns the notices leg off (Hex's own advisories are still read); blank means unset. A value that isn't an absolute http(s) URL is logged, and no Hex, git or path plugin can then read OK (each is unknown unless something else already fails or warns). A mirror on a private or loopback address is refused by `SafeFetch`, with the same result. Setting this does not turn the check on. | [`config/runtime/updates.exs:127`](../config/runtime/updates.exs#L127), [`Kiln.Plugins.Health`](../lib/kiln/plugins/health.ex) |
+| `KILN_PLUGIN_STALE_MONTHS` | `24` | Months without any release of the package on Hex after which a plugin warns "No recent release". A positive integer ([count variables](#count-variables)). | [`config/runtime/updates.exs:141`](../config/runtime/updates.exs#L141), [`Kiln.Plugins.Health`](../lib/kiln/plugins/health.ex) |
+
+`config :kiln_cms, Kiln.Plugins.Health` also takes `notices_type` (the
+content type the feed is filtered on, default `"security_notice"`),
+`hex_api_url` (default `"https://hex.pm/api"`) and `req_options` (passed to
+the HTTP client; a test seam). They have no environment variable.
 
 ### referrer attribution (#619)
 
@@ -953,7 +1002,7 @@ production.
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/runtime.exs:212`](../config/runtime.exs#L212) |
-| `KILN_STRICT_TEST` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Uses the same spellings as every other flag in this document, via the standalone [`config/strict_test_flag.exs`](../config/strict_test_flag.exs) (#646) — it can't call `KilnCMS.Config.Env` directly because it's read in `config/test.exs`, which cannot call project modules. An unrecognized value stays non-strict **and warns on stderr**, like every other flag: without that the strict leg runs zero tests and exits 0, which is indistinguishable from never having invoked it. | [`config/test.exs:369`](../config/test.exs#L369) |
+| `KILN_STRICT_TEST` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Uses the same spellings as every other flag in this document, via the standalone [`config/strict_test_flag.exs`](../config/strict_test_flag.exs) (#646) — it can't call `KilnCMS.Config.Env` directly because it's read in `config/test.exs`, which cannot call project modules. An unrecognized value stays non-strict **and warns on stderr**, like every other flag: without that the strict leg runs zero tests and exits 0, which is indistinguishable from never having invoked it. | [`config/test.exs:377`](../config/test.exs#L377) |
 | `KILN_ML` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to put the optional ML stack — Bumblebee, Nx and EXLA — into the dependency tree (#1321). Unset, `mix deps.get` fetches 102 MB instead of 773 MB and skips a one-time 110 MB XLA archive download, because semantic search ships disabled. Read in `mix.exs` (it decides `deps/0`) and in `config/dev.exs` / `config/test.exs` (which point Nx at `EXLA.Backend` only when it is on), so like `KILN_STRICT_TEST` it goes through a standalone snippet — [`config/ml_flag.exs`](../config/ml_flag.exs) — that cannot call `KilnCMS.Config.Env`. It is a **build-time** flag: it must be set for `mix deps.get` and `mix compile`, and exporting it afterwards changes nothing on its own. `KilnCMS.Search.ML.available?/0` reports what actually compiled, and `mix kiln.ml.note` prints it. An unrecognized value stays off **and warns on stderr**. | [`config/ml_flag.exs:37`](../config/ml_flag.exs#L37) |
 | `POSTGRES_USER` | `postgres` | E2E database user. | [`config/e2e.exs:28`](../config/e2e.exs#L28) |
 | `POSTGRES_PASSWORD` | `postgres` | E2E database password. | [`config/e2e.exs:29`](../config/e2e.exs#L29) |
@@ -1018,7 +1067,8 @@ connection (#606), and `VISUAL_EDITING_ENABLED=False` left the bridge on.
 The variables that hold a **positive integer** — `KILN_READING_TIME_WPM`,
 `KILN_API_CACHE_MAX_AGE`, `KILN_API_CACHE_SWR`,
 `KILN_ANALYTICS_LOW_COUNT_THRESHOLD`, `KILN_EXPERIMENTS_STICKY_DAYS`,
-`BACKUP_KEEP_DAYS` and `BACKUP_STALE_AFTER_HOURS` — go through the same module,
+`BACKUP_KEEP_DAYS`, `BACKUP_STALE_AFTER_HOURS` and `KILN_PLUGIN_STALE_MONTHS`
+— go through the same module,
 as `Env.positive_integer/1` (#1009). Before that each had hand-rolled its own
 `Integer.parse`, its own positivity check and its own warning.
 
