@@ -535,6 +535,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The `/access-denied` page no longer tells a signed-in account with no role on the site that it is signed in as viewer; it says the account has no role there and offers Sign out.**
   ([#2372](https://github.com/The-Verscienta/kiln_cms/issues/2372) · [long form](docs/changelog/unreleased.md#access-denied-no-role))
 
+- **The Essentials sidebar hint now lists the screens it names the way each language does: "Forms, Webhooks, API keys and Trash" in English, "… y Papelera" in Spanish, "… et Corbeille" in French, instead of a bare comma list. A single screen reads "is under Configure".**
+  ([#2379](https://github.com/The-Verscienta/kiln_cms/issues/2379))
+
 - **The editor can start a new document of a type with a required custom field that has no default; it used to fail with "Couldn't create the draft" and log nothing. The field starts blank, the first save asks for it, and the refused-create path now logs its error.**
   Publish and scheduled publish now refuse a document while a required custom field is blank, including drafts written before the field became required.
   ([#2651](https://github.com/The-Verscienta/kiln_cms/pull/2651))
