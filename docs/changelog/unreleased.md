@@ -927,6 +927,26 @@ carries the reasoning.
   Rolling the pin back is safe: the extra attributes are inert to the
   previous release.
 
+<a id="scrollable-tables-upgrade"></a>
+
+- **Optional: run `mix kiln.refire_all` after deploying to put the new table
+  markup into fired `:web` artifacts published before the upgrade (#2464).**
+  No migration and no setting. Public pages rendered by Kiln itself pick the
+  change up as soon as the deploy lands. A fired `:web` artifact keeps its old
+  markup (an unfocusable `.kiln-table-wrap`, or a bare `legacy_html` table with
+  no wrapper) until its document is next published, edited or re-fired:
+  `format_version` does not change, so a read does not re-fire it. The sweep
+  is the same one the [code-block note](#focusable-code-blocks-upgrade)
+  describes, and one run covers both: `mix kiln.refire_all` (on a release,
+  `/app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`). Clients that
+  revalidate with `If-None-Match` get the new HTML on their next revalidation,
+  because the artifact `ETag` is a digest of the body
+  ([#2463](#render-etags)); a consumer that waits for a webhook hears about it
+  only from `mix kiln.refire_all --notify`
+  ([how](../releasing.md#re-render-published-content-after-an-upgrade)).
+  Rolling the pin back is safe: the previous release ignores the extra
+  attributes and the wrapper.
+
 ## Breaking
 
 <a id="backup-request-api"></a>
@@ -4389,6 +4409,63 @@ carries the reasoning.
     reader's language, as before.
   - **Not covered.** Code inside a plugin block's `:web` output, and wide
     tables, which have the same problem (#2464).
+
+<a id="scrollable-tables"></a>
+
+- **A table wider than the column can now be reached and scrolled from the
+  keyboard (#2464).** A table scrolls sideways inside its `.kiln-table-wrap`,
+  and a scroll container with nothing focusable in it can only be scrolled
+  with a mouse or touch, so a keyboard user could not reach the columns past
+  the edge of the screen (axe's `scrollable-region-focusable`, WCAG 2.1.1).
+  Every table wrapper in a rich-text block now renders as
+  `<div class="kiln-table-wrap" tabindex="0" role="group" aria-label="Scrollable table">`.
+  Tab stops on it, the arrow keys scroll it, and a screen reader announces
+  "Scrollable table" before the table itself. Whether a table overflows
+  depends on the reader's screen, which the server cannot know, so every
+  table is focusable, not only the wide ones. This is the code-block fix
+  ([#2164](#focusable-code-blocks)) applied to tables, by
+  `KilnCMS.ScrollableTables.focusable/2`.
+  - **Old `legacy_html` tables get a wrapper.** A table stored as HTML (the
+    old TipTap shape, and imported prose) had no scroll wrapper at all, so a
+    wide one pushed past the column. A top-level `<table>` there is now
+    wrapped in the same focusable `.kiln-table-wrap` and scrolls inside it. A
+    table nested in another table's cell scrolls with its parent and is left
+    alone. Prose whose table tags don't balance is left as it was.
+  - **Where.** The same place as the code-block attributes, at the end of the
+    rich-text block's `:web` render: public pages, editor previews, fired
+    `:web` artifacts, and through them feeds, newsletter email and the static
+    export.
+  - **Label language.** "Scrollable table" is translated (French "Tableau
+    défilant", Spanish "Tabla desplazable") and follows the content's locale
+    the way the code-block label does, including on a cached second hit and
+    in a fired artifact.
+  - **Focus ring.** `.kiln-table-wrap[tabindex="0"]:focus-visible` draws a
+    2px solid `--color-primary-ink` outline, drawn 2px outside the wrapper
+    (`outline-offset: 2px`). Unlike the code block's ring it is not inset: on
+    the inside it would sit on the cells' `base-300` borders and the header's
+    `base-200` fill; outside, it sits on the page background, where the ink
+    shade clears the 3:1 of WCAG 1.4.11 in both themes. A site's custom CSS
+    should leave it in place
+    ([Keep the focus rings](../public-theming.md#keep-the-focus-rings-on-code-blocks-and-tables)).
+  - **Authors cannot set or remove them.** The rich-text sanitizer keeps only
+    `class="kiln-table-wrap"` on that `div` and no attribute on a `<table>`,
+    so a pasted `tabindex="-1"` cannot take a table out of the Tab order; the
+    attributes are added after it. A `div` an author gives the class without a
+    table directly inside is not made focusable. The editor's own copy of the
+    prose, `KilnCMS.Blocks.PortableText.to_html/1`, and the `:json` artifact
+    are unchanged.
+  - **Headless consumers.** The `:web` artifact's HTML gains the three
+    attributes on every table wrapper, and a `legacy_html` table that used to
+    arrive bare now arrives inside a `div.kiln-table-wrap`. A stylesheet that
+    targets a table as a direct child (`.kiln-block > table`) no longer
+    matches it there; `.kiln-block table` still does. `format_version` is
+    unchanged, so an artifact fired before the upgrade keeps the old markup
+    until it is re-fired ([upgrade note](#scrollable-tables-upgrade)). The
+    `:json` artifact stays plain
+    ([Tables in rendered HTML](../headless-consumer-guide.md#tables-in-rendered-html)).
+  - **Not covered.** The gallery block's carousel scrolls sideways with
+    nothing focusable in it and has the same problem (#2590). Tables in a
+    plugin block's own `:web` output carry whatever the plugin renders.
 
 ## Security
 
