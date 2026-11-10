@@ -14,8 +14,13 @@
 # so the committed images are never overwritten.
 #
 # Checked, because the resizer drives it:
-#   - home/<name>.jpg is 1440 wide, and its size is within SIZE_BAND percent
-#     of the committed (sips-made) one
+#   - home/<name>.jpg is 1440 wide, at most SIZE_BAND percent larger than the
+#     committed (sips-made) one, and not under SIZE_FLOOR percent of it. One-
+#     sided by decision (#2585): ImageMagick's quality scale differs from
+#     sips', and at the same setting it writes JPEGs about 35-40% smaller;
+#     smaller only lightens the page, so only a much LARGER file fails. The
+#     floor is not a calibration, only a guard against a blank or broken
+#     image, which a one-sided band would otherwise pass.
 #   - logo-mark-sm.png is 88x120, 8-bit RGBA, like the committed one
 #   - a second `logo` run writes a byte-identical logo-mark-sm.png
 #   - docs: a 2000-wide capture becomes a 1440-wide WebP, a 1200-wide one
@@ -30,6 +35,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 COMMITTED="$REPO/priv/static/images"
 SIZE_BAND="${SIZE_BAND:-40}"
+SIZE_FLOOR="${SIZE_FLOOR:-25}"
 
 fail=0
 die() { echo "check_optimize_images: $*" >&2; exit 1; }
@@ -129,12 +135,14 @@ for name in editor content calendar media; do
   expect "home/$name.jpg width" 1440 "$(jpg_width "$got")"
   size=$(bytes "$got")
   base=$(bytes "$COMMITTED/home/$name.jpg")
-  lo=$((base * (100 - SIZE_BAND) / 100))
+  lo=$((base * SIZE_FLOOR / 100))
   hi=$((base * (100 + SIZE_BAND) / 100))
-  if [ "$size" -ge "$lo" ] && [ "$size" -le "$hi" ]; then
-    ok "home/$name.jpg $size bytes, within ${SIZE_BAND}% of $base"
+  if [ "$size" -gt "$hi" ]; then
+    bad "home/$name.jpg $size bytes, over $hi (committed $base + ${SIZE_BAND}%)"
+  elif [ "$size" -lt "$lo" ]; then
+    bad "home/$name.jpg $size bytes, under $lo (${SIZE_FLOOR}% of committed $base): blank or broken?"
   else
-    bad "home/$name.jpg $size bytes, outside $lo..$hi (committed $base +/- ${SIZE_BAND}%)"
+    ok "home/$name.jpg $size bytes, at most ${SIZE_BAND}% over $base"
   fi
   widths="720 1440"
   [ "$name" = editor ] && widths="720 1440 2880"

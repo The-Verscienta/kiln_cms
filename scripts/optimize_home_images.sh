@@ -87,13 +87,15 @@ resize() {
     *)
       local geom="${w}x"; [ "$h" != "-" ] && geom="x${h}"
       # JPEG: drop metadata. PNG: 8-bit RGBA like sips writes (ImageMagick
-      # would otherwise pick a palette when the colors fit), and no date:*
-      # text or tIME chunk, so rerunning on the same input is byte-identical.
+      # would otherwise pick a palette when the colors fit), and no tIME chunk
+      # and no text chunk at all, so rerunning on the same input is
+      # byte-identical. `date` alone drops only date:create/date:modify, and
+      # a run that crossed a second boundary still differed (#2585).
       local qa=() dst="$out"
       if [ "$fmt" = jpeg ]; then
         qa=(-quality "$q" -strip)
       else
-        qa=(-define "png:exclude-chunks=date,time")
+        qa=(-define "png:exclude-chunks=date,time,tEXt,zTXt,iTXt")
         dst="PNG32:$out"
       fi
       "$RESIZER" "$in" -resize "$geom" "${qa[@]}" "$dst"
