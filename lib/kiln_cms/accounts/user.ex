@@ -47,8 +47,16 @@ defmodule KilnCMS.Accounts.User do
         # :register_with_sso — the OIDC provider has already verified the email
         # (the register change rejects unverified claims), so no second
         # confirmation loop.
+        #
+        # `:sign_in_with_magic_link` is not here: magic-link registration is
+        # off, so it is a read, and the add-on confirms only on a create or an
+        # update. A magic-link sign-in leaves an unconfirmed account
+        # unconfirmed (#2516). Confirming there is #2594's: proof of the
+        # mailbox has to settle what happens to the credentials the earlier
+        # registrant set, and forgetting them would also delete a genuine
+        # registrant's own password. It would be a write inside a read flow
+        # as well.
         auto_confirm_actions [
-          :sign_in_with_magic_link,
           :reset_password_with_token,
           :register_with_sso,
           # A site's own identity provider (#1561) vouched for the address, and
