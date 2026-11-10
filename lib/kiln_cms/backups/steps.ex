@@ -996,11 +996,17 @@ defmodule KilnCMS.Backups.Steps do
     |> Recorder.log(:info, "done", "Backup complete: #{length(artifacts)} artifact(s)")
     |> Recorder.finish()
 
-    _ = Importer.run()
-
     # After the run is closed: a node that dies between the two leaves at most
     # a stale `.work/<stamp>`, which `sweep_work_dirs/2` removes in time.
     File.rm_rf(ctx.work_dir)
+
+    # Once `.work/<stamp>` is gone this run is no longer in flight, so it can
+    # be the newest verified backup: its `.good` markers are written now,
+    # under the lock, so a later run that fails leaving a newer complete set
+    # can't get the cron prune to take this one. Total; nothing it does
+    # changes the backup's outcome. It runs the importer first, so a
+    # cron-made backup sitting next to this one is picked up too.
+    _ = Retention.sync_last_good(ctx.dir)
     _ = Chain.release(lease)
 
     Logger.info(

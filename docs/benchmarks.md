@@ -675,6 +675,39 @@ of it the write section. Knobs (`CF_ROWS`, `CF_RUNS`, `CF_WRITE_ROWS`,
 `CF_WRITE_UPDATES`) are listed at the top of the script. Use `--no-start`: the
 test config's sandbox pool drops a connection held for 120 s.
 
+## Range and sort indexes for custom fields
+
+**Measured for #2359; not a v1.0 metric.** What do the optional btrees of
+`config :kiln_cms, :indexed_custom_fields` buy, and what do they cost?
+Measured on 2026-11-10, PostgreSQL 17 on an Apple laptop with other sessions
+running, so read the ratios.
+
+| | |
+|---|---|
+| Table | A stand-in with the columns the queries touch (`id`, `org_id`, `title`, `custom_fields`, `archived_at`), not the real `pages`: 100,000 rows, 80% in the big tenant, `price` (0-100,000) and `rating` (0-50) integers, a GIN `jsonb_path_ops` index. The real table is wider, so a scan there costs more |
+| Indexes | `(org_id, <CASE expression> ASC NULLS LAST)` and `DESC NULLS LAST` for `price` and `rating`: four btrees |
+| Queries | The SQL Kiln issues for `custom_filter[price][gt]=99000` (849 rows) and `custom_sort=-price` with a page of 20, in the big tenant, `EXPLAIN (ANALYZE)` |
+
+| | Without | With |
+|---|---|---|
+| range, 849 rows | 17.4 ms (Seq Scan) | 0.6 ms (Bitmap Index Scan) |
+| sort, limit 21 | 16.9 ms (parallel Seq Scan, top-N sort) | 1.2 ms (Index Scan, Incremental Sort) |
+| size | heap 16 MB, GIN 6.2 MB | each btree 5.8 MB (about 36% of the heap) |
+| 20,000 saves leaving the field alone | 115 ms (GIN only) | 683 ms (GIN + 4 btrees) |
+| 100,000 inserts | 941 ms (GIN only, empty table) | 1,613 ms (GIN + 4 btrees, 100,000 rows present) |
+
+The Kiln test (`test/kiln_cms/cms/custom_field_range_index_test.exs`, tag
+`table_lock`) asserts the same plans on 20,000 real rows of `pages` and
+`entries` at default planner settings, replaying the issued SQL as a prepared
+statement ten times and, for the sort, as a forced generic plan. With a bound
+field name instead of the literal, the forced generic plan of the sort falls
+back to a sequential scan; the five-then-ten replay alone did not show it, so
+the test does both. A range under a forced generic plan is not asserted: its
+bound value is what a generic plan cannot see, and the name is not the cause.
+
+Not measured: the 1,000,000-row case, and a published-only sort on a table with
+many drafts (the second filter is not in the index).
+
 ## Test coverage over 80%
 
 **Met.** The `Coverage (full suite)` job of CI run
