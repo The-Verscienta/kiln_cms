@@ -448,7 +448,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2555](https://github.com/The-Verscienta/kiln_cms/pull/2555) · [long form](docs/changelog/unreleased.md#form-export-renamed-field-keys))
 
 - **Renaming a form field rewrites its `[field:<old>]` tokens in the autoresponder's subject and body, and a field the enabled autoresponder uses can no longer be deleted until the token is removed.**
-  ([#2343](https://github.com/The-Verscienta/kiln_cms/issues/2343) · [long form](docs/changelog/unreleased.md#autoresponder-tokens-follow-rename))
+  ([#2560](https://github.com/The-Verscienta/kiln_cms/pull/2560) · [long form](docs/changelog/unreleased.md#autoresponder-tokens-follow-rename))
 
 - **The range and link editor inputs now carry translatable help lines, and a field type's input part may declare a `help:` string.**
   Range says both bounds are the same kind; link lists the allowed `rel` tokens. A hostile link address over JSON:API HTTP, the Kotlin golden and dialyzer are verified.
