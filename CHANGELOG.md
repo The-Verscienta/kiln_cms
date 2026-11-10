@@ -445,7 +445,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **A form's CSV export keeps values stored under a renamed or removed field's old machine name, in a column headed `<key> (renamed or removed)`; forms never renamed export the same columns as before.**
-  ([#2342](https://github.com/The-Verscienta/kiln_cms/issues/2342) · [long form](docs/changelog/unreleased.md#form-export-renamed-field-keys))
+  ([#2555](https://github.com/The-Verscienta/kiln_cms/pull/2555) · [long form](docs/changelog/unreleased.md#form-export-renamed-field-keys))
 
 - **A document in the trash takes no more writes: an editor, API client or job still holding it is refused, so no `updated`, `unpublished` or `archived` follows `deleted`.**
   Open editors keep the unsaved text and say it was trashed; a second trash or restore is refused.
