@@ -301,6 +301,7 @@ defmodule KilnCMSWeb.ExperimentsGoalPickerTest do
         tenant: org_id()
       )
 
+      CMS.destroy_post!(post, actor: admin)
       CMS.purge_post!(post, actor: admin)
 
       {:ok, _lv, html} = live(conn, ~p"/editor/experiments")

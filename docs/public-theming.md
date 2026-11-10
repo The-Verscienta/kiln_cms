@@ -102,6 +102,33 @@ on the next request. The cached tree is resolved for the **anonymous**
 audience only — it is shared across visitors, so it must never carry a link
 only a signed-in audience may see.
 
+## Which language the page text is in
+
+A content page can be served in a language other than the visitor's: a
+visitor reading French follows a link to a page that has no French
+translation and gets the English one. Kiln writes some text of its own into
+the page, and which language it uses depends on where on the page it is:
+
+* **Inside the article** (`.public-article`): the page's language, the one
+  `<html lang>` and the `Content-Language` header declare. That covers the
+  byline and its date, a form block's labels and messages, a newsletter
+  sign-up's fields, the human-verification widget and an untitled embed's
+  title.
+* **The chrome around it** (header links, search, the language switcher,
+  the footer): the language of the request, from the URL prefix or else the
+  visitor's session. Whether the chrome should follow the page instead is an
+  open decision, tracked with a caching problem it causes in
+  [#2595](https://github.com/The-Verscienta/kiln_cms/issues/2595).
+
+A plugin block that ships its own Gettext backend renders in the request's
+language, not the page's.
+
+On a multilingual site, form and newsletter sign-up blocks on a content page
+post under the page's language prefix (`/en/forms/<slug>`,
+`/fr/newsletter/subscribe`), so a stylesheet or script that selects them by
+`action` no longer matches. Select `.kiln-form` and
+`.kiln-newsletter-signup` instead.
+
 ## Custom CSS
 
 A plain-CSS field on the code-injection screen, served inside a
@@ -121,28 +148,43 @@ only. Two rules, both enforced:
 `style-src` already allows inline styles, so no CSP work accompanies the
 field. The 64 KB bound and the paper trail come with the resource.
 
-### Keep the code-block focus ring
+### Keep the focus rings on code blocks and tables
 
-Every code block on a public page is a keyboard stop
-(`<pre tabindex="0" role="group" aria-label="Code sample">`), so a reader
-without a mouse can Tab to it and scroll a long line with the arrow keys
-([#2164](https://github.com/The-Verscienta/kiln_cms/issues/2164)). The
-outline that `pre[tabindex="0"]:focus-visible` draws is the only sign of
-where focus went. Custom CSS and presets may change its colour, but must not
-remove it:
+Every code block and every table on a public page is a keyboard stop, so a
+reader without a mouse can Tab to it and scroll it with the arrow keys:
+
+- a code block is `<pre tabindex="0" role="group" aria-label="Code sample">`
+  ([#2164](https://github.com/The-Verscienta/kiln_cms/issues/2164));
+- a table sits in
+  `<div class="kiln-table-wrap" tabindex="0" role="group" aria-label="Scrollable table">`
+  ([#2464](https://github.com/The-Verscienta/kiln_cms/issues/2464)).
+
+The outline each one draws on `:focus-visible` is the only sign of where
+focus went. Custom CSS and presets may change its color, but must not remove
+it:
 
 ```css
 /* Don't: a keyboard reader can no longer see which block has focus. */
-.public-body pre:focus { outline: none; }
+.public-body pre:focus,
+.public-body .kiln-table-wrap:focus { outline: none; }
 
-/* Fine: a different colour, still a visible outline. */
-pre[tabindex="0"]:focus-visible { outline-color: #0b5394; }
+/* Fine: a different color, still a visible outline. */
+pre[tabindex="0"]:focus-visible,
+.kiln-table-wrap[tabindex="0"]:focus-visible { outline-color: #0b5394; }
 ```
 
-The stock rule is `outline: 2px solid var(--color-primary-ink)` with
-`outline-offset: -2px`. It is drawn inside the block, so a parent with
-`overflow: hidden` or `overflow-x: clip` (monograph sets the latter) cannot
-trim it. A replacement colour needs 3:1 against the block's background
-(`--color-base-200`) in both light and dark mode (WCAG 1.4.11). A broader
-reset such as `*:focus { outline: none }` takes this ring away too, along
+Both stock rules are `outline: 2px solid var(--color-primary-ink)`; they
+differ in where the outline sits:
+
+- **Code block:** `outline-offset: -2px`, drawn inside the block, so a parent
+  with `overflow: hidden` or `overflow-x: clip` (monograph sets the latter)
+  cannot trim it. A replacement color needs 3:1 against the block's background
+  (`--color-base-200`).
+- **Table:** `outline-offset: 2px`, drawn outside the wrapper, because inside
+  it would land on the cells' `--color-base-300` borders and the header's
+  `--color-base-200` fill. A replacement color needs 3:1 against the page
+  background (`--color-base-100`).
+
+Check a replacement in both light and dark mode (WCAG 1.4.11). A broader
+reset such as `*:focus { outline: none }` takes these rings away too, along
 with every other focus indicator on the page.

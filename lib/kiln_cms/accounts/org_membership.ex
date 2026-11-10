@@ -81,6 +81,11 @@ defmodule KilnCMS.Accounts.OrgMembership do
       primary? true
       require_atomic? false
 
+      # The invitation still pending for this person here goes too (#2452):
+      # left behind, its link would put back a membership just removed.
+      # First, so the invitation's row is locked before the membership's.
+      change KilnCMS.Accounts.Changes.RetirePendingInvitation
+
       change {KilnCMS.Accounts.Changes.EvictSessions,
               reason: :membership_removed, user_id: :user_id}
 
@@ -93,6 +98,12 @@ defmodule KilnCMS.Accounts.OrgMembership do
     update :update do
       primary? true
       require_atomic? false
+
+      # A changed tier or custom role retires the invitation still pending for
+      # this person here (#2452), so an older link cannot raise them back over
+      # the decision just made. First, so the invitation's row is locked before
+      # the membership's (the accept path's order).
+      change KilnCMS.Accounts.Changes.RetirePendingInvitation
 
       # A new standing tier at or above a live temporary one makes that grant
       # meaningless. Mirrors `User.:manage_access` — see the change module.
@@ -283,6 +294,48 @@ defmodule KilnCMS.Accounts.OrgMembership do
       change KilnCMS.Security.Changes.RecordRegistration
     end
 
+    # An invitation accepted by someone already on its site (#2452,
+    # `Invitations.grant_membership/4`, as `SystemActor.new(:invitations)`):
+    # the membership takes the invited tier when that is higher than its
+    # standing one, and is never lowered. `RaiseRoleByInvitation` judges the
+    # row as locked here, not as the caller read it, and refuses an equal or
+    # lower tier (`:not_higher`) before anything is written, and a row that is
+    # not `:active`. The other axes (audiences, type scopes, field grants) are
+    # kept; `role_id` becomes the invitation's custom role when it names one.
+    #
+    # Not `:update`: that accepts every grant axis and retires the pending
+    # invitation (`RetirePendingInvitation`), which this write consumes itself.
+    update :raise_role_by_invitation do
+      description "Raise an active membership to the tier an accepted invitation names (system-only)."
+      accept []
+      require_atomic? false
+
+      argument :role, :atom do
+        constraints one_of: [:admin, :editor, :viewer]
+        allow_nil? false
+      end
+
+      argument :role_id, :uuid
+
+      # The role_id the row may take is the argument, not the row's own
+      # (validations run before the hook that writes it).
+      validate {KilnCMS.Accounts.Validations.RoleBelongsToOrg, argument: :role_id}
+
+      # The account's row before the membership's (`AccountLock`'s lock order).
+      change KilnCMS.Accounts.Changes.LockAccount
+      change get_and_lock_for_update()
+      change KilnCMS.Accounts.Changes.RaiseRoleByInvitation
+
+      # After the commit, so the reconnect it causes is authorized against the
+      # raised row, not the old one still visible before COMMIT.
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :membership_changed, user_id: :user_id, after_commit?: true}
+
+      # Audit log (#2241), in the transaction: `role_granted`, with the
+      # previous role.
+      change KilnCMS.Security.Changes.RecordRoleChange
+    end
+
     # A site admin turns the applicant away. The row is kept (`:rejected`), and
     # so is the account, so the address cannot simply register here again.
     # Allowed on an unconfirmed row too, so a wave of bot sign-ups can be
@@ -390,6 +443,15 @@ defmodule KilnCMS.Accounts.OrgMembership do
     policy action(:approve_registration_by_invitation) do
       authorize_if {KilnCMS.Checks.SystemActor,
                     subsystem: :invitations, action: :approve_registration_by_invitation}
+    end
+
+    # Raising a membership to an accepted invitation's tier (#2452) — system
+    # code only, from `Invitations.grant_membership/4`. A platform admin passes
+    # the bypass above, as for every membership write; `:update` already lets
+    # them set any tier.
+    policy action(:raise_role_by_invitation) do
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: :invitations, action: :raise_role_by_invitation}
     end
 
     # Listing and deciding registrations: an admin of the org the row (or, for

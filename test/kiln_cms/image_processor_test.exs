@@ -22,7 +22,7 @@ defmodule KilnCMS.ImageProcessorTest do
   # key) since forcing a genuine encoder failure needs an out-of-range
   # quality, and `quality/1` clamps to a valid 1..100 (or the default) before
   # it ever reaches `Image.write`, same as the "misconfigured quality" test
-  # above already establishes.
+  # in KilnCMS.ImageProcessorConfigTest already establishes.
   test "a fully successful run reports no failures, under the new key", %{path: path} do
     assert {:ok, %{failed: [], variants: variants}} = ImageProcessor.process(path, ".png")
     Enum.each(variants, &File.rm(&1.path))
@@ -93,24 +93,6 @@ defmodule KilnCMS.ImageProcessorTest do
       Enum.each(variants, &File.rm(&1.path))
     end
 
-    test "an unconfigured format list writes the source format only", %{path: path} do
-      Application.put_env(:kiln_cms, :image_variants, formats: [])
-      on_exit(fn -> Application.delete_env(:kiln_cms, :image_variants) end)
-
-      {:ok, %{variants: variants}} = ImageProcessor.process(path, ".png")
-
-      assert variants |> Enum.map(& &1.label) |> Enum.sort() == ["card", "medium", "thumb"]
-
-      Enum.each(variants, &File.rm(&1.path))
-    end
-
-    test "an unknown configured format is dropped rather than raising" do
-      Application.put_env(:kiln_cms, :image_variants, formats: [:webp, :jxl])
-      on_exit(fn -> Application.delete_env(:kiln_cms, :image_variants) end)
-
-      assert ImageProcessor.variant_formats() == [:webp]
-    end
-
     # A matching `<source>` REPLACES the `<img>`'s srcset, so without a
     # full-size alternate a WebP-capable browser could never reach a candidate
     # wider than the largest downscale — every image would quietly render
@@ -131,29 +113,8 @@ defmodule KilnCMS.ImageProcessorTest do
       Enum.each(variants, &File.rm(&1.path))
     end
 
-    # `Image.write` rejects a quality outside 1..100, and a rejected write
-    # produces no variant at all — so an unclamped `System.get_env/1` string
-    # would empty the library rather than degrade one format.
-    test "a misconfigured quality falls back instead of failing every write", %{path: path} do
-      Application.put_env(:kiln_cms, :image_variants, webp_quality: "82")
-      on_exit(fn -> Application.delete_env(:kiln_cms, :image_variants) end)
-
-      assert ImageProcessor.quality(:webp) == 82
-
-      {:ok, %{variants: variants}} = ImageProcessor.process(path, ".png")
-      assert Enum.any?(variants, &(&1.label == "thumb.webp"))
-
-      Enum.each(variants, &File.rm(&1.path))
-    end
-
-    test "quality is configurable per format, with a default" do
-      assert ImageProcessor.quality(:webp) == 82
-
-      Application.put_env(:kiln_cms, :image_variants, webp_quality: 60)
-      on_exit(fn -> Application.delete_env(:kiln_cms, :image_variants) end)
-
-      assert ImageProcessor.quality(:webp) == 60
-    end
+    # The tests that configure `:image_variants` are in
+    # KilnCMS.ImageProcessorConfigTest, async: false (#2380).
 
     test "base_label/1 sees through the format suffix" do
       assert ImageProcessor.base_label("card") == "card"
@@ -251,15 +212,8 @@ defmodule KilnCMS.ImageProcessorTest do
     assert {:ok, %{ext: ".png", content_type: "image/png"}} = ImageProcessor.validate_upload(path)
   end
 
-  # Decompression-bomb guard: dimensions above the configured pixel budget are
-  # rejected from the header alone, before any full decode can happen.
-  test "validate_upload/1 rejects images above the pixel limit", %{path: path} do
-    Application.put_env(:kiln_cms, :media, max_pixels: 100)
-    on_exit(fn -> Application.delete_env(:kiln_cms, :media) end)
-
-    # The fixture is 1200x800 (960k pixels) — far over a 100-pixel budget.
-    assert {:error, :too_many_pixels} = ImageProcessor.validate_upload(path)
-  end
+  # The pixel-limit refusal is in KilnCMS.ImageProcessorConfigTest: it lowers
+  # `:media` VM-wide, async: false (#2380).
 
   test "validate_upload/1 derives the extension from bytes, not the filename", %{path: path} do
     # PNG bytes written to a `.svg`-named file: the result must reflect the real

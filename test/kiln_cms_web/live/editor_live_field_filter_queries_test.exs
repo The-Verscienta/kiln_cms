@@ -3,12 +3,13 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterQueriesTest do
   What a custom-field filter and field sort cost the content list: the number
   of queries does not grow with the number of rows it narrows to.
   """
-  # async: false — the counter below attaches a global telemetry handler and
-  # counts every repo query in the VM, so no other test may run beside it.
+  # async: false — the counter attaches a global telemetry handler, so no other
+  # test may run beside it. Sync is not enough on its own (#2504): see
+  # `KilnCMS.Test.QueryCounting` for what else keeps the counts this test's own.
   use KilnCMSWeb.ConnCase, async: false
   @moduletag :capture_log
 
-  import Phoenix.LiveViewTest
+  import KilnCMS.Test.QueryCounting
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
@@ -41,28 +42,6 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterQueriesTest do
     user
   end
 
-  defp queries(fun) do
-    handler = "ffq-#{uniq()}"
-    {:ok, agent} = Agent.start_link(fn -> [] end)
-
-    :telemetry.attach(
-      handler,
-      [:kiln_cms, :repo, :query],
-      fn _event, _measure, meta, _config ->
-        Agent.update(agent, &[{meta[:source], meta[:query]} | &1])
-      end,
-      nil
-    )
-
-    try do
-      fun.()
-    after
-      :telemetry.detach(handler)
-    end
-
-    Agent.get(agent, & &1)
-  end
-
   defp seed_rows(prefix, count) do
     for n <- 1..count do
       Ash.Seed.seed!(Page, %{
@@ -74,20 +53,18 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterQueriesTest do
     end
   end
 
-  defp count_for(conn, prefix) do
-    query =
-      URI.encode_query(%{
+  defp editor_path(query), do: "/editor?" <> URI.encode_query(query)
+
+  defp filtered_queries(conn, prefix) do
+    page_queries(
+      conn,
+      editor_path(%{
         "type" => "page",
         "q" => prefix,
         "cf" => "price:gte:100;note:contains:n",
         "sort" => "-field:price"
       })
-
-    queries(fn ->
-      {:ok, lv, _html} = live(conn, "/editor?" <> query)
-      render(lv)
-    end)
-    |> length()
+    )
   end
 
   setup %{conn: conn} do
@@ -115,17 +92,18 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterQueriesTest do
     seed_rows(many, 30)
 
     # Warm the one-off caches (registries, settings) so both runs see the same ones.
-    count_for(conn, few)
+    filtered_queries(conn, few)
 
-    assert count_for(conn, many) == count_for(conn, few)
+    many_queries = filtered_queries(conn, many)
+    few_queries = filtered_queries(conn, few)
+
+    assert_same_queries(many_queries, few_queries, "30 rows minus 3 rows")
   end
 
   defp definition_reads(conn, query) do
-    queries(fn ->
-      {:ok, lv, _html} = live(conn, "/editor?" <> URI.encode_query(query))
-      render(lv)
-    end)
-    |> Enum.count(fn {source, _sql} -> source == "field_definitions" end)
+    conn
+    |> page_queries(editor_path(query))
+    |> Enum.count(&(&1.source == "field_definitions"))
   end
 
   test "a plain single-type list reads the field definitions once, no more than the column strip needs",
@@ -134,7 +112,8 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterQueriesTest do
 
     one_read = fn ->
       queries(fn -> CMS.field_definitions_for!(:page, actor: admin, tenant: org) end)
-      |> Enum.count(fn {source, _sql} -> source == "field_definitions" end)
+      |> elem(1)
+      |> Enum.count(&(&1.source == "field_definitions"))
     end
 
     plain = %{"type" => "page", "q" => "nothing#{uniq()}"}

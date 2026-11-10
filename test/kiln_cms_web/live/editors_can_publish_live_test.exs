@@ -20,15 +20,21 @@ defmodule KilnCMSWeb.EditorsCanPublishLiveTest do
 
   @password "password123456"
 
-  defp authed_user(role) do
+  defp authed_user(role, extra \\ %{}) do
     email = "pub-live-#{role}-#{System.unique_integer([:positive])}@example.com"
 
-    Ash.Seed.seed!(User, %{
-      email: email,
-      hashed_password: Bcrypt.hash_pwd_salt(@password),
-      confirmed_at: DateTime.utc_now(),
-      role: role
-    })
+    Ash.Seed.seed!(
+      User,
+      Map.merge(
+        %{
+          email: email,
+          hashed_password: Bcrypt.hash_pwd_salt(@password),
+          confirmed_at: DateTime.utc_now(),
+          role: role
+        },
+        extra
+      )
+    )
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
@@ -278,6 +284,70 @@ defmodule KilnCMSWeb.EditorsCanPublishLiveTest do
 
       lv |> element(row_unpublish(page)) |> render_click()
       assert CMS.get_page!(page.id, actor: admin).state == :draft
+    end
+  end
+
+  # "Only an admin…" is said only where it is the reason (#2473): to an editor
+  # on a site where publishing needs an admin. An editor scoped away from the
+  # type, or a viewer, was told something false or no help.
+  describe "refusal wording" do
+    @scoped %{editable_types: ["post"]}
+
+    test "an editor scoped away from the type is told so in the content editor, not that an admin publishes",
+         %{conn: conn} do
+      allow_editors!(true)
+      editor = authed_user(:editor, @scoped)
+      page = published_page!()
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+
+      for action <- ~w(unpublish archive) do
+        html = render_hook(lv, "workflow", %{"action" => action})
+        assert html =~ "You can&#39;t edit this content type."
+        refute html =~ "Only an admin"
+      end
+
+      assert CMS.get_page!(page.id, actor: editor).state == :published
+    end
+
+    test "the scope is the reason even while publishing needs an admin", %{conn: conn} do
+      admin = authed_user(:admin)
+      editor = authed_user(:editor, @scoped)
+      page = page!(admin)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+
+      html = render_hook(lv, "workflow", %{"action" => "publish"})
+      assert html =~ "You can&#39;t edit this content type."
+      refute html =~ "Only an admin"
+    end
+
+    test "Return stays an admin's step for an editor where editors may publish", %{conn: conn} do
+      allow_editors!(true)
+      editor = authed_user(:editor)
+      page = editor |> page!() |> CMS.submit_page_for_review!(%{}, actor: editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert render_hook(lv, "workflow", %{"action" => "return"}) =~
+               "Only an admin can return content to draft."
+
+      assert CMS.get_page!(page.id, actor: editor).state == :in_review
+    end
+
+    test "an editor scoped away from the type is told so in the content list", %{conn: conn} do
+      allow_editors!(true)
+      admin = authed_user(:admin)
+      editor = authed_user(:editor, @scoped)
+      page = page!(admin) |> CMS.publish_page!(%{}, actor: admin)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor")
+
+      html = render_hook(lv, "unpublish", %{"kind" => "page", "id" => page.id})
+      assert html =~ "You can&#39;t edit this content type."
+      refute html =~ "Only an admin"
+
+      assert CMS.get_page!(page.id, actor: admin).state == :published
     end
   end
 

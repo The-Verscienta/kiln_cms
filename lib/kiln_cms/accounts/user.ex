@@ -47,8 +47,16 @@ defmodule KilnCMS.Accounts.User do
         # :register_with_sso — the OIDC provider has already verified the email
         # (the register change rejects unverified claims), so no second
         # confirmation loop.
+        #
+        # `:sign_in_with_magic_link` is not here: magic-link registration is
+        # off, so it is a read, and the add-on confirms only on a create or an
+        # update. A magic-link sign-in leaves an unconfirmed account
+        # unconfirmed (#2516). Confirming there is #2594's: proof of the
+        # mailbox has to settle what happens to the credentials the earlier
+        # registrant set, and forgetting them would also delete a genuine
+        # registrant's own password. It would be a write inside a read flow
+        # as well.
         auto_confirm_actions [
-          :sign_in_with_magic_link,
           :reset_password_with_token,
           :register_with_sso,
           # A site's own identity provider (#1561) vouched for the address, and
@@ -457,6 +465,14 @@ defmodule KilnCMS.Accounts.User do
       # rejected form never calls out. After the validations above: a wrong
       # current password makes the changeset invalid and nothing is sent.
       change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :change}
+
+      # `PasswordValidation` above checks the current password against the
+      # struct the request loaded, which may be from before an invitation took
+      # the account over (#2453): the stranger's settings page, still open,
+      # would accept the stranger's own old password and set a new one over the
+      # invitee's. Under the row lock, the account's password must still be the
+      # one that struct holds. Above the hash, so the lock comes first.
+      change {KilnCMS.Accounts.Changes.GuardAccountTakeover, user_id: :id, lock: :no_key_update}
 
       change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
 
@@ -928,6 +944,11 @@ defmodule KilnCMS.Accounts.User do
       # hash above, and this ends everything they already hold (#734).
       change KilnCMS.Accounts.Changes.RevokeAllTokens
 
+      # ...and every other credential they may have set up on it (#2453): two-
+      # step verification, passkeys, identity-provider links, push devices and
+      # API keys, in this transaction, or the accept fails.
+      change KilnCMS.Accounts.Changes.ForgetPriorCredentials
+
       change {KilnCMS.Accounts.Changes.EvictSessions,
               reason: :password_reset, after_commit?: true}
 
@@ -1037,6 +1058,11 @@ defmodule KilnCMS.Accounts.User do
       require_atomic? false
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
       change set_attribute(:totp_pending_secret, &KilnCMS.Accounts.Totp.generate_secret/0)
+
+      # Not guarded against an invitation's takeover (#2453): a secret staged
+      # from a stale session is enforced by nothing until `:confirm_totp`
+      # promotes it, and that refuses a request from before the takeover; the
+      # invitee's own enrolment stages a fresh secret over it.
     end
 
     # Finish enrolment by proving a code from the *pending* secret, then
@@ -1084,6 +1110,14 @@ defmodule KilnCMS.Accounts.User do
       validate KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement
       change KilnCMS.Accounts.Changes.PromotePendingTotpSecret
       change set_attribute(:totp_confirmed_at, &DateTime.utc_now/0)
+
+      # Under the row lock, the secret promoted above must still be the one
+      # staged, and the account must not have changed hands since the request
+      # loaded it (#2453): a confirmation built before an invitation's takeover
+      # waits for it, then finds the staged secret cleared and is refused.
+      change {KilnCMS.Accounts.Changes.GuardAccountTakeover,
+              user_id: :id, lock: :no_key_update, pending_secret?: true}
+
       change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
 
       # Audit log (#2241), in the transaction: the factor and its event commit together.
@@ -1111,6 +1145,13 @@ defmodule KilnCMS.Accounts.User do
       # rejected it there is no hook left to charge from.
       change KilnCMS.Accounts.Changes.ThrottleSecondFactor
       validate KilnCMS.Accounts.Validations.ValidTotpCode
+
+      # `ValidTotpCode` checks the code against the struct the request loaded,
+      # which may hold a factor an invitation's takeover has since removed
+      # (#2453): the stranger would write recovery codes they know onto the
+      # invitee's account. Refused under the row lock instead.
+      change {KilnCMS.Accounts.Changes.GuardAccountTakeover, user_id: :id, lock: :no_key_update}
+
       change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
     end
 
@@ -1157,6 +1198,10 @@ defmodule KilnCMS.Accounts.User do
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
       change KilnCMS.Accounts.Changes.ThrottleSecondFactor
       validate KilnCMS.Accounts.Validations.ValidTotpCode
+
+      # Not guarded against an invitation's takeover (#2453): from a stale
+      # session it can only clear the factor columns, which the takeover has
+      # already cleared; it signs no one in and grants nothing.
       change set_attribute(:totp_secret, nil)
       change set_attribute(:totp_confirmed_at, nil)
       change set_attribute(:totp_recovery_hashes, [])

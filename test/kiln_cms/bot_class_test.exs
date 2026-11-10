@@ -8,6 +8,8 @@ defmodule KilnCMS.BotClassTest do
 
   alias KilnCMS.BotClass
 
+  doctest KilnCMS.BotClass
+
   @browser [
     {"desktop Chrome",
      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"},
@@ -155,5 +157,53 @@ defmodule KilnCMS.BotClassTest do
   test "classes/0 lists every answer" do
     assert Enum.sort(BotClass.classes()) ==
              Enum.sort([:browser, :search_engine, :ai_crawler, :declared_bot, :empty])
+  end
+
+  describe "search_engine/1 (#2254)" do
+    @engine_rows [
+      {"Googlebot smartphone",
+       "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.155 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+       :google},
+      {"Googlebot-Image", "Googlebot-Image/1.0", :google},
+      {"lowercase googlebot", "mozilla/5.0 (compatible; googlebot/2.1)", :google},
+      {"Google-InspectionTool", "Mozilla/5.0 (compatible; Google-InspectionTool/1.0;)", :google},
+      {"bingbot", "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)",
+       :bing},
+      {"DuckDuckBot", "DuckDuckBot/1.1; (+http://duckduckgo.com/duckduckbot.html)", :duckduckgo},
+      {"Baiduspider", "Mozilla/5.0 (compatible; Baiduspider/2.0)", :baidu},
+      {"YandexBot", "Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)", :yandex},
+      {"Applebot", "Mozilla/5.0 (Applebot/0.1; +http://www.apple.com/go/applebot)", :apple},
+      {"two engines: the leftmost wins", "bingbot/2.0 Googlebot/2.1", :bing}
+    ]
+
+    for {name, ua, engine} <- @engine_rows do
+      test "#{name} names #{engine}" do
+        assert BotClass.search_engine(unquote(ua)) == unquote(engine)
+      end
+    end
+
+    test "every search-engine row in classify/1 names an engine" do
+      for {name, ua} <- @search_engine do
+        assert BotClass.search_engine(ua) in BotClass.engines(), name
+      end
+    end
+
+    test "no other class names an engine" do
+      for {name, ua} <- @browser ++ @ai_crawler ++ @declared_bot do
+        assert BotClass.search_engine(ua) == nil, name
+      end
+
+      for value <- [nil, "", "   ", 42] do
+        assert BotClass.search_engine(value) == nil, inspect(value)
+      end
+    end
+
+    test "a name past the first 512 bytes is never read" do
+      assert BotClass.search_engine(String.duplicate("a", 600) <> " Googlebot/2.1") == nil
+    end
+
+    test "engines/0 is the table, in order" do
+      assert BotClass.engines() == [:google, :bing, :duckduckgo, :baidu, :yandex, :apple]
+    end
   end
 end

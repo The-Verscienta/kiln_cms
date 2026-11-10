@@ -320,22 +320,8 @@ defmodule KilnCMS.Accounts.SiteSsoTest do
       assert {:error, :unconfirmed_account} = Admission.admit(org.id, claims("pre@#{domain}"))
     end
 
-    test "invite-only: no new accounts, known ones still sign in", %{org: org, domain: domain} do
-      previous = Application.get_env(:kiln_cms, :registration_enabled)
-      Application.put_env(:kiln_cms, :registration_enabled, false)
-
-      on_exit(fn ->
-        if is_nil(previous),
-          do: Application.delete_env(:kiln_cms, :registration_enabled),
-          else: Application.put_env(:kiln_cms, :registration_enabled, previous)
-      end)
-
-      assert {:error, :registration_disabled} = Admission.admit(org.id, claims("new@#{domain}"))
-
-      known = user!("known@#{domain}")
-      member!(known, org, :viewer)
-      assert {:ok, _user} = Admission.admit(org.id, claims("known@#{domain}"))
-    end
+    # The invite-only case is KilnCMS.Accounts.SiteSsoRegistrationTest: it turns
+    # `:registration_enabled` off VM-wide, so it runs async: false (#2380).
   end
 
   describe "approval for the site's new accounts (#2514)" do

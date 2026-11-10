@@ -30,7 +30,8 @@ defmodule KilnCMS.Security.Posture.Registry do
     Checks.ExposedEndpoints,
     Checks.ApiKeys,
     Checks.HumanVerification,
-    Checks.Release
+    Checks.Release,
+    Checks.PluginHealth
   ]
 
   @min_timeout 100

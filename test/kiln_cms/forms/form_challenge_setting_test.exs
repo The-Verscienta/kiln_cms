@@ -141,8 +141,8 @@ defmodule KilnCMS.Forms.FormChallengeSettingTest do
       CMS.update_form_field!(field, %{label: "Your email"}, actor: admin)
       assert_receive {:bust_prefix, ^prefix}
 
-      # Never the full clear: that would reset every site's head-generation
-      # token (a stale 304) and empty the fired-artifact cache.
+      # Never the full clear: that would empty every site's delivery cache and
+      # the fired-artifact cache.
       refute_receive {:bust_all, _node}, 50
     end
 

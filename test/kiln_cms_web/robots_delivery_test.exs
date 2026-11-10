@@ -167,8 +167,10 @@ defmodule KilnCMSWeb.RobotsDeliveryTest do
       assert body["robots"] == %{"noindex" => true, "nofollow" => false}
 
       body = conn |> get(~p"/api/content/page/#{plain.slug}") |> json_response(200)
+      # Absent on an ordinary document, on a body that is otherwise current:
+      # `social` (#2258) is on every artifact of this build.
       refute Map.has_key?(body, "robots")
-      assert KilnCMS.Firing.Engine.format_version() == 3
+      assert Map.has_key?(body, "social")
     end
 
     test "JSON:API exposes the flags, including through sparse fields", %{

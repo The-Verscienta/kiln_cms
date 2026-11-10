@@ -2,7 +2,9 @@ defmodule KilnCMS.CMS.CustomFieldRangeIndexTest do
   @moduledoc """
   Range filters and `custom_sort` on a field listed in
   `config :kiln_cms, :indexed_custom_fields` are answered from that field's
-  btrees (#2359, ADR 0025). test.exs lists `idx_price` and `idx_rating`.
+  btrees (#2359, ADR 0025). The test environment declares none (CI's
+  `mix ash.codegen --check` would call them pending), so a setup block lists
+  `idx_price` and `idx_rating` through the module's test seam.
 
   Tagged `:table_lock`: it creates indexes on `pages` and `entries`, and a
   `CREATE INDEX` inside the sandbox holds a lock on the shared table until the
@@ -10,7 +12,7 @@ defmodule KilnCMS.CMS.CustomFieldRangeIndexTest do
 
   The indexes are not in the migrations (core ships none, the way a site that
   has not opted in has none), so setup builds them from the very definitions
-  the Content macro declares (`AshPostgres.DataLayer.Info.custom_indexes/1`),
+  the Content macro would declare (`IndexedCustomFields.index_specs/1`),
   org-leading as codegen would. The plan assertions then run against 20,000
   rows after `ANALYZE`, at default planner settings, replaying the SQL Ash
   issued with its real parameters eight times and once as a forced generic
@@ -36,24 +38,45 @@ defmodule KilnCMS.CMS.CustomFieldRangeIndexTest do
     })
   end
 
+  @names ["idx_price", "idx_rating"]
+
+  setup do
+    previous = Application.get_env(:kiln_cms, :indexed_custom_fields_override)
+
+    Application.put_env(
+      :kiln_cms,
+      :indexed_custom_fields_override,
+      Map.new(~w(pages posts entries), &{&1, @names})
+    )
+
+    on_exit(fn ->
+      if previous,
+        do: Application.put_env(:kiln_cms, :indexed_custom_fields_override, previous),
+        else: Application.delete_env(:kiln_cms, :indexed_custom_fields_override)
+    end)
+  end
+
   describe "the declared indexes" do
-    test "each core table gets an ascending and a descending btree per listed name" do
-      assert IndexedCustomFields.names("pages") == ["idx_price", "idx_rating"]
+    test "the test environment declares none; a listed name yields an asc and a desc btree" do
+      for resource <- [CMS.Page, CMS.Post, CMS.Entry] do
+        refute Enum.any?(
+                 AshPostgres.DataLayer.Info.custom_indexes(resource),
+                 &String.contains?(&1.name, "_cf_")
+               )
+      end
 
-      for {resource, table} <- [{CMS.Page, "pages"}, {CMS.Post, "posts"}, {CMS.Entry, "entries"}] do
-        declared =
-          resource
-          |> AshPostgres.DataLayer.Info.custom_indexes()
-          |> Map.new(&{&1.name, &1})
+      for table <- ~w(pages posts entries) do
+        assert IndexedCustomFields.names(table) == @names
+        specs = Map.new(IndexedCustomFields.index_specs(table), &{&1.name, &1.expr})
+        assert map_size(specs) == 4
 
-        for name <- ["idx_price", "idx_rating"], direction <- [:asc, :desc] do
-          index = Map.fetch!(declared, IndexedCustomFields.index_name(table, name, direction))
-          assert index.concurrently
-          refute index.all_tenants?
-          assert [column] = index.fields
-          assert column =~ IndexedCustomFields.index_sql(name)
-          assert column =~ if(direction == :asc, do: "ASC NULLS LAST", else: "DESC NULLS LAST")
+        for name <- @names, direction <- [:asc, :desc] do
+          expr = Map.fetch!(specs, IndexedCustomFields.index_name(table, name, direction))
+          assert expr =~ IndexedCustomFields.index_sql(name)
+          assert expr =~ if(direction == :asc, do: "ASC NULLS LAST", else: "DESC NULLS LAST")
         end
+
+        assert length(IndexedCustomFields.index_entries(table)) == 4
       end
     end
 
@@ -114,12 +137,8 @@ defmodule KilnCMS.CMS.CustomFieldRangeIndexTest do
         [org, @rows, Ecto.UUID.dump!(dyn.id)]
       )
 
-      for {resource, table} <- [{CMS.Page, "pages"}, {CMS.Post, "posts"}, {CMS.Entry, "entries"}],
-          index <- AshPostgres.DataLayer.Info.custom_indexes(resource),
-          String.contains?(index.name, "_cf_") do
-        [column] = index.fields
-
-        Repo.query!("CREATE INDEX #{index.name} ON #{table} (org_id, #{column})")
+      for table <- ~w(pages posts entries), spec <- IndexedCustomFields.index_specs(table) do
+        Repo.query!("CREATE INDEX #{spec.name} ON #{table} (org_id, #{spec.expr})")
       end
 
       Repo.query!("ANALYZE pages")

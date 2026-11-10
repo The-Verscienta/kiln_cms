@@ -168,15 +168,19 @@ defmodule KilnCMSWeb.FormBuilderLive do
   end
 
   def handle_event("delete_field", %{"id" => id}, socket) when is_binary(id) do
-    with %FormField{} = field <- Enum.find(socket.assigns.fields, &(&1.id == id)) do
-      CMS.destroy_form_field(field, actor_opts(socket))
+    with %FormField{} = field <- Enum.find(socket.assigns.fields, &(&1.id == id)),
+         # A refusal (the autoresponder still names the field, #2343) must
+         # say why the field is still there.
+         {:error, error} <- CMS.destroy_form_field(field, actor_opts(socket)) do
+      {:noreply, put_flash(socket, :error, error_message(error))}
+    else
+      _deleted_or_unknown ->
+        socket = reload_fields(socket)
+
+        if socket.assigns.selected_id == id,
+          do: {:noreply, select_field(socket, nil)},
+          else: {:noreply, socket}
     end
-
-    socket = reload_fields(socket)
-
-    if socket.assigns.selected_id == id,
-      do: {:noreply, select_field(socket, nil)},
-      else: {:noreply, socket}
   end
 
   # Pushed by the Sortable hook with the canvas' new data-sort-id order.
@@ -547,10 +551,10 @@ defmodule KilnCMSWeb.FormBuilderLive do
     |> assign(:field_draft, %{})
     # Inline error messages, by input key.
     |> assign(:field_errors, %{})
-    # The panel's status line ("Saved.") and, after a rename on a form with
-    # entries, what that rename means for them.
+    # The panel's status line ("Saved.") and, after a rename, what it meant
+    # for the form's entries and its autoresponder (one line each).
     |> assign(:field_status, nil)
-    |> assign(:rename_notice, nil)
+    |> assign(:rename_notice, [])
   end
 
   # The inputs that render their own errors (`<.setting_errors>` below).
@@ -620,27 +624,57 @@ defmodule KilnCMSWeb.FormBuilderLive do
       updated.name != field.name ->
         socket
         |> assign(:field_status, gettext("Saved."))
-        |> assign(:rename_notice, rename_notice(socket, field.name))
+        |> note_rename(field.name, updated.name)
 
       true ->
         assign(socket, :field_status, gettext("Saved."))
     end
   end
 
-  # Entries already received are keyed by the name they were submitted under;
-  # a rename does not rewrite them. Said at the moment it happens, on a form
-  # that has entries to strand (read as the admin).
-  defp rename_notice(socket, old_name) do
+  # What a rename meant beyond the field itself, said at the moment it
+  # happens. One read of the form (as the admin) serves both lines, and becomes
+  # `@form`: the rename rewrote the autoresponder's tokens in the stored
+  # template (#2343), and a Confirmations tab still holding the old text would
+  # show — and on its next save write back — a token for a field that no
+  # longer exists.
+  defp note_rename(socket, old_name, new_name) do
     opts = Keyword.put(actor_opts(socket), :load, [:submission_count])
 
     case CMS.get_form(socket.assigns.form.id, opts) do
-      {:ok, %{submission_count: count}} when is_integer(count) and count > 0 ->
-        # No count: `submission_count` includes entries received before this
-        # field existed, which never carried the old key.
-        gettext("Entries already received keep the old key “%{old}”.", old: old_name)
+      {:ok, form} ->
+        notices = [
+          entries_notice(form, old_name),
+          autoresponder_notice(socket.assigns.form, form, old_name, new_name)
+        ]
 
-      _none ->
-        nil
+        socket
+        |> assign(:form, form)
+        |> assign(:rename_notice, Enum.reject(notices, &is_nil/1))
+
+      {:error, _error} ->
+        assign(socket, :rename_notice, [])
+    end
+  end
+
+  # Entries already received are keyed by the name they were submitted under;
+  # a rename does not rewrite them. Only on a form that has entries to strand.
+  defp entries_notice(%{submission_count: count}, old_name)
+       when is_integer(count) and count > 0 do
+    # No count: `submission_count` includes entries received before this
+    # field existed, which never carried the old key.
+    gettext("Entries already received keep the old key “%{old}”.", old: old_name)
+  end
+
+  defp entries_notice(_form, _old_name), do: nil
+
+  # Whether or not the form has entries: told by the template itself changing.
+  defp autoresponder_notice(before, form, old_name, new_name) do
+    if {before.autoresponder_subject, before.autoresponder_body} !=
+         {form.autoresponder_subject, form.autoresponder_body} do
+      gettext("The autoresponder now uses [field:%{new}] where it used [field:%{old}].",
+        old: old_name,
+        new: new_name
+      )
     end
   end
 
@@ -1007,7 +1041,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     <.setting_errors key="name" errors={@field_errors} />
                     <p id="fs-name-hint" class="mt-1 text-xs text-base-content/60">
                       {gettext(
-                        "Keys this field's value in submissions. Entries already received keep the old key; exports and API clients use the new one from now on."
+                        "Keys this field's value in submissions. Entries already received keep the old key: the Entries tab and CSV export show it as a renamed field; API clients and webhooks use the new name from now on. The autoresponder's [field:…] tokens follow the rename."
                       )}
                     </p>
                   </div>
@@ -1135,7 +1169,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                       class="min-w-0 text-xs text-base-content/70"
                     >
                       <span :if={@field_status} class="text-success-ink">{@field_status}</span>
-                      <span :if={@rename_notice} class="block">{@rename_notice}</span>
+                      <span :for={notice <- @rename_notice} class="block">{notice}</span>
                     </p>
                   </div>
                 </form>

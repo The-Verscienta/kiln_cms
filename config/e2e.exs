@@ -120,6 +120,10 @@ config :phoenix, :plug_init_mode, :runtime
 # must not spend the instance's unauthenticated rate-limit budget.
 config :kiln_cms, Kiln.Updates, enabled: false
 
+# Same for the plugin health check (#2244): no hex.pm or kilncms.dev from a
+# browser run.
+config :kiln_cms, Kiln.Plugins.Health, enabled: false
+
 # The collaborative-editing CRDT prototype (KilnCMS.Collab.Crdt) stays OFF
 # here, as config/prod.exs pins it, so the editor specs drive the solo
 # rich-text editor production runs. `e2e/tests/collab.spec.js` switches it on

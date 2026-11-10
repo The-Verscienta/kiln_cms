@@ -44,7 +44,7 @@ into whichever one holds the read.
 > named) and `KILN_CHALLENGE_DISABLED`, `KILN_ENV_LABEL` / `KILN_ENV_COLOR`, `EMBED_ORIGINS` / `EMBED_ORIGINS_LOCKED`,
 > `KILN_AUDIT_ANCHORS_ENABLED`, `KILN_AUDIT_ANCHOR_EVERY_WRITE`, the
 > `KILN_GOVERNANCE_WITNESS*` group (plus `KILN_GOVERNANCE_CHECKPOINT_CRON`), and
-> the `KILN_PROVENANCE_*` group, the `KILN_DEMO_*` group, and the `KILN_BOT_BUDGET_*` group. `MIX_TEST_PARTITION` and `KILN_STRICT_TEST`
+> the `KILN_PROVENANCE_*` group, the `KILN_DEMO_*` group, the `KILN_BOT_BUDGET_*` group, and `KILN_CRAWLER_VERIFICATION`. `MIX_TEST_PARTITION` and `KILN_STRICT_TEST`
 > are the reverse — test-only. `KILN_ML` is neither: it is read at **build** time, by
 > `mix.exs` itself.
 
@@ -99,7 +99,7 @@ optional: unset means the feature is off or keeps the default named in its row.
 |----------|---------|---------|-----------------|
 | `PHX_SERVER` | unset ⇒ no HTTP | Set to start the web server in a release; without it the release boots but does not serve HTTP. The generated `bin/server` script sets this for you. **Presence-checked, not parsed** — the partial exception to the on/off rules above. *Any* value starts the server, including a blank `PHX_SERVER=` and an unrecognized one, because Phoenix documents this as "any truthy value" and reading a declared-but-empty variable as "serve nothing" is a silent outage. The one rule it does honour is the off-spellings: `false`/`0`/`no`/`off` keep the server off, where they used to start it anyway. | [`config/runtime.exs:67`](../config/runtime.exs#L67) |
 | `PHX_HOST` | the platform's hostname, else `example.com` | Public hostname used to generate URLs and validate socket origins — wrong values break links, emails, **and LiveView socket connections**. Bare hostname; any `https://` prefix or trailing `/` is stripped. Unset or blank, it falls back to the hostname a one-click platform provides (#1529): `RENDER_EXTERNAL_HOSTNAME`, then `RAILWAY_PUBLIC_DOMAIN`, then `<FLY_APP_NAME>.fly.dev`; with none of those, `example.com`, so on any other host it is effectively required. See [deploy-platforms.md](deploy-platforms.md). | [`lib/kiln_cms/config/host.ex:80`](../lib/kiln_cms/config/host.ex#L80) |
-| `PUBLIC_BASE_URL` | `https://<PHX_HOST>` | The origin every absolute **public** link is built from (#1833): sitemap, RSS/Atom feeds, canonical tags and JSON-LD, `llms.txt`, embed snippets, preview links, newsletter confirmation emails, site SSO callbacks, federation, static export and the provenance origin. The default org uses it as-is; another org keeps its scheme and port with `<slug>.<TENANT_BASE_HOST>` as the host, and an org's custom domain replaces the host. **Unset, it is derived from `PHX_HOST`** exactly as the endpoint's own URL is (`https`, port 443), so most deployments never set it. Set it only when the public site is served from a different origin than `PHX_HOST` — another host, a non-default port, or plain `http`. Must be an origin and nothing else (`https://cms.example.com`): a trailing `/` is dropped, but a path, query, fragment or credentials **refuses to boot**, naming the variable. Kiln warns at boot (log and Sentry) when it resolves to `localhost` or a loopback address. Blank counts as unset. Production only; dev and test use `http://localhost:4000`. | [`lib/kiln_cms/config/public_base_url.ex:54`](../lib/kiln_cms/config/public_base_url.ex#L54) |
+| `PUBLIC_BASE_URL` | `https://<PHX_HOST>` | The origin every absolute **public** link is built from (#1833): sitemap, RSS/Atom feeds, canonical tags and JSON-LD, link-preview images (`og:image`, `twitter:image`, and `social.image` in the `json` artifact, #2258), `llms.txt`, embed snippets, preview links, newsletter confirmation emails, site SSO callbacks, federation, static export and the provenance origin. The default org uses it as-is; another org keeps its scheme and port with `<slug>.<TENANT_BASE_HOST>` as the host, and an org's custom domain replaces the host. **Unset, it is derived from `PHX_HOST`** exactly as the endpoint's own URL is (`https`, port 443), so most deployments never set it. Set it only when the public site is served from a different origin than `PHX_HOST` — another host, a non-default port, or plain `http`. Must be an origin and nothing else (`https://cms.example.com`): a trailing `/` is dropped, but a path, query, fragment or credentials **refuses to boot**, naming the variable. Kiln warns at boot (log and Sentry) when it resolves to `localhost` or a loopback address. Blank counts as unset. Production only; dev and test use `http://localhost:4000`. | [`lib/kiln_cms/config/public_base_url.ex:54`](../lib/kiln_cms/config/public_base_url.ex#L54) |
 | `PORT` | `4000` | HTTP listen port the Bandit server binds to. | [`config/runtime.exs:72`](../config/runtime.exs#L72) |
 | `CHECK_ORIGINS` | unset | Comma-separated **extra** origins allowed to open LiveView/channel sockets, for when the app is served from more than one hostname (e.g. mid domain migration). Entries may be full origins (`https://cms.example.com`), scheme-less (`//cms.example.com` — any scheme/port), or bare hosts (normalized to `//host`). The `PHX_HOST` origin is always allowed. Unset ⇒ only `PHX_HOST` may connect. | [`config/runtime/prod/web.exs:42`](../config/runtime/prod/web.exs#L42) |
 | `CORS_ORIGINS` | unset | Comma-separated allowlist (or `*`) of origins allowed cross-origin **HTTP** reads of the headless API (`/api/*`, `/gql`). Read in every environment; without it prod stays same-origin-only. Does not affect sockets — that's `CHECK_ORIGINS`. See [`KilnCMSWeb.CORS`](../lib/kiln_cms_web/cors.ex). | [`config/runtime/cross_origin.exs:16`](../config/runtime/cross_origin.exs#L16) |
@@ -202,15 +202,18 @@ minute). A request whose `User-Agent` says it is a search engine, an AI crawler,
 another bot or script, or nothing at all is refused at its own **percentage** of
 that limit, on the same per-address count; browsers always get 100%. These set
 the percentage for each class and are the most any site may set. The user agent
-is spoofable, so a higher value is higher for anyone who claims the class. Read
-in every environment except `:test`. See [bot-budgets.md](bot-budgets.md).
+is spoofable, so a higher value is higher for anyone who claims the class, except
+that a search-engine value above 100 applies only to addresses verified by DNS
+while `KILN_CRAWLER_VERIFICATION` is on. Read in every environment except
+`:test`. See [bot-budgets.md](bot-budgets.md).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT` | `100` | Search engines (`Googlebot`, `bingbot`, `DuckDuckBot`, …): 100 is the browser limit, the same as before #2243. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Sign-in & access → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:137`](../config/runtime/delivery.exs#L137) |
+| `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT` | `100` | Search engines (`Googlebot`, `bingbot`, `DuckDuckBot`, …): 100 is the browser limit, the same as before #2243. Above 100 applies only to addresses DNS has verified as the engine they claim; an unchecked claim is held to 100, and one proven false gets `KILN_BOT_BUDGET_EMPTY_UA_PERCENT` (see `KILN_CRAWLER_VERIFICATION`). Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Sign-in & access → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:137`](../config/runtime/delivery.exs#L137) |
 | `KILN_BOT_BUDGET_AI_CRAWLER_PERCENT` | `100` | AI crawlers (`GPTBot`, `ClaudeBot`, `CCBot`, `PerplexityBot`, …). Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Sign-in & access → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:138`](../config/runtime/delivery.exs#L138) |
 | `KILN_BOT_BUDGET_DECLARED_BOT_PERCENT` | `50` | Other bots and scripts: `curl`, `wget`, Go, Java and Python HTTP clients, headless browsers, link-preview fetchers, and any product name ending in `bot`, `crawler`, `spider` or `scraper`. 50 is 150 requests a minute. Raise it if a headless consumer of `/media/:id/stream` or `/media/:id/download` cannot send its own user agent. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Sign-in & access → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:139`](../config/runtime/delivery.exs#L139) |
 | `KILN_BOT_BUDGET_EMPTY_UA_PERCENT` | `20` | Requests with no `User-Agent`, or an empty one. 20 is 60 requests a minute. Whole number, 1-1000; `0`, a non-number or anything above 1000 keeps the default and warns. A site may set a lower value at **Sign-in & access → Bot budgets**, never a higher one. | [`config/runtime/delivery.exs:140`](../config/runtime/delivery.exs#L140) |
+| `KILN_CRAWLER_VERIFICATION` | `true` | Checks a search-engine claim against DNS before believing it (#2254): the address's PTR name must be under the engine's domain and resolve back to the address. A claim proven false is charged as no user agent and loses the smart 404 guard's miss-threshold exemption; one not yet checked, or that DNS could not answer, keeps the search-engine percentage but never more than a browser gets. DuckDuckBot cannot be checked. Needs outbound DNS (PTR, A, AAAA) from each node to the resolvers in its `/etc/resolv.conf`, and, behind a proxy, `TRUSTED_PROXIES` or `CLIENT_IP_HEADER`, or no claim can be checked. `false` believes every claim for rate limiting, as before #2254, and makes the 404 guard exempt the six search-engine names by user agent; link-preview fetchers and Slurp stay non-exempt either way. Parsed by the shared [on/off rules](#boolean-variables); anything unrecognized keeps it on and warns. See [Verified search engines](bot-budgets.md#verified-search-engines). | [`config/runtime/delivery.exs:157`](../config/runtime/delivery.exs#L157) |
 
 
 ### multi-tenancy (#336)
@@ -789,10 +792,12 @@ service, and the page reports the running version and the update command
 without the comparison. To keep the check but skip kilncms.dev, set
 `KILN_UPDATE_FEED_URL=false` (GitHub only).
 
-**This is the only outbound integration that is on by default.** Unlike
-Meilisearch, S3, Unsplash and mail, it needs no credential to work, so there is
-no unset-secret that implicitly disables it — set `KILN_UPDATE_CHECK=false` if
-your deployment must make no third-party requests at all.
+**This and the [plugin health check](#plugin-health-check-2244) are the
+outbound integrations that are on by default.** Unlike Meilisearch, S3,
+Unsplash and mail, they need no credential to work, so there is no
+unset-secret that implicitly disables them. Set `KILN_UPDATE_CHECK=false` if
+your deployment must make no third-party requests at all: it turns off both,
+unless `KILN_PLUGIN_HEALTH_CHECK` is set.
 
 **If you run a fork, set `KILN_UPDATE_REPO`.** The default compares this build
 against `The-Verscienta/kiln_cms`, which for a fork is an answer about someone
@@ -816,13 +821,60 @@ reports the version alone.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `KILN_UPDATE_CHECK` | enabled | Set to an off-spelling for an instance that must make no outbound requests: neither the kilncms.dev feed nor GitHub is asked. | [`config/runtime/updates.exs:43`](../config/runtime/updates.exs#L43) |
+| `KILN_UPDATE_CHECK` | enabled | Set to an off-spelling for an instance that must make no outbound requests: neither the kilncms.dev feed nor GitHub is asked, and the plugin health check is off too unless `KILN_PLUGIN_HEALTH_CHECK` is set. | [`config/runtime/updates.exs:43`](../config/runtime/updates.exs#L43) |
 | `KILN_UPDATE_REPO` | `The-Verscienta/kiln_cms` | The `owner/name` this build compares itself against. **Forks must set this.** Left at the default, a fork is told about upstream's releases — and a fork *ahead* of upstream compares as newer, so the page reports "Up to date" forever and the fork's own security releases never surface. A value that isn't `owner/name` is rejected, not ignored. | [`config/runtime/updates.exs:73`](../config/runtime/updates.exs#L73), [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_UPDATE_RELEASES_URL` | derived from `KILN_UPDATE_REPO` | Full releases-API endpoint, for GitHub Enterprise or an internal mirror that can't reach `api.github.com`. Overrides the endpoint only — set `KILN_UPDATE_REPO` alongside it so the release link has a fallback. | [`config/runtime/updates.exs:79`](../config/runtime/updates.exs#L79), [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_UPDATE_FEED_URL` | `https://kilncms.dev/api/json/entries/published`, only while `KILN_UPDATE_REPO` and `KILN_UPDATE_RELEASES_URL` are unset | The release feed tried before GitHub: a Kiln site's published-entries endpoint, read for its `release` entries (`custom_fields.version` etc.); Kiln adds the query. Sends only the bare `KilnCMS` user-agent and a fixed query — no version or instance identifier — and kilncms.dev keeps no client IPs for it. Any failure falls back to GitHub. An off-spelling (`false`, `off`, …) makes the check GitHub-only; blank means unset. A value that isn't an absolute http(s) URL is logged and the check uses GitHub. A fork sets this to its own site to use a feed at all — see above. | [`config/runtime/updates.exs:92`](../config/runtime/updates.exs#L92), [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_PIN_PATH` | unset | Path to this project's pinned Kiln checkout (`kiln/upstream`, `upstream`, …). Display only: the update page prefixes its `mix kiln.update` command with a matching `cd`. Unset by default because the pin's path is a downstream choice — see [`projects/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md). | [`config/runtime/updates.exs:56`](../config/runtime/updates.exs#L56), [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_GIT_SHA` | unset | Commit the image was built from. Set via `--build-arg GIT_SHA`, else `--build-arg SOURCE_COMMIT` (what Coolify passes). | [`Kiln.Version`](../lib/kiln/version.ex) |
 | `KILN_BUILD_DATE` | unset | ISO-8601 UTC build timestamp. Set via `--build-arg BUILD_DATE`. | [`Kiln.Version`](../lib/kiln/version.ex) |
+
+### plugin health check (#2244)
+
+**Operations → System → Plugins** and the **Installed plugins** line of
+Security posture say whether each plugin built into this release still
+checks out: its package against hex.pm, security notices that cover the
+installed version, retired or long-unreleased packages, and its
+`kiln_plugin` requirement ([how to read it](security-posture.md#check-your-installed-plugins)).
+
+**When it asks.** Only when a platform admin opens System, or Security
+posture with nothing cached, or selects **Check plugins now** (at most one
+round a minute), and only when some plugin comes from Hex, git or a path. A
+deployment whose plugins are all built from `projects/`, or that has none,
+makes no request. The answer is cached on each node for 24 hours (15 minutes
+after a failed request) and dies with the VM: nothing is stored, nothing is
+scheduled, and nothing is asked at boot.
+
+**What is sent.** Unauthenticated GETs through `KilnCMS.SafeFetch`, with the
+bare `KilnCMS` user-agent:
+
+- for each plugin locked from hex.pm, `https://hex.pm/api/packages/<name>`
+  and `https://hex.pm/api/packages/<name>/releases/<version>`. **These tell
+  hex.pm the plugin's package name and version, from this server's IP.** It
+  is the first request on by default that says something about the
+  installation;
+- one GET to the security notices feed (more if it pages, at most five
+  pages, all on the configured URL's origin; a list longer than that reads
+  as unknown), with a fixed type filter, field list and page size. It sends
+  nothing about this installation.
+
+**What the feed covers.** kilncms.dev publishes notices for Kiln and the
+Kiln project's own plugins only. For a third-party plugin the notices are
+the ones Hex lists on the installed release.
+
+**Unknown is never OK.** A request that fails, times out or answers
+something unreadable makes the plugins it concerns **Unknown**, never **OK**.
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_PLUGIN_HEALTH_CHECK` | follows `KILN_UPDATE_CHECK` | Turns the plugin health check on or off. Unset, it follows `KILN_UPDATE_CHECK`, so one switch still means "no outbound requests"; an explicit on- or off-spelling wins either way. Off, System shows "Plugin checks are off." and Security posture **Not applicable**; the local `kiln_plugin` requirement check still runs. `mix kiln.plugins.list --health` asks even when this is off. | [`config/runtime/updates.exs:117`](../config/runtime/updates.exs#L117), [`Kiln.Plugins.Health`](../lib/kiln/plugins/health.ex) |
+| `KILN_SECURITY_NOTICES_URL` | `https://kilncms.dev/api/json/entries/published`, only while the update check's feed is kilncms.dev's | A Kiln site's published-entries endpoint, read for its `security_notice` entries; Kiln adds the query. Unset, kilncms.dev's feed is asked only while `KILN_UPDATE_FEED_URL` resolves to it: a fork (`KILN_UPDATE_REPO`), a mirror (`KILN_UPDATE_RELEASES_URL`), `KILN_UPDATE_FEED_URL=false`, or a feed pointed at another site asks no notices feed. An off-spelling turns the notices leg off (Hex's own advisories are still read); blank means unset. A value that isn't an absolute http(s) URL is logged, and no Hex, git or path plugin can then read OK (each is unknown unless something else already fails or warns). A mirror on a private or loopback address is refused by `SafeFetch`, with the same result. Setting this does not turn the check on. | [`config/runtime/updates.exs:127`](../config/runtime/updates.exs#L127), [`Kiln.Plugins.Health`](../lib/kiln/plugins/health.ex) |
+| `KILN_PLUGIN_STALE_MONTHS` | `24` | Months without any release of the package on Hex after which a plugin warns "No recent release". A positive integer ([count variables](#count-variables)). | [`config/runtime/updates.exs:141`](../config/runtime/updates.exs#L141), [`Kiln.Plugins.Health`](../lib/kiln/plugins/health.ex) |
+
+`config :kiln_cms, Kiln.Plugins.Health` also takes `notices_type` (the
+content type the feed is filtered on, default `"security_notice"`),
+`hex_api_url` (default `"https://hex.pm/api"`) and `req_options` (passed to
+the HTTP client; a test seam). They have no environment variable.
 
 ### referrer attribution (#619)
 
@@ -953,7 +1005,7 @@ production.
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/runtime.exs:212`](../config/runtime.exs#L212) |
-| `KILN_STRICT_TEST` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Uses the same spellings as every other flag in this document, via the standalone [`config/strict_test_flag.exs`](../config/strict_test_flag.exs) (#646) — it can't call `KilnCMS.Config.Env` directly because it's read in `config/test.exs`, which cannot call project modules. An unrecognized value stays non-strict **and warns on stderr**, like every other flag: without that the strict leg runs zero tests and exits 0, which is indistinguishable from never having invoked it. | [`config/test.exs:369`](../config/test.exs#L369) |
+| `KILN_STRICT_TEST` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Uses the same spellings as every other flag in this document, via the standalone [`config/strict_test_flag.exs`](../config/strict_test_flag.exs) (#646) — it can't call `KilnCMS.Config.Env` directly because it's read in `config/test.exs`, which cannot call project modules. An unrecognized value stays non-strict **and warns on stderr**, like every other flag: without that the strict leg runs zero tests and exits 0, which is indistinguishable from never having invoked it. | [`config/test.exs:377`](../config/test.exs#L377) |
 | `KILN_ML` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to put the optional ML stack — Bumblebee, Nx and EXLA — into the dependency tree (#1321). Unset, `mix deps.get` fetches 102 MB instead of 773 MB and skips a one-time 110 MB XLA archive download, because semantic search ships disabled. Read in `mix.exs` (it decides `deps/0`) and in `config/dev.exs` / `config/test.exs` (which point Nx at `EXLA.Backend` only when it is on), so like `KILN_STRICT_TEST` it goes through a standalone snippet — [`config/ml_flag.exs`](../config/ml_flag.exs) — that cannot call `KilnCMS.Config.Env`. It is a **build-time** flag: it must be set for `mix deps.get` and `mix compile`, and exporting it afterwards changes nothing on its own. `KilnCMS.Search.ML.available?/0` reports what actually compiled, and `mix kiln.ml.note` prints it. An unrecognized value stays off **and warns on stderr**. | [`config/ml_flag.exs:37`](../config/ml_flag.exs#L37) |
 | `POSTGRES_USER` | `postgres` | E2E database user. | [`config/e2e.exs:28`](../config/e2e.exs#L28) |
 | `POSTGRES_PASSWORD` | `postgres` | E2E database password. | [`config/e2e.exs:29`](../config/e2e.exs#L29) |
@@ -1018,7 +1070,8 @@ connection (#606), and `VISUAL_EDITING_ENABLED=False` left the bridge on.
 The variables that hold a **positive integer** — `KILN_READING_TIME_WPM`,
 `KILN_API_CACHE_MAX_AGE`, `KILN_API_CACHE_SWR`,
 `KILN_ANALYTICS_LOW_COUNT_THRESHOLD`, `KILN_EXPERIMENTS_STICKY_DAYS`,
-`BACKUP_KEEP_DAYS` and `BACKUP_STALE_AFTER_HOURS` — go through the same module,
+`BACKUP_KEEP_DAYS`, `BACKUP_STALE_AFTER_HOURS` and `KILN_PLUGIN_STALE_MONTHS`
+— go through the same module,
 as `Env.positive_integer/1` (#1009). Before that each had hand-rolled its own
 `Integer.parse`, its own positivity check and its own warning.
 

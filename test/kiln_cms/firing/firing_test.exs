@@ -51,7 +51,7 @@ defmodule KilnCMS.Firing.FiringTest do
   end
 
   describe "firing on publish" do
-    test "fires every surface at the current format_version (3)" do
+    test "fires every surface at the current format_version" do
       actor = admin()
       page = published_page(actor)
 
@@ -59,7 +59,7 @@ defmodule KilnCMS.Firing.FiringTest do
       surfaces = artifacts |> Enum.map(& &1.surface) |> Enum.sort()
 
       assert surfaces == [:json, :json_ld, :llm, :web]
-      assert Enum.all?(artifacts, &(&1.format_version == 3))
+      assert Enum.all?(artifacts, &(&1.format_version == Engine.format_version()))
     end
 
     test "the web artifact is pre-rendered HTML from the typed serializers" do
@@ -103,6 +103,74 @@ defmodule KilnCMS.Firing.FiringTest do
 
       assert html =~
                ~s(<pre class="highlight" tabindex="0" role="group" aria-label="Exemple de code">)
+
+      {:ok, %{"blocks" => [block]}} = Engine.read(org, :page, fr.id, :json)
+      refute inspect(block) =~ "tabindex"
+    end
+
+    # #2465: the strings a block writes into the fired artifact are in the
+    # document's language, and the sign-up still posts to the bare path — a
+    # fired artifact is hosted elsewhere, so the action is not pinned.
+    test "the web artifact's embed and sign-up strings are in the document's locale" do
+      org = KilnCMS.Accounts.default_org_id()
+      actor = admin()
+
+      fr =
+        CMS.create_page!(
+          %{
+            title: "Médias",
+            slug: slug(),
+            locale: "fr",
+            blocks: [
+              %{"_type" => "embed", "url" => "https://www.youtube.com/watch?v=abc123"},
+              %{"_type" => "newsletter_signup", "collect_name" => true}
+            ]
+          },
+          actor: actor
+        )
+
+      CMS.publish_page!(fr, actor: actor)
+      KilnCMS.DataCase.drain_oban()
+
+      {:ok, %{"html" => html}} = Engine.read(org, :page, fr.id, :web)
+
+      assert html =~ ~s(title="Média intégré")
+      refute html =~ "Embedded media"
+      assert html =~ "Laissez ce champ vide"
+      assert html =~ ~s(action="/newsletter/subscribe")
+    end
+
+    # #2464: a fired table's scroll wrapper takes focus and a name, in the
+    # document's language rather than the worker's.
+    test "the web artifact's tables are focusable and named in the document's locale" do
+      org = KilnCMS.Accounts.default_org_id()
+      actor = admin()
+
+      table = %{
+        "_type" => "table",
+        "rows" => [
+          %{"cells" => [%{"children" => [%{"_type" => "span", "text" => "a", "marks" => []}]}]}
+        ]
+      }
+
+      fr =
+        CMS.create_page!(
+          %{
+            title: "Tableau",
+            slug: slug(),
+            locale: "fr",
+            blocks: [%{"_type" => "rich_text", "body" => [table]}]
+          },
+          actor: actor
+        )
+
+      CMS.publish_page!(fr, actor: actor)
+      KilnCMS.DataCase.drain_oban()
+
+      {:ok, %{"html" => html}} = Engine.read(org, :page, fr.id, :web)
+
+      assert html =~
+               ~s(<div class="kiln-table-wrap" tabindex="0" role="group" aria-label="Tableau défilant"><table>)
 
       {:ok, %{"blocks" => [block]}} = Engine.read(org, :page, fr.id, :json)
       refute inspect(block) =~ "tabindex"
@@ -343,6 +411,111 @@ defmodule KilnCMS.Firing.FiringTest do
       {:ok, %{"markdown" => md}} = Engine.read(org, :page, page.id, :llm)
       assert md =~ "![A kiln](/a.jpg)"
       assert md =~ "### Size"
+    end
+  end
+
+  # #2258: the `:json` artifact carries the document's link-preview fields, so
+  # a headless consumer can emit the same Open Graph / X card tags Kiln's own
+  # pages do.
+  describe "social (#2258)" do
+    defp publish_page(actor, attrs, opts \\ []) do
+      page =
+        CMS.create_page!(
+          Map.merge(%{title: "Social", slug: slug()}, attrs),
+          Keyword.put(opts, :actor, actor)
+        )
+
+      published = CMS.publish_page!(page, Keyword.put(opts, :actor, actor))
+      KilnCMS.DataCase.drain_oban()
+      published
+    end
+
+    defp fired_social(page) do
+      {:ok, json} = Engine.read(page.org_id, :page, page.id, :json)
+      json["social"]
+    end
+
+    test "carries the SEO title, description and an absolute image as typed" do
+      page =
+        publish_page(admin(), %{
+          seo_title: "Hand-picked title",
+          seo_description: "Hand-written description",
+          seo_image: "https://cdn.example.com/card.png"
+        })
+
+      assert fired_social(page) == %{
+               "title" => "Hand-picked title",
+               "description" => "Hand-written description",
+               "image" => "https://cdn.example.com/card.png"
+             }
+    end
+
+    test "falls back to the title, and omits description and image when there is none" do
+      page = publish_page(admin(), %{title: "Only a title"})
+
+      assert fired_social(page) == %{"title" => "Only a title"}
+    end
+
+    test "a relative SEO image is made absolute on the document's own site" do
+      page = publish_page(admin(), %{seo_image: "/uploads/card.png"})
+
+      assert fired_social(page)["image"] ==
+               KilnCMSWeb.Tenant.base_url(page.org_id) <> "/uploads/card.png"
+    end
+
+    test "a relative SEO image lands on a tenant's own host, not the default one" do
+      org = KilnCMS.OrgFixtures.org("social")
+      page = publish_page(admin(), %{seo_image: "/uploads/card.png"}, tenant: org)
+
+      image = fired_social(page)["image"]
+      assert image == KilnCMSWeb.Tenant.base_url(org) <> "/uploads/card.png"
+      assert URI.parse(image).host =~ org.slug
+    end
+
+    test "a type's SEO patterns fill the title and description an entry left blank" do
+      actor = admin()
+
+      type =
+        CMS.create_type_definition!(
+          %{
+            name: "guide#{System.unique_integer([:positive])}",
+            label: "Guide",
+            has_excerpt: true,
+            seo_title_pattern: "Guides: [title]",
+            seo_description_pattern: "[excerpt] (guide)"
+          },
+          actor: actor
+        )
+
+      entry =
+        KilnCMS.CMS.ContentTypes.create!(type.name, %{title: "Firing", excerpt: "How to"},
+          actor: actor
+        )
+
+      {:ok, %{json: json}} = Engine.fire(entry, mode: :preview, surfaces: [:json])
+
+      assert json["social"] == %{"title" => "Guides: Firing", "description" => "How to (guide)"}
+    end
+
+    # Site-level values belong to the page, not to a signed per-document body:
+    # the card type, `twitter:site` and the brand's fallback image stay out.
+    test "carries no site-level branding" do
+      actor = admin()
+      org = KilnCMS.OrgFixtures.org("social-brand")
+      on_exit(fn -> KilnCMS.Cache.bust_branding(org.id) end)
+
+      CMS.save_site_branding!(
+        %{twitter_site: "@kilnsocial", social_image_url: "/uploads/brand-card.png"},
+        actor: actor,
+        tenant: org
+      )
+
+      page = publish_page(actor, %{}, tenant: org)
+      {:ok, json} = Engine.read(org.id, :page, page.id, :json)
+
+      assert json["social"] == %{"title" => "Social"}
+      refute Jason.encode!(json) =~ "kilnsocial"
+      refute Jason.encode!(json) =~ "brand-card.png"
     end
   end
 

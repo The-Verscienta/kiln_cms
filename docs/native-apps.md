@@ -141,7 +141,7 @@ pull-to-refresh on a detail screen cost a few hundred bytes.
 
 ```http
 GET /api/content/post/hello
-If-None-Match: W/"6f1c…-en-json-1792656000"
+If-None-Match: W/"6f1c…-en-json-bq3Xv…"
 
 HTTP/1.1 304 Not Modified
 ```
@@ -150,11 +150,12 @@ HTTP/1.1 304 Not Modified
   ignored, a comma-separated list matches if any tag in it does, and `*`
   matches any current version. The tag is weak so that Kiln can gzip the
   response: send `Accept-Encoding: gzip` (`URLSession` and OkHttp do by
-  default) and the JSON arrives compressed. The tag changes when the
-  document is republished, and it also names the served locale, the A/B
-  variant (`?variant_key=`) and the `?expand=` targets, so a tag from one of
-  those representations never `304`s another. A `?fields=`
-  response is tagged by its body instead (below).
+  default) and the JSON arrives compressed. The tag is a digest of the
+  body, so it changes when the body does: a republish that changed the
+  document, a republished `?expand=` target, or a re-fire after a Kiln
+  upgrade. It also names the served locale and the A/B variant
+  (`?variant_key=`), so a tag from one of those never `304`s another. A
+  `?fields=` response is digested after the cut (below).
 - `URLCache` (iOS) and OkHttp's `Cache` (Android) store the `ETag` and
   revalidate for you once the `max-age` has passed. Enable the cache with a
   real disk size and you get conditional requests without writing them.
@@ -179,8 +180,10 @@ curl -s 'https://cms.example.com/api/content/recipe/pancakes?fields=title,slug,c
 ```
 
 - Comma-separated **top-level keys** (`title`, `slug`, `locale`, `blocks`,
-  `custom_fields`, `custom_fields_plain`, `custom_fields_portable`, and any
-  other key the artifact carries) plus
+  `custom_fields`, `custom_fields_plain`, `custom_fields_portable`, `social`
+  for a share sheet's link preview
+  ([the `social` object](headless-consumer-guide.md#link-previews-the-social-object)),
+  and any other key the artifact carries) plus
   **`custom_fields.<name>`** for one custom field. `custom_fields` on its own
   keeps all of them.
 - `id` and `type` are **always** kept. So is `expanded` when you also pass

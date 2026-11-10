@@ -364,13 +364,8 @@ defmodule KilnCMS.Accounts.DraftWriteKeyTest do
       assert Exception.message(error) =~ "at most 30 days"
     end
 
-    test "the cap is configurable", %{owner: owner} do
-      Application.put_env(:kiln_cms, :draft_write_key_max_ttl_days, 3)
-      on_exit(fn -> Application.delete_env(:kiln_cms, :draft_write_key_max_ttl_days) end)
-
-      assert {:error, %Ash.Error.Invalid{}} = mint(owner, :draft_write, 7)
-      assert {:ok, _} = mint(owner, :draft_write, 3)
-    end
+    # "The cap is configurable" lives in KilnCMS.Accounts.DraftWriteKeyConfigTest:
+    # it rewrites VM-global config, so it cannot run beside async tests (#2380).
 
     test "other scopes keep their own lifetimes", %{owner: owner} do
       assert {:ok, _} = mint(owner, :read, 365)

@@ -50,6 +50,29 @@ defmodule KilnCMS.I18n do
     end
   end
 
+  @doc """
+  Prefixes a submit path with `locale` on a multi-locale site — the default
+  locale included — so a form posted from a page answers in that page's
+  language (#2465).
+
+  `localized_path/2` leaves the default locale unprefixed, which is right for a
+  link but not for a form action: an unprefixed request takes its locale from
+  the session, so an English page read by a visitor whose session says French
+  would answer its own form in French. On a single-locale site, or for a `nil`
+  or unsupported locale, the path comes back unchanged.
+
+      iex> KilnCMS.I18n.pinned_path(nil, "/newsletter/subscribe")
+      "/newsletter/subscribe"
+  """
+  @spec pinned_path(String.t() | nil, String.t()) :: String.t()
+  def pinned_path(locale, "/" <> _ = path) do
+    if is_binary(locale) and supported?(locale) and multi_locale?(),
+      do: "/" <> locale <> path,
+      else: path
+  end
+
+  defp multi_locale?, do: locales() != [default_locale()]
+
   @language_names %{
     "en" => "English",
     "fr" => "French",

@@ -35,6 +35,13 @@ defmodule KilnCMS.CMS.IndexedCustomFields do
   @config Application.compile_env(:kiln_cms, :indexed_custom_fields, [])
   @core_tables ~w(pages posts entries)
 
+  # Test seam: a test sets this application key (a map of table => names) to
+  # exercise the query and the drift check without declaring indexes in the
+  # compiled resources. The test environment must not declare any: CI's
+  # `mix ash.codegen --check` runs there, and a declared index is pending
+  # codegen until a migration carries it.
+  @override_key :indexed_custom_fields_override
+
   @name_format ~r/\A[a-z][a-z0-9_]*\z/
   @max_length 24
   @eligible_types [:integer, :float, :date, :datetime]
@@ -77,16 +84,21 @@ defmodule KilnCMS.CMS.IndexedCustomFields do
 
   @doc "The configured field names per table (compile-time)."
   @spec by_table() :: %{String.t() => [String.t()]}
-  def by_table, do: @by_table
+  def by_table, do: Application.get_env(:kiln_cms, @override_key) || @by_table
 
   @doc "The names declared for `table`."
   @spec names(String.t()) :: [String.t()]
-  def names(table), do: Map.get(@by_table, table, [])
+  def names(table), do: Map.get(by_table(), table, [])
 
   @doc "Is `name` safe to inline as a SQL literal and backed by a declared index on `table`?"
   @spec valid?(String.t() | nil, term()) :: boolean()
   def valid?(table, name) when is_binary(table) and is_binary(name), do: name in names(table)
   def valid?(_table, _name), do: false
+
+  @doc "Is `name` a well-formed indexable field name (format and length)?"
+  @spec well_formed?(term()) :: boolean()
+  def well_formed?(name),
+    do: is_binary(name) and name =~ @name_format and byte_size(name) <= @max_length
 
   @doc "The field types an index may be declared for."
   @spec eligible_types() :: [atom()]
@@ -128,13 +140,19 @@ defmodule KilnCMS.CMS.IndexedCustomFields do
   """
   @spec index_entries(String.t()) :: [Macro.t()]
   def index_entries(table) do
+    for %{expr: expr, name: name} <- index_specs(table) do
+      quote do
+        index [unquote(expr)], name: unquote(name), concurrently: true
+      end
+    end
+  end
+
+  @doc "The index definitions for `table`: `%{name: index_name, expr: column_sql}`."
+  @spec index_specs(String.t()) :: [%{name: String.t(), expr: String.t()}]
+  def index_specs(table) do
     for name <- names(table),
         {direction, suffix} <- [asc: "ASC NULLS LAST", desc: "DESC NULLS LAST"] do
-      quote do
-        index [unquote(index_sql(name) <> " " <> suffix)],
-          name: unquote(index_name(table, name, direction)),
-          concurrently: true
-      end
+      %{name: index_name(table, name, direction), expr: index_sql(name) <> " " <> suffix}
     end
   end
 
@@ -158,7 +176,8 @@ defmodule KilnCMS.CMS.IndexedCustomFields do
   """
   @spec check(module()) :: [{atom(), String.t()}]
   def check(repo \\ KilnCMS.Repo) do
-    tables = Enum.uniq(Map.keys(@by_table) ++ @core_tables)
+    by_table = by_table()
+    tables = Enum.uniq(Map.keys(by_table) ++ @core_tables)
 
     %{rows: indexes} =
       Ecto.Adapters.SQL.query!(
@@ -176,7 +195,7 @@ defmodule KilnCMS.CMS.IndexedCustomFields do
     present = Map.new(indexes, fn [name, _table, valid] -> {name, valid} end)
 
     expected =
-      for {table, names} <- @by_table, name <- names, direction <- [:asc, :desc] do
+      for {table, names} <- by_table, name <- names, direction <- [:asc, :desc] do
         index_name(table, name, direction)
       end
 
@@ -188,7 +207,7 @@ defmodule KilnCMS.CMS.IndexedCustomFields do
     unlisted =
       for {name, _valid} <- present, name not in expected, do: {:unlisted_index, name}
 
-    listed = @by_table |> Map.values() |> List.flatten() |> Enum.uniq()
+    listed = by_table |> Map.values() |> List.flatten() |> Enum.uniq()
 
     %{rows: definitions} =
       Ecto.Adapters.SQL.query!(

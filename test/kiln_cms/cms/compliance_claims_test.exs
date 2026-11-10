@@ -313,6 +313,44 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
       assert Exception.message(error) =~ "government approved"
     end
 
+    # #2532: the gate reads the held struct's state, and `:publish` keeps
+    # `lock_version`. A draft struct held across the publish passed the lock
+    # and skipped the gate, putting the claim back on the live page. The
+    # restore also filters on the held state, so it is refused as stale.
+    test "a restore from a draft struct held across a publish is refused, not ungated" do
+      actor = admin()
+
+      draft = page(%{blocks: [text_block("Our product is government approved.")]}, actor)
+
+      held =
+        CMS.update_page!(draft, %{blocks: [text_block("Our product is well reviewed.")]},
+          actor: actor
+        )
+
+      {:ok, published} = CMS.publish_page(held, actor: actor)
+      assert published.lock_version == held.lock_version
+
+      gate!()
+
+      [create_version | _] =
+        CMS.list_page_versions!(actor: actor)
+        |> Enum.filter(&(&1.version_source_id == held.id))
+        |> Enum.sort_by(& &1.version_inserted_at, DateTime)
+
+      assert {:error, error} =
+               CMS.restore_page_version(held, %{version_id: create_version.id}, actor: actor)
+
+      assert Enum.any?(
+               Ash.Error.to_error_class(error).errors,
+               &match?(%Ash.Error.Changes.StaleRecord{}, &1)
+             )
+
+      row = CMS.get_page!(held.id, authorize?: false, tenant: held.org_id)
+      assert row.state == :published
+      assert inspect(row.blocks) =~ "well reviewed"
+      refute inspect(row.blocks) =~ "government approved"
+    end
+
     test "restoring a DRAFT is not gated — it makes no public claim" do
       actor = admin()
 

@@ -213,9 +213,12 @@ defmodule KilnCMS.Search.SynonymsTest do
         actor: admin
       )
 
-      sections = Search.global("qwyx#{n}", sections: [:pages, :posts])
-      assert Enum.map(sections.pages, & &1.id) == [page.id]
-      assert Enum.map(sections.posts, & &1.id) == [post.id]
+      # Through `global_report/2`, so a sweep the query budget cut short says
+      # so in the failure rather than reading as a missing synonym (#2337).
+      report = Search.global_report("qwyx#{n}", sections: [:pages, :posts])
+      assert report.partial == %{}, "the query budget cut the sweep: #{inspect(report.partial)}"
+      assert Enum.map(report.sections.pages, & &1.id) == [page.id]
+      assert Enum.map(report.sections.posts, & &1.id) == [post.id]
     end
   end
 end

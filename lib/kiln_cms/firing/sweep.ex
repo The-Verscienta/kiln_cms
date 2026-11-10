@@ -22,6 +22,19 @@ defmodule KilnCMS.Firing.Sweep do
       mix kiln.refire_all                                # dev / checkout
       /app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()" # prod release (running node)
 
+  ## Telling delivery consumers (`notify: true`)
+
+  By default the sweep is silent: the artifacts change and nothing is told.
+  A headless consumer revalidating by `ETag` sees the new body, but one that
+  caches on a webhook does not. `run(notify: true)` (`mix kiln.refire_all
+  --notify`) announces each document whose fire completes as
+  `<type>.updated` with `"reason" => "refire"` in its payload (#2463) — to the
+  webhook endpoints and the public change feed only. Not to automation or
+  federation: a re-render is not an edit, and every published document at once
+  would run every "on updated" rule and announce the whole site to its
+  followers. Not to the CDN purge either, which would fire once per document
+  for the length of the sweep; purge once when `pending/0` reaches `0`.
+
   Multi-tenancy (epic #336, strict mode #419): reads iterate
   `KilnCMS.Accounts.list_org_ids/0` and run per-tenant — the same pattern as
   the AshOban schedulers — so the sweep covers every site and works under
@@ -45,22 +58,39 @@ defmodule KilnCMS.Firing.Sweep do
 
   @doc """
   Enqueue a re-fire for every published document. Returns `%{type => count}`.
+
+  Options:
+
+    * `:notify` (default `false`) — announce each re-fired document to the
+      webhook endpoints and the change feed (see "Telling delivery consumers"
+      above).
   """
-  @spec run() :: %{atom() => non_neg_integer()}
-  def run do
-    counts = Map.new(resources(), fn {type, resource} -> {type, sweep(type, resource)} end)
+  @spec run(keyword()) :: %{atom() => non_neg_integer()}
+  def run(opts \\ []) do
+    args = job_args(Keyword.get(opts, :notify, false))
+
+    counts =
+      Map.new(resources(), fn {type, resource} -> {type, sweep(type, resource, args)} end)
+
     total = counts |> Map.values() |> Enum.sum()
     Logger.info("Re-fire sweep enqueued #{total} documents: #{inspect(counts)}")
     counts
   end
 
-  defp sweep(type, resource) do
+  # A notifying sweep's job says who hears (`FireWorker`). Its own key, not
+  # `"refire"`: `KilnCMS.Firing.refire/3` dedupes pending jobs on that flag,
+  # and a refire swallowed by a pending sweep job would lose the CDN purge,
+  # automation and federation its full announcement owes them.
+  defp job_args(true), do: %{"announce" => "delivery"}
+  defp job_args(false), do: %{}
+
+  defp sweep(type, resource, args) do
     KilnCMS.Accounts.list_org_ids()
-    |> Enum.map(&sweep_org(type, resource, &1))
+    |> Enum.map(&sweep_org(type, resource, &1, args))
     |> Enum.sum()
   end
 
-  defp sweep_org(type, resource, org_id) do
+  defp sweep_org(type, resource, org_id, args \\ %{}) do
     # authorize?: false — kept deliberately (#1402): converting this to the firing system
     # actor would mean admitting `Checks.SystemActor` on the `Content` read
     # policy — a standing grant over every document on every site, drafts
@@ -73,7 +103,9 @@ defmodule KilnCMS.Firing.Sweep do
     |> Ash.Query.select([:id, :org_id])
     |> Ash.stream!(authorize?: false, tenant: org_id, stream_with: :full_read)
     |> Stream.map(fn record ->
-      FireWorker.new(%{"org_id" => record.org_id, "type" => to_string(type), "id" => record.id})
+      args
+      |> Map.merge(%{"org_id" => record.org_id, "type" => to_string(type), "id" => record.id})
+      |> FireWorker.new()
     end)
     |> Stream.chunk_every(@chunk)
     |> Enum.reduce(0, fn jobs, count ->
@@ -87,7 +119,8 @@ defmodule KilnCMS.Firing.Sweep do
 
   Used when a type's SEO pattern changes (#1135) — only that type's
   documents need new `:json_ld` artifacts, not the whole corpus.
-  Bounded via `Oban.insert_all` in `@chunk`-sized inserts, same as `run/0`.
+  Bounded via `Oban.insert_all` in `@chunk`-sized inserts, same as `run/1`.
+  Silent, like `run/1` without `notify: true`.
   """
   @spec sweep_type(Ash.UUID.t(), String.t() | atom()) :: non_neg_integer()
   def sweep_type(org_id, type_name) when is_binary(type_name) or is_atom(type_name) do
@@ -128,7 +161,7 @@ defmodule KilnCMS.Firing.Sweep do
   end
 
   @doc """
-  How many `:firing` jobs are still pending — poll this after `run/0` to watch
+  How many `:firing` jobs are still pending — poll this after `run/1` to watch
   the sweep drain (`0` = done).
   """
   @spec pending() :: non_neg_integer()
