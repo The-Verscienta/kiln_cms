@@ -113,6 +113,43 @@ defmodule KilnCMSWeb.BotBudgetsLiveTest do
     assert event.metadata == %{"setting" => "site_bot_budgets"}
   end
 
+  describe "search-engine verification (#2254)" do
+    test "the hints say a claim is checked and a false one counts as no user agent",
+         %{conn: conn, org: org} do
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      assert has_element?(lv, "#bot-budget-search_engine", "checks out as theirs")
+      assert has_element?(lv, "#bot-budget-search_engine", "A claim proven false counts as")
+      assert has_element?(lv, "#bot-budget-empty", "proven not to be them")
+      refute has_element?(lv, "#bot-budget-search_engine-unchecked")
+    end
+
+    test "with verification off, the page says claims are not checked", %{conn: conn, org: org} do
+      previous = Application.get_env(:kiln_cms, KilnCMS.CrawlerVerification)
+
+      # VM-global application env; this module is async: false.
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.CrawlerVerification,
+        Keyword.put(previous || [], :enabled, false)
+      )
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:kiln_cms, KilnCMS.CrawlerVerification, previous),
+          else: Application.delete_env(:kiln_cms, KilnCMS.CrawlerVerification)
+      end)
+
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      assert has_element?(
+               lv,
+               "#bot-budget-search_engine-unchecked",
+               "does not check search-engine claims"
+             )
+    end
+  end
+
   test "a lowered search engine budget is warned about", %{conn: conn, org: org} do
     {:ok, lv, _html} = admin_live(conn, org)
 

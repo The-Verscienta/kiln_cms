@@ -3373,6 +3373,11 @@ msgstr "Tous les statuts"
 msgid "Any tag"
 msgstr "N'importe quelle étiquette"
 
+#: lib/kiln_cms_web/live/invite_live.ex
+#, elixir-autogen, elixir-format
+msgid "Any two-step verification, passkeys or API keys set up on this address before were removed; set them up again."
+msgstr "La validation en deux étapes, les clés d'accès et les clés d’API configurées auparavant sur cette adresse ont été supprimées ; configurez-les à nouveau."
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Any uploader"
@@ -9637,8 +9642,8 @@ msgstr "Bon"
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot and Applebot."
-msgstr "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot et Applebot."
+msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot and Applebot, when the address checks out as theirs. A claim proven false counts as No user agent."
+msgstr "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot et Applebot, lorsque l’adresse s’avère être la leur. Une identité qui se révèle fausse compte comme Sans agent utilisateur."
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/governance_live.ex
@@ -16584,8 +16589,8 @@ msgstr "Des requêtes ou des cookies peuvent circuler en HTTP non chiffré."
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Requests that don't say what they are."
-msgstr "Requêtes qui ne disent pas ce qu'elles sont."
+msgid "Requests that don't say what they are, and claimed search engines proven not to be them."
+msgstr "Requêtes qui ne disent pas ce qu’elles sont, et prétendus moteurs de recherche dont on a prouvé qu’ils ne le sont pas."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -21816,6 +21821,11 @@ msgstr "Ce security.txt a expiré."
 #, elixir-autogen, elixir-format
 msgid "This segment has no confirmed subscribers. Pick another segment, or add and confirm subscribers first."
 msgstr "Ce segment n’a aucun abonné confirmé. Choisissez un autre segment, ou ajoutez et confirmez d’abord des abonnés."
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "This server does not check search-engine claims, so any client naming one gets this budget."
+msgstr "Ce serveur ne vérifie pas qu’un client est bien le moteur de recherche qu’il prétend être : tout client qui en nomme un reçoit ce budget."
 
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format

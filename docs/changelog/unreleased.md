@@ -662,6 +662,35 @@ carries the reasoning.
     config drops the `delivery_classes` key the new variables write; see
     [performance.md](../performance.md#running-a-basic-load-check).
 
+<a id="verified-search-bots-upgrade"></a>
+
+- **Each node now sends DNS queries about visitors: an address whose user agent
+  names a search engine is looked up by reverse and forward DNS, on by default
+  (#2254).** Allow outbound DNS (PTR, A, AAAA) to the resolvers in each node's
+  `/etc/resolv.conf`, or set `KILN_CRAWLER_VERIFICATION=false`. No migration;
+  rolling the pin back is safe and goes back to believing every claim.
+  - **Behind a proxy**, set `TRUSTED_PROXIES` (or `CLIENT_IP_HEADER` on Fly.io,
+    Railway or DigitalOcean App Platform). Otherwise every request carries the
+    proxy's address, no claim can be checked, and none is proven false: rate
+    limits stay as in #2243, and a search-engine value above 100% never applies.
+  - **Data flow.** The query names the visitor's address
+    (`in-addr.arpa` / `ip6.arpa`), so your resolver, and the operator of that
+    address's reverse zone, see it. If your resolver is a third party's, list
+    it as a subprocessor; see [data-flows.md](../data-flows.md#optional-subprocessors).
+  - **With the smart 404 guard on (`KILN_SCANNER_BLOCKING`),** link-preview
+    fetchers (`facebookexternalhit`, `Twitterbot`, `LinkedInBot`) and `Slurp`
+    are no longer exempt from the miss threshold, whatever
+    `KILN_CRAWLER_VERIFICATION` says ([below](#scanner-guard-exemption-narrowed)).
+    A site whose shared links often lead to 404s can see a preview fetcher's
+    address blocked for an hour. Remove such a block on `/editor/ip-blocks`.
+  - **Dashboards.** `kiln_cms_delivery_client_class_count{class="empty"}` now
+    includes search-engine claims proven false
+    ([below](#client-class-is-charged-class)).
+  - **Check it works**:
+    `bin/kiln_cms rpc 'IO.inspect(KilnCMS.CrawlerVerification.verify(:google, {66, 249, 66, 1}))'`
+    prints `{:verified, "crawl-66-249-66-1.googlebot.com"}`. Guide:
+    [Check that a node can verify crawlers](../bot-budgets.md#check-that-a-node-can-verify-crawlers).
+
 <a id="team-invitations-upgrade"></a>
 
 - **Run `mix ash.migrate` for site invitations: one new table, `invitations`,
@@ -2199,7 +2228,7 @@ carries the reasoning.
 - **Smart 404 blocking: an address that racks up delivery 404s, or probes bait paths such as `/wp-login.php`, is blocked for a while (#2253).**
   Off by default, so nothing changes until an operator sets `KILN_SCANNER_BLOCKING=1`. No migration; rolling the pin back is safe, and any automatic rules already written simply expire (they are ordinary `ip_block_rules` rows with an expiry).
   - **What trips it.** Delivery 404s from one address (an IPv6 `/64`) past `KILN_SCANNER_BLOCKING_THRESHOLD` (default 60) in `KILN_SCANNER_BLOCKING_WINDOW_MINUTES` (default 10), or past `KILN_SCANNER_BLOCKING_BAIT_THRESHOLD` (default 5) on a bait path. The window is fixed and clock-aligned, not sliding. The address then gets an `IpBlockRule` with the note "Automatic: scanner 404s" for `KILN_SCANNER_BLOCKING_BLOCK_MINUTES` (default 60), visible and removable on `/editor/ip-blocks`. Bait paths are config-only (`config :kiln_cms, :scanner_blocking, bait_paths: [...]`, replacing the built-in list), as is the cap of 300 automatic rules per site (`max_auto_rules`).
-  - **What never counts.** Non-`GET`/`HEAD` requests, signed-in visitors, browser-like requests (`Sec-Fetch-*` headers), private, loopback, link-local and CGNAT addresses and `TRUSTED_PROXIES` ranges, and a forwarded request while no proxy is trusted. A claimed crawler user agent skips the miss threshold but not bait paths (it is spoofable; there is no reverse DNS). A successful sign-in from the address in the last 24 hours prevents the block.
+  - **What never counts.** Non-`GET`/`HEAD` requests, signed-in visitors, browser-like requests (`Sec-Fetch-*` headers), private, loopback, link-local and CGNAT addresses and `TRUSTED_PROXIES` ranges, and a forwarded request while no proxy is trusted. A claimed search-engine user agent skips the miss threshold but not bait paths, unless DNS proves the claim false (#2254). A successful sign-in from the address in the last 24 hours prevents the block.
   - **Fails open and is not retried.** Counting runs off the request path; a dropped count or database error never changes the 404. A trip is claimed once per block window, so a trip skipped for the rule cap, a recent sign-in or a database error is not retried until the window rolls over. At the cap a new trip is skipped and logged.
   - **Security log, metric, policy.** A new security event type `ip_auto_blocked` ("Address blocked automatically") and a counter `kiln_cms.scanner_guard.blocked.count` (tag `reason`). The guard acts as a new `:scanner_guard` system actor that may only create an `IpBlockRule` and read recent sign-in events.
   - **If it blocks someone it should not,** the block ends by itself after the block time, or an admin selects **Remove** beside it on `/editor/ip-blocks`. Guide: [docs/ip-blocking.md](../ip-blocking.md#block-scanners-automatically); variables: [environment-variables.md](../environment-variables.md#smart-404-blocking-2253).
@@ -2238,8 +2267,9 @@ carries the reasoning.
     `org_setting_changed`. The setting is not on JSON:API, GraphQL or MCP.
   - **Not security.** The user agent is spoofable, so this is cost control: a
     higher ceiling for a class is a higher ceiling for anyone who claims it. That
-    is why search engines and AI crawlers default to 100%, not more. Higher
-    limits for verified crawlers belong to reverse-DNS verification (#2254).
+    is why search engines and AI crawlers default to 100%, not more. Since
+    #2254 a search-engine claim is checked by DNS, so a search-engine percentage
+    above 100 goes only to verified addresses.
   - **Never classified.** robots.txt, llms.txt, sitemaps, feeds and the health
     probes (`/up`, `/ready`, `/live`) are not on `:delivery`.
   - **Telemetry.** `[:kiln_cms, :delivery, :client_class]` with `class` and
@@ -2252,6 +2282,61 @@ carries the reasoning.
     (`GoogleOther`, `AdsBot-Google`) count as browsers, and `SeznamBot` and
     `Qwantbot` count as declared bots.
   - Guide: [bot-budgets.md](../bot-budgets.md).
+
+<a id="verified-search-bots"></a>
+
+- **A request claiming to be a search engine is checked against DNS, and a
+  claim proven false is charged as no user agent (60 requests a minute by
+  default) instead of the search-engine budget (#2254).** A user agent naming
+  Googlebot, bingbot, Applebot, YandexBot or Baiduspider used to buy the
+  search-engine ceiling for anyone who typed it.
+  - **The check.** `KilnCMS.CrawlerVerification` looks up the address's PTR
+    name, requires it to be under the engine's published domain (Google
+    `googlebot.com`; Bing `search.msn.com`; Apple `applebot.apple.com`; Yandex
+    `yandex.ru`, `yandex.net`, `yandex.com`; Baidu `baidu.com`, `baidu.jp`),
+    matched on a label boundary, and requires that name's A or AAAA lookup to
+    contain the address. Google's `google.com` and `googleusercontent.com` names
+    are not accepted: they are not its common crawlers, and
+    `googleusercontent.com` is any Google Cloud customer. DuckDuckBot publishes
+    only IP ranges and cannot be checked.
+  - **Only a proven failure costs anything.** No PTR record, a name outside the
+    engine's domain, or a forward mismatch is charged as `empty`. A claim not
+    proven either way (the lookup is running or could not start, DNS timed out
+    or failed, DuckDuckBot, a private or trusted-proxy address, an untrusted
+    forwarding header) keeps the search-engine class, held to the `:delivery`
+    limit (`KilnCMS.BotBudgets.unverified_search_limit/0`). With the shipped
+    defaults that is the same 300 a minute as before; a
+    `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT` above 100 is now spent only on
+    verified addresses. Higher defaults for verified crawlers are not part of
+    this change.
+  - **Never on the request path.** A lookup starts in the background and the
+    request is judged without it; later requests from that address are judged
+    by the result. Cached per node, per address: 6 h verified, 1 h proven
+    false, 5 min after a DNS error. At most 3 queries per lookup, a 3-second
+    deadline, 16 lookups at a time per node with none queued, and new lookups
+    rate limited per network (IPv4 `/24` 30 and `/16` 120 a minute, IPv6 `/64`
+    30, `/48` 60, `/32` 120) and per node (600). A verifier that is busy,
+    rate limited or restarting answers "not proven", never an error.
+  - **Off switch.** `KILN_CRAWLER_VERIFICATION=false` believes every claim, as
+    before. **Sign-in & access → Bot budgets** then says so under **Search
+    engines (%)**; the class hints now say a claim proven false counts as No
+    user agent.
+  - **Telemetry.** `kiln_cms.delivery.unverified_crawler.count` (`engine`,
+    `reason`), `kiln_cms.crawler_verification.lookup.count` (`engine`,
+    `result`), `kiln_cms.crawler_verification.lookup.duration` (ms, `result`)
+    and `kiln_cms.crawler_verification.skipped.count` (`reason`). No address,
+    hostname, user agent or org in any of them. Two warnings, once per node:
+    the first lookup the concurrency limit turns away, and 20 lookups in a row
+    with no DNS answer (naming `KILN_CRAWLER_VERIFICATION=false`).
+  - **Known limits.** A silent or slow reverse zone the attacker controls holds
+    a lookup slot until the deadline, and its claim is never proven false (so
+    it keeps the 404 guard's exemption, as every claim did before). Many
+    addresses can spend the lookup budgets or churn the cache so new real
+    crawlers stay unverified for longer, which matters only when the search
+    value is above 100%. No IP-range verification yet.
+  - Guide: [Verified search engines](../bot-budgets.md#verified-search-engines).
+    Variable: [environment-variables.md](../environment-variables.md#bot-budgets-2243).
+    Metrics: [observability.md](../observability.md#crawler-verification).
 
 <a id="team-invitations"></a>
 
@@ -3250,6 +3335,38 @@ carries the reasoning.
   - Guide: [Constrain the values of a field](../extending-content.md#constrain-the-values-of-a-field).
 
 ## Changed
+
+<a id="scanner-guard-exemption-narrowed"></a>
+
+- **The smart 404 guard exempts only search engines from its miss threshold,
+  and only until DNS proves the claim false; link-preview fetchers and Slurp
+  are no longer exempt (#2254).** Since #2253 a user agent containing
+  Googlebot, Bingbot, DuckDuckBot, Applebot, YandexBot, Baiduspider, Slurp,
+  facebookexternalhit, Twitterbot or LinkedInBot skipped the miss threshold.
+  - **With crawler verification on** (the default), the exemption follows
+    `KilnCMS.BotClass.search_engine/1` (which also covers
+    `Google-InspectionTool`, and not a user agent that names an AI crawler too)
+    and holds unless `KilnCMS.CrawlerVerification` has proven the claim false.
+    A claim still being checked, skipped or unanswered keeps it, so a real
+    crawler's first misses from a new address never count. DuckDuckBot cannot
+    be checked and stays exempt.
+  - **With `KILN_CRAWLER_VERIFICATION=false`**, the six search-engine names in
+    the user agent are enough, as before.
+  - **In both modes** `Slurp`, `facebookexternalhit`, `Twitterbot` and
+    `LinkedInBot` count like any other client: anyone can claim them, and none
+    can be checked by DNS. Bait paths count for everyone, as before. See the
+    [upgrade note](#verified-search-bots-upgrade) and
+    [ip-blocking.md](../ip-blocking.md#block-scanners-automatically).
+
+<a id="client-class-is-charged-class"></a>
+
+- **`kiln_cms_delivery_client_class_count`'s `class` tag is now the class a
+  request was charged as, so `class="empty"` includes search-engine claims
+  proven false by DNS (#2254).** Before, it was always the class the user agent
+  claimed. A claim not proven either way still counts as `search_engine`.
+  Split the proven spoofs out with
+  `kiln_cms_delivery_unverified_crawler_count{reason="failed"}`; see
+  [observability.md](../observability.md#crawler-verification).
 
 <a id="trashed-row-update-actions-refuse"></a>
 
@@ -4468,6 +4585,41 @@ carries the reasoning.
     plugin block's own `:web` output carry whatever the plugin renders.
 
 ## Security
+
+<a id="invitation-takeover-credentials"></a>
+
+- **Accepting an invitation over an unconfirmed account now removes every credential the first registrant could have set up, not just their password and sessions (#2453).**
+  Anyone can register an unconfirmed account for any address, sign in with
+  the password they chose, and, once an admin raises the account's role or
+  mints it a key, enroll an authenticator app, add passkeys, subscribe a push
+  device or hold an API key. The invitee who then accepted with a password
+  took over the account but left all of that in place: the stranger could
+  still sign in with a passkey or a key, and the invitee was asked for a code
+  only the stranger had. `User` `:accept_invitation_with_password` now also
+  clears two-step verification (the secret, recovery codes and any pending
+  enrollment), deletes passkeys, identity-provider links and push devices,
+  and revokes every live API key, draft-write keys included, so they no
+  longer authenticate or rotate. It all happens in the accept's transaction
+  as `SystemActor.new(:invitations)`; if any removal fails, the whole accept
+  rolls back and the invitee can retry. The security log records
+  `second_factor_removed` and `passkey_removed` (new metadata key `via`,
+  `invitation`) and `api_key_revoked`, each with no person, and the
+  invitee's flash adds "Any two-step verification, passkeys or API keys set
+  up on this address before were removed; set them up again." when one of
+  those was removed. A confirmed account's one-click accept changes none of
+  this. A passkey registration, push subscription, two-step confirmation,
+  recovery-code regeneration or password change that the stranger's session
+  had in flight takes the account's row first
+  (`Changes.GuardAccountTakeover`): if it gets there before the takeover, it
+  commits first, and the takeover removes or overwrites what it wrote; if
+  after, it waits, finds the password changed (or the staged secret
+  cleared), and is refused. The
+  stranger's sessions are evicted once the takeover commits. The same guard
+  makes `:confirm_totp` refuse a secret a second tab's `:setup_totp` replaced
+  after the confirmation was built. The threat model records the same wipe on
+  confirmation, password reset and magic-link sign-in of an unconfirmed
+  account as a follow-up. No migration; rolling the pin back is safe.
+  See [What taking over an account removes](../account-administration.md#what-taking-over-an-account-removes).
 
 <a id="account-enumeration-audit"></a>
 

@@ -303,14 +303,20 @@ that is what they are for there.
      password stops working, every session the account held is signed out, and
      a display name the first registrant chose is cleared unless they enter one.
      Anyone can register an unconfirmed account for any address, so its old
-     password proves nothing about who holds the mailbox.
+     password proves nothing about who holds the mailbox. For the same reason
+     every other credential on the account goes too
+     ([What taking over an account removes](#what-taking-over-an-account-removes)).
 6. They are sent to the sign-in page with "Your account is ready — sign in to
    (site)." or "You've joined (site) — sign in to continue." Someone who was
    already a member sees "You're now (tier) on (site) — sign in to continue."
    when the invitation raised them, or "You're already a member of (site) as
    (tier); nothing changed." when it did not ("Your account is ready. You were
    already a member of (site) as (tier), and that is unchanged." if they set a
-   password). They sign in as usual; a second factor still applies. On
+   password). When taking over an unconfirmed account removed two-step
+   verification, a passkey or an API key, the message goes on: "Any two-step
+   verification, passkeys or API keys set up on this address before were
+   removed; set them up again." They sign in as usual; a second factor still
+   applies (a confirmed account keeps its own). On
    **Team** they are in the member list, and their invitation is gone from
    **Pending invitations**.
 
@@ -320,6 +326,52 @@ the console host when `KILN_CONSOLE_HOST` is set, and the site's own host if it
 is not ([Serving the console from its own host](multi-tenancy.md#serving-the-console-from-its-own-host)).
 Opening the link changes nothing until a button is pressed, so a mail scanner
 that follows it does no harm.
+
+### What taking over an account removes
+
+Accepting an invitation with a password over an account that was registered
+but never confirmed (step 5) treats everything on that account as set up by a
+stranger, because it may have been: whoever registered the address first could
+sign in with their own password, and an admin may since have raised the
+account's role or minted it a key. In the same write as the new password, the
+accept:
+
+- turns off **two-step verification**: the authenticator secret, its recovery
+  codes, and any enrollment that was started but not confirmed;
+- deletes every **passkey**;
+- deletes every link to an **identity provider** (single sign-on);
+- deletes every **push device**, so review notifications stop going to the
+  stranger's browser;
+- revokes every **API key** still live, including a draft-write key, which can
+  then no longer sign in or rotate itself.
+
+If any of these fails, nothing is accepted: the password, the invitation and
+every credential stay as they were, the page shows an error, and the invitee
+can submit again.
+
+The invitee signs in with the new password alone. An editor or admin sets up
+**Two-factor authentication** and **Passkeys** again under **Settings**
+(`/editor/settings`); a viewer cannot reach that page. An
+admin who minted an API key for the account mints a new one under **API keys**
+if it is still wanted; the old key stays listed as revoked.
+
+The security log of the site the page was opened on records *Second factor
+removed* and *Passkey removed* (with `via` `invitation`) and *API key
+revoked*, each with no person
+([The security log](security-events.md)). Identity links and push devices are
+removed without an entry.
+
+A passkey, push device, two-step verification, new set of recovery codes or
+new password the stranger was saving at that moment does not survive either:
+it is either saved first and then removed or overwritten with the rest, or
+refused once the account has changed hands. The stranger sees the page's
+ordinary failure ("Couldn't verify that passkey — try again.", "Couldn't
+register this device for notifications.", "That code isn't valid — try
+again." for two-step verification and recovery codes, or "Couldn't change
+your password. Check your current password and try again."), and their
+sessions end as the accept commits.
+
+A **confirmed** account accepting with one click keeps all of it.
 
 ### Resend or revoke an invitation
 

@@ -126,6 +126,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `site_bot_budgets`). Scripts (`curl`, Go, Java, Python) now get 150 public-page requests a minute per address, not 300, and requests with no user agent 60; one count is shared per address.** Rolling the pin back is safe.
   ([#2470](https://github.com/The-Verscienta/kiln_cms/pull/2470) · [long form](docs/changelog/unreleased.md#bot-budgets-upgrade))
 
+- **New on by default: nodes ask their DNS resolver about the address of any visitor claiming to be a search engine. Allow outbound DNS (PTR, A, AAAA), set `TRUSTED_PROXIES` behind a proxy, or set `KILN_CRAWLER_VERIFICATION=false`. With smart 404 blocking on, link-preview fetchers are no longer exempt.**
+  No migration; rolling the pin back is safe.
+  ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#verified-search-bots-upgrade))
+
 - **Run `mix ash.migrate` (new table `invitations`). A new daily job prunes invitations 30 days past expiry; no setting.** Rolling the pin back is safe; pending invitation links stop working until you upgrade again.
   ([#2448](https://github.com/The-Verscienta/kiln_cms/pull/2448) · [long form](docs/changelog/unreleased.md#team-invitations-upgrade))
 
@@ -284,6 +288,10 @@ Every summary line below that was shortened links to its own entry there.
   Operators set the ceilings with `KILN_BOT_BUDGET_*_PERCENT`; a site may only lower them. Cost control, not security. Guide: [docs/bot-budgets.md](docs/bot-budgets.md).
   ([#2470](https://github.com/The-Verscienta/kiln_cms/pull/2470) · [long form](docs/changelog/unreleased.md#bot-budgets))
 
+- **Search-engine claims are checked by reverse and forward DNS; a claim proven false is charged as no user agent (60 a minute by default), and a search-engine budget above 100% goes only to verified addresses.**
+  Never on the request path; unchecked claims keep the browser limit. Guide: [docs/bot-budgets.md](docs/bot-budgets.md#verified-search-engines).
+  ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#verified-search-bots))
+
 - **Platform admins can invite someone with no account to a site by email: Team → Add or invite, with Pending invitations to resend or revoke.**
   Links last 7 days and work on invite-only sites; an unconfirmed account is now invited, not added. Guide: [docs/account-administration.md](docs/account-administration.md#invite-someone-to-a-site).
   ([#2448](https://github.com/The-Verscienta/kiln_cms/pull/2448) · [long form](docs/changelog/unreleased.md#team-invitations))
@@ -407,6 +415,12 @@ Every summary line below that was shortened links to its own entry there.
   ([#2256](https://github.com/The-Verscienta/kiln_cms/issues/2256) · [long form](docs/changelog/unreleased.md#robots-flags))
 
 ### Changed
+
+- **The smart 404 guard no longer exempts link-preview fetchers or Slurp from its miss threshold, and exempts a search-engine claim only until DNS proves it false.**
+  ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#scanner-guard-exemption-narrowed))
+
+- **`kiln_cms_delivery_client_class_count`'s `class` is now the class charged: `class="empty"` includes search-engine claims proven false by DNS.**
+  ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#client-class-is-charged-class))
 
 - **Every update action on a content resource, an overlay's own included, refuses a trashed row with `StaleRecord`; only `:restore` and `:clear_reference_target` are exempt.**
   ([#2528](https://github.com/The-Verscienta/kiln_cms/pull/2528) · [long form](docs/changelog/unreleased.md#trashed-row-update-actions-refuse))
@@ -564,6 +578,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2464](https://github.com/The-Verscienta/kiln_cms/issues/2464) · [long form](docs/changelog/unreleased.md#scrollable-tables))
 
 ### Security
+
+- **Accepting an invitation over an unconfirmed account now also removes its two-step verification, passkeys, identity-provider links and push devices, and revokes its API keys (#2453).**
+  ([#2593](https://github.com/The-Verscienta/kiln_cms/pull/2593) · [long form](docs/changelog/unreleased.md#invitation-takeover-credentials))
 
 - **Sign-in, reset, magic link, registration, newsletter, SSO and passkey answer a known and an unknown address alike; the per-surface matrix is in the threat model.**
   ([long form](docs/changelog/unreleased.md#account-enumeration-audit))

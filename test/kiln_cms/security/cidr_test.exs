@@ -255,4 +255,52 @@ defmodule KilnCMS.Security.CidrTest do
       end
     end
   end
+
+  describe "public_unicast?/1 (#2254)" do
+    test "public addresses, documentation ranges and mapped public IPv4 are" do
+      for ip <- [
+            {66, 249, 66, 1},
+            {203, 0, 113, 7},
+            {172, 32, 0, 1},
+            {223, 255, 255, 255},
+            {0x2001, 0x4860, 0x4801, 1, 0, 0, 0, 1},
+            {0x2001, 0xDB8, 0, 0, 0, 0, 0, 1},
+            {0, 0, 0, 0, 0, 0xFFFF, 0x42F9, 0x4201}
+          ] do
+        assert Cidr.public_unicast?(ip), inspect(ip)
+      end
+    end
+
+    test "loopback, shared, unspecified, multicast and reserved space are not" do
+      for ip <- [
+            {127, 0, 0, 1},
+            {10, 1, 2, 3},
+            {172, 16, 0, 1},
+            {192, 168, 1, 1},
+            {100, 64, 0, 1},
+            {169, 254, 1, 1},
+            {0, 0, 0, 0},
+            {0, 1, 2, 3},
+            {224, 0, 0, 1},
+            {239, 255, 255, 250},
+            {240, 0, 0, 1},
+            {255, 255, 255, 255},
+            {0, 0, 0, 0, 0, 0, 0, 0},
+            {0, 0, 0, 0, 0, 0, 0, 1},
+            {0xFD00, 0, 0, 0, 0, 0, 0, 1},
+            {0xFE80, 0, 0, 0, 0, 0, 0, 1},
+            {0xFF02, 0, 0, 0, 0, 0, 0, 1},
+            {0, 0, 0, 0, 0, 0xFFFF, 0x0A00, 0x0001},
+            {0, 0, 0, 0, 0, 0xFFFF, 0x7F00, 0x0001}
+          ] do
+        refute Cidr.public_unicast?(ip), inspect(ip)
+      end
+    end
+
+    test "anything that is not an address tuple is not" do
+      for junk <- [nil, "66.249.66.1", {1, 2, 3}, :inet] do
+        refute Cidr.public_unicast?(junk), inspect(junk)
+      end
+    end
+  end
 end
