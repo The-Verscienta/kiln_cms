@@ -66,6 +66,14 @@ The document comes back in the state it was trashed in. A published document
 goes straight back on the live site: its rendered pages are rebuilt and the
 search index picks it up again. A draft comes back as a draft.
 
+It also comes back with every field conversion (`mix kiln.fields.convert`)
+and media snapshot refresh (`mix kiln.media.resnapshot`) an operator ran
+while it was in the trash: both tasks process trashed documents too
+(#2533), so a field deleted in the meantime does not take the document's
+values with it. Two other background passes still skip the trash: the
+daily refresh of date-based computed fields, which the next save or daily
+run catches up, and `mix kiln.occurrences.backfill`.
+
 A trashed draft is never published by its schedule. If its **Scheduled
 publish at** time passed while it was in the trash, restoring it publishes it
 on the scheduler's next run, within about a minute. A trashed document can't
@@ -202,14 +210,25 @@ were never saved, so paste them in again after the restore.
   loaded before the trash is refused too. A refused write raises
   `Ash.Error.Changes.StaleRecord`, and nothing after it runs: no artifacts
   fired, no webhook, no job enqueued.
-- Two update actions are exempt, listed by
-  `KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0`: `:restore`, which
-  instead requires the row to still be trashed (a second restore is refused),
-  and `:clear_reference_target`, which a purge uses to clear the purged record
-  out of every referrer, trashed ones included, without re-firing or
-  announcing a trashed referrer. `:destroy` (the trash itself) also refuses a
-  row that is already trashed. An overlay action that must write a trashed
-  row has no opt-out.
+- Four update actions are exempt, listed by
+  `KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0`:
+  - `:restore`, which instead requires the row to still be trashed (a second
+    restore is refused);
+  - `:clear_reference_target`, which a purge uses to clear the purged record
+    out of every referrer, trashed ones included, without re-firing or
+    announcing a trashed referrer;
+  - `:convert_custom_field` and `:resnapshot_media`, the writes of
+    `KilnCMS.CMS.FieldConversion` and `KilnCMS.Media.Resnapshot` (#2533).
+    Both tasks read the live rows and then the trashed ones
+    (`ContentTypes.list_trashed!/2`), so a contract step reaches every row.
+    They fire artifacts only when the row the `UPDATE` returned is out of
+    the trash (`KilnCMS.CMS.Changes.FireArtifacts` with
+    `skip_trashed: true`), judged on that row rather than the struct read
+    earlier, because a trash or restore in between bumps no
+    `lock_version`.
+
+  `:destroy` (the trash itself) also refuses a row that is already trashed.
+  An overlay action that must write a trashed row has no opt-out.
 - `:purge` (the hard delete) takes only a row that is still trashed (#2531).
   It filters the delete on the row (`not is_nil(archived_at)`), so a struct
   loaded while the record was in the trash is refused once someone restores

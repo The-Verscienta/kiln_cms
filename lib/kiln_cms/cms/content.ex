@@ -3965,13 +3965,20 @@ defmodule KilnCMS.CMS.Content do
         # (`UnchangedSinceRead`). Versioned, because what it writes is
         # delivered (`custom_fields` on every API surface) and the sync delta
         # API reads changes from version rows. A published record re-fires.
+        # A trashed row is written too, and not fired. Its version row is
+        # harmless: the sync API classifies a changed document by its current
+        # row, so a trashed one is at most a tombstone (`KilnCMS.Firing.Sync`).
         update :resnapshot_media do
           require_atomic? false
           accept []
           change KilnCMS.CMS.Changes.UnchangedSinceRead
           change {KilnCMS.CMS.Changes.ApplyCustomFields, resnapshot: :media}
           change KilnCMS.CMS.Changes.KeepUpdatedAt
-          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+          # Exempt from `Changes.RefuseTrashed` (#2533): a contract step must
+          # reach trashed rows too. Fired only when the row the write returned
+          # is out of the trash, not judged on the struct: a restore between
+          # the read and this write bumps no `lock_version`.
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published, skip_trashed: true}
         end
 
         # Internal: move a JSON-in-text value into a `:group` field (written by
@@ -3985,7 +3992,8 @@ defmodule KilnCMS.CMS.Content do
         # keeps `updated_at` and `lock_version`, sends no webhook, and loses to
         # an editor's save in between. Versioned, because the group is
         # delivered content and the sync delta API reads version rows. A
-        # published record re-fires. A live record's pending working copy gets
+        # published record re-fires; a trashed one is written and not fired,
+        # as on `:resnapshot_media`. A live record's pending working copy gets
         # the same conversion of its own held value, or publishing the copy
         # would put back a map without the group.
         update :convert_custom_field do
@@ -3994,7 +4002,11 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.UnchangedSinceRead
           change {KilnCMS.CMS.Changes.ApplyCustomFields, convert: true}
           change KilnCMS.CMS.Changes.KeepUpdatedAt
-          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+          # Exempt from `Changes.RefuseTrashed` (#2533): a contract step must
+          # reach trashed rows too. Fired only when the row the write returned
+          # is out of the trash, not judged on the struct: a restore between
+          # the read and this write bumps no `lock_version`.
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published, skip_trashed: true}
         end
 
         # Internal: advance the materialized "what's on" sort key once an
@@ -4055,8 +4067,9 @@ defmodule KilnCMS.CMS.Content do
         # row filter `is_nil(archived_at)`, so a struct loaded before someone
         # trashed the record can no longer write into it (an autosave, a
         # *Publish changes* that re-fires and announces `updated` after
-        # `deleted`). `:restore` and `:clear_reference_target` are exempt;
-        # see the change module.
+        # `deleted`). `:restore`, `:clear_reference_target` and the two
+        # contract-step backfills (`:convert_custom_field`,
+        # `:resnapshot_media`) are exempt; see the change module.
         change KilnCMS.CMS.Changes.RefuseTrashed, on: [:update]
 
         change KilnCMS.CMS.Changes.BustContentCache, on: [:create, :update, :destroy]

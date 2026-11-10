@@ -433,7 +433,7 @@ Every summary line below that was shortened links to its own entry there.
 - **`kiln_cms_delivery_client_class_count`'s `class` is now the class charged: `class="empty"` includes search-engine claims proven false by DNS.**
   ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#client-class-is-charged-class))
 
-- **Every update action on a content resource, an overlay's own included, refuses a trashed row with `StaleRecord`; only `:restore` and `:clear_reference_target` are exempt.**
+- **Every update action on a content resource, an overlay's own included, refuses a trashed row with `StaleRecord`; only `:restore`, `:clear_reference_target`, `:convert_custom_field` and `:resnapshot_media` are exempt.**
   ([#2528](https://github.com/The-Verscienta/kiln_cms/pull/2528) · [long form](docs/changelog/unreleased.md#trashed-row-update-actions-refuse))
 
 - **Erasing an account also deletes its Web Push subscriptions, its private saved views and the notifications addressed to it, and now always clears its audiences.**
@@ -500,6 +500,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
 
 ### Fixed
+
+- **`mix kiln.fields.convert` and `mix kiln.media.resnapshot` now also process trashed documents, without firing them, so a document restored after a contract release has the new shape. A trashed record that fails is reported as `(trashed)` and blocks nothing; re-run both right before the contract release.**
+  ([#2533](https://github.com/The-Verscienta/kiln_cms/issues/2533) · [long form](docs/changelog/unreleased.md#contract-backfills-reach-trash))
 
 - **Restoring a version from a copy someone has since saved or published is now refused (editor: the conflict banner; API: `409`, or `404` if trashed), instead of reporting success and writing nothing or skipping the claim and alt-text gates.**
   ([#2616](https://github.com/The-Verscienta/kiln_cms/pull/2616) · [long form](docs/changelog/unreleased.md#restore-refuses-stale-copy))

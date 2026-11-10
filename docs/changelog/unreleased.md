@@ -3437,9 +3437,12 @@ carries the reasoning.
   fired, no webhook, no job enqueued.
   - **Exempt** (`KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0`):
     `:restore`, which now requires the opposite (the row must still be
-    trashed), and `:clear_reference_target`, which a purge runs on every
-    referrer, trashed ones included. `:destroy` now also refuses a row that
-    is already trashed.
+    trashed); `:clear_reference_target`, which a purge runs on every
+    referrer, trashed ones included; and `:convert_custom_field` and
+    `:resnapshot_media`, which `mix kiln.fields.convert` and
+    `mix kiln.media.resnapshot` run on trashed rows too
+    ([below](#contract-backfills-reach-trash)). `:destroy` now also refuses a
+    row that is already trashed.
   - **Overlays.** An update action you defined on a content resource that
     writes trashed rows on purpose now fails with `StaleRecord`. There is no
     opt-out today; if you need one, open an issue. Code that writes
@@ -4011,6 +4014,50 @@ carries the reasoning.
     has a new name; delete superseded items in the media library.
 
 ## Fixed
+
+<a id="contract-backfills-reach-trash"></a>
+
+- **`mix kiln.fields.convert` and `mix kiln.media.resnapshot` now also
+  process documents in the trash, so a document restored after a contract
+  release has the new field shape and current media snapshots (#2533).**
+  Both read only live records, and since #2332 their writes were refused on
+  a trashed row anyway. A document trashed before a conversion and restored
+  after the release that deleted the source field came back without its
+  values; one restored after a media shape change came back with the old
+  snapshot.
+  - **What changed.** Each task reads the live records, then the trashed
+    ones (`ContentTypes.list_trashed!/2`), and their actions
+    (`:convert_custom_field`, `:resnapshot_media`) are now exempt from
+    `KilnCMS.CMS.Changes.RefuseTrashed`. A trashed record's write fires no
+    artifact: its artifacts were removed when it was trashed, and a restore
+    rebuilds them. The check is made on the row the `UPDATE` returned
+    (`KilnCMS.CMS.Changes.FireArtifacts`, new option `skip_trashed: true`),
+    so a record restored between the task's read and its write is still
+    fired with the new shape.
+  - **Field conversion.** All or nothing now applies to live records only.
+    A trashed record that cannot be converted is listed with `(trashed)`
+    after its id, keeps its string and does not block `--apply`; the
+    `invalid record(s); nothing written` error counts only live ones. The
+    summary line reads `(N published, N trashed)`: `published` no longer
+    includes trashed records, and the new `trashed` count is the trashed
+    records converted (or, on a dry run, that would be). Each problem in the
+    report (and `--report` JSON) gains `trashed?`. For a multiple select
+    target, `terms` and `new_terms` include the terms of trashed records,
+    since a restored record needs its terms in the options too. New
+    `KilnCMS.CMS.FieldConversion.blocking/1` returns the problems that stop
+    `--apply`.
+  - **Media resnapshot.** The report gains `trashed` (trashed records
+    re-snapshotted, or that would be) and `trashed_failed`. A trashed record
+    that fails, often because it names an item deleted since, is printed
+    with `(trashed)` and does not fail the task. The summary reads
+    `re-snapshotted N (N trashed)`.
+  - **Operators.** The live and trashed records are two reads, so a record
+    trashed or restored during a run can be missed by both. Run either task
+    once more right before the release that relies on it; records already
+    converted or current are not rewritten. No migration, no config.
+  - **Not covered.** The daily refresh of computed fields
+    (`:refresh_computed`) and `mix kiln.occurrences.backfill` still skip
+    trashed records.
 
 <a id="restore-refuses-stale-copy"></a>
 
