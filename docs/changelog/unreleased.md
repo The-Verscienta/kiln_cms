@@ -3937,6 +3937,44 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="block-strings-follow-page-locale"></a>
+
+- **The text Kiln writes into a content page's article is in the page's
+  language, and a form or newsletter sign-up on the page answers in it
+  (#2465).** A page can be served in a language other than the visitor's: a
+  French reader sent to an English page with no French translation gets the
+  English one, with `<html lang="en">` and `Content-Language: en`. The
+  article's blocks were built in English, but Kiln's own strings in them were
+  rendered in the request's language, so the page mixed the two: an English
+  sign-up heading over French **Nom** and **E-mail** fields.
+  - **Inside the article** now follows the page: the byline and its date, a
+    form block's labels, hints and error messages, a newsletter sign-up's
+    fields, the human-verification widget, and an untitled embed's title. The
+    embed title is also translated in fired `web` artifacts, which render in
+    the document's locale.
+  - **The chrome around the article** (header, search, language switcher,
+    footer) still follows the request. Whether it should follow the page is
+    an open decision, tracked with a related caching problem in
+    [#2595](https://github.com/The-Verscienta/kiln_cms/issues/2595).
+  - **Submit paths change on multilingual sites only.** A form block on a
+    content page posts to `/<locale>/forms/<slug>` and a sign-up block to
+    `/<locale>/newsletter/subscribe`, in the page's language with the default
+    language included (`/en/…`): an unprefixed post takes its language from
+    the visitor's session. A refused form submission re-renders, and the
+    thank-you or "check your inbox" page answers, in the page's language. The
+    form embed served at `/fr/forms/<slug>/embed` now posts to
+    `/fr/forms/<slug>`, and the form's own page under any language prefix,
+    the default's included, posts back under it. Single-language sites,
+    editor previews and fired `web` artifacts keep the bare `/forms/<slug>`
+    and `/newsletter/subscribe`, as do the sign-up `action` in the `json`
+    artifact and `submit_url` in `GET /api/forms/<slug>`. A theme
+    stylesheet, script or analytics rule that selects these forms by `action` should select
+    `.kiln-form` or `.kiln-newsletter-signup` instead.
+  - **Not covered yet:** a plugin block with its own Gettext backend still
+    renders in the request's language; the locked-page and members-only
+    teaser pages; a locale attribute on the `embed.js` snippet; and the
+    language of the newsletter confirmation email.
+
 <a id="render-etags"></a>
 
 - **A change to rendered output that came without an edit no longer leaves

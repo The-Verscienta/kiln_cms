@@ -108,6 +108,38 @@ defmodule KilnCMS.Firing.FiringTest do
       refute inspect(block) =~ "tabindex"
     end
 
+    # #2465: the strings a block writes into the fired artifact are in the
+    # document's language, and the sign-up still posts to the bare path — a
+    # fired artifact is hosted elsewhere, so the action is not pinned.
+    test "the web artifact's embed and sign-up strings are in the document's locale" do
+      org = KilnCMS.Accounts.default_org_id()
+      actor = admin()
+
+      fr =
+        CMS.create_page!(
+          %{
+            title: "Médias",
+            slug: slug(),
+            locale: "fr",
+            blocks: [
+              %{"_type" => "embed", "url" => "https://www.youtube.com/watch?v=abc123"},
+              %{"_type" => "newsletter_signup", "collect_name" => true}
+            ]
+          },
+          actor: actor
+        )
+
+      CMS.publish_page!(fr, actor: actor)
+      KilnCMS.DataCase.drain_oban()
+
+      {:ok, %{"html" => html}} = Engine.read(org, :page, fr.id, :web)
+
+      assert html =~ ~s(title="Média intégré")
+      refute html =~ "Embedded media"
+      assert html =~ "Laissez ce champ vide"
+      assert html =~ ~s(action="/newsletter/subscribe")
+    end
+
     test "the json artifact carries structured intent" do
       org = KilnCMS.Accounts.default_org_id()
       page = published_page(admin())
