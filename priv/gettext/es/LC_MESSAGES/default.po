@@ -10790,8 +10790,8 @@ msgstr "Claves"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
-msgid "Keys this field's value in submissions. Entries already received keep the old key: the Entries tab and CSV export show it as a renamed field; API clients and webhooks use the new name from now on."
-msgstr "Identifica el valor de este campo en los envíos. Las entradas ya recibidas conservan la clave anterior: la pestaña Envíos y la exportación CSV la muestran como un campo renombrado; los clientes de la API y los webhooks usan el nombre nuevo a partir de ahora."
+msgid "Keys this field's value in submissions. Entries already received keep the old key: the Entries tab and CSV export show it as a renamed field; API clients and webhooks use the new name from now on. The autoresponder's [field:…] tokens follow the rename."
+msgstr "Identifica el valor de este campo en los envíos. Las entradas ya recibidas conservan la clave anterior: la pestaña Envíos y la exportación CSV la muestran como un campo renombrado; los clientes de la API y los webhooks usan el nombre nuevo a partir de ahora. Los tokens [field:…] de la respuesta automática siguen el cambio de nombre."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -20115,6 +20115,11 @@ msgstr "El icono de la app debe ser una imagen PNG o JPEG."
 #, elixir-autogen, elixir-format
 msgid "The app icon was saved but isn't installable yet: %{reason}"
 msgstr "El icono de la aplicación se guardó, pero todavía no es instalable: %{reason}"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "The autoresponder now uses [field:%{new}] where it used [field:%{old}]."
+msgstr "La respuesta automática ahora usa [field:%{new}] donde usaba [field:%{old}]."
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format

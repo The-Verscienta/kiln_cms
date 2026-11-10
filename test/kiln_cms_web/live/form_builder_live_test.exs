@@ -804,5 +804,101 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
 
       assert reload(form).name == "string"
     end
+
+    # The builder over a form whose autoresponder is already set up: the
+    # template may only name fields that exist, so the fields come first.
+    defp autoresponder_builder(conn, admin, names, autoresponder) do
+      form =
+        CMS.create_form!(%{name: "Contact", slug: "fb-ar-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      fields =
+        for {name, position} <- Enum.with_index(names) do
+          type = if position == 0, do: :email, else: :string
+
+          CMS.create_form_field!(
+            %{form_id: form.id, name: name, label: name, field_type: type, position: position},
+            actor: admin
+          )
+        end
+
+      form = CMS.update_form!(form, autoresponder, actor: admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/forms/#{form.id}")
+      {form, fields, lv}
+    end
+
+    test "a rename carries the autoresponder's tokens, and the Confirmations tab shows it (#2343)",
+         %{conn: conn} do
+      {form, [field], lv} =
+        autoresponder_builder(conn, authed_user(:admin), ["email"], %{
+          autoresponder_enabled: true,
+          autoresponder_subject: "Thanks, [field:email]!",
+          autoresponder_body: "<p>Sent to [field:email].</p>"
+        })
+
+      selector = open_settings(lv, field)
+      change(lv, selector, field, %{"name" => "address", "field_type" => "email"}, "name")
+
+      status = lv |> element("#field-settings-status") |> render()
+      assert status =~ "The autoresponder now uses [field:address] where it used [field:email]."
+      # No entries, so nothing about stranded keys.
+      refute status =~ "already received"
+
+      stored = CMS.get_form!(form.id, authorize?: false)
+      assert stored.autoresponder_subject == "Thanks, [field:address]!"
+      assert stored.autoresponder_body == "<p>Sent to [field:address].</p>"
+
+      lv
+      |> element(~s(#form-builder-tabs button[phx-value-tab="confirmations"]))
+      |> render_click()
+
+      assert lv |> element(~s(input[name="form[autoresponder_subject]"])) |> render() =~
+               ~s(value="Thanks, [field:address]!")
+
+      body = lv |> element(~s(textarea[name="form[autoresponder_body]"])) |> render()
+      assert body =~ "[field:address]"
+      refute body =~ "[field:email]"
+    end
+
+    test "a rename the autoresponder does not use says nothing about it", %{conn: conn} do
+      {_form, [_email, field], lv} =
+        autoresponder_builder(conn, authed_user(:admin), ["email", "message"], %{
+          autoresponder_enabled: true,
+          autoresponder_subject: "Thanks, [field:email]!",
+          autoresponder_body: "b"
+        })
+
+      selector = open_settings(lv, field)
+      change(lv, selector, field, %{"name" => "note"}, "name")
+
+      status = lv |> element("#field-settings-status") |> render()
+      assert status =~ "Saved."
+      refute status =~ "autoresponder"
+    end
+
+    test "deleting a field the autoresponder uses is refused with the reason (#2343)",
+         %{conn: conn} do
+      {form, [field], lv} =
+        autoresponder_builder(conn, authed_user(:admin), ["email"], %{
+          autoresponder_enabled: true,
+          autoresponder_subject: "Thanks, [field:email]!",
+          autoresponder_body: "b"
+        })
+
+      html =
+        lv
+        |> element(~s(button[phx-click="delete_field"][phx-value-id="#{field.id}"]))
+        |> render_click()
+
+      assert html =~
+               "The autoresponder uses [field:email]: remove it from the Confirmations template first."
+
+      assert has_element?(lv, "#canvas-field-name-#{field.id}")
+
+      assert form.id |> CMS.form_fields_for!(authorize?: false) |> Enum.map(& &1.name) == [
+               "email"
+             ]
+    end
   end
 end

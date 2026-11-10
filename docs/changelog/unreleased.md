@@ -3592,6 +3592,37 @@ carries the reasoning.
 
   Guide: [Read entries after a rename](../forms.md#read-entries-after-a-rename).
 
+<a id="autoresponder-tokens-follow-rename"></a>
+
+- **Renaming a form field rewrites its `[field:<old>]` tokens in the
+  autoresponder, and a field the autoresponder uses can no longer be deleted
+  while it is on (#2343).** The autoresponder's subject and body name fields by
+  machine name, and a rename or delete left the old token in place, where it
+  rendered empty in every confirmation email from then on, with no warning.
+  - **Rename.** Every exact `[field:<old>]` in the **Confirmations** subject
+    and body becomes `[field:<new>]` in the rename's own save, whether the
+    autoresponder is on or off; `[field:email2]` is untouched when `email` is
+    renamed. The builder's field panel adds "The autoresponder now uses
+    [field:new] where it used [field:old]." when the template changed, the
+    **Confirmations** tab shows the rewritten text, and the **Machine name**
+    hint now ends "The autoresponder's [field:…] tokens follow the rename."
+  - **Delete.** While the autoresponder is on and uses the field's token,
+    deleting the field is refused with "The autoresponder uses [field:email]:
+    remove it from the Confirmations template first." The builder used to
+    ignore a refused delete; it now shows the reason. Remove the token, or
+    switch the autoresponder off, then delete. Changing a field's `form_id` to
+    move it to another form is refused the same way.
+  - **Not repaired.** A template already holding a token for a field renamed or
+    deleted before this release still renders it empty; fix it in the
+    **Confirmations** tab. Such a stale token does not hold up the rename of a
+    different field.
+  - **Unchanged.** Webhook payloads, `GET /api/forms/<slug>` and stored
+    entries still use the new name after a rename, as before.
+  - **Operators.** No migration, no config. Rolling the pin back is safe;
+    templates already rewritten keep their new tokens, which are correct.
+
+  Guide: [Autoresponder tokens follow a rename](../forms.md#autoresponder-tokens-follow-a-rename).
+
 <a id="composite-field-part-help"></a>
 
 - **Range and link inputs explain themselves, and `Kiln.FieldType` input parts
@@ -3783,7 +3814,8 @@ carries the reasoning.
   Stored submissions are not rewritten. Still open: the CSV export drops an
   old key's values (#2342, since fixed: see
   [above](#form-export-renamed-field-keys)), an autoresponder `[field:old]` token renders
-  empty after a rename (#2343), and there is no option to rewrite old keys
+  empty after a rename (#2343, since fixed: see
+  [above](#autoresponder-tokens-follow-rename)), and there is no option to rewrite old keys
   (#2344). Nothing to configure or migrate. See
   [Edit and rename form fields](../forms.md#edit-and-rename-form-fields).
 

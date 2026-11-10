@@ -90,12 +90,19 @@ You need the **admin** role: the Forms pages are admin-only.
    name). Kiln does not rewrite stored submissions: entries received before
    the rename are keyed by the old name, and entries from now on by the new
    one.
+6. If the **Confirmations** subject or body used the field's old token, the
+   panel also says *The autoresponder now uses [field:full_name] where it used
+   [field:string].* (with the two names). Kiln has rewritten the template in
+   the same save; see
+   [Autoresponder tokens follow a rename](#autoresponder-tokens-follow-a-rename).
 
 For example, renaming `string` to `full_name` on a contact form that has two
-entries: the preview shows `full_name` under the field, the panel says
-*Saved.* and *Entries already received keep the old key “string”.*, and the
-next submission is stored as `{"full_name": "…"}` while the two earlier ones
-stay `{"string": "…"}`.
+entries and an autoresponder subject of `Thanks, [field:string]!`: the preview
+shows `full_name` under the field, the panel says *Saved.*, *Entries already
+received keep the old key “string”.* and *The autoresponder now uses
+[field:full_name] where it used [field:string].*, the **Confirmations** tab
+shows `Thanks, [field:full_name]!`, and the next submission is stored as
+`{"full_name": "…"}` while the two earlier ones stay `{"string": "…"}`.
 
 ### Read entries after a rename
 
@@ -132,14 +139,31 @@ form whose fields were never renamed or removed, or a filter that leaves no
 entry with an old key, exports exactly the current fields' columns, as
 before.
 
+### Autoresponder tokens follow a rename
+
+Renaming a field rewrites every `[field:<old name>]` token in the
+**Confirmations** subject and body to `[field:<new name>]`, in the same save
+as the rename. Without that, the old token would render empty in every
+confirmation email from then on, because no field has that name any more.
+
+- **Exact tokens only.** Renaming `email` rewrites `[field:email]` and leaves
+  `[field:email2]` alone.
+- **On or off.** A template is rewritten whether **Email the submitter a
+  confirmation** is ticked or not, so switching it on later does not find a
+  token for a field that was only renamed.
+- **One save.** If the template cannot be saved, the rename is refused too,
+  and the field keeps its old name.
+- **Older broken tokens stay.** A token left behind by a field deleted
+  earlier, or by a rename before this release, is not repaired, and it does not
+  hold up the rename of a different field. Fix it in the **Confirmations** tab;
+  while the autoresponder is on, that tab refuses to save until every token
+  names a current field.
+
+The builder reloads the **Confirmations** tab with the rewritten template, so
+a later save there does not write the old token back.
+
 ### What a rename does not carry over
 
-- **Autoresponder.** A `[field:<old name>]` token in the **Confirmations**
-  subject or body renders empty once no field has that name
-  ([#2343](https://github.com/The-Verscienta/kiln_cms/issues/2343)), and
-  nothing warns you. Update the template to the new name after renaming: while
-  the autoresponder is on, the tab refuses to save a template whose tokens
-  name no current field, so its next save fails until the token is fixed.
 - **Headless clients and webhook consumers.** `GET /api/forms/<slug>` and
   new `form.submitted` payloads carry the new name straight away; a frontend
   or integration that reads the old key needs changing at the same time.
@@ -152,6 +176,31 @@ before.
 Kiln has no option to rewrite the keys in existing entries
 ([#2344](https://github.com/The-Verscienta/kiln_cms/issues/2344)).
 
+### Delete a field the autoresponder uses
+
+While the autoresponder is on, Kiln refuses to delete a field whose
+`[field:<name>]` token is in the **Confirmations** subject or body: every
+confirmation from then on would show nothing where the value was. To delete
+such a field (admin role):
+
+1. Click the trash icon on the field in the preview and confirm **Delete this
+   field?**. The field stays, and a message at the corner of the screen says
+   *The autoresponder uses [field:email]: remove it from the Confirmations
+   template first.* (with the field's name).
+2. Open the **Confirmations** tab and either remove the token from **Subject**
+   and **Body**, or untick **Email the submitter a confirmation**. Click
+   **Save**.
+3. Go back to **Fields** and delete the field again. It disappears from the
+   preview.
+
+With the autoresponder off, a field is deleted even if the template names it.
+The token then stays in the template, and the tab refuses to save with the
+autoresponder switched back on until you remove or replace it.
+
+Moving a field to another form (changing its `form_id`, which the builder does
+not offer) is refused the same way while the old form's autoresponder is on and
+uses the field's token, with an error on `form_id`.
+
 ### Errors you can see
 
 | Message | Meaning |
@@ -159,6 +208,7 @@ Kiln has no option to rewrite the keys in existing entries
 | must be lowercase letters, digits and underscores, starting with a letter | The machine name has a capital, a space, a hyphen or another character outside `a-z`, `0-9` and `_`, or starts with a digit or underscore. |
 | has already been taken | Another field on this form already has that machine name. Machine names are unique per form. |
 | a select field must list at least one option | A dropdown's **Options** box is empty. Enter at least one option, one per line. |
+| The autoresponder uses [field:email]: remove it from the Confirmations template first. | Shown when you delete a field: the autoresponder is on and its subject or body uses this field's token. See [Delete a field the autoresponder uses](#delete-a-field-the-autoresponder-uses). |
 
 An error that belongs to no input in the panel, such as a permission error,
 shows as a message at the corner of the screen instead.
@@ -495,3 +545,15 @@ Saving with the toggle on requires a non-blank subject and body, both
 referencing only tokens the form currently has; saving with it off skips both
 checks, so a draft template — even one written against a field you haven't
 added yet — never blocks an unrelated save.
+
+The template follows the form's fields (#2343). Renaming a field rewrites its
+exact `[field:<old>]` tokens to `[field:<new>]`, enabled or not, in the
+rename's own transaction (`KilnCMS.CMS.Changes.RewriteAutoresponderTokens` on
+`FormField`'s `:update`); that write skips the token check above, so a stale
+token from an earlier delete cannot refuse the rename of another field.
+Deleting a field, or moving it to another form, is refused while the
+autoresponder is on and uses its token
+(`KilnCMS.CMS.Validations.AutoresponderFieldInUse`). Both live on the resource,
+so every writer of `FormField` gets them, not only the builder. See
+[Autoresponder tokens follow a rename](#autoresponder-tokens-follow-a-rename)
+and [Delete a field the autoresponder uses](#delete-a-field-the-autoresponder-uses).
