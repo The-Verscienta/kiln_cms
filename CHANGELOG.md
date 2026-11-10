@@ -444,6 +444,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Field locks: an idle or takeover-flush timeout that fires just as it is reset is now ignored. Two narrow races: a keystroke at the idle limit lost the field, and a stale flush timeout granted the next takeover unflushed.**
+  ([#2351](https://github.com/The-Verscienta/kiln_cms/issues/2351) · [long form](docs/changelog/unreleased.md#field-lock-stale-timers))
+
 - **The range and link editor inputs now carry translatable help lines, and a field type's input part may declare a `help:` string.**
   Range says both bounds are the same kind; link lists the allowed `rel` tokens. A hostile link address over JSON:API HTTP, the Kotlin golden and dialyzer are verified.
   ([#2435](https://github.com/The-Verscienta/kiln_cms/issues/2435) · [long form](docs/changelog/unreleased.md#composite-field-part-help))

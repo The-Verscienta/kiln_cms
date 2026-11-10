@@ -29,6 +29,36 @@ defmodule KilnCMS.Collab.FieldLockTest do
     end
   end
 
+  # The lock process of a topic and its private state. Timeouts are driven by
+  # sending the timer's own message, read from here, rather than by racing a
+  # real clock.
+  defp lock_pid(topic) do
+    [{pid, _}] = Registry.lookup(FieldLock.registry(), topic)
+    pid
+  end
+
+  defp lock_state(topic), do: topic |> lock_pid() |> :sys.get_state()
+
+  # Polls until the private holder of `field` satisfies `ready?`, and returns it.
+  defp await_holder(topic, field, ready?, tries \\ 100) do
+    holder = lock_state(topic).locks[field]
+
+    cond do
+      holder && ready?.(holder) -> holder
+      tries > 0 -> Process.sleep(5) && await_holder(topic, field, ready?, tries - 1)
+      true -> flunk("the holder of #{field} never got ready: #{inspect(holder)}")
+    end
+  end
+
+  # Waits for a stand-in session to have exited.
+  defp await_exit(pid, tries \\ 100) do
+    cond do
+      not Process.alive?(pid) -> :ok
+      tries > 0 -> Process.sleep(5) && await_exit(pid, tries - 1)
+      true -> flunk("#{inspect(pid)} never exited")
+    end
+  end
+
   # A stand-in session: a process that lives until told otherwise.
   defp session do
     spawn_link(fn ->
@@ -119,18 +149,28 @@ defmodule KilnCMS.Collab.FieldLockTest do
 
   describe "process death and the grace period" do
     test "a dead holder keeps the field through the grace, then loses it", %{topic: topic} do
-      start(topic, grace_ms: 80)
+      start(topic, grace_ms: 60_000)
       holder = session()
       assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
       assert_receive {:field_locks, ^topic, %{"title" => _}}
 
       send(holder, :stop)
+      %{gen: gen} = await_holder(topic, "title", &(&1.grace_timer != nil))
 
       # Still held while the grace runs: a reload must not cost the lock.
-      Process.sleep(20)
       assert %{"title" => %{user_id: "alice"}} = FieldLock.locks(topic)
 
-      assert_receive {:field_locks, ^topic, locks} when map_size(locks) == 0, 500
+      send(lock_pid(topic), {:grace_over, "title", gen})
+      assert_receive {:field_locks, ^topic, locks} when map_size(locks) == 0
+    end
+
+    test "the grace runs on a real clock", %{topic: topic} do
+      start(topic, grace_ms: 50)
+      holder = session()
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+      send(holder, :stop)
+
+      assert_receive {:field_locks, ^topic, locks} when map_size(locks) == 0, 2_000
     end
 
     test "the same user coming back inside the grace gets the field straight back",
@@ -139,8 +179,8 @@ defmodule KilnCMS.Collab.FieldLockTest do
       holder = session()
       assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
       send(holder, :stop)
-      # Let the monitor notice before the reload arrives.
-      Process.sleep(20)
+      # The reload arrives after the old tab is gone.
+      await_exit(holder)
 
       # Somebody else is still refused: the grace is the holder's.
       assert {:held, %{user_id: "alice"}} = FieldLock.acquire(topic, "title", @bob, session())
@@ -152,18 +192,32 @@ defmodule KilnCMS.Collab.FieldLockTest do
   end
 
   describe "the idle timeout" do
-    test "a silent holder loses the field; a keystroke restarts the clock", %{topic: topic} do
-      start(topic, idle_ms: 120)
+    test "a silent holder loses the field", %{topic: topic} do
+      start(topic, idle_ms: 50)
       assert :ok = FieldLock.acquire(topic, "title", @alice, self())
       assert_receive {:field_locks, ^topic, %{"title" => _}}
 
-      Process.sleep(80)
+      assert_receive {:field_locks, ^topic, locks} when map_size(locks) == 0, 2_000
+    end
+
+    test "a keystroke restarts the clock: the timeout it replaced does nothing",
+         %{topic: topic} do
+      start(topic, idle_ms: 60_000)
+      assert :ok = FieldLock.acquire(topic, "title", @alice, self())
+      assert_receive {:field_locks, ^topic, %{"title" => _}}
+      %{idle_ref: first} = lock_state(topic).locks["title"]
+
       FieldLock.ping(topic, self())
-      Process.sleep(80)
-      # 160 ms in, but only 80 since the last keystroke.
+      %{idle_ref: second} = lock_state(topic).locks["title"]
+      assert second != first
+
+      # The first timer fired just as the keystroke landed: its message is
+      # already queued and cancelling it no longer helps.
+      send(lock_pid(topic), {:idle_over, "title", first})
       assert %{"title" => %{user_id: "alice"}} = FieldLock.locks(topic)
 
-      assert_receive {:field_locks, ^topic, locks} when map_size(locks) == 0, 500
+      send(lock_pid(topic), {:idle_over, "title", second})
+      assert_receive {:field_locks, ^topic, locks} when map_size(locks) == 0
     end
 
     test "ping/2 moves last_keystroke_at for every field the session holds", %{topic: topic} do
@@ -223,14 +277,64 @@ defmodule KilnCMS.Collab.FieldLockTest do
     end
 
     test "a holder that does not answer is not waited for", %{topic: topic} do
-      start(topic, flush_ms: 60)
+      start(topic, flush_ms: 60_000)
       holder = session()
       assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
 
       assert :pending = FieldLock.takeover(topic, "title", @bob, self())
-      refute_receive {:lock_granted, _, _}, 30
+      %{ref: ref} = lock_state(topic).pending["title"]
+      refute_received {:lock_granted, _, _}
 
-      assert_receive {:lock_granted, ^topic, "title"}, 500
+      send(lock_pid(topic), {:flush_timeout, "title", ref})
+      assert_receive {:lock_granted, ^topic, "title"}
+      assert %{"title" => %{user_id: "bob"}} = FieldLock.locks(topic)
+    end
+
+    test "the flush wait runs on a real clock", %{topic: topic} do
+      start(topic, flush_ms: 50)
+      assert :ok = FieldLock.acquire(topic, "title", @alice, session())
+
+      assert :pending = FieldLock.takeover(topic, "title", @bob, self())
+      assert_receive {:lock_granted, ^topic, "title"}, 2_000
+    end
+
+    test "a stale flush timeout does not grant a later takeover early", %{topic: topic} do
+      start(topic, flush_ms: 60_000)
+      holder = session()
+      bob = session()
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+
+      assert :pending = FieldLock.takeover(topic, "title", @bob, bob)
+      %{ref: stale} = lock_state(topic).pending["title"]
+      FieldLock.flushed(topic, "title")
+      assert_receive {:field_locks, ^topic, %{"title" => %{user_id: "bob"}}}
+
+      assert :pending = FieldLock.takeover(topic, "title", %{id: "carol", name: "Carol"}, self())
+      %{ref: current} = lock_state(topic).pending["title"]
+      assert current != stale
+
+      # The first takeover's timer fired as its flush answered.
+      send(lock_pid(topic), {:flush_timeout, "title", stale})
+      assert %{"title" => %{user_id: "bob"}} = FieldLock.locks(topic)
+      refute_received {:lock_granted, _, _}
+
+      send(lock_pid(topic), {:flush_timeout, "title", current})
+      assert_receive {:lock_granted, ^topic, "title"}
+      assert %{"title" => %{user_id: "carol"}} = FieldLock.locks(topic)
+    end
+
+    test "a holder released mid-flush still lets the timeout grant the field",
+         %{topic: topic} do
+      start(topic, flush_ms: 60_000)
+      holder = session()
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+
+      assert :pending = FieldLock.takeover(topic, "title", @bob, self())
+      %{ref: ref} = lock_state(topic).pending["title"]
+      assert :ok = FieldLock.release(topic, "title", holder)
+
+      send(lock_pid(topic), {:flush_timeout, "title", ref})
+      assert_receive {:lock_granted, ^topic, "title"}
       assert %{"title" => %{user_id: "bob"}} = FieldLock.locks(topic)
     end
 
@@ -239,7 +343,7 @@ defmodule KilnCMS.Collab.FieldLockTest do
       holder = session()
       assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
       send(holder, :stop)
-      Process.sleep(20)
+      await_exit(holder)
 
       assert :ok = FieldLock.takeover(topic, "title", @bob, self())
       assert %{"title" => %{user_id: "bob"}} = FieldLock.locks(topic)
@@ -254,6 +358,19 @@ defmodule KilnCMS.Collab.FieldLockTest do
       assert :pending = FieldLock.takeover(topic, "title", %{id: "carol", name: "Carol"}, self())
 
       FieldLock.flushed(topic, "title")
+      assert_receive {:lock_granted, ^topic, "title"}
+      assert %{"title" => %{user_id: "carol"}} = FieldLock.locks(topic)
+    end
+
+    test "a second asker is granted by the first asker's flush timeout", %{topic: topic} do
+      start(topic, flush_ms: 60_000)
+      assert :ok = FieldLock.acquire(topic, "title", @alice, session())
+
+      assert :pending = FieldLock.takeover(topic, "title", @bob, session())
+      %{ref: ref} = lock_state(topic).pending["title"]
+      assert :pending = FieldLock.takeover(topic, "title", %{id: "carol", name: "Carol"}, self())
+
+      send(lock_pid(topic), {:flush_timeout, "title", ref})
       assert_receive {:lock_granted, ^topic, "title"}
       assert %{"title" => %{user_id: "carol"}} = FieldLock.locks(topic)
     end
