@@ -93,6 +93,7 @@ defmodule KilnCMS.Media.AVWorkerTest do
 
     test "a since-deleted item is a no-op, not a crash" do
       item = video!()
+      :ok = CMS.destroy_media_item(item, authorize?: false)
       :ok = CMS.purge_media_item(item, authorize?: false)
 
       assert :ok = perform(item)

@@ -726,7 +726,8 @@ defmodule KilnCMS.CMS.ReleasesTest do
       {:ok, published} = go_live(rel, admin)
       assert published.state == :published
 
-      :ok = CMS.purge_page(reload_page(doomed), authorize?: false)
+      :ok = CMS.destroy_page(reload_page(doomed), authorize?: false)
+      :ok = CMS.purge_page(doomed, authorize?: false)
 
       {:ok, _} = CMS.start_release_rollback(published, %{}, actor: admin)
       KilnCMS.DataCase.drain_oban()

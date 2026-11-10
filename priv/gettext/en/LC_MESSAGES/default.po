@@ -18935,6 +18935,11 @@ msgstr ""
 msgid "Someone else already moved this to the trash or deleted it."
 msgstr ""
 
+#: lib/kiln_cms_web/live/trash_live.ex
+#, elixir-autogen, elixir-format
+msgid "Someone else already restored that item."
+msgstr ""
+
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
 msgid "Someone else changed this item's status first — reload to see where it stands."
@@ -20064,6 +20069,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "That item is no longer available."
+msgstr ""
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "That item is no longer in the trash — someone else restored or deleted it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/trash_live.ex
+#, elixir-autogen, elixir-format
+msgid "That item is no longer in the trash — someone permanently deleted it."
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex
