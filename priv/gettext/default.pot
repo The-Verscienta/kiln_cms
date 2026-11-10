@@ -428,6 +428,20 @@ msgid_plural "%{count} platform administrators have no authenticator app."
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} plugin comes from git or a path; checked for security notices and SDK support only."
+msgid_plural "%{count} plugins come from git or a path; checked for security notices and SDK support only."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} plugin has problems."
+msgid_plural "%{count} plugins have problems."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} possible duplicate"
@@ -875,6 +889,16 @@ msgstr ""
 msgid "%{names} are typing…"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} %{version} is retired on Hex (%{reason})."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} %{version}: security notice %{id} (%{severity})."
+msgstr ""
+
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} (copy)"
@@ -890,9 +914,24 @@ msgstr ""
 msgid "%{name} (type not found)"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} could not be checked."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} couldn't be uploaded: %{reason}"
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} declares a kiln_plugin requirement that can't be read: %{requirement}."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} has had no release on Hex since %{date}."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/shared.ex
@@ -910,6 +949,11 @@ msgstr ""
 msgid "%{name} is editing this field — take it over"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} is not published on Hex at %{version}."
+msgstr ""
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} is on this block"
@@ -925,6 +969,11 @@ msgstr ""
 msgid "%{name} is typing…"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} needs kiln_plugin %{requirement}; this Kiln bundles %{version}."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor/session.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} took over “%{field}”. Your changes are saved."
@@ -933,6 +982,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/session.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} took over “%{field}”. Your unsaved changes are still in this form."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "%{name}: the package Hex publishes at %{version} differs from the one this release was built from."
 msgstr ""
 
 #: lib/kiln_cms_web/live/translations_live.ex
@@ -1741,6 +1795,11 @@ msgstr ""
 #: lib/kiln_cms/security/posture/checks/operator_second_factor.ex
 #, elixir-autogen, elixir-format
 msgid "A platform administrator can change every site on this installation, and its users, keys and backups."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "A plugin with a known security problem or a changed package can compromise the whole installation."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -2810,6 +2869,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Advisories"
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Advisory %{id}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
@@ -4230,6 +4294,11 @@ msgstr ""
 msgid "Built for developers"
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Built from this project"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "Built on"
@@ -4334,6 +4403,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Can't reschedule into the past."
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Can't verify"
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
@@ -4511,6 +4585,11 @@ msgstr ""
 msgid "Changed"
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Changed on Hex since this build"
+msgstr ""
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Changes here apply to the session you are reading this in: a demotion or a sign-out takes effect immediately."
@@ -4564,6 +4643,11 @@ msgstr ""
 msgid "Check outbound port 25"
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Check plugins now"
+msgstr ""
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "Check queued — results appear here as each link is answered."
@@ -4605,6 +4689,11 @@ msgstr ""
 msgid "Checkboxes show only the options. Pick Tags as the editor input to allow new terms."
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checked %{time}."
+msgstr ""
+
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "Checked at %{time}."
@@ -4628,6 +4717,16 @@ msgstr ""
 #: lib/kiln_cms/security/posture/checks/release.ex
 #, elixir-autogen, elixir-format
 msgid "Checking for updates; reopen this page in a minute."
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checking plugins..."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "Checking plugins; reopen this page in a minute."
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
@@ -5632,6 +5731,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Copying off-site"
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "Could not reach Hex or the security notices feed. Open System to check."
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_posture_live.ex
@@ -8352,6 +8456,11 @@ msgstr ""
 msgid "Every platform administrator uses an authenticator app."
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "Every plugin matches Hex and has no known security notice."
+msgstr ""
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every published document has at least one link in."
@@ -9806,6 +9915,11 @@ msgstr ""
 msgid "Help text"
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hex or the notices feed could not be reached; these results are unknown, not OK."
+msgstr ""
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Hidden"
@@ -10315,6 +10429,11 @@ msgstr ""
 msgid "Include private fields"
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Incompatible with this Kiln"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/auth_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Incorrect email or password"
@@ -10483,6 +10602,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Installed as %{id}, not selected"
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "Installed plugins"
 msgstr ""
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
@@ -10969,6 +11093,11 @@ msgstr ""
 msgid "Later →"
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Latest on Hex: %{version}"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/content_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Latest posts."
@@ -11329,6 +11458,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Locales %{locale} falls back to"
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Locked %{locked}, Hex has %{registry}."
 msgstr ""
 
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
@@ -12598,6 +12732,11 @@ msgstr ""
 msgid "No deliveries yet."
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "No dependency plugins to check."
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "No description — search engines will write their own."
@@ -12728,6 +12867,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "No images yet."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "No installed plugin has a known security notice or SDK problem."
 msgstr ""
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
@@ -12863,6 +13007,11 @@ msgstr ""
 msgid "No plans available yet"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "No plugins are installed from Hex, git or a path."
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "No plugins are installed on this instance."
@@ -12912,6 +13061,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "No recent delivery failures."
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "No recent release"
 msgstr ""
 
 #: lib/kiln_cms_web/live/redirect_live.ex
@@ -13231,6 +13385,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not installed"
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not on Hex"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -13554,6 +13713,7 @@ msgid "Numbers added up."
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_posture_live.ex
+#: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "OK"
 msgstr ""
@@ -14808,6 +14968,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "Plugin"
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Plugin checks are off."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "Plugin checks are turned off (KILN_PLUGIN_HEALTH_CHECK=false, or KILN_UPDATE_CHECK=false)."
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -16571,6 +16741,7 @@ msgid "Retention saved."
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Retired"
 msgstr ""
@@ -17598,6 +17769,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Security log"
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Security notice"
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -20716,6 +20892,12 @@ msgstr ""
 msgid "The section editors see it under"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "The security notices feed is turned off; only Hex's own advisories were checked."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/content_export_controller.ex
 #, elixir-autogen, elixir-format
 msgid "The selection is not a list of content ids."
@@ -22441,6 +22623,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #: lib/kiln_cms_web/live/security_posture_live.ex
+#: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unknown"
 msgstr ""
@@ -24811,6 +24994,11 @@ msgstr ""
 msgid "create a task for the author"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "critical"
+msgstr ""
+
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #, elixir-autogen, elixir-format
 msgid "custom"
@@ -24841,6 +25029,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "delivered later, %{at}"
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "deprecated"
 msgstr ""
 
 #: lib/kiln_cms_web/live/federation_live.ex
@@ -25064,6 +25257,11 @@ msgstr ""
 msgid "hidden"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "high"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "hybrid keyword + semantic search across all content types."
@@ -25109,6 +25307,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "intact (unsigned)"
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "invalid"
 msgstr ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex
@@ -25350,9 +25553,19 @@ msgstr ""
 msgid "locale discovery for building language switchers."
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "low"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "media library"
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "medium"
 msgstr ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex
@@ -25580,6 +25793,11 @@ msgstr ""
 msgid "orphaned"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "other"
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "partly pruned (retention)"
@@ -25728,6 +25946,11 @@ msgstr ""
 msgid "removed block"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "renamed"
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "repeating"
@@ -25793,6 +26016,11 @@ msgstr ""
 msgid "score %{score}"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "security"
+msgstr ""
+
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
 msgid "security.txt as served"
@@ -25846,6 +26074,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "several"
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/plugin_health.ex
+#, elixir-autogen, elixir-format
+msgid "severity unknown"
 msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex

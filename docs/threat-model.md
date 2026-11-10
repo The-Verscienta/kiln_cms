@@ -1774,6 +1774,11 @@ policy is under "Security posture" in [policy-matrix.md](policy-matrix.md).
 admin-triggered from System, or from Security posture when no answer is
 cached, and the feed's `links.next` is followed only on its own
 origin),
+`Kiln.Plugins.Health` (hex.pm's package API for each plugin locked from
+hex.pm, and the security notices feed; on the same platform-admin triggers,
+through `SafeFetch`, the feed's `links.next` followed only on its own origin
+and at most five pages; package names are checked against Hex's naming rule
+before they are put in a URL),
 Meilisearch (the operator's instance — a site's own is below), S3/MinIO, the
 mailer, and the LLM providers behind `/api/ask` and
 SEO drafting, and the breached-password check (`api.pwnedpasswords.com`, a

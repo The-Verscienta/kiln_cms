@@ -7,6 +7,43 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="plugin-health-egress-upgrade"></a>
+
+- **A new outbound request is on by default, and it is the first that tells
+  a third party something about your installation: with a plugin from Hex
+  installed, Kiln asks hex.pm about that plugin's package and version (#2244).
+  If your deployment must not, set `KILN_PLUGIN_HEALTH_CHECK=false` before
+  deploying.**
+  - **What is sent.** When a platform admin opens **Operations → System**,
+    opens **Security posture** with nothing cached, or selects **Check plugins
+    now**: for each plugin locked from hex.pm, `GET
+    https://hex.pm/api/packages/<name>` and
+    `GET https://hex.pm/api/packages/<name>/releases/<version>`, with a bare
+    `KilnCMS` user-agent. hex.pm sees the package names and versions together
+    with your server's IP. One more GET goes to kilncms.dev's security
+    notices feed (up to five pages), which carries nothing about the
+    installation. The answer is cached on each node for 24 hours (15 minutes
+    after a failure).
+  - **Who is affected.** Only a deployment with a plugin from Hex, git or a
+    path. One whose plugins are all built from `projects/`, or that has none,
+    sends nothing new. hex.pm is asked only about plugins locked from hex.pm.
+  - **Turning it off.** `KILN_PLUGIN_HEALTH_CHECK=false` turns the check off.
+    If you already set `KILN_UPDATE_CHECK=false` for "no outbound requests",
+    you need do nothing: the plugin check follows it while
+    `KILN_PLUGIN_HEALTH_CHECK` is unset. To keep the Hex comparison but not
+    ask kilncms.dev, set `KILN_SECURITY_NOTICES_URL=false`. A fork or a mirror
+    (`KILN_UPDATE_REPO`, `KILN_UPDATE_RELEASES_URL`, or
+    `KILN_UPDATE_FEED_URL=false`) asks no notices feed unless
+    `KILN_SECURITY_NOTICES_URL` names one.
+  - **Firewalls.** A server that can't reach `hex.pm` or `kilncms.dev` shows
+    its plugins as **Unknown** and the Security posture line as **Unknown**;
+    nothing else changes. A notices mirror on a private address is refused
+    by Kiln's outbound guard, with the same result.
+  - **No migration**, nothing stored. Rolling the pin back is safe.
+  See [the Added entry](#plugin-health-checks),
+  [data flows](../data-flows.md) and
+  [the variables](../environment-variables.md#plugin-health-check-2244).
+
 <a id="backup-step-chain-upgrade"></a>
 
 - **Run `mix ash.migrate` for the backup step chain (#2218, last part). In-app
@@ -924,6 +961,58 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="plugin-health-checks"></a>
+
+- **Platform admins can see whether each installed plugin still checks out:
+  whether its package changed on Hex since this build, whether a security
+  notice covers the installed version, whether Hex retired it or it has gone
+  unreleased for two years, and whether its `kiln_plugin` requirement accepts
+  this Kiln (#2244).** For platform admins at **Operations → System →
+  Plugins**, in the **Installed plugins** line of Security posture
+  (`core.plugin_health`, **This installation**), and from
+  `mix kiln.plugins.list --health`. Guide:
+  [Check your installed plugins](../security-posture.md#check-your-installed-plugins).
+  - **Badges on System.** Each plugin gets one: **OK**, **Changed on Hex
+    since this build**, **Security notice**, **Not on Hex**, **Retired**,
+    **No recent release**, **Incompatible with this Kiln**, **Can't verify**
+    (git, path or private-repo plugins), **Built from this project**
+    (`projects/` plugins) or **Unknown**. Under it, one line per problem,
+    shortened checksums for a changed package, a link per advisory and the
+    latest version on Hex. **Check plugins now** asks again, at most once a
+    minute.
+  - **Security posture.** **Fix now** for a changed package, a high,
+    critical or unrated notice, or a release retired for security; **Review**
+    for the other problems. Git and path plugins pass there, with a note
+    that only notices and the SDK requirement were checked.
+  - **Unknown is never OK.** A source that failed, timed out, answered
+    something unreadable or returned a list longer than five pages makes the
+    plugins it concerns **Unknown**.
+  - **What "Changed on Hex" means.** The checksum recorded from this build's
+    lockfile no longer matches the one hex.pm publishes for that version.
+    `mix deps.get` already refuses a lockfile that disagrees with Hex, so this
+    means Hex's record changed after the build, the build used a mirror or an
+    offline cache, or the lockfile was edited by hand. It does not re-hash
+    the compiled code in the running release.
+  - **Where notices come from.** Hex's advisories on the installed release,
+    and kilncms.dev's notices feed (#1873), which lists Kiln's and the Kiln
+    project's own plugins only: a third-party plugin's notices come from Hex
+    alone. A kilncms.dev notice that names several packages can only clear a
+    plugin, or leave it **Unknown**, because its ranges aren't recorded per
+    package.
+  - **No alert.** A check that finds a failing plugin logs one warning
+    ("Plugin health check failed for: …"); alerting is #2245.
+  - **Configuration.** `KILN_PLUGIN_HEALTH_CHECK` (unset follows
+    `KILN_UPDATE_CHECK`), `KILN_SECURITY_NOTICES_URL` and
+    `KILN_PLUGIN_STALE_MONTHS` (default 24); see
+    [the variables](../environment-variables.md#plugin-health-check-2244).
+    The request and its disclosure are in the
+    [upgrade note](#plugin-health-egress-upgrade).
+  - **For developers.** `Kiln.Plugins.Health` (`check/1`, `cached/1`,
+    `warm/0`), the pure `Kiln.Plugins.Health.Evaluate`, and
+    `Kiln.Plugins.LockRecord`, which records the lockfile's coordinates at
+    compile time because a release carries no `mix.lock`. Not exposed on any
+    API. Design: [Plugin system §7](../plugin-system-plan.md#7-plugin-health-checks-2244).
 
 <a id="backup-step-chain"></a>
 
