@@ -10790,7 +10790,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
-msgid "Keys this field's value in submissions. Entries already received keep the old key; exports and API clients use the new one from now on."
+msgid "Keys this field's value in submissions. Entries already received keep the old key: the Entries tab and CSV export show it as a renamed field; API clients and webhooks use the new name from now on."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
