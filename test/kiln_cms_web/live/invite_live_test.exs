@@ -124,9 +124,87 @@ defmodule KilnCMSWeb.InviteLiveTest do
     assert {:error, {:redirect, %{to: "/sign-in"}}} =
              view |> element("#invite-accept") |> render_click()
 
+    assert %{"info" => "You've joined" <> _} = assert_redirect(view, "/sign-in")
     assert membership(owner.id, site.id).role == :editor
     assert signs_in?(owner.email, @old_password)
     assert Invitations.peek(token) == nil
+  end
+
+  describe "an account already on the invited site (#2452)" do
+    setup do
+      site = org("invite-member")
+      %{site: site, conn: %{build_conn() | host: "#{site.slug}.#{Tenant.base_host()}"}}
+    end
+
+    defp member!(user, org_id, role),
+      do:
+        Ash.Seed.seed!(Accounts.OrgMembership, %{
+          organization_id: org_id,
+          user_id: user.id,
+          role: role
+        })
+
+    defp accept_click(conn, token) do
+      {:ok, view, _html} = live(conn, ~p"/auth/invite/#{token}")
+      assert {:error, {:redirect, _}} = view |> element("#invite-accept") |> render_click()
+      assert_redirect(view, "/sign-in")
+    end
+
+    test "a lower membership is raised, and the page says so", %{conn: conn, site: site} do
+      {invitation, token} = invite!(%{organization_id: site.id, role: :editor})
+      owner = user(:viewer, %{email: to_string(invitation.email)})
+      member!(owner, site.id, :viewer)
+
+      assert %{"info" => info} = accept_click(conn, token)
+
+      assert info =~ "now an editor on"
+      assert membership(owner.id, site.id).role == :editor
+    end
+
+    test "a higher membership is left alone, and the page does not claim a join",
+         %{conn: conn, site: site} do
+      {invitation, token} = invite!(%{organization_id: site.id, role: :viewer})
+      owner = user(:viewer, %{email: to_string(invitation.email)})
+      member!(owner, site.id, :editor)
+
+      assert %{"info" => info} = accept_click(conn, token)
+
+      assert info =~ "already a member of"
+      assert info =~ "as an editor; nothing changed"
+      refute info =~ "joined"
+      assert membership(owner.id, site.id).role == :editor
+      assert Invitations.peek(token) == nil
+    end
+
+    test "the password path says the same about a raise", %{conn: conn, site: site} do
+      {invitation, token} = invite!(%{organization_id: site.id, role: :admin})
+      squatter = user(:viewer, %{email: to_string(invitation.email), confirmed_at: nil})
+      member!(squatter, site.id, :editor)
+
+      {:ok, view, _html} = live(conn, ~p"/auth/invite/#{token}")
+
+      assert {:error, {:redirect, %{to: "/sign-in"}}} = submit_password(view)
+      assert %{"info" => info} = assert_redirect(view, "/sign-in")
+
+      assert info =~ "now an admin on"
+      assert membership(squatter.id, site.id).role == :admin
+    end
+
+    test "the password path over a higher membership says it is unchanged",
+         %{conn: conn, site: site} do
+      {invitation, token} = invite!(%{organization_id: site.id, role: :viewer})
+      squatter = user(:viewer, %{email: to_string(invitation.email), confirmed_at: nil})
+      member!(squatter, site.id, :editor)
+
+      {:ok, view, _html} = live(conn, ~p"/auth/invite/#{token}")
+
+      assert {:error, {:redirect, %{to: "/sign-in"}}} = submit_password(view)
+      assert %{"info" => info} = assert_redirect(view, "/sign-in")
+
+      assert info =~ "already a member of"
+      assert info =~ "as an editor, and that is unchanged"
+      assert membership(squatter.id, site.id).role == :editor
+    end
   end
 
   test "an unconfirmed account is taken over: the stranger's password stops working", %{

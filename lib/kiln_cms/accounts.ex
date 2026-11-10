@@ -129,6 +129,10 @@ defmodule KilnCMS.Accounts do
       # `Invitations.grant_membership/4`, or a platform admin's direct add.
       define :approve_registration_by_invitation, action: :approve_registration_by_invitation
 
+      # An accepted invitation raising a lower membership on its site (#2452):
+      # system-only, from `Invitations.grant_membership/4`.
+      define :raise_membership_role_by_invitation, action: :raise_role_by_invitation
+
       define :list_registration_queue,
         action: :registration_queue,
         args: [:organization_id, {:optional, :status}]
@@ -151,6 +155,9 @@ defmodule KilnCMS.Accounts do
       define :get_invitation_by_token, action: :by_token, args: [:token]
       define :accept_invitation_for_existing_account, action: :accept_existing, args: [:token]
       define :consume_invitation, action: :consume
+      # A membership change superseding an invitation (#2452): system-only,
+      # from `Changes.RetirePendingInvitation`.
+      define :retire_invitation, action: :retire
       # The daily sweep's write (AshOban trigger on the resource).
       define :prune_expired_invitations, action: :prune_expired
     end

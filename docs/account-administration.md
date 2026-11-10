@@ -294,7 +294,9 @@ that is what they are for there.
      **Password (again)**, and click **Set up my account**. They get a confirmed
      account with the invited tier on this site.
    - **A confirmed account:** they click **Accept invitation**. Nothing else
-     about the account changes.
+     about the account changes. If they are already a member of the site at a
+     lower tier, accepting raises them to the invited tier
+     ([If the invitee is already a member](#if-the-invitee-is-already-a-member)).
    - **An account that was registered but never confirmed:** they see the
      password form, with a note that an unconfirmed account was already started
      with this address. Choosing a password takes the account over: the old
@@ -303,9 +305,14 @@ that is what they are for there.
      Anyone can register an unconfirmed account for any address, so its old
      password proves nothing about who holds the mailbox.
 6. They are sent to the sign-in page with "Your account is ready — sign in to
-   (site)." or "You've joined (site) — sign in to continue." They sign in as
-   usual; a second factor still applies. On **Team** they are in the member
-   list, and their invitation is gone from **Pending invitations**.
+   (site)." or "You've joined (site) — sign in to continue." Someone who was
+   already a member sees "You're now (tier) on (site) — sign in to continue."
+   when the invitation raised them, or "You're already a member of (site) as
+   (tier); nothing changed." when it did not ("Your account is ready. You were
+   already a member of (site) as (tier), and that is unchanged." if they set a
+   password). They sign in as usual; a second factor still applies. On
+   **Team** they are in the member list, and their invitation is gone from
+   **Pending invitations**.
 
 The link opens on the invited site, whichever host you were on when you sent it.
 A viewer's link uses the site's public host. An editor's or admin's link uses
@@ -329,6 +336,38 @@ An expired invitation stays listed as *Expired* until it is 30 days past its
 expiry, when a daily job deletes it. Entering the same address in **Add or
 invite** while it is expired resends it with the tier and custom role you
 picked this time.
+
+### If the invitee is already a member
+
+**Add or invite** refuses an address that is already on the site, but a
+person can join between the invitation and the accept: through the site's own
+single sign-on, or by registering and being approved. Accepting then compares
+the invited tier with the one they hold:
+
+- **Lower than the invited tier:** the membership is raised to it. If the
+  invitation names a custom role, the membership takes that too; if not, it
+  keeps its own. Everything else on the row stays: audiences, content type
+  scopes, field grants. The member's sessions are signed out once the accept
+  commits, so their next request runs with the new tier. The security log
+  records *Role granted*, with the previous role and no person.
+- **The invited tier or higher:** nothing changes, and the invitation is used
+  up. An invitation never lowers anyone.
+
+The comparison is with the member's **standing** tier. A
+[temporary role](#temporary-roles) above it is not counted, because it
+expires; if the raise reaches or passes the temporary role, the temporary
+role is cleared as no longer needed.
+
+The invitation is the decision you made when you sent it, so a later decision
+replaces it. When an admin changes a member's tier or custom role on Team
+(**Edit**, then **Save**), or removes them (the trash button, "Remove
+(address)"), the invitation still pending for that person's address on that
+site is deleted in the same write, expired or not, and drops off **Pending
+invitations**. The security log records it as *Invitation revoked*, with you
+as the person. Otherwise a member you
+had just demoted could use the old link to raise themselves back, and one you
+had just removed could rejoin with it. Editing only a member's audiences or
+type scopes, or giving them a temporary role, leaves the invitation alone.
 
 ### Invite from code
 
@@ -402,10 +441,11 @@ On the invitation page:
 - **"This password has appeared in a known data breach. Choose a different
   one."** The site's [breached-password policy](#breached-passwords) blocks it
   for the invited tier (blocking applies to administrators).
-- **The invitee joined, but with a lower tier than you invited them at.** They
-  were already a member of the site when they accepted (for example, they
-  signed in through the site's own single sign-on first). Accepting leaves an
-  existing membership as it is. Change their tier on their row.
+- **"You're already a member of (site) as (tier); nothing changed."** The
+  invitee already held the invited tier or a higher one on the site, so the
+  invitation was used up without changing anything
+  ([If the invitee is already a member](#if-the-invitee-is-already-a-member)).
+  To change their tier, edit their row on Team.
 
 Accepting *through* single sign-on is not supported: the invitee accepts with a
 password or with an account they already have.

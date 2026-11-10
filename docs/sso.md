@@ -114,8 +114,9 @@ not trusted for everything it asserts:
   instead. A pending invitation does not admit its address through the site's
   provider: the invitee accepts it with a password first. With open
   registration on, someone who signs in through the provider *before*
-  accepting is already a `:viewer` member when they accept, and accepting leaves
-  that membership as it is, so raise their tier on Team.
+  accepting is already a `:viewer` member when they accept; accepting raises
+  that membership to the invited tier
+  ([If the invitee is already a member](account-administration.md#if-the-invitee-is-already-a-member)).
 - **New people can be made to wait for approval.** A site admin ticks **New
   accounts from this site's single sign-on wait for approval too** on
   **Registrations** (`/editor/registrations`; off by default, separate from

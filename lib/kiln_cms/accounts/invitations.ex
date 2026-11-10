@@ -33,7 +33,9 @@ defmodule KilnCMS.Accounts.Invitations do
     * no account: the invitee sets a password and gets a confirmed `:viewer`
       account with the invited tier on the invited site;
     * a **confirmed** account: one click adds the membership and changes
-      nothing on the account;
+      nothing on the account. Already a member of the site at a lower tier,
+      the membership is raised to the invited one; at that tier or a higher
+      one, nothing changes and the page says so (#2452). Never lowered;
     * an **unconfirmed** account: treated as if there were none. Anyone can
       register an unconfirmed account for any address, so its password is not
       the invitee's: the invitee sets a new one, the account is confirmed and
@@ -48,6 +50,7 @@ defmodule KilnCMS.Accounts.Invitations do
   alias KilnCMS.Accounts.Errors.RegistrationRefused
   alias KilnCMS.Accounts.Invitation
   alias KilnCMS.Accounts.LegacyAffiliation
+  alias KilnCMS.Accounts.OrgMembership
   alias KilnCMS.AfterCommit
 
   @ttl_days 7
@@ -121,29 +124,44 @@ defmodule KilnCMS.Accounts.Invitations do
   def inviter_still_admin?(%Invitation{}), do: true
 
   @doc """
-  Give `user` the membership `invitation` names, as a system write. An active
-  membership on that site is left as it is (the invitation is then simply used
-  up). A registration on that site awaiting approval, or rejected, is approved
-  with the invitation's tier instead (`OrgMembership.:approve_registration_by_invitation`,
-  #2514): the site's admin invited this address, which is the decision the
-  queue was waiting for. A rejected one only when the invitation was sent
-  after the rejection; otherwise the invitation is refused as no longer valid.
+  Give `user` the membership `invitation` names, as a system write, and say
+  what happened: `{:ok, %{outcome: outcome, membership: membership}}`, where
+  `outcome` is
+
+    * `:joined` — a membership on that site now: a new one, or a registration
+      there awaiting approval, or rejected, approved with the invitation's tier
+      instead (`OrgMembership.:approve_registration_by_invitation`, #2514): the
+      site's admin invited this address, which is the decision the queue was
+      waiting for. A rejected one only when the invitation was sent after the
+      rejection; otherwise the invitation is refused as no longer valid;
+    * `:raised` — an active membership there below the invited tier, raised to
+      it (`OrgMembership.:raise_role_by_invitation`, #2452). Its other axes are
+      kept, and its custom role becomes the invitation's when it names one;
+    * `:already_member` — an active membership there at the invited tier or a
+      higher one. Nothing is written: an invitation never lowers anyone.
+
+  `membership` is the row as it now stands, so its `role` is the tier the
+  invitee holds there. The tiers compared are standing ones: a live temporary
+  grant above the standing tier is not what the invitation is measured against.
+
   Before an account's first membership on another site, its legacy
   default-site tier is carried onto a membership of its own
   (`KilnCMS.Accounts.LegacyAffiliation`), so accepting never demotes it there.
 
   `context` is the Ash context to write with (the request's client address, for
-  the audit event). Approving a registration evicts the applicant's sessions
-  through `KilnCMS.AfterCommit`, so a caller running this inside its own
-  transaction must hold that effect until its commit: `AfterCommit.deferring/1`
-  around the transaction, or `capture/1` here and `replay/1` from its own
-  `after_transaction` hook. Pass `carry_legacy?: false` for an account this same
-  transaction just created: it has no legacy tier to carry, and carrying would
-  give it a stray `:viewer` membership on the default site (the site-SSO
-  admission skips the carry for a new account for the same reason).
+  the audit event). Approving a registration or raising a membership evicts the
+  invitee's sessions through `KilnCMS.AfterCommit`, so a caller running this
+  inside its own transaction must hold that effect until its commit:
+  `AfterCommit.deferring/1` around the transaction, or `capture/1` here and
+  `replay/1` from its own `after_transaction` hook. Pass `carry_legacy?: false`
+  for an account this same transaction just created: it has no legacy tier to
+  carry, and carrying would give it a stray `:viewer` membership on the default
+  site (the site-SSO admission skips the carry for a new account for the same
+  reason).
   """
   @spec grant_membership(Accounts.User.t(), Invitation.t(), map(), keyword()) ::
-          {:ok, Accounts.OrgMembership.t() | :already_member} | {:error, term()}
+          {:ok, %{outcome: :joined | :raised | :already_member, membership: OrgMembership.t()}}
+          | {:error, term()}
   def grant_membership(user, %Invitation{} = invitation, context \\ %{}, grant_opts \\ []) do
     # authorize?: false — membership writes are a platform-admin action; this is
     # the system honouring an invitation an admin sent, after the token, its
@@ -154,29 +172,38 @@ defmodule KilnCMS.Accounts.Invitations do
          :ok <- maybe_carry(user, memberships, invitation.organization_id, opts, grant_opts) do
       case Enum.find(memberships, &(&1.organization_id == invitation.organization_id)) do
         nil ->
-          Accounts.create_org_membership(
-            %{
-              user_id: user.id,
-              organization_id: invitation.organization_id,
-              role: invitation.role,
-              role_id: invitation.role_id
-            },
-            opts
-          )
+          create(user, invitation, opts)
 
         %{status: status} = registration when status in [:pending, :rejected] ->
           approve_registration(registration, invitation, context)
 
-        _active ->
-          {:ok, :already_member}
+        %{status: :active} = membership ->
+          raise_role(membership, invitation, context)
       end
     end
   end
 
+  defp create(user, invitation, opts) do
+    with {:ok, membership} <-
+           Accounts.create_org_membership(
+             %{
+               user_id: user.id,
+               organization_id: invitation.organization_id,
+               role: invitation.role,
+               role_id: invitation.role_id
+             },
+             opts
+           ),
+         do: joined(membership)
+  end
+
+  defp joined(membership), do: {:ok, %{outcome: :joined, membership: membership}}
+
   # As the invitations system actor, the one actor the action admits.
   #
   # A row another writer approved between the read above and the lock is a
-  # membership now, the same answer as an active row. Every other refusal (a
+  # membership now, so it is judged as one: raised when below the invited
+  # tier, left alone otherwise (`settle/3`). Every other refusal (a
   # rejection newer than the invitation, an unconfirmed or erased applicant)
   # reads as an invitation that is no longer valid, so the accept page says
   # what it says for any other. `rollback_on_error?: false` hands the refusal
@@ -195,21 +222,83 @@ defmodule KilnCMS.Accounts.Invitations do
              invited_at: invitation.last_sent_at || invitation.inserted_at,
              via: :invitation
            },
-           actor: KilnCMS.SystemActor.new(:invitations),
-           context: Map.merge(context, AfterCommit.context()),
-           rollback_on_error?: false
+           system_write_opts(context)
          ) do
       {:ok, membership} ->
-        {:ok, membership}
+        joined(membership)
 
       {:error, error} ->
         case RegistrationRefused.reason(error) do
-          :not_pending -> {:ok, :already_member}
+          :not_pending -> settle(registration, invitation, context)
           nil -> {:error, error}
-          _refused -> {:error, InvitationRefused.exception(field: :token, reason: :invalid)}
+          _refused -> invalid()
         end
     end
   end
+
+  # An active membership below the invited tier is raised to it; one at the
+  # tier or above is left as it is. The comparison is the action's, made on
+  # the row it has locked, not on `membership` as read above: a site admin may
+  # have changed the tier since. Refused as `:not_higher`, the row is read
+  # again for the tier it holds, under the lock the action took (inside the
+  # caller's transaction).
+  defp raise_role(membership, invitation, context) do
+    case Accounts.raise_membership_role_by_invitation(
+           membership,
+           %{role: invitation.role, role_id: invitation.role_id},
+           system_write_opts(context)
+         ) do
+      {:ok, raised} ->
+        {:ok, %{outcome: :raised, membership: raised}}
+
+      {:error, error} ->
+        case InvitationRefused.reason(error) do
+          :not_higher -> already_member(membership)
+          :invalid -> invalid()
+          _other -> {:error, error}
+        end
+    end
+  end
+
+  # A registration decided by someone else between the read and the lock: an
+  # active row now is judged as any active membership, once (no loop: the
+  # raise refuses anything but an active row as no longer valid); anything
+  # else (rejected meanwhile) leaves the invitation no longer valid.
+  defp settle(registration, invitation, context) do
+    case reread(registration) do
+      {:ok, %{status: :active} = membership} -> raise_role(membership, invitation, context)
+      {:ok, _not_active} -> invalid()
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  defp already_member(membership) do
+    case reread(membership) do
+      {:ok, %{status: :active} = current} ->
+        {:ok, %{outcome: :already_member, membership: current}}
+
+      {:ok, _not_active} ->
+        invalid()
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  defp reread(membership) do
+    # authorize?: false — a system re-read of the invitee's own row on the
+    # invited site, to report the tier it holds; nothing else is returned.
+    Accounts.get_org_membership(membership.user_id, membership.organization_id, authorize?: false)
+  end
+
+  defp system_write_opts(context),
+    do: [
+      actor: KilnCMS.SystemActor.new(:invitations),
+      context: Map.merge(context, AfterCommit.context()),
+      rollback_on_error?: false
+    ]
+
+  defp invalid, do: {:error, InvitationRefused.exception(field: :token, reason: :invalid)}
 
   defp maybe_carry(user, memberships, org_id, opts, grant_opts) do
     if Keyword.get(grant_opts, :carry_legacy?, true),
