@@ -22362,7 +22362,7 @@ msgstr ""
 
 #: lib/kiln_cms/cms/field_types/slug.ex
 #, elixir-autogen, elixir-format
-msgid "URL-safe words joined by hyphens; what you type is tidied up. For a short code or a path segment. Not checked for uniqueness."
+msgid "URL-safe words joined by hyphens; what you type is tidied up. For a short code or a path segment. Can be required to be unique."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex

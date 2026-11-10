@@ -8,8 +8,11 @@ defmodule KilnCMS.CMS.FieldTypes.Slug do
   with nothing left after that (only punctuation, or a script `slugify/1`
   transliterates away, such as Chinese) is refused rather than stored empty.
 
-  The value is **not unique**: two records may hold the same slug. Uniqueness
-  across a content type is a separate concern. To derive one from another
+  The value is **not unique** unless the definition says so: with
+  `validation: %{"unique" => true}` (#2433) no two live records of the content
+  type (and locale) may hold the same slug, enforced by
+  `KilnCMS.CMS.UniqueValues` on the slug *after* it is tidied up, so
+  `"Hello World"` collides with `"hello-world"`. To derive one from another
   field, use a `:computed` field.
   """
   use Kiln.FieldType
@@ -23,7 +26,7 @@ defmodule KilnCMS.CMS.FieldTypes.Slug do
   @impl Kiln.FieldType
   def description do
     gettext(
-      "URL-safe words joined by hyphens; what you type is tidied up. For a short code or a path segment. Not checked for uniqueness."
+      "URL-safe words joined by hyphens; what you type is tidied up. For a short code or a path segment. Can be required to be unique."
     )
   end
 
