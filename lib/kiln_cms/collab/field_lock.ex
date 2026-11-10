@@ -175,11 +175,16 @@ defmodule KilnCMS.Collab.FieldLock do
     call(topic, {:takeover, field, user, pid})
   end
 
-  @doc "The holder finished flushing `field`; the transfer may go ahead."
-  @spec flushed(String.t(), String.t()) :: :ok
-  def flushed(topic, field) do
+  @doc """
+  The holder `pid` (the caller, by default) finished flushing `field`; the
+  transfer may go ahead. Only the field's current holder settles a takeover
+  this way: a flush answered late by a session that no longer holds the field
+  must not hand over the next holder's field before its own flush (#2557).
+  """
+  @spec flushed(String.t(), String.t(), pid()) :: :ok
+  def flushed(topic, field, pid \\ self()) do
     case Registry.lookup(@registry, topic) do
-      [{lock, _}] -> GenServer.cast(lock, {:flushed, field})
+      [{lock, _}] -> GenServer.cast(lock, {:flushed, field, pid})
       [] -> :ok
     end
   end
@@ -253,18 +258,21 @@ defmodule KilnCMS.Collab.FieldLock do
       nil ->
         {:reply, :ok, give(state, field, user, pid)}
 
-      # The same tab focusing the field again: activity, nothing more.
+      # The same tab focusing the field again: activity, nothing more. A
+      # release it sent mid-flush is taken back, so the takeover settles as a
+      # displacement again.
       %{pid: ^pid} ->
-        {:reply, :ok, touch(state, field)}
+        {:reply, :ok, state |> put_in([:locks, field, :releasing], false) |> touch(field)}
 
       # The same person coming back to a tab that is not there any more: a
       # reload, a short drop, a window closed inside the grace.
-      %{user_id: user_id} = holder ->
-        if user_id == user.id and gone?(holder) do
-          {:reply, :ok, state |> drop(field) |> give(field, user, pid)}
-        else
-          {:reply, {:held, public(holder)}, state}
-        end
+      %{user_id: user_id} = holder when user_id == user.id ->
+        if gone?(holder),
+          do: return_to(state, field, user, pid),
+          else: {:reply, {:held, public(holder)}, state}
+
+      holder ->
+        {:reply, {:held, public(holder)}, state}
     end
   end
 
@@ -275,7 +283,7 @@ defmodule KilnCMS.Collab.FieldLock do
   def handle_call({:release, field, pid}, _from, state) do
     state =
       case Map.get(state.locks, field) do
-        %{pid: ^pid} -> state |> drop(field) |> announce()
+        %{pid: ^pid} -> state |> let_go(field) |> announce()
         _ -> state
       end
 
@@ -284,12 +292,18 @@ defmodule KilnCMS.Collab.FieldLock do
 
   def handle_call({:release_all, pid}, _from, state) do
     mine = for {field, %{pid: ^pid}} <- state.locks, do: field
+    asked = for {field, %{pid: ^pid}} <- state.pending, do: field
+
+    # The session is leaving: a flush it was asked for will never be
+    # answered, so a takeover waiting on one of its fields gets it now; and a
+    # takeover it asked for itself has nobody left to hand to.
+    state = Enum.reduce(asked, state, &forget_pending(&2, &1))
 
     state =
-      if mine == [] do
+      if mine == [] and asked == [] do
         state
       else
-        mine |> Enum.reduce(state, &drop(&2, &1)) |> announce()
+        mine |> Enum.reduce(state, &free(&2, &1)) |> announce()
       end
 
     stop_reply(state)
@@ -303,9 +317,12 @@ defmodule KilnCMS.Collab.FieldLock do
       state.locks[field].pid == pid ->
         {:reply, :ok, touch(state, field)}
 
-      # A tab that is gone has nothing left to flush, whoever's it was.
+      # A tab that is gone has nothing left to flush, whoever's it was. A
+      # takeover already waiting on it is superseded by this, the newest asker
+      # (as below): its timer goes too, or its timeout would hand the field
+      # back to it and displace this asker without a flush (#2557).
       gone?(state.locks[field]) ->
-        {:reply, :ok, state |> drop(field) |> give(field, user, pid)}
+        {:reply, :ok, state |> forget_pending(field) |> drop(field) |> give(field, user, pid)}
 
       # A flush is already in flight for this field: the newest asker is the
       # one it hands over to.
@@ -324,7 +341,13 @@ defmodule KilnCMS.Collab.FieldLock do
   end
 
   @impl true
-  def handle_cast({:flushed, field}, state), do: {:noreply, transfer(state, field)}
+  def handle_cast({:flushed, field, pid}, state) do
+    case state.locks[field] do
+      # A requester gone by then leaves the field free, possibly the last.
+      %{pid: ^pid} -> state |> transfer(field) |> stop_noreply()
+      _ -> {:noreply, state}
+    end
+  end
 
   def handle_cast({:ping, pid}, state) do
     fields = for {field, %{pid: ^pid}} <- state.locks, do: field
@@ -333,14 +356,15 @@ defmodule KilnCMS.Collab.FieldLock do
 
   @impl true
   # The holder did not answer in time: whoever waits on this field gets it.
-  # The timeout carries the pending takeover's own ref, not the holder's gen:
-  # a holder that releases mid-flush drops the field but leaves the takeover
-  # waiting, and a gen check would strand that requester. A timeout from a
-  # takeover already settled by `flushed/2` finds a different ref (or none)
-  # and is ignored, so a later takeover is not granted before its own flush.
+  # The timeout carries the pending takeover's own ref, not the holder's gen,
+  # so it is tied to the takeover it was set for. A takeover already settled
+  # — by `flushed/3`, by a holder gone with no flush to come (`free/2`,
+  # #2557), or superseded on a gone holder — finds a different ref (or none)
+  # and is ignored, so a later takeover is not granted before its own flush
+  # and a later holder is never displaced by it.
   def handle_info({:flush_timeout, field, ref}, state) do
     case state.pending[field] do
-      %{ref: ^ref} -> {:noreply, transfer(state, field)}
+      %{ref: ^ref} -> state |> transfer(field) |> stop_noreply()
       _ -> {:noreply, state}
     end
   end
@@ -389,7 +413,10 @@ defmodule KilnCMS.Collab.FieldLock do
       last_keystroke_at: now,
       grace_timer: nil,
       idle_timer: nil,
-      idle_ref: nil
+      idle_ref: nil,
+      # Set when the holder released the field while a takeover waited on its
+      # flush (`let_go/2`): it keeps the field until the flush settles it.
+      releasing: false
     }
 
     state
@@ -414,18 +441,36 @@ defmodule KilnCMS.Collab.FieldLock do
       {nil, _} ->
         state
 
+      # A requester whose tab has gone is handed nothing: the field would sit
+      # with a dead holder through the grace. A holder that let go meanwhile
+      # (`let_go/2`) gives the field up then.
       {%{user: user, pid: pid, timer: timer}, pending} ->
         Process.cancel_timer(timer)
         state = %{state | pending: pending}
-        notify_displaced(state.locks[field], state.topic, field, user, pid)
-        send(pid, {:lock_granted, state.topic, field})
-        state |> drop(field) |> give(field, user, pid)
+
+        if Process.alive?(pid),
+          do: grant(state, field, user, pid),
+          else: state |> release_if_letting_go(field) |> announce()
+    end
+  end
+
+  defp grant(state, field, user, pid) do
+    notify_displaced(state.locks[field], state.topic, field, user, pid)
+    send(pid, {:lock_granted, state.topic, field})
+    state |> drop(field) |> give(field, user, pid)
+  end
+
+  defp release_if_letting_go(state, field) do
+    case state.locks[field] do
+      %{releasing: true} -> drop(state, field)
+      _ -> state
     end
   end
 
   # The displaced holder learns who took the field — unless the field was
   # free by then (released mid-flush), or the taker is the holder's own pid.
   defp notify_displaced(nil, _topic, _field, _user, _pid), do: :ok
+  defp notify_displaced(%{releasing: true}, _topic, _field, _user, _pid), do: :ok
   defp notify_displaced(%{pid: pid}, _topic, _field, _user, pid), do: :ok
 
   defp notify_displaced(holder, topic, field, user, _pid),
@@ -434,8 +479,57 @@ defmodule KilnCMS.Collab.FieldLock do
   # Expires the field only if the timer that fired is still the holder's own.
   defp expire(state, field, key, value) do
     case state.locks[field] do
-      %{^key => ^value} -> state |> drop(field) |> announce() |> stop_noreply()
+      %{^key => ^value} -> state |> free(field) |> announce() |> stop_noreply()
       _ -> {:noreply, state}
+    end
+  end
+
+  # A takeover already waiting on the gone tab was asked first (#2557): it
+  # gets the field now, rather than the returning tab getting it and then
+  # losing it, unflushed, when the takeover's timeout fires. A requester gone
+  # too is handed nothing (`transfer/2`), and the field is the returner's.
+  defp return_to(state, field, user, pid) do
+    state = free(state, field)
+
+    case state.locks[field] do
+      nil -> {:reply, :ok, give(state, field, user, pid)}
+      taker -> {:reply, {:held, public(taker)}, state}
+    end
+  end
+
+  # The holder released `field` (blurred it). With no takeover waiting, the
+  # field is free. With one waiting, the holder's flush is in flight — its
+  # LiveView saves the text and then answers `flushed/3` — so the field stays
+  # with the holder, marked as letting go, until that answer (or the flush
+  # timeout) hands it over (#2557). Handing it over at the release would let
+  # the taker read the record before the holder's text is saved; leaving it
+  # free let a third party take it, only to lose it unflushed.
+  defp let_go(state, field) do
+    if is_map_key(state.pending, field),
+      do: put_in(state, [:locks, field, :releasing], true),
+      else: drop(state, field)
+  end
+
+  # The holder is gone from `field` with no flush to come — an idle or grace
+  # expiry, the session leaving the editor. A takeover waiting on it gets it
+  # now (#2557). Left free, the field went to whoever asked next, and the
+  # takeover's flush timeout then took it from them without asking them to
+  # flush, losing what they had typed.
+  defp free(state, field) do
+    state = drop(state, field)
+    if is_map_key(state.pending, field), do: transfer(state, field), else: state
+  end
+
+  # A takeover withdrawn without a transfer. A holder that was only keeping
+  # the field for it (`let_go/2`) has nothing left to keep it for.
+  defp forget_pending(state, field) do
+    case Map.pop(state.pending, field) do
+      {nil, _} ->
+        state
+
+      {%{timer: timer}, pending} ->
+        cancel(timer)
+        release_if_letting_go(%{state | pending: pending}, field)
     end
   end
 

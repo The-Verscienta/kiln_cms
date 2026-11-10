@@ -501,6 +501,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Field locks (collaborative editing): a field its holder leaves while a takeover waits on their save now stays theirs until that save lands, then goes to the taker, so a third editor can no longer grab it and then lose it, unsaved, when the takeover went through.**
+  ([#2619](https://github.com/The-Verscienta/kiln_cms/pull/2619) · [long form](docs/changelog/unreleased.md#field-lock-release-mid-flush))
+
 - **Restoring a version from a copy someone has since saved or published is now refused (editor: the conflict banner; API: `409`, or `404` if trashed), instead of reporting success and writing nothing or skipping the claim and alt-text gates.**
   ([#2616](https://github.com/The-Verscienta/kiln_cms/pull/2616) · [long form](docs/changelog/unreleased.md#restore-refuses-stale-copy))
 
