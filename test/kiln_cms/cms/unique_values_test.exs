@@ -161,6 +161,68 @@ defmodule KilnCMS.CMS.UniqueValuesTest do
     end
   end
 
+  describe "slug fields (#2433)" do
+    setup %{admin: admin} do
+      CMS.create_field_definition!(
+        %{
+          content_type: :post,
+          name: "handle",
+          label: "Handle",
+          field_type: :slug,
+          validation: %{"unique" => true}
+        },
+        actor: admin
+      )
+
+      :ok
+    end
+
+    test "a duplicate is refused, compared after tidying", %{admin: admin} do
+      post!(admin, nil, %{custom_fields: %{"handle" => "hello-world"}})
+
+      for dup <- ["hello-world", "Hello World!"] do
+        assert admin
+               |> post(nil, %{custom_fields: %{"handle" => dup}})
+               |> message() =~ "Handle (handle) is already in use"
+      end
+
+      assert {:ok, _} = post(admin, nil, %{custom_fields: %{"handle" => "hello-there"}})
+    end
+
+    test "update to a taken slug is refused; keeping its own is fine", %{admin: admin} do
+      post!(admin, nil, %{custom_fields: %{"handle" => "taken"}})
+      mine = post!(admin, nil, %{custom_fields: %{"handle" => "mine"}})
+
+      assert {:ok, mine} =
+               CMS.update_post(mine, %{custom_fields: %{"handle" => "Mine"}}, actor: admin)
+
+      assert mine.custom_fields["handle"] == "mine"
+
+      assert mine
+             |> CMS.update_post(%{custom_fields: %{"handle" => "taken"}}, actor: admin)
+             |> message() =~ "already in use"
+    end
+
+    test "the unique key is accepted on a slug definition only when single-valued", %{
+      admin: admin
+    } do
+      assert "unique" in KilnCMS.CMS.FieldConstraints.allowed_keys(:slug, nil)
+
+      assert {:error, _} =
+               CMS.create_field_definition(
+                 %{
+                   content_type: :post,
+                   name: "handles",
+                   label: "Handles",
+                   field_type: :slug,
+                   multiple: true,
+                   validation: %{"unique" => true}
+                 },
+                 actor: admin
+               )
+    end
+  end
+
   describe "scope" do
     test "two dynamic types keep their own values", %{admin: admin} do
       a =

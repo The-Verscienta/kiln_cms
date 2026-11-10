@@ -176,6 +176,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A Slug field can now be marked unique: no two records of a content type (and language) may hold the same slug, on every way of saving.**
+  Compared after the slug is tidied, so `Hello World` and `hello-world` collide; a record keeps its own value on update. Follow-up to the Slug field type.
+  ([#2433](https://github.com/The-Verscienta/kiln_cms/issues/2433))
+
 - **In-app backups run as retried steps behind a cluster-wide lock: a second backup queues, a stopped node's step moves on, and platform admins can Cancel a running backup (audited, resumable).**
   Each step retries 4 times (1/5/15 min); database-only backups can now be resumed. Guide: [docs/backups.md](docs/backups.md#how-an-in-app-backup-runs-2218).
   ([#2537](https://github.com/The-Verscienta/kiln_cms/pull/2537) · [long form](docs/changelog/unreleased.md#backup-step-chain))
