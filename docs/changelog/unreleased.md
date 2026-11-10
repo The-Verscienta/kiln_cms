@@ -4059,6 +4059,27 @@ carries the reasoning.
     (`:refresh_computed`) and `mix kiln.occurrences.backfill` still skip
     trashed records.
 
+<a id="field-lock-release-mid-flush"></a>
+
+- **Field locks: a field released while a takeover waits on its holder's
+  save is never left free (#2557).** In collaborative editing a takeover
+  asks the holder to save, then hands the field over. If the holder clicked
+  out of the field meanwhile, the field went free: a third editor who
+  focused it was given it, and when the takeover's wait ran out it was taken
+  from them without asking them to save, so what they had typed was lost.
+  - **A click-away during a takeover waits for the save.** The holder keeps
+    the field (others are told it is held) until their save answers or the
+    wait runs out, then it goes to the taker. The holder is not told it was
+    "taken" from them. Clicking back in cancels the click-away.
+  - **Where no save can come, the hand-over is immediate:** an idle or
+    closed-tab timeout, or the holder leaving the editor.
+  - **Only the field's current holder can answer "saved"** (`KilnCMS.Collab.FieldLock.flushed/3`
+    takes the holder's pid, defaulting to the caller), so a late answer from
+    an earlier holder cannot hand over the next holder's field unsaved.
+  - A taker who has left is handed nothing, and leaving the editor withdraws
+    your own waiting takeovers, so a field is never locked to a closed tab.
+  - No migration or configuration. Collaborative editing is off by default.
+
 <a id="restore-refuses-stale-copy"></a>
 
 - **Restoring a version from a copy of the document that someone has since
