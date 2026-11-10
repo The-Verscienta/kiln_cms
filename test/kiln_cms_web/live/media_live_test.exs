@@ -846,6 +846,51 @@ defmodule KilnCMSWeb.MediaLiveTest do
       refute File.exists?(derivative)
     end
 
+    # #2531: the trash list was rendered before someone else restored the
+    # item. The purge is refused, so the live item and its blob both stay.
+    test "purge of an item someone restored meanwhile keeps the item and its file",
+         %{conn: conn} do
+      root = Path.join(System.tmp_dir!(), "kiln_ui_stale_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      Application.put_env(:kiln_cms, KilnCMS.Storage.Local, root: root, base_url: "/uploads")
+
+      on_exit(fn ->
+        File.rm_rf!(root)
+        Application.delete_env(:kiln_cms, KilnCMS.Storage.Local)
+      end)
+
+      src = Path.join(System.tmp_dir!(), "stale-src-#{System.unique_integer([:positive])}.png")
+      {:ok, image} = Image.new(60, 40, color: :green)
+      {:ok, _} = Image.write(image, src)
+      key = "stale-orig-#{System.unique_integer([:positive])}.png"
+      {:ok, ^key} = KilnCMS.Storage.store(key, src)
+      File.rm(src)
+
+      item =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "kept.png",
+          url: "/uploads/#{key}",
+          storage_key: key,
+          content_type: "image/png"
+        })
+
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/media")
+      lv |> element(~s(button[phx-value-id="#{item.id}"][phx-click="delete"])) |> render_click()
+      lv |> element("button", "Trash") |> render_click()
+
+      [held] = CMS.list_trashed_media_items!(actor: admin, query: [filter: [id: item.id]])
+      {:ok, _} = CMS.restore_media_item(held, actor: admin)
+
+      html =
+        lv |> element(~s(button[phx-value-id="#{item.id}"][phx-click="purge"])) |> render_click()
+
+      assert html =~ "someone else restored or deleted it"
+      refute html =~ "permission to delete media"
+      assert CMS.get_media_item!(item.id, actor: admin).id == item.id
+      assert File.exists?(Path.join(root, key))
+    end
+
     test "non-admins don't see the trash toggle", %{conn: conn} do
       {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
       refute html =~ ~s(phx-click="show_trash")

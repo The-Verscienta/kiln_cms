@@ -68,6 +68,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             BREACHED_PASSWORD_CHECK BREACHED_PASSWORD_POLICY
             KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT KILN_BOT_BUDGET_AI_CRAWLER_PERCENT
             KILN_BOT_BUDGET_DECLARED_BOT_PERCENT KILN_BOT_BUDGET_EMPTY_UA_PERCENT
+            KILN_CRAWLER_VERIFICATION
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
             AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
             KILN_IMAGE_TRANSFORM_KEY KILN_IMAGE_TRANSFORM_UNSIGNED
@@ -470,9 +471,9 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
     defp notices_url(value) do
       %{"KILN_SECURITY_NOTICES_URL" => value}
       |> eval()
-      |> get_in([:kiln_cms, Kiln.Plugins.Health])
+      |> get_in([:kiln_cms, Kiln.SecurityNotices])
       |> Kernel.||([])
-      |> Keyword.fetch(:notices_url)
+      |> Keyword.fetch(:url)
     end
 
     test "unset or blank writes nothing, so the default applies" do
@@ -1549,6 +1550,40 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
     test "nothing is written in the test env, so an exported value cannot change the suite" do
       assert bot_budgets(%{"KILN_BOT_BUDGET_EMPTY_UA_PERCENT" => "5"}, :test) == nil
+    end
+  end
+
+  describe "KILN_CRAWLER_VERIFICATION (#2254)" do
+    defp crawler_verification(vars, env \\ :prod) do
+      vars
+      |> eval(env)
+      |> get_in([:kiln_cms, KilnCMS.CrawlerVerification, :enabled])
+    end
+
+    test "unset or blank writes nothing, so verification stays on" do
+      assert crawler_verification(%{}) == nil
+      assert crawler_verification(%{"KILN_CRAWLER_VERIFICATION" => "  "}) == nil
+    end
+
+    test "an off-spelling turns it off" do
+      for value <- ["false", "False", "0", "no", "off"] do
+        assert crawler_verification(%{"KILN_CRAWLER_VERIFICATION" => value}) == false
+      end
+    end
+
+    test "an on-spelling writes on" do
+      assert crawler_verification(%{"KILN_CRAWLER_VERIFICATION" => "true"}) == true
+    end
+
+    test "an unrecognized value keeps the default and warns" do
+      {config, stderr} = eval_io(%{"KILN_CRAWLER_VERIFICATION" => "enabled"}, :prod)
+
+      assert get_in(config, [:kiln_cms, KilnCMS.CrawlerVerification, :enabled]) == nil
+      assert stderr =~ "KILN_CRAWLER_VERIFICATION"
+    end
+
+    test "nothing is written in the test env, so an exported value cannot change the suite" do
+      assert crawler_verification(%{"KILN_CRAWLER_VERIFICATION" => "false"}, :test) == nil
     end
   end
 end

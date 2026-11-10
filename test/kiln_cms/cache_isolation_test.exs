@@ -22,12 +22,15 @@ defmodule KilnCMS.CacheIsolationTest do
 
   @poison {:poisoned_by, __MODULE__}
 
+  # Through `Cache.store_for/1`: the generation tokens and the last-known admin
+  # allowlist live outside the delivery cache (#2502), and poisoning them there
+  # would prove nothing about the slot they are actually read from.
   defp poison(keys) do
-    for {_name, key} <- keys, do: Cachex.put(Cache.cache_name(), key, @poison)
+    for {_name, key} <- keys, do: Cachex.put(Cache.store_for(key), key, @poison)
     keys
   end
 
-  defp cached(key), do: Cachex.get(Cache.cache_name(), key)
+  defp cached(key), do: Cachex.get(Cache.store_for(key), key)
 
   describe "the covered key set" do
     test "reaches every aggregate key the incident named, by its real name" do
@@ -44,6 +47,8 @@ defmodule KilnCMS.CacheIsolationTest do
             :feed_policy_key,
             :experiments_key,
             :head_generation_key,
+            :menus_generation_key,
+            :admin_allowlist_last_known_key,
             :sitemap_key
           ] do
         assert name in covered,
@@ -51,6 +56,20 @@ defmodule KilnCMS.CacheIsolationTest do
                  "a value resolved for the default org under it now outlives the test that " <>
                  "wrote it"
       end
+    end
+
+    # Not vacuous: the poison above only proves a key is reset if it is
+    # written where the key is read.
+    test "probes the generation tokens in the store they live in" do
+      org_id = Accounts.default_org_id()
+
+      assert Cache.store_for(Cache.head_generation_key(org_id)) == Cache.generation_cache_name()
+      assert Cache.store_for(Cache.menus_generation_key(org_id)) == Cache.generation_cache_name()
+
+      assert Cache.store_for(Cache.admin_allowlist_last_known_key(org_id)) ==
+               Cache.generation_cache_name()
+
+      assert Cache.store_for(Cache.branding_key(org_id)) == Cache.cache_name()
     end
 
     test "excludes feed_key/3, which is not a bare per-org aggregate" do

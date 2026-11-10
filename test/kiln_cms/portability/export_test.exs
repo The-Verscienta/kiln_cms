@@ -164,8 +164,8 @@ defmodule KilnCMS.Portability.ExportTest do
       # not the subject here — purging and re-importing exercises the same
       # path: the envelope must stand alone. `purge`, not `destroy` — see the
       # trashed-slug test below for why that distinction matters.
-      for post <- CMS.list_posts!(actor: actor), do: CMS.purge_post!(post, actor: actor)
-      for page <- CMS.list_pages!(actor: actor), do: CMS.purge_page!(page, actor: actor)
+      for post <- CMS.list_posts!(actor: actor), do: purge_post!(post, actor)
+      for page <- CMS.list_pages!(actor: actor), do: purge_page!(page, actor)
 
       {:ok, report} = Import.run_envelope(envelope, actor: actor, skip_media: true)
 
@@ -359,7 +359,7 @@ defmodule KilnCMS.Portability.ExportTest do
     test "an envelope state the importer does not know imports as a draft", %{actor: actor} do
       {:ok, envelope} = Export.run([:post], actor: actor)
       envelope = update_in(envelope, ["records", Access.all(), "state"], fn _ -> "pending" end)
-      for post <- CMS.list_posts!(actor: actor), do: CMS.purge_post!(post, actor: actor)
+      for post <- CMS.list_posts!(actor: actor), do: purge_post!(post, actor)
 
       {:ok, _report} = Import.run_envelope(envelope, actor: actor, skip_media: true)
 
@@ -405,5 +405,16 @@ defmodule KilnCMS.Portability.ExportTest do
       # export must never be a way around authorization.
       assert length(as_viewer["records"]) <= length(as_admin["records"])
     end
+  end
+
+  # `:purge` takes only a trashed row (#2531): trash, then purge.
+  defp purge_post!(post, actor) do
+    CMS.destroy_post!(post, actor: actor)
+    CMS.purge_post!(post, actor: actor)
+  end
+
+  defp purge_page!(page, actor) do
+    CMS.destroy_page!(page, actor: actor)
+    CMS.purge_page!(page, actor: actor)
   end
 end

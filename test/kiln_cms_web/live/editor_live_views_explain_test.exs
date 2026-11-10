@@ -21,6 +21,7 @@ defmodule KilnCMSWeb.EditorLiveViewsExplainTest do
 
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Repo
+  alias KilnCMS.Test.QueryCounting
   alias KilnCMSWeb.EditorLive.Filters
 
   @rows 1_000
@@ -59,7 +60,8 @@ defmodule KilnCMSWeb.EditorLiveViewsExplainTest do
       handler,
       [:kiln_cms, :repo, :query],
       fn _event, _measure, meta, _config ->
-        if meta[:source] == "posts", do: send(parent, {:sql, meta[:query], meta[:params]})
+        if meta[:source] == "posts" and QueryCounting.on_behalf_of?(parent),
+          do: send(parent, {:sql, meta[:query], meta[:params]})
       end,
       nil
     )

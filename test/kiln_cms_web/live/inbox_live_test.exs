@@ -247,6 +247,64 @@ defmodule KilnCMSWeb.InboxLiveTest do
     end
   end
 
+  # An event a newer release added (#2509), read by this one during a rolling
+  # deploy or after a rollback: one such row used to fail the whole page and
+  # mark-all-read.
+  describe "an event a newer release wrote" do
+    alias KilnCMS.NewerReleaseRows
+
+    test "is listed generically, linking to the inbox, beside known rows", %{conn: conn} do
+      me = authed_user("Ada")
+      notify(me, %{title: "Known one"})
+      id = NewerReleaseRows.notification!(me.id, %{title: "From the future"})
+
+      {:ok, lv, html} = conn |> log_in(me) |> live(~p"/editor/inbox")
+
+      assert html =~ "Known one"
+      assert html =~ "From the future"
+
+      row =
+        lv
+        |> element("#main div.items-start.p-4", "From the future")
+        |> render()
+        |> Floki.parse_fragment!()
+
+      assert [link] = Floki.find(row, "a[href='/editor/inbox']")
+      assert Floki.text(link) =~ "Notification"
+      refute Floki.text(link) =~ NewerReleaseRows.unknown()
+      assert [_toggle] = Floki.find(row, "button[phx-value-id='#{id}']")
+    end
+
+    test "toggles read and unread", %{conn: conn} do
+      me = authed_user("Ada")
+      id = NewerReleaseRows.notification!(me.id)
+
+      {:ok, lv, _html} = conn |> log_in(me) |> live(~p"/editor/inbox")
+
+      lv |> element("#main button[phx-value-id='#{id}']") |> render_click()
+      assert render(lv) =~ "Mark unread"
+      assert NewerReleaseRows.stored_row("notifications", id)["read_at"]
+
+      lv |> element("#main button[phx-value-id='#{id}']") |> render_click()
+      assert render(lv) =~ "Mark read"
+      assert is_nil(NewerReleaseRows.stored_row("notifications", id)["read_at"])
+    end
+
+    test "mark-all-read moves it with the known rows", %{conn: conn} do
+      me = authed_user("Ada")
+      notify(me)
+      id = NewerReleaseRows.notification!(me.id)
+
+      {:ok, lv, _html} = conn |> log_in(me) |> live(~p"/editor/inbox")
+
+      html = lv |> element("#main button", "Mark all read") |> render_click()
+
+      assert html =~ "Marked 2 notifications read"
+      assert Notifications.unread_count(me, nil) == 0
+      assert NewerReleaseRows.stored_row("notifications", id)["read_at"]
+    end
+  end
+
   describe "live updates" do
     test "a notification recorded elsewhere appears without a reload", %{conn: conn} do
       me = authed_user("Ada")

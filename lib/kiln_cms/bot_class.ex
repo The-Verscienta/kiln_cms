@@ -8,7 +8,8 @@ defmodule KilnCMS.BotClass do
   `:browser`. This is **cost control, not security**: a user agent is whatever
   the client typed, so anyone can claim to be Googlebot or a browser. Nothing
   here grants access, and a higher ceiling for a class is a higher ceiling for
-  anyone who spoofs it. Verifying a crawler by reverse DNS is #2254.
+  anyone who spoofs it. Checking a search-engine claim against DNS is
+  `KilnCMS.CrawlerVerification` (#2254), keyed by `search_engine/1`.
 
   ## The order
 
@@ -51,10 +52,14 @@ defmodule KilnCMS.BotClass do
 
   The lists are curated here, not configured: what an operator configures is
   each class's ceiling, never its membership. Adding a token is a code change
-  with a test row in `test/kiln_cms/bot_class_test.exs`.
+  with a test row in `test/kiln_cms/bot_class_test.exs`. A new search engine
+  also needs its reverse-DNS row in `KilnCMS.CrawlerVerification.Engines`.
   """
 
   @type t :: :search_engine | :ai_crawler | :declared_bot | :empty | :browser
+
+  @typedoc "A search engine `search_engine/1` can name."
+  @type engine :: :google | :bing | :duckduckgo | :baidu | :yandex | :apple
 
   @classes [:browser, :search_engine, :ai_crawler, :declared_bot, :empty]
 
@@ -67,9 +72,33 @@ defmodule KilnCMS.BotClass do
   # header that is not valid UTF-8 matches nothing rather than raising.
   @ai_crawler ~r/\b(?:GPTBot|ChatGPT-User|OAI-SearchBot|ClaudeBot|Claude-User|Claude-SearchBot|anthropic-ai|CCBot|PerplexityBot|Perplexity-User|Bytespider|Amazonbot|meta-externalagent)\b/i
 
+  # The search engines and the user-agent tokens that name each, in one table
+  # so `search_engine/1` and crawler verification (#2254) agree on who is who.
   # `Googlebot` also covers `Googlebot-Image`, `-News` and `-Video` (the hyphen
-  # is a word boundary).
-  @search_engine ~r/\b(?:Googlebot|Google-InspectionTool|bingbot|DuckDuckBot|Baiduspider|YandexBot|Applebot)\b/i
+  # is a word boundary). Each engine needs a row in
+  # `KilnCMS.CrawlerVerification.Engines`.
+  @search_engines [
+    google: ~w(Googlebot Google-InspectionTool),
+    bing: ~w(bingbot),
+    duckduckgo: ~w(DuckDuckBot),
+    baidu: ~w(Baiduspider),
+    yandex: ~w(YandexBot),
+    apple: ~w(Applebot)
+  ]
+
+  @search_tokens Enum.flat_map(@search_engines, fn {_engine, tokens} -> tokens end)
+
+  # Token (lowercased) → engine, for reading back which engine a match named.
+  @engine_by_token Map.new(
+                     for {engine, tokens} <- @search_engines, token <- tokens do
+                       {String.downcase(token), engine}
+                     end
+                   )
+
+  @search_engine Regex.compile!(
+                   "\\b(?:" <> Enum.map_join(@search_tokens, "|", &Regex.escape/1) <> ")\\b",
+                   "i"
+                 )
 
   # Scripting tools, headless browsers, and named fetchers that do not need the
   # generic token to be caught (some send a browser-shaped string). `okhttp` is
@@ -88,6 +117,35 @@ defmodule KilnCMS.BotClass do
   @doc "Every class `classify/1` can answer, browser first."
   @spec classes() :: [t()]
   def classes, do: @classes
+
+  @doc "Every engine `search_engine/1` can answer, in table order."
+  @spec engines() :: [engine()]
+  def engines, do: Keyword.keys(@search_engines)
+
+  @doc """
+  Which search engine a `User-Agent` names, when `classify/1` makes it
+  `:search_engine`; `nil` for every other class (so a user agent that names an
+  AI crawler too, which is `:declared_bot`, names no engine). When it names
+  more than one engine, the leftmost name wins.
+
+  This says what the client *claims*. `KilnCMS.CrawlerVerification` is what
+  checks the claim against DNS.
+
+      iex> KilnCMS.BotClass.search_engine("Mozilla/5.0 (compatible; bingbot/2.0)")
+      :bing
+
+      iex> KilnCMS.BotClass.search_engine("GPTBot/1.0 Googlebot/2.1")
+      nil
+  """
+  @spec search_engine(term()) :: engine() | nil
+  def search_engine(user_agent) do
+    with :search_engine <- classify(user_agent),
+         [token] <- Regex.run(@search_engine, truncate(user_agent), capture: :first) do
+      Map.fetch!(@engine_by_token, String.downcase(token))
+    else
+      _ -> nil
+    end
+  end
 
   @doc """
   The class of a `User-Agent` value. Anything that is not a binary, and any

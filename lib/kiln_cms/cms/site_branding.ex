@@ -1,7 +1,7 @@
 defmodule KilnCMS.CMS.SiteBranding do
   @moduledoc """
   Per-site white-label branding tokens (#48): site name, logo, favicon, social
-  image, brand colour, and the attribution toggle.
+  image, brand colour, X (Twitter) username, and the attribution toggle.
 
   One row **per organization** — the per-org analogue of the instance-wide
   `KilnCMS.Mail.Settings` singleton, but **tenant-scoped**, and that is the
@@ -53,7 +53,8 @@ defmodule KilnCMS.CMS.SiteBranding do
       :show_attribution,
       :theme,
       :header_menu_key,
-      :footer_menu_key
+      :footer_menu_key,
+      :twitter_site
     ],
     upsert_fields: [
       :site_name,
@@ -67,7 +68,8 @@ defmodule KilnCMS.CMS.SiteBranding do
       :show_attribution,
       :theme,
       :header_menu_key,
-      :footer_menu_key
+      :footer_menu_key,
+      :twitter_site
     ],
     read: :public,
     save_arguments: [{:app_icon_size, :integer}],
@@ -131,6 +133,7 @@ defmodule KilnCMS.CMS.SiteBranding do
 
   changes do
     change KilnCMS.CMS.Changes.NormalizeBrandColor, on: [:create, :update]
+    change KilnCMS.CMS.Changes.NormalizeTwitterSite, on: [:create, :update]
     change KilnCMS.CMS.Changes.BustBranding, on: [:create, :update, :destroy]
   end
 
@@ -222,6 +225,15 @@ defmodule KilnCMS.CMS.SiteBranding do
       constraints: [max_length: KilnCMS.Limits.identifier()]
 
     attribute :footer_menu_key, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
+
+    # The site's X (Twitter) account, emitted as `twitter:site` on every page
+    # (#2258). Stored canonical — `@handle` — by `Changes.NormalizeTwitterSite`;
+    # `Validations.BrandTokens` holds the grammar. No Ash `match:` constraint:
+    # it would run before normalization and refuse `kilncms` or a profile URL
+    # the change turns into `@kilncms`.
+    attribute :twitter_site, :string,
       public?: true,
       constraints: [max_length: KilnCMS.Limits.identifier()]
   end

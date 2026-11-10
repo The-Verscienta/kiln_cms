@@ -7,6 +7,149 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="backup-last-good-marker-upgrade"></a>
+
+- **Update the host's copy of `scripts/backup.sh`: the app now marks the newest
+  verified backup of each component with `kiln-<stamp>.good`, and
+  `backup.sh prune` keeps the unit a marker names (part of #2219).** For
+  operators who prune with cron. No migration, no new setting.
+  - **Why.** Retention (#2486) never lets the app delete the newest verified
+    backup, but cron has no backup history and only knew the newest
+    *complete* one. When the newest complete set on disk came from a failed
+    run (a refused off-site copy, say), cron kept that set and deleted the
+    older verified one once it passed `BACKUP_KEEP_DAYS`. The marker carries
+    the app's answer to disk, so the rule now holds for both prunes.
+  - **The format.** An empty 0600 file named `kiln-<stamp>.good` in the
+    component's own directory, `db/` or `media/`. It pins only that component
+    of that stamp; a `.keep` recovery point still pins both. Only its presence
+    counts, and cron honors an entry of that name of any kind. There is at
+    most one per directory once the app has synced it.
+  - **Who writes it.** Only the app: at the end of each successful in-app
+    backup (after the run is closed, under the backup lock), and before an
+    in-app prune deletes anything. Never on a dry run, never by `backup.sh`.
+    The new marker is written before the old one is removed. A backup imported
+    from cron counts as verified, so the marker can land on a cron-made set.
+    The app does not read markers back; it still works out the newest verified
+    backup from History.
+  - **What to do.** Copy this release's `scripts/backup.sh` over the one your
+    cron line runs (for example `/opt/kiln_cms/scripts/backup.sh`). An older
+    copy ignores the markers. Markers appear after the first in-app backup or
+    prune; a cron-only deployment gets none, and its prune works as before.
+  - **What to watch.** Don't delete a `.good` by hand while in-app backups run.
+    If you stop in-app backups, one stale marker per component keeps its unit
+    from cron indefinitely; delete it when you want cron to age that backup. A
+    marker the app can't write or remove (a permission error, a directory or
+    symlink of that name) logs a warning and emits
+    `[:kiln_cms, :backups, :last_good, :failed]` (measurements `%{count: 1}`;
+    metadata `kind`, `stamp`, `reason`, or `marker`, `reason`, or `reason`).
+  - **For developers.** `KilnCMS.Backups.Artifact.good_name/1` and
+    `parse_good_name/1`; `KilnCMS.Backups.Retention.sync_last_good/2`; the
+    retention plan gains `last_good: %{db: stamp | nil, media: stamp | nil}`.
+  - **Rolling the pin back** is safe. The previous release ignores `.good`
+    markers, and its in-app prune deletes each one as a stray once the marker
+    file is older than `BACKUP_KEEP_DAYS`. A host script left at this release
+    honors the markers until then.
+  Guide: [The last-good marker](../backups.md#the-last-good-marker).
+
+<a id="rollback-to-1-8-0-upgrade"></a>
+
+- **Before rolling back to v1.8.0, delete the rows v1.8.0 cannot read (#2509).**
+  Nothing to do when upgrading. v1.8.0 loads an atom column with
+  `String.to_existing_atom/1` and fails the whole read on a value it does not
+  know, and two columns gained values since:
+  ```sql
+  DELETE FROM notifications WHERE event = 'registration_pending';
+  DELETE FROM api_keys WHERE access = 'draft_write';
+  ```
+  Without the first, the bell, the inbox and "mark all read" fail on v1.8.0
+  for everyone holding a registration notice. Draft-write keys stop working on
+  v1.8.0 whatever you do (it has no such scope); left in place, the key's own
+  lookup and the site's API keys page fail, so delete them and mint new ones
+  after rolling forward. Never `UPDATE` them to `'read'`: that silently
+  changes what a key someone already holds can do. Security events need
+  nothing, since v1.8.0 has no security log. Field definitions of type
+  `key_value` or `telephone` also break v1.8.0's reads, and deleting them
+  loses data: check
+  [#2605](https://github.com/The-Verscienta/kiln_cms/issues/2605) before
+  rolling back if any site uses them. Details in
+  [New values in an atom column](../releasing.md#new-values-in-an-atom-column).
+
+<a id="render-etags-upgrade"></a>
+
+- **Every fired-artifact `ETag` (`/api/content/…`, every surface) and every
+  `ETag` on a page Kiln renders itself changes once on this deploy (#2463).**
+  No migration and no setting. A CDN, browser or app that revalidates with
+  `If-None-Match` gets one full `200` per URL instead of a `304`, then
+  revalidates as before. Plan for that much extra origin traffic in the first
+  cache window after the deploy (300 seconds for an artifact, 60 for a page).
+  - **Artifacts:** the tag is now `W/"<id>-<locale>-<surface>-b<digest>"`
+    (`-<variant id>` appended for an A/B arm), where the digest is of the
+    body served. It used to end in the document's `updated_at` (and
+    `-x<tag>` for an `?expand=` response). From now on it changes only when
+    the bytes do, so a republish or re-fire that produced the same body keeps
+    it. Treat the tag as opaque: a client that read the timestamp out of the
+    old one gets none now.
+  - **Pages:** the tag now names the running build as well, so it also
+    changes on every later deploy whose code, dependencies or assets differ,
+    and a rolling deploy flips it between old and new nodes until it
+    finishes.
+  - **Rolling back** is safe: the old release goes back to its own tags,
+    which costs another one-time round of `200`s.
+
+<a id="twitter-card-upgrade"></a>
+
+- **Run `mix ash.migrate` for the new X (Twitter) username setting, and expect
+  fired `json` artifacts to move to `format_version` 4 (#2258). On a large
+  site, run `mix kiln.refire_all` after the deploy.**
+  - **The migration.** `20261110041039_add_site_branding_twitter_site` adds a
+    nullable `site_branding.twitter_site` (`text`). Additive and instant; no
+    existing row changes, and nothing is set until a site admin saves one.
+  - **Why the version moves.** The `json` artifact gains a `social` object
+    that belongs on every published document, not only on ones edited after
+    the deploy (the reason `robots` did not need a bump). Only a
+    `format_version` bump makes existing artifacts converge.
+  - **How existing artifacts converge.** An artifact older than v4 is re-fired
+    in the background after the first read that misses the firing cache. That
+    read, and cached reads for up to an hour, still serve the old body, and a
+    document nobody reads is never re-fired. `mix kiln.refire_all` (on a
+    release, `bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`) re-fires every
+    published document through the `firing` queue instead.
+  - **What a re-fire doesn't reach.** A re-fire is not an edit, so:
+    - an `/api/sync` mirror is not sent the document again; it keeps the body
+      without `social` until the document is next edited, or until it runs a
+      fresh `?initial=true` sync after the re-fire has finished;
+    - a CDN or client that revalidates with `If-None-Match` gets `304` for the
+      old artifact body, because the artifact `ETag` names the document's
+      last edit, not the body
+      ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463));
+      `?fields=` responses are unaffected (their `ETag` is a body digest);
+    - Kiln's own HTML pages render the new tags at once, but their `ETag` also
+      ignores the layout until the document is edited or a site setting that
+      reaches `<head>` (such as Branding) is saved, so a revalidating CDN may
+      hold the old `<head>` until then.
+  - **Rolling back.** Safe. The older release ignores the column. It serves
+    v4 artifacts as stored, `social` included, rather than downgrading them,
+    and logs at most once a minute that an artifact is newer than the build;
+    `mix kiln.refire_all` on the older release rewrites them in its own shape.
+
+<a id="invitation-raise-tier-upgrade"></a>
+
+- **After upgrading, check Team → Pending invitations on each site for
+  members you demoted or removed while their invitation was still pending
+  (#2452).** Accepting an invitation now raises a member who holds a lower
+  tier on the site ([below](#invitation-raises-lower-membership)), and
+  changing a member's tier or custom role, or removing them, now deletes their
+  pending invitation there. A change made before this upgrade deleted
+  nothing. So for up to 7 days after deploying (an invitation's lifetime), a
+  link left pending for a member you demoted raises them back to the tier it
+  names, where before it did nothing; a link left pending for a member you
+  removed re-adds them, as it already did. Revoke any such invitation with the
+  **×** on its row. Only instances that ran a build with site invitations
+  (#2448) are affected; v1.8.0 has no invitations. No migration, and nothing is
+  rewritten: an older build ignores the new behavior, and rolling the pin back
+  is safe (an accept then leaves a lower membership as it is again; an
+  invitation retired meanwhile stays deleted).
+
 <a id="plugin-health-egress-upgrade"></a>
 
 - **A new outbound request is on by default, and it is the first that tells
@@ -26,9 +169,13 @@ carries the reasoning.
     after a failure).
   - **Who is affected.** Only a deployment with a plugin from Hex, git or a
     path. One whose plugins are all built from `projects/`, or that has none,
-    sends nothing new. hex.pm is asked only about plugins locked from hex.pm.
-  - **Turning it off.** `KILN_PLUGIN_HEALTH_CHECK=false` turns the check off.
-    If you already set `KILN_UPDATE_CHECK=false` for "no outbound requests",
+    sends nothing new to hex.pm. hex.pm is asked only about plugins locked
+    from hex.pm. The notices feed is asked whatever plugins are installed,
+    by the core's own notices check, while `KILN_UPDATE_CHECK` is on
+    ([Security notices for Kiln](#core-security-notices)).
+  - **Turning it off.** `KILN_PLUGIN_HEALTH_CHECK=false` turns the check off
+    and stops the hex.pm requests; the notices feed is still asked for the
+    core while `KILN_UPDATE_CHECK` is on. If you already set `KILN_UPDATE_CHECK=false` for "no outbound requests",
     you need do nothing: the plugin check follows it while
     `KILN_PLUGIN_HEALTH_CHECK` is unset. To keep the Hex comparison but not
     ask kilncms.dev, set `KILN_SECURITY_NOTICES_URL=false`. A fork or a mirror
@@ -586,6 +733,35 @@ carries the reasoning.
     config drops the `delivery_classes` key the new variables write; see
     [performance.md](../performance.md#running-a-basic-load-check).
 
+<a id="verified-search-bots-upgrade"></a>
+
+- **Each node now sends DNS queries about visitors: an address whose user agent
+  names a search engine is looked up by reverse and forward DNS, on by default
+  (#2254).** Allow outbound DNS (PTR, A, AAAA) to the resolvers in each node's
+  `/etc/resolv.conf`, or set `KILN_CRAWLER_VERIFICATION=false`. No migration;
+  rolling the pin back is safe and goes back to believing every claim.
+  - **Behind a proxy**, set `TRUSTED_PROXIES` (or `CLIENT_IP_HEADER` on Fly.io,
+    Railway or DigitalOcean App Platform). Otherwise every request carries the
+    proxy's address, no claim can be checked, and none is proven false: rate
+    limits stay as in #2243, and a search-engine value above 100% never applies.
+  - **Data flow.** The query names the visitor's address
+    (`in-addr.arpa` / `ip6.arpa`), so your resolver, and the operator of that
+    address's reverse zone, see it. If your resolver is a third party's, list
+    it as a subprocessor; see [data-flows.md](../data-flows.md#optional-subprocessors).
+  - **With the smart 404 guard on (`KILN_SCANNER_BLOCKING`),** link-preview
+    fetchers (`facebookexternalhit`, `Twitterbot`, `LinkedInBot`) and `Slurp`
+    are no longer exempt from the miss threshold, whatever
+    `KILN_CRAWLER_VERIFICATION` says ([below](#scanner-guard-exemption-narrowed)).
+    A site whose shared links often lead to 404s can see a preview fetcher's
+    address blocked for an hour. Remove such a block on `/editor/ip-blocks`.
+  - **Dashboards.** `kiln_cms_delivery_client_class_count{class="empty"}` now
+    includes search-engine claims proven false
+    ([below](#client-class-is-charged-class)).
+  - **Check it works**:
+    `bin/kiln_cms rpc 'IO.inspect(KilnCMS.CrawlerVerification.verify(:google, {66, 249, 66, 1}))'`
+    prints `{:verified, "crawl-66-249-66-1.googlebot.com"}`. Guide:
+    [Check that a node can verify crawlers](../bot-budgets.md#check-that-a-node-can-verify-crawlers).
+
 <a id="team-invitations-upgrade"></a>
 
 - **Run `mix ash.migrate` for site invitations: one new table, `invitations`,
@@ -840,16 +1016,66 @@ carries the reasoning.
   edited: `format_version` does not change, so a read does not re-fire it.
   `mix kiln.refire_all` (on a release,
   `/app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`) rewrites every
-  published document's artifacts now. It sends no `updated` webhook and busts
-  no cache, and the artifact `ETag` does not change. A headless consumer, CDN
-  or browser that revalidates with `If-None-Match` can therefore keep the old
-  HTML until the document is next edited; a consumer that re-reads without a
-  validator gets the new markup. The same `ETag` gap applies to Kiln's own
-  public HTML pages behind a CDN or in a browser cache that revalidates
-  (#2463). Rolling the pin back is safe: the extra attributes are inert to the
+  published document's artifacts now. Since the artifact `ETag` became a
+  digest of the body ([#2463](#render-etags)), a headless consumer, CDN or
+  browser that revalidates with `If-None-Match` gets the new HTML on its next
+  revalidation. A consumer that caches until a webhook tells it otherwise
+  hears nothing from a plain sweep: run it as `mix kiln.refire_all --notify`
+  (`KilnCMS.Firing.Sweep.run(notify: true)`) to send each document as
+  `<type>.updated` with `"reason": "refire"`
+  ([how](../releasing.md#re-render-published-content-after-an-upgrade)).
+  Rolling the pin back is safe: the extra attributes are inert to the
   previous release.
 
+<a id="scrollable-tables-upgrade"></a>
+
+- **Optional: run `mix kiln.refire_all` after deploying to put the new table
+  markup into fired `:web` artifacts published before the upgrade (#2464).**
+  No migration and no setting. Public pages rendered by Kiln itself pick the
+  change up as soon as the deploy lands. A fired `:web` artifact keeps its old
+  markup (an unfocusable `.kiln-table-wrap`, or a bare `legacy_html` table with
+  no wrapper) until its document is next published, edited or re-fired:
+  `format_version` does not change, so a read does not re-fire it. The sweep
+  is the same one the [code-block note](#focusable-code-blocks-upgrade)
+  describes, and one run covers both: `mix kiln.refire_all` (on a release,
+  `/app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`). Clients that
+  revalidate with `If-None-Match` get the new HTML on their next revalidation,
+  because the artifact `ETag` is a digest of the body
+  ([#2463](#render-etags)); a consumer that waits for a webhook hears about it
+  only from `mix kiln.refire_all --notify`
+  ([how](../releasing.md#re-render-published-content-after-an-upgrade)).
+  Rolling the pin back is safe: the previous release ignores the extra
+  attributes and the wrapper.
+
 ## Breaking
+
+<a id="purge-trashed-only"></a>
+
+- **Overlay and plugin code: `purge_<type>` (`purge_page`, `purge_post`,
+  `purge_entry`, …) and `purge_media_item` now refuse a record that isn't in
+  the trash (#2531).** The call returns `Ash.Error.Invalid` containing
+  `Ash.Error.Changes.StaleRecord` and changes nothing. Trash the record first
+  (`destroy_<type>` / `destroy_media_item`), then purge it. Media still being
+  quarantined by the upload pipeline can be purged without trashing. The API
+  never exposed `:purge`, so HTTP clients are unaffected; the nightly
+  trash purge only ever read trashed rows.
+
+<a id="restore-version-stale-struct"></a>
+
+- **Overlay and plugin code: `restore_<type>_version` (`restore_page_version`,
+  `restore_post_version`, …) now refuses a record read before a later write,
+  and a restore increments `lock_version` (#2532).** The call returns an
+  error containing `Ash.Error.Changes.StaleRecord` and writes nothing when the
+  row's `lock_version` or `state` no longer matches the record passed in.
+  Before, it could succeed while writing nothing, or restore onto a page
+  published since the read without the publish-time gates. Read the record
+  again (`get_<type>`) right before restoring, and use the returned record
+  afterwards: a record held from before the restore is now stale for
+  `update_<type>` and every other action that carries the optimistic lock.
+  Over HTTP, the revisions restore route answers a lost race with `409`
+  `invalid_state_transition` instead of `422` `restore_failed`, and a
+  document trashed meanwhile with `404` (see
+  [Fixed](#restore-refuses-stale-copy)).
 
 <a id="backup-request-api"></a>
 
@@ -911,11 +1137,15 @@ carries the reasoning.
     **Unpublish** on the page (nor in the **Live · draft** menu), **Unpublish**
     in a content-list row's menu, or **Unpublish** and **Archive** in the bulk
     bar. **Scheduled unpublish at** is locked on a live or scheduled page, with
-    a note saying an admin sets it. A refused action says "Only an admin can
-    unpublish content on this site." or "Only an admin can archive content on
-    this site."; dragging a live page's unpublish chip on the calendar says
-    "Only an admin can move the unpublish date of a live page on this site.",
-    and a publish chip "Only an admin can move a publish date on this site."
+    a note saying an admin sets it. When an editor on such a site is refused,
+    an unpublish says "Only an admin can unpublish content on this site.", an
+    archive "Only an admin can archive content on this site.", and on the
+    calendar dragging a live page's unpublish chip says "Only an admin can
+    move the unpublish date of a live page on this site." and a publish chip
+    "Only an admin can move a publish date on this site." Those sentences go
+    only to that editor, judged at the moment of the refusal (so a live
+    temporary grant counts); everyone else is told why they were actually
+    refused ([refusal wording](#refusal-wording-names-the-reason)).
   - **Rolling back** is safe: there is no migration and no data change, and
     the previous release's policies apply again.
   - **Guides.** [The editorial workflow](../editorial-workflow.md#7-take-it-down),
@@ -961,6 +1191,208 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="core-security-notices"></a>
+
+- **Security posture says when a published security notice covers the Kiln
+  version you run, and System's Updates card shows the same answer (#2522,
+  part 3 of #2252).** A new line, **Security notices for Kiln**
+  (`core.security_notices`, **This installation**), reads kilncms.dev's
+  security notices feed (#1873). Before this, being behind a security release
+  showed only as **Review** on the Kiln version line. Guide:
+  [Security notices for Kiln](../security-posture.md#security-notices-for-kiln).
+  - **Fix now at any severity.** A notice that covers the running core is a
+    known way into the whole installation, so low and medium fail too.
+    Plugin notices keep their rule: low and medium are **Review**.
+  - **Only the affected range decides**, for the core and for plugins.
+    `patched_versions` is shown ("fixed in 1.8.1") and never consulted: the
+    publisher leaves out a line with no fix yet, so reading it would clear an
+    unfixed newer line or a regression range. A range that was never narrowed
+    to exclude the fixed releases flags them, which errs on the strict side;
+    [releasing](../releasing.md) now says to narrow it.
+  - **Unknown is never OK.** A notice naming `kiln_cms` reads **Unknown**
+    when its affected range can't be read, when it names several packages
+    and this version is inside their joined ranges, or when this build's
+    version can't be read. So does a feed that failed, timed out or has
+    an invalid `KILN_SECURITY_NOTICES_URL`.
+  - **Not applicable** with `KILN_UPDATE_CHECK=false`, which this check
+    follows like the Kiln version line, and when the notices feed is off
+    (`KILN_SECURITY_NOTICES_URL=false`, or a fork or mirror).
+  - **On System**, the **Updates** card has a **Security notices** line, with
+    a **Security notice** or **Unknown** badge, a line per notice with its
+    severity and fixed release, and an **Advisory *id*** link per notice.
+    **Check now** asks the feed again past the cache, at most once a minute,
+    and now re-checks that you are a platform admin ("You need admin access
+    to do that.").
+  - **When it asks.** One fetch and one cache (24 hours, 15 minutes after a
+    failure, per node) now serve both this line and the plugin health check
+    (#2244), so the feed is asked at most once between them. The core's
+    reader asks when a platform admin opens System or Security posture with
+    nothing cached, and on **Check now**, even with no plugin installed. It
+    carries nothing about the installation. A deployment that keeps
+    kilncms.dev out with `KILN_UPDATE_CHECK=false` or
+    `KILN_UPDATE_FEED_URL=false` sees no new request.
+  - **A log line** when a fresh answer covers the running Kiln, once per
+    request and only while the update check is on: "Kiln 1.8.0 is covered by
+    security notice(s) GHSA-…; update it (System, Updates)." Ids only.
+  - **Known gaps.** A build from `main` between releases still carries the
+    last release's version, so it can read as covered after the fix merged.
+    A notice that names `kiln_plugin` (the SDK built into Kiln) matches
+    neither line.
+  - **Changes to the plugin health check (#2244), not yet released.**
+    `KILN_PLUGIN_HEALTH_CHECK=false` no longer stops the notices request,
+    which the core's reader still makes; `KILN_SECURITY_NOTICES_URL=false`
+    stops both. The invalid-URL log line now reads
+    "KILN_SECURITY_NOTICES_URL is not an absolute http(s) URL; security
+    notices are unknown." The config keys moved from
+    `config :kiln_cms, Kiln.Plugins.Health, notices_url:, notices_type:` to
+    `config :kiln_cms, Kiln.SecurityNotices, url:, type:, req_options:`
+    ([the variables](../environment-variables.md#plugin-health-check-2244)).
+  - **The publishing script** (`scripts/publish/security.exs`) now names the
+    core `kiln_cms` for every advisory vulnerability without a package name,
+    also when another vulnerability names a plugin. Such a notice used to
+    name only the plugin and fail its check; it now names both, so the
+    plugin reads **Unknown** and the core is matched. Never a pass:
+    publishing ranges per package, so it can match, is #2566.
+  - **For developers.** `Kiln.SecurityNotices` (`url/0`, `fetch/1`,
+    `cached/0`, `checked_at/0`, `warm/0`) owns the feed, the cache and one
+    request in flight per node; it gates on no switch itself, so each caller
+    checks its own. The pure matcher is `Kiln.SecurityNotices.Core`
+    (`status/2`, `classify/2`), and `Kiln.Plugins.Health.Notice` gains
+    `patched`. `Kiln.Plugins.Health`'s `notices_url/0` is gone; use
+    `Kiln.SecurityNotices.url/0`. No migration, nothing stored; rolling the
+    pin back is safe.
+
+<a id="custom-field-range-index"></a>
+
+- **A site can index custom fields for range filters and `custom_sort`
+  (#2359, tier 2 of #2291).** For operators; editors and API consumers see
+  only speed.
+  - **How.** List the field names: `config :kiln_cms, :indexed_custom_fields,
+    ["price", "rating"]` (every content table), or per table,
+    `%{"entries" => ["price"]}`. Run `mix ash.codegen`: each name becomes two
+    expression btrees per table, `org_id` first, one `ASC NULLS LAST` and one
+    `DESC NULLS LAST`, built `CONCURRENTLY`. Apply the migration with
+    `mix ash.migrate`. The list is read at compile time, so it belongs in the
+    config of the build that runs codegen (an overlay's own `config/`). Core
+    lists nothing.
+  - **What it speeds up.** `custom_filter` `gt`/`gte`/`lt`/`lte` and
+    `custom_sort` (either direction, including the keyset page after the
+    first) on a listed field. `eq` and `in` keep using the GIN index of #2291.
+    `not_eq`, `ilike`, `contains`, `null`, `has_none` and `count` are not
+    indexed. For a listed name only, the query puts the field name in the SQL
+    as a literal: with a bound name Postgres can lose the index once it
+    switches to a generic plan. The name is checked against the config and a
+    strict pattern first, so it cannot carry SQL.
+  - **Which fields.** Integer, float, date and datetime. A string btree can
+    exceed the index row limit; a boolean index is nearly useless.
+    `mix kiln.custom_fields.index --check` reports a listed name with no
+    index, an invalid index (a failed concurrent build), an index no name asks
+    for, a name no field carries and an ineligible type. It is read-only and
+    exits non-zero on drift.
+  - **Cost.** Measured at 100,000 rows (see
+    [benchmarks](../benchmarks.md#range-and-sort-indexes-for-custom-fields)):
+    a range returning 1% falls from 17 ms to 0.6 ms and a sort with a limit
+    from 17 ms to 1.2 ms; each btree is about 36% of the table's heap; 100,000
+    inserts took 1.7x as long and 20,000 saves that leave the field alone 6x
+    as long with the GIN index and four btrees (two fields) as against the GIN
+    index alone. Index the fields you sort or range-filter on, not all of
+    them.
+  - **Upgrading.** Adding or removing a name is an additive migration (a
+    concurrent `CREATE INDEX` or a `DROP INDEX`); rolling back to the
+    previous release is safe, since it ignores the indexes. Until the
+    migration finishes, queries on the field answer correctly from the table.
+    Renaming a field is a drop and a create.
+
+<a id="refire-notify"></a>
+
+- **`mix kiln.refire_all --notify` re-fires every published document and
+  tells webhook receivers about each one (#2463).** A plain sweep is silent:
+  revalidating clients now see the new body (its `ETag` moves, [below](#render-etags)),
+  but a static build, an ISR page or a mirror that waits for a webhook never
+  heard that the markup changed after an upgrade.
+  - **What it sends:** for each document whose fire completes,
+    `<type>.updated` to every endpoint subscribed to it, with
+    `"reason": "refire"` in `data`, and the same `updated` on the public
+    change feed (which does not carry the reason). On a release:
+    `/app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run(notify: true)"`.
+  - **What it doesn't:** automation rules, federation and the CDN purge do
+    not run. A re-render is not an edit, and every published document at
+    once would run every "on updated" rule, announce the whole site to its
+    followers, and purge the CDN every few seconds for as long as the sweep
+    ran. Purge once when `KilnCMS.Firing.Sweep.pending/0` reaches `0`
+    (`KilnCMS.CDN.purge_site/1` per site, or the `kiln` surrogate key at
+    your CDN).
+  - **Volume:** one delivery per published document per endpoint, on the
+    `webhooks` queue your editors' publishes use too. A receiver that answers
+    `429` until deliveries run out of retries can trip auto-disable (10 in a
+    row by default). Run it off-peak. The walk-through is
+    [Re-render published content after an upgrade](../releasing.md#re-render-published-content-after-an-upgrade).
+  - **`reason` on other `updated`s:** `KilnCMS.Firing.refire/3` (#2048) now
+    marks its `updated` with `"reason": "refire"` too; it still reaches
+    automation, federation and the CDN purge as before. An edit's `updated`
+    carries no `reason` key, so its payload is unchanged. A receiver that
+    drops an `updated` whose `updated_at` it has already seen must not drop
+    one with a reason: the body changed and `updated_at` did not.
+  - The default sweep and `KilnCMS.Firing.Sweep.sweep_type/2` (an SEO
+    pattern change, #1135) stay silent. A publish made while the sweep's job
+    for that document is pending is merged into it, so that document also
+    gets an `updated` marked `refire` after its own event.
+  - `/api/sync` does not report a re-fire, because it reads `updated_at`;
+    a mirror picks the new body up on its next full resync (`initial=true`).
+
+<a id="twitter-card-tags"></a>
+
+- **Site admins can set the site's X (Twitter) username, and link previews
+  are built from one resolution: no empty tags, absolute images on the site's
+  own host, and the same values for Open Graph and X (#2258).** For site
+  admins, front-end developers and anyone sharing links.
+  - **X (Twitter) username.** A new field in **Delivery → Branding**,
+    **Identity** section (site admins only). It accepts `kilncms`, `@kilncms`
+    or an `x.com` / `twitter.com` profile URL (with `www.` or `mobile.`, a
+    trailing slash, and a `?s=21`-style query or fragment), stores
+    `@kilncms`, and refuses anything else, including X's own pages (`home`,
+    `i`, `explore`, `search`, `settings` and the like), with "must be an X
+    (Twitter) username like @kilncms". Pages then carry
+    `<meta name="twitter:site">`. It is per site only: there is no
+    environment variable or instance-wide default. A site that added
+    `twitter:site` under **Code injection** should remove it, or the tag
+    appears twice.
+  - **One resolution for both sets of tags.**
+    `KilnCMSWeb.Layouts.social_meta/1` feeds `og:title`/`twitter:title`,
+    `og:description`/`twitter:description`, `og:image`/`twitter:image`,
+    `twitter:card` and `twitter:site`. A tag with no value is left out, never
+    sent as `content=""`. The title falls back to the site name, so the stock
+    home page now has `og:title` and `twitter:title`. A blank page image falls
+    through to Branding's Default social image instead of an empty tag. The
+    card is `summary_large_image` when there is an image (the page's or the
+    site's), else `summary`.
+  - **Absolute images.** `og:image`, `twitter:image` and the JSON-LD `image`
+    are now always absolute on the site's own address (custom domain, else
+    subdomain, else `PUBLIC_BASE_URL`), including a page's own site-relative
+    Social image, which used to go out relative. `KilnCMSWeb.Tenant.absolute_url/2`
+    is the one place that decides this; a relative image with no site to
+    resolve it against is dropped.
+  - **No separate social override fields.** The SEO title, SEO description and
+    Social image are the overrides, so a search result and a link preview
+    never disagree about a page.
+  - **`social` on the `json` artifact.** `{"title", "description", "image"}`:
+    the effective SEO title (else the title; `null` only with no title), the
+    effective SEO description and the SEO image made absolute, the last two
+    omitted when there is none. The image's host is fixed when the document
+    is fired, so re-fire after changing a site's domain. It is per document
+    only: no card type, no `twitter:site` and no Branding fallback image,
+    because those belong to the site, and Branding is not on any API yet, so a
+    front end supplies its own handle and default image. `?fields=social`
+    returns it alone, and under an experiment `social.title` stays canonical.
+    `GET /api/schema` adds `social` as an optional property, and the
+    generated TypeScript, Swift and Kotlin models gain it. JSON:API, GraphQL,
+    MCP and webhook payloads are unchanged.
+  - **Not yet:** `twitter:creator`, and `og:image:alt` / `twitter:image:alt`
+    (the Social image stores no alt text).
+  - Guides: [Link previews](../seo.md#link-previews-open-graph-and-x-twitter-cards)
+    (with the how-to) and, for front ends,
+    [the `social` object](../headless-consumer-guide.md#link-previews-the-social-object).
 
 <a id="plugin-health-checks"></a>
 
@@ -2011,7 +2443,7 @@ carries the reasoning.
 - **Smart 404 blocking: an address that racks up delivery 404s, or probes bait paths such as `/wp-login.php`, is blocked for a while (#2253).**
   Off by default, so nothing changes until an operator sets `KILN_SCANNER_BLOCKING=1`. No migration; rolling the pin back is safe, and any automatic rules already written simply expire (they are ordinary `ip_block_rules` rows with an expiry).
   - **What trips it.** Delivery 404s from one address (an IPv6 `/64`) past `KILN_SCANNER_BLOCKING_THRESHOLD` (default 60) in `KILN_SCANNER_BLOCKING_WINDOW_MINUTES` (default 10), or past `KILN_SCANNER_BLOCKING_BAIT_THRESHOLD` (default 5) on a bait path. The window is fixed and clock-aligned, not sliding. The address then gets an `IpBlockRule` with the note "Automatic: scanner 404s" for `KILN_SCANNER_BLOCKING_BLOCK_MINUTES` (default 60), visible and removable on `/editor/ip-blocks`. Bait paths are config-only (`config :kiln_cms, :scanner_blocking, bait_paths: [...]`, replacing the built-in list), as is the cap of 300 automatic rules per site (`max_auto_rules`).
-  - **What never counts.** Non-`GET`/`HEAD` requests, signed-in visitors, browser-like requests (`Sec-Fetch-*` headers), private, loopback, link-local and CGNAT addresses and `TRUSTED_PROXIES` ranges, and a forwarded request while no proxy is trusted. A claimed crawler user agent skips the miss threshold but not bait paths (it is spoofable; there is no reverse DNS). A successful sign-in from the address in the last 24 hours prevents the block.
+  - **What never counts.** Non-`GET`/`HEAD` requests, signed-in visitors, browser-like requests (`Sec-Fetch-*` headers), private, loopback, link-local and CGNAT addresses and `TRUSTED_PROXIES` ranges, and a forwarded request while no proxy is trusted. A claimed search-engine user agent skips the miss threshold but not bait paths, unless DNS proves the claim false (#2254). A successful sign-in from the address in the last 24 hours prevents the block.
   - **Fails open and is not retried.** Counting runs off the request path; a dropped count or database error never changes the 404. A trip is claimed once per block window, so a trip skipped for the rule cap, a recent sign-in or a database error is not retried until the window rolls over. At the cap a new trip is skipped and logged.
   - **Security log, metric, policy.** A new security event type `ip_auto_blocked` ("Address blocked automatically") and a counter `kiln_cms.scanner_guard.blocked.count` (tag `reason`). The guard acts as a new `:scanner_guard` system actor that may only create an `IpBlockRule` and read recent sign-in events.
   - **If it blocks someone it should not,** the block ends by itself after the block time, or an admin selects **Remove** beside it on `/editor/ip-blocks`. Guide: [docs/ip-blocking.md](../ip-blocking.md#block-scanners-automatically); variables: [environment-variables.md](../environment-variables.md#smart-404-blocking-2253).
@@ -2050,8 +2482,9 @@ carries the reasoning.
     `org_setting_changed`. The setting is not on JSON:API, GraphQL or MCP.
   - **Not security.** The user agent is spoofable, so this is cost control: a
     higher ceiling for a class is a higher ceiling for anyone who claims it. That
-    is why search engines and AI crawlers default to 100%, not more. Higher
-    limits for verified crawlers belong to reverse-DNS verification (#2254).
+    is why search engines and AI crawlers default to 100%, not more. Since
+    #2254 a search-engine claim is checked by DNS, so a search-engine percentage
+    above 100 goes only to verified addresses.
   - **Never classified.** robots.txt, llms.txt, sitemaps, feeds and the health
     probes (`/up`, `/ready`, `/live`) are not on `:delivery`.
   - **Telemetry.** `[:kiln_cms, :delivery, :client_class]` with `class` and
@@ -2064,6 +2497,61 @@ carries the reasoning.
     (`GoogleOther`, `AdsBot-Google`) count as browsers, and `SeznamBot` and
     `Qwantbot` count as declared bots.
   - Guide: [bot-budgets.md](../bot-budgets.md).
+
+<a id="verified-search-bots"></a>
+
+- **A request claiming to be a search engine is checked against DNS, and a
+  claim proven false is charged as no user agent (60 requests a minute by
+  default) instead of the search-engine budget (#2254).** A user agent naming
+  Googlebot, bingbot, Applebot, YandexBot or Baiduspider used to buy the
+  search-engine ceiling for anyone who typed it.
+  - **The check.** `KilnCMS.CrawlerVerification` looks up the address's PTR
+    name, requires it to be under the engine's published domain (Google
+    `googlebot.com`; Bing `search.msn.com`; Apple `applebot.apple.com`; Yandex
+    `yandex.ru`, `yandex.net`, `yandex.com`; Baidu `baidu.com`, `baidu.jp`),
+    matched on a label boundary, and requires that name's A or AAAA lookup to
+    contain the address. Google's `google.com` and `googleusercontent.com` names
+    are not accepted: they are not its common crawlers, and
+    `googleusercontent.com` is any Google Cloud customer. DuckDuckBot publishes
+    only IP ranges and cannot be checked.
+  - **Only a proven failure costs anything.** No PTR record, a name outside the
+    engine's domain, or a forward mismatch is charged as `empty`. A claim not
+    proven either way (the lookup is running or could not start, DNS timed out
+    or failed, DuckDuckBot, a private or trusted-proxy address, an untrusted
+    forwarding header) keeps the search-engine class, held to the `:delivery`
+    limit (`KilnCMS.BotBudgets.unverified_search_limit/0`). With the shipped
+    defaults that is the same 300 a minute as before; a
+    `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT` above 100 is now spent only on
+    verified addresses. Higher defaults for verified crawlers are not part of
+    this change.
+  - **Never on the request path.** A lookup starts in the background and the
+    request is judged without it; later requests from that address are judged
+    by the result. Cached per node, per address: 6 h verified, 1 h proven
+    false, 5 min after a DNS error. At most 3 queries per lookup, a 3-second
+    deadline, 16 lookups at a time per node with none queued, and new lookups
+    rate limited per network (IPv4 `/24` 30 and `/16` 120 a minute, IPv6 `/64`
+    30, `/48` 60, `/32` 120) and per node (600). A verifier that is busy,
+    rate limited or restarting answers "not proven", never an error.
+  - **Off switch.** `KILN_CRAWLER_VERIFICATION=false` believes every claim, as
+    before. **Sign-in & access → Bot budgets** then says so under **Search
+    engines (%)**; the class hints now say a claim proven false counts as No
+    user agent.
+  - **Telemetry.** `kiln_cms.delivery.unverified_crawler.count` (`engine`,
+    `reason`), `kiln_cms.crawler_verification.lookup.count` (`engine`,
+    `result`), `kiln_cms.crawler_verification.lookup.duration` (ms, `result`)
+    and `kiln_cms.crawler_verification.skipped.count` (`reason`). No address,
+    hostname, user agent or org in any of them. Two warnings, once per node:
+    the first lookup the concurrency limit turns away, and 20 lookups in a row
+    with no DNS answer (naming `KILN_CRAWLER_VERIFICATION=false`).
+  - **Known limits.** A silent or slow reverse zone the attacker controls holds
+    a lookup slot until the deadline, and its claim is never proven false (so
+    it keeps the 404 guard's exemption, as every claim did before). Many
+    addresses can spend the lookup budgets or churn the cache so new real
+    crawlers stay unverified for longer, which matters only when the search
+    value is above 100%. No IP-range verification yet.
+  - Guide: [Verified search engines](../bot-budgets.md#verified-search-engines).
+    Variable: [environment-variables.md](../environment-variables.md#bot-budgets-2243).
+    Metrics: [observability.md](../observability.md#crawler-verification).
 
 <a id="team-invitations"></a>
 
@@ -3063,6 +3551,49 @@ carries the reasoning.
 
 ## Changed
 
+<a id="custom-field-range-index-changed"></a>
+
+- **Custom-field range filters read a stored JSON `null`, array or object as
+  no value (#2359).** `custom_filter[price][gt]=0` used to match a record
+  whose `price` was `[1]` or `{"a": 1}`, because jsonb orders arrays and
+  objects above every number. It now matches only numbers (strings for a
+  text-like value, as before), the same reading `custom_sort` has always had.
+  The change applies to every field, indexed or not, so the same request
+  returns the same rows whatever a site has configured. A record only holds
+  such a value if its field was retyped after the record was written.
+
+<a id="scanner-guard-exemption-narrowed"></a>
+
+- **The smart 404 guard exempts only search engines from its miss threshold,
+  and only until DNS proves the claim false; link-preview fetchers and Slurp
+  are no longer exempt (#2254).** Since #2253 a user agent containing
+  Googlebot, Bingbot, DuckDuckBot, Applebot, YandexBot, Baiduspider, Slurp,
+  facebookexternalhit, Twitterbot or LinkedInBot skipped the miss threshold.
+  - **With crawler verification on** (the default), the exemption follows
+    `KilnCMS.BotClass.search_engine/1` (which also covers
+    `Google-InspectionTool`, and not a user agent that names an AI crawler too)
+    and holds unless `KilnCMS.CrawlerVerification` has proven the claim false.
+    A claim still being checked, skipped or unanswered keeps it, so a real
+    crawler's first misses from a new address never count. DuckDuckBot cannot
+    be checked and stays exempt.
+  - **With `KILN_CRAWLER_VERIFICATION=false`**, the six search-engine names in
+    the user agent are enough, as before.
+  - **In both modes** `Slurp`, `facebookexternalhit`, `Twitterbot` and
+    `LinkedInBot` count like any other client: anyone can claim them, and none
+    can be checked by DNS. Bait paths count for everyone, as before. See the
+    [upgrade note](#verified-search-bots-upgrade) and
+    [ip-blocking.md](../ip-blocking.md#block-scanners-automatically).
+
+<a id="client-class-is-charged-class"></a>
+
+- **`kiln_cms_delivery_client_class_count`'s `class` tag is now the class a
+  request was charged as, so `class="empty"` includes search-engine claims
+  proven false by DNS (#2254).** Before, it was always the class the user agent
+  claimed. A claim not proven either way still counts as `search_engine`.
+  Split the proven spoofs out with
+  `kiln_cms_delivery_unverified_crawler_count{reason="failed"}`; see
+  [observability.md](../observability.md#crawler-verification).
+
 <a id="trashed-row-update-actions-refuse"></a>
 
 - **Every update action on a content resource refuses a trashed row,
@@ -3077,9 +3608,12 @@ carries the reasoning.
   fired, no webhook, no job enqueued.
   - **Exempt** (`KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0`):
     `:restore`, which now requires the opposite (the row must still be
-    trashed), and `:clear_reference_target`, which a purge runs on every
-    referrer, trashed ones included. `:destroy` now also refuses a row that
-    is already trashed.
+    trashed); `:clear_reference_target`, which a purge runs on every
+    referrer, trashed ones included; and `:convert_custom_field` and
+    `:resnapshot_media`, which `mix kiln.fields.convert` and
+    `mix kiln.media.resnapshot` run on trashed rows too
+    ([below](#contract-backfills-reach-trash)). `:destroy` now also refuses a
+    row that is already trashed.
   - **Overlays.** An update action you defined on a content resource that
     writes trashed rows on purpose now fails with `StaleRecord`. There is no
     opt-out today; if you need one, open an issue. Code that writes
@@ -3652,6 +4186,450 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="contract-backfills-reach-trash"></a>
+
+- **`mix kiln.fields.convert` and `mix kiln.media.resnapshot` now also
+  process documents in the trash, so a document restored after a contract
+  release has the new field shape and current media snapshots (#2533).**
+  Both read only live records, and since #2332 their writes were refused on
+  a trashed row anyway. A document trashed before a conversion and restored
+  after the release that deleted the source field came back without its
+  values; one restored after a media shape change came back with the old
+  snapshot.
+  - **What changed.** Each task reads the live records, then the trashed
+    ones (`ContentTypes.list_trashed!/2`), and their actions
+    (`:convert_custom_field`, `:resnapshot_media`) are now exempt from
+    `KilnCMS.CMS.Changes.RefuseTrashed`. A trashed record's write fires no
+    artifact: its artifacts were removed when it was trashed, and a restore
+    rebuilds them. The check is made on the row the `UPDATE` returned
+    (`KilnCMS.CMS.Changes.FireArtifacts`, new option `skip_trashed: true`),
+    so a record restored between the task's read and its write is still
+    fired with the new shape.
+  - **Field conversion.** All or nothing now applies to live records only.
+    A trashed record that cannot be converted is listed with `(trashed)`
+    after its id, keeps its string and does not block `--apply`; the
+    `invalid record(s); nothing written` error counts only live ones. The
+    summary line reads `(N published, N trashed)`: `published` no longer
+    includes trashed records, and the new `trashed` count is the trashed
+    records converted (or, on a dry run, that would be). Each problem in the
+    report (and `--report` JSON) gains `trashed?`. For a multiple select
+    target, `terms` and `new_terms` include the terms of trashed records,
+    since a restored record needs its terms in the options too. New
+    `KilnCMS.CMS.FieldConversion.blocking/1` returns the problems that stop
+    `--apply`.
+  - **Media resnapshot.** The report gains `trashed` (trashed records
+    re-snapshotted, or that would be) and `trashed_failed`. A trashed record
+    that fails, often because it names an item deleted since, is printed
+    with `(trashed)` and does not fail the task. The summary reads
+    `re-snapshotted N (N trashed)`.
+  - **Operators.** The live and trashed records are two reads, so a record
+    trashed or restored during a run can be missed by both. Run either task
+    once more right before the release that relies on it; records already
+    converted or current are not rewritten. No migration, no config.
+  - **Not covered.** The daily refresh of computed fields
+    (`:refresh_computed`) and `mix kiln.occurrences.backfill` still skip
+    trashed records.
+
+<a id="field-lock-release-mid-flush"></a>
+
+- **Field locks: a field released while a takeover waits on its holder's
+  save is never left free (#2557).** In collaborative editing a takeover
+  asks the holder to save, then hands the field over. If the holder clicked
+  out of the field meanwhile, the field went free: a third editor who
+  focused it was given it, and when the takeover's wait ran out it was taken
+  from them without asking them to save, so what they had typed was lost.
+  - **A click-away during a takeover waits for the save.** The holder keeps
+    the field (others are told it is held) until their save answers or the
+    wait runs out, then it goes to the taker. The holder is not told it was
+    "taken" from them. Clicking back in cancels the click-away.
+  - **Where no save can come, the hand-over is immediate:** an idle or
+    closed-tab timeout, or the holder leaving the editor.
+  - **Only the field's current holder can answer "saved"** (`KilnCMS.Collab.FieldLock.flushed/3`
+    takes the holder's pid, defaulting to the caller), so a late answer from
+    an earlier holder cannot hand over the next holder's field unsaved.
+  - A taker who has left is handed nothing, and leaving the editor withdraws
+    your own waiting takeovers, so a field is never locked to a closed tab.
+  - No migration or configuration. Collaborative editing is off by default.
+
+<a id="restore-refuses-stale-copy"></a>
+
+- **Restoring a version from a copy of the document that someone has since
+  changed is now refused, instead of reporting success and writing nothing or
+  skipping the publish-time checks (#2532).** `:restore_version` writes the
+  old version's values onto the record the caller holds and judges that
+  record: its workflow state decides whether the compliance-claim and
+  alt-text gates run, and Ash drops any value equal to it. A copy read before
+  a later save therefore restored nothing whenever the old version matched
+  the copy (the editor still said *Restored that version.*), and a draft copy
+  held across a publish put the old text on the live page without the gates
+  a published page gets.
+  - **What changed.** The restore now matches only a row whose
+    `lock_version` and `state` are still those of the copy it was given
+    (`state` too, because publish, unpublish, archive and unarchive keep
+    `lock_version`). Anything else is refused with
+    `Ash.Error.Changes.StaleRecord` and writes nothing, not even a version
+    row. A document moved to the trash meanwhile is refused the same way.
+  - **Editors.** Confirming *Restore this version* after someone else saved
+    the page shows the conflict banner a stale save shows: *Someone else saved
+    changes to this content. Saving is paused so you don't overwrite their
+    work.*, with **Reload latest**. Your unsaved text stays in the form until
+    you reload. If the page was trashed meanwhile, the banner says so and
+    offers **Back to content**.
+  - **API.** `POST /api/content/:type/:id/revisions/:version_id/restore`
+    answers `409` `invalid_state_transition` when a save lands between the
+    route's read and its restore (before: success that might write nothing,
+    or `422` `restore_failed`), and `404` `not_found` when the document was
+    trashed meanwhile (before: `422`). A credential the content policies
+    refuse still gets `403`. On a `409`, read the document again and retry;
+    `kiln_client` and the JS client already map `409` to their conflict
+    error. Guide: [api.md](../api.md#version-history-revisions).
+  - **Still not covered.** Writes that keep both `lock_version` and `state`
+    do not make a held copy stale: the computed-field refresh, field
+    conversion, `:resnapshot_media`, `:set_oembed_metadata`, `:move` and
+    `:reassign_author`. None of them changes the state, slug or text the
+    restore judges.
+  - No migration and no config. Overlay code that restores from a record
+    read before a later write must read it again first
+    ([Breaking](#restore-version-stale-struct)).
+
+<a id="restore-bumps-lock-version"></a>
+
+- **A save from a tab opened before a version restore no longer silently
+  undoes the restore (#2532).** A restore left `lock_version` alone, so the
+  other tab's copy still passed the optimistic lock and its save wrote the
+  pre-restore text back over the restored one without a conflict. A restore
+  now increments `lock_version`, so that save is refused as stale and the
+  other tab shows the conflict banner with **Reload latest**. No migration
+  and no config.
+
+<a id="purge-refuses-restored-rows"></a>
+
+- **A permanent delete no longer removes a record someone restored after the
+  Trash page loaded (#2531).** The trash is a soft delete, and the content
+  and media `:purge` actions were left outside its read filter so they could
+  reach trashed rows. They did not check that the row was still trashed,
+  though, so the Trash page (or the media library's trash view) acted on the
+  row it had listed, whatever had happened to it since. If another admin
+  restored a document and someone then clicked **Delete permanently** on the
+  stale row, the live document was hard-deleted: its pages and artifacts were
+  left in place, and no `deleted` webhook went out. A media file was deleted
+  along with its stored original, variants and cached transforms.
+  - **What changed.** Content `:purge` (every type built on
+    `KilnCMS.CMS.Content`, overlays' included) now deletes only a row whose
+    `archived_at` is set, the mirror of the check `:restore` gained in
+    #2528. `KilnCMS.CMS.MediaItem`'s `:purge` deletes a trashed item or a
+    quarantined one; the second keeps the media pipeline's purge of an upload
+    it refused or that never finished processing (#1659) working. Anything
+    else is refused with an `Ash.Error.Invalid` holding an
+    `Ash.Error.Changes.StaleRecord`, and the purge's hooks roll back with it.
+    The media library deletes stored files only after the purge succeeds, so
+    a refused one leaves them.
+  - **Editors and admins.** On the Trash page, **Restore** or **Delete
+    permanently** on an item another admin restored says *Someone else
+    already restored that item.*; on one someone permanently deleted it says
+    *That item is no longer in the trash — someone permanently deleted it.*
+    Either way the list reloads without the row, so the next click can't
+    fail the same way. Before this, a second restore said *Couldn't restore
+    that item.* and the row stayed listed, failing on every retry. Other
+    refusals keep *Couldn't restore that item.* / *Couldn't delete that
+    item.* and the row. **Empty trash** counts a row that left the trash
+    while it ran as neither deleted nor skipped. In the media library's trash,
+    **Delete permanently** on a file someone restored says *That item is no
+    longer in the trash — someone else restored or deleted it.*
+  - **Restore with a unique field.** Restore on the Trash page now acts on
+    the full row rather than on the narrow one the list reads. The
+    unique-field re-check on restore (#2276) reads `custom_fields`, which the
+    list leaves out, so restoring a document of a type with a `unique` custom
+    field failed there; it now restores, or says *Couldn't restore that
+    item.* when another document holds the value.
+  - **Developers.** Code that calls `purge_<type>` or `purge_media_item` on a
+    record that is not in the trash now gets the `StaleRecord` error. Trash
+    it first (`destroy_<type>`), then purge. The nightly purge reads only
+    trashed rows and is unaffected. New
+    `KilnCMS.CMS.ContentTypes.can_restore?/4` and `can_purge?/4` ask the
+    `:restore` and `:purge` policies for one record. The API never exposes
+    `:purge`, so no API response changes. No migration and no config.
+    Guide: [Trash and restore](../trash.md#delete-permanently).
+
+<a id="unconfirmed-applicant-confirm-first"></a>
+
+- **An applicant whose registration waits for approval and who hasn't
+  confirmed their address is now told on `/account` to confirm it first, and
+  how (#2516).** An administrator can't approve an unconfirmed address, and
+  nothing told the applicant that, so they could wait for an approval that
+  could never come. Under "Waiting for approval on (site)", **Your account**
+  now adds "Confirm your email address first: an administrator can't approve
+  your registration until you do.", a **Reset your password to confirm it.**
+  link to `/reset`, and "Or use the link in the confirmation email we sent,
+  if it's still valid." The reset comes first because it always works: every
+  unconfirmed account signed up with a password, and finishing a reset
+  confirms the address. The confirmation link lasts 3 days and can't be sent
+  again. A confirmed applicant, or an unconfirmed account with no waiting
+  registration, sees no change.
+
+  A magic-link sign-in does not confirm an address, and never did. The
+  confirmation settings on `User` listed `:sign_in_with_magic_link` among the
+  actions that confirm, but with magic-link registration off that action is
+  a read, and confirmation runs only on a create or an update, so the entry
+  did nothing. It is removed, so the code no longer claims otherwise. Behavior
+  is unchanged: the confirmation link, a password reset, single sign-on and
+  site single sign-on registration, accepting an invitation, and the
+  first-run admin still confirm. Confirming on a magic-link sign-in has to
+  settle what happens to credentials an earlier registrant of the address
+  set up (forgetting them would also delete a genuine registrant's own
+  password), so it is left to #2594.
+
+  No migration and no setting; rolling back is safe.
+
+<a id="unknown-atom-values-load"></a>
+
+- **A security event type or notification event a newer release wrote no
+  longer breaks the release reading it (#2509).** `Security.Event.type` and
+  `Notification.event` were plain `:atom` columns, and Ash loads one with
+  `String.to_existing_atom/1`: a stored value the running release did not
+  know failed the whole read, not just its row. During a rolling deploy, or
+  after a rollback, one such row took down the security log page, its CSV
+  export, `Security.anonymize_actor/1` (and so account erasure), the
+  notification bell, the inbox and "mark all read".
+
+  Both columns are now `KilnCMS.Types.KnownAtom`, which loads a value outside
+  the column's `one_of` as `%KilnCMS.Types.UnknownAtom{value: "the_name"}`
+  and never creates an atom from database text. What readers do with it:
+  - **Security log:** the row shows as "Unrecognized event (name)" in a
+    neutral badge; the CSV export carries the raw name in `type`; filtering
+    by a known type excludes it; erasure still scrubs its actor, IP address,
+    user agent and metadata, and the retention prune still deletes it.
+  - **Notifications:** the row shows the generic "Notification" headline and
+    links to `/editor/inbox`; marking it read or unread works.
+
+  Writes stay strict: recording or notifying with a value outside the list is
+  refused, an `UnknownAtom` included. No migration: the storage is still text.
+  This protects only from this release on. A release that predates it still
+  fails on a newer value, which is why a column has to switch to `KnownAtom`
+  at least one release before it gains a value
+  ([New values in an atom column](../releasing.md#new-values-in-an-atom-column)),
+  and why rolling back to v1.8.0 needs the
+  [one-time cleanup](#rollback-to-1-8-0-upgrade). `ApiKey.access` is still
+  a plain `:atom` column
+  ([#2604](https://github.com/The-Verscienta/kiln_cms/issues/2604)).
+
+<a id="generation-tokens-survive-clears"></a>
+
+- **Clearing or evicting the delivery cache no longer moves a site's
+  `<head>` and menus generation tokens back, so a browser holding an old page
+  is no longer answered `304` with a stale `<head>` or navigation (#2502).**
+  A page's `ETag` folds the site's head-generation token, and cached menu
+  trees are keyed on its menus-generation token; a save of branding, code
+  injection, feed settings or a menu draws a new one of each on every node.
+  Both tokens lived in the delivery cache and fell back to `"0"` when absent,
+  so anything that emptied it put every site back on `"0"`, the token its
+  pages carried before the first such save on that node. A browser revalidating
+  a page from then got `304 Not Modified` and kept the `<head>` (feed links,
+  branding, injected code) and navigation the save had replaced. These
+  emptied it:
+  - editing a media item, a bulk media action and a portability import,
+    which drop every published record because any page may reference an
+    asset, and promoting a dynamic content type to a compiled one
+    (`mix kiln.promote_data`);
+  - the **Flush delivery cache** button on System, `mix kiln.cache.flush` and
+    `KilnCMS.Cache.flush_delivery/0`;
+  - the delivery cache's 10,000-entry cap, whose least-recently-written
+    eviction reached the rarely written token keys first.
+
+  The tokens now live in a Cachex instance of their own
+  (`KilnCMS.Cache.generation_cache_name/0`) with no size cap, which no clear
+  or flush touches. Each site's last-known admin allowlist moves there too,
+  so the copy that stops a late read from moving the allowlist backwards
+  survives a clear: a site last seen with the allowlist off still stays off
+  through a database outage after a media edit or a flush (the copy keeps its
+  24-hour expiry).
+
+  **What changes for operators.**
+  - A site whose settings and menus have not been saved since a node started
+    no longer carries `"0"`: the node draws a random token on first read. On
+    a cluster without sticky sessions, two nodes can therefore tag the same
+    page differently until the site's next save, which costs a `200` where a
+    `304` would have done, never a stale `304`. A restart also moves a site's
+    page `ETag`s, as a deploy already did (#2463).
+  - Rolling deploys keep bumps cluster-wide in both directions: tokens still
+    travel as the message the previous release sends and understands, and
+    each node files the keys into the right store on arrival.
+  - No migration and no configuration. Rolling the pin back is safe; it
+    brings back the old behavior.
+
+  **For overlay and plugin authors.** The keys keep their names
+  (`head_generation:<org_id>`, `menus_generation:<org_id>`,
+  `admin_allowlist:last_known:<org_id>`) but are no longer in
+  `KilnCMS.Cache.cache_name/0`. Code that read them from that instance with
+  Cachex directly now sees nothing; call `KilnCMS.Cache.head_generation/1` and
+  `KilnCMS.Cache.menus_generation/1` instead. `KilnCMS.Cache.peek/1` and
+  `KilnCMS.Cache.put/3` route these keys to the right store.
+
+<a id="refusal-wording-names-the-reason"></a>
+
+- **A refused workflow action now names the reason it was refused, instead
+  of saying "Only an admin can …" to people for whom that is not the reason
+  (#2473).** A refusal carries no record of which rule refused it, so before,
+  every refused publish said "Only an admin can publish. Submit the draft for
+  review instead." and every refused return "Only an admin can return content
+  to draft.", whoever was refused and on whichever site. The sentence is now
+  chosen from the actor's effective tier on the site (a live temporary grant
+  counts), their content-type scope, and the site's **Team → Publishing**
+  switch, read at the moment of the refusal, in this order:
+  1. An admin or a viewer sees "You don't have permission to do that."
+  2. An editor refused **Return to draft** sees "Only an admin can return
+     content to draft.", whatever the switch and whatever their scope:
+     returning is an admin's step.
+  3. An editor whose **Content types they may edit** (on **Team**) leave this
+     type out sees "You can't edit this content type." for a publish,
+     unpublish, archive, submit, unarchive, publish changes or mark reviewed,
+     whatever the switch, since letting editors publish would not have
+     helped them. Never for the trash: that is admin-only, so a wider scope
+     would not help either.
+  4. An editor on a site where only admins publish, refused a publish,
+     unpublish or archive, sees "Only an admin can publish. Submit the draft
+     for review instead.", "Only an admin can unpublish content on this
+     site." or "Only an admin can archive content on this site." On the
+     calendar the same editor sees "Only an admin can move a publish date on
+     this site." or "Only an admin can move the unpublish date of a live page
+     on this site."
+  5. Anyone else (an editor where editors may publish, or refused the trash
+     or another action the switch does not govern) sees "You don't have
+     permission to do that."
+  - **Calendar.** Dragging a chip whose record was trashed, or fell outside
+    what you may read, since the calendar loaded now says "That item is no
+    longer on the calendar — reload to see why." Before it showed the raw
+    error, or (unreleased) an admin sentence.
+  - **Bulk bar.** A refused bulk verb on the content list is judged on the
+    tier and the switch alone, because a selection can span content types.
+  - **Developers.** `KilnCMSWeb.WorkflowMessages.error/3` and `forbidden/2`
+    take a context (`actor:`, `org:`, and `resource:` as a record or
+    resource module); `error/2` and `forbidden/1` are gone. `refusal/2`
+    returns `:out_of_scope`, `:needs_publisher`, `:needs_admin` or
+    `:not_permitted`, and `refusal_message/2` turns that decision and the
+    action into the sentence, so a caller with its own wording for one case
+    (the calendar) decides once and falls back to the shared copy for the
+    rest. No policy changed: the same people are refused as before.
+
+<a id="block-strings-follow-page-locale"></a>
+
+- **The text Kiln writes into a content page's article is in the page's
+  language, and a form or newsletter sign-up on the page answers in it
+  (#2465).** A page can be served in a language other than the visitor's: a
+  French reader sent to an English page with no French translation gets the
+  English one, with `<html lang="en">` and `Content-Language: en`. The
+  article's blocks were built in English, but Kiln's own strings in them were
+  rendered in the request's language, so the page mixed the two: an English
+  sign-up heading over French **Nom** and **E-mail** fields.
+  - **Inside the article** now follows the page: the byline and its date, a
+    form block's labels, hints and error messages, a newsletter sign-up's
+    fields, the human-verification widget, and an untitled embed's title. The
+    embed title is also translated in fired `web` artifacts, which render in
+    the document's locale.
+  - **The chrome around the article** (header, search, language switcher,
+    footer) still follows the request. Whether it should follow the page is
+    an open decision, tracked with a related caching problem in
+    [#2595](https://github.com/The-Verscienta/kiln_cms/issues/2595).
+  - **Submit paths change on multilingual sites only.** A form block on a
+    content page posts to `/<locale>/forms/<slug>` and a sign-up block to
+    `/<locale>/newsletter/subscribe`, in the page's language with the default
+    language included (`/en/…`): an unprefixed post takes its language from
+    the visitor's session. A refused form submission re-renders, and the
+    thank-you or "check your inbox" page answers, in the page's language. The
+    form embed served at `/fr/forms/<slug>/embed` now posts to
+    `/fr/forms/<slug>`, and the form's own page under any language prefix,
+    the default's included, posts back under it. Single-language sites,
+    editor previews and fired `web` artifacts keep the bare `/forms/<slug>`
+    and `/newsletter/subscribe`, as do the sign-up `action` in the `json`
+    artifact and `submit_url` in `GET /api/forms/<slug>`. A theme
+    stylesheet, script or analytics rule that selects these forms by `action` should select
+    `.kiln-form` or `.kiln-newsletter-signup` instead.
+  - **Not covered yet:** a plugin block with its own Gettext backend still
+    renders in the request's language; the locked-page and members-only
+    teaser pages; a locale attribute on the `embed.js` snippet; and the
+    language of the newsletter confirmation email.
+
+<a id="render-etags"></a>
+
+- **A change to rendered output that came without an edit no longer leaves
+  revalidating clients on the old copy (#2463).** Two validators named the
+  content but not what rendered it:
+  - **Fired artifacts** (`/api/content/:type/:slug`) were tagged with the
+    document's id, locale, surface and `updated_at`. A re-fire rewrites the
+    stored body without moving `updated_at`: `mix kiln.refire_all` after an
+    upgrade that changed markup, or `KilnCMS.Firing.refire/3`. A CDN or app
+    holding the old body went on getting `304`. The `ETag` is now a digest
+    of the body served, as `?fields=` responses already had, so it moves
+    exactly when the bytes do. `?expand=` responses are digested with their
+    expansion, and `surface=llm` by its Markdown. `Last-Modified` stays the
+    last edit: Kiln itself answers `304` only on `If-None-Match`, but a cache
+    in between that revalidates with `If-Modified-Since` alone can still keep
+    a re-rendered body until it expires.
+  - **Pages Kiln renders itself** are rendered on every request, but their
+    `ETag` named only the record and the site's settings, so a deploy that
+    changed a template or a block renderer kept answering `304`. It now also
+    names the build (`KilnCMSWeb.BuildFingerprint`): the code of Kiln and of
+    any overlay or plugin (each module's MD5, which ignores build paths and
+    times), the version of every application they depend on, and the asset
+    manifest when `mix phx.digest` wrote one. Every node of one release
+    image computes the same value, and rebuilding unchanged source keeps it.
+    A markup change made only by runtime configuration (an environment
+    variable) is not covered.
+  - The firing cache now stores each body as a JSON round trip gives it back
+    (string keys, no structs), so a body cached straight from a fire and the
+    same body read back from the table digest to the same `ETag`.
+
+<a id="invitation-raises-lower-membership"></a>
+
+- **Accepting an invitation raises a lower membership on the site to the
+  invited tier, and says so; a later tier change or removal retires the
+  pending invitation (#2452).** Before, an invitee who was already a member
+  (they signed in through the site's own single sign-on first, or registered
+  and were approved) kept their lower tier, the invitation was used up, and
+  the page said "You've joined (site)" as if it had worked. Now:
+  - **Lower than invited:** the membership takes the invited tier, and the
+    invitation's custom role when it names one. Audiences, content type
+    scopes, field grants, and a custom role the invitation doesn't replace
+    are kept. The security log records *Role granted* with `previous_role`
+    and no person, and the member's sessions are signed out after the commit
+    so their next request runs with the new tier. A temporary role at or
+    below the new tier is cleared.
+  - **The invited tier or higher:** nothing changes; an invitation never
+    lowers anyone. The flash reads "You're already a member of (site) as
+    (tier); nothing changed." (or, on the password path, "Your account is
+    ready. You were already a member of (site) as (tier), and that is
+    unchanged."). A raise reads "You're now (tier) on (site) — sign in to
+    continue."
+  - The comparison is with the member's standing tier, made on the
+    membership row as locked by the accept, so a site admin's edit between
+    loading the page and clicking is what counts. A temporary role is not
+    compared.
+  - **Retiring:** `OrgMembership` `:update` (when it changes `role` or
+    `role_id`) and `:destroy` delete the pending invitation for the member's
+    address on the membership's own site, so a member you demote cannot use
+    an older link to raise themselves back. The security log records the
+    retirement as *Invitation revoked* (`invitation_revoked`, metadata
+    `role`), with the admin who made the membership change as the person.
+    Editing only audiences or type scopes, or a temporary role, leaves it
+    alone.
+  - A `:viewer` or `:editor` invitation whose sender has since lost the admin
+    role still raises, as it already created a membership; an `:admin`
+    invitation still needs a standing admin sender.
+
+  For code: `OrgMembership` gains the system-only action
+  `:raise_role_by_invitation` (code interface
+  `Accounts.raise_membership_role_by_invitation`), admitted for
+  `SystemActor.new(:invitations)` and a platform admin, and `Invitation`
+  gains the destroy action `:retire`, admitted for
+  `SystemActor.new(:invitations)` only (declared above the platform-admin
+  bypass; an admin withdraws an invitation with `:revoke`).
+  `Invitations.grant_membership/4` now returns
+  `{:ok, %{outcome: :joined | :raised | :already_member, membership: membership}}`
+  instead of `{:ok, membership}` or `{:ok, :already_member}`, and
+  `Invitation` `:accept_existing` returns `%{outcome: ..., role: tier}`
+  instead of `:accepted`. Both are system-only; only the invitation page
+  calls them. See [Account administration](../account-administration.md#if-the-invitee-is-already-a-member).
+
 <a id="field-lock-stale-timers"></a>
 
 - **A field lock's timeout that fires in the same instant it is reset no
@@ -4141,7 +5119,99 @@ carries the reasoning.
   - **Not covered.** Code inside a plugin block's `:web` output, and wide
     tables, which have the same problem (#2464).
 
+<a id="scrollable-tables"></a>
+
+- **A table wider than the column can now be reached and scrolled from the
+  keyboard (#2464).** A table scrolls sideways inside its `.kiln-table-wrap`,
+  and a scroll container with nothing focusable in it can only be scrolled
+  with a mouse or touch, so a keyboard user could not reach the columns past
+  the edge of the screen (axe's `scrollable-region-focusable`, WCAG 2.1.1).
+  Every table wrapper in a rich-text block now renders as
+  `<div class="kiln-table-wrap" tabindex="0" role="group" aria-label="Scrollable table">`.
+  Tab stops on it, the arrow keys scroll it, and a screen reader announces
+  "Scrollable table" before the table itself. Whether a table overflows
+  depends on the reader's screen, which the server cannot know, so every
+  table is focusable, not only the wide ones. This is the code-block fix
+  ([#2164](#focusable-code-blocks)) applied to tables, by
+  `KilnCMS.ScrollableTables.focusable/2`.
+  - **Old `legacy_html` tables get a wrapper.** A table stored as HTML (the
+    old TipTap shape, and imported prose) had no scroll wrapper at all, so a
+    wide one pushed past the column. A top-level `<table>` there is now
+    wrapped in the same focusable `.kiln-table-wrap` and scrolls inside it. A
+    table nested in another table's cell scrolls with its parent and is left
+    alone. Prose whose table tags don't balance is left as it was.
+  - **Where.** The same place as the code-block attributes, at the end of the
+    rich-text block's `:web` render: public pages, editor previews, fired
+    `:web` artifacts, and through them feeds, newsletter email and the static
+    export.
+  - **Label language.** "Scrollable table" is translated (French "Tableau
+    défilant", Spanish "Tabla desplazable") and follows the content's locale
+    the way the code-block label does, including on a cached second hit and
+    in a fired artifact.
+  - **Focus ring.** `.kiln-table-wrap[tabindex="0"]:focus-visible` draws a
+    2px solid `--color-primary-ink` outline, drawn 2px outside the wrapper
+    (`outline-offset: 2px`). Unlike the code block's ring it is not inset: on
+    the inside it would sit on the cells' `base-300` borders and the header's
+    `base-200` fill; outside, it sits on the page background, where the ink
+    shade clears the 3:1 of WCAG 1.4.11 in both themes. A site's custom CSS
+    should leave it in place
+    ([Keep the focus rings](../public-theming.md#keep-the-focus-rings-on-code-blocks-and-tables)).
+  - **Authors cannot set or remove them.** The rich-text sanitizer keeps only
+    `class="kiln-table-wrap"` on that `div` and no attribute on a `<table>`,
+    so a pasted `tabindex="-1"` cannot take a table out of the Tab order; the
+    attributes are added after it. A `div` an author gives the class without a
+    table directly inside is not made focusable. The editor's own copy of the
+    prose, `KilnCMS.Blocks.PortableText.to_html/1`, and the `:json` artifact
+    are unchanged.
+  - **Headless consumers.** The `:web` artifact's HTML gains the three
+    attributes on every table wrapper, and a `legacy_html` table that used to
+    arrive bare now arrives inside a `div.kiln-table-wrap`. A stylesheet that
+    targets a table as a direct child (`.kiln-block > table`) no longer
+    matches it there; `.kiln-block table` still does. `format_version` is
+    unchanged, so an artifact fired before the upgrade keeps the old markup
+    until it is re-fired ([upgrade note](#scrollable-tables-upgrade)). The
+    `:json` artifact stays plain
+    ([Tables in rendered HTML](../headless-consumer-guide.md#tables-in-rendered-html)).
+  - **Not covered.** The gallery block's carousel scrolls sideways with
+    nothing focusable in it and has the same problem (#2590). Tables in a
+    plugin block's own `:web` output carry whatever the plugin renders.
+
 ## Security
+
+<a id="invitation-takeover-credentials"></a>
+
+- **Accepting an invitation over an unconfirmed account now removes every credential the first registrant could have set up, not just their password and sessions (#2453).**
+  Anyone can register an unconfirmed account for any address, sign in with
+  the password they chose, and, once an admin raises the account's role or
+  mints it a key, enroll an authenticator app, add passkeys, subscribe a push
+  device or hold an API key. The invitee who then accepted with a password
+  took over the account but left all of that in place: the stranger could
+  still sign in with a passkey or a key, and the invitee was asked for a code
+  only the stranger had. `User` `:accept_invitation_with_password` now also
+  clears two-step verification (the secret, recovery codes and any pending
+  enrollment), deletes passkeys, identity-provider links and push devices,
+  and revokes every live API key, draft-write keys included, so they no
+  longer authenticate or rotate. It all happens in the accept's transaction
+  as `SystemActor.new(:invitations)`; if any removal fails, the whole accept
+  rolls back and the invitee can retry. The security log records
+  `second_factor_removed` and `passkey_removed` (new metadata key `via`,
+  `invitation`) and `api_key_revoked`, each with no person, and the
+  invitee's flash adds "Any two-step verification, passkeys or API keys set
+  up on this address before were removed; set them up again." when one of
+  those was removed. A confirmed account's one-click accept changes none of
+  this. A passkey registration, push subscription, two-step confirmation,
+  recovery-code regeneration or password change that the stranger's session
+  had in flight takes the account's row first
+  (`Changes.GuardAccountTakeover`): if it gets there before the takeover, it
+  commits first, and the takeover removes or overwrites what it wrote; if
+  after, it waits, finds the password changed (or the staged secret
+  cleared), and is refused. The
+  stranger's sessions are evicted once the takeover commits. The same guard
+  makes `:confirm_totp` refuse a secret a second tab's `:setup_totp` replaced
+  after the confirmation was built. The threat model records the same wipe on
+  confirmation, password reset and magic-link sign-in of an unconfirmed
+  account as a follow-up. No migration; rolling the pin back is safe.
+  See [What taking over an account removes](../account-administration.md#what-taking-over-an-account-removes).
 
 <a id="account-enumeration-audit"></a>
 

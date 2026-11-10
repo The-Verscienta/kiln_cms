@@ -61,7 +61,7 @@ defmodule KilnCMSWeb.SafetyFieldsLiveTest do
       version =
         CMS.list_post_versions!(authorize?: false, tenant: edited.org_id)
         |> Enum.filter(&(&1.version_source_id == edited.id and &1.version_action_name == :update))
-        |> List.last()
+        |> Enum.max_by(&{DateTime.to_unix(&1.version_inserted_at, :microsecond), &1.id})
 
       assert version.change_severity == :notable
     end

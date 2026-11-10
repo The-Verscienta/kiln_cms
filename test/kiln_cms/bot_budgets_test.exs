@@ -225,4 +225,19 @@ defmodule KilnCMS.BotBudgetsTest do
     assert BotBudgets.limit(org, :browser) == 10
     assert BotBudgets.operator_limit(:empty) == 2
   end
+
+  describe "unverified_search_limit/0 (#2254)" do
+    test "is the search-engine ceiling held to the delivery limit" do
+      assert BotBudgets.unverified_search_limit() == 300
+
+      put_classes(%{search_engine: 400})
+      assert BotBudgets.operator_limit(:search_engine) == 1_200
+      assert BotBudgets.unverified_search_limit() == 300
+    end
+
+    test "is the search-engine ceiling itself when that is lower" do
+      put_classes(%{search_engine: 40})
+      assert BotBudgets.unverified_search_limit() == 120
+    end
+  end
 end

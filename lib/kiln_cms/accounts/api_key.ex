@@ -218,8 +218,17 @@ defmodule KilnCMS.Accounts.ApiKey do
     # Minting, listing and revoking keys is an operator task — admins only.
     # Listed by action rather than `always()` so `:rotate` is judged by its own
     # policy alone; a create action added later matches no policy and is refused.
+    #
+    # One exception: accepting a site invitation over an unconfirmed account
+    # (#2453) lists that account's keys and revokes them, as the invitations
+    # system actor (`Changes.ForgetPriorCredentials`), so a key minted for
+    # whoever registered the address first stops working when the invitee
+    # takes it over.
     policy action_type([:read, :update, :destroy]) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
+
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: :invitations, action: [:for_user, :revoke]}
     end
 
     policy action(:create) do

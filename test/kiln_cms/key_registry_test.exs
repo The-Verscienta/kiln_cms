@@ -11,9 +11,30 @@ defmodule KilnCMS.Provenance.KeyRegistryTest do
 
   alias KilnCMS.Provenance.KeyRegistry
 
+  # With its env var unset, the signing key falls back to the key `/setup`
+  # stored (`KilnCMS.Provenance.stored_key/0`): a VM-wide cached PEM, else a
+  # database read. This module checks out no connection, so that read must find
+  # nothing. The previous sync module's `DataCase` leaves the sandbox in
+  # `{:shared, owner}` mode and stops that owner from an `on_exit`; until the
+  # ownership manager sees it go, a read here is handed the owner's connection,
+  # and either sees whatever that sandbox holds or exits with `owner #PID<…>
+  # exited` (#2504, CI on #2520). `:manual` mode refuses a process with no
+  # checkout outright, whatever the module before left behind.
+  setup_all do
+    Ecto.Adapters.SQL.Sandbox.mode(KilnCMS.Repo, :manual)
+    :ok
+  end
+
   setup do
     prev = Application.get_env(:kiln_cms, KilnCMS.Provenance)
-    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Provenance, prev || []) end)
+    # The cached stored key outlives any sandbox: forget one another module left.
+    KilnCMS.Provenance.forget_stored_key()
+
+    on_exit(fn ->
+      Application.put_env(:kiln_cms, KilnCMS.Provenance, prev || [])
+      KilnCMS.Provenance.forget_stored_key()
+    end)
+
     :ok
   end
 
@@ -172,7 +193,7 @@ defmodule KilnCMS.Provenance.KeyRegistryTest do
 
       result =
         KeyRegistry.with_cache(fn ->
-          assert {:error, _} = KeyRegistry.current()
+          assert {:error, {:env_var_unset, ^var}} = KeyRegistry.current()
           System.put_env(var, KilnCMS.Keys.generate_rsa_pem())
           KeyRegistry.current()
         end)

@@ -833,6 +833,22 @@ defmodule KilnCMS.CMS.ContentTypes do
   def can_destroy?(type, record, actor, opts \\ []),
     do: call(type, "can_destroy_#{atom(type, opts)}?", [actor, record, %{}, opts], opts)
 
+  @doc """
+  Whether `actor` may bring `record` back from the trash — the generated
+  `can_restore_<type>?` helper behind `restore/3` (`can_restore_entry?` for a
+  dynamic type). `opts` takes `:tenant`.
+  """
+  def can_restore?(type, record, actor, opts \\ []),
+    do: call(type, "can_restore_#{atom(type, opts)}?", [actor, record, %{}, opts], opts)
+
+  @doc """
+  Whether `actor` may permanently delete `record` from the trash — the
+  generated `can_purge_<type>?` helper behind `purge/3` (`can_purge_entry?`
+  for a dynamic type). `opts` takes `:tenant`.
+  """
+  def can_purge?(type, record, actor, opts \\ []),
+    do: call(type, "can_purge_#{atom(type, opts)}?", [actor, record, %{}, opts], opts)
+
   # --- internals -------------------------------------------------------------
 
   # Resolve a convention-built interface name to the existing function on the

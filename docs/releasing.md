@@ -460,6 +460,10 @@ for the previous minor, use a branch:
 **A security fix's notice.** Fill in the private advisory's affected and
 patched versions per line (`>= 1.0.0, < 1.0.3` and `1.0.3`; `>= 1.1.0, <
 1.1.1` and `1.1.1`), and publish it before you publish the GitHub release.
+Deployed instances decide from the affected range alone; `patched_versions`
+is display text ("fixed in 1.0.3"). So the affected range must end before
+each fixed release, or instances already on the fix read as covered
+([Security notices for Kiln](security-posture.md#security-notices-for-kiln)).
 Publishing a release runs `.github/workflows/publish-security.yml`, which
 turns every published advisory into a notice at
 `kilncms.dev/security-notices/<ghsa-id>`, lists it on `/security`, and puts
@@ -508,6 +512,86 @@ newest, `--pre` to let a release candidate count as the newest, `--ref main`
 to deliberately track bleeding edge, `--allow-major` after
 reading the upgrade notes, and `--check --exit-code` to fail a CI job when a
 project has drifted behind upstream.
+
+### Re-render published content after an upgrade
+
+A release that changes what firing produces (new markup on the `web`
+surface, a new key in `json_ld`) reaches a published document only when it is
+next published, edited or re-fired; reading it does not re-fire it. The
+release's upgrade notes say when a re-fire is worth running. To re-fire every
+published document on every site at once:
+
+1. **Wait until every node runs the new release.** A firing job picked up by
+   a node still on the old release writes the old markup again.
+2. **Decide who has to be told.** A fired artifact's `ETag` is a digest of
+   the body it serves, so a CDN, browser or app that revalidates with
+   `If-None-Match` gets the new body on its next revalidation, whether or not
+   anything is announced. A consumer that keeps its copy until a webhook says
+   otherwise (a static build, an ISR page, a mirror fed by webhooks) does not
+   hear about a plain re-fire. If you have one, add `notify: true` below.
+3. **With `notify: true`, check that the receivers can take the volume.** It
+   sends one `<type>.updated` per published document to every endpoint
+   subscribed to that event, with `"reason": "refire"` in `data`, and puts
+   the same `updated` on the public change feed. Nothing else hears it:
+   automation rules, federation and the CDN purge do not run. The deliveries
+   share the `webhooks` queue (3 at a time per node) with your editors'
+   publishes, which wait behind them. A receiver that answers `429` or `5xx`
+   until a delivery runs out of retries counts toward auto-disable, and 10
+   exhausted deliveries in a row turn the endpoint off
+   ([Auto-disable](webhooks.md#auto-disable)). Run it off-peak, and tell the
+   receivers' owners first.
+4. **Start the sweep** on the running node:
+
+   ```bash
+   /app/bin/kiln_cms rpc "IO.inspect(KilnCMS.Firing.Sweep.run(notify: true))"
+   ```
+
+   It prints how many documents it queued, per type (`%{entry: …, page: …,
+   post: …}`), and the node logs `Re-fire sweep enqueued <n> documents`. For
+   a silent sweep, call `KilnCMS.Firing.Sweep.run()` instead. In a checkout
+   the same sweep is `mix kiln.refire_all --notify` (or without the flag);
+   don't run the `mix` task against production, because it boots a second
+   node.
+5. **Watch it drain** until this prints `0`:
+
+   ```bash
+   /app/bin/kiln_cms rpc "IO.inspect(KilnCMS.Firing.Sweep.pending())"
+   ```
+
+   It counts every pending `:firing` job, your editors' publishes included.
+6. **Purge the CDN once**, if you run one in front of Kiln and don't want to
+   wait for cached copies to expire (300 seconds for a fired artifact). With
+   `KILN_CDN_PURGE_URL` set, queue a purge of every site:
+
+   ```bash
+   /app/bin/kiln_cms rpc "Enum.each(KilnCMS.Accounts.list_org_ids(), &KilnCMS.CDN.purge_site/1)"
+   ```
+
+   Without it, purge the `kiln` surrogate key (every Kiln API response
+   carries it) in your CDN's own console. The sweep does not purge per
+   document, which would empty the cache every few seconds for as long as it
+   ran.
+
+What can go wrong:
+
+- **`--notfy : Unknown option. Did you mean --notify?`** from
+  `mix kiln.refire_all`: the flag is misspelled. Nothing was queued.
+- **An endpoint shows as auto-disabled** after the sweep: its receiver
+  refused 10 deliveries in a row, and gets nothing more until you tick
+  **Active** on it again ([Auto-disable](webhooks.md#auto-disable)).
+  `/editor/webhooks` lists only the 25 newest deliveries, too few to
+  redeliver a sweep's worth by hand. Fix the receiver, turn the endpoint back
+  on, and either have the receiver refetch everything once or run the sweep
+  again with `notify: true` (re-firing is idempotent, but every endpoint
+  hears the whole round again).
+- **A receiver gets an `updated` with `"reason": "refire"` right after a
+  `published`** for the same document. An editor published it while the
+  sweep's job for it was still pending, and the publish's fire was merged
+  into that job, so it was announced as a re-fire too. It is the same
+  document; refetching it twice is harmless.
+- **`/api/sync` clients do not see the re-render**: sync reports a document
+  when its `updated_at` moves, and a re-fire does not move it. They pick up
+  the new body on their next full resync (`initial=true`).
 
 ## Migrations: expand, migrate, contract
 
@@ -562,6 +646,16 @@ The cases that come up:
   one that belongs to the migration with `DROP INDEX CONCURRENTLY <name>;`,
   and run the migration again. The `custom_fields` GIN indexes (#2291) are an
   example: they are large on `entries`, so the build can take a while.
+- **A custom field's stored shape** changes with a task rather than a
+  migration: `mix kiln.fields.convert` moves a field's values into a new
+  field ([field-conversion.md](field-conversion.md)), and
+  `mix kiln.media.resnapshot --apply` rewrites stored media snapshots. Both
+  write records in the trash as well as live ones, so a document restored
+  after the contract release has the new shape (#2533). They read the live
+  records and the trashed ones separately, and a record trashed or restored
+  in between can be missed by both, so **run the task again right before
+  the contract release**. Records already converted or current are not
+  rewritten.
 
 ### The check
 
@@ -639,6 +733,84 @@ change is still a contract change, so it also needs the usual
 only dropping the views does. Re-creating the views with changed columns is
 a breaking change to the SQL contract: ship it as `kiln_reporting_v2`.
 
+### New values in an atom column
+
+An Ash `:atom` attribute is stored as text, and adding a value to its
+`one_of` list needs no migration, so `mix kiln.migrations.check` has nothing
+to flag. The older release is still the problem. Plain `:atom` loads stored
+text with `String.to_existing_atom/1`, and when the release has no such atom
+the read fails, and with it every list, export or bulk update that meets the
+row. A new value written by release N therefore breaks release N-1's reads of
+that table during a rolling deploy, and again after a rollback, for as long as
+the row exists (#2509).
+
+`KilnCMS.Types.KnownAtom` is the fix. Used in place of `:atom` on a table
+column, it loads a stored value outside `one_of` (or one that names no atom
+at all) as `%KilnCMS.Types.UnknownAtom{value: "the_text"}` instead of failing,
+and creates no atom from database text. Writes stay strict: input is cast as
+`:atom` casts it and `one_of` still applies. Switching costs no migration,
+because the storage stays text.
+
+So the rule for a column, or an embedded attribute, that will grow:
+
+1. **Release N:** change the attribute from `:atom` to `KilnCMS.Types.KnownAtom`
+   (keep `one_of`), and give every reader of the column a clause for
+   `%UnknownAtom{}`. A `case` on the known values falls through to its
+   catch-all, since the struct equals no atom. `mix ash.codegen --check`
+   stays clean.
+2. **Release N+1 or later:** add the new value. N is now the oldest release
+   that can run beside it, and N reads the row.
+
+The switch has to ship **at least one release before** the first new value,
+for the same reason a contract step waits a release. `Security.Event.type`
+and `Notification.event` are already `KnownAtom`.
+
+The same hazard, and the same two-step rule, covers:
+
+- **`{:array, :atom}` columns.** `{:array, KilnCMS.Types.KnownAtom}` loads an
+  unknown item as `UnknownAtom` and the rest as atoms.
+- **An `:atom` attribute inside an embedded resource** (a block, a group
+  field: one JSON tree per record, D3). With plain `:atom`, an unknown value
+  fails the cast of the whole tree, so the record does not load at all.
+  `KnownAtom` (and `{:array, KnownAtom}`) loads it as `UnknownAtom` there
+  too, and dumps it back to its stored text unchanged. Switch the
+  embedded attribute a release before adding a value, as for a column.
+- **An `:atom` column without `one_of`.** It fails the same way on a value the
+  older release has no atom for. `FieldDefinition.field_type` is one: the
+  `key_value` and `telephone` types added since v1.8.0 break v1.8.0's
+  field-definition reads
+  ([#2605](https://github.com/The-Verscienta/kiln_cms/issues/2605)).
+
+#### Rolling back to v1.8.0
+
+v1.8.0 predates `KnownAtom`, so rows the current code wrote with a value
+v1.8.0 does not know break its reads. Before rolling back to v1.8.0, run this
+once against the database:
+
+```sql
+DELETE FROM notifications WHERE event = 'registration_pending';
+DELETE FROM api_keys WHERE access = 'draft_write';
+```
+
+- **Notifications.** A `registration_pending` notice breaks the bell, the
+  inbox and "mark all read" for its recipients on v1.8.0. The notices are
+  reminders about the registration queue, which itself is untouched.
+- **API keys.** Draft-write keys stop working on v1.8.0 whatever you do,
+  because it has no `draft_write` scope. Left in place, the key's own lookup
+  and the site's list on the API keys page fail; deleted, the page loads.
+  Mint the keys again after rolling forward. Never `UPDATE` them to
+  `'read'` instead: that silently changes what a key someone already holds
+  can do.
+- **Security events** need nothing: v1.8.0 has no security log, so it never
+  reads `security_events`.
+- **Field definitions** of type `key_value` or `telephone` also break v1.8.0's
+  reads, and deleting them loses data. Check
+  [#2605](https://github.com/The-Verscienta/kiln_cms/issues/2605) before
+  rolling back if any site uses them.
+
+A rollback to a release that already has `KnownAtom` on a column needs none
+of this for that column: the older release shows the row as unrecognized.
+
 ### What zero-downtime does and does not cover
 
 The policy makes the **schema** safe for two releases at once. Kiln's boot
@@ -683,6 +855,11 @@ It does **not** cover:
   deployed in turn. Jumping from N-1 to N+1 runs N's expand and N+1's
   contract in one boot while N-1 nodes are still serving. Deploy each
   minor in sequence, or accept a short outage and stop the old nodes first.
+- **New values in an atom column.** No migration, so the check passes, but
+  the old release's nodes fail to read a row the new ones wrote with a value
+  they do not know, unless the column was already `KilnCMS.Types.KnownAtom`
+  in the old release. See
+  [New values in an atom column](#new-values-in-an-atom-column).
 - **Single-instance deployments.** One container on one host (the Compose
   reference deployment, or a platform with a disk attached) has no second
   node to serve while the new one boots, so it drops traffic for the length

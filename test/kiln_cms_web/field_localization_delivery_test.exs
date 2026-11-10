@@ -291,9 +291,10 @@ defmodule KilnCMSWeb.FieldLocalizationDeliveryTest do
   # Golden key sets: what each surface returned before field-level
   # localization existed. A document whose type opts nothing in must come back
   # with exactly these keys — `inherited_fields` appears nowhere unless asked
-  # for, and only on a type that can inherit.
+  # for, and only on a type that can inherit. `social` (#2258) is on every
+  # artifact since format_version 4, so it belongs to the golden set.
   describe "a document that opts nothing in" do
-    @artifact_keys ~w(blocks custom_fields id locale slug title type)
+    @artifact_keys ~w(blocks custom_fields id locale slug social title type)
 
     setup %{actor: actor} do
       {en, fr} =

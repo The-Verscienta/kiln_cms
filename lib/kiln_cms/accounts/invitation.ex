@@ -15,6 +15,9 @@ defmodule KilnCMS.Accounts.Invitation do
       memberships. A temporary platform admin cannot invite or resend
       (`Validations.StandingAdminOnly`): an accepted invitation outlasts the
       grant that sent it.
+    * **Retire** — the invitations system actor only, when a membership
+      change supersedes the invitation (#2452); recorded as
+      `invitation_revoked`.
     * **Look a token up, accept, consume** — the system only. Forbidden to every
       authorized caller *before* the admin bypass, so not even an admin can
       call them with an actor; the accept paths call them with
@@ -139,6 +142,30 @@ defmodule KilnCMS.Accounts.Invitation do
               metadata: fn record, _changeset -> %{"role" => record.role} end}
     end
 
+    # An invitation a membership change has superseded (#2452): a platform
+    # admin changed the tier or custom role of the person it names on its
+    # site, or removed them, and `Changes.RetirePendingInvitation` retires it
+    # in that write's transaction so the link cannot undo the decision.
+    # System-only (as `SystemActor.new(:invitations)`). Recorded as the
+    # revocation it is, with the admin who made the change as the actor when
+    # the write carried one (`:retired_by` in the context).
+    destroy :retire do
+      description "Withdraw an invitation a membership change has superseded (system-only)."
+      require_atomic? false
+
+      change {KilnCMS.Security.Changes.Record,
+              type: :invitation_revoked,
+              tenant: fn record, _changeset -> record.organization_id end,
+              target: fn record, _changeset -> {"invitation", record.id} end,
+              user: fn _record, changeset ->
+                case changeset.context[:retired_by] do
+                  %KilnCMS.Accounts.User{} = user -> user
+                  _system_or_none -> nil
+                end
+              end,
+              metadata: fn record, _changeset -> %{"role" => record.role} end}
+    end
+
     read :for_org do
       description "A site's invitations, live and expired (backs the Team page)."
       argument :organization_id, :uuid, allow_nil?: false
@@ -161,9 +188,11 @@ defmodule KilnCMS.Accounts.Invitation do
     end
 
     # One click for a confirmed account: the membership, then the row gone.
-    action :accept_existing, :atom do
+    # Returns `%{outcome: :joined | :raised | :already_member, role: tier}`
+    # (#2452): whether the account joined the site, was raised to the invited
+    # tier, or already held it or a higher one, and the tier it now holds.
+    action :accept_existing, :map do
       description "Accept an invitation with the confirmed account the address already has (system-only)."
-      constraints one_of: [:accepted]
       argument :token, :string, allow_nil?: false, sensitive?: true
       run KilnCMS.Accounts.Invitations.AcceptExisting
     end
@@ -201,12 +230,21 @@ defmodule KilnCMS.Accounts.Invitation do
       forbid_if always()
     end
 
+    # System-only too, and above the admin bypass for the same reason: only
+    # the invitations system actor may retire an invitation this way (an
+    # admin withdraws one with `:revoke`). The grant is repeated in the last
+    # policy, which every action meets.
+    policy action(:retire) do
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :invitations, action: :retire}
+    end
+
     # Inviting is the same operator task as managing memberships.
     bypass KilnCMS.Accounts.Checks.PlatformAdmin do
       authorize_if always()
     end
 
     policy always() do
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :invitations, action: :retire}
       forbid_if always()
     end
   end

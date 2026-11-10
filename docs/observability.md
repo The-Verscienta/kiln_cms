@@ -138,8 +138,11 @@ downloads and streams) emits `[:kiln_cms, :delivery, :client_class]` from
 `KilnCMSWeb.Plugs.RateLimit`, with measurement `count` (always `1`) and two
 metadata fields ([bot-budgets.md](bot-budgets.md), #2243):
 
-- `:class` -- what the request's `User-Agent` claims: `:browser`,
-  `:search_engine`, `:ai_crawler`, `:declared_bot` or `:empty`.
+- `:class` -- the class the request was **charged** as: `:browser`,
+  `:search_engine`, `:ai_crawler`, `:declared_bot` or `:empty`. This is what the
+  `User-Agent` claims, except that since #2254 a search-engine claim that DNS
+  has proven false is charged, and reported, as `:empty` (see
+  [Crawler verification](#crawler-verification)).
 - `:result` -- `:allowed`, or `:throttled` when that class's ceiling refused it.
 
 The user agent, the address and the org are deliberately not in the event. It is
@@ -151,8 +154,71 @@ Useful Grafana panel: `sum(rate(kiln_cms_delivery_client_class_count[5m])) by (c
 It shows the traffic mix, and which classes are being refused. A steady
 `declared_bot` or `empty` throttle rate is the feature working. A `search_engine`
 throttle rate after a site lowered that class can slow indexing. A sudden
-`browser` throttle rate is ordinary flood limiting, as before. Because the class
-is only a claim, read the split as "what clients say they are".
+`browser` throttle rate is ordinary flood limiting, as before. Apart from
+search-engine claims proven false, the class is only a claim, so read the split
+as "what clients say they are". An `empty` series that grows after upgrading to
+#2254 may be spoofed search-engine claims; the
+`kiln_cms_delivery_unverified_crawler_count{reason="failed"}` series below
+separates them.
+
+## Crawler verification
+
+A `:delivery` request whose user agent names a search engine is checked against
+DNS (#2254, `KilnCMS.CrawlerVerification`; see
+[bot-budgets.md](bot-budgets.md#verified-search-engines)). Three events cover
+it. None carries an address, a hostname, a user agent or an org.
+
+| Event | Emitted | Measurements | Metadata |
+|---|---|---|---|
+| `[:kiln_cms, :delivery, :unverified_crawler]` | by `KilnCMSWeb.Plugs.RateLimit`, once per search-engine request whose claim is not verified | `count` (always `1`) | `engine`, `reason` |
+| `[:kiln_cms, :crawler_verification, :lookup]` | once per finished background lookup | `duration` (native units) | `engine`, `result`, `reason` |
+| `[:kiln_cms, :crawler_verification, :skipped]` | once per lookup that was not started | `count` (always `1`) | `engine`, `reason` |
+
+- `engine` -- `:google`, `:bing`, `:duckduckgo`, `:baidu`, `:yandex` or
+  `:apple`: what the user agent claims.
+- `reason` on `unverified_crawler` -- `:failed` (proven false: charged as
+  `empty`), `:pending` (a lookup is running or was just started), `:error` (the
+  last lookup got no DNS answer), `:skipped` (no lookup could start),
+  `:unverifiable` (DuckDuckBot) or `:not_public` (a private or
+  `TRUSTED_PROXIES` address, or a forwarding header nothing trusts). Every
+  reason but `:failed` keeps the search-engine class, held to the browser
+  limit. A verified claim, and every claim while `KILN_CRAWLER_VERIFICATION` is
+  off, emits nothing here.
+- `result` on `lookup` -- `:verified`, `:rejected`, `:timeout` (the 3-second
+  deadline, or the resolver's own timeout) or `:error`. Its `reason` is `nil`,
+  the rejection (`:no_ptr`, `:wrong_domain`, `:forward_mismatch`) or the error
+  (`:timeout`, `:servfail`, `:refused`, `:formerr`, `:notimp`,
+  `:econnrefused`, `:nxdomain`, or `:other`).
+- `reason` on `skipped` -- `:busy` (16 lookups already running on this node)
+  or `:rate_limited` (the address's network, or the node, used its lookup
+  budget for the minute).
+
+Exported metrics (Prometheus names in brackets):
+
+- `kiln_cms.delivery.unverified_crawler.count`, tagged `engine` and `reason`
+  (`kiln_cms_delivery_unverified_crawler_count`).
+- `kiln_cms.crawler_verification.lookup.count`, tagged `engine` and `result`
+  (`kiln_cms_crawler_verification_lookup_count`).
+- `kiln_cms.crawler_verification.lookup.duration`, a distribution in
+  milliseconds tagged `result`
+  (`kiln_cms_crawler_verification_lookup_duration_bucket` / `_sum` / `_count`).
+- `kiln_cms.crawler_verification.skipped.count`, tagged `reason`
+  (`kiln_cms_crawler_verification_skipped_count`).
+
+Useful panels:
+
+- `sum(rate(kiln_cms_crawler_verification_lookup_count[5m])) by (result)`:
+  a real crawler's lookups end `verified`, a spoofer's `rejected`. A steady
+  `timeout` or `error` share means the node cannot reach its resolver.
+- `sum(rate(kiln_cms_delivery_unverified_crawler_count[5m])) by (reason)`:
+  `failed` is spoofed claims being charged as `empty`; a large `not_public`
+  share means the node sees a proxy's address (set `TRUSTED_PROXIES`).
+- `sum(rate(kiln_cms_crawler_verification_skipped_count[5m])) by (reason)`:
+  should be near zero. A steady `busy` rate means lookups are slow.
+
+Two warnings are also logged, each once per node: the first time the
+concurrency limit turns a lookup away, and after 20 lookups in a row got no DNS
+answer (that one names `KILN_CRAWLER_VERIFICATION=false`).
 
 ## Breached-password checks
 

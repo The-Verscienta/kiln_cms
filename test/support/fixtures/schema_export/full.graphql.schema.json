@@ -1210,6 +1210,28 @@
             "null"
           ]
         },
+        "social": {
+          "additionalProperties": false,
+          "description": "The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included.",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "type": "object"
+        },
         "title": {
           "type": [
             "string",
@@ -1739,6 +1761,28 @@
             "null"
           ]
         },
+        "social": {
+          "additionalProperties": false,
+          "description": "The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included.",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "type": "object"
+        },
         "title": {
           "type": [
             "string",
@@ -1959,7 +2003,7 @@
   ],
   "title": "KilnCMS delivery schema",
   "x-kiln": {
-    "artifact_format_version": 3,
+    "artifact_format_version": 4,
     "blocks": [
       "accordion",
       "audio",

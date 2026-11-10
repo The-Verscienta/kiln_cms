@@ -139,6 +139,16 @@ defmodule KilnCMS.BotBudgets do
   @spec operator_limit(class()) :: pos_integer()
   def operator_limit(class), do: ceiling(delivery_limit(), operator_percent(class))
 
+  @doc """
+  The operator's search-engine ceiling for a claim `KilnCMS.CrawlerVerification`
+  has neither proven nor disproven (#2254): `operator_limit(:search_engine)`,
+  but never above the `:delivery` limit. A search-engine percentage above 100
+  is spent only on addresses proven to be the engine's; below 100 this is the
+  same as `operator_limit(:search_engine)`. No database read.
+  """
+  @spec unverified_search_limit() :: pos_integer()
+  def unverified_search_limit, do: min(operator_limit(:search_engine), delivery_limit())
+
   @doc "`max(1, div(delivery_limit * percent, 100))`."
   @spec ceiling(pos_integer(), pos_integer()) :: pos_integer()
   def ceiling(delivery_limit, percent)

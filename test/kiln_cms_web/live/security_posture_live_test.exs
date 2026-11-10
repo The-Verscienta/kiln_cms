@@ -131,6 +131,9 @@ defmodule KilnCMSWeb.SecurityPostureLiveTest do
     assert has_element?(lv, "#posture-core-transport", "Not applicable")
     assert has_element?(lv, "#posture-core-operator_second_factor")
     assert html =~ "This is the newest Kiln release."
+    # The notices feed is off in this suite (`config/test.exs`).
+    assert has_element?(lv, "#posture-core-security_notices", "Security notices for Kiln")
+    assert has_element?(lv, "#posture-core-security_notices", "Not applicable")
   end
 
   test "a check that crashes is a row that says so, and the page still draws", %{

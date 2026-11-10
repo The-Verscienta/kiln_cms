@@ -32,9 +32,12 @@ defmodule Mix.Tasks.Kiln.Fields.Convert do
       --report PATH      also write the report as JSON
       --batch N          records read per page (default 100)
 
-  A **dry run is the default**, and nothing is written while any record is
-  invalid unless `--skip-invalid` is given. The source field is left as it
-  is; drop it a release later. Re-running skips records already converted.
+  A **dry run is the default**, and nothing is written while any live record
+  is invalid unless `--skip-invalid` is given. Records in the trash are
+  converted too, so a restore after the source field is dropped finds the
+  converted value; a trashed record that does not fit is reported, keeps its
+  string, and does not block. The source field is left as it is; drop it a
+  release later. Re-running skips records already converted.
   """
 
   use Mix.Task
@@ -93,7 +96,10 @@ defmodule Mix.Tasks.Kiln.Fields.Convert do
     if path, do: File.write!(path, Jason.encode!(report, pretty: true))
 
     if report.blocked?,
-      do: Mix.raise("#{length(report.problems)} invalid record(s); nothing written")
+      do:
+        Mix.raise(
+          "#{length(FieldConversion.blocking(report))} invalid record(s); nothing written"
+        )
 
     unless report.dry_run? or report.problems == [],
       do: Mix.shell().error("#{length(report.problems)} record(s) not converted")

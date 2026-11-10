@@ -113,6 +113,39 @@ defmodule KilnCMSWeb.FormPageTest do
              |> LazyHTML.attribute("action") == ["/fr/forms/#{form.slug}"]
     end
 
+    # #2465: the default locale's prefix is kept too — an unprefixed POST
+    # would answer in the session's locale, not the page's. The page itself is
+    # in the path's locale: a form has no record locale of its own.
+    test "under the default locale's prefix, posts back under it", %{conn: conn} do
+      form = form!()
+
+      body =
+        conn
+        |> Phoenix.ConnTest.init_test_session(%{"locale" => "fr"})
+        |> get("/en/forms/#{form.slug}")
+        |> html_response(200)
+
+      assert body =~ ~s(lang="en")
+      assert body =~ "Submit"
+
+      assert body
+             |> LazyHTML.from_document()
+             |> LazyHTML.query("form.kiln-form")
+             |> LazyHTML.attribute("action") == ["/en/forms/#{form.slug}"]
+    end
+
+    test "under /fr/, the page's own strings are French", %{conn: conn} do
+      form = form!()
+
+      body = conn |> get("/fr/forms/#{form.slug}") |> html_response(200)
+
+      assert body =~ ~s(lang="fr")
+      assert body =~ "Soumettre"
+      refute body =~ ">Submit<"
+    after
+      Gettext.put_locale(KilnCMSWeb.Gettext, "en")
+    end
+
     test "a refused submission from the localized page keeps the prefix", %{conn: conn} do
       form = form!()
 

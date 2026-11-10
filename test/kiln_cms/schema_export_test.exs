@@ -60,7 +60,7 @@ defmodule KilnCMS.SchemaExportTest do
       # locale fallback chain, and this suite registers a block with a
       # `localized: :fallback` field (the fixture plugin's `product_card`).
       assert page["properties"] |> Map.keys() |> Enum.sort() ==
-               ~w(blocks custom_fields id inherited_fields locale robots slug title type)
+               ~w(blocks custom_fields id inherited_fields locale robots slug social title type)
 
       assert Enum.sort(page["required"]) == ~w(blocks custom_fields id locale slug title type)
 

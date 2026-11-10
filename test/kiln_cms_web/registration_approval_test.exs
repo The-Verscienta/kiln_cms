@@ -527,6 +527,49 @@ defmodule KilnCMSWeb.RegistrationApprovalTest do
       {:ok, lv, _html} = build_conn() |> log_in(member) |> live(~p"/account")
       refute has_element?(lv, "#registration-status")
     end
+
+    # #2516: approving an unconfirmed applicant is refused, and a magic-link
+    # sign-in does not confirm, so the page has to say how to get unstuck.
+    test "tells an unconfirmed applicant to confirm first, via a password reset" do
+      user = seed_user(:viewer, %{confirmed_at: nil})
+      row(user, Accounts.default_org_id(), :viewer, :pending)
+
+      conn = log_in(build_conn(), user)
+      {:ok, lv, _html} = live(conn, ~p"/account")
+
+      assert has_element?(lv, "#registration-status #confirm-first", "Confirm your email address")
+      assert has_element?(lv, ~s|#confirm-first a[href="/reset"]|, "Reset your password")
+      assert has_element?(lv, "#confirm-first", "confirmation email")
+
+      # The link lands on the reset request form for a signed-in applicant too.
+      assert conn |> get(~p"/reset") |> html_response(200)
+    end
+
+    test "says nothing about confirming to a confirmed applicant" do
+      user = seed_user()
+      row(user, Accounts.default_org_id(), :viewer, :pending)
+
+      {:ok, lv, _html} = build_conn() |> log_in(user) |> live(~p"/account")
+
+      assert has_element?(lv, "#registration-status", "Waiting for approval on")
+      refute has_element?(lv, "#confirm-first")
+    end
+
+    test "says nothing about confirming when no registration is waiting" do
+      org_id = Accounts.default_org_id()
+
+      # Unconfirmed with no row at all, and unconfirmed with a rejected one:
+      # only a pending registration waits on the confirmation.
+      bare = seed_user(:viewer, %{confirmed_at: nil})
+      {:ok, lv, _html} = build_conn() |> log_in(bare) |> live(~p"/account")
+      refute has_element?(lv, "#confirm-first")
+
+      rejected = seed_user(:viewer, %{confirmed_at: nil})
+      row(rejected, org_id, :viewer, :rejected)
+      {:ok, lv, _html} = build_conn() |> log_in(rejected) |> live(~p"/account")
+      assert has_element?(lv, "#registration-status", "Your registration on")
+      refute has_element?(lv, "#confirm-first")
+    end
   end
 
   describe "/account on another site's host" do

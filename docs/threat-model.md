@@ -750,10 +750,19 @@ probes bait paths. Off unless `KILN_SCANNER_BLOCKING` is on; see
   link-local, CGNAT or in `TRUSTED_PROXIES` are never counted, and a forwarded
   request with no trusted proxy is never counted, so a shared proxy or office
   NAT is not blocked as one scanner.
-- **Spoofable good-bot exemption.** A `User-Agent` naming a known crawler skips
-  the miss threshold only, never the bait threshold. No reverse DNS is done, so a
-  scanner that claims to be Googlebot can make misses without being blocked
-  by volume, but not probe bait paths.
+- **Search-engine exemption, checked by DNS.** A `User-Agent` naming a search
+  engine (`KilnCMS.BotClass.search_engine/1`) skips the miss threshold only,
+  never the bait threshold, and only until crawler verification (#2254, below)
+  proves the claim false. A claim not yet checked, skipped, or whose DNS gave no
+  answer keeps the exemption, so a real crawler's first misses from a new
+  address never count. A scanner claiming to be Googlebot is therefore counted
+  once its address fails the reverse-DNS check, but one whose PTR zone never
+  answers (an attacker's own reverse zone left silent) keeps the exemption, as
+  every claim did before #2254. A DuckDuckBot claim cannot be checked and is
+  always exempt. With `KILN_CRAWLER_VERIFICATION=false` the six search-engine
+  names in the user agent are enough, as before. Link-preview fetchers
+  (`facebookexternalhit`, `Twitterbot`, `LinkedInBot`) and `Slurp` are not
+  exempt in either mode: anyone can claim them and there is nothing to check.
 - **Bounded blast radius.** One rule per address, always with an expiry (60 minutes
   by default), so a false positive heals itself; an admin can remove one at any
   time. At most 300 automatic rules per site, so spreading a scan over many
@@ -785,11 +794,54 @@ see [bot-budgets.md](bot-budgets.md).
 - **What it stops.** Volume from clients that say what they are: a runaway
   `curl` loop, a crawler with no user agent, an over-eager SEO tool. Defaults
   are 50% of the browser limit for other bots and 20% for no user agent.
-- **What it does not.** Anything that lies. The user agent is spoofable, so a
-  class grants nothing: search engines and AI crawlers default to 100%, the same
-  as a browser, precisely so that typing "Googlebot" earns no more than a
-  browser does. Raising either class by environment raises it for every spoofer
-  too. Verifying a crawler by reverse DNS is #2254.
+- **What it does not.** Anything that lies about being a browser, an AI
+  crawler or a script. The user agent is spoofable, so those classes grant
+  nothing: AI crawlers default to 100%, the same as a browser, and raising that
+  class by environment raises it for every spoofer too. Search engines also
+  default to 100%, but their claims are checked (next point).
+- **Search-engine claims are checked by DNS (#2254).**
+  `KilnCMS.CrawlerVerification` looks up the address's PTR name, requires it
+  under the engine's published domain (label-aligned, so `evilgooglebot.com`
+  fails), and requires the name's forward lookup to contain the address. Only a
+  claim **proven** false (no PTR, wrong domain, forward mismatch) is charged as
+  no user agent. Everything not proven either way (lookup pending, skipped, DNS
+  error or timeout, DuckDuckBot, a non-public address, untrusted forwarding)
+  keeps the search-engine class but held to the `:delivery` limit, so a
+  search-engine value above 100% is spent only on verified addresses, and with
+  the defaults the outcome is #2243's until a spoof is proven. A DNS outage or a
+  busy verifier therefore never refuses a real crawler; the cost is that a
+  spoofer whose claim cannot be settled gets what a browser gets. The lookup
+  runs off the request path, so a request never waits on DNS.
+- **Lookups as an amplification surface.** An anonymous client can make the
+  node send DNS queries by naming a search engine from a new address. Bounded:
+  at most 3 queries per address (1 PTR, forward only for up to 2 of the first
+  3 names, only the client's family), a 3-second deadline per lookup,
+  single-flight per address, results cached per address (6 h verified, 1 h
+  proven false, 5 min DNS error), at most 16 concurrent lookups per node with
+  no queue, and new lookups rate limited per network (IPv4 `/24` 30 and `/16`
+  120 a minute; IPv6 `/64` 30, `/48` 60, `/32` 120) and per node (600 a
+  minute). The cache is bounded (50,000 addresses, evicted oldest-written
+  first) and is its own Cachex instance, so a flood of new addresses cannot
+  evict anything else. No address, hostname, user agent or org is in any
+  verification event or log line.
+- **Residual: lookup starvation.** An attacker who controls a slow or silent
+  reverse zone can hold lookup slots until the deadline, and an attacker with
+  many addresses can spend the per-network and per-node lookup budgets or churn
+  the cache. Either way new real-crawler addresses stay unverified for longer.
+  That only costs anything when the operator has set the search-engine value
+  above 100%, because an unverified claim is held to the browser limit, not
+  refused.
+- **Residual: no IP-range verification.** DuckDuckBot publishes IP ranges only,
+  so its claims are never verified (and never proven false); the other
+  engines' published ranges are not read either.
+- **Outbound DNS to the system resolver.** Each node sends PTR, A and AAAA
+  queries for visitors' addresses to the nameservers in its `/etc/resolv.conf`
+  (`:inet_res`, not `SafeFetch`: no HTTP, and the names queried are the
+  `in-addr.arpa` / `ip6.arpa` name of the client's address, then PTR names
+  that matched an engine's domain). The resolver, and the authoritative server
+  of the address's reverse zone, learn that this server was visited from that
+  address; see [data-flows.md](data-flows.md#optional-subprocessors).
+  `KILN_CRAWLER_VERIFICATION=false` turns all of it off.
 - **Switching user agents gains nothing.** Every class charges the one
   per-address counter, so an address never gets past the highest single class
   ceiling. The cost of sharing is that a browser-heavy shared address (an office
@@ -802,7 +854,8 @@ see [bot-budgets.md](bot-budgets.md).
   feeds, `/up`, `/ready`) and `/live`, so crawlers can always read the files
   that tell them what to do and probes are never throttled by class.
 - **No user agent, address or org in the metric.** The counter
-  `kiln_cms.delivery.client_class.count` carries only `class` and `result`.
+  `kiln_cms.delivery.client_class.count` carries only `class` and `result`;
+  `class` is the class charged, so a proven spoof is counted as `empty`.
 
 ### Public forms
 - **CSRF** — deliberately absent: forms are meant to be posted from third-party
@@ -1320,14 +1373,68 @@ creates an account and grants a site tier.
   account for any address. So an unconfirmed account is never added to a site
   directly: the Team page invites it instead, and accepting sets a new
   password, confirms the account, revokes every token it held, signs out its
-  sessions and clears a display name the first registrant chose. Only a
-  confirmed account accepts with one click and keeps its password. An erased
+  sessions and clears a display name the first registrant chose. It also
+  forgets every other credential the first registrant could have set up
+  (#2453, `Changes.ForgetPriorCredentials`): two-step verification (the live
+  secret, recovery codes and any pending re-enrollment), passkeys,
+  identity-provider links and push devices are removed, and every live API
+  key is revoked. Whoever registered first can sign in with their own
+  password while the account is unconfirmed, and an admin can raise an
+  unconfirmed account's role (`:manage_access`, `:grant_temporary_role`) to one
+  that reaches `/editor/settings`, or mint it an API key. So "a self-registered
+  viewer cannot enroll a factor" is no defense. The removals run inside the accept's transaction, as
+  `SystemActor.new(:invitations)` (each action admits that actor and no
+  person; the passkey and push-device removals sit above the platform-admin
+  bypass), with reads that fail closed, so any error rolls the whole accept
+  back rather than handing over an account a stranger can still get into. The
+  TOTP columns are cleared from the row re-read `FOR NO KEY UPDATE` in the
+  transaction, not from the caller's possibly stale struct. Each removal is
+  logged with no person: `second_factor_removed` and `passkey_removed` with
+  `via` `invitation`, and `api_key_revoked`. A credential write the
+  stranger's session already had in flight cannot slip past the takeover. The
+  takeover holds the account's row (`FOR NO KEY UPDATE`) while it forgets the
+  account's credentials. A passkey registration, push subscription,
+  two-step confirmation, recovery-code regeneration or password change
+  (`Passkey` `:register`, `PushSubscription` `:subscribe`, `User`
+  `:confirm_totp`, `:regenerate_totp_recovery_codes`, `:change_password`)
+  that the stranger's session had in flight takes the account's row first
+  (`Changes.GuardAccountTakeover`, through `AccountLock.credentials/2`:
+  `FOR SHARE` for the two inserts, `FOR NO KEY UPDATE` for the three user
+  updates). If it gets there before the takeover, it commits first, and the
+  takeover removes or overwrites what it wrote. If it gets there after, it
+  waits, finds the password changed (or the staged secret cleared), and is
+  refused with `Errors.AccountTakenOver`. The stranger's sessions are evicted
+  once the takeover commits. `:setup_totp` and `:disable_totp` are left
+  unguarded on purpose: a secret staged from a stale session is enforced by
+  nothing until `:confirm_totp` promotes it, which the guard refuses, and the
+  invitee's own enrollment stages a fresh one over it; a stale disable can
+  only clear columns the takeover already cleared. Only a confirmed account accepts
+  with one click, and it keeps its password and every credential. An erased
   account cannot accept.
 - **Who can send, and for how long it counts.** Only a standing platform admin
   can invite or resend (`StandingAdminOnly`): a temporary admin's invitation
   would outlast the grant. An `:admin` invitation is honoured at accept time
   only while its sender is still a standing platform admin, not erased and not
-  deleted.
+  deleted. A `:viewer` or `:editor` invitation is honored whatever has
+  happened to its sender since, and that now includes raising a lower
+  membership (below), as it already included creating one.
+- **An invitation raises, never lowers, and a later decision retires it
+  (#2452).** Accepting over an active membership below the invited tier raises
+  it (`OrgMembership.:raise_role_by_invitation`, admitted only for the
+  `:invitations` system actor and a platform admin). The comparison is made on
+  the membership row locked `FOR UPDATE`, against its standing tier, so a site
+  admin's edit between the page load and the click is what is judged; an equal
+  or higher tier is refused before any write and the invitation is simply
+  used up. The other grant axes are kept, and the invitee's sessions are
+  evicted after the commit. Because accepting can now raise, a pending
+  invitation would otherwise outlive a demotion: `OrgMembership` `:update`
+  (when it changes `role` or `role_id`) and `:destroy` delete the pending
+  invitation for the member's address on the membership's own site
+  (`Changes.RetirePendingInvitation`, through the system-only
+  `Invitation.:retire`), locking it before the membership row, the same order
+  as the accept, so an edit and an accept racing on one person serialize. The
+  retirement is logged as `invitation_revoked`, with the admin who made the
+  membership change as the actor, so an invitation never vanishes untraced.
 - **Mail as a weapon.** The admin names any address. Invitation mail is budgeted
   per address (`mail:invitation`, the shared mail budget, 5 per hour by
   default), and a spent budget or a suppressed address is refused by name, so
@@ -1358,14 +1465,22 @@ creates an account and grants a site tier.
   whoever opens it first; the account it creates has the invited address,
   and an admin can remove the membership from Team. (4) *Accepting through single sign-on is not supported*, so an
   invitee whose organisation signs in by SSO must still accept with a password
-  or an existing account first. (5) *An existing membership wins.* If the
-  invitee is already a member when they accept (they joined through the site's
-  own SSO in between, say), the membership is left as it is and the
-  invitation is used up; the invited tier is not applied. (6) Taking over an
-  unconfirmed account replaces its password and ends its sessions, but does not
-  remove a second factor, passkey or linked SSO identity the account may hold.
-  A self-registered account is a `:viewer` and cannot reach `/editor/settings`,
-  where those are enrolled, so this needs another route to them to matter.
+  or an existing account first. (5) *Pending invitations from before #2452.*
+  A tier change or removal made on a build that had invitations but not #2452
+  did not retire the member's pending invitation, so for up to 7 days after
+  upgrading such a link raises a demoted member back (and, as before, re-adds
+  a removed one). Admins check **Pending invitations** on Team. (6) *The
+  same takeover by another route keeps the stranger's credentials.*
+  `:confirm_new_user` and `:reset_password_with_token` confirm an
+  unconfirmed account without running the wipe above. A magic-link sign-in
+  (`:sign_in_with_magic_link`, a read) neither confirms the account nor takes
+  it over (#2516), so the stranger keeps a working password on an account the
+  address's owner now shares and that stays unconfirmed. Both are the general
+  pre-hijack residual, tracked in #2594. (7) *What the takeover does not touch:* memberships on
+  other sites, billing, and newsletter subscriptions stay as the first
+  registrant left them. (8) *Erasure leaves the TOTP columns.*
+  `Changes.AnonymizeUser` removes passkeys and identities but not
+  `totp_*`; a follow-up.
 
 ### Account unlock (#2250)
 
@@ -1779,6 +1894,11 @@ hex.pm, and the security notices feed; on the same platform-admin triggers,
 through `SafeFetch`, the feed's `links.next` followed only on its own origin
 and at most five pages; package names are checked against Hex's naming rule
 before they are put in a URL),
+`Kiln.SecurityNotices` (the same security notices feed, fetched once per
+node and shared by `Kiln.Plugins.Health` and the `core.security_notices`
+posture check; that check asks only while `KILN_UPDATE_CHECK` is on, on the
+same platform-admin triggers plus System's **Check now**, and logs only
+notice ids, never a notice's text or links),
 Meilisearch (the operator's instance — a site's own is below), S3/MinIO, the
 mailer, and the LLM providers behind `/api/ask` and
 SEO drafting, and the breached-password check (`api.pwnedpasswords.com`, a

@@ -8,6 +8,7 @@ defmodule KilnCMS.Media.SnapshotTest do
   `async: false`: it fires and re-fires on the default org, through Oban.
   """
   use KilnCMS.DataCase, async: false
+  use Oban.Testing, repo: KilnCMS.Repo
 
   import ExUnit.CaptureIO
 
@@ -114,6 +115,11 @@ defmodule KilnCMS.Media.SnapshotTest do
   end
 
   defp reload(page), do: CMS.get_page!(page.id, actor: nil, authorize?: false)
+
+  defp trashed(page) do
+    CMS.list_trashed_pages!(authorize?: false, tenant: page.org_id)
+    |> Enum.find(&(&1.id == page.id))
+  end
 
   describe "of/1" do
     test "dimensions, MIME type, focal point, and variants smallest first with crops last",
@@ -298,6 +304,52 @@ defmodule KilnCMS.Media.SnapshotTest do
 
       assert {:error, %Ash.Error.Forbidden{}} =
                resnapshot.(KilnCMS.SystemActor.new(:computed_fields))
+    end
+
+    # A record trashed before a release that relies on the new shape and
+    # restored after it must come back current (#2533).
+    test "re-snapshots a trashed record without a fire; a restore brings the current shape",
+         %{actor: actor, org_id: org_id, hero: hero} = ctx do
+      item = image!(org_id)
+      page = publish!(ctx, %{custom_fields: %{hero => item.id}})
+      :ok = CMS.destroy_page!(reload(page), actor: actor)
+      drain_oban()
+      item = process!(item)
+      drain_oban()
+
+      assert %{"variants" => []} = trashed(page).custom_fields[hero]
+
+      assert %{stale: 1, trashed: 1, written: 0} = Resnapshot.run(org_id, dry_run?: true)
+      assert %{written: 1, trashed: 1, failed: [], trashed_failed: []} = Resnapshot.run(org_id)
+
+      refute_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"id" => page.id})
+      assert trashed(page).custom_fields[hero] == Snapshot.of(item)
+
+      restored = CMS.restore_page!(trashed(page), actor: actor)
+      assert reload(restored).custom_fields[hero] == Snapshot.of(item)
+
+      assert %{stale: 0, written: 0, trashed: 0} = Resnapshot.run(org_id)
+    end
+
+    test "a trashed record that fails is reported apart and does not fail the task",
+         %{actor: actor, org_id: org_id, hero: hero} = ctx do
+      item = image!(org_id)
+      page = publish!(ctx, %{custom_fields: %{hero => item.id}})
+      :ok = CMS.destroy_page!(reload(page), actor: actor)
+      :ok = CMS.destroy_media_item!(item, actor: actor)
+
+      report = Resnapshot.run(org_id)
+      assert report.failed == []
+      assert [{"page", id, _message}] = report.trashed_failed
+      assert id == page.id
+      assert Resnapshot.describe(report, org_id, false) =~ "page #{page.id} (trashed): "
+
+      Mix.shell(Mix.Shell.Process)
+      on_exit(fn -> Mix.shell(Mix.Shell.IO) end)
+
+      capture_io(fn -> Mix.Tasks.Kiln.Media.Resnapshot.run(["--org", org_id, "--apply"]) end)
+      assert_received {:mix_shell, :info, [applied]}
+      assert applied =~ "1 failed:"
     end
 
     test "the mix task is a dry run unless --apply", %{org_id: org_id, hero: hero} = ctx do

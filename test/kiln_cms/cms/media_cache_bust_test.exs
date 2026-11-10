@@ -99,6 +99,8 @@ defmodule KilnCMS.CMS.MediaCacheBustTest do
 
   test "a purge busts the cache" do
     media = media!()
+    # `:purge` takes only a trashed item (#2531); trash it before priming.
+    Ash.destroy!(media, authorize?: false)
     s = prime()
 
     Ash.destroy!(media, action: :purge, authorize?: false)

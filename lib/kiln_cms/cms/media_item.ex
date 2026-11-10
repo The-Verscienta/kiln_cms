@@ -414,6 +414,12 @@ defmodule KilnCMS.CMS.MediaItem do
     destroy :purge do
       # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
       require_atomic? false
+      # Only a row still in the trash (#2531), or one still quarantined — the
+      # media pipeline's purge of a refused or stuck upload (#1659), which is
+      # never trashed. AshArchival leaves `:purge` unfiltered, so a held
+      # struct whose row someone restored meanwhile hard-deleted a live item.
+      # A miss is a `StaleRecord`, and the caller keeps the blobs.
+      change filter(expr(not is_nil(^ref(:archived_at)) or quarantined == true))
     end
 
     # Faceted library browse (#1316): every argument is optional and absent

@@ -27,7 +27,9 @@ defmodule KilnCMS.Firing do
   every surface's artifact, the reference graph, and the wave to every
   published document that embeds it — and then, as an edit of live content
   does, its delivery cache is dropped and `<type>.updated` is dispatched: the
-  webhook endpoints, automation, federation and the CDN purge. A document that
+  webhook endpoints, automation, federation and the CDN purge. The payload
+  carries `"reason" => "refire"` (#2463), so a receiver can tell the re-render
+  from an edit. A document that
   is not published fires and dispatches nothing. The return value is how many
   fires were queued; an id that already has a re-fire pending is not queued
   twice.

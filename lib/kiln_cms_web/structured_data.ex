@@ -11,6 +11,12 @@ defmodule KilnCMSWeb.StructuredData do
   `CollectionPage`. The result is serialized with
   `Jason.encode!(escape: :html_safe)` at the call site so it is safe to inline in
   a `<script type="application/ld+json">` block.
+
+  `image` is absolute on the site's own host (`KilnCMSWeb.Tenant.absolute_url/2`,
+  #2258), the same value as the page's `og:image`: a media-library
+  `seo_image` is a site-relative path, which a crawler cannot resolve from
+  the JSON-LD alone. A relative image with no org to resolve it against is
+  omitted rather than guessed.
   """
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Firing.Bylines
@@ -54,7 +60,7 @@ defmodule KilnCMSWeb.StructuredData do
       "publisher" => %{"@type" => "Organization", "name" => site_name(org)}
     }
     |> maybe_put("description", record.seo_description)
-    |> maybe_put("image", record.seo_image)
+    |> maybe_put("image", KilnCMSWeb.Tenant.absolute_url(org, record.seo_image))
     |> maybe_creative_work_fields(type, record)
     |> maybe_bylines(type, record, bylines)
     |> maybe_put("mainEntity", SchemaOrg.main_entity(type, record))
@@ -160,7 +166,7 @@ defmodule KilnCMSWeb.StructuredData do
         "publisher" => %{"@type" => "Organization", "name" => site_name(org)}
       }
       |> maybe_put("description", teaser.summary || teaser.seo_description)
-      |> maybe_put("image", teaser.seo_image)
+      |> maybe_put("image", KilnCMSWeb.Tenant.absolute_url(org, teaser.seo_image))
       |> maybe_teaser_dates(type, teaser)
       |> maybe_teaser_event_schedule(type, teaser)
       |> Map.merge(paywall_markers())

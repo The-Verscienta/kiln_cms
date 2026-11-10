@@ -10,6 +10,7 @@ defmodule KilnCMSWeb.SecurityLogExportControllerTest do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.User
+  alias KilnCMS.NewerReleaseRows
   alias KilnCMS.Security
 
   @moduletag :capture_log
@@ -69,6 +70,34 @@ defmodule KilnCMSWeb.SecurityLogExportControllerTest do
       assert conn.resp_body =~ "time,type,actor,target_type,target_id,ip,user_agent"
       assert conn.resp_body =~ "sign_in_failed,mine@example.com,,,203.0.113.9,Mozilla/5.0"
       refute conn.resp_body =~ "theirs@example.com"
+    end
+
+    # A type a newer release added (#2509): exported under its stored name,
+    # and left out by a known type filter.
+    test "exports a type a newer release recorded under its stored name", %{
+      conn: conn,
+      org: org
+    } do
+      record!(org, %{type: :sign_in, actor_label: "signin@example.com"})
+
+      NewerReleaseRows.security_event!(%{
+        org_id: org.id,
+        actor_label: "newer@example.com",
+        ip: "203.0.113.10"
+      })
+
+      body = admin_conn(conn, org) |> get(~p"/editor/security-log/export.csv") |> response(200)
+
+      assert body =~ "#{NewerReleaseRows.unknown()},newer@example.com,,,203.0.113.10,"
+      assert body =~ "signin@example.com"
+
+      body =
+        admin_conn(conn, org)
+        |> get(~p"/editor/security-log/export.csv?type=sign_in")
+        |> response(200)
+
+      assert body =~ "signin@example.com"
+      refute body =~ "newer@example.com"
     end
 
     test "honours the type filter", %{conn: conn, org: org} do

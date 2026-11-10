@@ -200,6 +200,30 @@ defmodule KilnCMSWeb.ArtifactExpandTest do
     assert hd(body["expanded"][ctx.field])["target"]["title"] == "Renamed page"
   end
 
+  # #2463: a target re-fired without an edit — its `updated_at` never moves —
+  # still moves the expanded response's ETag, because the ETag is a digest of
+  # the body served.
+  test "the ETag changes when an expanded target is re-rendered without an edit", ctx do
+    assert [etag] = ctx.conn |> expand(ctx.source, ctx.field) |> get_resp_header("etag")
+
+    Ecto.Adapters.SQL.query!(KilnCMS.Repo, "UPDATE pages SET title = $1 WHERE id = $2", [
+      "Re-rendered page",
+      Ecto.UUID.dump!(ctx.live_page.id)
+    ])
+
+    KilnCMS.Firing.refire!("page", [ctx.live_page.id],
+      actor: KilnCMS.SystemActor.new(:overlay),
+      tenant: KilnCMS.Accounts.default_org_id()
+    )
+
+    KilnCMS.DataCase.drain_oban()
+
+    moved = build_conn() |> put_req_header("if-none-match", etag) |> expand(ctx.source, ctx.field)
+    body = json_response(moved, 200)
+    assert hd(body["expanded"][ctx.field])["target"]["title"] == "Re-rendered page"
+    refute get_resp_header(moved, "etag") == [etag]
+  end
+
   describe "refused" do
     test "on a surface other than json", ctx do
       body =

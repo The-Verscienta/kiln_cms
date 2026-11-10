@@ -197,7 +197,7 @@ can emit, so a new content type has webhook events for free:
 | --- | --- | --- |
 | `published` | A document goes live | Yes |
 | `unpublished` | A live document is taken down | Yes |
-| `updated` | A **published** document is edited (draft edits/autosaves stay silent) | Yes |
+| `updated` | A **published** document is edited (draft edits/autosaves stay silent), or re-rendered without an edit (see below) | Yes |
 | `in_review` | A document is submitted for review ([#375](https://github.com/The-Verscienta/kiln_cms/issues/375)) | **No — opt in** |
 | `returned_to_draft` | A review is sent back to draft | **No — opt in** |
 | `created` | A document is created (API, editor, or import) | **No — opt in** |
@@ -224,6 +224,20 @@ twice sends one `deleted`, and restoring it twice sends one `restored`. When a
 purge clears the purged document out of another document's reference field,
 a referrer that is itself in the trash is cleared silently; a live referrer
 still sends `updated`.
+
+`updated` also fires when a published document's fired artifacts are
+re-rendered without an edit, so what delivery serves may have changed while
+`updated_at` did not: an overlay's `KilnCMS.Firing.refire/3`
+([#2048](https://github.com/The-Verscienta/kiln_cms/issues/2048)), and an
+operator's re-fire sweep run with `notify: true` after an upgrade
+([Re-render published content after an upgrade](releasing.md#re-render-published-content-after-an-upgrade)).
+Those payloads carry `"reason": "refire"` in `data`; an edit's carries no
+`reason` key ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463)).
+Treat a re-fire like an edit: refetch the document. Don't drop it as a
+duplicate because its `updated_at` matches what you hold. A sweep's
+`updated` reaches webhook endpoints and the public change feed only, not
+automation, federation or the CDN purge, and the change feed's event does not
+say it was a re-fire.
 
 `unpublished` fires for both an explicit unpublish **and** archiving a
 published document (#914) — both remove it from delivery, and a receiver
@@ -284,7 +298,9 @@ dedupe key. `data` shape depends on the event:
   trimmed to `type`, `content`, `data`, `order`, `children`. Internal-only
   fields (e.g. search text) are never included. These payloads also carry
   **`affected`**: the published documents whose fired artifacts embed this
-  one, each as `{"type", "id", "slug", "locale"}` (see below).
+  one, each as `{"type", "id", "slug", "locale"}` (see below). An `updated`
+  sent for a re-render rather than an edit also carries `"reason": "refire"`
+  (above).
 - **`form.submitted`** — `{"form": "<slug>", "data": {...submitted fields...}}`.
 - **`membership.activated`** / **`membership.canceled`** — the member (`user_id`,
   `email`), the tier (`id`, `slug`, `name`, `audience`), the transition

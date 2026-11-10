@@ -196,6 +196,21 @@ defmodule KilnCMSWeb.ExperimentsDeliveryTest do
       assert body["title"] == @variant_headline
     end
 
+    # Invariant 3 on the headless surface (#2258): a variant changes what a
+    # human reads, never what a machine indexes — and a link preview is read by
+    # a machine. `social.title` stays canonical while the title is patched.
+    test "a variant leaves the link-preview title canonical", ctx do
+      %{page: page} = experimented_page(ctx)
+
+      body =
+        ctx.conn
+        |> get("/api/content/page/#{page.slug}?variant_key=visitor-1")
+        |> json_response(200)
+
+      assert body["title"] == @variant_headline
+      assert body["social"]["title"] == @headline
+    end
+
     # Headless keeps `public` caching where the HTML surface cannot, because the
     # key is a query PARAMETER — every distinct key is a distinct URL, so a
     # shared cache stores one entry per arm with no `Vary` needed. Advertising

@@ -474,16 +474,19 @@ defmodule KilnCMSWeb.SystemLiveTest do
   end
 
   # Plugin health (#2244). Remote answers come from the `Kiln.Plugins.Health`
-  # Req.Test stub; checks are off in this suite unless a case turns them on.
+  # and `Kiln.SecurityNotices` Req.Test stubs; checks are off in this suite
+  # unless a case turns them on.
   describe "plugin health" do
     setup %{conn: conn} do
       Req.Test.stub(Updates, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
 
       original = Application.get_env(:kiln_cms, Health, [])
+      notices = Application.get_env(:kiln_cms, Kiln.SecurityNotices, [])
       Health.clear_cache()
 
       on_exit(fn ->
         Application.put_env(:kiln_cms, Health, original)
+        Application.put_env(:kiln_cms, Kiln.SecurityNotices, notices)
         Health.clear_cache()
       end)
 
@@ -548,7 +551,7 @@ defmodule KilnCMSWeb.SystemLiveTest do
     # plugin's notices are unknown, and nothing reads as OK.
     test "a source that crashed renders unknown, never OK", %{conn: conn} do
       enable_health()
-      Req.Test.stub(Health, fn _conn -> exit(:boom) end)
+      stub_both(fn _conn -> exit(:boom) end)
 
       {:ok, lv, _html} = live(conn, ~p"/editor/system")
       html = render_async(lv, 2000)
@@ -617,12 +620,222 @@ defmodule KilnCMSWeb.SystemLiveTest do
     end
   end
 
+  # The core's own security notices (#2522), in the Updates card. Answers come
+  # from the `Kiln.SecurityNotices` Req.Test stub; the feed is off in this
+  # suite unless a case turns it on.
+  describe "security notices for the core" do
+    setup %{conn: conn} do
+      Req.Test.stub(Updates, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+
+      notices = Application.get_env(:kiln_cms, Kiln.SecurityNotices, [])
+      Kiln.SecurityNotices.clear_cache()
+
+      on_exit(fn ->
+        Application.put_env(:kiln_cms, Kiln.SecurityNotices, notices)
+        Kiln.SecurityNotices.clear_cache()
+      end)
+
+      %{conn: log_in(conn, authed_user(:admin))}
+    end
+
+    defp enable_notices do
+      Application.put_env(
+        :kiln_cms,
+        Kiln.SecurityNotices,
+        Keyword.put(Application.get_env(:kiln_cms, Kiln.SecurityNotices, []), :url, nil)
+      )
+    end
+
+    defp stub_notices(entries) do
+      test = self()
+
+      Req.Test.stub(Kiln.SecurityNotices, fn conn ->
+        send(test, {:notices_request, conn.request_path})
+        Req.Test.json(conn, %{"data" => entries})
+      end)
+    end
+
+    defp covering_notice do
+      notice(%{
+        "package" => "kiln_cms",
+        "affected_versions" => "<= #{Kiln.Version.version()}",
+        "patched_versions" => "99.0.0",
+        "severity" => "medium",
+        "advisory_id" => "GHSA-aaaa-bbbb-cccc",
+        "advisory_url" =>
+          "https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-aaaa-bbbb-cccc"
+      })
+    end
+
+    defp notices_line(html) do
+      html |> Floki.parse_document!() |> Floki.find("#core-security-notices") |> Floki.text()
+    end
+
+    test "with the feed off, the card says so and nothing is asked", %{conn: conn} do
+      stub_notices([])
+      {:ok, _lv, html} = live(conn, ~p"/editor/system")
+
+      assert notices_line(html) =~ "The security notices feed is turned off"
+      refute_received {:notices_request, _path}
+    end
+
+    test "a notice covering this version names itself, its fix and links it", %{conn: conn} do
+      enable_notices()
+      stub_notices([covering_notice()])
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+      html = render_async(lv, 2000)
+      line = notices_line(html)
+
+      assert line =~ "A security notice covers Kiln #{Kiln.Version.version()}."
+      assert line =~ "GHSA-aaaa-bbbb-cccc (medium): fixed in 99.0.0."
+
+      assert has_element?(
+               lv,
+               ~s(#core-security-notices a[href="https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-aaaa-bbbb-cccc"]),
+               "Advisory GHSA-aaaa-bbbb-cccc"
+             )
+    end
+
+    test "an unsafe advisory link is dropped, the notice still listed", %{conn: conn} do
+      enable_notices()
+
+      stub_notices([
+        notice(%{
+          "package" => "kiln_cms",
+          "affected_versions" => "<= #{Kiln.Version.version()}",
+          "advisory_id" => "GHSA-aaaa-bbbb-cccc",
+          "advisory_url" => "javascript:alert(1)"
+        })
+      ])
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+      html = render_async(lv, 2000)
+
+      assert notices_line(html) =~ "GHSA-aaaa-bbbb-cccc"
+      refute has_element?(lv, "#core-security-notices a")
+    end
+
+    test "no notice for this version reads as such", %{conn: conn} do
+      enable_notices()
+      stub_notices([])
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+
+      assert notices_line(render_async(lv, 2000)) =~
+               "No published security notice covers Kiln #{Kiln.Version.version()}."
+    end
+
+    test "an unreachable feed is unknown, not clean", %{conn: conn} do
+      enable_notices()
+      Req.Test.stub(Kiln.SecurityNotices, &Req.Test.transport_error(&1, :econnrefused))
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+
+      assert notices_line(render_async(lv, 2000)) =~
+               "Couldn't reach the security notices feed."
+    end
+
+    test "check now asks the feed again, past the cache", %{conn: conn} do
+      enable_notices()
+      stub_notices([])
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+      render_async(lv, 2000)
+      assert_received {:notices_request, _path}
+
+      stub_notices([covering_notice()])
+      lv |> element("button", "Check now") |> render_click()
+
+      assert notices_line(render_async(lv, 2000)) =~ "A security notice covers Kiln"
+      assert_received {:notices_request, _path}
+    end
+
+    test "with update checks off, there is no line and nothing is asked", %{conn: conn} do
+      enable_notices()
+      stub_notices([])
+      previous = Application.get_env(:kiln_cms, Updates, [])
+      Application.put_env(:kiln_cms, Updates, Keyword.put(previous, :enabled, false))
+      on_exit(fn -> Application.put_env(:kiln_cms, Updates, previous) end)
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+
+      refute has_element?(lv, "#core-security-notices")
+      refute_received {:notices_request, _path}
+    end
+
+    # The route stops these principals before a socket exists, so the handler
+    # is driven directly: it makes outbound requests and takes no actor a
+    # policy could refuse.
+    test "the check now handler refuses an editor, and asks nothing" do
+      enable_notices()
+      stub_notices([])
+      Req.Test.stub(Updates, fn _conn -> flunk("checked upstream for a non-admin") end)
+
+      {:noreply, socket} =
+        KilnCMSWeb.SystemLive.handle_event(
+          "check-now",
+          %{},
+          check_now_socket(authed_user(:editor))
+        )
+
+      assert socket.assigns.flash["error"] =~ "admin access"
+      assert socket.assigns.update == {:ok, :current}
+      assert socket.assigns.core_notices == :disabled
+      refute_received {:notices_request, _path}
+    end
+
+    test "the check now handler refuses a platform admin whose grant has expired" do
+      enable_notices()
+      stub_notices([])
+
+      expired = %{
+        authed_user(:editor)
+        | granted_role: :admin,
+          granted_role_expires_at: DateTime.add(DateTime.utc_now(), -60, :second)
+      }
+
+      {:noreply, socket} =
+        KilnCMSWeb.SystemLive.handle_event("check-now", %{}, check_now_socket(expired))
+
+      assert socket.assigns.flash["error"] =~ "admin access"
+      refute_received {:notices_request, _path}
+    end
+  end
+
+  defp check_now_socket(user) do
+    %Phoenix.LiveView.Socket{
+      assigns: %{
+        __changed__: %{},
+        current_user: user,
+        update: {:ok, :current},
+        core_notices: :disabled,
+        flash: %{}
+      }
+    }
+  end
+
   defp enable_health do
     Application.put_env(
       :kiln_cms,
       Health,
       Keyword.put(Application.get_env(:kiln_cms, Health, []), :enabled, true)
     )
+
+    # The notices feed is off in the test config; unset, it follows the update
+    # feed (kilncms.dev's), as in production.
+    Application.put_env(
+      :kiln_cms,
+      Kiln.SecurityNotices,
+      Keyword.put(Application.get_env(:kiln_cms, Kiln.SecurityNotices, []), :url, nil)
+    )
+  end
+
+  # Both names: Hex is asked through `Kiln.Plugins.Health`'s options, the
+  # notices feed through `Kiln.SecurityNotices`'s.
+  defp stub_both(fun) do
+    Req.Test.stub(Health, fun)
+    Req.Test.stub(Kiln.SecurityNotices, fun)
   end
 
   # Answers like kilncms.dev's published-entries endpoint (the only request a
@@ -631,7 +844,7 @@ defmodule KilnCMSWeb.SystemLiveTest do
     test = self()
     notices = %{"data" => Keyword.get(opts, :notices, [])}
 
-    Req.Test.stub(Health, fn conn ->
+    stub_both(fn conn ->
       send(test, {:health_request, conn.request_path})
       Req.Test.json(conn, notices)
     end)

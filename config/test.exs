@@ -97,6 +97,15 @@ config :kiln_cms, Kiln.Plugins.Health,
   enabled: false,
   req_options: [plug: {Req.Test, Kiln.Plugins.Health}]
 
+# The security notices feed (#2522) is off by default here for the same
+# reason, and because the core's own notices check would otherwise ask it on
+# every System or Security posture mount. Tests that read it set `url:`
+# (unset follows the update feed, kilncms.dev's); requests go to a Req.Test
+# stub.
+config :kiln_cms, Kiln.SecurityNotices,
+  url: false,
+  req_options: [plug: {Req.Test, Kiln.SecurityNotices}]
+
 # The HTTP governance witness (#733) reaches an operator-configured transparency
 # log. Never dialled for real in tests; the stub stands in for the log.
 config :kiln_cms, KilnCMS.Governance.Witness.HTTP,
@@ -443,3 +452,12 @@ config :kiln_cms, KilnCMS.Accounts.SignInUnlock, async: false
 # expected hits, with no error. Run the query through `Search.global_report/2`
 # and look at `:partial`.
 config :kiln_cms, KilnCMS.Search, query_budget: 10_000
+
+# Crawler verification (#2254) is on, like production, but asks
+# `KilnCMS.Test.StubCrawlerResolver` instead of DNS: every address has no PTR
+# record unless a test plants one, so nothing reaches the network. Tests that
+# need a settled result without a lookup plant it with
+# `KilnCMS.CrawlerVerification.put_result/4`.
+config :kiln_cms, KilnCMS.CrawlerVerification,
+  enabled: true,
+  resolver: KilnCMS.Test.StubCrawlerResolver

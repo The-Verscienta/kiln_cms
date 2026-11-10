@@ -146,4 +146,15 @@ if config_env() != :test do
   if bot_budgets != %{} do
     config :kiln_cms, KilnCMSWeb.RateLimit, delivery_classes: bot_budgets
   end
+
+  # ## Verified search engines (#2254, KilnCMS.CrawlerVerification)
+  #
+  # A request whose user agent names a search engine keeps that class's
+  # ceiling only until a reverse-DNS check proves the claim false. On by
+  # default; `false` turns the check off (every claim is believed, the #2243
+  # behavior) for a node that cannot reach a DNS resolver. Skipped under
+  # :test like the rest of this block: config/test.exs pins it to a stub.
+  with {:ok, enabled?} <- Env.fetch("KILN_CRAWLER_VERIFICATION") do
+    config :kiln_cms, KilnCMS.CrawlerVerification, enabled: enabled?
+  end
 end

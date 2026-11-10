@@ -3831,7 +3831,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
         {:error, socket} -> {:noreply, socket}
       end
     else
-      {:noreply, put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.forbidden("trash"))}
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         KilnCMSWeb.WorkflowMessages.forbidden("trash", refusal_context(socket))
+       )}
     end
   end
 
@@ -3942,9 +3947,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> assign(:compare_pick, [])
         |> put_flash(:info, gettext("Restored that version."))
 
+      # `:restore_version` carries the optimistic lock (#2532): a page changed
+      # since this session loaded it is refused rather than restored onto a
+      # copy the row no longer matches. `flag_conflict/1` also tells a page
+      # moved to the trash meanwhile apart (#2332).
       {:error, error} ->
-        if gone_after_stale?(socket, error),
-          do: flag_gone(socket),
+        if stale_conflict?(error),
+          do: flag_conflict(socket),
           else: put_flash(socket, :error, restore_error_message(error))
 
       _ ->
@@ -5327,7 +5336,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
           )
           |> push_navigate(to: ~p"/editor")
         else
-          put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("trash", error))
+          put_flash(
+            socket,
+            :error,
+            KilnCMSWeb.WorkflowMessages.error("trash", error, refusal_context(socket))
+          )
         end
     end
   end
@@ -5339,7 +5352,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp mark_reviewed_refused(socket, error) do
     if gone_after_stale?(socket, error),
       do: flag_gone(socket),
-      else: put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("mark_reviewed", error))
+      else:
+        put_flash(
+          socket,
+          :error,
+          KilnCMSWeb.WorkflowMessages.error("mark_reviewed", error, refusal_context(socket))
+        )
+  end
+
+  # Who was refused, where, on what — for `KilnCMSWeb.WorkflowMessages`, which
+  # decides the sentence from the actor's tier and scope on the record's org.
+  defp refusal_context(socket) do
+    %{actor: actor, record: record} = socket.assigns
+    [actor: actor, org: record.org_id, resource: record]
   end
 
   defp settle_before_workflow(%{assigns: %{save_state: state}} = socket)
@@ -5408,7 +5433,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
             flag_gone(socket)
 
           true ->
-            put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error(action, error))
+            put_flash(
+              socket,
+              :error,
+              KilnCMSWeb.WorkflowMessages.error(action, error, refusal_context(socket))
+            )
         end
     end
   end

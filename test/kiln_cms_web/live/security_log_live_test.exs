@@ -204,6 +204,88 @@ defmodule KilnCMSWeb.SecurityLogLiveTest do
     end
   end
 
+  # A type a newer release added, read by this one during a rolling deploy or
+  # after a rollback: one such row used to take the whole page down.
+  describe "a type a newer release recorded (#2509)" do
+    alias KilnCMS.NewerReleaseRows
+
+    test "is listed, labeled with its stored name in a neutral badge", %{conn: conn, org: org} do
+      record!(org, %{type: :sign_in_failed, actor_label: "known@example.com"})
+
+      id =
+        NewerReleaseRows.security_event!(%{
+          org_id: org.id,
+          actor_label: "newer@example.com",
+          ip: "203.0.113.9"
+        })
+
+      {:ok, lv, html} = admin_conn(conn, org) |> live(~p"/editor/security-log")
+
+      assert html =~ "known@example.com"
+      assert html =~ "Failed sign-in"
+
+      row = lv |> element("#security-event-#{id}") |> render()
+      assert row =~ "Unrecognized event (#{NewerReleaseRows.unknown()})"
+      assert row =~ "newer@example.com"
+      assert row =~ "203.0.113.9"
+      assert row =~ "bg-base-200"
+      refute row =~ "bg-warning"
+    end
+
+    test "a known type filter leaves it out; an unknown type param is ignored", %{
+      conn: conn,
+      org: org
+    } do
+      record!(org, %{type: :sign_in, actor_label: "signin@example.com"})
+      NewerReleaseRows.security_event!(%{org_id: org.id, actor_label: "newer@example.com"})
+
+      {:ok, _lv, html} = admin_conn(conn, org) |> live(~p"/editor/security-log?type=sign_in")
+      assert html =~ "signin@example.com"
+      refute html =~ "newer@example.com"
+
+      {:ok, _lv, html} =
+        admin_conn(conn, org)
+        |> live(~p"/editor/security-log?type=#{NewerReleaseRows.unknown()}")
+
+      assert html =~ "signin@example.com"
+      assert html =~ "newer@example.com"
+    end
+
+    test "the actor filter finds a person whose only event is one", %{conn: conn, org: org} do
+      someone = Ash.UUID.generate()
+
+      NewerReleaseRows.security_event!(%{
+        org_id: org.id,
+        actor_id: someone,
+        actor_label: "only-new@example.com"
+      })
+
+      record!(org, %{actor_label: "someone-else@example.com"})
+
+      {:ok, _lv, html} =
+        admin_conn(conn, org) |> live(~p"/editor/security-log?actor=only-new@example.com")
+
+      assert html =~ "Unrecognized event"
+      refute html =~ "someone-else@example.com"
+    end
+
+    test "load more pages past it", %{conn: conn, org: org} do
+      id =
+        NewerReleaseRows.security_event!(%{
+          org_id: org.id,
+          inserted_at: DateTime.add(DateTime.utc_now(), -3600, :second)
+        })
+
+      for n <- 1..50, do: record!(org, %{actor_label: "row#{n}@example.com"})
+
+      {:ok, lv, _html} = admin_conn(conn, org) |> live(~p"/editor/security-log")
+      refute has_element?(lv, "#security-event-#{id}")
+
+      lv |> element("#security-log-load-more") |> render_click()
+      assert has_element?(lv, "#security-event-#{id}")
+    end
+  end
+
   describe "retention" do
     test "shows the window and saves a new one", %{conn: conn, org: org} do
       {:ok, lv, html} = admin_conn(conn, org) |> live(~p"/editor/security-log")

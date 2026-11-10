@@ -281,7 +281,33 @@ defmodule KilnCMSWeb.Telemetry do
           "Public delivery requests by the client class their user agent claims " <>
             "(#2243: browser / search_engine / ai_crawler / declared_bot / empty) " <>
             "and whether the class's ceiling allowed or throttled them. At most " <>
-            "ten series; the user agent, address and org are deliberately not tags."
+            "ten series; the user agent, address and org are deliberately not tags. " <>
+            "The class is the one charged: since #2254 a search-engine claim proven " <>
+            "false by DNS is counted as empty."
+      ),
+      counter("kiln_cms.delivery.unverified_crawler.count",
+        tags: [:engine, :reason],
+        description:
+          "Delivery requests naming a search engine whose address was not verified " <>
+            "by DNS (#2254), by engine and reason (failed / pending / error / skipped / " <>
+            "unverifiable / not_public). Only failed is charged as empty."
+      ),
+      counter("kiln_cms.crawler_verification.lookup.count",
+        tags: [:engine, :result],
+        description:
+          "Reverse-DNS crawler verification lookups (#2254) by the engine claimed " <>
+            "and result (verified / rejected / timeout / error)"
+      ),
+      distribution("kiln_cms.crawler_verification.lookup.duration",
+        unit: {:native, :millisecond},
+        tags: [:result],
+        description: "Time for one crawler verification lookup, deadline included"
+      ),
+      counter("kiln_cms.crawler_verification.skipped.count",
+        tags: [:reason],
+        description:
+          "Crawler verification lookups not started (#2254): busy (concurrency " <>
+            "limit) or rate_limited (per-network or per-node budget)"
       ),
 
       # Oban job Metrics (emitted by Oban) — queue throughput, latency, failures

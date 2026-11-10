@@ -22,8 +22,14 @@ defmodule KilnCMS.Accounts.Invitations.AcceptExisting do
     2. the invitation, re-read by token under a row lock — two clicks on one
        link serialize here and the second finds nothing;
     3. an `:admin` invitation still needs its sender to be a standing admin;
-    4. the membership (none is added if the account is already on the site);
-    5. the invitation, consumed.
+    4. the membership (`Invitations.grant_membership/4`): added, or, if the
+       account is already on the site below the invited tier, raised to it
+       (#2452); at that tier or above, left as it is;
+    5. the invitation, consumed — whichever of those it was.
+
+  It returns what happened, `%{outcome: :joined | :raised | :already_member,
+  role: tier}`, `role` being the tier the account now holds on the site, so
+  the page can say so rather than claim a join that changed nothing.
 
   Any refusal is the one `:invalid` reason, so a made-up, expired, revoked or
   used link, or a withdrawn admin invitation, all read the same.
@@ -64,9 +70,10 @@ defmodule KilnCMS.Accounts.Invitations.AcceptExisting do
       with {:ok, invitation} <- locked(token),
            true <- Invitations.inviter_still_admin?(invitation) || invalid(),
            {:ok, user} <- confirmed_account(invitation),
-           {:ok, _membership} <- Invitations.grant_membership(user, invitation, write_context),
+           {:ok, %{outcome: outcome, membership: membership}} <-
+             Invitations.grant_membership(user, invitation, write_context),
            :ok <- consume(invitation) do
-        :accepted
+        %{outcome: outcome, role: membership.role}
       else
         {:error, error} -> KilnCMS.Repo.rollback(error)
       end

@@ -3,7 +3,7 @@
 // The `:json` fired-artifact shape served by
 // `GET /api/content/:type/:slug?surface=json`.
 //
-// Artifact format version: 3
+// Artifact format version: 4
 
 
 // MARK: - Shared
@@ -1026,10 +1026,12 @@ public struct PageDocument: Codable, Hashable, Sendable {
     /// The document's robots flags. Absent when neither is set; absent means both false.
     public let robots: Robots?
     public let slug: String?
+    /// The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included.
+    public let social: Social?
     public let title: String?
     public let type: String
 
-    public init(blocks: [Block], customFields: CustomFields, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, robots: Robots? = nil, slug: String? = nil, title: String? = nil, type: String) {
+    public init(blocks: [Block], customFields: CustomFields, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, robots: Robots? = nil, slug: String? = nil, social: Social? = nil, title: String? = nil, type: String) {
         self.blocks = blocks
         self.customFields = customFields
         self.id = id
@@ -1037,6 +1039,7 @@ public struct PageDocument: Codable, Hashable, Sendable {
         self.locale = locale
         self.robots = robots
         self.slug = slug
+        self.social = social
         self.title = title
         self.type = type
     }
@@ -1049,6 +1052,7 @@ public struct PageDocument: Codable, Hashable, Sendable {
         case locale
         case robots
         case slug
+        case social
         case title
         case type
     }
@@ -1064,6 +1068,18 @@ public struct PageDocument: Codable, Hashable, Sendable {
         public init(nofollow: Bool, noindex: Bool) {
             self.nofollow = nofollow
             self.noindex = noindex
+        }
+    }
+
+    public struct Social: Codable, Hashable, Sendable {
+        public let description: String?
+        public let image: String?
+        public let title: String?
+
+        public init(description: String? = nil, image: String? = nil, title: String? = nil) {
+            self.description = description
+            self.image = image
+            self.title = title
         }
     }
 }
@@ -1082,10 +1098,12 @@ public struct PostDocument: Codable, Hashable, Sendable {
     /// The document's robots flags. Absent when neither is set; absent means both false.
     public let robots: Robots?
     public let slug: String?
+    /// The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included.
+    public let social: Social?
     public let title: String?
     public let type: String
 
-    public init(blocks: [Block], customFields: CustomFields, customFieldsPlain: CustomFieldsPlain? = nil, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, robots: Robots? = nil, slug: String? = nil, title: String? = nil, type: String) {
+    public init(blocks: [Block], customFields: CustomFields, customFieldsPlain: CustomFieldsPlain? = nil, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, robots: Robots? = nil, slug: String? = nil, social: Social? = nil, title: String? = nil, type: String) {
         self.blocks = blocks
         self.customFields = customFields
         self.customFieldsPlain = customFieldsPlain
@@ -1094,6 +1112,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
         self.locale = locale
         self.robots = robots
         self.slug = slug
+        self.social = social
         self.title = title
         self.type = type
     }
@@ -1107,6 +1126,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
         case locale
         case robots
         case slug
+        case social
         case title
         case type
     }
@@ -1365,6 +1385,18 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public init(nofollow: Bool, noindex: Bool) {
             self.nofollow = nofollow
             self.noindex = noindex
+        }
+    }
+
+    public struct Social: Codable, Hashable, Sendable {
+        public let description: String?
+        public let image: String?
+        public let title: String?
+
+        public init(description: String? = nil, image: String? = nil, title: String? = nil) {
+            self.description = description
+            self.image = image
+            self.title = title
         }
     }
 }

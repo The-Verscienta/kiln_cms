@@ -549,6 +549,7 @@ defmodule KilnCMSWeb.SyncControllerTest do
       entry = entry!(ctx)
       {_items, cursor} = drain(conn, ctx, %{"initial" => "true", "type" => ctx.definition.name})
 
+      CMS.destroy_entry!(entry, actor: ctx.admin, tenant: ctx.org)
       CMS.purge_entry!(entry, actor: ctx.admin, tenant: ctx.org)
 
       {items, _} = drain(conn, ctx, %{"cursor" => cursor})
@@ -700,7 +701,11 @@ defmodule KilnCMSWeb.SyncControllerTest do
   def soft_delete(post, ctx), do: CMS.destroy_post!(post, actor: ctx.admin, tenant: ctx.org)
 
   @doc false
-  def purge(post, ctx), do: CMS.purge_post!(post, actor: ctx.admin, tenant: ctx.org)
+  # `:purge` takes only a trashed row (#2531): trash, then purge.
+  def purge(post, ctx) do
+    CMS.destroy_post!(post, actor: ctx.admin, tenant: ctx.org)
+    CMS.purge_post!(post, actor: ctx.admin, tenant: ctx.org)
+  end
 
   @doc false
   def gate(post, ctx),

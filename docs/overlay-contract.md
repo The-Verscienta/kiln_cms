@@ -61,7 +61,7 @@ you*).
 | `Kiln.Plugins`, `Kiln.Version`, `Kiln.Updates`, `Kiln.Tokens` | Their documented functions and return shapes |
 | `Kiln.SafeFetch` | Since KilnCMS 1.6 (`kiln_plugin` 1.3, #2047): `get/2`, `head/2`, `post/3` and `request/3`, their documented options and `{:ok, %{status, headers, body}}` / `{:error, reason}` shapes, and the guarantees in its moduledoc — the address checked and pinned, redirects followed only on request and re-checked per hop, the body capped. The wording of `reason` is not covered. This is how a plugin fetches a URL it didn't write; `KilnCMS.SafeFetch`, the core implementation behind it, is not itself covered |
 | `KilnCMS.Blocks`, `KilnCMS.Blocks.Upcaster`, `KilnCMS.CMS.ContentTypes` | The registry and dispatch functions an overlay calls |
-| `KilnCMS.Firing.refire/3` and `refire!/3` | Re-firing named documents from an overlay (#2048): its arguments, the `:overlay` system actor it admits, its return value, and that each fire cascades to dependents and is announced as `<type>.updated` (webhooks and the CDN purge), as an edit of live content is. The job it queues and the queue it runs on are not promised |
+| `KilnCMS.Firing.refire/3` and `refire!/3` | Re-firing named documents from an overlay (#2048): its arguments, the `:overlay` system actor it admits, its return value, and that each fire cascades to dependents and is announced as `<type>.updated` (webhooks and the CDN purge), as an edit of live content is, with `"reason": "refire"` in the payload (#2463). The job it queues and the queue it runs on are not promised |
 | `KilnCMS.Migrations` | The search-vector helpers every content type's hand-written migration calls |
 | `KilnCMS.SchemaExport`, `KilnCMS.Branding` | The exported schema shape, and the theme list a preset is selected from |
 | `KilnCMSWeb.PluginRouter` | The three route macros |
@@ -318,8 +318,10 @@ Stated rather than discovered later.
   every update action (#2332), yours included, so a write to a record in the
   trash fails with `Ash.Error.Changes.StaleRecord`. Only the actions in
   `KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0` (`:restore`,
-  `:clear_reference_target`) may write one, and an overlay cannot add to that
-  list today.
+  `:clear_reference_target`, `:convert_custom_field`, `:resnapshot_media`)
+  may write one, and an overlay cannot add to that list today. The last two
+  mean `mix kiln.fields.convert` and `mix kiln.media.resnapshot` also write
+  your content types' trashed records (#2533).
 
 ## Status of this document
 

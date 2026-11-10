@@ -103,6 +103,39 @@ defmodule KilnCMS.SchemaExportArtifactTest do
     assert JsonSchemaValidator.validate(body, schema, document) == :ok
   end
 
+  # #2258: `social` is optional and closed; `title` inside it is nullable like
+  # the top-level `title`.
+  test "an artifact carrying every `social` key validates" do
+    actor = admin()
+    org_id = KilnCMS.Accounts.default_org_id()
+
+    page =
+      published_page(actor, %{
+        seo_title: "Card title",
+        seo_description: "Card description",
+        seo_image: "/uploads/card.png"
+      })
+
+    {:ok, body} = Engine.read(org_id, :page, page.id, :json)
+    assert Map.keys(body["social"]) |> Enum.sort() == ["description", "image", "title"]
+
+    document = SchemaExport.json_schema(org_id: org_id)
+    schema = document["$defs"]["content_page"]
+
+    assert JsonSchemaValidator.validate(body, schema, document) == :ok
+
+    # A document with no title (the schema allows one at the top level) fires
+    # `social.title: null`; the schema must accept that too. Not reachable
+    # through a page's create action, which requires a title, so the body is
+    # adjusted rather than fired.
+    untitled = body |> Map.put("title", nil) |> put_in(["social", "title"], nil)
+    assert JsonSchemaValidator.validate(untitled, schema, document) == :ok
+
+    # And it stays closed: an unknown key inside `social` is refused.
+    extra = put_in(body, ["social", "site"], "@kilncms")
+    refute JsonSchemaValidator.validate(extra, schema, document) == :ok
+  end
+
   test "custom-field values validate against their exported property schemas" do
     actor = admin()
     org_id = KilnCMS.Accounts.default_org_id()

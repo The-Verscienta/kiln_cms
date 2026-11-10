@@ -181,3 +181,9 @@ Ecto.Adapters.SQL.Sandbox.mode(KilnCMS.Repo, :manual)
 # other tests and fails with "type `X` can not be handled" (#1796). See
 # `KilnCMS.Test.TypeCache`.
 KilnCMS.Test.TypeCache.warm!(KilnCMS.Repo)
+
+# The table behind the crawler-verification DNS stub (#2254), owned by a
+# process that lives as long as the run so every test and lookup task can
+# plant and read answers.
+KilnCMS.Test.StubCrawlerResolver.start()
+KilnCMS.Test.PublicAddress.start()

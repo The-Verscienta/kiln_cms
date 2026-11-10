@@ -34,6 +34,7 @@ defmodule KilnCMS.CMS.CustomFieldSerializersTest do
       lib/kiln_cms/cms/field_conversion.ex
       lib/kiln_cms/cms/field_definition.ex
       lib/kiln_cms/cms/field_sync.ex
+      lib/kiln_cms/cms/indexed_custom_fields.ex
       lib/kiln_cms/cms/field_types.ex
       lib/kiln_cms/cms/field_types/computed.ex
       lib/kiln_cms/cms/field_types/geolocation.ex
@@ -167,6 +168,7 @@ defmodule KilnCMS.CMS.CustomFieldSerializersTest do
     ),
     operator: ~w(
       lib/mix/tasks/kiln.gen.plugin.ex
+      lib/mix/tasks/kiln.custom_fields.index.ex
       lib/mix/tasks/kiln.join.retire.ex
       lib/mix/tasks/kiln.links.backfill.ex
       lib/mix/tasks/kiln.migrations.check.ex

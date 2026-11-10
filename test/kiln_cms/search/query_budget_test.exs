@@ -9,13 +9,14 @@ defmodule KilnCMS.Search.QueryBudgetTest do
 
   alias KilnCMS.CMS
   alias KilnCMS.Search
+  alias KilnCMS.Test.SearchHold
 
   defmodule SlowEmbedder do
     @behaviour KilnCMS.Search.Embedder
 
     @impl true
     def embed(text) do
-      Process.sleep(Application.get_env(:kiln_cms, :budget_test_delay, 0))
+      SearchHold.hold(:budget_test_delay)
       seed = :erlang.phash2(text)
       {:ok, for(i <- 1..384, do: :math.sin(seed * 1.0e-4 + i))}
     end
@@ -26,7 +27,7 @@ defmodule KilnCMS.Search.QueryBudgetTest do
 
     @impl true
     def scores(_query, docs) do
-      Process.sleep(Application.get_env(:kiln_cms, :budget_test_rerank_delay, 0))
+      SearchHold.hold(:budget_test_rerank_delay)
       {:ok, docs |> Enum.with_index() |> Enum.map(fn {_doc, i} -> i * 1.0 end)}
     end
   end
@@ -54,6 +55,10 @@ defmodule KilnCMS.Search.QueryBudgetTest do
       Application.delete_env(:kiln_cms, :budget_test_rerank_delay)
     end)
 
+    # A separate callback, so a slow call that never lets go cannot stop
+    # the config above from being put back.
+    SearchHold.release_on_exit()
+
     put_search_env(semantic: true, embedder: SlowEmbedder)
     admin = admin()
 
@@ -66,25 +71,34 @@ defmodule KilnCMS.Search.QueryBudgetTest do
 
   test "an embedding that misses its half of the budget costs only the vector legs",
        %{admin: admin, page: page} do
-    Application.put_env(:kiln_cms, :budget_test_delay, 3_000)
+    Application.put_env(:kiln_cms, :budget_test_delay, 30_000)
 
     # Core's own sections, not `Search.content_sections/0`: every section
-    # must finish its keyword legs inside 400 ms, one at a time at
-    # concurrency 1. An overlay that registers a dozen more content types
-    # makes that a test of its section count on a slow runner, not of how an
-    # embedding miss is charged.
+    # must finish its keyword legs inside the half of the budget the
+    # embedding leaves, one at a time at concurrency 1. An overlay that
+    # registers a dozen more content types makes that a test of its section
+    # count on a slow runner, not of how an embedding miss is charged.
+    #
+    # A budget of seconds, not milliseconds (#2553): a keyword leg still
+    # querying at the deadline is killed mid-query, and in the SQL sandbox
+    # that takes down the test's shared connection, so every later read
+    # fails with an `OwnershipError`. Under a loaded suite 400 ms cut the
+    # keyword legs as well as the embedding.
     sections = [:pages, :posts, :entries]
 
     for concurrency <- [1, 2] do
-      put_search_env(section_concurrency: concurrency, query_budget: 400)
+      put_search_env(section_concurrency: concurrency, query_budget: 3_000)
 
       {micros, report} =
         :timer.tc(fn -> Search.global_report("alpha", actor: admin, sections: sections) end)
 
       # The keyword legs answered...
       assert Enum.map(report.sections.pages, & &1.id) == [page.id]
-      # ...the request did not wait for the embedder's three seconds...
-      assert micros < 1_500_000, "took #{div(micros, 1000)} ms at concurrency #{concurrency}"
+      # ...the request did not wait for the embedder's thirty seconds...
+      assert micros < 6_000_000, "took #{div(micros, 1000)} ms at concurrency #{concurrency}"
+      # ...the embedding was given up at half the budget, not all of it...
+      embed = report.timings[:embed]
+      assert embed >= 1_400_000 and embed < 3_000_000, "embed took #{div(embed, 1000)} ms"
       # ...and every swept content section says which legs it went without.
       for section <- sections do
         assert report.partial[section] == [:semantic, :block, :tag]
@@ -125,12 +139,13 @@ defmodule KilnCMS.Search.QueryBudgetTest do
   end
 
   test "a reranker slower than the budget leaves the fused order", %{admin: admin, page: page} do
-    put_search_env(reranker: SlowReranker, query_budget: 400)
-    Application.put_env(:kiln_cms, :budget_test_rerank_delay, 3_000)
+    # Seconds, for the reason the embedding-miss test above gives (#2553).
+    put_search_env(reranker: SlowReranker, query_budget: 3_000)
+    Application.put_env(:kiln_cms, :budget_test_rerank_delay, 30_000)
 
     # Core's sections only, for the reason the embedding-miss test above
-    # gives: under a 400 ms budget, an overlay's extra content types make
-    # this a test of the section count on a slow runner.
+    # gives: an overlay's extra content types make this a test of the
+    # section count on a slow runner.
     {micros, report} =
       :timer.tc(fn ->
         Search.global_report("alpha",
@@ -141,7 +156,7 @@ defmodule KilnCMS.Search.QueryBudgetTest do
       end)
 
     assert Enum.map(report.sections.pages, & &1.id) == [page.id]
-    assert micros < 1_500_000
+    assert micros < 6_000_000
     assert report.partial == %{pages: [:rerank]}
   end
 

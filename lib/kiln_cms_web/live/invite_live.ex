@@ -16,6 +16,11 @@ defmodule KilnCMSWeb.InviteLive do
       (`Invitation.:accept_existing`), which adds the membership and changes
       nothing on the account.
 
+  An account already on the site is raised to the invited tier when it held a
+  lower one there, and left as it is otherwise (#2452). The flash after the
+  accept says which: joined, now at the invited tier, or already a member at
+  the tier it holds, with nothing changed.
+
   A made-up, expired, revoked or used token — or an `:admin` invitation whose
   sender is no longer a standing admin — gets one fixed page that names
   nothing, so the link is not a way to learn which of those it was.
@@ -115,12 +120,9 @@ defmodule KilnCMSWeb.InviteLive do
       end
 
     case result do
-      {:ok, _user} ->
+      {:ok, user} ->
         socket
-        |> put_flash(
-          :info,
-          gettext("Your account is ready — sign in to %{site}.", site: socket.assigns.site_name)
-        )
+        |> put_flash(:info, password_accepted(user, socket))
         |> redirect(to: ~p"/sign-in")
 
       {:error, error} ->
@@ -184,12 +186,9 @@ defmodule KilnCMSWeb.InviteLive do
            authorize?: false,
            context: socket.assigns.context
          ) do
-      {:ok, :accepted} ->
+      {:ok, outcome} ->
         socket
-        |> put_flash(
-          :info,
-          gettext("You've joined %{site} — sign in to continue.", site: socket.assigns.site_name)
-        )
+        |> put_flash(:info, accepted(outcome, socket.assigns.site_name))
         |> redirect(to: ~p"/sign-in")
 
       {:error, error} ->
@@ -213,6 +212,57 @@ defmodule KilnCMSWeb.InviteLive do
         end
     end
   end
+
+  # What the accept did (#2452), in the flash the sign-in page shows. The
+  # password paths set the account up whichever it was, so only an unchanged
+  # membership needs saying differently there.
+  defp accepted(%{outcome: :raised, role: role}, site), do: raised(role, site)
+
+  defp accepted(%{outcome: :already_member, role: role}, site),
+    do:
+      gettext("You're already a member of %{site} as %{tier}; nothing changed.",
+        site: site,
+        tier: tier(role)
+      )
+
+  defp accepted(_joined, site),
+    do: gettext("You've joined %{site} — sign in to continue.", site: site)
+
+  # Accepting over an unconfirmed account forgets every credential it held
+  # (#2453); when one the invitee may have set up was among them, say so.
+  defp password_accepted(user, socket) do
+    accepted = password_outcome(user.__metadata__[:invitation_outcome], socket)
+
+    if user.__metadata__[:forgotten_credentials] == true,
+      do:
+        accepted <>
+          " " <>
+          gettext(
+            "Any two-step verification, passkeys or API keys set up on this address before were removed; set them up again."
+          ),
+      else: accepted
+  end
+
+  defp password_outcome(%{outcome: :raised, role: role}, socket),
+    do: raised(role, socket.assigns.site_name)
+
+  defp password_outcome(%{outcome: :already_member, role: role}, socket),
+    do:
+      gettext(
+        "Your account is ready. You were already a member of %{site} as %{tier}, and that is unchanged.",
+        site: socket.assigns.site_name,
+        tier: tier(role)
+      )
+
+  defp password_outcome(_joined, socket),
+    do: gettext("Your account is ready — sign in to %{site}.", site: socket.assigns.site_name)
+
+  defp raised(role, site),
+    do:
+      gettext("You're now %{tier} on %{site} — sign in to continue.",
+        tier: tier(role),
+        site: site
+      )
 
   # --- loading ---------------------------------------------------------------
 
@@ -378,7 +428,7 @@ defmodule KilnCMSWeb.InviteLive do
           <div :if={@branch == :existing} id="invite-existing">
             <p class="auth-muted mb-4">
               {gettext(
-                "This address already has an account. Accept to add this site to it; nothing else about the account changes."
+                "This address already has an account. Accept to add this site to it, or to take the invited role there if yours is lower; nothing else about the account changes."
               )}
             </p>
             <button

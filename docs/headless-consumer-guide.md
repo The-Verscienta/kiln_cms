@@ -277,16 +277,93 @@ If you render either one, add `tabindex="0"`, `role="group"` and a translated
 
 The attributes arrived in a release without a `format_version` change, so an
 artifact fired before that release keeps its old markup until the document is
-next published or edited. A read does not re-fire it. An operator can rewrite
-every artifact at once with `mix kiln.refire_all`, but that sends no `updated`
-webhook and no CDN purge, and the artifact's `ETag` (built from the document,
-locale, surface and publish time, not from the body) stays the same. A CDN or
-client that revalidates with `If-None-Match` therefore gets `304` and keeps
-the old HTML; one that re-reads without a validator gets the new markup.
-[#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463) tracks
-closing that gap. Until then, if you need the new markup now, re-read
-without `If-None-Match`, or add the attributes on your side as you would
-for the `json` surface, skipping any `<pre>` that already has `tabindex`.
+next published, edited or re-fired. A read does not re-fire it. An operator
+re-fires every artifact at once after the upgrade
+([Re-render published content after an upgrade](releasing.md#re-render-published-content-after-an-upgrade)).
+What you see depends on how you cache:
+
+- **You revalidate with `If-None-Match`** (a CDN, a browser, `URLCache`,
+  OkHttp): you get the new markup on your next revalidation once the
+  re-fire has run. A fired artifact's `ETag` is a digest of the body it
+  serves, so it moves when the markup does
+  ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463)).
+- **You keep a copy until a webhook says otherwise** (a static build, ISR, a
+  mirror): you hear about it only if the operator ran the sweep with
+  `notify: true` (`mix kiln.refire_all --notify`). Each document then
+  arrives as `<type>.updated` with `"reason": "refire"` in `data` and an
+  unchanged `updated_at`, so refetch it rather than drop it as a duplicate
+  ([Webhooks](webhooks.md)). A silent sweep sends
+  nothing; ask the operator which they ran.
+- **You mirror with `/api/sync`**: a re-fire does not move a document's
+  `updated_at`, so a delta does not report it. Run a full resync
+  (`initial=true`) after an upgrade that re-renders.
+
+If you can't wait for the re-fire, add the attributes on your side as you
+would for the `json` surface, skipping any `<pre>` that already has
+`tabindex`.
+
+## Tables in rendered HTML
+
+A table wider than your column scrolls sideways inside its wrapper, and a
+keyboard user can scroll it only if the wrapper takes focus
+([#2464](https://github.com/The-Verscienta/kiln_cms/issues/2464)). It works
+like [code blocks](#code-blocks-in-rendered-html): Kiln adds the markup on the
+`web` surface, and on the `json` surface you add it yourself.
+
+### Tables on the `web` surface
+
+Every table in a rich-text block arrives inside a `div.kiln-table-wrap` that
+carries `tabindex="0"`, `role="group"` and an `aria-label`:
+
+```json
+{
+  "html": "<div class=\"kiln-table-wrap\" tabindex=\"0\" role=\"group\" aria-label=\"Scrollable table\"><table><tbody><tr><td>Flour</td></tr></tbody></table></div>"
+}
+```
+
+- **A `legacy_html` table is wrapped too.** Before this, a table stored as
+  HTML reached the `web` surface as a bare `<table>` with no wrapper. It now
+  arrives in the same `div.kiln-table-wrap`. If your stylesheet targets
+  tables as direct children (`.kiln-block > table`), switch to a descendant
+  selector (`.kiln-block table`) or style `.kiln-table-wrap > table`.
+- The label is translated into the document's locale, like the code-block
+  label: "Scrollable table", "Tableau défilant" (`fr`), "Tabla desplazable"
+  (`es`).
+- Authors cannot set these attributes; the sanitizer strips them and Kiln
+  adds them afterwards.
+- A table nested inside another table's cell gets no wrapper of its own; it
+  scrolls with the outer one.
+
+Give the wrapper a horizontal scroll and a focus ring. Kiln's stylesheet does
+not travel with the HTML. Kiln's own rules, minus its `.kiln-block` scope:
+
+```css
+.kiln-table-wrap {
+  overflow-x: auto;
+}
+.kiln-table-wrap[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--your-accent);
+  outline-offset: 2px; /* outside the wrapper, clear of the cell borders */
+}
+```
+
+Pick a color with 3:1 contrast against the page background around the table
+(WCAG 1.4.11). Keep the wrapper and its attributes if you post-process the
+HTML.
+
+### Tables on the `json` surface
+
+The `json` surface carries the stored prose unchanged: a Portable Text
+`"_type": "table"` block in `body`, or sanitized HTML in `legacy_html`, where a
+table is either bare or in a `div.kiln-table-wrap` with no other attributes.
+If you render either one, put each top-level table in a scrolling wrapper with
+`tabindex="0"`, `role="group"` and a translated `aria-label`, and add the
+focus ring above.
+
+An artifact fired before the release that added this keeps its old table
+markup until it is re-fired; [After a Kiln upgrade](#after-a-kiln-upgrade)
+covers how that reaches you. If you add the wrapper on your side meanwhile,
+skip any `.kiln-table-wrap` that already has `tabindex`.
 
 ## Images: sizes, crops and formats on request
 
@@ -340,6 +417,78 @@ must not hold your API key. Mint on the server, redeem in the page:
 
 See [api.md → Preview tokens](api.md#preview-tokens) for the response shape and
 who may mint.
+
+## Link previews: the `social` object
+
+A front end that renders its own pages needs Open Graph and X (Twitter) card
+tags that agree with Kiln's. The `json` surface carries the document's part of
+them in `social` (#2258):
+
+```bash
+curl -s 'https://cms.example.com/api/content/post/hello-world?fields=social'
+```
+
+```json
+{"id": "…", "type": "post",
+ "social": {"title": "Hello, world",
+            "description": "Our first post.",
+            "image": "https://cms.example.com/uploads/hello.png"}}
+```
+
+| Key | Value |
+|---|---|
+| `title` | The effective SEO title (the author's, else the type's pattern), else the document's title. Always present; `null` only when the document has no title. |
+| `description` | The effective SEO description. Absent when there is none. |
+| `image` | The SEO image as an absolute URL. A site-relative image is put on the document's own site: its custom domain, else its subdomain, else `PUBLIC_BASE_URL` for the default site. Absent when there is none. |
+
+These are the values Kiln's own pages use for `og:title` / `twitter:title`,
+`og:description` / `twitter:description` and the page's own `og:image` /
+`twitter:image` ([seo.md](seo.md#link-previews-open-graph-and-x-twitter-cards)).
+`?fields=social` returns just this object, as above. Under an experiment
+(`?variant_key=`), `title` at the top level is the variant's while
+`social.title` stays the canonical one: a link preview is read by a machine,
+and a variant never changes what a machine reads.
+
+**What you supply yourself.** `social` is per document, so it leaves out the
+three values that belong to the site rather than the document:
+
+- **The card type.** Use `summary_large_image` when you have an image
+  (`social.image`, or your own default) and `summary` when you don't. That is
+  Kiln's own rule.
+- **`twitter:site`.** The site's X username is set in Kiln's Branding settings,
+  but branding is not on any API yet, so put your handle in your front end's
+  config.
+- **A fallback image.** Kiln's pages fall back to Branding's Default social
+  image; the artifact does not, so `image` is absent on a document without one.
+  Use your own default.
+
+Not provided: `twitter:creator` and image alt text (`og:image:alt`).
+
+**`image` is fixed when the document is fired.** It names the host the site
+had at that moment. After a site's custom domain or slug, or the
+deployment's `PUBLIC_BASE_URL`, changes, artifacts keep the old host until they
+are re-fired (`mix kiln.refire_all`); Kiln's own pages resolve the host on
+every request and are not affected.
+
+**Older artifacts.** `social` arrived with `format_version` 4, so the schema
+from `GET /api/schema` marks it optional, and an artifact fired by an earlier
+release lacks it until it is re-fired. Kiln re-fires such an artifact in the
+background after the first read that misses its cache; that read, and cached
+reads for up to an hour after it, still get the old body. An operator can
+re-fire everything at once with `mix kiln.refire_all`. Even after the re-fire,
+two kinds of consumer keep the old body until the document is next edited:
+
+- **A `/api/sync` mirror** gets a document again only when it changes
+  editorially, and a re-fire is not an edit. To refresh a mirror, wait until
+  the operator's `mix kiln.refire_all` has finished, then run a fresh
+  `?initial=true` sync.
+- **A client or CDN that revalidates with `If-None-Match`.** The artifact's
+  `ETag` names the document's last edit, not the body, so it gets `304` for the
+  old body ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463)).
+  Re-read without the validator, or use `?fields=`, whose `ETag` is a digest
+  of the body.
+
+Read `social` as optional and fall back to `title` when it is missing.
 
 ## Author / PII
 
@@ -569,13 +718,15 @@ What that means for a front end:
   which age out). Static builds and ISR should still
   rebuild from [webhooks](webhooks.md); the purge only covers the CDN in front of
   Kiln.
-* **Don't build your own ETag from fields.** On JSON:API, GraphQL and search,
-  Kiln's is a digest of the response body, so it already changes whenever
-  anything in the body does — keying on `updatedAt` or an id misses changes
-  that do not touch them. A fired artifact's names the document, locale,
-  surface and publish time instead (a `?fields=` response's is a body
-  digest), so a Kiln upgrade that changes rendered markup does not move it
-  ([After a Kiln upgrade](#after-a-kiln-upgrade)).
+* **Don't build your own ETag from fields.** On JSON:API, GraphQL, search
+  and fired artifacts, Kiln's is a digest of the response body, so it already
+  changes whenever anything in the body does, and only then: keying on
+  `updatedAt` or an id misses a re-render after a Kiln upgrade, which changes
+  the body without touching either ([After a Kiln upgrade](#after-a-kiln-upgrade)).
+  A page rendered by Kiln itself has an `ETag` that also names the build
+  serving it, so it moves on every deploy that changes Kiln's code, dependencies or
+  assets.
+
 ## Analytics: your fetches are what get counted
 
 A successful `GET /api/content/:type/:slug` records a view against that

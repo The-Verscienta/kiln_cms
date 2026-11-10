@@ -11,10 +11,12 @@ defmodule KilnCMS.Security.ScannerGuardTest do
   import KilnCMS.OrgFixtures, only: [org: 1]
 
   alias KilnCMS.CMS
+  alias KilnCMS.CrawlerVerification
   alias KilnCMS.Security
   alias KilnCMS.Security.IpBlocklist
   alias KilnCMS.Security.ScannerGuard
   alias KilnCMS.SystemActor
+  alias KilnCMS.Test.StubCrawlerResolver
 
   @moduletag :capture_log
 
@@ -244,16 +246,6 @@ defmodule KilnCMS.Security.ScannerGuardTest do
       assert counter_rows() == 0
     end
 
-    test "a claimed good crawler is exempt from the miss threshold but not from bait paths" do
-      ua = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-
-      miss(10, "/gone", ua: ua)
-      assert rules() == []
-
-      miss(3, "/wp-login.php", ua: ua)
-      assert [_] = rules()
-    end
-
     test "an address the list already blocks is not counted further" do
       CMS.create_ip_block_rule!(%{cidr: "203.0.113.9", confirm_self_block: true},
         actor: admin(),
@@ -293,6 +285,118 @@ defmodule KilnCMS.Security.ScannerGuardTest do
       })
 
       miss(1)
+      assert [_] = rules()
+    end
+  end
+
+  describe "search-engine claims (#2254)" do
+    @googlebot "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+
+    # Each test gets an address of its own (results are cached per address)
+    # and a rate-limit scope of its own (lookup budgets are per network, and
+    # every address here is in 66.249/16).
+    setup do
+      previous = Application.get_env(:kiln_cms, CrawlerVerification)
+
+      Application.put_env(
+        :kiln_cms,
+        CrawlerVerification,
+        Keyword.put(previous || [], :rate_scope, "sg-cv-#{System.unique_integer([:positive])}")
+      )
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:kiln_cms, CrawlerVerification, previous),
+          else: Application.delete_env(:kiln_cms, CrawlerVerification)
+      end)
+
+      ip = KilnCMS.Test.PublicAddress.v4()
+      CrawlerVerification.forget(ip)
+      StubCrawlerResolver.reset(ip)
+      on_exit(fn -> CrawlerVerification.forget(ip) end)
+
+      %{ip: ip}
+    end
+
+    test "a verified claim is exempt from the miss threshold, not from bait paths", %{ip: ip} do
+      CrawlerVerification.put_result(:google, ip, :verified)
+
+      miss(10, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+
+      miss(3, "/wp-login.php", ua: @googlebot, ip: ip)
+      assert [_] = rules()
+    end
+
+    test "a claim whose lookup has not finished is exempt", %{ip: ip} do
+      StubCrawlerResolver.put_ptr(ip, {:block, self()})
+
+      miss(10, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+
+      # One lookup, still waiting on DNS, for all ten misses.
+      assert_receive {StubCrawlerResolver, :blocked, resolver, _callers, :ptr, ^ip}
+      assert StubCrawlerResolver.calls(:ptr, ip) == 1
+      StubCrawlerResolver.release(resolver)
+    end
+
+    test "a claim DNS proved false is counted like any other client", %{ip: ip} do
+      CrawlerVerification.put_result(:google, ip, {:rejected, :wrong_domain})
+
+      miss(3, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+      miss(1, "/gone", ua: @googlebot, ip: ip)
+      assert [event] = events()
+      assert event.metadata["reason"] == "miss_threshold"
+    end
+
+    test "a resolver error is not a proof: still exempt", %{ip: ip} do
+      CrawlerVerification.put_result(:google, ip, {:error, :timeout})
+
+      miss(10, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+    end
+
+    test "with verification off, the engine's name is enough, and nothing is looked up",
+         %{ip: ip} do
+      previous = Application.get_env(:kiln_cms, CrawlerVerification, [])
+      Application.put_env(:kiln_cms, CrawlerVerification, Keyword.put(previous, :enabled, false))
+
+      miss(10, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+      assert StubCrawlerResolver.calls(:ptr, ip) == 0
+
+      miss(3, "/wp-login.php", ua: @googlebot, ip: ip)
+      assert [_] = rules()
+    end
+
+    test "with verification off, a planted failure is not read", %{ip: ip} do
+      CrawlerVerification.put_result(:google, ip, {:rejected, :no_ptr})
+      previous = Application.get_env(:kiln_cms, CrawlerVerification, [])
+      Application.put_env(:kiln_cms, CrawlerVerification, Keyword.put(previous, :enabled, false))
+
+      miss(10, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+    end
+
+    for ua <- [
+          "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+          "Twitterbot/1.0",
+          "LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)",
+          "Mozilla/5.0 (compatible; Yahoo! Slurp; http://help.yahoo.com/help/us/ysearch/slurp)"
+        ] do
+      test "#{ua |> String.split(["/", " "]) |> hd()} is not exempt", %{ip: ip} do
+        miss(4, "/gone", ua: unquote(ua), ip: ip)
+        assert [_] = rules()
+        assert StubCrawlerResolver.calls(:ptr, ip) == 0
+      end
+    end
+
+    test "a link-preview fetcher is not exempt with verification off either", %{ip: ip} do
+      previous = Application.get_env(:kiln_cms, CrawlerVerification, [])
+      Application.put_env(:kiln_cms, CrawlerVerification, Keyword.put(previous, :enabled, false))
+
+      miss(4, "/gone", ua: "facebookexternalhit/1.1", ip: ip)
       assert [_] = rules()
     end
   end

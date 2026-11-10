@@ -129,7 +129,7 @@ defmodule KilnCMSWeb.ContentControllerChallengeTest do
       conn = %{build_conn() | host: host} |> get("/#{page.slug}")
 
       html = html_response(conn, 200)
-      assert html =~ ~s(action="/forms/#{required.slug}")
+      assert html =~ ~s(action="/en/forms/#{required.slug}")
       refute html =~ "data-kiln-challenge"
       refute csp(conn) =~ @provider
     end
@@ -148,13 +148,15 @@ defmodule KilnCMSWeb.ContentControllerChallengeTest do
       bare = page!([])
       with_plain = page!([form_block(plain)])
 
-      # The pre-#2249 formula, verbatim.
+      # The pre-#2249 formula, with no forms segment, and the build named last
+      # (#2463).
       expected = fn record ->
         raw =
           "#{record.id}:#{record.locale}:#{record.updated_at}:#{record.published_version_id}" <>
             ":#{record.seo_title}:#{record.seo_description}" <>
             ":#{KilnCMSWeb.Robots.directive(record)}" <>
-            ":#{KilnCMS.Cache.head_generation(record.org_id)}"
+            ":#{KilnCMS.Cache.head_generation(record.org_id)}" <>
+            ":#{KilnCMSWeb.BuildFingerprint.fingerprint()}"
 
         digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)
         ~s("#{digest}")
@@ -274,7 +276,7 @@ defmodule KilnCMSWeb.ContentControllerChallengeTest do
       conn = fetch(page.slug)
       html = html_response(conn, 200)
 
-      assert html =~ ~s(action="/forms/#{required.slug}")
+      assert html =~ ~s(action="/en/forms/#{required.slug}")
       assert html =~ "data-kiln-challenge"
       assert csp(conn) =~ @provider
     end

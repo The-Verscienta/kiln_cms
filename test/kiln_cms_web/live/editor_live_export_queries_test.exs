@@ -5,12 +5,14 @@ defmodule KilnCMSWeb.EditorLiveExportQueriesTest do
   disclosure runs it once; and a list over the cap says so instead of giving a
   number.
   """
-  # async: false — the counter attaches a global telemetry handler and counts
-  # every repo query in the VM, and the over-cap test lowers the cap with
-  # `Application.put_env`, which every other test in the VM would see.
+  # async: false — the counter attaches a global telemetry handler (see
+  # `KilnCMS.Test.QueryCounting` for what keeps its counts this test's own), and
+  # the over-cap test lowers the cap with `Application.put_env`, which every
+  # other test in the VM would see.
   use KilnCMSWeb.ConnCase, async: false
   @moduletag :capture_log
 
+  import KilnCMS.Test.QueryCounting
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Accounts.User
@@ -43,32 +45,9 @@ defmodule KilnCMSWeb.EditorLiveExportQueriesTest do
     user
   end
 
-  # The bound parameters of every repo query issued while `fun` runs.
-  defp query_params(fun) do
-    handler = "expq-#{uniq()}"
-    {:ok, agent} = Agent.start_link(fn -> [] end)
-
-    :telemetry.attach(
-      handler,
-      [:kiln_cms, :repo, :query],
-      fn _event, _measure, meta, _config ->
-        Agent.update(agent, &[{meta[:source], meta[:params]} | &1])
-      end,
-      nil
-    )
-
-    try do
-      fun.()
-    after
-      :telemetry.detach(handler)
-    end
-
-    Agent.get(agent, & &1)
-  end
-
   # An export count is the only list read bound with the cap plus one.
   defp export_counts(queries, cap) do
-    Enum.filter(queries, fn {_source, params} -> is_list(params) and (cap + 1) in params end)
+    Enum.filter(queries, fn %{params: params} -> is_list(params) and (cap + 1) in params end)
   end
 
   setup %{conn: conn} do
@@ -89,28 +68,29 @@ defmodule KilnCMSWeb.EditorLiveExportQueriesTest do
   test "no export count runs until the disclosure opens, then once", %{conn: conn, prefix: prefix} do
     cap = KilnCMSWeb.EditorLive.ListScope.export_cap()
 
-    {:ok, lv, _html} = live(conn, "/editor?type=page&q=#{prefix}")
     # Warm the one-off caches (registries, settings) so they are not counted.
-    render(lv)
+    page_queries(conn, "/editor?type=page&q=#{prefix}")
 
-    rendering =
-      query_params(fn ->
+    {lv, rendering} =
+      queries(fn ->
         {:ok, lv, _html} = live(conn, "/editor?type=page&q=#{prefix}&status=draft")
         render(lv)
         lv |> form("#content-filter", %{"status" => "draft"}) |> render_change()
+        lv
       end)
 
+    GenServer.stop(lv.pid)
     assert export_counts(rendering, cap) == []
 
     {:ok, lv, _html} = live(conn, "/editor?type=page&q=#{prefix}")
 
-    opening = query_params(fn -> lv |> element("#content-export-toggle") |> render_click() end)
-    assert [{_source, _params}] = export_counts(opening, cap)
+    {_, opening} = queries(fn -> lv |> element("#content-export-toggle") |> render_click() end)
+    assert [_count] = export_counts(opening, cap)
     assert has_element?(lv, "#export-summary", "Export 3 matching")
 
     # Closing and opening again reads nothing: the figure stands until the
     # filter changes.
-    again = query_params(fn -> lv |> element("#content-export-toggle") |> render_click() end)
+    {_, again} = queries(fn -> lv |> element("#content-export-toggle") |> render_click() end)
     assert export_counts(again, cap) == []
   end
 

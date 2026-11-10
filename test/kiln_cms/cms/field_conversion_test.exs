@@ -309,6 +309,172 @@ defmodule KilnCMS.CMS.FieldConversionTest do
     end
   end
 
+  # A contract step must reach the trash too (#2533): the source field is
+  # dropped a release later, and a record restored after that would come back
+  # holding only the string.
+  describe "a trashed record" do
+    setup ctx do
+      post = post!(ctx, ~s([{"amount": 2, "unit": "g"}]))
+      CMS.publish_post!(post, %{}, actor: ctx.admin)
+      KilnCMS.DataCase.drain_oban()
+      :ok = CMS.destroy_post!(reload(post), actor: ctx.admin)
+      KilnCMS.DataCase.drain_oban()
+      %{post: trashed(post)}
+    end
+
+    defp trashed(post) do
+      CMS.list_trashed_posts!(authorize?: false, tenant: post.org_id)
+      |> Enum.find(&(&1.id == post.id))
+    end
+
+    defp convert_changeset(record, ctx, rows) do
+      Ash.Changeset.for_update(record, :convert_custom_field, %{},
+        actor: KilnCMS.SystemActor.resolve(:field_conversion),
+        tenant: record.org_id,
+        context: %{convert_custom_field: %{name: ctx.group, live: rows}}
+      )
+    end
+
+    test "is converted without a fire, and a restore brings the group back",
+         %{post: post} = ctx do
+      dry = convert(ctx)
+      assert %{convertible: 1, published: 0, trashed: 1} = dry
+      assert FieldConversion.describe(dry) =~ "would convert 1 (0 published, 1 trashed)"
+
+      assert %{written: 1, published: 0, trashed: 1, problems: []} =
+               convert(ctx, dry_run?: false)
+
+      # Its artifacts were purged when it was trashed; a fire would put them back.
+      refute_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"id" => post.id})
+
+      converted = trashed(post)
+      assert converted.custom_fields[ctx.group] == [%{"amount" => 2.0, "unit" => "g"}]
+      assert converted.lock_version == post.lock_version
+      assert converted.updated_at == post.updated_at
+
+      restored = CMS.restore_post!(converted, actor: ctx.admin)
+      assert reload(restored).custom_fields[ctx.group] == [%{"amount" => 2.0, "unit" => "g"}]
+
+      # A second run finds it converted.
+      assert %{kept: 1, written: 0} = convert(ctx, dry_run?: false)
+    end
+
+    test "that does not fit is reported as trashed and does not block --apply", ctx do
+      prose = post!(ctx, "Two grams, as needed")
+      :ok = CMS.destroy_post!(prose, actor: ctx.admin)
+      live = post!(ctx, ~s({"amount": 1, "unit": "ml"}))
+
+      report = convert(ctx, dry_run?: false)
+
+      refute report.blocked?
+      assert %{written: 2, trashed: 1} = report
+      assert [%{id: id, kind: :unparseable, trashed?: true}] = report.problems
+      assert id == prose.id
+      assert FieldConversion.blocking(report) == []
+      assert reload(live).custom_fields[ctx.group] == [%{"amount" => 1.0, "unit" => "ml"}]
+      assert trashed(prose).custom_fields[ctx.source] == "Two grams, as needed"
+
+      described = FieldConversion.describe(report)
+      assert described =~ "#{prose.id} (#{prose.slug}) (trashed) — unparseable:"
+      assert described =~ "1 trashed record(s) keep their string"
+    end
+
+    test "a live record that does not fit still blocks, and the count is the live ones'", ctx do
+      trashed_prose = post!(ctx, "Two grams")
+      :ok = CMS.destroy_post!(trashed_prose, actor: ctx.admin)
+      _live_prose = post!(ctx, "Three grams")
+
+      report = convert(ctx, dry_run?: false)
+
+      assert report.blocked?
+      assert report.written == 0
+      assert length(report.problems) == 2
+      assert [%{trashed?: false}] = FieldConversion.blocking(report)
+      assert FieldConversion.describe(report) =~ "nothing written: 1 invalid"
+      assert trashed(trashed_prose).custom_fields[ctx.group] == nil
+    end
+
+    # The race the fire gate is for: a trash and a restore bump no
+    # `lock_version`, so the struct read in the trashed pass still writes
+    # after a restore. The write must fire then: the restore's own fire may
+    # have delivered the shape from before the conversion.
+    test "restored between the read and the write is fired", %{post: post} = ctx do
+      changeset = convert_changeset(post, ctx, [%{"amount" => 4, "unit" => "g"}])
+      assert changeset.data.archived_at
+
+      CMS.restore_post!(post, actor: ctx.admin)
+      KilnCMS.DataCase.drain_oban()
+      refute_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"id" => post.id})
+
+      assert {:ok, %{archived_at: nil}} = Ash.update(changeset)
+
+      assert_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"id" => post.id})
+      assert reload(post).custom_fields[ctx.group] == [%{"amount" => 4.0, "unit" => "g"}]
+    end
+
+    test "a live struct whose row is trashed before the write is written and not fired", ctx do
+      post = post!(ctx, ~s([{"amount": 2, "unit": "g"}]))
+      live = CMS.publish_post!(post, %{}, actor: ctx.admin)
+      KilnCMS.DataCase.drain_oban()
+      live = reload(live)
+
+      changeset = convert_changeset(live, ctx, [%{"amount" => 6, "unit" => "ml"}])
+      :ok = CMS.destroy_post!(live, actor: ctx.admin)
+      KilnCMS.DataCase.drain_oban()
+
+      assert {:ok, %{archived_at: %DateTime{}}} = Ash.update(changeset)
+
+      refute_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"id" => live.id})
+      assert trashed(live).custom_fields[ctx.group] == [%{"amount" => 6.0, "unit" => "ml"}]
+    end
+
+    test "an ordinary update of it is still refused", %{post: post} = ctx do
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{} | _]}} =
+               CMS.update_post(post, %{title: "After the trash"}, actor: ctx.admin)
+    end
+
+    test "of a dynamic type is converted too", ctx do
+      type =
+        CMS.create_type_definition!(
+          %{name: "remedy#{System.unique_integer([:positive])}", label: "Remedy"},
+          actor: ctx.admin
+        )
+
+      field =
+        &CMS.create_field_definition!(Map.put(&1, :type_definition_id, type.id),
+          actor: ctx.admin
+        )
+
+      field.(%{name: "uses_json", label: "Uses (old)", field_type: :text})
+      field.(%{name: "uses", label: "Uses", field_type: :string, multiple: true})
+
+      entry =
+        CMS.create_entry!(
+          %{
+            type_definition_id: type.id,
+            title: "Remedy",
+            slug: slug(),
+            custom_fields: %{"uses_json" => ~s(["sleep", "calm"])}
+          },
+          actor: ctx.admin
+        )
+
+      :ok = CMS.destroy_entry!(entry, actor: ctx.admin)
+
+      assert {:ok, %{written: 1, trashed: 1}} =
+               FieldConversion.run(entry.org_id, type.name, "uses_json", "uses",
+                 dry_run?: false,
+                 batch: 1
+               )
+
+      [converted] =
+        CMS.list_trashed_entries!(authorize?: false, tenant: entry.org_id)
+        |> Enum.filter(&(&1.id == entry.id))
+
+      assert converted.custom_fields["uses"] == ["sleep", "calm"]
+    end
+  end
+
   describe "the release entry point" do
     defp release(ctx, opts, serving? \\ true) do
       test = self()

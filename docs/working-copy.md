@@ -279,6 +279,18 @@ What can go wrong:
 - A version that cannot be restored (a category or media item since deleted)
   opens the dialog with the reason and no confirm button.
 - *Couldn't restore that version.* The history read failed.
+- *This content changed elsewhere. Reload to get the latest before saving.*
+  Someone saved, published, unpublished or archived the document after you
+  opened it, so the restore was refused and nothing was written (#2532). The
+  banner above the form pauses saving; your unsaved text stays in the form.
+  Copy anything you need, choose **Reload latest**, then restore again from
+  the reloaded history. If the document was moved to the trash meanwhile, the
+  message is *This content was moved to the trash or deleted.* and the banner
+  offers **Back to content** instead.
+
+A restore also counts as a save for every other open editor: a tab that
+loaded the document before the restore gets the same banner on its next save
+instead of writing the old text back over it.
 
 The preview and the restore run the same `KilnCMS.CMS.Changes.RestoreVersion.plan/3`,
 so the preview cannot promise something the restore does not do. The preview

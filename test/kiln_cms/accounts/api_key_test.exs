@@ -189,7 +189,8 @@ defmodule KilnCMS.Accounts.ApiKeyTest do
       # Hard delete stays banned for every key regardless of scope/role (#330).
       assert {:error, %Ash.Error.Forbidden{}} = KilnCMS.CMS.purge_page(page, actor: actor)
 
-      # The same admin, keyless, may hard-delete.
+      # The same admin, keyless, may hard-delete (a trashed row: #2531).
+      :ok = KilnCMS.CMS.destroy_page(page, actor: admin)
       assert :ok = KilnCMS.CMS.purge_page(page, actor: admin)
     end
 

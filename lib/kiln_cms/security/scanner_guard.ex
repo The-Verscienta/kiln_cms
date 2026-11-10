@@ -40,17 +40,23 @@ defmodule KilnCMS.Security.ScannerGuard do
       misses against us. (Header absence is not proof of a scanner, and a
       scanner can send them: the threshold is the real control.)
     * loopback, private (RFC 1918), unique-local, link-local and CGNAT
-      (`100.64.0.0/10`) addresses, and any `TRUSTED_PROXIES` range: those are
-      a proxy, a health check or a whole office behind one NAT, never one
-      scanner
+      (`100.64.0.0/10`) addresses, unspecified, multicast and reserved ones
+      (anything `Cidr.public_unicast?/1` refuses), and any `TRUSTED_PROXIES`
+      range: those are a proxy, a health check or a whole office behind one
+      NAT, never one scanner
     * a request carrying a forwarding header while no proxy is trusted
       (`Plugs.ClientIp.untrusted_forwarding?/1`): `remote_ip` is then the
       proxy's, and blocking it would block the site
     * an address the block list already matches
-    * a claimed good crawler (`User-Agent` names Googlebot, Bingbot, ...) is
-      exempt from the miss threshold only; **bait paths still count**. The
-      user agent is spoofable, which is why it does not buy anything on a bait
-      path, and no reverse DNS is done.
+    * a search-engine claim (`KilnCMS.BotClass.search_engine/1`: Googlebot,
+      bingbot, ...) is exempt from the miss threshold only, and only until
+      `KilnCMS.CrawlerVerification` proves it false (#2254): verified, pending,
+      skipped or unanswered claims keep the exemption, a claim whose address
+      fails the reverse-DNS check counts like any other client. With
+      verification off (`KILN_CRAWLER_VERIFICATION=false`) the engine's name
+      in the user agent is enough. Link-preview fetchers (facebookexternalhit,
+      Twitterbot, LinkedInBot) and Slurp are not exempt. **Bait paths count
+      for everyone**: no crawler has a reason to ask for one.
 
   At the moment of the trip the block is also skipped when the address has a
   successful `:sign_in` event on this site in the last 24 hours (one indexed
@@ -85,7 +91,9 @@ defmodule KilnCMS.Security.ScannerGuard do
   require Logger
 
   alias KilnCMS.Accounts.ThrottleStore
+  alias KilnCMS.BotClass
   alias KilnCMS.CMS
+  alias KilnCMS.CrawlerVerification
   alias KilnCMS.Security
   alias KilnCMS.Security.Cidr
   alias KilnCMS.Security.IpBlocklist
@@ -102,16 +110,10 @@ defmodule KilnCMS.Security.ScannerGuard do
 
   @recent_sign_in_hours 24
 
-  @private_ranges ~w(
-    0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.16.0.0/12
-    192.168.0.0/16 fc00::/7 fe80::/10 ::/128
-  )
-
-  # Crawlers whose user agent exempts a request from the miss threshold.
-  @good_bots ~w(
-    googlebot bingbot duckduckbot applebot yandexbot baiduspider slurp
-    facebookexternalhit twitterbot linkedinbot
-  )
+  # The search engines whose name in a user agent exempts a request from the
+  # miss threshold while crawler verification is off. With it on, the claim is
+  # read by `BotClass.search_engine/1` and checked instead (`good_bot?/2`).
+  @search_bots ~w(googlebot bingbot duckduckbot applebot yandexbot baiduspider)
 
   @defaults [
     enabled: false,
@@ -182,7 +184,7 @@ defmodule KilnCMS.Security.ScannerGuard do
          %{id: org_id} <- conn.assigns[:current_org],
          nil <- conn.assigns[:current_user],
          ip when is_tuple(ip) <- conn.remote_ip,
-         true <- public?(ip),
+         true <- Cidr.public_unicast?(ip),
          false <- trusted_proxy?(ip),
          false <- ClientIp.untrusted_forwarding?(conn.req_headers),
          false <- browser_like?(conn),
@@ -194,16 +196,12 @@ defmodule KilnCMS.Security.ScannerGuard do
          cidr: cidr,
          key: "#{org_id}|#{cidr}",
          bait?: bait?(path),
-         bot?: good_bot?(conn),
+         bot?: good_bot?(conn, ip),
          request: Recorder.request_context(conn)
        }}
     else
       _skip -> :skip
     end
-  end
-
-  defp public?(ip) do
-    not Cidr.loopback?(ip) and not Enum.any?(@private_ranges, &Cidr.contains?(&1, ip))
   end
 
   defp trusted_proxy?(ip) do
@@ -225,9 +223,24 @@ defmodule KilnCMS.Security.ScannerGuard do
     end
   end
 
-  defp good_bot?(conn) do
-    ua = conn |> Plug.Conn.get_req_header("user-agent") |> List.first("") |> String.downcase()
-    Enum.any?(@good_bots, &String.contains?(ua, &1))
+  # A search-engine claim is exempt from the miss threshold unless DNS has
+  # proven it false (#2254): a lookup still pending, skipped or unanswered
+  # keeps the exemption, so a real crawler's first misses from a new address
+  # never count. `context/2` has already turned away untrusted forwarding and
+  # non-public addresses, so the check sees the client's own address. With
+  # verification off, the name in the user agent is enough, as before.
+  defp good_bot?(conn, ip) do
+    ua = conn |> Plug.Conn.get_req_header("user-agent") |> List.first("")
+
+    if CrawlerVerification.enabled?() do
+      case BotClass.search_engine(ua) do
+        nil -> false
+        engine -> CrawlerVerification.check(engine, ip) != {:unverified, :failed}
+      end
+    else
+      lowered = String.downcase(ua)
+      Enum.any?(@search_bots, &String.contains?(lowered, &1))
+    end
   end
 
   defp bait?(path) do
