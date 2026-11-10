@@ -24,8 +24,13 @@ defmodule KilnCMS.Accounts.Changes.AcceptInvitation do
       nothing; an `:admin` invitation re-checks that its sender is still a
       standing admin.
     * **`after_action`**, in the same transaction: the membership the
-      invitation names (`KilnCMS.Accounts.Invitations.grant_membership/3`), then
+      invitation names (`KilnCMS.Accounts.Invitations.grant_membership/4`), then
       the row consumed. All of it commits with the account or none of it does.
+      An unconfirmed account may already be on the site: a lower membership is
+      raised to the invited tier, an equal or higher one left alone (#2452).
+      What happened rides back on the returned user's metadata, under
+      `:invitation_outcome`: `%{outcome: :joined | :raised | :already_member,
+      role: tier}`, the tier being the one the account now holds there.
 
   Every refusal is the one `InvitationRefused` `:invalid` reason, on `:token`.
 
@@ -112,15 +117,21 @@ defmodule KilnCMS.Accounts.Changes.AcceptInvitation do
     # action's own commit — `replay/2` below.
     {result, effects} =
       AfterCommit.capture(fn ->
-        with {:ok, _membership} <-
-               Invitations.grant_membership(user, invitation, write_context, grant_opts) do
-          # authorize?: false — the system-only consume of the invitation this
-          # transaction just honoured.
-          Accounts.consume_invitation(invitation, authorize?: false)
+        with {:ok, %{outcome: outcome, membership: membership}} <-
+               Invitations.grant_membership(user, invitation, write_context, grant_opts),
+             # authorize?: false — the system-only consume of the invitation
+             # this transaction just honoured.
+             :ok <- Accounts.consume_invitation(invitation, authorize?: false) do
+          {:ok, %{outcome: outcome, role: membership.role}}
         end
       end)
 
-    with :ok <- result, do: {:ok, Ash.Resource.put_metadata(user, @effects, effects)}
+    with {:ok, outcome} <- result do
+      {:ok,
+       user
+       |> Ash.Resource.put_metadata(@effects, effects)
+       |> Ash.Resource.put_metadata(:invitation_outcome, outcome)}
+    end
   end
 
   # Run what `grant/2` captured once the account's transaction has committed

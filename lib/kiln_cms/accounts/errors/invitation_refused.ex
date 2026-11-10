@@ -13,7 +13,12 @@ defmodule KilnCMS.Accounts.Errors.InvitationRefused do
       the per-address mail window;
     * `:invalid` — the token is made up, expired, revoked or used, or the
       invitation no longer stands. One reason for all of them, so the accept
-      page cannot tell them apart.
+      page cannot tell them apart;
+    * `:not_higher` — the invitee's membership on the site already holds the
+      invited tier or a higher one, so accepting raises nothing
+      (`OrgMembership.:raise_role_by_invitation`, #2452). Never shown as an
+      error: `KilnCMS.Accounts.Invitations.grant_membership/4` reads it as
+      "already a member".
 
   `:invalid`-class, on a field, so `AshPhoenix.Form` and the console's flash
   render it. `in?/2` lets a caller pick out one reason.
@@ -31,6 +36,9 @@ defmodule KilnCMS.Accounts.Errors.InvitationRefused do
 
   def message(%{reason: :mail_budget}),
     do: "has been sent too many invitations in the last hour — try again later"
+
+  def message(%{reason: :not_higher}),
+    do: "already holds this tier or a higher one on this site"
 
   def message(_error), do: "this invitation is no longer valid"
 
