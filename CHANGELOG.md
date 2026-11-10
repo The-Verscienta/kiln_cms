@@ -58,7 +58,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Run `mix ash.migrate` (new tables `backup_locks`, `backup_node_beats`; `backup_runs` gains `chain_id` and status `canceled`). Backups run on a new Oban queue `backup_steps` (1 per node; add 1 to `POOL_SIZE`); drain the `backups` queue before the next minor. Node names must be unique.**
   Mid-deploy, don't start backups from an old node. Before rolling back, cancel running backups, then relabel `canceled` runs and delete `backup_canceled` events (#2509), or roll forward.
-  ([long form](docs/changelog/unreleased.md#backup-step-chain-upgrade))
+  ([#2537](https://github.com/The-Verscienta/kiln_cms/pull/2537) · [long form](docs/changelog/unreleased.md#backup-step-chain-upgrade))
 
 - **Run `mix ash.migrate` (new column `field_definitions.width`, new table `field_sections`). Field sync files exported from now on carry `width`, which builds from before this change refuse.** Rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#field-layout-upgrade))
@@ -163,7 +163,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Breaking
 
 - **Console and overlays: `Backups.enqueue/1` returns `{:ok, %{status:, chain:}}`, not an `Oban.Job`, and `Backups.Worker.run/3` requests a backup and waits for it instead of running it inline; both are deprecated for `Backups.request/2`.**
-  ([long form](docs/changelog/unreleased.md#backup-request-api))
+  ([#2537](https://github.com/The-Verscienta/kiln_cms/pull/2537) · [long form](docs/changelog/unreleased.md#backup-request-api))
 
 - **Unpublishing and archiving need publish rights (admin, or editor where Team → Publishing allows). Upgraded sites default it off, so editors there lose both, and their `:read_write` keys get 403; an admin can choose Let editors publish.** No migration.
   ([long form](docs/changelog/unreleased.md#takedown-needs-publish-rights))
@@ -178,7 +178,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **In-app backups run as retried steps behind a cluster-wide lock: a second backup queues, a stopped node's step moves on, and platform admins can Cancel a running backup (audited, resumable).**
   Each step retries 4 times (1/5/15 min); database-only backups can now be resumed. Guide: [docs/backups.md](docs/backups.md#how-an-in-app-backup-runs-2218).
-  ([long form](docs/changelog/unreleased.md#backup-step-chain))
+  ([#2537](https://github.com/The-Verscienta/kiln_cms/pull/2537) · [long form](docs/changelog/unreleased.md#backup-step-chain))
 
 - **Site admins can see which security settings are on, and what to fix first, at Organization → Security posture; platform admins also see the installation's checks.**
   Read-only, ten checks; an unknown or broken check counts as a warning, never a pass. Plugins add checks with `security_checks/0` and `Kiln.Security.Check` (`kiln_plugin` 1.4). Guide: [docs/security-posture.md](docs/security-posture.md).
