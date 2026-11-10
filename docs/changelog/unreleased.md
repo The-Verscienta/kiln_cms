@@ -7,6 +7,64 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="render-etags-upgrade"></a>
+
+- **Every fired-artifact `ETag` (`/api/content/…`, every surface) and every
+  `ETag` on a page Kiln renders itself changes once on this deploy (#2463).**
+  No migration and no setting. A CDN, browser or app that revalidates with
+  `If-None-Match` gets one full `200` per URL instead of a `304`, then
+  revalidates as before. Plan for that much extra origin traffic in the first
+  cache window after the deploy (300 seconds for an artifact, 60 for a page).
+  - **Artifacts:** the tag is now `W/"<id>-<locale>-<surface>-b<digest>"`
+    (`-<variant id>` appended for an A/B arm), where the digest is of the
+    body served. It used to end in the document's `updated_at` (and
+    `-x<tag>` for an `?expand=` response). From now on it changes only when
+    the bytes do, so a republish or re-fire that produced the same body keeps
+    it. Treat the tag as opaque: a client that read the timestamp out of the
+    old one gets none now.
+  - **Pages:** the tag now names the running build as well, so it also
+    changes on every later deploy whose code, dependencies or assets differ,
+    and a rolling deploy flips it between old and new nodes until it
+    finishes.
+  - **Rolling back** is safe: the old release goes back to its own tags,
+    which costs another one-time round of `200`s.
+
+<a id="twitter-card-upgrade"></a>
+
+- **Run `mix ash.migrate` for the new X (Twitter) username setting, and expect
+  fired `json` artifacts to move to `format_version` 4 (#2258). On a large
+  site, run `mix kiln.refire_all` after the deploy.**
+  - **The migration.** `20261110041039_add_site_branding_twitter_site` adds a
+    nullable `site_branding.twitter_site` (`text`). Additive and instant; no
+    existing row changes, and nothing is set until a site admin saves one.
+  - **Why the version moves.** The `json` artifact gains a `social` object
+    that belongs on every published document, not only on ones edited after
+    the deploy (the reason `robots` did not need a bump). Only a
+    `format_version` bump makes existing artifacts converge.
+  - **How existing artifacts converge.** An artifact older than v4 is re-fired
+    in the background after the first read that misses the firing cache. That
+    read, and cached reads for up to an hour, still serve the old body, and a
+    document nobody reads is never re-fired. `mix kiln.refire_all` (on a
+    release, `bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`) re-fires every
+    published document through the `firing` queue instead.
+  - **What a re-fire doesn't reach.** A re-fire is not an edit, so:
+    - an `/api/sync` mirror is not sent the document again; it keeps the body
+      without `social` until the document is next edited, or until it runs a
+      fresh `?initial=true` sync after the re-fire has finished;
+    - a CDN or client that revalidates with `If-None-Match` gets `304` for the
+      old artifact body, because the artifact `ETag` names the document's
+      last edit, not the body
+      ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463));
+      `?fields=` responses are unaffected (their `ETag` is a body digest);
+    - Kiln's own HTML pages render the new tags at once, but their `ETag` also
+      ignores the layout until the document is edited or a site setting that
+      reaches `<head>` (such as Branding) is saved, so a revalidating CDN may
+      hold the old `<head>` until then.
+  - **Rolling back.** Safe. The older release ignores the column. It serves
+    v4 artifacts as stored, `social` included, rather than downgrading them,
+    and logs at most once a minute that an artifact is newer than the build;
+    `mix kiln.refire_all` on the older release rewrites them in its own shape.
+
 <a id="invitation-raise-tier-upgrade"></a>
 
 - **After upgrading, check Team → Pending invitations on each site for
@@ -887,13 +945,15 @@ carries the reasoning.
   edited: `format_version` does not change, so a read does not re-fire it.
   `mix kiln.refire_all` (on a release,
   `/app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`) rewrites every
-  published document's artifacts now. It sends no `updated` webhook and busts
-  no cache, and the artifact `ETag` does not change. A headless consumer, CDN
-  or browser that revalidates with `If-None-Match` can therefore keep the old
-  HTML until the document is next edited; a consumer that re-reads without a
-  validator gets the new markup. The same `ETag` gap applies to Kiln's own
-  public HTML pages behind a CDN or in a browser cache that revalidates
-  (#2463). Rolling the pin back is safe: the extra attributes are inert to the
+  published document's artifacts now. Since the artifact `ETag` became a
+  digest of the body ([#2463](#render-etags)), a headless consumer, CDN or
+  browser that revalidates with `If-None-Match` gets the new HTML on its next
+  revalidation. A consumer that caches until a webhook tells it otherwise
+  hears nothing from a plain sweep: run it as `mix kiln.refire_all --notify`
+  (`KilnCMS.Firing.Sweep.run(notify: true)`) to send each document as
+  `<type>.updated` with `"reason": "refire"`
+  ([how](../releasing.md#re-render-published-content-after-an-upgrade)).
+  Rolling the pin back is safe: the extra attributes are inert to the
   previous release.
 
 ## Breaking
@@ -1008,6 +1068,96 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="refire-notify"></a>
+
+- **`mix kiln.refire_all --notify` re-fires every published document and
+  tells webhook receivers about each one (#2463).** A plain sweep is silent:
+  revalidating clients now see the new body (its `ETag` moves, [below](#render-etags)),
+  but a static build, an ISR page or a mirror that waits for a webhook never
+  heard that the markup changed after an upgrade.
+  - **What it sends:** for each document whose fire completes,
+    `<type>.updated` to every endpoint subscribed to it, with
+    `"reason": "refire"` in `data`, and the same `updated` on the public
+    change feed (which does not carry the reason). On a release:
+    `/app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run(notify: true)"`.
+  - **What it doesn't:** automation rules, federation and the CDN purge do
+    not run. A re-render is not an edit, and every published document at
+    once would run every "on updated" rule, announce the whole site to its
+    followers, and purge the CDN every few seconds for as long as the sweep
+    ran. Purge once when `KilnCMS.Firing.Sweep.pending/0` reaches `0`
+    (`KilnCMS.CDN.purge_site/1` per site, or the `kiln` surrogate key at
+    your CDN).
+  - **Volume:** one delivery per published document per endpoint, on the
+    `webhooks` queue your editors' publishes use too. A receiver that answers
+    `429` until deliveries run out of retries can trip auto-disable (10 in a
+    row by default). Run it off-peak. The walk-through is
+    [Re-render published content after an upgrade](../releasing.md#re-render-published-content-after-an-upgrade).
+  - **`reason` on other `updated`s:** `KilnCMS.Firing.refire/3` (#2048) now
+    marks its `updated` with `"reason": "refire"` too; it still reaches
+    automation, federation and the CDN purge as before. An edit's `updated`
+    carries no `reason` key, so its payload is unchanged. A receiver that
+    drops an `updated` whose `updated_at` it has already seen must not drop
+    one with a reason: the body changed and `updated_at` did not.
+  - The default sweep and `KilnCMS.Firing.Sweep.sweep_type/2` (an SEO
+    pattern change, #1135) stay silent. A publish made while the sweep's job
+    for that document is pending is merged into it, so that document also
+    gets an `updated` marked `refire` after its own event.
+  - `/api/sync` does not report a re-fire, because it reads `updated_at`;
+    a mirror picks the new body up on its next full resync (`initial=true`).
+
+<a id="twitter-card-tags"></a>
+
+- **Site admins can set the site's X (Twitter) username, and link previews
+  are built from one resolution: no empty tags, absolute images on the site's
+  own host, and the same values for Open Graph and X (#2258).** For site
+  admins, front-end developers and anyone sharing links.
+  - **X (Twitter) username.** A new field in **Delivery → Branding**,
+    **Identity** section (site admins only). It accepts `kilncms`, `@kilncms`
+    or an `x.com` / `twitter.com` profile URL (with `www.` or `mobile.`, a
+    trailing slash, and a `?s=21`-style query or fragment), stores
+    `@kilncms`, and refuses anything else, including X's own pages (`home`,
+    `i`, `explore`, `search`, `settings` and the like), with "must be an X
+    (Twitter) username like @kilncms". Pages then carry
+    `<meta name="twitter:site">`. It is per site only: there is no
+    environment variable or instance-wide default. A site that added
+    `twitter:site` under **Code injection** should remove it, or the tag
+    appears twice.
+  - **One resolution for both sets of tags.**
+    `KilnCMSWeb.Layouts.social_meta/1` feeds `og:title`/`twitter:title`,
+    `og:description`/`twitter:description`, `og:image`/`twitter:image`,
+    `twitter:card` and `twitter:site`. A tag with no value is left out, never
+    sent as `content=""`. The title falls back to the site name, so the stock
+    home page now has `og:title` and `twitter:title`. A blank page image falls
+    through to Branding's Default social image instead of an empty tag. The
+    card is `summary_large_image` when there is an image (the page's or the
+    site's), else `summary`.
+  - **Absolute images.** `og:image`, `twitter:image` and the JSON-LD `image`
+    are now always absolute on the site's own address (custom domain, else
+    subdomain, else `PUBLIC_BASE_URL`), including a page's own site-relative
+    Social image, which used to go out relative. `KilnCMSWeb.Tenant.absolute_url/2`
+    is the one place that decides this; a relative image with no site to
+    resolve it against is dropped.
+  - **No separate social override fields.** The SEO title, SEO description and
+    Social image are the overrides, so a search result and a link preview
+    never disagree about a page.
+  - **`social` on the `json` artifact.** `{"title", "description", "image"}`:
+    the effective SEO title (else the title; `null` only with no title), the
+    effective SEO description and the SEO image made absolute, the last two
+    omitted when there is none. The image's host is fixed when the document
+    is fired, so re-fire after changing a site's domain. It is per document
+    only: no card type, no `twitter:site` and no Branding fallback image,
+    because those belong to the site, and Branding is not on any API yet, so a
+    front end supplies its own handle and default image. `?fields=social`
+    returns it alone, and under an experiment `social.title` stays canonical.
+    `GET /api/schema` adds `social` as an optional property, and the
+    generated TypeScript, Swift and Kotlin models gain it. JSON:API, GraphQL,
+    MCP and webhook payloads are unchanged.
+  - **Not yet:** `twitter:creator`, and `og:image:alt` / `twitter:image:alt`
+    (the Social image stores no alt text).
+  - Guides: [Link previews](../seo.md#link-previews-open-graph-and-x-twitter-cards)
+    (with the how-to) and, for front ends,
+    [the `social` object](../headless-consumer-guide.md#link-previews-the-social-object).
 
 <a id="plugin-health-checks"></a>
 
@@ -3786,6 +3936,36 @@ carries the reasoning.
     has a new name; delete superseded items in the media library.
 
 ## Fixed
+
+<a id="render-etags"></a>
+
+- **A change to rendered output that came without an edit no longer leaves
+  revalidating clients on the old copy (#2463).** Two validators named the
+  content but not what rendered it:
+  - **Fired artifacts** (`/api/content/:type/:slug`) were tagged with the
+    document's id, locale, surface and `updated_at`. A re-fire rewrites the
+    stored body without moving `updated_at`: `mix kiln.refire_all` after an
+    upgrade that changed markup, or `KilnCMS.Firing.refire/3`. A CDN or app
+    holding the old body went on getting `304`. The `ETag` is now a digest
+    of the body served, as `?fields=` responses already had, so it moves
+    exactly when the bytes do. `?expand=` responses are digested with their
+    expansion, and `surface=llm` by its Markdown. `Last-Modified` stays the
+    last edit: Kiln itself answers `304` only on `If-None-Match`, but a cache
+    in between that revalidates with `If-Modified-Since` alone can still keep
+    a re-rendered body until it expires.
+  - **Pages Kiln renders itself** are rendered on every request, but their
+    `ETag` named only the record and the site's settings, so a deploy that
+    changed a template or a block renderer kept answering `304`. It now also
+    names the build (`KilnCMSWeb.BuildFingerprint`): the code of Kiln and of
+    any overlay or plugin (each module's MD5, which ignores build paths and
+    times), the version of every application they depend on, and the asset
+    manifest when `mix phx.digest` wrote one. Every node of one release
+    image computes the same value, and rebuilding unchanged source keeps it.
+    A markup change made only by runtime configuration (an environment
+    variable) is not covered.
+  - The firing cache now stores each body as a JSON round trip gives it back
+    (string keys, no structs), so a body cached straight from a fire and the
+    same body read back from the table digest to the same `ETag`.
 
 <a id="invitation-raises-lower-membership"></a>
 

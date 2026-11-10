@@ -18412,6 +18412,11 @@ msgstr "Affiché comme auteur du contenu que vous publiez, sur vos commentaires 
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
+msgid "Shown as the site's account on link previews in X (Twitter), e.g. @kilncms. Leave blank to omit it."
+msgstr "Affiché comme compte du site dans les aperçus de liens sur X (Twitter), par ex. @kilncms. Laissez vide pour l'omettre."
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
 msgid "Shown in the header, the page title, and sign-in emails."
 msgstr "Affiché dans l'en-tête, le titre de la page et les e-mails de connexion."
 
@@ -23937,6 +23942,11 @@ msgstr "Rédigez votre page d'accueil"
 #, elixir-autogen, elixir-format
 msgid "Writes new prose from your instruction. Describe what this section should say."
 msgstr "Rédige un nouveau texte à partir de votre consigne. Décrivez ce que cette section doit dire."
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "X (Twitter) username"
+msgstr "Nom d'utilisateur X (Twitter)"
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format

@@ -509,6 +509,86 @@ to deliberately track bleeding edge, `--allow-major` after
 reading the upgrade notes, and `--check --exit-code` to fail a CI job when a
 project has drifted behind upstream.
 
+### Re-render published content after an upgrade
+
+A release that changes what firing produces (new markup on the `web`
+surface, a new key in `json_ld`) reaches a published document only when it is
+next published, edited or re-fired; reading it does not re-fire it. The
+release's upgrade notes say when a re-fire is worth running. To re-fire every
+published document on every site at once:
+
+1. **Wait until every node runs the new release.** A firing job picked up by
+   a node still on the old release writes the old markup again.
+2. **Decide who has to be told.** A fired artifact's `ETag` is a digest of
+   the body it serves, so a CDN, browser or app that revalidates with
+   `If-None-Match` gets the new body on its next revalidation, whether or not
+   anything is announced. A consumer that keeps its copy until a webhook says
+   otherwise (a static build, an ISR page, a mirror fed by webhooks) does not
+   hear about a plain re-fire. If you have one, add `notify: true` below.
+3. **With `notify: true`, check that the receivers can take the volume.** It
+   sends one `<type>.updated` per published document to every endpoint
+   subscribed to that event, with `"reason": "refire"` in `data`, and puts
+   the same `updated` on the public change feed. Nothing else hears it:
+   automation rules, federation and the CDN purge do not run. The deliveries
+   share the `webhooks` queue (3 at a time per node) with your editors'
+   publishes, which wait behind them. A receiver that answers `429` or `5xx`
+   until a delivery runs out of retries counts toward auto-disable, and 10
+   exhausted deliveries in a row turn the endpoint off
+   ([Auto-disable](webhooks.md#auto-disable)). Run it off-peak, and tell the
+   receivers' owners first.
+4. **Start the sweep** on the running node:
+
+   ```bash
+   /app/bin/kiln_cms rpc "IO.inspect(KilnCMS.Firing.Sweep.run(notify: true))"
+   ```
+
+   It prints how many documents it queued, per type (`%{entry: …, page: …,
+   post: …}`), and the node logs `Re-fire sweep enqueued <n> documents`. For
+   a silent sweep, call `KilnCMS.Firing.Sweep.run()` instead. In a checkout
+   the same sweep is `mix kiln.refire_all --notify` (or without the flag);
+   don't run the `mix` task against production, because it boots a second
+   node.
+5. **Watch it drain** until this prints `0`:
+
+   ```bash
+   /app/bin/kiln_cms rpc "IO.inspect(KilnCMS.Firing.Sweep.pending())"
+   ```
+
+   It counts every pending `:firing` job, your editors' publishes included.
+6. **Purge the CDN once**, if you run one in front of Kiln and don't want to
+   wait for cached copies to expire (300 seconds for a fired artifact). With
+   `KILN_CDN_PURGE_URL` set, queue a purge of every site:
+
+   ```bash
+   /app/bin/kiln_cms rpc "Enum.each(KilnCMS.Accounts.list_org_ids(), &KilnCMS.CDN.purge_site/1)"
+   ```
+
+   Without it, purge the `kiln` surrogate key (every Kiln API response
+   carries it) in your CDN's own console. The sweep does not purge per
+   document, which would empty the cache every few seconds for as long as it
+   ran.
+
+What can go wrong:
+
+- **`--notfy : Unknown option. Did you mean --notify?`** from
+  `mix kiln.refire_all`: the flag is misspelled. Nothing was queued.
+- **An endpoint shows as auto-disabled** after the sweep: its receiver
+  refused 10 deliveries in a row, and gets nothing more until you tick
+  **Active** on it again ([Auto-disable](webhooks.md#auto-disable)).
+  `/editor/webhooks` lists only the 25 newest deliveries, too few to
+  redeliver a sweep's worth by hand. Fix the receiver, turn the endpoint back
+  on, and either have the receiver refetch everything once or run the sweep
+  again with `notify: true` (re-firing is idempotent, but every endpoint
+  hears the whole round again).
+- **A receiver gets an `updated` with `"reason": "refire"` right after a
+  `published`** for the same document. An editor published it while the
+  sweep's job for it was still pending, and the publish's fire was merged
+  into that job, so it was announced as a re-fire too. It is the same
+  document; refetching it twice is harmless.
+- **`/api/sync` clients do not see the re-render**: sync reports a document
+  when its `updated_at` moves, and a re-fire does not move it. They pick up
+  the new body on their next full resync (`initial=true`).
+
 ## Migrations: expand, migrate, contract
 
 A rolling deploy runs two releases at once. The first new node migrates the

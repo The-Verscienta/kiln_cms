@@ -105,7 +105,7 @@ defmodule KilnCMS.Firing.FireWorker do
   def perform(%Oban.Job{args: %{"org_id" => org_id, "type" => type_str, "id" => id} = args}) do
     case References.type_atom(type_str) do
       nil -> {:cancel, "no content type answers to #{inspect(type_str)}"}
-      type -> fire(org_id, type, id, fire_opts(args), args["refire"] == true)
+      type -> fire(org_id, type, id, fire_opts(args), announcement(args))
     end
   end
 
@@ -119,7 +119,7 @@ defmodule KilnCMS.Firing.FireWorker do
 
   # One clause per outcome of the load, because they are four different
   # situations and used to be one (#664).
-  defp fire(org_id, type, id, opts, refire?) do
+  defp fire(org_id, type, id, opts, announcement) do
     case References.load_published(org_id, type, id) do
       {:ok, document} ->
         # `fire/2` reads the tenant off `document.org_id`; the wave + indexing carry
@@ -127,7 +127,7 @@ defmodule KilnCMS.Firing.FireWorker do
         Engine.fire(document, opts)
         References.invalidate(org_id, type, id, [References.key(type, id)])
         enqueue_indexing(org_id, type, id, document)
-        if refire?, do: announce_refire(org_id, document)
+        if announcement, do: announce_refire(org_id, document, announcement)
         :ok
 
       :absent ->
@@ -168,15 +168,33 @@ defmodule KilnCMS.Firing.FireWorker do
 
   defp fire_opts(_args), do: []
 
-  # A requested re-fire (`KilnCMS.Firing.refire/3`, #2048) changed what delivery
-  # serves without an edit, so it does here what an edit's own changes would
-  # have: drop the delivery cache memoized under the document's slug, and
-  # dispatch `<type>.updated` — the webhooks, automation, federation and the
-  # CDN purge. After the fire, so whatever refetches on the event gets the new
-  # body. A publish's job carries no flag: its action has dispatched already.
-  defp announce_refire(org_id, document) do
+  # Who hears about this fire once it lands: `nil` for a publish's job (its
+  # action has dispatched already) and a silent sweep; `:full` for a requested
+  # re-fire; `:delivery` for a notifying sweep (`KilnCMS.Firing.Sweep.run/1`).
+  # A requested re-fire wins if a job ever carried both.
+  defp announcement(%{"refire" => true}), do: :full
+  defp announcement(%{"announce" => "delivery"}), do: :delivery
+  defp announcement(_args), do: nil
+
+  # A re-fire changed what delivery serves without an edit, so it does here
+  # what an edit's own changes would have: drop the delivery cache memoized
+  # under the document's slug, and dispatch `<type>.updated`, its payload
+  # marked `"reason" => "refire"` (#2463) so a receiver can tell it from an
+  # edit. After the fire, so whatever refetches on the event gets the new body.
+  #
+  # A requested re-fire (`KilnCMS.Firing.refire/3`, #2048) is announced like an
+  # edit: the webhooks, automation, federation and the CDN purge. A notifying
+  # sweep re-fires every published document at once, so it reaches only the
+  # webhook endpoints and the change feed (`KilnCMS.Webhooks.dispatch/4`'s
+  # `announce: :delivery`) — not every "on updated" rule, not the site's
+  # followers, and not a CDN purge per document.
+  defp announce_refire(org_id, document, announcement) do
     KilnCMS.Cache.bust(org_id, Engine.public_type(document), document.slug)
-    KilnCMS.CMS.Changes.NotifyWebhooks.notify(document, "updated")
+
+    KilnCMS.CMS.Changes.NotifyWebhooks.notify(document, "updated",
+      reason: "refire",
+      announce: announcement
+    )
   end
 
   # The document is settled-gone, so its artifacts are garbage: this is exactly

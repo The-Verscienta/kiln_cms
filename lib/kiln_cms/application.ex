@@ -209,6 +209,12 @@ defmodule KilnCMS.Application do
       # {KilnCMS.Worker, arg},
       # Start to serve requests, typically the last entry
       KilnCMSWeb.Endpoint,
+      # The build fingerprint the HTML ETag names (#2463), computed off the
+      # boot path so the first pages find it ready. Temporary: a request
+      # computes it itself if this has not finished, or did not.
+      Supervisor.child_spec({Task, &KilnCMSWeb.BuildFingerprint.warm/0},
+        id: KilnCMSWeb.BuildFingerprint
+      ),
       {Absinthe.Subscription, KilnCMSWeb.Endpoint},
       {AshAuthentication.Supervisor, [otp_app: :kiln_cms]},
       # Dev only: warns (log + console banner) when the watchers leave a stale

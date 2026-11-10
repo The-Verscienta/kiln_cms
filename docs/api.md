@@ -555,8 +555,9 @@ curl -s 'http://localhost:4000/api/content/recipe/pancakes?expand=ingredients'
 - Only targets an **anonymous** reader could fetch are expanded: published,
   public, not passphrase-locked. A draft target is left out as if it were not
   linked, even when the request unlocks the source. The response is the same
-  for every caller, so it keeps `public` cache headers. Its `ETag` also covers
-  the expanded targets, so republishing a target invalidates it.
+  for every caller, so it keeps `public` cache headers. Its `ETag` is a
+  digest of the expanded body, so a republished target that changes what is
+  expanded moves it.
 - `link` is the data stored on the connection (a relationship's link fields),
   passed through as stored; `{}` when the field has none.
 - `target` is `null` for a target that is published but not fired yet; a
@@ -1047,8 +1048,9 @@ public never appears in a delta at all, not even as an id.
 * **Edits re-send.** Any editorial write to a public document re-sends it,
   even one that did not change the rendered body.
 * **Not seen:** a change that writes no version to the document itself —
-  editing a *fragment* it embeds, or its type's custom-field definitions. Its
-  artifact re-fires, but the document is not reported. A periodic full resync
+  editing a *fragment* it embeds, or its type's custom-field definitions, or
+  an operator re-firing every document after a Kiln upgrade. Its artifact
+  re-fires, but the document is not reported. A periodic full resync
   (`initial=true`) covers that.
 
 **Errors.** `400 invalid_cursor` — the cursor was tampered with, belongs to
@@ -1188,6 +1190,11 @@ Notable properties:
   added after a document was last saved has no stored value and publishing does
   not invent one, while a point-in-time read (`?as_of=`) serves the values
   stored at that instant — which may include fields since removed;
+- `social`, the document's link-preview title, description and absolute image
+  ([headless-consumer-guide.md](headless-consumer-guide.md#link-previews-the-social-object)),
+  is optional: an artifact fired before `format_version` 4 lacks it until it
+  is re-fired. Inside it, `title` is required (a string or `null`) and
+  `description` and `image` are present only when set;
 - a `required: true` block field is listed in `required` (the key is always
   present) **and** is non-nullable — a container child now runs through the
   same Ash cast a top-level block does (#935), so a nested block cannot carry
@@ -1773,14 +1780,25 @@ What the cached responses carry:
   validator (`W/"…"`) so the server can still gzip the response; conditional
   `GET`s compare weakly anyway. A credentialed request never gets a `304` from
   this: it has no `ETag` to match.
-- **A fired artifact's `ETag` is weak too** (`W/"…"`), for the same reason:
-  Kiln gzips the artifact for a client that sends `Accept-Encoding: gzip`. It
-  names the document, locale, surface and publish time (a `?fields=` response
-  is tagged by a digest of its filtered body instead). `If-None-Match` is
-  compared weakly: a `W/` prefix is ignored, a comma-separated list matches if
-  any tag does, and `*` matches. A tag cached from an older Kiln (the same
-  value without `W/`) still revalidates. A passphrase-unlocked document has no
-  `ETag` and is never `304`ed.
+- **A fired artifact's `ETag` is a digest of the body too**, of the
+  response as served: after a `?fields=` cut or an `?expand=`, and of the
+  Markdown for `surface=llm`. It has the form
+  `W/"<id>-<locale>-<surface>-b<digest>"`, with `-<variant id>` appended for
+  an A/B arm, so a tag for one locale, surface or arm never `304`s another.
+  It moves whenever the stored artifact's body changes, including a re-fire
+  after a Kiln upgrade that changes the markup without an edit
+  ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463)), and
+  stays put across a republish or re-fire that produced the same body. Treat
+  it as opaque. `Last-Modified` is still the document's last edit, which a
+  re-fire does not move: Kiln answers `304` only on `If-None-Match`, but a
+  cache between you and Kiln that revalidates with `If-Modified-Since` alone
+  can keep a re-rendered body stale until it expires.
+- **The fired artifact's tag is weak** (`W/"…"`) for the same reason as the
+  others: Kiln gzips the artifact for a client that sends
+  `Accept-Encoding: gzip`. `If-None-Match` is compared weakly: a `W/` prefix
+  is ignored, a comma-separated list matches if any tag does, and `*`
+  matches. A passphrase-unlocked document has no `ETag` and is never
+  `304`ed.
 - **`Vary: Accept, Authorization, Origin`** on every response of these
   surfaces, cached or not. `Origin` because the CORS `Access-Control-Allow-Origin`
   header is only sent to a request with an allowed `Origin` — a copy cached from
