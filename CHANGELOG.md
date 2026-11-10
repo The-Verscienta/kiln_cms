@@ -62,8 +62,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Update the host's copy of `scripts/backup.sh` so cron's prune honors the new `kiln-<stamp>.good` marker, which the app keeps on the newest verified backup of each component (part of #2219).** No migration; rolling back is safe.
   ([#2552](https://github.com/The-Verscienta/kiln_cms/pull/2552) · [long form](docs/changelog/unreleased.md#backup-last-good-marker-upgrade))
 
-- **Before rolling back to v1.8.0, run `DELETE FROM notifications WHERE event IN ('registration_pending', 'security_alert', 'security_notice');` and `DELETE FROM api_keys WHERE access = 'draft_write';` (re-mint those keys after rolling forward; never `UPDATE` them). Check #2605 first if any site has `key_value` or `telephone` fields.**
-  ([#2606](https://github.com/The-Verscienta/kiln_cms/pull/2606) · [long form](docs/changelog/unreleased.md#rollback-to-1-8-0-upgrade))
+- **Before rolling back to v1.8.0, run `DELETE FROM notifications WHERE event IN ('registration_pending', 'security_alert', 'security_notice');` and `DELETE FROM api_keys WHERE access = 'draft_write';` (re-mint those keys after rolling forward; never `UPDATE` them). Back up, then delete every `key_value` and `telephone` custom field (and its values).**
+  Fields of the other types added since v1.8.0, and the new scalar lists, load there but can fail to save or open; the long form has the queries and a console loop.
+  ([#2606](https://github.com/The-Verscienta/kiln_cms/pull/2606) · [#2670](https://github.com/The-Verscienta/kiln_cms/pull/2670) · [long form](docs/changelog/unreleased.md#rollback-to-1-8-0-upgrade))
 
 - **Run `mix ash.migrate` (new tables `security_alert_dispatches`, `site_security_alerts`; `users.notify_on_security_alert`, `NOT NULL DEFAULT true`). Site member admins now get security alert emails for every kind but failed sign-ins; platform admins get platform alerts they can't mute. A site with no member admins sends them to the platform admins.**
   The stolen-key email is now an alert, with the old email as fallback; alert email uses the instance relay. `security` is a reserved webhook namespace. Before rolling back past #2509, delete the new notifications and `api_key_reuse_detected` events.
@@ -490,6 +491,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The signed-out home page and the default logo ship right-sized images: page image weight drops from about 1,030 KB to about 100 KB (WebP).**
   ([#2165](https://github.com/The-Verscienta/kiln_cms/issues/2165) · [long form](docs/changelog/unreleased.md#public-image-weight))
 
+- **The console sidebar and the thin page shell render the built-in logo at its small size too, instead of the 95 KB 278x379 original.**
+  A custom `logo_url` is still a plain `<img>`. The `KilnCMSWeb.Layouts.brand_logo` helper is removed; use `Layouts.brand_mark/1`.
+  ([#2400](https://github.com/The-Verscienta/kiln_cms/issues/2400) · [long form](docs/changelog/unreleased.md#console-brand-mark))
+
 - **CSV exports write a negative number as `-5`, not `'-5`; text starting with `=`, `+`, `-` or `@` is still prefixed.**
   Affects any CSV that passes a negative number to `KilnCMSWeb.CSV`; text is unchanged.
   ([long form](docs/changelog/unreleased.md#csv-numbers-unguarded))
@@ -540,6 +545,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A category-scoped `/search?category=<slug>` now stays scoped: the search form, the "did you mean" link and the language links keep the category, and the page says what it searches with a "Search everything" link. kilncms.dev's /docs links to a docs-only search this way.**
   ([#2457](https://github.com/The-Verscienta/kiln_cms/issues/2457) · [long form](docs/changelog/unreleased.md#scoped-search-keeps-category))
+
+- **A custom field of a type this release doesn't know (a newer release's, after a rollback, or a removed plugin's) no longer breaks the Fields screen, the editor, saves and delivery: it is hidden, records keep its values, and Fields lists it under "Fields of an unknown type" with a Delete.**
+  ([#2670](https://github.com/The-Verscienta/kiln_cms/pull/2670) · [long form](docs/changelog/unreleased.md#unknown-field-type-rollback))
 
 - **The `/access-denied` page no longer tells a signed-in account with no role on the site that it is signed in as viewer; it says the account has no role there and offers Sign out.**
   ([#2372](https://github.com/The-Verscienta/kiln_cms/issues/2372) · [long form](docs/changelog/unreleased.md#access-denied-no-role))

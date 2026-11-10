@@ -776,10 +776,48 @@ The same hazard, and the same two-step rule, covers:
   too, and dumps it back to its stored text unchanged. Switch the
   embedded attribute a release before adding a value, as for a column.
 - **An `:atom` column without `one_of`.** It fails the same way on a value the
-  older release has no atom for. `FieldDefinition.field_type` is one: the
+  older release has no atom for. `FieldDefinition.field_type` was one: the
   `key_value` and `telephone` types added since v1.8.0 break v1.8.0's
   field-definition reads
   ([#2605](https://github.com/The-Verscienta/kiln_cms/issues/2605)).
+
+An **open set**, whose values follow a registry rather than a list in the
+attribute (field types, which plugins add to), cannot take `one_of`. Make it
+a `KilnCMS.Types.KnownAtom` without `one_of`, and check membership in the
+registry yourself:
+
+- **On write,** a validation refuses a value the registry doesn't list
+  (`Validations.KnownFieldType`).
+- **On read,** decide what a row of an unregistered value means. For
+  `FieldDefinition`, a resource-level preparation
+  (`Preparations.RegisteredFieldTypes`) filters such rows out in SQL, so
+  nothing downstream meets one. The few readers that must see them (the
+  value-keeping write, private-field masking, the Fields screen's delete)
+  pass `FieldDefinition.all_types_context/0` and handle
+  `FieldDefinition.unknown_type?/1` themselves.
+
+With that in place, a value can join the registry in any release, and a
+rollback, or removing the plugin that supplied it, only hides the rows.
+
+`test/kiln_cms/atom_columns_test.exs` holds the line: it walks the core
+domains (as `config/config.exs` lists them) and the core's embedded resources,
+and fails on any `:atom` or `{:array, :atom}` attribute without `one_of` that
+is not on its reviewed list. Use `KnownAtom`, add `one_of`, or add the
+attribute to the list with the reason an unknown value can't reach it. A
+downstream project's own domains are not checked.
+
+Two widenings need the same two-release treatment although they add no
+atom:
+
+- **`FieldDefinition.link_field_types/0`.** Link fields and group sub-fields
+  may only have these types. A sub-field row of a type the older release
+  filters out is missing from its parent's definition there, so a save of
+  the parent's value from the editor drops that key from each row: the
+  value-keeping write covers top-level fields only.
+- **The types that may be `multiple`** (`KilnCMS.CMS.ScalarLists.types/0`,
+  `Changes.ClearMultiple.list_types/0`). An older release treats the field
+  as single-valued, so a record holding a list in it can fail to save or to
+  open in the editor there.
 
 #### Rolling back to v1.8.0
 
@@ -788,13 +826,15 @@ v1.8.0 does not know break its reads. Before rolling back to v1.8.0, run this
 once against the database:
 
 ```sql
-DELETE FROM notifications WHERE event = 'registration_pending';
+DELETE FROM notifications
+WHERE event IN ('registration_pending', 'security_alert', 'security_notice');
 DELETE FROM api_keys WHERE access = 'draft_write';
 ```
 
-- **Notifications.** A `registration_pending` notice breaks the bell, the
-  inbox and "mark all read" for its recipients on v1.8.0. The notices are
-  reminders about the registration queue, which itself is untouched.
+- **Notifications.** A registration notice or a security alert breaks the
+  bell, the inbox and "mark all read" for its recipients on v1.8.0. The
+  registration notices are reminders about the registration queue, which
+  itself is untouched.
 - **API keys.** Draft-write keys stop working on v1.8.0 whatever you do,
   because it has no `draft_write` scope. Left in place, the key's own lookup
   and the site's list on the API keys page fail; deleted, the page loads.
@@ -803,13 +843,70 @@ DELETE FROM api_keys WHERE access = 'draft_write';
   can do.
 - **Security events** need nothing: v1.8.0 has no security log, so it never
   reads `security_events`.
-- **Field definitions** of type `key_value` or `telephone` also break v1.8.0's
-  reads, and deleting them loses data. Check
-  [#2605](https://github.com/The-Verscienta/kiln_cms/issues/2605) before
-  rolling back if any site uses them.
+
+**Custom fields** of a type added since v1.8.0 need a decision per field,
+because deleting a field deletes the values every record holds in it:
+
+1. **Find the `key_value` and `telephone` fields.** v1.8.0 has no atom for
+   either, so while one exists every field-definition read fails there: the
+   Fields screen, the content editor, every save of a record with custom
+   fields, and delivery.
+
+   ```sql
+   SELECT org_id, content_type, type_definition_id, name, field_type
+   FROM field_definitions WHERE field_type IN ('key_value', 'telephone');
+   ```
+
+2. **Back up.** A database backup keeps the values. A field export
+   (`GET /editor/fields/export.json` or `KilnCMS.CMS.FieldSync.export/1`)
+   keeps only the definitions.
+3. **Delete them on the current release,** from a remote console
+   (`bin/kiln_cms remote`), so their values are removed from every record
+   and the caches are cleared:
+
+   ```elixir
+   for org <- KilnCMS.Accounts.list_organizations!(authorize?: false),
+       field <-
+         KilnCMS.CMS.list_field_definitions!(
+           authorize?: false,
+           tenant: org.id,
+           query: [filter: [field_type: [in: [:key_value, :telephone]]]]
+         ) do
+     KilnCMS.CMS.destroy_field_definition!(field, authorize?: false, tenant: org.id)
+   end
+   ```
+
+   A field that another field's condition reads is refused ("is used in the
+   conditions of …; remove those conditions first"): remove the condition
+   and run the loop again. A plain
+   `DELETE FROM field_definitions WHERE field_type IN ('key_value', 'telephone');`
+   also unblocks v1.8.0, but leaves the values in each record's
+   `custom_fields` until v1.8.0 next saves it, and running nodes keep the
+   rows cached until they restart.
+4. **Decide on the other new types.** v1.8.0 loads `email`, `color`, `slug`,
+   `time`, `json`, `range` and `link` fields, but refuses to save a record
+   with a value in one ("has an unregistered field type"), and a map value
+   (`range`, `link`, a `json` object) can stop its editor opening the
+   record. The same goes for a `multiple` field of type `integer`, `float`,
+   `date`, `datetime` or `url` (scalar lists, #2289). Delete those fields as
+   in step 3, or leave the records that use them alone until you roll
+   forward. To find them:
+
+   ```sql
+   SELECT org_id, content_type, type_definition_id, name, field_type, multiple
+   FROM field_definitions
+   WHERE field_type IN ('email', 'color', 'slug', 'time', 'json', 'range', 'link')
+      OR (multiple AND field_type IN ('integer', 'float', 'date', 'datetime', 'url'));
+   ```
+
+The steps were run against the current release; what v1.8.0 does with what
+is left is read from its code, not tried on a v1.8.0 deployment.
 
 A rollback to a release that already has `KnownAtom` on a column needs none
 of this for that column: the older release shows the row as unrecognized.
+For field definitions that is every release from the one that fixed #2605:
+it hides a field of a type it doesn't know and keeps the field's values
+(see [Delete a field of an unknown type](extending-content.md#delete-a-field-of-an-unknown-type)).
 
 ### What zero-downtime does and does not cover
 
