@@ -103,6 +103,15 @@ config :kiln_cms, Kiln.Plugins.Health,
   enabled: false,
   req_options: [plug: {Req.Test, Kiln.Plugins.Health}]
 
+# The security notices feed (#2522) is off by default here for the same
+# reason, and because the core's own notices check would otherwise ask it on
+# every System or Security posture mount. Tests that read it set `url:`
+# (unset follows the update feed, kilncms.dev's); requests go to a Req.Test
+# stub.
+config :kiln_cms, Kiln.SecurityNotices,
+  url: false,
+  req_options: [plug: {Req.Test, Kiln.SecurityNotices}]
+
 # The HTTP governance witness (#733) reaches an operator-configured transparency
 # log. Never dialled for real in tests; the stub stands in for the log.
 config :kiln_cms, KilnCMS.Governance.Witness.HTTP,

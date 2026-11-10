@@ -471,9 +471,9 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
     defp notices_url(value) do
       %{"KILN_SECURITY_NOTICES_URL" => value}
       |> eval()
-      |> get_in([:kiln_cms, Kiln.Plugins.Health])
+      |> get_in([:kiln_cms, Kiln.SecurityNotices])
       |> Kernel.||([])
-      |> Keyword.fetch(:notices_url)
+      |> Keyword.fetch(:url)
     end
 
     test "unset or blank writes nothing, so the default applies" do

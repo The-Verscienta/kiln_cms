@@ -157,6 +157,7 @@ defmodule Kiln.Plugins.Health.Notices do
             title: present(get_in(e, ["attributes", "title"])),
             packages: packages,
             affected: present(fields["affected_versions"]),
+            patched: present(fields["patched_versions"]),
             severity: Map.get(@severities, downcase(fields["severity"]), :unknown),
             url: http_url(fields["advisory_url"]),
             source: :kiln

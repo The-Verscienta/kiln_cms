@@ -7,6 +7,50 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="backup-last-good-marker-upgrade"></a>
+
+- **Update the host's copy of `scripts/backup.sh`: the app now marks the newest
+  verified backup of each component with `kiln-<stamp>.good`, and
+  `backup.sh prune` keeps the unit a marker names (part of #2219).** For
+  operators who prune with cron. No migration, no new setting.
+  - **Why.** Retention (#2486) never lets the app delete the newest verified
+    backup, but cron has no backup history and only knew the newest
+    *complete* one. When the newest complete set on disk came from a failed
+    run (a refused off-site copy, say), cron kept that set and deleted the
+    older verified one once it passed `BACKUP_KEEP_DAYS`. The marker carries
+    the app's answer to disk, so the rule now holds for both prunes.
+  - **The format.** An empty 0600 file named `kiln-<stamp>.good` in the
+    component's own directory, `db/` or `media/`. It pins only that component
+    of that stamp; a `.keep` recovery point still pins both. Only its presence
+    counts, and cron honors an entry of that name of any kind. There is at
+    most one per directory once the app has synced it.
+  - **Who writes it.** Only the app: at the end of each successful in-app
+    backup (after the run is closed, under the backup lock), and before an
+    in-app prune deletes anything. Never on a dry run, never by `backup.sh`.
+    The new marker is written before the old one is removed. A backup imported
+    from cron counts as verified, so the marker can land on a cron-made set.
+    The app does not read markers back; it still works out the newest verified
+    backup from History.
+  - **What to do.** Copy this release's `scripts/backup.sh` over the one your
+    cron line runs (for example `/opt/kiln_cms/scripts/backup.sh`). An older
+    copy ignores the markers. Markers appear after the first in-app backup or
+    prune; a cron-only deployment gets none, and its prune works as before.
+  - **What to watch.** Don't delete a `.good` by hand while in-app backups run.
+    If you stop in-app backups, one stale marker per component keeps its unit
+    from cron indefinitely; delete it when you want cron to age that backup. A
+    marker the app can't write or remove (a permission error, a directory or
+    symlink of that name) logs a warning and emits
+    `[:kiln_cms, :backups, :last_good, :failed]` (measurements `%{count: 1}`;
+    metadata `kind`, `stamp`, `reason`, or `marker`, `reason`, or `reason`).
+  - **For developers.** `KilnCMS.Backups.Artifact.good_name/1` and
+    `parse_good_name/1`; `KilnCMS.Backups.Retention.sync_last_good/2`; the
+    retention plan gains `last_good: %{db: stamp | nil, media: stamp | nil}`.
+  - **Rolling the pin back** is safe. The previous release ignores `.good`
+    markers, and its in-app prune deletes each one as a stray once the marker
+    file is older than `BACKUP_KEEP_DAYS`. A host script left at this release
+    honors the markers until then.
+  Guide: [The last-good marker](../backups.md#the-last-good-marker).
+
 <a id="rollback-to-1-8-0-upgrade"></a>
 
 - **Before rolling back to v1.8.0, delete the rows v1.8.0 cannot read (#2509).**
@@ -198,9 +242,13 @@ carries the reasoning.
     after a failure).
   - **Who is affected.** Only a deployment with a plugin from Hex, git or a
     path. One whose plugins are all built from `projects/`, or that has none,
-    sends nothing new. hex.pm is asked only about plugins locked from hex.pm.
-  - **Turning it off.** `KILN_PLUGIN_HEALTH_CHECK=false` turns the check off.
-    If you already set `KILN_UPDATE_CHECK=false` for "no outbound requests",
+    sends nothing new to hex.pm. hex.pm is asked only about plugins locked
+    from hex.pm. The notices feed is asked whatever plugins are installed,
+    by the core's own notices check, while `KILN_UPDATE_CHECK` is on
+    ([Security notices for Kiln](#core-security-notices)).
+  - **Turning it off.** `KILN_PLUGIN_HEALTH_CHECK=false` turns the check off
+    and stops the hex.pm requests; the notices feed is still asked for the
+    core while `KILN_UPDATE_CHECK` is on. If you already set `KILN_UPDATE_CHECK=false` for "no outbound requests",
     you need do nothing: the plugin check follows it while
     `KILN_PLUGIN_HEALTH_CHECK` is unset. To keep the Hex comparison but not
     ask kilncms.dev, set `KILN_SECURITY_NOTICES_URL=false`. A fork or a mirror
@@ -1216,6 +1264,118 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="core-security-notices"></a>
+
+- **Security posture says when a published security notice covers the Kiln
+  version you run, and System's Updates card shows the same answer (#2522,
+  part 3 of #2252).** A new line, **Security notices for Kiln**
+  (`core.security_notices`, **This installation**), reads kilncms.dev's
+  security notices feed (#1873). Before this, being behind a security release
+  showed only as **Review** on the Kiln version line. Guide:
+  [Security notices for Kiln](../security-posture.md#security-notices-for-kiln).
+  - **Fix now at any severity.** A notice that covers the running core is a
+    known way into the whole installation, so low and medium fail too.
+    Plugin notices keep their rule: low and medium are **Review**.
+  - **Only the affected range decides**, for the core and for plugins.
+    `patched_versions` is shown ("fixed in 1.8.1") and never consulted: the
+    publisher leaves out a line with no fix yet, so reading it would clear an
+    unfixed newer line or a regression range. A range that was never narrowed
+    to exclude the fixed releases flags them, which errs on the strict side;
+    [releasing](../releasing.md) now says to narrow it.
+  - **Unknown is never OK.** A notice naming `kiln_cms` reads **Unknown**
+    when its affected range can't be read, when it names several packages
+    and this version is inside their joined ranges, or when this build's
+    version can't be read. So does a feed that failed, timed out or has
+    an invalid `KILN_SECURITY_NOTICES_URL`.
+  - **Not applicable** with `KILN_UPDATE_CHECK=false`, which this check
+    follows like the Kiln version line, and when the notices feed is off
+    (`KILN_SECURITY_NOTICES_URL=false`, or a fork or mirror).
+  - **On System**, the **Updates** card has a **Security notices** line, with
+    a **Security notice** or **Unknown** badge, a line per notice with its
+    severity and fixed release, and an **Advisory *id*** link per notice.
+    **Check now** asks the feed again past the cache, at most once a minute,
+    and now re-checks that you are a platform admin ("You need admin access
+    to do that.").
+  - **When it asks.** One fetch and one cache (24 hours, 15 minutes after a
+    failure, per node) now serve both this line and the plugin health check
+    (#2244), so the feed is asked at most once between them. The core's
+    reader asks when a platform admin opens System or Security posture with
+    nothing cached, and on **Check now**, even with no plugin installed. It
+    carries nothing about the installation. A deployment that keeps
+    kilncms.dev out with `KILN_UPDATE_CHECK=false` or
+    `KILN_UPDATE_FEED_URL=false` sees no new request.
+  - **A log line** when a fresh answer covers the running Kiln, once per
+    request and only while the update check is on: "Kiln 1.8.0 is covered by
+    security notice(s) GHSA-…; update it (System, Updates)." Ids only.
+  - **Known gaps.** A build from `main` between releases still carries the
+    last release's version, so it can read as covered after the fix merged.
+    A notice that names `kiln_plugin` (the SDK built into Kiln) matches
+    neither line.
+  - **Changes to the plugin health check (#2244), not yet released.**
+    `KILN_PLUGIN_HEALTH_CHECK=false` no longer stops the notices request,
+    which the core's reader still makes; `KILN_SECURITY_NOTICES_URL=false`
+    stops both. The invalid-URL log line now reads
+    "KILN_SECURITY_NOTICES_URL is not an absolute http(s) URL; security
+    notices are unknown." The config keys moved from
+    `config :kiln_cms, Kiln.Plugins.Health, notices_url:, notices_type:` to
+    `config :kiln_cms, Kiln.SecurityNotices, url:, type:, req_options:`
+    ([the variables](../environment-variables.md#plugin-health-check-2244)).
+  - **The publishing script** (`scripts/publish/security.exs`) now names the
+    core `kiln_cms` for every advisory vulnerability without a package name,
+    also when another vulnerability names a plugin. Such a notice used to
+    name only the plugin and fail its check; it now names both, so the
+    plugin reads **Unknown** and the core is matched. Never a pass:
+    publishing ranges per package, so it can match, is #2566.
+  - **For developers.** `Kiln.SecurityNotices` (`url/0`, `fetch/1`,
+    `cached/0`, `checked_at/0`, `warm/0`) owns the feed, the cache and one
+    request in flight per node; it gates on no switch itself, so each caller
+    checks its own. The pure matcher is `Kiln.SecurityNotices.Core`
+    (`status/2`, `classify/2`), and `Kiln.Plugins.Health.Notice` gains
+    `patched`. `Kiln.Plugins.Health`'s `notices_url/0` is gone; use
+    `Kiln.SecurityNotices.url/0`. No migration, nothing stored; rolling the
+    pin back is safe.
+
+<a id="custom-field-range-index"></a>
+
+- **A site can index custom fields for range filters and `custom_sort`
+  (#2359, tier 2 of #2291).** For operators; editors and API consumers see
+  only speed.
+  - **How.** List the field names: `config :kiln_cms, :indexed_custom_fields,
+    ["price", "rating"]` (every content table), or per table,
+    `%{"entries" => ["price"]}`. Run `mix ash.codegen`: each name becomes two
+    expression btrees per table, `org_id` first, one `ASC NULLS LAST` and one
+    `DESC NULLS LAST`, built `CONCURRENTLY`. Apply the migration with
+    `mix ash.migrate`. The list is read at compile time, so it belongs in the
+    config of the build that runs codegen (an overlay's own `config/`). Core
+    lists nothing.
+  - **What it speeds up.** `custom_filter` `gt`/`gte`/`lt`/`lte` and
+    `custom_sort` (either direction, including the keyset page after the
+    first) on a listed field. `eq` and `in` keep using the GIN index of #2291.
+    `not_eq`, `ilike`, `contains`, `null`, `has_none` and `count` are not
+    indexed. For a listed name only, the query puts the field name in the SQL
+    as a literal: with a bound name Postgres can lose the index once it
+    switches to a generic plan. The name is checked against the config and a
+    strict pattern first, so it cannot carry SQL.
+  - **Which fields.** Integer, float, date and datetime. A string btree can
+    exceed the index row limit; a boolean index is nearly useless.
+    `mix kiln.custom_fields.index --check` reports a listed name with no
+    index, an invalid index (a failed concurrent build), an index no name asks
+    for, a name no field carries and an ineligible type. It is read-only and
+    exits non-zero on drift.
+  - **Cost.** Measured at 100,000 rows (see
+    [benchmarks](../benchmarks.md#range-and-sort-indexes-for-custom-fields)):
+    a range returning 1% falls from 17 ms to 0.6 ms and a sort with a limit
+    from 17 ms to 1.2 ms; each btree is about 36% of the table's heap; 100,000
+    inserts took 1.7x as long and 20,000 saves that leave the field alone 6x
+    as long with the GIN index and four btrees (two fields) as against the GIN
+    index alone. Index the fields you sort or range-filter on, not all of
+    them.
+  - **Upgrading.** Adding or removing a name is an additive migration (a
+    concurrent `CREATE INDEX` or a `DROP INDEX`); rolling back to the
+    previous release is safe, since it ignores the indexes. Until the
+    migration finishes, queries on the field answer correctly from the table.
+    Renaming a field is a drop and a create.
 
 <a id="security-alerts"></a>
 
@@ -3513,6 +3673,17 @@ carries the reasoning.
   - Guide: [Constrain the values of a field](../extending-content.md#constrain-the-values-of-a-field).
 
 ## Changed
+
+<a id="custom-field-range-index-changed"></a>
+
+- **Custom-field range filters read a stored JSON `null`, array or object as
+  no value (#2359).** `custom_filter[price][gt]=0` used to match a record
+  whose `price` was `[1]` or `{"a": 1}`, because jsonb orders arrays and
+  objects above every number. It now matches only numbers (strings for a
+  text-like value, as before), the same reading `custom_sort` has always had.
+  The change applies to every field, indexed or not, so the same request
+  returns the same rows whatever a site has configured. A record only holds
+  such a value if its field was retyped after the record was written.
 
 <a id="scanner-guard-exemption-narrowed"></a>
 

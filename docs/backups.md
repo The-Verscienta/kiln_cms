@@ -122,10 +122,12 @@ attempt, while the parts the resume rebuilt are newer. With a very small
    file of that unit younger than an hour, or (app only) its History row is
    still `Running`. This is what keeps the backup doing the pruning, and one
    still being written by cron or another job, out of reach.
-3. **Newest verified** (app only). The newest unit of its kind, by stamp, that is complete
+3. **Newest verified.** The newest unit of its kind, by stamp, that is complete
    on disk and belongs to a `Succeeded` run whose artifact of that kind is
    verified (app-made) or present (imported from cron, which is never
-   verified). The app never deletes it.
+   verified). The app never deletes it. Cron has no History, so it learns
+   which unit this is from the app's
+   [last-good marker](#the-last-good-marker) and keeps that.
 4. **Newest complete.** The newest unit of its kind, by stamp, that is complete on disk,
    whatever its run says. `backup.sh prune` keeps the same one, so the two
    prunes together cannot empty a component.
@@ -149,11 +151,13 @@ makes the unit in flight; an older one is ignored.
 run failing), the last good backup of each component stays past
 `BACKUP_KEEP_DAYS` instead of being pruned away. Budget for up to two units per
 component older than the window (the newest verified and the newest complete
-can be different stamps), plus every recovery point.
+can be different stamps), plus every recovery point, plus for cron any unit a
+stale [last-good marker](#the-last-good-marker) still names.
 
 **Never deleted by retention:** `.partial` files (the next in-app backup
 removes those older than an hour), symlinks, directories, `.work/`, and
-recovery-point markers. A `kiln-*` file in `db/` or `media/` that belongs to no
+recovery-point markers. Last-good markers are never aged either; the app moves
+them itself ([below](#the-last-good-marker)). A `kiln-*` file in `db/` or `media/` that belongs to no
 unit, such as a part named `part001` instead of `part01`, is a stray: the app
 deletes it once it is older than `BACKUP_KEEP_DAYS`, and `backup.sh` leaves it
 alone.
@@ -195,8 +199,8 @@ Things to know:
   symlink; its contents are never read.
 - The name must be exactly `kiln-<stamp>.keep` with a full stamp.
   `kiln-20261020.keep` pins nothing, and is left alone too.
-- Retention never creates or deletes a marker. A marker whose backup is gone is
-  harmless.
+- Retention never creates or deletes a `.keep`. A marker whose backup is gone
+  is harmless.
 - Markers live on this host's disk, not in the database, so they survive a
   database restore. `rclone sync` of `BACKUP_DIR` copies them like any file.
 - Rolling back to a release before markers existed: its in-app prune does not
@@ -243,7 +247,8 @@ media/ kiln-media-20261025-031700.tar.gz                               (14 days 
     %{stamp: "20261107-031700", kind: :db, sub: "db",
       files: ["kiln-db-20261107-031700.dump", "kiln-db-20261107-031700.sha256"],
       reason: :newest_complete}
-  ]
+  ],
+  last_good: %{db: nil, media: nil}
 }
 ```
 
@@ -254,22 +259,124 @@ unit's `reason` is one of `:recovery_point`, `:in_flight`, `:newest_verified`,
 `:newest_complete`, `:unrecorded` or `:keep_days`; a deleted one's is
 `{:expired, rule, days}`, where `rule` is `:unrecorded`, `:keep_days` or
 `:stray`. Once the newest unit of a kind belongs to a succeeded run that verified it (or
-imported it from cron), it reads `:newest_verified` instead.
+imported it from cron), it reads `:newest_verified` instead. `plan.last_good`
+is that newest verified stamp of each kind, or `nil` when there is none: what
+the [last-good markers](#the-last-good-marker) should name. A dry run writes no
+marker.
+
+### The last-good marker
+
+`kiln-<stamp>.good` tells `backup.sh prune` which backup of each component the
+app last saw verified, so cron keeps it too (rule 3 above). Cron has no
+History to work that out; the app writes the answer to disk. You don't create
+these markers; this section is what to expect on the host and what to do when
+one is left behind.
+
+What it is:
+
+- **An empty file in the component's own directory**, mode 0600. It pins only
+  that component of that stamp: `db/kiln-20261107-031700.good` keeps that
+  dump and its sidecar from `backup.sh prune`, never the media of the same
+  stamp. A recovery point (`.keep`) pins both.
+- **Only its presence counts.** `backup.sh prune` reads the directory listing,
+  so an entry of that exact name of any kind (file, directory, symlink) keeps
+  the unit; its contents are never read.
+- **At most one per directory**, once the app has brought it in step: the
+  newest verified dump in `db/`, the newest verified media set in `media/`.
+  A component with no verified unit keeps whatever marker it already has.
+- **It can name a cron-made backup.** A backup imported from cron counts as
+  verified once its run is `Succeeded` and its file is present (rule 3), so the
+  marker often lands on last night's cron set.
+
+When the app writes it:
+
+- **At the end of every successful in-app backup**, after the run is closed and
+  its `.work/<stamp>/` is gone, while it still holds the backup lock. It imports
+  cron's backups into History first, so the newest verified backup is chosen
+  from both.
+- **Before every in-app prune deletes anything.** The prune runs during each
+  in-app backup (the backup in progress is in flight, so the marker names the
+  previous one at that point), and when you call
+  `KilnCMS.Backups.Retention.run/2` yourself.
+- **Never on a dry run, and never by cron.** `backup.sh` reads markers and
+  writes none.
+
+The new marker is written first, and the component's other `.good` markers are
+removed only once it is there, so a cron prune that runs in between keeps both
+units, never neither. The app itself does not read `.good` markers: it works out
+the newest verified backup from History every time, so a stale marker pins
+nothing in the app, and its unit ages there like any other.
+
+**Turn it on.** Nothing to configure; you only need the new script on the host.
+
+1. Replace the host's copy of `scripts/backup.sh` (the one your cron line
+   runs, `/opt/kiln_cms/scripts/backup.sh` in the cron line at the top of
+   this guide) with this release's. An older copy
+   ignores `.good` markers and can still delete the newest verified backup.
+2. Take an in-app backup, or wait for the next one. No marker exists before
+   the first one finishes.
+3. List the backup directories. Each component with a verified backup has one
+   marker:
+
+   ```bash
+   ls /var/backups/kiln/db/ /var/backups/kiln/media/
+   # /var/backups/kiln/db/:
+   # kiln-20261107-031700.good  kiln-db-20261107-031700.dump  kiln-db-20261107-031700.sha256  …
+   #
+   # /var/backups/kiln/media/:
+   # kiln-20261107-031700.good  kiln-media-20261107-031700.sha256  kiln-media-20261107-031700.tar.gz  …
+   ```
+
+A deployment that backs up only with cron never runs an in-app backup, so it
+gets no marker, and its prune keeps only the newest complete set, as before.
+
+Things to know:
+
+- **Don't delete a `.good` by hand while in-app backups run.** The app moves
+  it at the next backup anyway, and until then cron can delete the backup it
+  named.
+- **If you stop taking in-app backups**, the last marker of each component
+  stays, and cron keeps that unit past `BACKUP_KEEP_DAYS` indefinitely.
+  Delete the marker by hand when you want cron to age that backup.
+- **A marker the app cannot remove** (a directory or symlink of that name, or a
+  file it has no permission to delete) pins its unit for cron indefinitely.
+  The app leaves it, logs a warning, and emits the telemetry event below.
+  Remove it by hand.
+- **Rolling back to a release before this one.** Its in-app prune ignores
+  `.good` markers and deletes each one as a stray once the marker file is older
+  than `BACKUP_KEEP_DAYS`; harmless. If the host's `backup.sh` stays at this
+  release, cron keeps honoring the markers that remain until then.
+
+**When a marker can't be moved.** The backup or prune still succeeds; the
+marker is housekeeping. Each of these logs a warning, and all but the last
+emit `[:kiln_cms, :backups, :last_good, :failed]` with measurements
+`%{count: 1}`:
+
+| Server log | Telemetry metadata | Meaning |
+|---|---|---|
+| `Backup last-good marker not updated: <reason>` | `%{reason: reason}` | After an in-app backup or before an in-app prune, importing cron's backups, listing `db/`, `media/` or `.work/`, reading a file in them, or reading History failed. No marker was written or removed. The reasons read as in [When retention is skipped or stops](#when-retention-is-skipped-or-stops). |
+| `Backup last-good marker db/kiln-<stamp>.good couldn't be written (<reason>); the previous marker stays` | `%{kind: :db, stamp: stamp, reason: posix}` | The new marker could not be created, so the old one was left pinning the previous backup. A `reason` of `:eacces` is a permission problem on that directory. |
+| `Couldn't remove old last-good marker db/kiln-<stamp>.good (<reason>)` | `%{marker: "db/kiln-<stamp>.good", reason: {:remove, posix}}` | The new marker is in place, but an old one could not be deleted. Cron keeps both units. |
+| `Left db/kiln-<stamp>.good in place: a directory, not a regular file` | `%{marker: "db/kiln-<stamp>.good", reason: {:not_regular, type}}` | Something other than a regular file has an old marker's name. The app removes only regular files. |
+| `Couldn't list db/ to remove old last-good markers (<reason>)` | none | The new marker is in place; old ones stay until the next sync. |
 
 ### What the cron prune cannot see
 
-`backup.sh` has no database, so two of the rules above are the app's alone:
+`backup.sh` has no database, so it sees two of the rules above only partly:
 
-- **It cannot keep the newest verified backup.** It keeps the newest complete
-  one. If the newest complete set on disk came from a run that failed (for
-  example its off-site copy was refused), cron keeps that set and deletes the
-  older, verified one once it is past `BACKUP_KEEP_DAYS`. The app never does.
-  If that matters, pin the verified one with a
-  [recovery point](#keep-a-backup-as-a-recovery-point).
+- **It knows the newest verified backup only through the last-good marker.**
+  It keeps the unit the app marked with `kiln-<stamp>.good`, so when the newest
+  complete set on disk came from a run that failed (for example its off-site
+  copy was refused), cron keeps both that set and the older verified one. This
+  holds only while the app keeps the marker in step: a host whose copy of
+  `backup.sh` predates the marker, a deployment where the app has not yet run
+  a backup or a prune, and a marker deleted by hand all leave cron keeping the
+  newest complete set alone, and deleting the verified one once it is past
+  `BACKUP_KEEP_DAYS` ([The last-good marker](#the-last-good-marker)).
 - **It cannot see an in-app backup that is `Running`.** It relies on that
   backup's `.work/<stamp>/` directory and `.partial` files instead.
 
-It also never deletes strays.
+It never deletes strays, and never deletes a `.keep` or a `.good` marker.
 
 ### When retention is skipped or stops
 
@@ -295,7 +402,7 @@ backup history (…)`, `couldn't list media/ in the backup directory (…)`,
 (BACKUP_KEEP_DAYS must be a whole number of days, 1 or more)`.
 
 Right before each unit goes, the app looks again: a unit that has gained a
-`.work/<stamp>/` directory or a marker, whose run is now `Running`, or whose run
+`.work/<stamp>/` directory or a recovery-point marker, whose run is now `Running`, or whose run
 cannot be read is left in place. A file that cannot be removed stops that unit,
 so its sidecar stays. If the deleting itself breaks off, the run's log reads
 "Retention removed 2 file(s) from 1 backup(s), then stopped: …", the server log

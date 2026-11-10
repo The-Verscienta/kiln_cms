@@ -43,6 +43,16 @@ defmodule KilnCMSWeb.SystemLive do
   never OK. "Check plugins now" re-checks platform admin in its handler for
   the same reason `flush-cache` does: it makes outbound requests on the
   server's behalf.
+
+  ## Security notices for the core
+
+  The Updates card also says whether a security notice kilncms.dev publishes
+  covers the running Kiln (#2522, `Kiln.SecurityNotices.Core`), in the words
+  of the `core.security_notices` posture check. It is read through
+  `Kiln.SecurityNotices`, the fetch and cache the plugin health check shares,
+  so the two make one request between them, and only while update checks are
+  on. "Check now" asks again past the cache (at most once a minute), and
+  re-checks platform admin for the same reason.
   """
   use KilnCMSWeb, :live_view
 
@@ -52,9 +62,12 @@ defmodule KilnCMSWeb.SystemLive do
   alias Kiln.Plugins.Health
   alias Kiln.Plugins.Health.PluginStatus
   alias Kiln.Plugins.Health.Report
+  alias Kiln.SecurityNotices
+  alias Kiln.SecurityNotices.Core
   alias Kiln.Updates
   alias Kiln.Version, as: Build
   alias KilnCMS.HTMLSanitizer
+  alias KilnCMS.Security.Posture.Checks.CoreSecurityNotices
   alias KilnCMS.Security.Posture.Checks.PluginHealth
   alias KilnCMSWeb.Tenant
 
@@ -72,6 +85,7 @@ defmodule KilnCMSWeb.SystemLive do
        |> assign(:update, :loading)
        |> assign(:flushed, nil)
        |> check_for_updates()
+       |> assign_core_notices()
        |> assign_plugin_health()}
     else
       # Not redundant: the `:live_admin_required` hook admits any ADMIN of this
@@ -122,6 +136,33 @@ defmodule KilnCMSWeb.SystemLive do
     end
   end
 
+  # Only while update checks are on: `KILN_UPDATE_CHECK=false` asks nothing,
+  # and the card already says checks are off. The cached answer when there is
+  # one (a feed that is off always has one); otherwise it is fetched in the
+  # background, like the update check.
+  defp assign_core_notices(socket) do
+    cond do
+      not Updates.enabled?() -> assign(socket, :core_notices, :off)
+      answer = SecurityNotices.cached() -> assign(socket, :core_notices, place(answer))
+      true -> check_core_notices(socket, [])
+    end
+  end
+
+  # Run directly in `start_async`, unlike `isolated_plugin_check/1` below:
+  # `Kiln.SecurityNotices.fetch/1` runs its request in one task whose body
+  # rescues and catches everything (a crash is stored as an answer), and
+  # shuts that task down itself on a timeout, so no linked process can send
+  # this one an exit signal. Anything raised here still arrives as
+  # `{:exit, _}`.
+  defp check_core_notices(socket, opts) do
+    socket
+    |> assign(:core_notices, :loading)
+    |> start_async(:core_notices, fn -> place(SecurityNotices.fetch(opts)) end)
+  end
+
+  defp place({:ok, notices}), do: Core.status(notices, Build.version())
+  defp place(other), do: other
+
   # The cached answer when there is one (a disabled check and a deployment
   # with nothing to check always have one); otherwise the check runs in the
   # background so a slow hex.pm never delays the page.
@@ -165,6 +206,16 @@ defmodule KilnCMSWeb.SystemLive do
     {:noreply, assign(socket, :plugin_health, :failed)}
   end
 
+  def handle_async(:core_notices, {:ok, answer}, socket) do
+    {:noreply, assign(socket, :core_notices, answer)}
+  end
+
+  # Unknown, never "no notice": the same line as a feed that did not answer.
+  def handle_async(:core_notices, {:exit, reason}, socket) do
+    Logger.warning("Security notices check crashed: #{inspect(reason)}")
+    {:noreply, assign(socket, :core_notices, {:error, :crashed})}
+  end
+
   def handle_async(:update_check, {:ok, result}, socket) do
     {:noreply, assign(socket, :update, result)}
   end
@@ -175,17 +226,15 @@ defmodule KilnCMSWeb.SystemLive do
     {:noreply, assign(socket, :update, {:error, reason})}
   end
 
+  # Re-checked here, not just in `mount/3`, for the reason `check-plugins-now`
+  # gives below: it asks GitHub (or kilncms.dev) and the notices feed on the
+  # server's behalf, and takes no actor that a policy could refuse.
   @impl true
   def handle_event("check-now", _params, socket) do
-    # The button's `disabled` attribute is client-side only, and start_async
-    # does not cancel an in-flight task — without this guard a scripted client
-    # could stack unbounded concurrent requests, and a late-finishing orphan
-    # would still write the cache after its result was discarded for display.
-    # `Kiln.Updates` also floors forced checks at one per minute.
-    if socket.assigns.update == :loading do
-      {:noreply, socket}
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      {:noreply, socket |> recheck_updates() |> recheck_core_notices()}
     else
-      {:noreply, check_for_updates(socket, force: true)}
+      {:noreply, put_flash(socket, :error, gettext("You need admin access to do that."))}
     end
   end
 
@@ -242,6 +291,25 @@ defmodule KilnCMSWeb.SystemLive do
     else
       {:noreply, put_flash(socket, :error, gettext("You need admin access to do that."))}
     end
+  end
+
+  # The button's `disabled` attribute is client-side only, and start_async
+  # does not cancel an in-flight task — without these guards a scripted client
+  # could stack unbounded concurrent requests, and a late-finishing orphan
+  # would still write the cache after its result was discarded for display.
+  # Each check has its own guard, so one still in flight does not stop the
+  # other. `Kiln.Updates` and `Kiln.SecurityNotices` also floor forced checks
+  # at one per minute.
+  defp recheck_updates(socket) do
+    if socket.assigns.update == :loading,
+      do: socket,
+      else: check_for_updates(socket, force: true)
+  end
+
+  defp recheck_core_notices(socket) do
+    if socket.assigns.core_notices in [:loading, :off] or not Updates.enabled?(),
+      do: socket,
+      else: check_core_notices(socket, force: true)
   end
 
   @impl true
@@ -468,6 +536,15 @@ defmodule KilnCMSWeb.SystemLive do
 
           <div class="mt-4">
             <.update_status update={@update} />
+          </div>
+
+          <div
+            :if={@core_notices != :off}
+            id="core-security-notices"
+            class="mt-4 border-t border-base-content/10 pt-4"
+          >
+            <h3 class="text-sm font-medium">{gettext("Security notices")}</h3>
+            <.core_notices_status answer={@core_notices} />
           </div>
         </section>
 
@@ -716,15 +793,7 @@ defmodule KilnCMSWeb.SystemLive do
   defp health_reasons(%PluginStatus{} = status), do: PluginHealth.reasons(status)
   defp health_reasons(_status), do: []
 
-  # Advisory links, each through the one href policy this project keeps.
-  defp health_notices(%PluginStatus{advisories: {_state, notices}}) do
-    Enum.flat_map(notices, fn notice ->
-      case HTMLSanitizer.safe_href(notice.url) do
-        nil -> []
-        href -> [{notice.id, href}]
-      end
-    end)
-  end
+  defp health_notices(%PluginStatus{advisories: {_state, notices}}), do: notice_links(notices)
 
   defp health_notices(_status), do: []
 
@@ -888,6 +957,100 @@ defmodule KilnCMSWeb.SystemLive do
       nil -> @update_command
       path -> "cd #{path}\n#{@update_command}"
     end
+  end
+
+  attr :answer, :any, required: true
+
+  defp core_notices_status(%{answer: :loading} = assigns) do
+    ~H"""
+    <p class="mt-1 text-sm text-base-content/70">{gettext("Checking security notices...")}</p>
+    """
+  end
+
+  defp core_notices_status(%{answer: :disabled} = assigns) do
+    ~H"""
+    <p class="mt-1 text-sm text-base-content/70">
+      {gettext(
+        "The security notices feed is turned off (KILN_SECURITY_NOTICES_URL=false, or a fork or mirror of the update feed)."
+      )}
+    </p>
+    """
+  end
+
+  defp core_notices_status(%{answer: {:error, :invalid_notices_url}} = assigns) do
+    ~H"""
+    <p class="mt-1 text-sm text-base-content/70">
+      {gettext("KILN_SECURITY_NOTICES_URL is not an absolute http(s) URL, so no notice was checked.")}
+    </p>
+    """
+  end
+
+  # Placed: in the posture check's words, with each notice that covers this
+  # version linked through the one href policy this project keeps.
+  defp core_notices_status(%{answer: {:ok, status}} = assigns) do
+    result = CoreSecurityNotices.result({:ok, status})
+
+    assigns =
+      assigns
+      |> assign(:result, result)
+      |> assign(:badge, core_notices_badge(result.status))
+      |> assign(:links, notice_links(status.affected ++ status.unplaceable))
+
+    ~H"""
+    <p class="mt-1 text-sm">
+      <.badge :if={@badge} variant={elem(@badge, 0)} class="mr-2">{elem(@badge, 1)}</.badge>
+      {@result.summary}
+    </p>
+
+    <ul :if={@result.details != []} class="mt-1 space-y-0.5 text-sm">
+      <li :for={detail <- @result.details} class="flex items-baseline gap-1.5">
+        <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0 text-warning-ink" />
+        <span>{detail}</span>
+      </li>
+    </ul>
+
+    <p :if={@links != []} class="mt-1 flex flex-wrap gap-x-3 text-xs">
+      <.link
+        :for={{id, href} <- @links}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="text-base-content/70 hover:underline"
+      >
+        {gettext("Advisory %{id}", id: id)}
+      </.link>
+    </p>
+    """
+  end
+
+  defp core_notices_status(%{answer: {:error, :unknown_version}} = assigns) do
+    ~H"""
+    <p class="mt-1 text-sm text-base-content/70">{gettext("Could not read this Kiln's version.")}</p>
+    """
+  end
+
+  defp core_notices_status(assigns) do
+    ~H"""
+    <p class="mt-1 text-sm text-base-content/70">
+      {gettext(
+        "Couldn't reach the security notices feed. This says nothing about whether a notice covers this version."
+      )}
+    </p>
+    """
+  end
+
+  defp core_notices_badge(:fail), do: {"error", gettext("Security notice")}
+  defp core_notices_badge(:unknown), do: {"outline", gettext("Unknown")}
+  defp core_notices_badge(_pass), do: nil
+
+  # Advisory links, each through the one href policy this project keeps.
+  defp notice_links(notices) do
+    Enum.flat_map(notices, fn notice ->
+      case HTMLSanitizer.safe_href(notice.url) do
+        nil -> []
+        href -> [{notice.id, href}]
+      end
+    end)
   end
 
   attr :update, :any, required: true

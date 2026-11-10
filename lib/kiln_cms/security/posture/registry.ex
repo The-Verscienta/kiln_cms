@@ -31,6 +31,7 @@ defmodule KilnCMS.Security.Posture.Registry do
     Checks.ApiKeys,
     Checks.HumanVerification,
     Checks.Release,
+    Checks.CoreSecurityNotices,
     Checks.PluginHealth
   ]
 

@@ -212,14 +212,14 @@ defmodule PublishSecurity do
   defp severity(_unknown), do: "unknown"
 
   # Every package the advisory names, in its order. GitHub may record the
-  # core under its Hex name or not at all (an advisory with no package
-  # entry), so an empty list is the core.
+  # core under its Hex name or not at all (a vulnerability with no package
+  # name), so an unnamed vulnerability is the core's — also beside a named
+  # plugin, or the notice would hide that the core is affected — and an
+  # empty list is the core.
   defp package(vulnerabilities) do
     names =
       vulnerabilities
-      |> Enum.map(&get_in(&1, ["package", "name"]))
-      |> Enum.map(&presence/1)
-      |> Enum.reject(&is_nil/1)
+      |> Enum.map(&(presence(get_in(&1, ["package", "name"])) || @core_package))
       |> Enum.uniq()
 
     if names == [], do: @core_package, else: Enum.join(names, ", ")

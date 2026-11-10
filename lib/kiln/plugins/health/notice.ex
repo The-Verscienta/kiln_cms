@@ -12,6 +12,9 @@ defmodule Kiln.Plugins.Health.Notice do
     * `:hex` — an advisory Hex lists on the installed *release*, so it already
       applies to that version; `affected` is kept for display only.
 
+  `patched` is the feed's `patched_versions` text as published (`"1.3.2;
+  1.2.4"`, or `"unknown"`), `nil` when absent; Hex notices have none.
+
   `id` is the advisory id; `aliases` holds the other ids it is known by (CVE,
   GHSA), so the same advisory reported by both sources is shown once.
   """
@@ -21,6 +24,7 @@ defmodule Kiln.Plugins.Health.Notice do
     :id,
     :title,
     :affected,
+    :patched,
     :url,
     :source,
     packages: [],
@@ -36,6 +40,7 @@ defmodule Kiln.Plugins.Health.Notice do
           packages: [String.t()],
           aliases: [String.t()],
           affected: String.t() | nil,
+          patched: String.t() | nil,
           severity: severity(),
           url: String.t() | nil,
           source: :kiln | :hex
