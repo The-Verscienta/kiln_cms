@@ -1,15 +1,17 @@
 defmodule KilnCMSWeb.Plugs.AdminAllowlist do
   @moduledoc """
   The HTTP gate of a site's admin allowlist (#2248): refuses a request to the
-  console, `/setup` or a sign-in route from an address the site has not
+  console, `/setup`, a sign-in route or the security posture
+  (`GET /api/security/posture`, #2521) from an address the site has not
   listed. The socket half is `KilnCMSWeb.AdminAllowlist`; the list is
   `KilnCMS.Security.AdminAllowlist`.
 
   It is a router pipeline, `:admin_allowlist` (HTML) and `:admin_allowlist_api`
-  (JSON, `POST /api/auth/sign_in*`), not an endpoint plug with path prefixes:
-  which routes are gated is a fact on each route (`pipe_through`), pinned by
-  `test/kiln_cms_web/admin_allowlist_routes_test.exs`, and public delivery never
-  runs it. It comes **first** in each gated `pipe_through`, ahead of the
+  (JSON: `POST /api/auth/sign_in*` and `GET /api/security/posture`), not an
+  endpoint plug with path prefixes: which routes are gated is a fact on each
+  route (`pipe_through`), pinned by
+  `test/kiln_cms_web/admin_allowlist_routes_test.exs`, and public delivery
+  never runs it. It comes **first** in each gated `pipe_through`, ahead of the
   session, so a refused request reads no session and is never signed in by a
   remember-me cookie (whose `Set-Cookie` it would otherwise carry).
 
@@ -24,7 +26,9 @@ defmodule KilnCMSWeb.Plugs.AdminAllowlist do
       people refused here are the site's own admins on the wrong network, or
       behind a proxy Kiln does not trust), with a strict CSP of its own,
       `cache-control: no-store` and `x-robots-tag: noindex`.
-    * JSON: `403` `network_not_allowed` in the API's error envelope.
+    * JSON: `403` `network_not_allowed` in the API's error envelope, with
+      `cache-control: no-store` and `x-robots-tag: noindex` too. The detail is
+      the HTML page's neutral heading, since it answers more than sign-in.
     * When the list cannot be read: `503` with `retry-after: 30`
       (`temporarily_unavailable`), and no address.
 
@@ -88,7 +92,7 @@ defmodule KilnCMSWeb.Plugs.AdminAllowlist do
       conn,
       :forbidden,
       "network_not_allowed",
-      gettext("Sign-in is not available from this network.")
+      gettext("Not available from this network")
     )
   end
 
@@ -98,7 +102,7 @@ defmodule KilnCMSWeb.Plugs.AdminAllowlist do
     |> KilnCMSWeb.ApiError.send(
       :service_unavailable,
       "temporarily_unavailable",
-      gettext("Sign-in is temporarily unavailable. Try again in a minute.")
+      gettext("Temporarily unavailable")
     )
   end
 

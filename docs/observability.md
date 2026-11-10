@@ -354,6 +354,14 @@ with ...". A plugin check the core skips is logged at warning level when the
 page runs ("Security posture: ... is not a usable check and is skipped", "...
 takes the reserved id ...", "... repeats the id ...").
 
+These events say how the checks ran, not what the site's settings are. To
+alert on the posture itself (a line turning **Fix now**), poll
+`GET /api/security/posture` with a site administrator's read-only API key:
+see [Monitor the posture from a script](security-posture.md#monitor-the-posture-from-a-script)
+and the [API guide](api.md#security-posture-monitoring). A run for that
+endpoint emits the same events, at most once per site and scope set every
+30 seconds on each node.
+
 ## Where the metrics go
 
 The matching `Telemetry.Metrics` definitions live in

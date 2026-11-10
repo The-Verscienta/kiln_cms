@@ -55,7 +55,8 @@ defmodule KilnCMSWeb.SurfaceTest do
     /api/graphql/schema.graphql /api/json /api/json/swaggerui /api/keys/rotate /api/locales /api/media
     /api/media/import-url /api/media/uploads /api/media/uploads/complete /api/menus
     /api/menus/:key /api/provenance/:type/:slug /api/provenance/:type/:slug/verify
-    /api/provenance/public-key /api/provenance/verify/:type/:slug /api/resolve /api/schema /api/search /api/sync
+    /api/provenance/public-key /api/provenance/verify/:type/:slug /api/resolve /api/schema /api/search
+    /api/security/posture /api/sync
     /api/visual-editing/:type/:slug /auth /auth/passkey/options /auth/passkey/verify
     /auth/invite/:invite_token /auth/site-sso /auth/site-sso/callback /auth/unlock/:unlock_token
     /confirm_new_user/:token /gql /locale/:locale /magic_link/:token /manifest.webmanifest /mcp

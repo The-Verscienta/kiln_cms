@@ -1192,6 +1192,76 @@ carries the reasoning.
 
 ## Added
 
+<a id="security-posture-json"></a>
+
+- **The Security posture report is available as JSON for monitoring, at
+  `GET /api/security/posture` (#2521, part 2 of #2252).** The page told an
+  administrator what was off, but only when someone opened it; a monitor can
+  now poll the same checks and alert when a line turns **Fix now**. Guides:
+  [Security posture (monitoring)](../api.md#security-posture-monitoring) and
+  [Monitor the posture from a script](../security-posture.md#monitor-the-posture-from-a-script).
+  - **Who may call it.** An administrator of the request's site, with a
+    bearer JWT or an API key they own; a platform administrator also gets the
+    installation's checks (`"scopes": ["site", "deployment"]`). Use a
+    **Read-only** key: the posture's own **API keys** line reports a
+    read-write key on an administrator as **Fix now**. A `draft_write` key is
+    refused (`403` `forbidden`) even if its owner has since become an
+    administrator, because such a key may draft and nothing else. The
+    `PostureReport` policy gains that `forbid_if DraftWriteKey` on the page's
+    `:run` action too; a drafts-only key could never reach the page.
+  - **Behind the admin allowlist.** With a list on, the endpoint answers only
+    to listed networks, whatever the credential, so add the monitor's address.
+    This is the first API-key route the allowlist gates: the allowlist page's
+    note now reads "... The public site, API keys, existing app tokens,
+    previews and media are not affected, except that the security posture
+    endpoint for monitoring (GET /api/security/posture) also answers only to
+    listed networks."
+  - **The answer.** `version` (1), `generated_at`, `org_id`, `scopes`,
+    `status` (`pass` / `warn` / `fail`, the page's badge), `counts` per
+    status, and `checks`, each with `id`, `scope`, `source` (`core`, `plugin`,
+    `config`), `plugin`, `status`, `title`, `summary`, `fix_path` (relative
+    to the console host), `docs_url`, `facts` and `error`. Never a line's
+    **Details** (the email addresses and key names), its description, its
+    duration or its module.
+  - **The contract.** Additive only, with its own `version`. Value sets are
+    open (tolerate a status or `counts` key you don't know, and read it as a
+    warning); read checks by `id`, not position; core ids and core facts keys
+    are contract; `title` and `summary` are English text that may be
+    reworded.
+  - **Cached 30 seconds per node**, per site and scope set, without details:
+    a burst of monitors runs the checks once per window, and `generated_at`
+    can be that old. Every answer, refusals included, is
+    uncacheable (`cache-control: private, no-store`; the allowlist's refusals
+    send `no-store`). A platform administrator's call on a
+    cold cache starts the same background update, security-notices and
+    plugin checks the page does.
+  - **Status codes, in order:** `403` `network_not_allowed` or `503`
+    `temporarily_unavailable` (`retry-after: 30`) from the allowlist; `429`
+    from the `api` bucket; `401` `invalid_token` or `unauthenticated`; `403`
+    `forbidden`; `503` `temporarily_unavailable` with `retry-after: 5` while
+    three reports of the site are already running on the server.
+  - **Shorter allowlist refusal details on the JSON API.** Because the
+    allowlist's JSON refusals now answer more than sign-in, on
+    `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` too the `403`
+    detail changes from "Sign-in is not available from this network." to
+    "Not available from this network", and the `503` detail from "Sign-in is
+    temporarily unavailable. Try again in a minute." to "Temporarily
+    unavailable". The codes are unchanged; a client that matched on the
+    text should branch on `code`.
+  - **Plugin authors (`kiln_plugin` 1.4).** A check's `facts` and `summary`
+    are now published to every administrator who can see the line, so facts
+    must carry no secret, token or address (the SDK always said so).
+    `Kiln.Security.Check.Result.sanitize/1` now replaces invalid UTF-8
+    (U+FFFD) in the summary, details, fact keys and string fact values, and
+    `fix_path/1` and `docs_url/1` drop a non-UTF-8 value; the core repairs a
+    non-UTF-8 title or description the same way, and lists a plugin whose
+    `name/0` is not valid UTF-8 under its module name. A result that makes
+    the sanitizer raise is one **Could not run** line, not a failed report.
+  - **No migration, no new environment variable.** Rolling the pin back
+    removes the endpoint and restores the old detail text.
+  - **API spec.** `docs/api/openapi.json` describes the route
+    (`getSecurityPosture`, tag `Monitoring`), with no `enum` on any field.
+
 <a id="core-security-notices"></a>
 
 - **Security posture says when a published security notice covers the Kiln

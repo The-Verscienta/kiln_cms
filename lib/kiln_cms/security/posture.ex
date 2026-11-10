@@ -29,13 +29,16 @@ defmodule KilnCMS.Security.Posture do
   ## Nothing is stored
 
   The report is computed when asked (the `KilnCMS.Security.PostureReport`
-  action), like the governance report. There is no table and no snapshot.
+  action), like the governance report. There is no table. The one copy kept
+  is `snapshot/2`'s, for monitoring (#2521): in this node's cache for
+  30 seconds, per site and scope set, without any result's details.
   """
 
   use Gettext, backend: KilnCMSWeb.Gettext
 
   alias Kiln.Security.Check.Context
   alias Kiln.Security.Check.Result
+  alias KilnCMS.Accounts.RoleGrant
   alias KilnCMS.Security.Posture.Registry, as: CheckRegistry
   alias KilnCMS.Security.Posture.Runner
 
@@ -103,6 +106,7 @@ defmodule KilnCMS.Security.Posture do
 
   @slots KilnCMS.Security.Posture.Slots
   @max_per_org 3
+  @snapshot_ttl :timer.seconds(30)
 
   @doc """
   Run `fun` holding one of the site's report slots: `{:ok, fun.()}`, or
@@ -137,6 +141,62 @@ defmodule KilnCMS.Security.Posture do
   @doc "The `Registry` the report slots are kept in."
   @spec slots() :: atom()
   def slots, do: @slots
+
+  @doc """
+  Which checks `actor` gets: the site's (`:site`), and for a platform
+  administrator (effective platform role `:admin`, a live elevation grant
+  included) the deployment's (`:deployment`) as well. The one rule, shared by
+  the page's `:run` and monitoring's `:snapshot`.
+  """
+  @spec scopes_for(map() | nil) :: [:site] | [:site | :deployment]
+  def scopes_for(actor) do
+    if RoleGrant.effective_role(actor) == :admin, do: [:site, :deployment], else: [:site]
+  end
+
+  @doc "How long a `snapshot/2` is reused, in milliseconds."
+  @spec snapshot_ttl() :: pos_integer()
+  def snapshot_ttl, do: @snapshot_ttl
+
+  @doc """
+  The posture of the site `org_id` for monitoring (#2521): `report/3` in
+  English, every result's details removed (they name people), and kept in
+  this node's cache for #{div(@snapshot_ttl, 1000)} seconds under the site and
+  the scope set (`KilnCMS.Cache.security_posture_key/2`), so a burst of
+  monitors runs the checks at most once per window. Concurrent misses for one
+  key wait on a single run. `ran_at` is when that run happened.
+
+  Still bounded by `with_slot/2`: `{:error, :busy}` when the site's slots are
+  full, and that answer is never cached.
+  """
+  @spec snapshot(String.t(), [:site | :deployment]) :: {:ok, Report.t()} | {:error, :busy}
+  def snapshot(org_id, scopes) when is_binary(org_id) and is_list(scopes) do
+    key = KilnCMS.Cache.security_posture_key(org_id, scopes)
+
+    case KilnCMS.Cache.fetch(key, @snapshot_ttl, fn -> fresh_snapshot(org_id, scopes) end) do
+      %Report{} = report -> {:ok, report}
+      nil -> {:error, :busy}
+    end
+  end
+
+  # `nil` when the site's slots are full: `KilnCMS.Cache.fetch/3` never caches
+  # a `nil`, so a busy answer does not stick for the window.
+  defp fresh_snapshot(org_id, scopes) do
+    case with_slot(org_id, fn -> report(org_id, scopes, locale: "en") end) do
+      {:ok, report} -> without_details(report)
+      {:error, :busy} -> nil
+    end
+  end
+
+  @doc "`report` with every result's `details` emptied."
+  @spec without_details(Report.t()) :: Report.t()
+  def without_details(%Report{entries: entries} = report) do
+    %{report | entries: Enum.map(entries, &entry_without_details/1)}
+  end
+
+  defp entry_without_details(%Entry{result: %Result{} = result} = entry),
+    do: %{entry | result: %{result | details: []}}
+
+  defp entry_without_details(entry), do: entry
 
   @doc """
   The report for the site `org_id`, running the checks whose scope is one of

@@ -13,7 +13,10 @@ defmodule KilnCMS.Security.Posture.Registry do
   contributes none rather than taking the page down.
 
   The metadata (`title/0`, `description/0`) is read on every report, in the
-  reader's locale, so a translated title follows the page.
+  reader's locale, so a translated title follows the page. Text that is not
+  valid UTF-8 has its bad bytes replaced (U+FFFD) rather than the check being
+  left out, and a plugin name that is not valid UTF-8 is replaced by the
+  plugin's module name, so a report always encodes.
   """
 
   require Logger
@@ -115,6 +118,8 @@ defmodule KilnCMS.Security.Posture.Registry do
           true ->
             {:ok,
              described
+             |> Map.put(:title, String.replace_invalid(described.title))
+             |> Map.update(:description, nil, &valid_text/1)
              |> Map.put(:timeout, clamp(described.timeout))
              |> Map.put(:source, source)}
         end
@@ -140,12 +145,21 @@ defmodule KilnCMS.Security.Posture.Registry do
     end
   end
 
-  defp plugin_name(plugin) do
+  @doc """
+  The name a plugin's checks are listed under: its `name/0`, or its module
+  name when that raises, is not a string, or is not valid UTF-8 (which would
+  make the report unencodable on the page and at `GET /api/security/posture`).
+  """
+  @spec plugin_name(module()) :: String.t()
+  def plugin_name(plugin) do
     case safely(fn -> plugin.name() end) do
-      name when is_binary(name) -> name
+      name when is_binary(name) -> if String.valid?(name), do: name, else: inspect(plugin)
       _unnamed -> inspect(plugin)
     end
   end
+
+  defp valid_text(text) when is_binary(text), do: String.replace_invalid(text)
+  defp valid_text(other), do: other
 
   defp safely(fun) do
     fun.()

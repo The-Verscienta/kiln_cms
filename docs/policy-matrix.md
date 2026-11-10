@@ -1147,15 +1147,23 @@ GraphQL or MCP.
 | Action | org admin | platform admin | editor | viewer | anonymous | System actor |
 |--------|:---------:|:--------------:|:------:|:------:|:---------:|:------------:|
 | `run` (generic action) | ✅ (own org; site checks only) | ✅ (any org; site and deployment checks) | ❌ | ❌ | ❌ | ❌ |
+| `snapshot` (generic action, #2521) | ✅ (own org; site checks only) | ✅ (any org; site and deployment checks) | ❌ | ❌ | ❌ | ❌ |
 
-The [Security posture](security-posture.md) page's one action. It has no data
-layer and stores nothing. One policy, `authorize_if Checks.OrgAdmin`. The site
+`run` is the [Security posture](security-posture.md) page's action;
+`snapshot` is the same report for monitoring, in English, with every
+result's `details` emptied, and reused for 30 seconds per site and scope set
+on each node (`Posture.snapshot/2`). The resource has no data layer and
+stores nothing else. One policy covers both actions: `forbid_if
+Accounts.Checks.DraftWriteKey` (a `:draft_write` key is refused whoever owns
+it, since such a key may draft and nothing else), then `authorize_if
+Checks.OrgAdmin`. The site
 is the action's tenant, never an argument; with no tenant it is the default
 site, which an admin of another site is refused on, and so is an admin whose
 membership is still waiting for approval. What a caller *gets* is decided
 inside the action from the same actor: every caller gets the `:site` checks,
 and a caller whose effective platform role is `:admin` (standing or by a live
-grant) also gets the `:deployment` checks. The console page re-checks the tier
+grant) also gets the `:deployment` checks (`Posture.scopes_for/1`, shared by
+both actions). The console page re-checks the tier
 on **Run checks again**, as the security log does.
 
 Three checks read rows no policy would show the caller, with
@@ -1169,8 +1177,11 @@ two are `:deployment` checks, shown only to platform admins. The idle-timeout,
 allowlist and password-policy checks read through their existing
 `:accounts` and `:admin_allowlist` grants (above), with no new grant. At most
 three reports of one site run at once on a node; a fourth is refused with
-`Security.Errors.PostureBusy`, which is not a permission refusal. Not exposed
-over JSON:API, GraphQL or MCP.
+`Security.Errors.PostureBusy`, which is not a permission refusal (the JSON
+endpoint answers it `503` with `retry-after: 5`). Not on JSON:API, GraphQL or
+MCP: `snapshot` is exposed only at `GET /api/security/posture`, without
+`details` ([API guide](api.md#security-posture-monitoring)); `run` is the
+page's alone.
 
 ## Automation & newsletter
 
@@ -1319,7 +1330,7 @@ API key carries an immutable **access scope** (`:read`, `:read_write` or
 |---|---|
 | `KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess` | an API-key actor whose key is *not* `:read_write` — i.e. a `:read` key, or any key whose record cannot be inspected (**fails closed to read-only**) |
 | `AshAuthentication.Checks.UsingApiKey` | *any* API-key actor, regardless of scope |
-| `KilnCMS.Accounts.Checks.DraftWriteKey` | an actor whose key is `:draft_write`, in three modes: `:any`, `:outside_allowlist` (the `forbid_if` on `Content`), `:within_allowlist` (the grant inside `EditableContentType`'s policy) |
+| `KilnCMS.Accounts.Checks.DraftWriteKey` | an actor whose key is `:draft_write`, in three modes: `:any` (also the `forbid_if` on `Security.PostureReport`), `:outside_allowlist` (the `forbid_if` on `Content`), `:within_allowlist` (the grant inside `EditableContentType`'s policy) |
 
 Applied as `forbid_if` clauses placed **before** the `OrgAdmin` bypass, so a key
 minted on an admin account cannot skip them:
