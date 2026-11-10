@@ -128,7 +128,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **New on by default: nodes ask their DNS resolver about the address of any visitor claiming to be a search engine. Allow outbound DNS (PTR, A, AAAA), set `TRUSTED_PROXIES` behind a proxy, or set `KILN_CRAWLER_VERIFICATION=false`. With smart 404 blocking on, link-preview fetchers are no longer exempt.**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#verified-search-bots-upgrade))
+  ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#verified-search-bots-upgrade))
 
 - **Run `mix ash.migrate` (new table `invitations`). A new daily job prunes invitations 30 days past expiry; no setting.** Rolling the pin back is safe; pending invitation links stop working until you upgrade again.
   ([#2448](https://github.com/The-Verscienta/kiln_cms/pull/2448) · [long form](docs/changelog/unreleased.md#team-invitations-upgrade))
@@ -286,7 +286,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Search-engine claims are checked by reverse and forward DNS; a claim proven false is charged as no user agent (60 a minute by default), and a search-engine budget above 100% goes only to verified addresses.**
   Never on the request path; unchecked claims keep the browser limit. Guide: [docs/bot-budgets.md](docs/bot-budgets.md#verified-search-engines).
-  ([long form](docs/changelog/unreleased.md#verified-search-bots))
+  ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#verified-search-bots))
 
 - **Platform admins can invite someone with no account to a site by email: Team → Add or invite, with Pending invitations to resend or revoke.**
   Links last 7 days and work on invite-only sites; an unconfirmed account is now invited, not added. Guide: [docs/account-administration.md](docs/account-administration.md#invite-someone-to-a-site).
@@ -413,10 +413,10 @@ Every summary line below that was shortened links to its own entry there.
 ### Changed
 
 - **The smart 404 guard no longer exempts link-preview fetchers or Slurp from its miss threshold, and exempts a search-engine claim only until DNS proves it false.**
-  ([long form](docs/changelog/unreleased.md#scanner-guard-exemption-narrowed))
+  ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#scanner-guard-exemption-narrowed))
 
 - **`kiln_cms_delivery_client_class_count`'s `class` is now the class charged: `class="empty"` includes search-engine claims proven false by DNS.**
-  ([long form](docs/changelog/unreleased.md#client-class-is-charged-class))
+  ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#client-class-is-charged-class))
 
 - **Every update action on a content resource, an overlay's own included, refuses a trashed row with `StaleRecord`; only `:restore` and `:clear_reference_target` are exempt.**
   ([#2528](https://github.com/The-Verscienta/kiln_cms/pull/2528) · [long form](docs/changelog/unreleased.md#trashed-row-update-actions-refuse))
