@@ -17844,6 +17844,11 @@ msgstr "Motores de búsqueda"
 msgid "Search engines will be refused sooner than browsers. That can slow how quickly new pages are indexed."
 msgstr "Los motores de búsqueda se rechazarán antes que los navegadores. Eso puede retrasar la indexación de las páginas nuevas."
 
+#: lib/kiln_cms_web/controllers/content_html/search.html.heex
+#, elixir-autogen, elixir-format
+msgid "Search everything"
+msgstr "Buscar en todo"
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "Search for a WebVTT (.vtt) track you've uploaded to the"
@@ -17895,6 +17900,11 @@ msgstr "Las búsquedas se registran de forma anónima — sin ID de usuario ni I
 #, elixir-autogen, elixir-format
 msgid "Searches that found nothing, read as organization: a term that exists but has no page behind it, or a term the site doesn't have."
 msgstr "Búsquedas que no encontraron nada, leídas como organización: un término que existe pero no tiene página detrás, o un término que el sitio no tiene."
+
+#: lib/kiln_cms_web/controllers/content_html/search.html.heex
+#, elixir-autogen, elixir-format
+msgid "Searching only in “%{category}”."
+msgstr "Buscando solo en “%{category}”."
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -20184,6 +20194,11 @@ msgstr "Esa copia de seguridad está en curso ahora mismo."
 #, elixir-autogen, elixir-format
 msgid "That block no longer exists."
 msgstr "Ese bloqueo ya no existe."
+
+#: lib/kiln_cms_web/controllers/content_html/search.html.heex
+#, elixir-autogen, elixir-format
+msgid "That category doesn't exist, so nothing was searched."
+msgstr "Esa categoría no existe, así que no se buscó nada."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format

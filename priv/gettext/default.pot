@@ -17844,6 +17844,11 @@ msgstr ""
 msgid "Search engines will be refused sooner than browsers. That can slow how quickly new pages are indexed."
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/content_html/search.html.heex
+#, elixir-autogen, elixir-format
+msgid "Search everything"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "Search for a WebVTT (.vtt) track you've uploaded to the"
@@ -17894,6 +17899,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Searches that found nothing, read as organization: a term that exists but has no page behind it, or a term the site doesn't have."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/content_html/search.html.heex
+#, elixir-autogen, elixir-format
+msgid "Searching only in “%{category}”."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
@@ -20183,6 +20193,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "That block no longer exists."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/content_html/search.html.heex
+#, elixir-autogen, elixir-format
+msgid "That category doesn't exist, so nothing was searched."
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex

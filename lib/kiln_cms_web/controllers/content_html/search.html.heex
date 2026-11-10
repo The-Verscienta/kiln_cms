@@ -20,6 +20,13 @@
       autocomplete="off"
       class="field-input min-w-0 flex-1 px-4 py-2.5 text-base"
     />
+    <%!-- A scoped search stays scoped when the query is changed (#2457). --%>
+    <input
+      :if={@active_category}
+      type="hidden"
+      name="category"
+      value={@active_category.slug}
+    />
     <button
       type="submit"
       class="public-search-submit btn btn-default shrink-0 px-4 py-2.5 text-base"
@@ -27,6 +34,26 @@
       {gettext("Search")}
     </button>
   </form>
+
+  <%!-- Shown whenever a category scopes the search, query or not: a link such
+       as kilncms.dev's "Search the docs" (`?category=documentation`) lands
+       here before anything is typed, when there are no facets to show it. --%>
+  <p :if={@active_category} class="mt-3 text-sm text-base-content/70">
+    {gettext("Searching only in “%{category}”.", category: @active_category.name)}
+    <a href={search_href(@locale, @query)} class="text-primary-ink hover:underline">
+      {gettext("Search everything")}
+    </a>
+  </p>
+
+  <%!-- An unknown slug matches nothing (it never silently unfilters), so say
+       why the page is empty: a renamed or deleted category behind a link.
+       The slug itself is not repeated: it is whatever text a link carries. --%>
+  <p :if={@unknown_category?} class="mt-3 text-sm text-base-content/70">
+    {gettext("That category doesn't exist, so nothing was searched.")}
+    <a href={search_href(@locale, @query)} class="text-primary-ink hover:underline">
+      {gettext("Search everything")}
+    </a>
+  </p>
 
   <p
     :if={
@@ -42,7 +69,7 @@
        from a typo, and this names the corrected term. --%>
   <p :if={@suggestion} class="mt-4 text-base-content/70">
     <a
-      href={KilnCMS.I18n.localized_path(@locale, "/search") <> "?q=" <> URI.encode_www_form(@suggestion)}
+      href={search_href(@locale, @suggestion, @active_category && @active_category.slug)}
       class="text-primary-ink hover:underline"
     >
       {gettext("Did you mean “%{suggestion}”?", suggestion: @suggestion)}
@@ -55,7 +82,7 @@
     <ul class="flex flex-wrap items-center gap-2 text-sm">
       <li :if={@active_category}>
         <a
-          href={KilnCMS.I18n.localized_path(@locale, "/search") <> "?q=" <> URI.encode_www_form(@query)}
+          href={search_href(@locale, @query)}
           class="inline-block rounded-full border border-base-content/20 px-3 py-1 hover:border-primary"
         >
           {gettext("All results")}
@@ -63,10 +90,7 @@
       </li>
       <li :for={facet <- @facets}>
         <a
-          href={
-            KilnCMS.I18n.localized_path(@locale, "/search") <>
-              "?q=" <> URI.encode_www_form(@query) <> "&category=" <> URI.encode_www_form(facet.slug)
-          }
+          href={search_href(@locale, @query, facet.slug)}
           aria-current={if @active_category && @active_category.slug == facet.slug, do: "true"}
           class={[
             "inline-block rounded-full border px-3 py-1 hover:border-primary",

@@ -538,6 +538,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A category-scoped `/search?category=<slug>` now stays scoped: the search form, the "did you mean" link and the language links keep the category, and the page says what it searches with a "Search everything" link. kilncms.dev's /docs links to a docs-only search this way.**
+  ([#2457](https://github.com/The-Verscienta/kiln_cms/issues/2457) · [long form](docs/changelog/unreleased.md#scoped-search-keeps-category))
+
 - **The `/access-denied` page no longer tells a signed-in account with no role on the site that it is signed in as viewer; it says the account has no role there and offers Sign out.**
   ([#2372](https://github.com/The-Verscienta/kiln_cms/issues/2372) · [long form](docs/changelog/unreleased.md#access-denied-no-role))
 
