@@ -1012,6 +1012,23 @@ carries the reasoning.
   never exposed `:purge`, so HTTP clients are unaffected; the nightly
   trash purge only ever read trashed rows.
 
+<a id="restore-version-stale-struct"></a>
+
+- **Overlay and plugin code: `restore_<type>_version` (`restore_page_version`,
+  `restore_post_version`, …) now refuses a record read before a later write,
+  and a restore increments `lock_version` (#2532).** The call returns an
+  error containing `Ash.Error.Changes.StaleRecord` and writes nothing when the
+  row's `lock_version` or `state` no longer matches the record passed in.
+  Before, it could succeed while writing nothing, or restore onto a page
+  published since the read without the publish-time gates. Read the record
+  again (`get_<type>`) right before restoring, and use the returned record
+  afterwards: a record held from before the restore is now stale for
+  `update_<type>` and every other action that carries the optimistic lock.
+  Over HTTP, the revisions restore route answers a lost race with `409`
+  `invalid_state_transition` instead of `422` `restore_failed`, and a
+  document trashed meanwhile with `404` (see
+  [Fixed](#restore-refuses-stale-copy)).
+
 <a id="backup-request-api"></a>
 
 - **Console and overlay callers: `KilnCMS.Backups.enqueue/1` returns
@@ -3994,6 +4011,57 @@ carries the reasoning.
     has a new name; delete superseded items in the media library.
 
 ## Fixed
+
+<a id="restore-refuses-stale-copy"></a>
+
+- **Restoring a version from a copy of the document that someone has since
+  changed is now refused, instead of reporting success and writing nothing or
+  skipping the publish-time checks (#2532).** `:restore_version` writes the
+  old version's values onto the record the caller holds and judges that
+  record: its workflow state decides whether the compliance-claim and
+  alt-text gates run, and Ash drops any value equal to it. A copy read before
+  a later save therefore restored nothing whenever the old version matched
+  the copy (the editor still said *Restored that version.*), and a draft copy
+  held across a publish put the old text on the live page without the gates
+  a published page gets.
+  - **What changed.** The restore now matches only a row whose
+    `lock_version` and `state` are still those of the copy it was given
+    (`state` too, because publish, unpublish, archive and unarchive keep
+    `lock_version`). Anything else is refused with
+    `Ash.Error.Changes.StaleRecord` and writes nothing, not even a version
+    row. A document moved to the trash meanwhile is refused the same way.
+  - **Editors.** Confirming *Restore this version* after someone else saved
+    the page shows the conflict banner a stale save shows: *Someone else saved
+    changes to this content. Saving is paused so you don't overwrite their
+    work.*, with **Reload latest**. Your unsaved text stays in the form until
+    you reload. If the page was trashed meanwhile, the banner says so and
+    offers **Back to content**.
+  - **API.** `POST /api/content/:type/:id/revisions/:version_id/restore`
+    answers `409` `invalid_state_transition` when a save lands between the
+    route's read and its restore (before: success that might write nothing,
+    or `422` `restore_failed`), and `404` `not_found` when the document was
+    trashed meanwhile (before: `422`). A credential the content policies
+    refuse still gets `403`. On a `409`, read the document again and retry;
+    `kiln_client` and the JS client already map `409` to their conflict
+    error. Guide: [api.md](../api.md#version-history-revisions).
+  - **Still not covered.** Writes that keep both `lock_version` and `state`
+    do not make a held copy stale: the computed-field refresh, field
+    conversion, `:resnapshot_media`, `:set_oembed_metadata`, `:move` and
+    `:reassign_author`. None of them changes the state, slug or text the
+    restore judges.
+  - No migration and no config. Overlay code that restores from a record
+    read before a later write must read it again first
+    ([Breaking](#restore-version-stale-struct)).
+
+<a id="restore-bumps-lock-version"></a>
+
+- **A save from a tab opened before a version restore no longer silently
+  undoes the restore (#2532).** A restore left `lock_version` alone, so the
+  other tab's copy still passed the optimistic lock and its save wrote the
+  pre-restore text back over the restored one without a conflict. A restore
+  now increments `lock_version`, so that save is refused as stale and the
+  other tab shows the conflict banner with **Reload latest**. No migration
+  and no config.
 
 <a id="purge-refuses-restored-rows"></a>
 
