@@ -88,8 +88,10 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   user data, and the public API's anonymous callers filter too. The read fails
   closed — a refused registry read raises rather than resolving to "no
   fields" (which would already 400, never widen the result). No index backs
-  these predicates — promote a hot field to a compiled attribute when that
-  starts to matter (D4/D17). A private field (#2044) is unknown to anyone
+  these predicates unless the site declared the field in
+  `config :kiln_cms, :indexed_custom_fields` (#2359, ADR 0025, which indexes
+  its range operators and `custom_sort`) — otherwise promote a hot field to a
+  compiled attribute when that starts to matter (D4/D17). A private field (#2044) is unknown to anyone
   below editor, here as everywhere else.
   """
   use Ash.Resource.Preparation
@@ -99,6 +101,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   require Ash.Sort
 
   alias Ash.Error.Query.InvalidArgument
+  alias KilnCMS.CMS.IndexedCustomFields
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Lists
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Relations
   alias KilnCMS.CMS.ScalarLists
@@ -143,6 +146,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       # What the relationship operators gate targets with (`Relations`).
       ctx = %{
         resource: query.resource,
+        table: AshPostgres.DataLayer.Info.table(query.resource),
         actor: Map.get(context, :actor),
         tenant: query.to_tenant || query.tenant
       }
@@ -554,8 +558,10 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
        "is not a reference"}
   end
 
-  defp relation_or_condition(definition, op, raw, _ctx),
-    do: condition(definition, normalize_op(op), raw)
+  # `:index_table` tells the range operators which table's declared indexes
+  # apply (#2359); it rides on the definition because `condition/3` has no ctx.
+  defp relation_or_condition(definition, op, raw, ctx),
+    do: condition(Map.put(definition, :index_table, ctx.table), normalize_op(op), raw)
 
   # `is_nil` is the native `filter[x][is_nil]` spelling of `null`, accepted so
   # the same predicate reads the same on a custom field (#2292). Resolved
@@ -749,7 +755,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   defp condition(%{name: name} = definition, op, raw) do
     with {:ok, value} <- cast_value(raw, ash_type(definition), name) do
-      {:ok, jsonb_condition(:custom_fields, op, name, value)}
+      {:ok, jsonb_condition(:custom_fields, op, name, value, Map.get(definition, :index_table))}
     end
   end
 
@@ -773,8 +779,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   #
   # `column` is `:custom_fields` for a field on the record, `:metadata` for a
   # link field on an edge (R3).
-  defp jsonb_condition(column, op, name, raw_value) do
-    field = expr(fragment("(? -> ?::text)", ^ref(column), ^name))
+  defp jsonb_condition(column, op, name, raw_value, table \\ nil) do
+    field = comparison_field(column, op, name, table)
     value = expr(fragment("?::jsonb", ^raw_value))
 
     case op do
@@ -786,6 +792,33 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       "lt" -> expr(^field < ^value)
       "lte" -> expr(^field <= ^value)
     end
+  end
+
+  # A range operator compares the CASE expression the indexes are built on
+  # (#2359), so a stored JSON null, array or object never matches, indexed or
+  # not. A field the site declared in `:indexed_custom_fields` gets its name
+  # inlined as a literal (a bound name defeats the btree under a generic plan);
+  # any other keeps a bound name.
+  defp comparison_field(:custom_fields, op, name, table) when op in ~w(gt gte lt lte),
+    do: range_field(name, table)
+
+  defp comparison_field(column, _op, name, _table),
+    do: expr(fragment("(? -> ?::text)", ^ref(column), ^name))
+
+  # `name` passed `IndexedCustomFields.valid?/2` where inlined: a configured,
+  # pattern-checked field name, so it cannot carry SQL.
+  defp range_field(name, table) do
+    column = ref(:custom_fields)
+
+    args =
+      if IndexedCustomFields.valid?(table, name),
+        do: [IndexedCustomFields.sort_sql(name), column, column],
+        else: [IndexedCustomFields.bound_sql(), column, name, column, name]
+
+    # `fragment/2` only takes a compile-time string; the SQL here is built from
+    # a configured, pattern-checked name (or none), so it is built directly.
+    {:ok, fragment} = Ash.Query.Function.Fragment.new(args)
+    fragment
   end
 
   # --- containment (index-matchable equality) ---------------------------------
@@ -1109,7 +1142,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         invalid(query, :custom_sort, "custom field #{inspect(name)} (a list) is not sortable")
 
       {:ok, definition} ->
-        Ash.Query.sort(query, [{sort_expr(definition), direction}])
+        Ash.Query.sort(query, [{sort_expr(definition, table_of(query)), direction}])
 
       {:error, message} ->
         invalid(query, :custom_sort, message)
@@ -1147,7 +1180,18 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # null lowest), and an array/object cursor value cannot be bound back into
   # the keyset filter (`jsonb > integer[]`), which fails the page-2 read.
   # Neither is a value a field of a sortable type holds unless it was retyped.
-  defp sort_expr(%{name: name}) do
+  defp sort_expr(%{name: name}, table) do
+    if IndexedCustomFields.valid?(table, name) do
+      # The expression a declared btree is built on (#2359), name inlined.
+      Ash.Sort.expr_sort(^range_field(name, table))
+    else
+      bound_sort_expr(name)
+    end
+  end
+
+  defp table_of(query), do: AshPostgres.DataLayer.Info.table(query.resource)
+
+  defp bound_sort_expr(name) do
     Ash.Sort.expr_sort(
       fragment(
         "(CASE WHEN jsonb_typeof(? -> ?::text) IN ('null', 'array', 'object') THEN NULL ELSE (? -> ?::text) END)",

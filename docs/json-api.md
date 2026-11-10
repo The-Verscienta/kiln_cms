@@ -595,46 +595,71 @@ dynamic type. The rows returned are the same as before; only the speed
 changes, and the planner still prefers a scan when a filter matches a large
 share of the table.
 
-These are **not** accelerated: `not_eq`, `gt`, `gte`, `lt`, `lte`, `ilike`,
-`null`, `has_none` and `count` on a list of values, and `custom_sort`. `not_eq` stays on the older `->` form on purpose,
-because a record without the field must stay excluded from it. If a field
-needs fast range filters or sorting, make it a compiled attribute (the D4
-answer in [dynamic-content-types-plan.md](dynamic-content-types-plan.md)).
+These are **not** accelerated by default: `not_eq`, `gt`, `gte`, `lt`, `lte`,
+`ilike`, `contains`, `starts_with`, `null`, `has_none` and `count` on a list
+of values, and `custom_sort`. `not_eq` stays on the older `->` form on
+purpose, because a record without the field must stay excluded from it.
 
 The index costs about 26% of the table's size, slows bulk inserts by about
 25% and single saves by 10-35%; see
 [Custom-field filters at 100k rows](benchmarks.md#custom-field-filters-at-100k-rows)
 for the method and the caveats.
 
-**A recipe, not a feature: a range or sort index for one hot field.** If you
-must keep a field dynamic and sort or range-filter on it, add two expression
-btrees for that field, one `ASC NULLS LAST` and one `DESC NULLS LAST`, from
-a reviewed migration (with `@disable_ddl_transaction true` and
-`@disable_migration_lock true`, see
-[releasing.md](releasing.md#migrations-expand-migrate-contract)):
+#### Range filters and sort for a hot field (`indexed_custom_fields`)
+
+If a field is range-filtered or sorted on, and promoting it to a compiled
+attribute (the D4 answer in
+[dynamic-content-types-plan.md](dynamic-content-types-plan.md)) is more than
+you want, list its name in the config of the build that runs `mix ash.codegen`
+(an overlay keeps it in its own `config/config.exs`). It is read at compile
+time:
 
 ```elixir
-create index(:posts, ["(custom_fields -> 'price') ASC NULLS LAST"],
-  name: "posts_cf_price_asc_index", concurrently: true)
-
-create index(:posts, ["(custom_fields -> 'price') DESC NULLS LAST"],
-  name: "posts_cf_price_desc_index", concurrently: true)
+config :kiln_cms, :indexed_custom_fields, ["price", "rating"]
+# or, to index only one table's rows:
+config :kiln_cms, :indexed_custom_fields, %{"entries" => ["price"]}
 ```
 
-An overlay can instead declare the same expression strings as
-`custom_indexes` entries on its resource (column strings pass through to the
-DDL, as the GIN index's `"custom_fields jsonb_path_ops"` does) and let
-`mix ash.codegen` write the migration. Limits to know before you do:
+Then `mix ash.codegen indexed_custom_fields` and `mix ash.migrate`. Each name
+gets two btrees per content table (`pages`, `posts`, `entries`, and an
+overlay's own), `org_id` first: one `ASC NULLS LAST` and one `DESC NULLS
+LAST`, built concurrently. Nothing is indexed unless you list it, and Kiln
+never runs DDL itself.
 
-- Postgres uses the index only when the field name is a literal in the
-  query. Kiln's query binds the name, so a prepared statement can use the
-  btree for roughly its first five executions, then switches to a generic plan
-  that cannot. Expect it to help in a benchmark and fade in production.
-- Use it for integer, float, boolean, date and datetime fields. A string btree
-  can hit the index row limit (about 2.7 KB).
-- Each index adds write cost like the GIN one. Measure with your own data.
+What is accelerated, for a listed field:
 
-Kiln does not create, test or support these indexes.
+| Request | Index |
+|---|---|
+| `custom_filter[price][gt]` / `gte` / `lt` / `lte` | yes |
+| `custom_sort=price` and `custom_sort=-price`, with a page limit (also the keyset page after the first) | yes |
+| `custom_filter[price]` (`eq`), `in` | the GIN index above |
+| `not_eq`, `ilike`, `contains`, `starts_with`, `null` | no |
+
+Rules to know:
+
+- **Use it for integer, float, date and datetime fields.** A string btree can
+  exceed the index row limit (about 2.7 KB); a boolean index is nearly useless.
+  Values that are not the field's type (a string in an integer field) sort and
+  compare by JSON type order, as before.
+- **A range never matches a stored JSON `null`, array or object**, listed or
+  not: they read as "no value", the way `custom_sort` has always read them.
+- **Each btree costs writes.** `custom_fields` is rewritten on every save, so
+  every listed name adds two index updates to each save of a record, whether
+  or not that save changes the field. At 100,000 rows two fields (four btrees)
+  next to the GIN index made 20,000 unrelated saves about 6x slower and 100,000
+  inserts about 1.7x slower. See
+  [the measurements](benchmarks.md#range-and-sort-indexes-for-custom-fields).
+  List what you sort or range-filter on, per table where you can.
+- **Adding a name, removing one, or renaming a field is a migration.** Add the
+  name, generate, apply: queries answer correctly (from the table) until the
+  concurrent build finishes. A failed build leaves an invalid index; drop it and
+  rebuild.
+- **Check for drift** with `mix kiln.custom_fields.index --check` (read-only,
+  exits non-zero): a listed name with no or an invalid index, an index no name
+  asks for, a name no field definition carries, an ineligible type.
+
+The reasoning is in
+[ADR 0025](decisions/0025-a-site-declares-which-custom-fields-get-range-and-sort-indexes-in-config.md).
 
 ## Pagination
 

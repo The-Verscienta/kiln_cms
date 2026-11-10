@@ -2739,6 +2739,13 @@ defmodule KilnCMS.CMS.Content do
           index ["published_at DESC NULLS LAST", "id DESC"],
             name: unquote("#{table}_console_published_index"),
             concurrently: true
+
+          # Range/sort btrees for the custom fields a site lists in
+          # `config :kiln_cms, :indexed_custom_fields` (#2359, ADR 0025).
+          # Nothing by default. `org_id`-leading (codegen's default under
+          # multitenancy): the tenant filter is the equality, the field the
+          # order.
+          unquote_splicing(KilnCMS.CMS.IndexedCustomFields.index_entries(table))
         end
       end
 
