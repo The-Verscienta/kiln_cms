@@ -9,7 +9,7 @@ defmodule KilnCMS.CMS.Validations.FieldConstraints do
     * `min`/`max` for `:integer`/`:float` (an integer field takes integer
       bounds); `min_length`/`max_length`/`pattern`/`pattern_message` for
       `:string`, `:url` and plain `:text`; `unique` for single-valued
-      `:string`, `:url`, `:integer`, `:float`, `:date` and `:datetime`
+      `:string`, `:url`, `:integer`, `:float`, `:date`, `:datetime` and `:slug`
       top-level fields — not on a computed, shared-localization, link or
       group sub-field, and not alongside a `default`;
     * on a `multiple` field (a list of phrases, numbers, links, …) every

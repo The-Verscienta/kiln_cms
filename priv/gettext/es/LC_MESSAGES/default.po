@@ -22362,8 +22362,8 @@ msgstr "Slug de URL"
 
 #: lib/kiln_cms/cms/field_types/slug.ex
 #, elixir-autogen, elixir-format
-msgid "URL-safe words joined by hyphens; what you type is tidied up. For a short code or a path segment. Not checked for uniqueness."
-msgstr "Palabras seguras para URL unidas por guiones; lo que escribes se normaliza. Para un código corto o un segmento de ruta. No se comprueba que sea único."
+msgid "URL-safe words joined by hyphens; what you type is tidied up. For a short code or a path segment. Can be required to be unique."
+msgstr "Palabras seguras para URL unidas por guiones; lo que escribes se normaliza. Para un código corto o un segmento de ruta. Se puede exigir que sea único."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex

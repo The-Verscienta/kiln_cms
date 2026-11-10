@@ -62,7 +62,7 @@ defmodule KilnCMS.CMS.FieldConstraints do
     do: ~w(min_length max_length pattern pattern_message unique)
 
   def allowed_keys(:text, :plain), do: ~w(min_length max_length pattern pattern_message)
-  def allowed_keys(type, _format) when type in [:date, :datetime], do: ["unique"]
+  def allowed_keys(type, _format) when type in [:date, :datetime, :slug], do: ["unique"]
   def allowed_keys(_type, _format), do: []
 
   @doc """

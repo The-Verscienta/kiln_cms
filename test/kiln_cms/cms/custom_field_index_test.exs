@@ -26,6 +26,18 @@ defmodule KilnCMS.CMS.CustomFieldIndexTest do
   # rows, 0.05% of the table.
   @distinct 2_000
 
+  # The setup writes @rows rows into each of two indexed tables, then merges
+  # the GIN pending lists and analyzes. Under load from another suite on the
+  # same host, these statements can take longer than the repo's default 15 s
+  # query `:timeout` (#2334: the `entries` INSERT was cut off at 15 s while
+  # the plan assertions themselves held), so they get their own bound, and
+  # ExUnit's 60 s test timeout (which covers `setup`) is raised to match.
+  # Both stay under the SQL sandbox's 120 s ownership timeout
+  # (`KilnCMS.DataCase.setup_sandbox/1` sets none, so DBConnection's default
+  # applies): past it the owner's connection is dropped whatever these say.
+  @seed_timeout :timer.seconds(45)
+  @moduletag timeout: :timer.seconds(110)
+
   defp admin do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
       email: "cfi-#{System.unique_integer([:positive])}@example.com",
@@ -87,7 +99,8 @@ defmodule KilnCMS.CMS.CustomFieldIndexTest do
                                   'tags', jsonb_build_array('t' || (i % $2), 'common'))
         FROM generate_series(1, $3) AS i
         """,
-        [org, @distinct, @rows]
+        [org, @distinct, @rows],
+        timeout: @seed_timeout
       )
 
       for {name, type} <- [{"price", :integer}, {"color", :string}] do
@@ -142,7 +155,8 @@ defmodule KilnCMS.CMS.CustomFieldIndexTest do
                                   'tags', jsonb_build_array('t' || (i % $2), 'common'))
         FROM generate_series(1, $3) AS i
         """,
-        [org, @distinct, @rows, Ecto.UUID.dump!(type.id)]
+        [org, @distinct, @rows, Ecto.UUID.dump!(type.id)],
+        timeout: @seed_timeout
       )
 
       # Statistics for the rows just written, so the planner costs the table it
@@ -158,11 +172,17 @@ defmodule KilnCMS.CMS.CustomFieldIndexTest do
       # this table alone. `type_definitions` is the other side of the entries
       # join; analyze it too rather than plan against whatever autovacuum
       # last sampled.
-      Repo.query!("SELECT gin_clean_pending_list('pages_custom_fields_gin_index')")
-      Repo.query!("SELECT gin_clean_pending_list('entries_custom_fields_gin_index')")
-      Repo.query!("ANALYZE pages")
-      Repo.query!("ANALYZE entries")
-      Repo.query!("ANALYZE type_definitions")
+      Repo.query!("SELECT gin_clean_pending_list('pages_custom_fields_gin_index')", [],
+        timeout: @seed_timeout
+      )
+
+      Repo.query!("SELECT gin_clean_pending_list('entries_custom_fields_gin_index')", [],
+        timeout: @seed_timeout
+      )
+
+      Repo.query!("ANALYZE pages", [], timeout: @seed_timeout)
+      Repo.query!("ANALYZE entries", [], timeout: @seed_timeout)
+      Repo.query!("ANALYZE type_definitions", [], timeout: @seed_timeout)
 
       %{admin: admin, org_id: org_id, type: type}
     end
