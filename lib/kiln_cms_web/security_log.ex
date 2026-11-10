@@ -168,6 +168,7 @@ defmodule KilnCMSWeb.SecurityLog do
   def type_label(:registration_queued), do: gettext("Registration awaiting approval")
   def type_label(:registration_approved), do: gettext("Registration approved")
   def type_label(:registration_rejected), do: gettext("Registration rejected")
+  def type_label(:backup_canceled), do: gettext("Backup canceled")
 
   def type_label(other), do: to_string(other)
 

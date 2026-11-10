@@ -15,6 +15,7 @@ defmodule KilnCMS.Backups.ResumeTest do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Checksum, Manifest, Worker, WorkState}
+  alias KilnCMS.Test.BackupChain
 
   @moduletag :capture_log
 
@@ -124,7 +125,7 @@ defmodule KilnCMS.Backups.ResumeTest do
   # Runs a backup that fails at part 3; returns what a resume builds on.
   defp fail_at_part_3(dir, tools) do
     File.write!(tools.gate, "")
-    assert {:error, _} = Worker.run("manual")
+    assert {:error, _} = BackupChain.run()
     File.rm!(tools.gate)
 
     assert [run] = runs()
@@ -172,7 +173,7 @@ defmodule KilnCMS.Backups.ResumeTest do
 
       old = Map.new([dump, p1, p2], &{&1, aged(&1)})
 
-      assert :ok = Worker.run("ignored", nil, resume: stamp)
+      assert :ok = BackupChain.resume(stamp)
 
       # The dump was not re-run and nothing earlier was rewritten.
       assert dump_count(tools) == 1
@@ -224,7 +225,7 @@ defmodule KilnCMS.Backups.ResumeTest do
       aged_p1 = aged(p1)
       flip_byte!(p2)
 
-      assert :ok = Worker.run("manual", nil, resume: stamp)
+      assert :ok = BackupChain.resume(stamp)
 
       assert mtime(p1) == aged_p1
       assert {_, 0} = System.cmd("tar", ["-tzf", p2], stderr_to_stdout: true)
@@ -248,7 +249,7 @@ defmodule KilnCMS.Backups.ResumeTest do
       # Exists under its final name, but the state never recorded it.
       File.write!(p3, "not a tarball, and nobody vouched for it")
 
-      assert :ok = Worker.run("manual", nil, resume: stamp)
+      assert :ok = BackupChain.resume(stamp)
 
       assert {_, 0} = System.cmd("tar", ["-tzf", p3], stderr_to_stdout: true)
     end
@@ -264,7 +265,7 @@ defmodule KilnCMS.Backups.ResumeTest do
       :ok = WorkState.write(work, Map.put(state, "dump", nil))
       File.write!(dump, "garbage")
 
-      assert :ok = Worker.run("manual", nil, resume: stamp)
+      assert :ok = BackupChain.resume(stamp)
 
       assert dump_count(tools) == 2
       assert {_, 0} = System.cmd("pg_restore", ["--list", dump], stderr_to_stdout: true)
@@ -277,7 +278,7 @@ defmodule KilnCMS.Backups.ResumeTest do
 
       flip_byte!(dump)
 
-      assert :ok = Worker.run("manual", nil, resume: stamp)
+      assert :ok = BackupChain.resume(stamp)
       assert dump_count(tools) == 2
       assert {_, 0} = System.cmd("pg_restore", ["--list", dump], stderr_to_stdout: true)
     end
@@ -290,13 +291,40 @@ defmodule KilnCMS.Backups.ResumeTest do
       %{stamp: stamp} = fail_at_part_3(dir, tools)
 
       File.write!(tools.gate, "")
-      assert {:error, _} = Worker.run("manual", nil, resume: stamp)
+      assert {:error, _} = BackupChain.resume(stamp)
       assert [%{status: :failed, stamp: ^stamp}] = runs()
       assert WorkState.exists?(WorkState.path(dir, stamp))
 
       File.rm!(tools.gate)
-      assert :ok = Worker.run("manual", nil, resume: stamp)
+      assert :ok = BackupChain.resume(stamp)
       assert [%{status: :succeeded}] = runs()
+      assert dump_count(tools) == 1
+    end
+
+    test "a resume whose start failed after re-opening the run carries on when retried", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+
+      # The start step's state write fails once, after `Recorder.reopen/2`.
+      blocker = WorkState.file(work) <> ".partial"
+      File.mkdir!(blocker)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} =
+          Backups.request([resume: stamp], Backups.system())
+
+        assert %{failure: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+        assert [%{status: :running, chain_id: ^chain}] = runs()
+
+        File.rmdir!(blocker)
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(chain)
+      end)
+
+      assert [%{status: :succeeded, stamp: ^stamp}] = runs()
       assert dump_count(tools) == 1
     end
 
@@ -313,33 +341,44 @@ defmodule KilnCMS.Backups.ResumeTest do
           set: [status: "running", finished_at: nil, started_at: quiet, updated_at: quiet]
         )
 
-      assert :ok = Worker.run("manual", nil, resume: stamp)
+      assert :ok = BackupChain.resume(stamp)
       assert [%{status: :succeeded}] = runs()
     end
 
-    test "Backups.enqueue(resume: stamp) queues a resume job with the stamp in its args", %{
+    test "Backups.enqueue(resume: stamp) starts a resume chain with the stamp in its args", %{
       base: base,
       dir: dir
     } do
       tools = stub_tools(base)
       %{stamp: stamp} = fail_at_part_3(dir, tools)
 
-      assert {:ok, %Oban.Job{args: args, queue: "backups"}} = Backups.enqueue(resume: stamp)
-      assert args == %{"trigger" => "manual", "resume" => stamp}
+      assert {:ok, %{status: :started, chain: chain}} = Backups.enqueue(resume: stamp)
 
-      # A plain backup is a different job (different args), so this one does not
-      # block it and it does not resume anything.
-      assert {:ok, %Oban.Job{args: plain}} = Backups.enqueue()
-      refute Map.has_key?(plain, "resume")
+      assert [%Oban.Job{args: args, queue: "backup_steps"}] =
+               KilnCMS.Repo.all(
+                 from(j in Oban.Job, where: j.queue == "backup_steps" and j.state == "available")
+               )
+
+      assert %{"chain" => ^chain, "step" => "start", "resume" => ^stamp} = args
+
+      # A second resume of the same stamp is the one in flight.
+      assert {:error, :in_flight} = Backups.enqueue(resume: stamp)
+      # A plain backup queues behind it.
+      assert {:ok, %{status: :queued, chain: ^chain}} = Backups.enqueue()
     end
 
-    test "the worker's perform/1 resumes from the job args", %{base: base, dir: dir} do
+    test "a legacy Worker job goes through the lock and resumes from its args", %{
+      base: base,
+      dir: dir
+    } do
       tools = stub_tools(base)
       %{stamp: stamp} = fail_at_part_3(dir, tools)
 
       assert :ok =
                Worker.perform(%Oban.Job{id: 7, args: %{"trigger" => "manual", "resume" => stamp}})
 
+      assert %{stamp: ^stamp, step: :start} = Backups.in_flight()
+      BackupChain.drain()
       assert [%{status: :succeeded}] = runs()
     end
   end
@@ -409,7 +448,7 @@ defmodule KilnCMS.Backups.ResumeTest do
       rclone = stub_rclone(base, dir)
       gate!(Map.fetch!(rclone, gate))
 
-      assert {:error, {:offsite, _}} = Worker.run("manual")
+      assert {:error, {:offsite, _}} = BackupChain.run()
       File.rm!(Map.fetch!(rclone, gate))
 
       assert [%{status: :failed} = run] = runs()
@@ -438,7 +477,7 @@ defmodule KilnCMS.Backups.ResumeTest do
       first_round = length(rclone_calls(rclone))
       old = Map.new([dump | parts], &{&1, aged(&1)})
 
-      assert :ok = Worker.run("manual", nil, resume: failed.stamp)
+      assert :ok = BackupChain.resume(failed.stamp)
 
       assert dump_count(tools) == 1
       for {path, mtime} <- old, do: assert(mtime(path) == mtime, "#{path} was rewritten")
@@ -463,7 +502,7 @@ defmodule KilnCMS.Backups.ResumeTest do
       refute Enum.any?(rclone_calls(rclone), &(&1 =~ Path.basename(p2)))
       old = Map.new([dump, p1, p3], &{&1, aged(&1)})
 
-      assert :ok = Worker.run("manual", nil, resume: failed.stamp)
+      assert :ok = BackupChain.resume(failed.stamp)
 
       assert dump_count(tools) == 1
       for {path, mtime} <- old, do: assert(mtime(path) == mtime, "#{path} was rewritten")
@@ -498,7 +537,7 @@ defmodule KilnCMS.Backups.ResumeTest do
 
       # Reuse applies the off-site gate's own check, so the symlink is not reused
       # (which would be refused again on every Resume) but rebuilt in its place.
-      assert :ok = Worker.run("manual", nil, resume: failed.stamp)
+      assert :ok = BackupChain.resume(failed.stamp)
 
       assert {:ok, %File.Stat{type: :regular}} = File.lstat(p2)
       for {path, mtime} <- old, do: assert(mtime(path) == mtime, "#{path} was rewritten")
@@ -517,13 +556,13 @@ defmodule KilnCMS.Backups.ResumeTest do
       gate!(rclone.tamper)
 
       assert {:error, {:offsite, %{refused: [_]}}} =
-               Worker.run("manual", nil, resume: failed.stamp)
+               BackupChain.resume(failed.stamp)
 
       assert [%{status: :failed, error: "Off-site copy REFUSED" <> _}] = runs()
       assert {:ok, _} = Backups.resumable_run(failed.stamp)
 
       File.rm!(rclone.tamper)
-      assert :ok = Worker.run("manual", nil, resume: failed.stamp)
+      assert :ok = BackupChain.resume(failed.stamp)
       assert [%{status: :succeeded}] = runs()
     end
 
@@ -536,7 +575,7 @@ defmodule KilnCMS.Backups.ResumeTest do
       assert failed.error =~ "Off-site copy REFUSED for 1 file: kiln-media-#{failed.stamp}.sha256"
       old = Map.new([dump | parts], &{&1, aged(&1)})
 
-      assert :ok = Worker.run("manual", nil, resume: failed.stamp)
+      assert :ok = BackupChain.resume(failed.stamp)
 
       assert dump_count(tools) == 1
       for {path, mtime} <- old, do: assert(mtime(path) == mtime, "#{path} was rewritten")
@@ -547,7 +586,9 @@ defmodule KilnCMS.Backups.ResumeTest do
       assert Enum.map(entries, &elem(&1, 1)) == Enum.map(parts, &Path.basename/1)
     end
 
-    test "a database-only run that failed off-site has nothing to resume", %{
+    # Since #2218 every backup has a work directory, so a database-only one
+    # resumes like any other.
+    test "a database-only run that failed off-site resumes, reusing its dump", %{
       base: base,
       dir: dir
     } do
@@ -557,14 +598,20 @@ defmodule KilnCMS.Backups.ResumeTest do
         Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :media_dir, nil)
       )
 
+      tools = stub_tools(base)
       rclone = stub_rclone(base, dir)
       gate!(rclone.fail)
 
-      assert {:error, {:offsite, _}} = Worker.run("manual")
+      assert {:error, {:offsite, _}} = BackupChain.run()
       assert [%{status: :failed} = run] = runs()
-      assert run.error =~ "run a new backup to try the off-site copy again"
-      refute run.error =~ "Resume"
-      assert {:error, :no_state} = Backups.resumable_run(run.stamp)
+      assert run.error =~ "Resume retries the off-site copy"
+      assert {:ok, _} = Backups.resumable_run(run.stamp)
+
+      File.rm!(rclone.fail)
+      assert :ok = BackupChain.resume(run.stamp)
+      assert dump_count(tools) == 1
+      assert [%{status: :succeeded}] = runs()
+      assert Manifest.read(dir).offsite == "r2:kiln"
     end
   end
 
@@ -589,9 +636,9 @@ defmodule KilnCMS.Backups.ResumeTest do
       for bad <- @forged ++ [nil, 20_260_101, %{}, :stamp] do
         assert {:error, :invalid_stamp} = Backups.resumable_run(bad)
         assert {:error, :invalid_stamp} = Backups.enqueue(resume: bad)
-        assert {:error, :invalid_stamp} = Worker.run("manual", nil, resume: bad)
+        assert {:error, :invalid_stamp} = BackupChain.resume(bad)
 
-        assert {:error, :invalid_stamp} =
+        assert {:cancel, :invalid_stamp} =
                  Worker.perform(%Oban.Job{id: 1, args: %{"resume" => bad}})
       end
 
@@ -602,7 +649,7 @@ defmodule KilnCMS.Backups.ResumeTest do
 
       refute Enum.any?(
                KilnCMS.Repo.all(Oban.Job),
-               &String.starts_with?(&1.worker, "KilnCMS.Backups.Worker")
+               &String.starts_with?(&1.worker, "KilnCMS.Backups.")
              )
     end
 
@@ -614,7 +661,7 @@ defmodule KilnCMS.Backups.ResumeTest do
 
     test "a stamp with no Run is refused", %{dir: dir} do
       File.mkdir_p!(WorkState.path(dir, "20260101-000000"))
-      assert {:error, :no_such_run} = Worker.run("manual", nil, resume: "20260101-000000")
+      assert {:error, :no_such_run} = BackupChain.resume("20260101-000000")
       assert runs() == []
     end
 
@@ -623,7 +670,7 @@ defmodule KilnCMS.Backups.ResumeTest do
       Backups.finish_run!(run, %{}, actor: Backups.system())
 
       assert {:error, {:not_resumable, :succeeded}} =
-               Worker.run("manual", nil, resume: run.stamp)
+               BackupChain.resume(run.stamp)
 
       assert {:error, {:not_resumable, :succeeded}} = Backups.enqueue(resume: run.stamp)
       assert %{status: :succeeded} = Backups.get_run!(run.id, actor: Backups.system())
@@ -632,7 +679,7 @@ defmodule KilnCMS.Backups.ResumeTest do
     test "a running run that is not stale is refused and left alone", %{dir: dir} do
       run = open_run!(dir, "20260101-000000")
 
-      assert {:error, {:not_resumable, :running}} = Worker.run("manual", nil, resume: run.stamp)
+      assert {:error, {:not_resumable, :running}} = BackupChain.resume(run.stamp)
       assert {:error, {:not_resumable, :running}} = Backups.enqueue(resume: run.stamp)
 
       untouched = Backups.get_run!(run.id, actor: Backups.system())
@@ -654,7 +701,7 @@ defmodule KilnCMS.Backups.ResumeTest do
       File.rm!(WorkState.file(WorkState.path(dir, run.stamp)))
       Backups.fail_run!(run, %{error: "boom"}, actor: Backups.system())
 
-      assert {:error, :no_state} = Worker.run("manual", nil, resume: run.stamp)
+      assert {:error, :no_state} = BackupChain.resume(run.stamp)
       assert {:error, :no_state} = Backups.enqueue(resume: run.stamp)
       assert %{status: :failed} = Backups.get_run!(run.id, actor: Backups.system())
     end
@@ -753,6 +800,21 @@ defmodule KilnCMS.Backups.ResumeTest do
 
       assert Worker.sweep_work_dirs(dir) == ["20200104-000000"]
       refute File.exists?(path)
+    end
+
+    test "a lock row that can't be read keeps everything (when unsure, keep)", %{dir: dir} do
+      stamp = "20200106-000000"
+      path = work_dir!(dir, stamp, 9)
+
+      # The lock holds this stamp, but the row doesn't load.
+      KilnCMS.Repo.query!(
+        "INSERT INTO backup_locks (name, chain_id, stamp, step) VALUES ('backups', $1, $2, $3)",
+        [Ecto.UUID.dump!(Ash.UUID.generate()), stamp, "not_a_step_#{System.unique_integer()}"]
+      )
+
+      assert {:error, _} = KilnCMS.Backups.Chain.fetch_held_stamp()
+      assert Worker.sweep_work_dirs(dir) == []
+      assert File.exists?(path)
     end
 
     test "a revoked grant keeps everything (when unsure, keep)", %{dir: dir} do

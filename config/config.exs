@@ -58,6 +58,10 @@ config :kiln_cms, Oban,
     # that runs for minutes can't leave a publish or a password-reset email
     # queued behind it.
     backups: 1,
+    # A backup's step chain (#2218), one step at a time per node; the backup
+    # lock makes it one per cluster. The `backups` queue above only runs
+    # legacy jobs enqueued before the upgrade and goes next minor.
+    backup_steps: 1,
     default: 10
   ],
   repo: KilnCMS.Repo,
@@ -86,7 +90,8 @@ config :kiln_cms, Oban,
 # shutdown stays `executing` for ever and, if `unique`, blocks every later
 # enqueue of itself. MUST exceed the longest legitimate job: the rescue is
 # purely time-based, so a live job older than this runs twice. The longest
-# bounded job is a backup (`KilnCMS.Backups.Worker.timeout/1`, 2 h), hence 3 h.
+# bounded job is a backup step (`KilnCMS.Backups.StepWorker.timeout/1`, 2 h),
+# hence 3 h.
 # `false` switches rescuing off (e.g. for Oban Pro's DynamicLifeline).
 # Runtime override: KILN_OBAN_RESCUE_AFTER_MINUTES.
 config :kiln_cms, :oban_rescue_after_minutes, 180
@@ -168,7 +173,10 @@ config :kiln_cms, KilnCMS.Backups,
   # Target ceiling on one media part's input bytes (400 MB) and the exclusion
   # globs (#2218). Overridden by BACKUP_MEDIA_PART_MB / BACKUP_MEDIA_EXCLUDE.
   media_part_bytes: 400 * 1_048_576,
-  media_exclude: []
+  media_exclude: [],
+  # Each node's backup heartbeat (#2218, `KilnCMS.Backups.Heartbeat`): beats
+  # every 30 s, frees the backup lock from a node that stopped. Off in test.
+  heartbeat?: true
 
 # Media blob storage. Swap the adapter for S3/MinIO in production (configure
 # the bucket/endpoint/credentials in runtime.exs).

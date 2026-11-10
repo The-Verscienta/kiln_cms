@@ -283,7 +283,14 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
         # Scoped to the backups queue (#1354): the single-element claim is
         # about THIS button's enqueue, not the whole shared table.
-        assert [%Oban.Job{worker: "KilnCMS.Backups.Worker", args: args, queue: "backups"}] =
+        # The chain's start step (#2218), through the lock.
+        assert [
+                 %Oban.Job{
+                   worker: "KilnCMS.Backups.StepWorker",
+                   args: args,
+                   queue: "backup_steps"
+                 }
+               ] =
                  Enum.filter(
                    KilnCMS.Repo.all(Oban.Job),
                    &String.starts_with?(&1.worker, "KilnCMS.Backups.")
@@ -659,10 +666,13 @@ defmodule KilnCMSWeb.BackupLiveTest do
       html = lv |> element(~s|#backup-run-#{run.id} [data-role="resume"]|) |> render_click()
 
       assert html =~ "Backup resumed"
-      assert [%Oban.Job{args: args, queue: "backups"}] = backup_jobs()
+      assert [%Oban.Job{args: args, queue: "backup_steps"}] = backup_jobs()
+      assert args["step"] == "start"
       assert args["resume"] == run.stamp
-      # The poll now follows it, and the buttons wait.
-      assert has_element?(lv, ~s|button[phx-click="backup_now"][disabled]|)
+      # The strip and the poll now follow it; "Back up now" stays enabled (a
+      # request while one runs queues).
+      assert has_element?(lv, "#backup-in-flight")
+      refute has_element?(lv, ~s|button[phx-click="backup_now"][disabled]|)
     end
 
     @tag :pg_tools
@@ -789,6 +799,189 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert has_element?(lv, ~s|#{row} [data-role="verified"]|, "Not verified")
       assert has_element?(lv, ~s|#{row} [data-role="destination"]|, "failed")
       assert has_element?(lv, ~s|#{row} button[data-role="resume"]|, "Resume")
+    end
+  end
+
+  describe "in flight and cancel (#2218)" do
+    alias KilnCMS.Backups.{DirId, WorkState}
+    alias KilnCMS.Test.BackupChain
+
+    defp lock_row, do: Backups.backup_lock!(actor: Backups.system())
+
+    # A backup requested and its start step run: the lock holds a stamp, its
+    # Run is `running`, and the dump step waits.
+    defp started! do
+      {:ok, %{status: :started}} = Backups.request([], Backups.system())
+      %{success: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+      row = lock_row()
+      %{stamp: row.stamp, run: Backups.get_run_by_stamp!(row.stamp, actor: Backups.system())}
+    end
+
+    test "Back up now is guarded against a double click" do
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+
+      assert has_element?(lv, ~s|button[phx-click="backup_now"][phx-disable-with]|)
+    end
+
+    test "a seeded canceled run reads Canceled, and Resume is offered when its files are kept",
+         %{dir: dir} do
+      stamp = "20261106-101010"
+      run = Ash.Seed.seed!(KilnCMS.Backups.Run, %{stamp: stamp, status: :canceled})
+      work = WorkState.path(dir, stamp)
+      File.mkdir_p!(work)
+      :ok = WorkState.write(work, WorkState.new(stamp))
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      row = "#backup-run-#{run.id}"
+      assert has_element?(lv, ~s|#{row} [data-role="status"]|, "Canceled")
+      assert has_element?(lv, ~s|#{row} button[data-role="resume"]|)
+      refute has_element?(lv, ~s|#{row} [data-role="cancel"]|)
+    end
+
+    @tag :pg_tools
+    test "the strip names the step; a platform admin cancels; the row reads Canceled and " <>
+           "offers Resume" do
+      %{stamp: stamp, run: run} = started!()
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert has_element?(lv, ~s|#backup-in-flight [data-role="step"]|, "Dumping the database")
+      assert has_element?(lv, "#backup-in-flight", stamp)
+      refute has_element?(lv, ~s|#backup-in-flight [data-role="queued"]|)
+
+      strip = ~s|#backup-in-flight button[data-role="cancel"][data-confirm]|
+      assert has_element?(lv, strip)
+      refute render(lv) =~ "A queued backup will start next"
+      assert has_element?(lv, ~s|#backup-run-#{run.id} button[data-role="cancel"]|)
+
+      html = lv |> element(strip) |> render_click()
+
+      assert html =~ "Backup canceled"
+      assert Backups.in_flight() == nil
+      refute has_element?(lv, "#backup-in-flight")
+
+      row = "#backup-run-#{run.id}"
+      assert has_element?(lv, ~s|#{row} [data-role="status"]|, "Canceled")
+      refute has_element?(lv, ~s|#{row} [data-role="cancel"]|)
+      assert has_element?(lv, ~s|#{row} button[data-role="resume"]|)
+
+      # Resume on the canceled row requests it again.
+      html = lv |> element(~s|#{row} button[data-role="resume"]|) |> render_click()
+      assert html =~ "Backup resumed"
+      assert %{stamp: ^stamp} = Backups.in_flight()
+    end
+
+    @tag :pg_tools
+    test "a queued request shows on the strip, with its folds, and the confirm says it starts next" do
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([trigger: "schedule"], Backups.system())
+      {:ok, %{status: :folded}} = Backups.request([], Backups.system())
+      {:ok, %{status: :folded}} = Backups.request([], Backups.system())
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+
+      queued = ~s|#backup-in-flight [data-role="queued"]|
+      assert has_element?(lv, queued, "1 queued (requested ")
+      assert has_element?(lv, queued, "2 later requests folded into it")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-in-flight button[data-role="cancel"][data-confirm*="A queued backup will start next"]|
+             )
+    end
+
+    @tag :pg_tools
+    test "Back up now while one runs queues it and says so" do
+      started!()
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+
+      html = lv |> element(~s|button[phx-click="backup_now"]|) |> render_click()
+
+      assert html =~ "this one starts when it finishes"
+      assert has_element?(lv, ~s|#backup-in-flight [data-role="queued"]|)
+    end
+
+    @tag :pg_tools
+    test "the archive step reads part i of N", %{dir: dir} do
+      %{stamp: stamp} = started!()
+      row = lock_row()
+      {:ok, dir_id} = DirId.local(dir)
+
+      Backups.move_backup_lock!(
+        row,
+        %{step: :archive, part: 2, step_job_id: row.step_job_id, dir_id: dir_id},
+        actor: Backups.system()
+      )
+
+      work = WorkState.path(dir, stamp)
+      {:ok, state} = WorkState.read(work)
+      :ok = WorkState.write(work, Map.put(state, "parts_total", 3))
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-in-flight [data-role="step"]|,
+               "Archiving media: part 2 of 3"
+             )
+    end
+
+    @tag :pg_tools
+    test "a backup that is finishing has no Cancel on the strip, and a forced cancel is refused" do
+      %{run: run} = started!()
+      Backups.mark_backup_lock_finishing!(lock_row(), %{}, actor: Backups.system())
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      refute has_element?(lv, ~s|#backup-in-flight [data-role="cancel"]|)
+
+      assert render_hook(lv, "cancel_run", %{"id" => run.id}) =~
+               "Too late to cancel: the backup is finishing."
+
+      assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
+    end
+
+    test "a forged cancel of a finished run says it already finished", %{dir: dir} do
+      run = app_run!(dir, 2, :succeeded)
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert render_hook(lv, "cancel_run", %{"id" => run.id}) =~ "That backup already finished."
+
+      assert render_hook(lv, "cancel_run", %{"id" => Ecto.UUID.generate()}) =~
+               "can&#39;t be canceled"
+
+      render_hook(lv, "cancel_run", %{"id" => 7})
+
+      assert %{status: :succeeded} = Backups.get_run!(run.id, actor: Backups.system())
+    end
+
+    @tag :pg_tools
+    test "the handler re-checks platform admin: editor, org admin, viewer and anonymous get nothing" do
+      %{run: run} = started!()
+
+      org_admin = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: org_admin.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      for user <- [authed_user(:editor), org_admin, authed_user(:viewer), nil] do
+        socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, current_user: user}}
+
+        assert {:noreply, ^socket} =
+                 KilnCMSWeb.BackupLive.handle_event("cancel_run", %{"id" => run.id}, socket)
+      end
+
+      assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
+      assert Backups.in_flight() != nil
     end
   end
 

@@ -69,6 +69,7 @@ defmodule KilnCMS.Backups.MediaArchive do
   """
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Checksum, Redact}
+  alias KilnCMS.ExternalCommand
 
   require Logger
 
@@ -734,73 +735,17 @@ defmodule KilnCMS.Backups.MediaArchive do
 
   # Runs `tar` with stdout and stderr merged, keeping only the tail of its
   # output (a listing of millions of files must not accumulate in the VM).
-  # `rescue` is not needed: `Port.open/2` failing is the same `:enoent`-style
-  # error a missing executable reports.
   #
   # Closing a port does not stop its OS process, so a caller killed mid-run (an
-  # Oban timeout) would leave `tar -czf` writing `<part>.partial` that a Resume
-  # then collides with. A watcher process outside the caller's link set
-  # monitors it and kills the OS process if the caller dies before tar exits.
-  # sobelow_skip ["CI.System"]
+  # Oban timeout or cancel) would leave `tar -czf` writing `<part>.partial` that
+  # a Resume then collides with. `ExternalCommand` kills the OS process when
+  # the caller dies before tar exits.
   defp run_tar(tar, args) do
-    port =
-      Port.open({:spawn_executable, tar}, [
-        :binary,
-        :exit_status,
-        :stderr_to_stdout,
-        :hide,
-        args: args
-      ])
-
-    watcher = watch_os_process(port)
-
-    try do
-      case collect(port, "") do
-        {0, _output} -> :ok
-        {status, output} -> {:error, {:exit_status, "tar", status, Redact.text(output, [], 500)}}
-      end
-    after
-      send(watcher, :done)
+    case ExternalCommand.run(tar, args, :infinity, tail: @tail) do
+      {_output, 0} -> :ok
+      {output, status} -> {:error, {:exit_status, "tar", status, Redact.text(output, [], 500)}}
     end
   end
-
-  defp watch_os_process(port) do
-    caller = self()
-
-    case Port.info(port, :os_pid) do
-      {:os_pid, os_pid} ->
-        spawn(fn ->
-          ref = Process.monitor(caller)
-
-          receive do
-            :done -> :ok
-            {:DOWN, ^ref, :process, _pid, _reason} -> kill_os_process(os_pid)
-          end
-        end)
-
-      _gone ->
-        spawn(fn -> :ok end)
-    end
-  end
-
-  # sobelow_skip ["CI.System"]
-  defp kill_os_process(os_pid) do
-    # `kill` is on every POSIX host; a pid that already exited is not an error.
-    System.cmd("kill", ["-KILL", Integer.to_string(os_pid)], stderr_to_stdout: true)
-  end
-
-  defp collect(port, tail) do
-    receive do
-      {^port, {:data, data}} ->
-        collect(port, keep_tail(tail <> data))
-
-      {^port, {:exit_status, status}} ->
-        {status, tail}
-    end
-  end
-
-  defp keep_tail(bin) when byte_size(bin) <= @tail, do: bin
-  defp keep_tail(bin), do: binary_part(bin, byte_size(bin) - @tail, @tail)
 
   ## Checksums
 

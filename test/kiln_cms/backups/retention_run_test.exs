@@ -12,7 +12,7 @@ defmodule KilnCMS.Backups.RetentionRunTest do
   import ExUnit.CaptureLog
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Importer, Recorder, Retention}
+  alias KilnCMS.Backups.{Artifact, Importer, Presence, Recorder, Retention}
   alias KilnCMS.Backups.Retention.Policy
 
   @moduletag :capture_log
@@ -540,10 +540,14 @@ defmodule KilnCMS.Backups.RetentionRunTest do
       {:ok, attrs} =
         Artifact.from_manifest(%{kind: "media", path: "media/kiln-media-#{@old}.tar.gz"})
 
-      run_with([attrs])
+      run = run_with([attrs])
+      assert run.status == :succeeded
       assert {:ok, %{deleted: ["kiln-media-#{@old}.tar.gz"]}} = Retention.run(dir)
 
+      # The run has finished, so the mark goes through `mark_pruned`, which
+      # (unlike the chain's `record_progress`, #2218) takes no status filter.
       assert [%{destinations: %{"local" => %{"status" => "pruned"}}}] = stored(@old).artifacts
+      assert Presence.for(stored(@old), dir, 14) == :pruned
     end
   end
 end

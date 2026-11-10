@@ -138,6 +138,7 @@ a type may carry only the keys below; anything else is dropped.
 | `registration_queued` | Registration awaiting approval | A password sign-up on a site that [requires approval](account-administration.md#approving-registrations) was queued, or a new account from the site's own single sign-on on a site that [holds those](account-administration.md#hold-new-single-sign-on-accounts-too). No acting person (the registration's own system write); the target is the new account | `method` |
 | `registration_approved` | Registration approved | A waiting or rejected registration was approved: by a site admin on Registrations, by the applicant accepting an invitation to the site (no person), or by a platform admin adding the address on Team. The target is the applicant | `role`, `via` |
 | `registration_rejected` | Registration rejected | A site admin rejected a waiting registration. The person is the admin; the target is the applicant, or none when the account was erased | `outcome` |
+| `backup_canceled` | Backup canceled | A platform admin [canceled a running backup](backups.md#cancel-a-running-backup). Always in the default site's log. The person is the admin; the target is the backup run (target type `backup_run`) | `stamp`, `step` |
 
 `method` is `password`, `password_reset`, `magic_link`, `sso`, `passkey`,
 `second_factor` or `other`. `reason` is `invalid_credentials`,
@@ -258,7 +259,9 @@ membership's own site, whichever site the admin was viewing; a user's global
 role is written to the site the request ran on. Invitation events likewise go to
 the invited site's log. Registration events go to the log of the site the registration
 waits on, which may be the default site for a sign-up on another site's host,
-whichever host the deciding admin was on.
+whichever host the deciding admin was on. A canceled backup belongs to the
+whole installation, not to a site, so `backup_canceled` always goes to the
+default site's log.
 
 ## Event matrix: where each event comes from
 
@@ -307,6 +310,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sign_in_unlocked` | `sign_in_unlock.ex`: `redeem/2`, after the token's atomic revoke succeeded and the counter was cleared (`AuthEvents.sign_in_unlocked/3`) | after commit; `was_locked` |
 | `sign_in_unlock_refused` | `sign_in_unlock.ex`: `redeem/2` on every refusal, including the loser of two concurrent redeems (`AuthEvents.sign_in_unlock_refused/3`) | sampled, after commit; `reason` |
 | `registration_queued`, `registration_approved`, `registration_rejected` | `lib/kiln_cms/security/changes/record_registration.ex`, on `OrgMembership` `:queue_registration` (from `Changes.QueueRegistration` inside `User` `:register_with_password`, and from `SiteSso.Admission` for a new site single sign-on account), `:approve_registration`, `:approve_registration_by_invitation` (from `Invitations.grant_membership/4` when an invitation is accepted, and from `Invitations.AddOrInvite`) and `:reject_registration` (`lib/kiln_cms/accounts/org_membership.ex`) | in txn; tenant is the membership's site |
+| `backup_canceled` | `KilnCMS.Security.Changes.Record` on `Backups.Run` `:cancel` (`lib/kiln_cms/backups/run.ex`), called from the Backups page | in txn, with the cancel: if the event cannot be written the backup is not canceled; tenant is the default site |
 
 `org_setting_changed` covers every resource built with `use
 KilnCMS.CMS.OrgSettings`, so a new settings resource cannot forget it:

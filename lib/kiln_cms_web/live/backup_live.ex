@@ -11,12 +11,11 @@ defmodule KilnCMSWeb.BackupLive do
   same gate `KilnCMSWeb.SystemLive` uses for a cache flush and for the same
   stated reason.
 
-  `handle_event/3` asks again rather than trusting the mount. Two reasons, both
-  of which the sibling console already documents: `Backups.enqueue/1` takes no
-  actor and authorizes nothing, so a mount-guard mistake has no policy behind it
-  to catch it; and a mount guard is evaluated once, so an admin whose role is
-  revoked mid-session would otherwise keep triggering full-instance backups for
-  as long as the socket lived.
+  `handle_event/3` asks again rather than trusting the mount: a mount guard is
+  evaluated once, so an admin whose role is revoked mid-session would otherwise
+  keep triggering full-instance backups for as long as the socket lived. Since
+  #2218 the requests also carry the admin as the actor (`Backups.request/2`,
+  `Backups.cancel_run/2`), so the policies decide as well.
 
   The artifact list names the database dump; an editor has no reason to see it
   and no action to take on it.
@@ -40,15 +39,27 @@ defmodule KilnCMSWeb.BackupLive do
   Whether each run's files are still on disk is computed for the visible page
   only (`Backups.Presence`).
 
-  ## Resume (#2218)
+  ## In flight, Cancel and Resume (#2218)
 
-  A failed or interrupted in-app run whose `.work/<stamp>/state.json` still
-  exists gets a **Resume** button (platform admin only, computed for the visible
-  page and bounded by its 25 rows). The `resume_run` handler re-checks
-  `platform_admin?`, takes only the run's **id** from the client, looks the run
-  up itself and passes ITS stamp to `Backups.enqueue(resume: stamp)`, which
-  refuses anything that is not resumable (a succeeded or still-running run, a
-  forged id, a run whose files are gone). The page never sends or trusts a stamp.
+  A backup is a chain of step jobs behind a cluster-wide lock. While one holds
+  it, a strip says which step it is on (and which media part of how many), and
+  whether another backup is queued behind it; the page polls while that is so.
+  "Back up now" stays enabled: a request while one runs queues, and later ones
+  fold into the queued one.
+
+  A running in-app backup has a **Cancel** button (on its row and on the strip)
+  for a platform admin: `Backups.cancel_run/2`, as that admin, whose policy and
+  guard decide (a backup that is finishing can't be canceled). Its files stay.
+
+  A failed, interrupted or canceled in-app run whose `.work/<stamp>/state.json`
+  still exists gets a **Resume** button (platform admin only, computed for the
+  visible page and bounded by its 25 rows).
+
+  Both handlers re-check `platform_admin?`, take only the run's **id** from the
+  client and look the run up themselves; Resume passes THAT run's stamp to
+  `Backups.request(resume: stamp)`, which refuses anything that is not
+  resumable (a succeeded or still-running run, a forged id, a run whose files
+  are gone). The page never sends or trusts a stamp.
 
   ## Restore is not here
 
@@ -61,10 +72,11 @@ defmodule KilnCMSWeb.BackupLive do
   alias KilnCMS.Backups.{Importer, Manifest, Presence}
   alias KilnCMSWeb.Params
 
-  # A backup takes minutes; 200 polls at 3s is ten of them, comfortably past
-  # any real run and finite when a run never reports back at all.
+  # The page polls while the backup lock is held (`Backups.in_flight/0`). A
+  # multi-GB backup takes a while: 1 200 polls at 3 s is an hour, and the tab
+  # stops polling then rather than for as long as it stays open.
   @poll_interval_ms 3_000
-  @max_polls 200
+  @max_polls 1_200
   @per_page 25
 
   @impl true
@@ -73,12 +85,14 @@ defmodule KilnCMSWeb.BackupLive do
       {:ok,
        socket
        |> assign(:page_title, gettext("Backups"))
-       |> assign(:running?, false)
+       |> assign(:poll_timer, nil)
        |> assign(:polls_left, @max_polls)
        |> assign(:page, 1)
        |> assign(:runs, [])
        |> assign(:run_count, 0)
        |> load_status()
+       |> load_in_flight()
+       |> poll()
        |> start_import()}
     else
       # Platform-only, which the `:live_admin_required` hook (any site admin)
@@ -148,45 +162,121 @@ defmodule KilnCMSWeb.BackupLive do
 
   def handle_event("resume_run", _params, socket), do: {:noreply, socket}
 
+  # Cancel: as with Resume, the client names a run by id and the server reads
+  # the run itself; `Backups.cancel_run/2`'s policy and guard decide.
+  def handle_event("cancel_run", %{"id" => id}, socket) when is_binary(id) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      cancel_backup(socket, id)
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("cancel_run", _params, socket), do: {:noreply, socket}
+
+  # Through the lock (#2218), as the admin, so the policy decides too: a
+  # backup while one runs queues behind it, or folds into the queued one.
   defp start_backup(socket) do
-    case Backups.enqueue(trigger: :manual) do
-      {:ok, _job} ->
+    case Backups.request([trigger: "manual"], socket.assigns.current_user) do
+      {:ok, %{status: :started}} ->
         {:noreply, watch(socket, gettext("Backup started — this page updates when it finishes."))}
+
+      {:ok, %{status: status}} ->
+        {:noreply, watch(socket, queued_message(status))}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, unavailable_message(reason))}
     end
   end
 
+  defp cancel_backup(socket, id) do
+    user = socket.assigns.current_user
+
+    with {:ok, run} <- Backups.get_run(id, actor: user),
+         {:ok, _canceled} <-
+           Backups.cancel_run(run,
+             actor: user,
+             # The client the `backup_canceled` event is logged with (#2241).
+             context: socket.assigns[:security_context] || %{}
+           ) do
+      {:noreply,
+       socket
+       |> put_flash(:info, gettext("Backup canceled. Its files are kept, so it can be resumed."))
+       |> refresh()}
+    else
+      {:error, error} ->
+        {:noreply, socket |> put_flash(:error, cancel_message(error)) |> refresh()}
+    end
+  end
+
+  defp cancel_message(%Ash.Error.Forbidden{}),
+    do: gettext("Only a platform admin can cancel a backup.")
+
+  defp cancel_message(%Ash.Error.Invalid{errors: errors}) do
+    cond do
+      Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1)) ->
+        gettext("That backup already finished.")
+
+      Enum.any?(errors, &(Exception.message(&1) =~ "too late to cancel")) ->
+        gettext("Too late to cancel: the backup is finishing.")
+
+      true ->
+        gettext("That backup can't be canceled.")
+    end
+  end
+
+  defp cancel_message(_error), do: gettext("That backup can't be canceled.")
+
   defp resume_backup(socket, id) do
     with {:ok, %{stamp: stamp}} <- Backups.get_run(id, actor: socket.assigns.current_user),
-         {:ok, _job} <- Backups.enqueue(trigger: :manual, resume: stamp) do
-      {:noreply, watch(socket, gettext("Backup resumed — this page updates when it finishes."))}
+         {:ok, outcome} <-
+           Backups.request([trigger: "manual", resume: stamp], socket.assigns.current_user) do
+      case outcome do
+        %{status: :started} ->
+          {:noreply,
+           watch(socket, gettext("Backup resumed — this page updates when it finishes."))}
+
+        %{status: status} ->
+          {:noreply, watch(socket, queued_message(status))}
+      end
     else
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, resume_message(reason))}
     end
   end
 
-  # `running?` is optimistic and local to this session: the job is on a queue
-  # with a concurrency of one, and the manifest is the source of truth once it
-  # lands. A spinner that lies for a few seconds is better than a button that
-  # looks like it did nothing for a minute.
+  # The lock is the source of truth for "is a backup running": the strip and
+  # the poll follow it, on every node.
   defp watch(socket, message) do
     socket
-    |> assign(:running?, true)
-    # Captured HERE, not at mount: on a page left open for an hour, a cron
-    # backup that landed in the meantime would otherwise satisfy
-    # `finished_since?/2` on the first tick and be reported as the result of
-    # this click.
-    |> assign(:since, DateTime.utc_now())
-    |> assign(:polls_left, @max_polls)
     |> put_flash(:info, message)
-    |> schedule_refresh()
+    |> refresh()
   end
 
+  # Re-read what the page shows and (re)start the poll with a fresh budget.
+  defp refresh(socket) do
+    socket
+    |> assign(:polls_left, @max_polls)
+    |> load_in_flight()
+    |> load_history()
+    |> poll()
+  end
+
+  defp queued_message(:queued),
+    do: gettext("A backup is running; this one starts when it finishes.")
+
+  defp queued_message(_folded),
+    do:
+      gettext(
+        "A backup is running and another is already queued; that queued backup covers this request."
+      )
+
+  defp resume_message(:in_flight),
+    do: gettext("That backup is running right now.")
+
   defp resume_message({:not_resumable, _status}),
-    do: gettext("That backup can't be resumed: only a failed or interrupted backup can.")
+    do:
+      gettext("That backup can't be resumed: only a failed, interrupted or canceled backup can.")
 
   defp resume_message(reason) when reason in [:no_state, :no_such_run],
     do: gettext("That backup can't be resumed: the files it had written are gone.")
@@ -197,30 +287,25 @@ defmodule KilnCMSWeb.BackupLive do
 
   defp resume_message(_reason), do: gettext("That backup can't be resumed.")
 
+  # One tick: the panel, the strip and the history follow the backup (the new
+  # run appears as `running`, then settles, without a reload). Polling stops
+  # when the lock is free, or after `@max_polls`.
   @impl true
   def handle_info(:refresh, socket) do
-    status = Backups.status()
-    polls_left = socket.assigns.polls_left - 1
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      socket =
+        socket
+        |> assign(:poll_timer, nil)
+        |> assign(:polls_left, socket.assigns.polls_left - 1)
+        |> assign(:status, Backups.status())
+        |> load_in_flight()
+        |> load_history()
+        |> poll()
 
-    # Give up after `@max_polls`, not only when the manifest updates. A job
-    # that never writes one — killed by Oban's timeout, lost to a node
-    # restart, or unable to write the file — would otherwise leave the tab
-    # polling every few seconds for as long as it stayed open.
-    running? =
-      socket.assigns.running? and polls_left > 0 and
-        not finished_since?(status, socket.assigns.since)
-
-    socket =
-      socket
-      |> assign(:status, status)
-      |> assign(:running?, running?)
-      |> assign(:polls_left, polls_left)
-
-    # The history follows the poll: the new run appears as `running`, then
-    # settles, without a reload.
-    socket = load_history(socket)
-
-    {:noreply, if(running?, do: schedule_refresh(socket), else: socket)}
+      {:noreply, socket}
+    else
+      {:noreply, assign(socket, :poll_timer, nil)}
+    end
   end
 
   # The import (and the stale sweep inside it) finished: show what it found.
@@ -238,6 +323,25 @@ defmodule KilnCMSWeb.BackupLive do
       else: socket
   end
 
+  # The lock as the strip shows it, and the run to cancel from it: the one the
+  # lock is writing, when it is running (a starting chain has none yet).
+  defp load_in_flight(socket) do
+    in_flight = Backups.in_flight()
+
+    run =
+      with %{stamp: stamp} when is_binary(stamp) <- in_flight,
+           {:ok, %{status: :running, origin: :app} = run} <-
+             Backups.get_run_by_stamp(stamp, actor: socket.assigns.current_user) do
+        run
+      else
+        _ -> nil
+      end
+
+    socket
+    |> assign(:in_flight, in_flight)
+    |> assign(:in_flight_run_id, run && run.id)
+  end
+
   defp load_history(socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
       do: read_history(socket),
@@ -253,7 +357,7 @@ defmodule KilnCMSWeb.BackupLive do
          ) do
       {:ok, result} ->
         socket
-        |> assign(:runs, with_presence(result.results))
+        |> assign(:runs, with_presence(result.results, user))
         |> assign(:run_count, result.count || 0)
 
       {:error, _error} ->
@@ -265,10 +369,21 @@ defmodule KilnCMSWeb.BackupLive do
   end
 
   # Stat'ed for the visible page only (<= @per_page rows).
-  defp with_presence(runs) do
+  defp with_presence(runs, user) do
     {dir, now} = {backup_dir(), DateTime.utc_now()}
-    for run <- runs, do: {run, Presence.for(run, dir, keep_days(), now), resumable?(run, now)}
+
+    for run <- runs do
+      {run, Presence.for(run, dir, keep_days(), now), resumable?(run, now),
+       cancelable?(run, user)}
+    end
   end
+
+  # A running in-app run, and the policy agrees. Whether it is past the point
+  # of no return is the action's to say when clicked.
+  defp cancelable?(%{status: :running, origin: :app} = run, user),
+    do: Backups.can_cancel_run?(user, run)
+
+  defp cancelable?(_run, _user), do: false
 
   # A cheap status check first, so the one `stat` per row is only paid by the
   # (few) failed or running rows of the page.
@@ -280,24 +395,22 @@ defmodule KilnCMSWeb.BackupLive do
   defp history_path(1), do: ~p"/editor/backups"
   defp history_path(page), do: ~p"/editor/backups?#{%{page: page}}"
 
-  defp load_status(socket) do
-    socket
-    |> assign(:status, Backups.status())
-    |> assign(:since, DateTime.utc_now())
+  defp load_status(socket), do: assign(socket, :status, Backups.status())
+
+  # Polling rather than PubSub: a backup runs every few hours at most, so one
+  # timer on an open admin page is cheaper than a topic, a broadcast and a
+  # subscription that exist for this one screen. One timer at a time, and only
+  # while the lock is held.
+  defp poll(%{assigns: %{poll_timer: ref}} = socket) when is_reference(ref), do: socket
+
+  defp poll(socket) do
+    if connected?(socket) and socket.assigns.in_flight != nil and
+         socket.assigns.polls_left > 0 do
+      assign(socket, :poll_timer, Process.send_after(self(), :refresh, @poll_interval_ms))
+    else
+      socket
+    end
   end
-
-  # Polling rather than PubSub: a backup runs every few hours at most and
-  # finishes in minutes, so one timer on an open admin page is cheaper than a
-  # topic, a broadcast and a subscription that exist for this one screen.
-  defp schedule_refresh(socket) do
-    if connected?(socket), do: Process.send_after(self(), :refresh, @poll_interval_ms)
-    socket
-  end
-
-  defp finished_since?(%{manifest: %Manifest{finished_at: %DateTime{} = at}}, since),
-    do: DateTime.compare(at, since) != :lt
-
-  defp finished_since?(_status, _since), do: false
 
   defp unavailable_message(:disabled),
     do: gettext("In-app backups are turned off (BACKUP_ENABLED).")
@@ -335,21 +448,21 @@ defmodule KilnCMSWeb.BackupLive do
             </p>
           </div>
 
+          <%!-- Enabled while a backup runs: a request then queues behind it.
+                `phx-disable-with` stops a double click asking twice. --%>
           <button
             type="button"
             phx-click="backup_now"
-            disabled={not @status.available? or @running?}
+            phx-disable-with={gettext("Requesting…")}
+            disabled={not @status.available?}
             title={not @status.available? && unavailable_message(@status.reason)}
             class="btn btn-primary"
           >
-            <.icon
-              :if={@running?}
-              name="hero-arrow-path"
-              class="mr-1 size-4 motion-safe:animate-spin"
-            />
-            {if @running?, do: gettext("Backing up…"), else: gettext("Back up now")}
+            {gettext("Back up now")}
           </button>
         </div>
+
+        <.in_flight :if={@in_flight} in_flight={@in_flight} run_id={@in_flight_run_id} />
 
         <%!-- The headline. Stale (or never) is an error tone on purpose: a
               deployment that has not been backed up is the state this whole
@@ -476,16 +589,101 @@ defmodule KilnCMSWeb.BackupLive do
           </p>
         </section>
 
-        <.history runs={@runs} page={@page} run_count={@run_count} running?={@running?} />
+        <.history runs={@runs} page={@page} run_count={@run_count} in_flight={@in_flight} />
       </div>
     </Layouts.console>
     """
   end
 
+  attr :in_flight, :map, required: true
+  attr :run_id, :string, default: nil
+
+  # The running backup: its step, the part of how many, the queued request.
+  defp in_flight(assigns) do
+    ~H"""
+    <section
+      id="backup-in-flight"
+      class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-info/30 bg-info/5 p-4 text-sm"
+    >
+      <.icon name="hero-arrow-path" class="size-5 shrink-0 text-info motion-safe:animate-spin" />
+      <div class="min-w-0 flex-1 space-y-0.5">
+        <p class="font-medium" data-role="step">{step_label(@in_flight)}</p>
+        <p :if={@in_flight.stamp} class="font-mono text-xs text-base-content/70">
+          {@in_flight.stamp}
+        </p>
+        <p :if={@in_flight.waiting} data-role="queued" class="text-xs text-base-content/70">
+          {queued_label(@in_flight.waiting)}
+        </p>
+      </div>
+      <button
+        :if={@run_id && @in_flight.phase != :finishing}
+        type="button"
+        phx-click="cancel_run"
+        phx-value-id={@run_id}
+        phx-disable-with={gettext("Canceling…")}
+        data-role="cancel"
+        data-confirm={cancel_confirm(@in_flight)}
+        class="btn btn-sm btn-danger"
+      >
+        <.icon name="hero-stop-circle" class="mr-1 size-4" />
+        {gettext("Cancel")}
+      </button>
+    </section>
+    """
+  end
+
+  defp step_label(%{step: :archive, part: part, parts_total: total})
+       when is_integer(part) and is_integer(total),
+       do: gettext("Archiving media: part %{part} of %{total}", part: part, total: total)
+
+  defp step_label(%{step: :archive, part: part}) when is_integer(part),
+    do: gettext("Archiving media: part %{part}", part: part)
+
+  defp step_label(%{step: step}) do
+    case step do
+      :dump -> gettext("Dumping the database")
+      :plan -> gettext("Planning the media archive")
+      :archive -> gettext("Archiving media")
+      :checksum -> gettext("Checking the media parts")
+      :prune -> gettext("Applying retention")
+      :offsite -> gettext("Copying off-site")
+      :finish -> gettext("Finishing")
+      _start -> gettext("Starting a backup")
+    end
+  end
+
+  defp queued_label(%{requested_at: at, folds: folds}) do
+    queued =
+      gettext("1 queued (requested %{at})", at: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC"))
+
+    case folds do
+      n when is_integer(n) and n > 0 ->
+        queued <>
+          " · " <>
+          ngettext(
+            "%{count} later request folded into it",
+            "%{count} later requests folded into it",
+            n
+          )
+
+      _ ->
+        queued
+    end
+  end
+
+  defp cancel_confirm(%{waiting: nil}),
+    do: gettext("Cancel this backup? Its files are kept, so it can be resumed later.")
+
+  defp cancel_confirm(_in_flight),
+    do:
+      gettext(
+        "Cancel this backup? Its files are kept, so it can be resumed later. A queued backup will start next."
+      )
+
   attr :runs, :list, required: true
   attr :page, :integer, required: true
   attr :run_count, :integer, required: true
-  attr :running?, :boolean, default: false
+  attr :in_flight, :map, default: nil
 
   defp history(assigns) do
     assigns = assign(assigns, :last_page, last_page(assigns.run_count))
@@ -502,7 +700,7 @@ defmodule KilnCMSWeb.BackupLive do
 
       <ul :if={@runs != []} class="mt-3 divide-y divide-base-content/10">
         <li
-          :for={{run, presence, resumable?} <- @runs}
+          :for={{run, presence, resumable?, cancelable?} <- @runs}
           id={"backup-run-#{run.id}"}
           class="space-y-1.5 py-3 text-sm"
         >
@@ -548,11 +746,24 @@ defmodule KilnCMSWeb.BackupLive do
               {presence_label(presence)}
             </span>
             <button
+              :if={cancelable?}
+              type="button"
+              phx-click="cancel_run"
+              phx-value-id={run.id}
+              phx-disable-with={gettext("Canceling…")}
+              data-role="cancel"
+              data-confirm={cancel_confirm(@in_flight || %{waiting: nil})}
+              class="btn btn-sm btn-danger ml-auto"
+            >
+              <.icon name="hero-stop-circle" class="mr-1 size-4" />
+              {gettext("Cancel")}
+            </button>
+            <button
               :if={resumable?}
               type="button"
               phx-click="resume_run"
               phx-value-id={run.id}
-              disabled={@running?}
+              phx-disable-with={gettext("Requesting…")}
               data-role="resume"
               title={gettext("Continue this backup from the files it already wrote")}
               class="btn btn-sm btn-default ml-auto"
@@ -608,11 +819,13 @@ defmodule KilnCMSWeb.BackupLive do
   defp status_class(:failed), do: "bg-error/15 text-error-ink"
   defp status_class(:running), do: "bg-info/15 text-info-ink"
   defp status_class(:skipped), do: "bg-warning/15 text-warning-ink"
+  defp status_class(:canceled), do: "bg-base-content/10 text-base-content/70"
 
   defp status_label(:succeeded), do: gettext("Succeeded")
   defp status_label(:failed), do: gettext("Failed")
   defp status_label(:running), do: gettext("Running")
   defp status_label(:skipped), do: gettext("Skipped")
+  defp status_label(:canceled), do: gettext("Canceled")
 
   defp component_label(:db), do: gettext("Database")
   defp component_label(:media), do: gettext("Media")

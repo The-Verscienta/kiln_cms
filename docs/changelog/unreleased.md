@@ -7,6 +7,80 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="backup-step-chain-upgrade"></a>
+
+- **Run `mix ash.migrate` for the backup step chain (#2218, last part). In-app
+  backups now run on a new Oban queue, `backup_steps`. Don't start a backup
+  from a node still on the older release during the deploy, and before rolling
+  back, cancel any running backup and relabel `canceled` runs, or roll
+  forward.**
+  - **What the migration does.** `20261109234923_backup_step_chain` creates
+    `backup_locks` (the cluster-wide backup lock, one row) and
+    `backup_node_beats` (one heartbeat row per node), adds a nullable
+    `backup_runs.chain_id`, and widens the `backup_runs_status_must_be_known`
+    check to admit `canceled`. Additive; no existing row changes.
+  - **A new queue.** `backup_steps` runs one step at a time on each node (the
+    lock makes it one per cluster). If you size `POOL_SIZE` as the sum of
+    queue limits plus web traffic, add one. If your deployment builds Oban's
+    `queues:` list itself instead of merging into Kiln's, add
+    `backup_steps: 1`: without it a backup request is accepted and its first
+    step waits on a queue no node runs.
+  - **The `backups` queue stays for this release.** It now only runs jobs an
+    older node enqueued, and each one becomes an ordinary backup request
+    (it queues behind a running backup, like any other). The queue and
+    `KilnCMS.Backups.Worker` are removed in the next minor release: before
+    upgrading to it, check that this returns 0:
+
+    ```sql
+    SELECT count(*) FROM oban_jobs
+    WHERE queue = 'backups' AND state IN ('available', 'scheduled', 'retryable', 'executing');
+    ```
+
+  - **Node names must be unique.** Each node's heartbeat is keyed by its Oban
+    node name (the Erlang node name when distributed, else `DYNO`, else the
+    hostname). Replicas sharing one name can take a running backup step away
+    from each other; the log then says "Backup heartbeat: another node is
+    beating as …".
+  - **A new file in `BACKUP_DIR`.** `.kiln-dir-id` (mode 0600) ties a backup's
+    steps to the host whose directory it started in. If you copy a backup
+    directory to another host, delete the copy's `.kiln-dir-id`.
+  - **During a rolling deploy.**
+    - Don't click **Back up now** or **Resume** on a page served by a node
+      still on the older release: its worker runs the whole backup at once and
+      ignores the lock. A new node's backup waits (up to 3 hours) while such a
+      job is running, but the old job does not wait for a new one.
+    - Once a backup has been canceled, an older node's **Backups** page fails
+      to load while that run is on the page (it cannot read a `canceled`
+      run), and its retention deletes nothing (it fails closed on a status it
+      doesn't know).
+    - The new `backup_canceled` security event cannot be loaded by an older
+      build that has the security log: that site's **Security log** page and
+      CSV fail there, and erasing the admin named in one fails and retries
+      ([#2509](https://github.com/The-Verscienta/kiln_cms/issues/2509)). The
+      event always goes to the default site's log.
+    All three last only until every node runs this release.
+  - **Before rolling back**, on the new release:
+    1. Cancel the running backup, if any (**Backups** → **Cancel**). If one
+       was queued, it starts next; cancel that one too. The in-flight strip
+       is gone when nothing runs.
+    2. In `psql` against the deployment's database:
+
+       ```sql
+       UPDATE backup_runs SET status = 'failed' WHERE status = 'canceled';
+       DELETE FROM security_events WHERE type = 'backup_canceled';
+       ```
+
+       The first keeps the canceled runs, as `Failed`; the second removes
+       audit history, so export the log first if you need it. The `UPDATE` is also what lets the down migration
+       restore the narrower status check, which fails while a `canceled` row
+       exists.
+    Rolling back to v1.8.0 needs neither statement: it has no backup history
+    and no security log. Otherwise rolling the pin back is safe: the older
+    release ignores the two new tables and the new column. Or roll forward.
+  See also [the Added entry](#backup-step-chain) and
+  [the Breaking entry](#backup-request-api).
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))
+
 <a id="field-layout-upgrade"></a>
 
 - **Run `mix ash.migrate` for custom-field layouts: one new column,
@@ -338,8 +412,9 @@ carries the reasoning.
     History row show the error, and the overview shows its backup alarm. After
     upgrading, if your backups turn red, check the remote name and its
     credentials. rclone's own retries (`--retries`, default 3, or
-    `RCLONE_RETRIES`) run before the run is failed; Kiln adds none of its own.
-    Cron already failed on a failed copy.
+    `RCLONE_RETRIES`) run before the run is failed; since
+    [the step chain](#backup-step-chain) the app also retries the off-site
+    step itself, four attempts in all. Cron already failed on a failed copy.
   - **A file that changed is refused.** The dump, every media part and every
     sidecar is read again immediately before its own copy and compared with the
     SHA-256 recorded when it verified. A file that changed in between is not
@@ -354,9 +429,9 @@ carries the reasoning.
     `.work/<stamp>/` (it is now removed only when the backup and its off-site
     copy both succeed), so **Resume** on the History row retries the copy,
     reusing every file that still matches and rebuilding only one that changed.
-    Copy a suspect file aside first if you want it as evidence. A database-only
-    run (S3 media adapter, or no media directory) has no work directory and
-    cannot be resumed: take a new backup.
+    Copy a suspect file aside first if you want it as evidence. Since
+    [the step chain](#backup-step-chain) a database-only run (S3 media
+    adapter, or no media directory) keeps a work directory and resumes too.
   - **No `rclone` in the image is a warning, not a failure.** The official
     image does not install it. With `BACKUP_RCLONE_REMOTE` set and no `rclone`,
     an in-app backup succeeds locally, logs a warning, and **Where backups go**
@@ -739,6 +814,32 @@ carries the reasoning.
 
 ## Breaking
 
+<a id="backup-request-api"></a>
+
+- **Console and overlay callers: `KilnCMS.Backups.enqueue/1` returns
+  `{:ok, %{status: :started | :queued | :folded, chain: chain}}` instead of
+  `{:ok, %Oban.Job{}}`, and `KilnCMS.Backups.Worker.run/3` no longer runs a
+  backup inline (#2218).** Both are deprecated and go in the next minor
+  release; use `KilnCMS.Backups.request/2` with the actor asking.
+  - **`enqueue/1`** is `request/2` as `KilnCMS.Backups.system/0`, so code that
+    matched the job (`{:ok, %Oban.Job{id: id}}`) must match the map. Its
+    `{:error, reason}` values are those of `request/2`.
+  - **`Worker.run(trigger, job_id, opts)`** requests a backup and waits for
+    its chain to settle (`KilnCMS.Backups.await/2`): `:ok`, or
+    `{:error, reason}` with the run's error text for a failed backup
+    (including an off-site failure), `:canceled`, `{:skipped, error}`,
+    `:no_run` or `:timeout`. When another backup is running it returns
+    `{:error, :queued}` or `{:error, :folded}` at once; the request still runs
+    later. `job_id` is ignored; `:timeout` (default 3 hours) bounds the wait,
+    not the backup. The backup runs on the `backup_steps` queue of whichever
+    node picks it up, not in the console's process.
+  - **New:** `KilnCMS.Backups.request/2`, `await/2` and `in_flight/0`, and the
+    code interfaces `request_backup`, `backup_lock` and `cancel_run` (see
+    [Start a backup from a release console](../backups.md#start-a-backup-from-a-release-console)).
+    A future scheduler must call `request(trigger: "schedule")` as
+    `system/0`.
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))
+
 <a id="takedown-needs-publish-rights"></a>
 
 - **Unpublishing and archiving content now need the same permission as
@@ -823,6 +924,63 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="backup-step-chain"></a>
+
+- **In-app backups run as a chain of retried steps behind a cluster-wide lock:
+  a second backup queues instead of overlapping, a failed step is retried
+  rather than failing the backup, a stopped node's backup moves on without it,
+  and a platform admin can cancel a running backup (#2218, last part).** For
+  platform admins at `/editor/backups` and for operators.
+  - **Steps.** `start`, `dump`, then with a media directory `plan`, one
+    `archive` job per part and `checksum`, then `prune`, `offsite` and
+    `finish`, each its own Oban job on the `backup_steps` queue, handing over
+    through `.work/<stamp>/state.json`. Each step has four attempts, 1, 5 and
+    15 minutes apart (fixed), and 2 hours per attempt. A failed `rclone copy`
+    is now retried this way too, after rclone's own retries.
+  - **Failures a retry can't fix fail at once.** A media part that changed on
+    disk between being archived and being checksummed fails the backup and
+    names the parts; Resume rebuilds them. A file refused before its off-site
+    copy fails it as before (#2481). A step that finds its `state.json` gone
+    fails the backup without writing a manifest, so a good one is never
+    overwritten with nothing.
+  - **One backup at a time.** A request while a backup runs queues behind it;
+    at most one waits, and later requests fold into that one (logged at
+    `info`, telemetry `[:kiln_cms, :backups, :request, :folded]`). The queued
+    backup starts, with its own stamp, when the running one ends. **Back up
+    now** no longer disables while a backup runs; a strip shows the step
+    ("Archiving media: part 2 of 5"), the stamp and the queued request, and
+    the page refreshes while it runs.
+  - **Cancel.** A **Cancel** button on the strip and on a `Running` History
+    row, for platform admins (enforced by the `Backups.Run` `:cancel` policy,
+    not only the page). It stops the step jobs and the `pg_dump`, `tar` or
+    `rclone` they started, releases the lock (a queued backup starts next),
+    marks the run `Canceled`, and records a **Backup canceled** event in the
+    default site's security log. It writes no `manifest.json` and keeps every
+    file, so **Resume** continues a canceled backup. A backup that has reached
+    `finish` can't be canceled.
+  - **Nodes that stop.** Every node beats every 30 seconds (database clock).
+    A step whose node has not beaten for 180 seconds, or restarted, is
+    requeued with the attempts it had left, under the same stamp, reusing
+    finished files (telemetry `[:kiln_cms, :backups, :lock, :reclaimed]`); a
+    node that cannot beat for 90 seconds stops its own steps first. A step job
+    that ended without handing over fails the backup as "Interrupted". A
+    chain's end emits `[:kiln_cms, :backups, :chain, :settled]`.
+  - **Several hosts.** With a `BACKUP_DIR` per host, every step after `start`
+    runs on the host whose directory the backup started in
+    (`<BACKUP_DIR>/.kiln-dir-id`); with one shared volume, any node runs any
+    step.
+  - **Smaller changes.** A database-only backup (S3 media adapter, or no
+    media directory) now keeps a work directory and can be resumed. A
+    trigger is cut to 64 characters and redacted when the backup is
+    requested. External commands (`pg_dump`, `pg_restore`, `rclone`, `tar`)
+    are killed when the step running them dies
+    (`KilnCMS.ExternalCommand.run/4` gains `:env` and `:tail`).
+  - **Not included.** A queued request can't be removed, only canceled once
+    it starts. `scripts/backup.sh` does not take the lock.
+  Guide: [How an in-app backup runs](../backups.md#how-an-in-app-backup-runs-2218).
+  Upgrade: [the upgrade note](#backup-step-chain-upgrade).
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))
 
 <a id="security-posture"></a>
 
@@ -1993,8 +2151,9 @@ carries the reasoning.
     days). A failed or interrupted run shows **Resume** in History for platform
     admins; it reuses only parts whose recorded hash still verifies, so a resumed
     set can mix times (the Run log says so) and a very large library converges over
-    repeated resumes. Console form: `Backups.enqueue(resume: stamp)`, or
-    `Worker.run(trigger, job_id, resume: stamp)`. The one write policy change is
+    repeated resumes. Console form: `Backups.request([resume: stamp], Backups.system())`
+    (see [the step chain](#backup-step-chain); `Backups.enqueue/1` and
+    `Worker.run/3` are deprecated there). The one write policy change is
     `:resume` on `Backups.Run`, system actor only. A stuck run is now failed when
     it has been quiet for 2h15m, measured from its last update, not its start.
   - **Restore.** `scripts/restore.sh media` takes a legacy archive, any one part
@@ -2009,8 +2168,8 @@ carries the reasoning.
     dump of the same stamp is aged on its own
     ([retention by component](#backup-retention-by-component)). There is no
     free-space check: budget for the dump, the finished parts and one in flight.
-  - **Not here yet.** The automatic Oban job-per-step chain is a follow-up;
-    the issue stays open. Splitting in `backup.sh` followed in a later PR
+  - **Since then.** The Oban job-per-step chain followed in a later PR
+    ([the step chain](#backup-step-chain)), as did splitting in `backup.sh`
     ([upgrade note](#backup-sh-media-parts-upgrade)). The runbook is in
     [backups.md](../backups.md#media-backups-in-parts-2218).
   ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218))

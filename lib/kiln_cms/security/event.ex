@@ -57,7 +57,8 @@ defmodule KilnCMS.Security.Event do
     :sign_in_unlock_refused,
     :registration_queued,
     :registration_approved,
-    :registration_rejected
+    :registration_rejected,
+    :backup_canceled
   ]
 
   # The only metadata keys each type may carry. None names a person: who is in
@@ -91,7 +92,8 @@ defmodule KilnCMS.Security.Event do
     sign_in_unlock_refused: ~w(reason),
     registration_queued: ~w(method),
     registration_approved: ~w(role via),
-    registration_rejected: ~w(outcome)
+    registration_rejected: ~w(outcome),
+    backup_canceled: ~w(stamp step)
   }
 
   @max_metadata_keys 8

@@ -12,10 +12,12 @@ defmodule KilnCMS.Backups.Run do
   The backup directory belongs to the instance, so there is no `multitenancy`
   block and the read gate is `KilnCMS.Accounts.Checks.PlatformAdmin` — never
   `OrgAdmin`, which would resolve a tenant-less subject to the default org (the
-  hazard `KilnCMS.Mail.Settings` documents). **No person writes a Run**: the
-  worker, the importer and the stale-run sweep write as `KilnCMS.Backups.system/0`
-  (subsystem `:backups`), through exactly the actions named in the write policy.
-  There is no `destroy` yet; retention arrives with #2225.
+  hazard `KilnCMS.Mail.Settings` documents). **No person writes a Run**, with one
+  exception: a platform admin may `:cancel` a running backup (#2218). The
+  worker, the importer, retention and the stale-run sweep write as
+  `KilnCMS.Backups.system/0` (subsystem `:backups`), through exactly the actions
+  named in the write policy. There is no `destroy` yet; retention arrives with
+  #2225.
 
   ## Idempotency
 
@@ -31,9 +33,12 @@ defmodule KilnCMS.Backups.Run do
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer]
 
-  alias KilnCMS.Backups.Run.Changes.{Normalize, Resume}
+  alias KilnCMS.Backups.Run.Changes.{Cancel, Normalize, Resume}
 
-  @statuses [:running, :succeeded, :failed, :skipped]
+  # `:canceled` (#2218) comes last: a platform admin stopped the run. Widening
+  # the check constraint is expand-safe; an older node READING a canceled row
+  # cannot cast it (accepted, see the upgrade note).
+  @statuses [:running, :succeeded, :failed, :skipped, :canceled]
   @statuses_sql Enum.map_join(@statuses, ", ", &"'#{&1}'")
 
   postgres do
@@ -78,7 +83,7 @@ defmodule KilnCMS.Backups.Run do
 
     # The worker opens a run before any file lands.
     create :start do
-      accept [:stamp, :trigger, :components, :started_at, :oban_job_id]
+      accept [:stamp, :trigger, :components, :started_at, :oban_job_id, :chain_id]
       change set_attribute(:origin, :app)
       change set_attribute(:status, :running)
       change Normalize
@@ -94,15 +99,21 @@ defmodule KilnCMS.Backups.Run do
       change Normalize
     end
 
+    # The chain's writes (`record_progress`, `finish`, `fail`) only land on a
+    # run that is still `running` (#2218): a step canceled or superseded meanwhile
+    # gets a `StaleRecord` error (the recorder logs it) instead of overwriting
+    # `canceled` or a newer outcome.
     update :record_progress do
       accept [:components, :artifacts, :log]
       require_atomic? false
+      change filter(expr(status == :running))
       change Normalize
     end
 
     update :finish do
       accept [:components, :artifacts, :log]
       require_atomic? false
+      change filter(expr(status == :running))
       change set_attribute(:status, :succeeded)
       change set_attribute(:finished_at, &DateTime.utc_now/0)
       change Normalize
@@ -111,6 +122,7 @@ defmodule KilnCMS.Backups.Run do
     update :fail do
       accept [:components, :artifacts, :log, :error]
       require_atomic? false
+      change filter(expr(status == :running))
       change set_attribute(:status, :failed)
       change set_attribute(:finished_at, &DateTime.utc_now/0)
       change Normalize
@@ -121,13 +133,47 @@ defmodule KilnCMS.Backups.Run do
     # `Resume` change, which refuses anything but a failed run or a stale
     # `running` one; the stamp and `started_at` stay the original attempt's.
     update :resume do
-      accept []
+      accept [:chain_id]
       require_atomic? false
       change Resume
       change set_attribute(:status, :running)
       change set_attribute(:finished_at, nil)
       change set_attribute(:error, nil)
       change Normalize
+    end
+
+    # Retention marking another run's deleted files `pruned`. Separate from
+    # `record_progress` because that run has finished: no status filter.
+    update :mark_pruned do
+      accept [:artifacts]
+      require_atomic? false
+      change Normalize
+    end
+
+    # A platform admin stops a running in-app backup (#2218). The guard and the
+    # job/lock side effects are the `Cancel` change; the status filter turns a
+    # run that finished meanwhile into a `StaleRecord` error. Audited in the
+    # same transaction. `manifest.json` and the work dir are left alone, so
+    # the run can be resumed.
+    update :cancel do
+      accept []
+      require_atomic? false
+      change filter(expr(status == :running))
+      change Cancel
+      change set_attribute(:status, :canceled)
+      change set_attribute(:finished_at, &DateTime.utc_now/0)
+      change Normalize
+
+      # The backup directory is the instance's, but the security log is per
+      # org; the event goes to the default org's log.
+      change {KilnCMS.Security.Changes.Record,
+              type: :backup_canceled,
+              mode: :in_transaction,
+              target: fn record, _changeset -> {"backup_run", record.id} end,
+              metadata: fn record, changeset ->
+                %{"stamp" => record.stamp, "step" => changeset.context[:backup_step]}
+              end,
+              tenant: fn _record, _changeset -> KilnCMS.Accounts.default_org_id() end}
     end
 
     # A cron-made backup becomes a row, once. `upsert_fields []` makes a
@@ -168,16 +214,31 @@ defmodule KilnCMS.Backups.Run do
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :backups}
     end
 
-    # Writes: closed to every person, platform admin included — there is no
-    # `authorize_if PlatformAdmin` ahead of the narrowing, which would admit
-    # one to every action. Only the named actions, only the `:backups` system
-    # actor. (No `destroy` action exists; deletion comes with #2225.) `resume`
-    # (#2218) is the worker re-opening a failed run; the platform admin's
-    # "Resume" button enqueues a job, it never writes the run itself.
-    policy action_type([:create, :update, :destroy]) do
-      forbid_unless action([:start, :skip, :record_progress, :finish, :fail, :resume, :import])
+    # Writes: the pipeline's actions are closed to every person, platform admin
+    # included, and open only to the `:backups` system actor. (No `destroy`
+    # action exists; deletion comes with #2225.) `resume` (#2218) is the worker
+    # re-opening a failed run; the platform admin's "Resume" button requests a
+    # backup, it never writes the run itself.
+    policy action([
+             :start,
+             :skip,
+             :record_progress,
+             :finish,
+             :fail,
+             :resume,
+             :import,
+             :mark_pruned
+           ]) do
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :backups}
     end
+
+    # The one write a person makes (#2218): a platform admin cancels a running
+    # backup. Not the system actor: nothing in the pipeline cancels a run.
+    policy action(:cancel) do
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
+    end
+
+    # Any write action not named above matches no policy and is forbidden.
   end
 
   attributes do
@@ -243,6 +304,10 @@ defmodule KilnCMS.Backups.Run do
     end
 
     attribute :oban_job_id, :integer, public?: true
+
+    # The step chain (#2218) writing this run; a resume or retry under a new
+    # chain replaces it. Nil on imported runs and runs from before #2218.
+    attribute :chain_id, :uuid, public?: true
 
     timestamps()
   end

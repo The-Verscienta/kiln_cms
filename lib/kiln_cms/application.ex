@@ -43,6 +43,10 @@ defmodule KilnCMS.Application do
     # `cannot load "money"` (the v1.8.0 upgrade rehearsal).
     {:module, _} = Code.ensure_loaded(KilnCMS.CMS.FieldTypes)
 
+    # This boot's id, before any backup step can run (#2218): a step stamps it
+    # on the backup lock, so a restarted node is told apart from a live one.
+    _ = KilnCMS.Backups.init_boot_id()
+
     children = [
       KilnCMSWeb.Telemetry,
       # Aggregated log of CalendarLive's burst coalescing (#1336). The
@@ -115,11 +119,17 @@ defmodule KilnCMS.Application do
       KilnCMS.Firing.Cache,
       KilnCMS.Repo,
       {DNSCluster, query: Application.get_env(:kiln_cms, :dns_cluster_query) || :ignore},
+      # Running backup steps, by chain (#2218), before Oban so a step can
+      # register. `:duplicate`: the heartbeat's self-fence kills every one.
+      {Registry, keys: :duplicate, name: KilnCMS.Backups.StepRegistry},
       {Oban,
        AshOban.config(
          Application.fetch_env!(:kiln_cms, :ash_domains),
          oban_config()
        )},
+      # This node's backup heartbeat (#2218): beats, sweeps the backup lock
+      # and fences its own steps. After Oban, whose node name it beats under.
+      backup_heartbeat(),
       {Phoenix.PubSub, name: KilnCMS.PubSub},
       # Subscribes this node to cluster-wide cache invalidations (#739), so a
       # deleted code-injection snippet stops executing everywhere rather than
@@ -199,6 +209,8 @@ defmodule KilnCMS.Application do
       # or missing asset build behind (#1761). Starts nothing in other builds.
       KilnCMSWeb.DevAssets
     ]
+
+    children = Enum.reject(children, &is_nil/1)
 
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options
@@ -287,6 +299,13 @@ defmodule KilnCMS.Application do
     |> with_demo_queue()
   end
 
+  # `config :kiln_cms, KilnCMS.Backups, heartbeat?: false` (the test build)
+  # starts none; tests drive `KilnCMS.Backups.Heartbeat.tick/1` directly.
+  defp backup_heartbeat do
+    if KilnCMS.Backups.Chain.heartbeat?(),
+      do: KilnCMS.Backups.Heartbeat
+  end
+
   # Rescue jobs orphaned in `executing` (#1718). A node stopped mid-deploy
   # gives its running jobs `shutdown_grace_period` (15 s) and then kills them;
   # the row stays `executing` for ever — never retried, never discarded, and
@@ -297,7 +316,7 @@ defmodule KilnCMS.Application do
   # The rescuer is purely time-based: it cannot tell an orphan from a job that
   # is genuinely still running, so `rescue_after` must exceed the longest
   # legitimate run or a live job executes twice. The ceiling today is
-  # `KilnCMS.Backups.Worker.timeout/1` (2 h); the default is 3 h, and
+  # `KilnCMS.Backups.StepWorker.timeout/1` (2 h); the default is 3 h, and
   # `test/kiln_cms/oban_lifeline_test.exs` fails if any worker's `timeout/1`
   # grows past it. See docs/deploy.md ("Jobs interrupted by a deploy").
   #

@@ -78,6 +78,8 @@ queues: [firing: 5, search: 5, mail: 3, media: 3, webhooks: 3, scheduling: 5, de
 | `webhooks`   | `DeliveryWorker`                                       |
 | `newsletter` | `SendWorker`, `MailWorker` (newsletter fan-out)        |
 | `billing`    | `WebhookWorker` (inbound payment webhooks)             |
+| `backup_steps` | `Backups.StepWorker`: one step of an in-app backup, concurrency 1 per node ([backups.md](backups.md#how-an-in-app-backup-runs-2218)) |
+| `backups`    | `Backups.Worker`: only jobs enqueued before #2218, which it hands to `backup_steps`; removed in the next minor |
 | `scheduling` | Every-minute AshOban triggers (scheduled publish, scheduled unpublish/embargo) |
 | `default`    | Daily AshOban triggers (trash purge, untitled sweep)   |
 
