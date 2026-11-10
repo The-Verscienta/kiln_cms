@@ -109,12 +109,31 @@ So after the rename above, the two earlier entries show their value in that
 box under `string`, and new entries show it under the field's label, with
 `full_name` beside it.
 
+**Export CSV** on the same tab keeps the old keys too. After the current
+fields' columns, in form order, it adds one column per old key the exported
+entries carry, headed with the key and ` (renamed or removed)`, sorted by key,
+then `status`, `spam_score` and `submitted_at`. An entry with no value under a
+column leaves that cell empty. After the rename above, the export's header is:
+
+```csv
+full_name,string (renamed or removed),status,spam_score,submitted_at
+```
+
+The two earlier entries have their value in the `string (renamed or
+removed)` column and an empty `full_name`; new entries are the other way
+round. The suffix is always in English, whatever the admin's language,
+because a spreadsheet or import script keys on the header the way it keys on
+the machine names.
+
+The extra columns come only from the entries being exported: with
+**New**, **Reviewed** or **Spam** selected above the list, the export holds
+only those entries (`?status=`), and only their old keys get a column. A
+form whose fields were never renamed or removed, or a filter that leaves no
+entry with an old key, exports exactly the current fields' columns, as
+before.
+
 ### What a rename does not carry over
 
-- **CSV export.** **Export CSV** has one column per current machine name, so
-  an old key's values are not in the file
-  ([#2342](https://github.com/The-Verscienta/kiln_cms/issues/2342)). Export
-  before renaming if you need them in one sheet.
 - **Autoresponder.** A `[field:<old name>]` token in the **Confirmations**
   subject or body renders empty once no field has that name
   ([#2343](https://github.com/The-Verscienta/kiln_cms/issues/2343)), and
@@ -127,7 +146,8 @@ box under `string`, and new entries show it under the field's label, with
 - **Reusing an old name.** If you rename `email` to `work_email` and later
   give another field the machine name `email`, the old entries' `email`
   values show under that new field on the Entries tab, because the key
-  matches it.
+  matches it. **Export CSV** merges them the same way: they land in the
+  `email` column, with no `email (renamed or removed)` column.
 
 Kiln has no option to rewrite the keys in existing entries
 ([#2344](https://github.com/The-Verscienta/kiln_cms/issues/2344)).

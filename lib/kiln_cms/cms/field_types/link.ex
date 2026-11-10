@@ -99,6 +99,8 @@ defmodule KilnCMS.CMS.FieldTypes.Link do
         label: gettext("Rel"),
         type: "text",
         required?: false,
+        help:
+          gettext("Space-separated: noopener, noreferrer, nofollow, sponsored, ugc, external."),
         attrs: %{placeholder: "nofollow sponsored"}
       }
     ]

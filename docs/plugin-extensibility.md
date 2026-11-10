@@ -527,7 +527,9 @@ agility of a live marketplace while staying compile-time-safe:
   plus how it edits: `input_type/0` + `input_attrs/1` for a single control, or
   `input_parts/1` for a **composite** value rendered as one labelled input per
   part and cast as a map. A part with `type: "select"` carries an
-  `options: [{value, label}]` list (blank choice first). An optional `description/0` is shown under the type
+  `options: [{value, label}]` list (blank choice first), and any part may carry a
+  translatable `help:` line shown under its control (a placeholder is not
+  translatable). An optional `description/0` is shown under the type
   picker once an admin selects the type, next to the core types' own
   descriptions. A type that can be edited in more than one way (a number box
   or stars) lists those ways with the optional `widgets/1` (`kiln_plugin`

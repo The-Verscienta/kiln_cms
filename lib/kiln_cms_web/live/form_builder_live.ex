@@ -1007,7 +1007,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     <.setting_errors key="name" errors={@field_errors} />
                     <p id="fs-name-hint" class="mt-1 text-xs text-base-content/60">
                       {gettext(
-                        "Keys this field's value in submissions. Entries already received keep the old key; exports and API clients use the new one from now on."
+                        "Keys this field's value in submissions. Entries already received keep the old key: the Entries tab and CSV export show it as a renamed field; API clients and webhooks use the new name from now on."
                       )}
                     </p>
                   </div>
