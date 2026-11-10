@@ -319,7 +319,7 @@ defmodule KilnCMSWeb.TrashLive do
   end
 
   # On the full row, like `purge/3`: the unique-field re-check on `:restore`
-  # reads `custom_fields`, which `@list_fields` leaves out.
+  # reads the custom field values, which `@list_fields` leaves out.
   defp restore(socket, kind, record) do
     %{actor: actor, current_org: org} = socket.assigns
     failed = gettext("Couldn't restore that item.")
