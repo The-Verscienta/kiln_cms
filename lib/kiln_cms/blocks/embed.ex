@@ -32,6 +32,7 @@ defmodule KilnCMS.Blocks.Embed do
   be absent at any time.
   """
   use Kiln.Block
+  use Gettext, backend: KilnCMSWeb.Gettext
 
   block :embed do
     # Not required — an unparseable URL is blanked on save, so an empty embed is
@@ -71,7 +72,9 @@ defmodule KilnCMS.Blocks.Embed do
           "<figure class=\"kiln-embed\"><iframe src=\"",
           esc(iframe),
           "\" loading=\"lazy\" allowfullscreen title=\"",
-          esc(block.title || "Embedded media"),
+          # Firing renders in the document's locale (`Firing.Engine`), so the
+          # fallback is in the language of the page around it (#2465).
+          esc(block.title || gettext("Embedded media")),
           "\"></iframe></figure>"
         ]
 
