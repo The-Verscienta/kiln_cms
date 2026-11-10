@@ -168,6 +168,30 @@ defmodule KilnCMS.Backups.ArtifactTest do
       assert Artifact.sidecar_name(:db, "20260805-031700") == "kiln-db-20260805-031700.sha256"
     end
 
+    test "good_name/1 and parse_good_name/1 round-trip (#2219)" do
+      stamp = "20260805-031700"
+      assert Artifact.good_name(stamp) == "kiln-20260805-031700.good"
+      assert {:ok, ^stamp} = Artifact.parse_good_name(Artifact.good_name(stamp))
+    end
+
+    test "parse_good_name/1 refuses a bad stamp and anything that is not the marker" do
+      for name <- [
+            "kiln-foo.good",
+            "kiln-2026080-031700.good",
+            "kiln-db-20260805-031700.good",
+            "kiln-20260805-031700.good.partial",
+            "kiln-20260805-031700.keep",
+            "kiln-db-20260805-031700.dump"
+          ] do
+        assert :error = Artifact.parse_good_name(name), name
+      end
+
+      assert :error = Artifact.parse_good_name(nil)
+      assert :error = Artifact.parse_file(Artifact.good_name("20260805-031700"))
+      assert :error = Artifact.parse_sidecar_name(Artifact.good_name("20260805-031700"))
+      assert :error = Artifact.parse_keep_name(Artifact.good_name("20260805-031700"))
+    end
+
     test "files/1 is the name for a single file and the part names, in order, for a set" do
       assert Artifact.files(%{name: "kiln-db-x.dump", parts: []}) == ["kiln-db-x.dump"]
 

@@ -7,6 +7,50 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="backup-last-good-marker-upgrade"></a>
+
+- **Update the host's copy of `scripts/backup.sh`: the app now marks the newest
+  verified backup of each component with `kiln-<stamp>.good`, and
+  `backup.sh prune` keeps the unit a marker names (part of #2219).** For
+  operators who prune with cron. No migration, no new setting.
+  - **Why.** Retention (#2486) never lets the app delete the newest verified
+    backup, but cron has no backup history and only knew the newest
+    *complete* one. When the newest complete set on disk came from a failed
+    run (a refused off-site copy, say), cron kept that set and deleted the
+    older verified one once it passed `BACKUP_KEEP_DAYS`. The marker carries
+    the app's answer to disk, so the rule now holds for both prunes.
+  - **The format.** An empty 0600 file named `kiln-<stamp>.good` in the
+    component's own directory, `db/` or `media/`. It pins only that component
+    of that stamp; a `.keep` recovery point still pins both. Only its presence
+    counts, and cron honors an entry of that name of any kind. There is at
+    most one per directory once the app has synced it.
+  - **Who writes it.** Only the app: at the end of each successful in-app
+    backup (after the run is closed, under the backup lock), and before an
+    in-app prune deletes anything. Never on a dry run, never by `backup.sh`.
+    The new marker is written before the old one is removed. A backup imported
+    from cron counts as verified, so the marker can land on a cron-made set.
+    The app does not read markers back; it still works out the newest verified
+    backup from History.
+  - **What to do.** Copy this release's `scripts/backup.sh` over the one your
+    cron line runs (for example `/opt/kiln_cms/scripts/backup.sh`). An older
+    copy ignores the markers. Markers appear after the first in-app backup or
+    prune; a cron-only deployment gets none, and its prune works as before.
+  - **What to watch.** Don't delete a `.good` by hand while in-app backups run.
+    If you stop in-app backups, one stale marker per component keeps its unit
+    from cron indefinitely; delete it when you want cron to age that backup. A
+    marker the app can't write or remove (a permission error, a directory or
+    symlink of that name) logs a warning and emits
+    `[:kiln_cms, :backups, :last_good, :failed]` (measurements `%{count: 1}`;
+    metadata `kind`, `stamp`, `reason`, or `marker`, `reason`, or `reason`).
+  - **For developers.** `KilnCMS.Backups.Artifact.good_name/1` and
+    `parse_good_name/1`; `KilnCMS.Backups.Retention.sync_last_good/2`; the
+    retention plan gains `last_good: %{db: stamp | nil, media: stamp | nil}`.
+  - **Rolling the pin back** is safe. The previous release ignores `.good`
+    markers, and its in-app prune deletes each one as a stray once the marker
+    file is older than `BACKUP_KEEP_DAYS`. A host script left at this release
+    honors the markers until then.
+  Guide: [The last-good marker](../backups.md#the-last-good-marker).
+
 <a id="rollback-to-1-8-0-upgrade"></a>
 
 - **Before rolling back to v1.8.0, delete the rows v1.8.0 cannot read (#2509).**

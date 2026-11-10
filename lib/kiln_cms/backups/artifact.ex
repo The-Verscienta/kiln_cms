@@ -18,7 +18,7 @@ defmodule KilnCMS.Backups.Artifact do
 
   File names are built and parsed here and nowhere else: `parse_file/1`,
   `part_name/2`, `set_names/2`, `sidecar_name/2`, `parse_sidecar_name/1`,
-  `keep_name/1`, `parse_keep_name/1`.
+  `keep_name/1`, `parse_keep_name/1`, `good_name/1`, `parse_good_name/1`.
   """
   use Ash.Resource, data_layer: :embedded
 
@@ -220,6 +220,31 @@ defmodule KilnCMS.Backups.Artifact do
   end
 
   def parse_keep_name(_other), do: :error
+
+  @doc """
+  The last-good marker for a stamp (#2219): `kiln-<stamp>.good`. Unlike a
+  recovery point it lives in ONE component's directory and pins only that
+  component of that stamp: `db/kiln-<stamp>.good` keeps the dump from
+  `scripts/backup.sh prune`, never the media of the same stamp. The app keeps
+  it on the newest verified backup of each kind (`Retention.sync_last_good/1`)
+  so the cron prune, which has no run history, keeps that backup too. Only its
+  presence counts; its contents are never read.
+  """
+  @spec good_name(String.t()) :: String.t()
+  def good_name(stamp) when is_binary(stamp), do: "kiln-#{stamp}.good"
+
+  @good_name ~r/\Akiln-(\d{8}-\d{6})\.good\z/
+
+  @doc "The stamp a `good_name/1` marker names, as `{:ok, stamp}`, or `:error`."
+  @spec parse_good_name(String.t()) :: {:ok, String.t()} | :error
+  def parse_good_name(name) when is_binary(name) do
+    case Regex.run(@good_name, name) do
+      [_, stamp] -> {:ok, stamp}
+      nil -> :error
+    end
+  end
+
+  def parse_good_name(_other), do: :error
 
   @doc """
   The file names an artifact occupies in its kind's subdirectory, in order:
