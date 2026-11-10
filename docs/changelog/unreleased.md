@@ -4601,6 +4601,23 @@ carries the reasoning.
     attribute without `one_of` in the core domains unless it is on its
     reviewed list. No migration: the column stays text.
 
+<a id="access-denied-no-role"></a>
+
+- **The access-denied page tells an account with no role on the site so,
+  instead of calling it a viewer (#2372).** The page (#2143) read the viewer's
+  tier on the current site and showed "no tier" as viewer. An account that
+  belongs only to another site, or whose registration here awaits approval
+  or was rejected, has no role here at all, so it was told "You are signed in
+  as viewer on <site>" and offered **Go to your account**. It now reads "You
+  are signed in, but your account has no role on <site>", says why that can
+  happen, asks for an admin to give the account a role, and offers **Sign
+  out** so someone signed in with the wrong account can switch. Viewers,
+  editors, admins and signed-out visitors see what they saw before. No
+  migration or setting; overlays that replace `access_denied.html.heex` keep
+  their own copy, and now receive `viewer_role: :none` for these accounts
+  where they used to receive `:viewer`.
+  ([#2372](https://github.com/The-Verscienta/kiln_cms/issues/2372))
+
 <a id="public-delivery-session-locale-leak"></a>
 
 - **A visitor's session language no longer ends up in shared caches for

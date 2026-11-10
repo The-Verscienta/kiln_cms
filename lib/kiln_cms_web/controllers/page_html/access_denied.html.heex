@@ -21,7 +21,22 @@
     </p>
 
     <div
-      :if={@viewer_role}
+      :if={@viewer_role == :none}
+      id="access-denied-no-role"
+      class="mt-6 rounded-lg border border-base-content/10 p-4"
+    >
+      <p class="text-sm font-semibold">
+        {gettext("You are signed in, but your account has no role on %{site}.", site: @site_name)}
+      </p>
+      <p class="mt-1 text-sm leading-6 text-base-content/70">
+        {gettext(
+          "It may belong to a different site, or your registration here may still be waiting for approval. If you meant to use another account, sign out and sign in with that one."
+        )}
+      </p>
+    </div>
+
+    <div
+      :if={@viewer_role && @viewer_role != :none}
       id="access-denied-role"
       class="mt-6 rounded-lg border border-base-content/10 p-4"
     >
@@ -44,7 +59,15 @@
       <%= if @needs == :platform do %>
         {gettext("To get access, ask the person who administers this installation.")}
       <% else %>
-        {gettext("To get access, ask an admin of %{site} to change your role.", site: @site_name)}
+        <%= if @viewer_role == :none do %>
+          {gettext("To get access, ask an admin of %{site} to give your account a role.",
+            site: @site_name
+          )}
+        <% else %>
+          {gettext("To get access, ask an admin of %{site} to change your role.",
+            site: @site_name
+          )}
+        <% end %>
       <% end %>
     </p>
 
@@ -72,6 +95,14 @@
         class="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
       >
         {gettext("Go to your account")}
+      </.link>
+      <.link
+        :if={@viewer_role == :none}
+        id="access-denied-sign-out"
+        href={~p"/sign-out"}
+        class="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
+      >
+        {gettext("Sign out")}
       </.link>
       <.link
         id="access-denied-home"

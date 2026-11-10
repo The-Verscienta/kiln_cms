@@ -542,6 +542,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A custom field of a type this release doesn't know (a newer release's, after a rollback, or a removed plugin's) no longer breaks the Fields screen, the editor, saves and delivery: it is hidden, records keep its values, and Fields lists it under "Fields of an unknown type" with a Delete.**
   ([#2670](https://github.com/The-Verscienta/kiln_cms/pull/2670) · [long form](docs/changelog/unreleased.md#unknown-field-type-rollback))
 
+- **The `/access-denied` page no longer tells a signed-in account with no role on the site that it is signed in as viewer; it says the account has no role there and offers Sign out.**
+  ([#2372](https://github.com/The-Verscienta/kiln_cms/issues/2372) · [long form](docs/changelog/unreleased.md#access-denied-no-role))
+
 - **The Essentials sidebar hint now lists the screens it names the way each language does: "Forms, Webhooks, API keys and Trash" in English, "… y Papelera" in Spanish, "… et Corbeille" in French, instead of a bare comma list. A single screen reads "is under Configure".**
   ([#2379](https://github.com/The-Verscienta/kiln_cms/issues/2379))
 
