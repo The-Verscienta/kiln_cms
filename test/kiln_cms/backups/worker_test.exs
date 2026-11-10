@@ -1,6 +1,7 @@
 defmodule KilnCMS.Backups.WorkerTest do
   @moduledoc """
-  The backup worker (#484).
+  The backup pipeline (#484), run as its step chain (#2218) through
+  `KilnCMS.Test.BackupChain`.
 
   It really does run `pg_dump` against the test database — a mocked backup
   proves nothing, because the whole premise of this feature is that the file
@@ -13,6 +14,7 @@ defmodule KilnCMS.Backups.WorkerTest do
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Checksum, Manifest}
   alias KilnCMS.Backups.Worker
+  alias KilnCMS.Test.BackupChain
 
   @moduletag :capture_log
 
@@ -42,7 +44,7 @@ defmodule KilnCMS.Backups.WorkerTest do
   describe "a real run" do
     @tag :pg_tools
     test "produces a verified dump and media archive, and a manifest describing them", %{dir: dir} do
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
 
       manifest = Manifest.read(dir)
 
@@ -71,7 +73,7 @@ defmodule KilnCMS.Backups.WorkerTest do
       # The interchange guarantee: `scripts/restore.sh` finds a backup by
       # globbing these names, so a divergence here means the shell tooling
       # silently stops seeing app-made backups.
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
 
       assert [dump] = Path.wildcard(Path.join([dir, "db", "kiln-db-*.dump"]))
       assert Path.basename(dump) =~ ~r/\Akiln-db-\d{8}-\d{6}\.dump\z/
@@ -90,7 +92,7 @@ defmodule KilnCMS.Backups.WorkerTest do
 
       set_part_bytes(700)
 
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
 
       manifest = Manifest.read(dir)
       assert manifest.ok
@@ -129,7 +131,7 @@ defmodule KilnCMS.Backups.WorkerTest do
 
     @tag :pg_tools
     test "the database dump gets a sha256 sidecar", %{dir: dir} do
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
 
       assert [dump] = Path.wildcard(Path.join([dir, "db", "kiln-db-*.dump"]))
       sidecar = String.replace_suffix(dump, ".dump", ".sha256")
@@ -140,7 +142,7 @@ defmodule KilnCMS.Backups.WorkerTest do
 
     @tag :pg_tools
     test "leaves no .partial behind", %{dir: dir} do
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
       assert Path.wildcard(Path.join([dir, "**", "*.partial"])) == []
     end
 
@@ -153,7 +155,7 @@ defmodule KilnCMS.Backups.WorkerTest do
       Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(original, :media_dir, nil))
       on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Backups, original) end)
 
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
       assert [%{kind: "db"}] = Manifest.read(dir).artifacts
     end
   end
@@ -173,7 +175,7 @@ defmodule KilnCMS.Backups.WorkerTest do
 
       on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Backups, original) end)
 
-      assert {:error, _reason} = Worker.run("manual")
+      assert {:error, _reason} = BackupChain.run()
 
       manifest = Manifest.read(dir)
 
@@ -195,7 +197,7 @@ defmodule KilnCMS.Backups.WorkerTest do
 
       on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Backups, original) end)
 
-      Worker.run("manual")
+      BackupChain.run()
       assert Path.wildcard(Path.join([dir, "**", "*.partial"])) == []
     end
 
@@ -233,7 +235,7 @@ defmodule KilnCMS.Backups.WorkerTest do
 
       on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Backups, original) end)
 
-      Worker.run("manual")
+      BackupChain.run()
 
       error = Manifest.read(dir).error || ""
       refute error =~ "hunter2"
@@ -257,7 +259,7 @@ defmodule KilnCMS.Backups.WorkerTest do
       Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(original, :enabled, false))
       on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Backups, original) end)
 
-      assert {:error, :disabled} = Worker.run("manual")
+      assert {:error, :disabled} = BackupChain.run()
 
       assert %Manifest{ok: true, trigger: "cron"} = Manifest.read(dir)
     end
@@ -280,7 +282,7 @@ defmodule KilnCMS.Backups.WorkerTest do
       File.touch!(older, ancient)
       File.touch!(old, ancient)
 
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
 
       # `old` is imported first and, with this run still running and `recent`
       # too fresh to import, it is the newest verified dump: kept (#2219).
@@ -310,7 +312,7 @@ defmodule KilnCMS.Backups.WorkerTest do
       # Not a usable policy, so retention fails closed.
       set_config(keep_days: 0)
 
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
       assert File.exists?(old)
 
       assert [%{stamp: stamp, status: :succeeded}] =
@@ -331,7 +333,7 @@ defmodule KilnCMS.Backups.WorkerTest do
       File.mkdir_p!(Path.dirname(partial))
       File.write!(partial, "in progress")
 
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
       assert File.exists?(partial)
     end
 
@@ -347,7 +349,7 @@ defmodule KilnCMS.Backups.WorkerTest do
       File.write!(partial, "abandoned")
       File.touch!(partial, System.os_time(:second) - 7200)
 
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
       refute File.exists?(partial)
     end
   end
@@ -387,13 +389,15 @@ defmodule KilnCMS.Backups.WorkerTest do
 
     @tag :pg_tools
     test "a successful run is recorded with its artifacts and local destinations", %{dir: dir} do
-      assert :ok = Worker.run("manual", 42)
+      assert :ok = BackupChain.run()
 
       assert [run] = runs()
       assert run.status == :succeeded
       assert run.origin == :app
       assert run.trigger == "manual"
-      assert run.oban_job_id == 42
+      # The start step's job, and the chain that wrote it.
+      assert is_integer(run.oban_job_id)
+      assert is_binary(run.chain_id)
       assert run.components == [:db, :media]
       assert run.finished_at
       assert run.stamp =~ ~r/\A\d{8}-\d{6}\z/
@@ -408,7 +412,7 @@ defmodule KilnCMS.Backups.WorkerTest do
 
     @tag :pg_tools
     test "the manifest keeps its exact shape", %{dir: dir} do
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
 
       raw = File.read!(Manifest.path(dir))
       decoded = Jason.decode!(raw)
@@ -439,7 +443,7 @@ defmodule KilnCMS.Backups.WorkerTest do
     test "a failure after the dump keeps the partial artifact and fails the run", %{dir: dir} do
       set_config(media_dir: Path.join(dir, "no-such-media-dir"))
 
-      assert {:error, _} = Worker.run("manual")
+      assert {:error, _} = BackupChain.run()
 
       assert [run] = runs()
       assert run.status == :failed
@@ -452,7 +456,7 @@ defmodule KilnCMS.Backups.WorkerTest do
     test "a failure before anything lands records the redacted error" do
       set_config(database_url: "postgres://someone:hunter2@127.0.0.1:1/nope")
 
-      assert {:error, _} = Worker.run("manual")
+      assert {:error, _} = BackupChain.run()
 
       assert [run] = runs()
       assert run.status == :failed
@@ -462,7 +466,17 @@ defmodule KilnCMS.Backups.WorkerTest do
       refute inspect(run.log) =~ "hunter2"
     end
 
-    test "a refused attempt is a skipped run and leaves the manifest alone", %{dir: dir} do
+    test "a request the deployment can't run is refused up front: no run, no chain", %{dir: dir} do
+      set_config(enabled: false)
+
+      assert {:error, :disabled} = BackupChain.run()
+      assert runs() == []
+      assert Backups.in_flight() == nil
+      refute File.exists?(Manifest.path(dir))
+    end
+
+    test "unavailable by the time the chain starts: a skipped run, the lock released, the manifest alone",
+         %{dir: dir} do
       :ok =
         Manifest.write(dir, %Manifest{
           finished_at: DateTime.utc_now(),
@@ -472,12 +486,21 @@ defmodule KilnCMS.Backups.WorkerTest do
         })
 
       before = File.read!(Manifest.path(dir))
+
+      assert {:ok, %{status: :started, chain: chain}} =
+               Backups.request([trigger: "manual"], Backups.system())
+
+      # pg_dump disappears between the request and the start step.
       set_config(enabled: false)
 
-      assert {:error, :disabled} = Worker.run("manual")
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+        assert {:error, :disabled} = BackupChain.settled(chain)
+      end)
 
       assert [%{status: :skipped, error: "Refused: disabled", finished_at: %DateTime{}}] = runs()
       assert File.read!(Manifest.path(dir)) == before
+      assert Backups.in_flight() == nil
     end
 
     @tag :pg_tools
@@ -499,7 +522,7 @@ defmodule KilnCMS.Backups.WorkerTest do
         set: [updated_at: long_ago]
       )
 
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
 
       assert %{status: :failed, error: "Interrupted: " <> _} =
                Backups.get_run!(killed.id, actor: Backups.system())
@@ -528,7 +551,7 @@ defmodule KilnCMS.Backups.WorkerTest do
 
       Backups.finish_run!(prior, %{artifacts: [attrs]}, actor: Backups.system())
 
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
 
       refute File.exists?(old)
       assert File.exists?(newer)
@@ -543,20 +566,38 @@ defmodule KilnCMS.Backups.WorkerTest do
       File.write!(cron, "from cron")
       File.touch!(cron, System.os_time(:second) - 3600)
 
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
 
       assert %{origin: :imported, trigger: "cron"} =
                Backups.get_run_by_stamp!("20260101-000000", actor: Backups.system())
     end
 
     @tag :pg_tools
-    test "a Run-write failure never fails the backup", %{dir: dir} do
-      # Grant revoked: every Run write is refused.
-      assert :ok = Backups.with_actor(nil, fn -> Worker.run("manual") end)
+    test "a Run-write failure never fails the backup, and the chain still advances", %{dir: dir} do
+      assert {:ok, %{status: :started, chain: chain}} =
+               Backups.request([trigger: "manual"], Backups.system())
 
-      assert runs() == []
+      # The start step only: it opens the run.
+      BackupChain.drain(with_recursion: false)
+      assert [%{status: :running} = run] = runs()
+
+      # Every later Run write is refused (the row is no longer `running`).
+      import Ecto.Query
+
+      KilnCMS.Repo.update_all(
+        from(r in "backup_runs", where: r.id == type(^run.id, :binary_id)),
+        set: [status: "failed"]
+      )
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(chain)
+      end)
+
       assert %Manifest{ok: true} = Manifest.read(dir)
       assert [_dump] = Path.wildcard(Path.join([dir, "db", "*.dump"]))
+      assert [_archive] = Path.wildcard(Path.join([dir, "media", "*.tar.gz"]))
+      assert Backups.in_flight() == nil
     end
 
     @tag :pg_tools
@@ -568,7 +609,7 @@ defmodule KilnCMS.Backups.WorkerTest do
         {"pg_dump", ~s|while [ ! -f "#{gate}" ]; do sleep 0.05; done\nexec "#{real}" "$@"\n|}
       ])
 
-      task = Task.async(fn -> Worker.run("manual") end)
+      task = Task.async(fn -> BackupChain.run() end)
 
       wait_until(fn -> Enum.any?(runs(), &(&1.status == :running)) end)
       KilnCMS.Repo.delete_all(Backups.Run)
@@ -591,7 +632,7 @@ defmodule KilnCMS.Backups.WorkerTest do
          ~s|case "$*" in *kiln-media*) echo "Failed secret_access_key=SUPERSECRETVAL ($*)" >&2; exit 1;; esac\nexit 0\n|}
       ])
 
-      assert {:error, {:offsite, %{failed: [_ | _], refused: []}}} = Worker.run("manual")
+      assert {:error, {:offsite, %{failed: [_ | _], refused: []}}} = BackupChain.run()
 
       assert [run] = runs()
       assert run.status == :failed
@@ -636,7 +677,7 @@ defmodule KilnCMS.Backups.WorkerTest do
          ~s|echo "$*" >> "#{log}"\ncase "$2" in *kiln-db-*.dump) for f in "#{dir}"/media/kiln-media-*.tar.gz; do printf x >> "$f"; done ;; esac\nexit 0\n|}
       ])
 
-      {result, output} = ExUnit.CaptureLog.with_log(fn -> Worker.run("manual") end)
+      {result, output} = ExUnit.CaptureLog.with_log(fn -> BackupChain.run() end)
       assert {:error, {:offsite, %{refused: [{archive, {:changed, _}}], failed: []}}} = result
       assert output =~ "REFUSED"
       assert output =~ archive
@@ -678,7 +719,7 @@ defmodule KilnCMS.Backups.WorkerTest do
       set_config(rclone_remote: "r2:kiln")
       fake_bin([{"rclone", "exit 1\n"}])
 
-      assert {:error, {:offsite, _}} = Worker.run("manual")
+      assert {:error, {:offsite, _}} = BackupChain.run()
       refute File.exists?(older)
       # The newest verified dump (imported; this run's own is not finished).
       assert File.exists?(old)
@@ -689,7 +730,7 @@ defmodule KilnCMS.Backups.WorkerTest do
       set_config(rclone_remote: "r2:kiln")
       fake_bin([{"rclone", "exit 0\n"}])
 
-      assert :ok = Worker.run("manual")
+      assert :ok = BackupChain.run()
       assert [%{status: :succeeded, stamp: stamp}] = runs()
       refute Backups.work_state?(stamp)
       refute File.exists?(Path.join([dir, ".work", stamp]))

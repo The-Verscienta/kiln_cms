@@ -19,8 +19,15 @@ defmodule KilnCMS.Backups.Run.Changes.Normalize do
     changeset
     |> normalize(:log, &Log.cap/1)
     |> normalize(:error, &Redact.text(&1, [], @max_error))
-    |> normalize(:trigger, &Redact.text(&1, [], @max_trigger))
+    |> normalize(:trigger, &trigger/1)
   end
+
+  @doc """
+  An operator-supplied trigger as a Run stores it: redacted and cut to 64
+  characters. `KilnCMS.Backups.Chain` applies it before the lock row sees one.
+  """
+  @spec trigger(String.t()) :: String.t()
+  def trigger(value), do: Redact.text(value, [], @max_trigger)
 
   defp normalize(changeset, field, fun) do
     case Ash.Changeset.fetch_change(changeset, field) do

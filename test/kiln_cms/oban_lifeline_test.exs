@@ -112,6 +112,8 @@ defmodule KilnCMS.ObanLifelineTest do
       # The ceiling the default was chosen against; if this worker loses its
       # timeout the guard above would pass vacuously.
       assert {KilnCMS.Backups.Worker, :timer.hours(2)} in timeouts
+      # Each backup step (#2218) is bounded the same way.
+      assert {KilnCMS.Backups.StepWorker, :timer.hours(2)} in timeouts
 
       too_long = for {module, timeout} <- timeouts, timeout + margin > rescue_after, do: module
 

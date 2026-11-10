@@ -14,7 +14,18 @@ defmodule KilnCMS.Backups do
       the console can say when the last backup was, how big it was, and
       whether it verified — including for a cron run this application never
       saw.
-    * `run/1` performs one, from the app, on its own Oban queue.
+    * `request/2` asks for one, from the app: a chain of Oban jobs, one per
+      step, behind a cluster-wide lock (#2218; `KilnCMS.Backups.Chain`).
+
+  ## Starting a backup
+
+  Every entry point goes through `request/2` with an actor: the Backups page's
+  "Back up now" and "Resume" buttons (as the platform admin), a legacy
+  `KilnCMS.Backups.Worker` job and the console's `Worker.run/3` (as
+  `system/0`), and a future scheduler, which must call
+  `request(trigger: "schedule")` as `system/0`. A request while a backup runs
+  queues behind it; at most one waits, and later requests fold into that one.
+  `scripts/backup.sh` runs outside the application and does not take the lock.
 
   ## The shell scripts stay canonical
 
@@ -45,13 +56,14 @@ defmodule KilnCMS.Backups do
 
   use Ash.Domain
 
-  alias KilnCMS.Backups.{Manifest, Run, WorkState}
+  alias KilnCMS.Backups.{Chain, Manifest, Refused, Run, StepWorker, WorkState}
 
   resources do
     resource KilnCMS.Backups.Run do
-      # Every write is the `:backups` system actor's (`system/0`): the worker,
-      # the importer and `reconcile_stale_runs/0`. The history page reads
-      # `run_history` as a platform admin.
+      # Every write but `cancel_run` is the `:backups` system actor's
+      # (`system/0`): the worker, the importer, retention and
+      # `reconcile_stale_runs/0`. The history page reads `run_history` and
+      # calls `cancel_run` as a platform admin.
       define :start_run, action: :start
       define :skip_run, action: :skip
       define :record_run_progress, action: :record_progress
@@ -64,6 +76,33 @@ defmodule KilnCMS.Backups do
       define :get_run, action: :read, get_by: [:id]
       define :get_run_by_stamp, action: :by_stamp, args: [:stamp], not_found_error?: false
       define :list_running_runs, action: :running
+      define :mark_run_pruned, action: :mark_pruned
+      define :cancel_run, action: :cancel
+    end
+
+    resource KilnCMS.Backups.Lock do
+      # `request_backup` is every entry point that starts a backup; the
+      # platform admin reads `backup_lock` for the in-flight strip. The rest
+      # are the step chain's, as `system/0`, inside the lock transaction.
+      define :request_backup, action: :request
+      define :backup_lock, action: :read, get?: true, not_found_error?: false
+      define :ensure_backup_lock, action: :ensure
+      define :hold_backup_lock, action: :hold
+      define :move_backup_lock, action: :move
+      define :mark_backup_lock_executing, action: :mark_executing
+      define :mark_backup_lock_finishing, action: :finishing
+      define :clear_backup_lock, action: :clear
+      define :queue_backup_request, action: :queue_waiting
+      define :fold_backup_request, action: :fold
+      define :reclaim_stale_backups, action: :reclaim_stale
+    end
+
+    resource KilnCMS.Backups.NodeBeat do
+      # The heartbeat's, as `system/0`.
+      define :beat_node, action: :beat
+      define :list_node_beats, action: :read
+      define :get_node_beat, action: :read, get_by: [:node], not_found_error?: false
+      define :prune_node_beats, action: :prune, require_reference?: false
     end
   end
 
@@ -106,6 +145,31 @@ defmodule KilnCMS.Backups do
     end
   end
 
+  @boot_id_key {__MODULE__, :boot_id}
+
+  @doc """
+  This boot of this node: a random id set once when the application starts
+  (`init_boot_id/0`). A step job stamps it on the lock when it begins, so a
+  node that restarted under the same name is told apart from one still running
+  the step (`KilnCMS.Backups.Chain.reclaim_stale/0`).
+  """
+  @spec boot_id() :: String.t()
+  def boot_id do
+    case :persistent_term.get(@boot_id_key, nil) do
+      nil -> init_boot_id()
+      id -> id
+    end
+  end
+
+  @doc false
+  # Called from `KilnCMS.Application.start/2`, before any job can run.
+  @spec init_boot_id() :: String.t()
+  def init_boot_id do
+    id = Ash.UUID.generate()
+    :persistent_term.put(@boot_id_key, id)
+    id
+  end
+
   # How long past the worker's own timeout a `running` run may sit before it is
   # presumed dead: slack for a slow final write, and for a node whose clock
   # lags the one that started the run.
@@ -115,19 +179,23 @@ defmodule KilnCMS.Backups do
   Fail every `running` run that can no longer be running (#2217), and return how
   many.
 
-  **Time-based, not Oban-state-based**: `Worker.run/1` may be called from a
-  console with no job behind it, so a run is stale when nothing has touched it
-  for longer than `Worker.timeout/1` plus #{@stale_grace_minutes} minutes before
-  `now`, whatever Oban says (see `run_stale?/2`). The job was killed or the node
-  stopped; the run says so.
+  **Time-based, not Oban-state-based**: a run is stale when nothing has touched
+  it for longer than a step's timeout (`StepWorker.timeout/1`) plus
+  #{@stale_grace_minutes} minutes before `now`, whatever Oban says (see
+  `run_stale?/2`). The job was killed or the node stopped; the run says so. The
+  run the backup lock holds is never touched: its chain is alive, however long
+  a step takes, until the lock says otherwise.
 
   Reads and writes as `system/0` and fails closed: a revoked grant raises
   instead of reporting "nothing stale". Callers on a request or job tail wrap it.
   """
   @spec reconcile_stale_runs(DateTime.t()) :: non_neg_integer()
   def reconcile_stale_runs(now \\ DateTime.utc_now()) do
+    held = Chain.held_stamp()
+
     # One stale row failing to update must not strand the rest as `running`.
     for run <- list_running_runs!(actor: system(), authorize_with: :error),
+        run.stamp != held,
         run_stale?(run, now),
         match?(
           {:ok, _},
@@ -163,18 +231,19 @@ defmodule KilnCMS.Backups do
   end
 
   defp stale_after_ms do
-    KilnCMS.Backups.Worker.timeout(nil) + :timer.minutes(@stale_grace_minutes)
+    StepWorker.timeout(nil) + :timer.minutes(@stale_grace_minutes)
   end
 
   @doc """
-  Whether `run` is one a resume may re-open (#2218): an in-app run that `failed`,
-  or one that is `running` and `run_stale?/2`. Succeeded, skipped and imported
+  Whether `run` is one a resume may re-open (#2218): an in-app run that `failed`
+  or was `canceled`, or one that is `running` and `run_stale?/2`. Succeeded, skipped and imported
   runs, and a `running` one that is still being written to, are not.
   """
   @spec run_resumable?(Run.t(), DateTime.t()) :: boolean()
   def run_resumable?(run, now \\ DateTime.utc_now())
 
   def run_resumable?(%Run{origin: :app, status: :failed}, _now), do: true
+  def run_resumable?(%Run{origin: :app, status: :canceled}, _now), do: true
   def run_resumable?(%Run{origin: :app, status: :running} = run, now), do: run_stale?(run, now)
   def run_resumable?(_run, _now), do: false
 
@@ -187,12 +256,18 @@ defmodule KilnCMS.Backups do
   the filesystem consulted for `.work/<stamp>/state.json`. Every refusal is an
   `{:error, reason}`; nothing falls back to a fresh backup.
 
-  Reasons: `:invalid_stamp`, `:no_such_run`, `{:not_resumable, status}` (a
-  succeeded run, or one still running), `:no_state`.
+  Reasons: `:invalid_stamp`, `:in_flight` (the running backup is that stamp's,
+  or a resume of it is about to start), `:no_such_run`,
+  `{:not_resumable, status}` (a succeeded run, or one still running),
+  `:no_state`.
+
+  `lock: false` skips the `:in_flight` check: for the resume's own start step,
+  which holds the lock on that stamp.
   """
-  @spec resumable_run(term(), DateTime.t()) :: {:ok, Run.t()} | {:error, term()}
-  def resumable_run(stamp, now \\ DateTime.utc_now()) do
+  @spec resumable_run(term(), DateTime.t(), keyword()) :: {:ok, Run.t()} | {:error, term()}
+  def resumable_run(stamp, now \\ DateTime.utc_now(), opts \\ []) do
     with :ok <- check_stamp(stamp),
+         :ok <- check_not_held(stamp, Keyword.get(opts, :lock, true)),
          {:ok, run} <- fetch_run(stamp),
          :ok <- check_resumable(run, now),
          :ok <- check_state(stamp) do
@@ -202,6 +277,11 @@ defmodule KilnCMS.Backups do
 
   defp check_stamp(stamp),
     do: if(WorkState.valid_stamp?(stamp), do: :ok, else: {:error, :invalid_stamp})
+
+  defp check_not_held(_stamp, false), do: :ok
+
+  defp check_not_held(stamp, true),
+    do: if(Chain.held_stamp() == stamp, do: {:error, :in_flight}, else: :ok)
 
   defp fetch_run(stamp) do
     case get_run_by_stamp(stamp, actor: system()) do
@@ -381,34 +461,127 @@ defmodule KilnCMS.Backups do
   end
 
   @doc """
-  Enqueue a backup. Returns `{:error, reason}` when `availability/0` says this
-  deployment can't run one, so the caller can explain rather than queue a job
-  that is certain to fail.
+  Ask for a backup, as `actor` (#2218). The one entry point: see the moduledoc.
 
-  `resume: stamp` (#2218) enqueues a resume of that failed or interrupted
-  backup instead (job args `"resume" => stamp`, so the `unique` window does not
-  mistake it for a plain backup). It is refused with `{:error, reason}` - see
-  `resumable_run/2` - rather than ever becoming a fresh run. Callers: the
-  platform admin's "Resume" button (`KilnCMSWeb.BackupLive`, which re-checks
-  `platform_admin?` in its handler) and a release console.
+  From a release console, as the backup system actor, then waiting for it:
+
+      {:ok, %{status: :started, chain: chain}} =
+        KilnCMS.Backups.request([trigger: "console"], KilnCMS.Backups.system())
+
+      KilnCMS.Backups.await(chain)
+      #=> :ok
+
+  Options: `:trigger` (default `"manual"`) and `:resume`, a stamp whose failed,
+  interrupted or canceled backup to continue. A `:resume` that is present is
+  always a resume: a malformed one is refused (`:invalid_stamp`), never a fresh
+  backup.
+
+    * `{:ok, %{status: :started, chain: chain}}`: it is running.
+    * `{:ok, %{status: :queued, chain: running}}`: it starts when the running
+      chain finishes.
+    * `{:ok, %{status: :folded, chain: running}}`: one is already queued; that
+      one covers this request (logged).
+    * `{:error, reason}`: `availability/0`'s reason, a resume refusal
+      (`resumable_run/2`: `:invalid_stamp`, `:in_flight`, `:no_such_run`,
+      `{:not_resumable, status}`, `:no_state`), or `:forbidden` for an actor the
+      policy refuses (only a platform admin and `system/0` may ask).
   """
-  @spec enqueue(keyword()) :: {:ok, Oban.Job.t()} | {:error, term()}
-  def enqueue(opts \\ []) do
-    trigger = to_string(Keyword.get(opts, :trigger, :manual))
+  @spec request(keyword(), term()) :: {:ok, map()} | {:error, term()}
+  def request(opts \\ [], actor) do
+    input = %{trigger: to_string(Keyword.get(opts, :trigger, "manual"))}
 
+    with {:ok, input} <- put_resume(input, opts) do
+      case request_backup(input, actor: actor) do
+        {:ok, result} -> {:ok, result}
+        {:error, error} -> {:error, refusal(error)}
+      end
+    end
+  end
+
+  defp put_resume(input, opts) do
     if Keyword.has_key?(opts, :resume) do
-      with {:ok, run} <- resumable_run(Keyword.get(opts, :resume)),
-           :ok <- availability() do
-        %{"trigger" => trigger, "resume" => run.stamp}
-        |> KilnCMS.Backups.Worker.new()
-        |> Oban.insert()
-      end
+      resume = Keyword.get(opts, :resume)
+
+      if WorkState.valid_stamp?(resume),
+        do: {:ok, Map.put(input, :resume, resume)},
+        else: {:error, :invalid_stamp}
     else
-      with :ok <- availability() do
-        %{"trigger" => trigger}
-        |> KilnCMS.Backups.Worker.new()
-        |> Oban.insert()
-      end
+      {:ok, input}
+    end
+  end
+
+  defp refusal(%Ash.Error.Forbidden{}), do: :forbidden
+
+  defp refusal(%{errors: errors} = error) do
+    case Enum.find(errors, &match?(%Refused{}, &1)) do
+      %Refused{reason: reason} -> reason
+      nil -> error
+    end
+  end
+
+  defp refusal(error), do: error
+
+  @doc """
+  Enqueue a backup as `system/0` (deprecated: use `request/2` with the actor
+  asking). Same options and results as `request/2`; before #2218 it returned
+  the `Oban.Job`.
+  """
+  @spec enqueue(keyword()) :: {:ok, map()} | {:error, term()}
+  def enqueue(opts \\ []), do: request(opts, system())
+
+  @doc """
+  What the backup lock holds right now, or `nil` when no backup runs: the chain,
+  its stamp, trigger, step and part, `parts_total` (the archive step's part
+  count, when this node has the chain's backup directory; else nil), phase
+  (`:running`, or `:finishing` once Cancel is refused), when it took the lock,
+  and the queued request
+  (`%{trigger, resume, requested_at, folds}`) or `nil`.
+  """
+  @spec in_flight() :: map() | nil
+  def in_flight, do: Chain.in_flight()
+
+  @doc """
+  Wait for the chain `chain` to settle: `:ok` when its run succeeded, else
+  `{:error, reason}` (the run's error, `:canceled`, `{:skipped, error}`,
+  `:no_run` when it ended without one, or `:timeout`). Polls the database, so it
+  works from any node. Options: `:timeout` (ms, default 3 hours), `:interval`
+  (ms, default 2 s).
+  """
+  @spec await(String.t(), keyword()) :: :ok | {:error, term()}
+  def await(chain, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, :timer.hours(3))
+    interval = Keyword.get(opts, :interval, 2_000)
+    deadline = System.monotonic_time(:millisecond) + timeout
+    poll(chain, interval, deadline)
+  end
+
+  defp poll(chain, interval, deadline) do
+    case settled(chain) do
+      :running ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          {:error, :timeout}
+        else
+          Process.sleep(interval)
+          poll(chain, interval, deadline)
+        end
+
+      outcome ->
+        outcome
+    end
+  end
+
+  defp settled(chain) do
+    held? = match?(%{chain: ^chain}, in_flight())
+
+    case list_runs(query: [filter: [chain_id: chain]], actor: system()) do
+      {:ok, [%Run{status: :running} | _]} -> :running
+      {:ok, _} when held? -> :running
+      {:ok, [%Run{status: :succeeded} | _]} -> :ok
+      {:ok, [%Run{status: :canceled} | _]} -> {:error, :canceled}
+      {:ok, [%Run{status: :skipped, error: error} | _]} -> {:error, {:skipped, error}}
+      {:ok, [%Run{error: error} | _]} -> {:error, error}
+      {:ok, []} -> {:error, :no_run}
+      {:error, _} = error -> error
     end
   end
 

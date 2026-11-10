@@ -3,7 +3,7 @@ defmodule KilnCMS.Backups.Run.Changes.Resume do
   The guard and bookkeeping of `KilnCMS.Backups.Run`'s `:resume` action (#2218).
 
   A run may be resumed only if `KilnCMS.Backups.run_resumable?/2` says so: an
-  in-app run that `failed`, or one still `running` that has shown no sign of
+  in-app run that `failed` or was `canceled`, or one still `running` that has shown no sign of
   life for longer than the worker's timeout plus grace (its job is gone). A
   `succeeded`, `skipped` or imported run, and a `running` one that is still being
   written to, are refused with an error on `status`; the caller never falls back
@@ -22,7 +22,12 @@ defmodule KilnCMS.Backups.Run.Changes.Resume do
     run = changeset.data
 
     if Backups.run_resumable?(run) do
-      previous = if run.status == :failed, do: "failed", else: "interrupted"
+      previous =
+        case run.status do
+          :failed -> "failed"
+          :canceled -> "canceled"
+          _running -> "interrupted"
+        end
 
       entry = %{
         at: DateTime.utc_now(),
@@ -35,7 +40,7 @@ defmodule KilnCMS.Backups.Run.Changes.Resume do
     else
       Ash.Changeset.add_error(changeset,
         field: :status,
-        message: "can't be resumed: only a failed or interrupted in-app backup can"
+        message: "can't be resumed: only a failed, interrupted or canceled in-app backup can"
       )
     end
   end

@@ -48,7 +48,10 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
     )
   end
 
-  # {name, fun(actor) -> result} for every write action.
+  # {name, fun(actor) -> result} for every write action of the pipeline.
+  # `record_progress`, `finish` and `fail` get a fresh running run per call:
+  # they land only on a `running` run (#2218), and a refusal by that filter
+  # would hide whether the POLICY admitted the actor.
   defp writes(run) do
     [
       start: fn actor ->
@@ -57,9 +60,10 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
       skip: fn actor ->
         Backups.skip_run(%{stamp: stamp(), trigger: "t", error: "no pg_dump"}, actor: actor)
       end,
-      record_progress: fn actor -> Backups.record_run_progress(run, %{}, actor: actor) end,
-      finish: fn actor -> Backups.finish_run(run, %{}, actor: actor) end,
-      fail: fn actor -> Backups.fail_run(run, %{error: "x"}, actor: actor) end,
+      record_progress: fn actor -> Backups.record_run_progress(run!(), %{}, actor: actor) end,
+      finish: fn actor -> Backups.finish_run(run!(), %{}, actor: actor) end,
+      fail: fn actor -> Backups.fail_run(run!(), %{error: "x"}, actor: actor) end,
+      mark_pruned: fn actor -> Backups.mark_run_pruned(run, %{artifacts: []}, actor: actor) end,
       # A fresh failed run per call: the guard refuses anything else, and a
       # refusal by the guard would hide whether the POLICY admitted the actor.
       resume: fn actor ->
@@ -108,6 +112,73 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
         assert {:error, %Ash.Error.Forbidden{}} = call.(SystemActor.new(:billing)),
                "#{action} must refuse :billing"
       end
+    end
+  end
+
+  describe "cancel" do
+    # The policy alone: `can_cancel_run?/2` decides it without running the
+    # action, whose side effects are the `Cancel` change's.
+    test "a platform admin may cancel a run" do
+      assert Backups.can_cancel_run?(user(:admin), run!())
+    end
+
+    test "editor, viewer, org admin and anonymous are refused" do
+      run = run!()
+
+      for actor <- [user(:editor), user(:viewer), org_admin(), nil] do
+        refute Backups.can_cancel_run?(actor, run),
+               "cancel must refuse #{inspect(actor && actor.role)}"
+
+        assert {:error, %Ash.Error.Forbidden{}} = Backups.cancel_run(run, actor: actor)
+      end
+    end
+
+    test "the :backups system actor is refused: nothing in the pipeline cancels a run" do
+      run = run!()
+
+      refute Backups.can_cancel_run?(Backups.system(), run)
+      assert {:error, %Ash.Error.Forbidden{}} = Backups.cancel_run(run, actor: Backups.system())
+    end
+  end
+
+  describe "status" do
+    test "the database's status check admits :canceled" do
+      run = Ash.Seed.seed!(KilnCMS.Backups.Run, %{stamp: stamp(), status: :canceled})
+
+      assert Backups.get_run_by_stamp!(run.stamp, actor: Backups.system()).status == :canceled
+    end
+
+    test "the database's status check still refuses an unknown status" do
+      run = run!()
+
+      assert_raise Postgrex.Error, ~r/backup_runs_status_must_be_known/, fn ->
+        KilnCMS.Repo.query!("UPDATE backup_runs SET status = 'paused' WHERE id = $1", [
+          Ecto.UUID.dump!(run.id)
+        ])
+      end
+    end
+
+    test "record_progress, finish and fail refuse a run that is no longer running" do
+      canceled = Ash.Seed.seed!(KilnCMS.Backups.Run, %{stamp: stamp(), status: :canceled})
+
+      for call <- [
+            &Backups.record_run_progress(&1, %{}, actor: Backups.system()),
+            &Backups.finish_run(&1, %{}, actor: Backups.system()),
+            &Backups.fail_run(&1, %{error: "late"}, actor: Backups.system())
+          ] do
+        assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+                 call.(canceled)
+      end
+
+      assert Backups.get_run_by_stamp!(canceled.stamp, actor: Backups.system()).status ==
+               :canceled
+    end
+
+    test "mark_pruned updates a finished run's artifacts" do
+      run = Backups.finish_run!(run!(), %{}, actor: Backups.system())
+
+      assert {:ok, %{status: :succeeded}} =
+               Backups.mark_run_pruned(run, %{artifacts: []}, actor: Backups.system())
     end
   end
 

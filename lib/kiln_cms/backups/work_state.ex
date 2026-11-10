@@ -17,8 +17,19 @@ defmodule KilnCMS.Backups.WorkState do
   trusted because it happens to exist.
 
   The file is a hint to a resume and a record of work already done, not a source
-  of truth: losing or corrupting it only costs a rebuild, and the Run row (not
-  this file) decides whether a resume is permitted at all.
+  of truth for *permission*: the Run row (not this file) decides whether a resume
+  is permitted at all.
+
+  ## Version 2: the step chain's state (#2218)
+
+  Since the pipeline became a chain of Oban jobs (`KilnCMS.Backups.StepWorker`),
+  this file is also how one step hands its results to the next, so writing it
+  is no longer best-effort: a step whose state write fails is retried. Version 2
+  adds `chain` (the chain that owns the directory), `trigger`, `started_at`,
+  `resume`, `dir_id`, `components`, `parts_total`, `outputs` (the manifest
+  entries landed so far), `offsite` and `rec` (the run record's accumulator,
+  `KilnCMS.Backups.Recorder.to_state/1`). A version-1 file, written by a release
+  before the chain, still reads: a resume of it stamps the chain into it.
 
   `path/2` is the one place a path is built from a stamp, and it refuses anything
   that is not a real `YYYYMMDD-HHMMSS` instant, so a forged stamp cannot walk out
@@ -27,7 +38,7 @@ defmodule KilnCMS.Backups.WorkState do
   alias KilnCMS.Backups.Artifact
 
   @stamp ~r/\A\d{8}-\d{6}\z/
-  @version 1
+  @version 2
 
   @type t :: %{required(String.t()) => term()}
 
@@ -59,10 +70,18 @@ defmodule KilnCMS.Backups.WorkState do
   @spec exists?(Path.t()) :: boolean()
   def exists?(work_dir), do: File.regular?(file(work_dir))
 
-  @doc "A fresh state for `stamp`."
-  @spec new(String.t()) :: t()
-  def new(stamp),
-    do: %{"version" => @version, "stamp" => stamp, "steps" => [], "dump" => nil, "parts" => %{}}
+  @doc "A fresh state for `stamp`, with the chain's own `fields` (string keys) merged in."
+  @spec new(String.t(), map()) :: t()
+  def new(stamp, fields \\ %{}) do
+    Map.merge(
+      %{"version" => @version, "stamp" => stamp, "steps" => [], "dump" => nil, "parts" => %{}},
+      fields
+    )
+  end
+
+  @doc "The chain that owns this state, or `nil` (a version-1 file)."
+  @spec chain(t()) :: String.t() | nil
+  def chain(state), do: Map.get(state, "chain")
 
   @doc """
   Read the state of a work directory. `{:error, :no_state}` when the file is

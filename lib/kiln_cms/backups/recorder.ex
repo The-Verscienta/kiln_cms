@@ -15,6 +15,14 @@ defmodule KilnCMS.Backups.Recorder do
   revoked grant, a lost connection, the row deleted by a database restore mid-run —
   never fails a good backup, and never deletes one. With no row (`run: nil`,
   after a stamp collision or a failed start) every call is a no-op.
+
+  ## Across the step chain (#2218)
+
+  Each step of a chain is its own job, so the accumulator travels between them
+  in `state.json` (`to_state/1`, `load/3`), which a step must write, rather than
+  in the Run row, which is best-effort: a step that missed a Run write still
+  hands the next step everything, and the run is closed from that. A step only
+  writes a Run whose `chain_id` is its own chain's.
   """
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Redact}
@@ -23,31 +31,166 @@ defmodule KilnCMS.Backups.Recorder do
 
   @type t :: %__MODULE__{
           run: KilnCMS.Backups.Run.t() | nil,
+          chain_id: String.t() | nil,
           components: [:db | :media],
           artifacts: [map()],
           log: [map()]
         }
 
-  defstruct run: nil, components: [], artifacts: [], log: []
+  @artifact_fields [:kind, :name, :bytes, :sha256, :verified, :parts, :encrypted?, :destinations]
+
+  defstruct run: nil, chain_id: nil, components: [], artifacts: [], log: []
 
   @doc """
   Open the run for an attempt. On a stamp collision or any write error the
   attempt proceeds without a row.
+
+  With a `chain_id`, a run this chain already opened under `stamp` (the start
+  step retried) is taken up again instead of colliding with itself.
   """
-  @spec open(String.t(), String.t(), DateTime.t(), [:db | :media], integer() | nil) :: t()
-  def open(stamp, trigger, started_at, components, job_id) do
+  @spec open(
+          String.t(),
+          String.t(),
+          DateTime.t(),
+          [:db | :media],
+          integer() | nil,
+          String.t() | nil
+        ) ::
+          t()
+  def open(stamp, trigger, started_at, components, job_id, chain_id \\ nil) do
     attrs = %{
       stamp: stamp,
       trigger: trigger,
       components: components,
       started_at: started_at,
-      oban_job_id: job_id
+      oban_job_id: job_id,
+      chain_id: chain_id
     }
 
-    case safely("open", fn -> Backups.start_run(attrs, actor: Backups.system()) end) do
-      {:ok, run} -> %__MODULE__{run: run, components: components}
-      _ -> %__MODULE__{components: components}
+    rec = %__MODULE__{components: components, chain_id: chain_id}
+
+    case own_run(stamp, chain_id) do
+      %{} = run -> %{rec | run: run}
+      nil -> start_run(rec, attrs)
     end
+  end
+
+  defp start_run(rec, attrs) do
+    case safely("open", fn -> Backups.start_run(attrs, actor: Backups.system()) end) do
+      {:ok, run} -> %{rec | run: run}
+      _ -> rec
+    end
+  end
+
+  @doc """
+  The recorder a later step of `chain_id` works with: the accumulator `saved`
+  in `state.json` (`to_state/1`), writing to the run of `stamp` only if that
+  run belongs to this chain. Never fails; with no such run the writes are
+  no-ops.
+  """
+  @spec load(String.t(), String.t(), map() | nil) :: t()
+  def load(stamp, chain_id, saved) do
+    saved
+    |> from_state()
+    |> Map.merge(%{chain_id: chain_id, run: own_run(stamp, chain_id)})
+  end
+
+  @doc """
+  A recorder seeded from the run row of `stamp` itself, for a chain whose
+  `state.json` is gone: closing the run from it keeps what the row already
+  holds rather than overwriting it with nothing.
+  """
+  @spec from_run(String.t() | nil, String.t()) :: t()
+  def from_run(nil, chain_id), do: %__MODULE__{chain_id: chain_id}
+
+  def from_run(stamp, chain_id) do
+    case own_run(stamp, chain_id) do
+      nil ->
+        %__MODULE__{chain_id: chain_id}
+
+      run ->
+        %__MODULE__{
+          run: run,
+          chain_id: chain_id,
+          components: run.components,
+          artifacts: Enum.map(run.artifacts, &Map.take(&1, @artifact_fields)),
+          log: Enum.map(run.log, &Map.take(&1, [:at, :level, :step, :message]))
+        }
+    end
+  end
+
+  defp own_run(_stamp, nil), do: nil
+
+  defp own_run(stamp, chain_id) do
+    case safely("load", fn -> Backups.get_run_by_stamp(stamp, actor: Backups.system()) end) do
+      {:ok, %{chain_id: ^chain_id} = run} -> run
+      _ -> nil
+    end
+  end
+
+  @doc "The accumulator as JSON-safe data for `state.json`; `load/3` reads it back."
+  @spec to_state(t()) :: map()
+  def to_state(%__MODULE__{} = rec) do
+    %{
+      "components" => Enum.map(rec.components, &Atom.to_string/1),
+      "artifacts" => rec.artifacts,
+      "log" =>
+        Enum.map(rec.log, fn entry ->
+          %{
+            "at" => entry.at,
+            "level" => to_string(entry.level),
+            "step" => entry.step,
+            "message" => entry.message
+          }
+        end)
+    }
+  end
+
+  @artifact_keys ~w(kind name bytes sha256 verified parts encrypted? destinations part parts_total oversize)
+  @levels ~w(info warn error)
+
+  defp from_state(%{} = saved) do
+    %__MODULE__{
+      components:
+        for(
+          c <- List.wrap(saved["components"]),
+          c in ["db", "media"],
+          do: String.to_existing_atom(c)
+        ),
+      artifacts: for(a <- List.wrap(saved["artifacts"]), is_map(a), do: decode_artifact(a)),
+      log: for(e <- List.wrap(saved["log"]), is_map(e), do: decode_entry(e))
+    }
+  end
+
+  defp from_state(_none), do: %__MODULE__{}
+
+  defp decode_artifact(map) do
+    for {key, value} <- map, key = to_string(key), key in @artifact_keys, into: %{} do
+      case key do
+        "kind" -> {:kind, if(value in ["db", :db], do: :db, else: :media)}
+        key -> {String.to_existing_atom(key), value}
+      end
+    end
+  end
+
+  defp decode_entry(entry) do
+    at =
+      case entry["at"] do
+        %DateTime{} = at ->
+          at
+
+        text when is_binary(text) ->
+          case DateTime.from_iso8601(text) do
+            {:ok, at, _} -> at
+            _ -> DateTime.utc_now()
+          end
+
+        _ ->
+          DateTime.utc_now()
+      end
+
+    level = if entry["level"] in @levels, do: String.to_existing_atom(entry["level"]), else: :info
+    %{at: at, level: level, step: to_string(entry["step"]), message: to_string(entry["message"])}
   end
 
   @doc """
@@ -60,23 +203,43 @@ defmodule KilnCMS.Backups.Recorder do
   must refuse the resume when the run can't be re-opened (it is no longer
   failed, the grant is revoked, the row is gone), not carry on without a row.
   """
-  @spec reopen(String.t()) :: {:ok, t()} | {:error, term()}
-  def reopen(stamp) do
+  @spec reopen(String.t(), String.t() | nil) :: {:ok, t()} | {:error, term()}
+  def reopen(stamp, chain_id \\ nil) do
     result =
       safely("reopen", fn ->
         with {:ok, %{} = run} <- Backups.get_run_by_stamp(stamp, actor: Backups.system()) do
-          Backups.resume_run(run, %{}, actor: Backups.system())
+          Backups.resume_run(run, %{chain_id: chain_id}, actor: Backups.system())
         end
       end)
 
     case result do
-      {:ok, %{} = run} ->
-        log = Enum.map(run.log, &Map.take(&1, [:at, :level, :step, :message]))
-        {:ok, %__MODULE__{run: run, components: run.components, artifacts: [], log: log}}
-
-      _ ->
-        {:error, :not_resumable}
+      {:ok, %{} = run} -> {:ok, resumed(run, chain_id)}
+      _ -> {:error, :not_resumable}
     end
+  end
+
+  @doc """
+  The accumulator for a run that chain `chain_id` already re-opened
+  (`reopen/2`): a resume's start step retried after the re-open committed but
+  before its `state.json` landed. `{:error, :not_resumable}` unless the run is
+  `running` under `chain_id`.
+  """
+  @spec reopened(String.t(), String.t()) :: {:ok, t()} | {:error, :not_resumable}
+  def reopened(stamp, chain_id) do
+    case own_run(stamp, chain_id) do
+      %{status: :running} = run -> {:ok, resumed(run, chain_id)}
+      _ -> {:error, :not_resumable}
+    end
+  end
+
+  defp resumed(run, chain_id) do
+    %__MODULE__{
+      run: run,
+      chain_id: chain_id,
+      components: run.components,
+      artifacts: [],
+      log: Enum.map(run.log, &Map.take(&1, [:at, :level, :step, :message]))
+    }
   end
 
   @doc """
@@ -241,14 +404,12 @@ defmodule KilnCMS.Backups.Recorder do
     safely("prune", fn ->
       with {:ok, %{} = run} <- Backups.get_run_by_stamp(stamp, actor: Backups.system()) do
         artifacts = Enum.map(run.artifacts, &prune_artifact(&1, names, at))
-        Backups.record_run_progress(run, %{artifacts: artifacts}, actor: Backups.system())
+        Backups.mark_run_pruned(run, %{artifacts: artifacts}, actor: Backups.system())
       end
     end)
 
     :ok
   end
-
-  @artifact_fields [:kind, :name, :bytes, :sha256, :verified, :parts, :encrypted?, :destinations]
 
   defp prune_artifact(artifact, names, at) do
     attrs = Map.take(artifact, @artifact_fields)

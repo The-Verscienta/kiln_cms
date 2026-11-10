@@ -303,6 +303,13 @@ msgid_plural "%{count} keys can write content as an administrator."
 msgstr[0] "%{count} clé peut écrire du contenu en tant qu'administrateur."
 msgstr[1] "%{count} clés peuvent écrire du contenu en tant qu'administrateur."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} later request folded into it"
+msgid_plural "%{count} later requests folded into it"
+msgstr[0] "%{count} demande ultérieure y a été intégrée"
+msgstr[1] "%{count} demandes ultérieures y ont été intégrées"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -1370,6 +1377,11 @@ msgid_plural "%{count} published documents are in no menu."
 msgstr[0] "1 document publié n'est dans aucun menu."
 msgstr[1] "%{count} documents publiés ne sont dans aucun menu."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 queued (requested %{at})"
+msgstr "1 en attente (demandée %{at})"
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "1 registration is waiting for approval"
@@ -1426,6 +1438,16 @@ msgstr "Un objet ou une liste JSON, jusqu'à 64 Ko. Pour des données structuré
 #, elixir-autogen, elixir-format
 msgid "A backup can't run on this deployment."
 msgstr "Une sauvegarde ne peut pas s'exécuter sur cette installation."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running and another is already queued; that queued backup covers this request."
+msgstr "Une sauvegarde est en cours et une autre est déjà en attente ; la sauvegarde en attente couvre cette demande."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running; this one starts when it finishes."
+msgstr "Une sauvegarde est en cours ; celle-ci démarrera quand elle sera terminée."
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
@@ -3379,6 +3401,11 @@ msgstr "Appliquer cette règle"
 msgid "Applying renames…"
 msgstr "Application des renommages…"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Applying retention"
+msgstr "Application de la rétention"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
@@ -3476,6 +3503,21 @@ msgstr "Type archivé"
 #, elixir-autogen, elixir-format
 msgid "Archived types"
 msgstr "Types archivés"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Archiving media"
+msgstr "Archivage des médias"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Archiving media: part %{part}"
+msgstr "Archivage des médias : partie %{part}"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Archiving media: part %{part} of %{total}"
+msgstr "Archivage des médias : partie %{part} sur %{total}"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -3843,10 +3885,15 @@ msgstr "Sauvegardé il y a %{ago}"
 msgid "Background queues"
 msgstr "Files d'attente en arrière-plan"
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup canceled"
+msgstr "Sauvegarde annulée"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Backing up…"
-msgstr "Sauvegarde en cours…"
+msgid "Backup canceled. Its files are kept, so it can be resumed."
+msgstr "Sauvegarde annulée. Ses fichiers sont conservés, elle peut donc être reprise."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -4295,6 +4342,7 @@ msgstr "Impossible de reprogrammer dans le passé."
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
@@ -4316,10 +4364,30 @@ msgstr "Impossible de reprogrammer dans le passé."
 msgid "Cancel"
 msgstr "Annuler"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Cancel this backup? Its files are kept, so it can be resumed later."
+msgstr "Annuler cette sauvegarde ? Ses fichiers sont conservés, elle pourra donc être reprise plus tard."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Cancel this backup? Its files are kept, so it can be resumed later. A queued backup will start next."
+msgstr "Annuler cette sauvegarde ? Ses fichiers sont conservés, elle pourra donc être reprise plus tard. Une sauvegarde en attente démarrera ensuite."
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Cancel upload"
 msgstr "Annuler le téléversement"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Canceled"
+msgstr "Annulée"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Canceling…"
+msgstr "Annulation…"
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
@@ -4561,6 +4629,11 @@ msgstr "Recherche de mises à jour…"
 #, elixir-autogen, elixir-format
 msgid "Checking for updates; reopen this page in a minute."
 msgstr "Recherche de mises à jour en cours ; rouvrez cette page dans une minute."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checking the media parts"
+msgstr "Vérification des parties de médias"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/image_backend_live.ex
@@ -5555,6 +5628,11 @@ msgstr "Copiez cette clé maintenant — elle ne sera plus affichée."
 #, elixir-autogen, elixir-format
 msgid "Copy value"
 msgstr "Copier la valeur"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Copying off-site"
+msgstr "Copie hors site"
 
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
@@ -7385,6 +7463,11 @@ msgstr "Échéance après (jours)"
 msgid "Due soon"
 msgstr "Bientôt à réviser"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Dumping the database"
+msgstr "Export de la base de données"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -8900,6 +8983,11 @@ msgstr "Trouver des pages connexes"
 #, elixir-autogen, elixir-format
 msgid "Finish"
 msgstr "Terminer"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Finishing"
+msgstr "Finalisation"
 
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
@@ -13739,6 +13827,11 @@ msgstr "Seulement %{count} mots — les pages de moins de %{min} mots se classen
 msgid "Only .xlf, .xliff and .xml files can be imported."
 msgstr "Seuls les fichiers .xlf, .xliff et .xml peuvent être importés."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only a platform admin can cancel a backup."
+msgstr "Seul un administrateur de la plateforme peut annuler une sauvegarde."
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "Only admins of this site can open it. Your account has a different role."
@@ -14681,6 +14774,11 @@ msgstr "Texte brut"
 #, elixir-autogen, elixir-format
 msgid "Planned"
 msgstr "Planifiés"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Planning the media archive"
+msgstr "Planification de l'archive des médias"
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -16298,6 +16396,11 @@ msgstr "Demander un nouveau lien"
 #, elixir-autogen, elixir-format
 msgid "Request changes"
 msgstr "Demander des modifications"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Requesting…"
+msgstr "Demande en cours…"
 
 #: lib/kiln_cms/security/posture/checks/transport.ex
 #, elixir-autogen, elixir-format
@@ -18790,6 +18893,11 @@ msgstr "Commencer à envoyer des newsletters à %{email} ?"
 msgid "Started from “%{recipe}”. Change anything you like, then add the rule."
 msgstr "Partie de « %{recipe} ». Modifiez ce que vous voulez, puis ajoutez la règle."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Starting a backup"
+msgstr "Démarrage d'une sauvegarde"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Starting…"
@@ -19592,18 +19700,33 @@ msgstr "Cette adresse figure sur la liste de suppression des e-mails, l’invita
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "That backup already finished."
+msgstr "Cette sauvegarde est déjà terminée."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That backup can't be canceled."
+msgstr "Cette sauvegarde ne peut pas être annulée."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "That backup can't be resumed."
 msgstr "Cette sauvegarde ne peut pas être reprise."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "That backup can't be resumed: only a failed or interrupted backup can."
-msgstr "Cette sauvegarde ne peut pas être reprise : seule une sauvegarde échouée ou interrompue le peut."
+msgid "That backup can't be resumed: only a failed, interrupted or canceled backup can."
+msgstr "Cette sauvegarde ne peut pas être reprise : seule une sauvegarde échouée, interrompue ou annulée peut l'être."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "That backup can't be resumed: the files it had written are gone."
 msgstr "Cette sauvegarde ne peut pas être reprise : les fichiers déjà écrits ont disparu."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That backup is running right now."
+msgstr "Cette sauvegarde est en cours en ce moment."
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
@@ -21895,6 +22018,11 @@ msgstr "Jetons : %{tokens}, [field:<name>]. Utilisé uniquement lorsqu'une entr�
 #, elixir-autogen, elixir-format
 msgid "Too large to propose in bulk (%{count} embeddings). Open it in the editor for its own suggestions."
 msgstr "Trop volumineux pour une proposition groupée (%{count} embeddings). Ouvrez-le dans l'éditeur pour ses propres suggestions."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Too late to cancel: the backup is finishing."
+msgstr "Trop tard pour annuler : la sauvegarde se termine."
 
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format

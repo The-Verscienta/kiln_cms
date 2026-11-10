@@ -82,4 +82,81 @@ defmodule KilnCMS.ExternalCommandTest do
              "port messages were left behind: #{inspect(messages)}"
     end
   end
+
+  describe "run/4 options" do
+    test "passes :env to the child" do
+      assert {"s3cret-value", 0} =
+               ExternalCommand.run(@sh, ["-c", "printf %s \"$KILN_TEST_VAR\""], 5_000,
+                 env: [{"KILN_TEST_VAR", "s3cret-value"}]
+               )
+    end
+
+    test ":tail keeps only the last bytes of the output" do
+      assert {output, 0} =
+               ExternalCommand.run(@sh, ["-c", "printf 'abcdefghij'; printf 'XYZ'"], 5_000,
+                 tail: 5
+               )
+
+      assert output == "ijXYZ"
+    end
+
+    test "accepts :infinity as the timeout" do
+      assert {"ok", 0} = ExternalCommand.run(@sh, ["-c", "printf ok"], :infinity)
+    end
+  end
+
+  describe "run/4 when the caller dies" do
+    @tag :tmp_dir
+    test "kills the child OS process", %{tmp_dir: dir} do
+      # The child records its own pid, then `exec`s so that pid is the long
+      # sleeper: killing the caller must take that exact process down.
+      pid_file = Path.join(dir, "pid")
+      test = self()
+
+      caller =
+        spawn(fn ->
+          send(test, :started)
+
+          ExternalCommand.run(@sh, ["-c", "echo $$ > #{pid_file}; exec sleep 30"], :infinity)
+        end)
+
+      assert_receive :started
+      os_pid = wait_for_pid(pid_file)
+      assert alive?(os_pid)
+
+      ref = Process.monitor(caller)
+      Process.exit(caller, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^caller, :killed}
+
+      assert eventually(fn -> not alive?(os_pid) end),
+             "the child outlived its killed caller"
+    end
+  end
+
+  defp wait_for_pid(file, tries \\ 100) do
+    case File.read(file) do
+      {:ok, text} when text != "" ->
+        text |> String.trim() |> String.to_integer()
+
+      _ when tries > 0 ->
+        Process.sleep(20)
+        wait_for_pid(file, tries - 1)
+    end
+  end
+
+  # `kill -0` probes without signalling. A killed child is a zombie until the
+  # VM's port reaper collects it, which `kill -0` still reports alive for a
+  # moment, hence the polling.
+  defp alive?(os_pid) do
+    {_out, status} = System.cmd("kill", ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true)
+    status == 0
+  end
+
+  defp eventually(fun, tries \\ 100) do
+    cond do
+      fun.() -> true
+      tries == 0 -> false
+      true -> Process.sleep(20) && eventually(fun, tries - 1)
+    end
+  end
 end

@@ -1,6 +1,10 @@
 import Config
 config :kiln_cms, Oban, testing: :manual
 
+# No backup heartbeat process (#2218): it would beat and sweep the lock on a
+# timer against the sandbox. Tests drive `KilnCMS.Backups.Heartbeat.tick/1`.
+config :kiln_cms, KilnCMS.Backups, heartbeat?: false
+
 # No boot-time occurrence backfill (#766). Every test runs inside a rolled-back
 # sandbox, but application boot is OUTSIDE them — so an enqueue there commits a
 # real `oban_jobs` row, which `DataCase.drain_oban/0` then re-executes inside

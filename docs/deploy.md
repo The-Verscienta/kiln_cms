@@ -416,7 +416,10 @@ ships no `rel/env.sh.eex`, so it starts with `mix release`'s defaults
 `kiln_cms@<ip>` names DNSCluster resolves — set `RELEASE_DISTRIBUTION=name`
 and `RELEASE_NODE=kiln_cms@<this node's IP>` in each node's environment (the
 snippet Phoenix's Fly guide generates), or the nodes stay silently
-disconnected and cache busts never cross them.
+disconnected and cache busts never cross them. Give every node its own name:
+in-app backups key each node's heartbeat by it, and two nodes sharing one can
+take a running backup step away from each other
+([backups.md](backups.md#several-nodes-and-the-backup-lock)).
 
 The auth budgets need nothing from the cluster at all. The sign-in, second
 factor, reset-mail and credential-form budgets count in Postgres
@@ -594,8 +597,8 @@ attempt. Without the rescue, such a row would stay `executing` for ever. For a
 
 The rescue goes by time alone. It cannot tell a dead job from a slow one, so
 the window must be longer than any job legitimately runs. Otherwise a live job
-runs a second time. The longest job with a timeout is a backup
-(`KilnCMS.Backups.Worker`, 2 h), and a test fails if any worker's `timeout/1`
+runs a second time. The longest job with a timeout is a backup step
+(`KilnCMS.Backups.StepWorker`, 2 h), and a test fails if any worker's `timeout/1`
 comes within 30 minutes of the window. Raise the variable if you have added a
 longer worker. Lower it to get stranded work back sooner, but only if you know
 your longest real job. `false` switches the rescue off, for a deployment that
@@ -617,11 +620,16 @@ of work:
 - **Newsletter fan-out** (`SendWorker`) is safe to repeat. Each
   `{send, subscriber}` pair can be enqueued only once, so a repeat reaches only
   the recipients the first run missed.
-- **`max_attempts: 1` workers are discarded, not re-run:** backups,
-  demo reset, slug regeneration, content-release go-live/rollback. A backup
-  leaves a `.partial` file that is never mistaken for a finished one; take a
-  new backup. A release left in `publishing` or `rolling_back` is freed with
-  the admin-only **abandon** action in the release console.
+- **Backups do not wait for the rescue.** A backup step on a stopped node is
+  taken back by the backup heartbeat of any node within about 3 minutes (or
+  at the restarted node's first beat), and requeued under the same stamp with
+  the attempts it had left, reusing the files already finished
+  ([backups.md](backups.md#several-nodes-and-the-backup-lock)). Its job is
+  canceled first, so Lifeline never re-runs it.
+- **`max_attempts: 1` workers are discarded, not re-run:** demo reset, slug
+  regeneration, content-release go-live/rollback. A release left in
+  `publishing` or `rolling_back` is freed with the admin-only **abandon**
+  action in the release console.
 
 ## Upgrading a deployment
 

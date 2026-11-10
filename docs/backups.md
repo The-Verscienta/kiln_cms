@@ -333,7 +333,7 @@ answer it.
 
 ### The app path and the shell path share one format
 
-`KilnCMS.Backups.Worker` runs the same `pg_dump --format=custom --no-owner
+The in-app backup (`KilnCMS.Backups.Steps`) runs the same `pg_dump --format=custom --no-owner
 --no-privileges`, writes to the same `db/kiln-db-<stamp>.dump` under the same
 `$BACKUP_DIR`, uses the same `.partial`-then-rename discipline, and verifies with
 the same `pg_restore --list` / `tar -tzf`. `backup.sh verify` and `restore.sh`
@@ -355,10 +355,236 @@ The one difference is recovery. A failed in-app backup keeps its finished parts
 so it can be [resumed](#media-backups-in-parts-2218); a failed cron run removes
 the parts it wrote and keeps nothing to resume ([below](#cron-backups-in-parts)).
 
-That constraint is why the worker shells out to `pg_dump` and `tar` rather than
+That constraint is why the app shells out to `pg_dump` and `tar` rather than
 implementing them in Elixir: a hand-rolled export would be a second format
 with a second restore procedure, and the restore path is where a backup system
 earns its keep.
+
+### How an in-app backup runs (#2218)
+
+An in-app backup is a chain of Oban jobs, one per step, on the `backup_steps`
+queue:
+
+**start** → **dump** → **plan** → **archive** (one job per media part) →
+**checksum** → **prune** → **offsite** → **finish**
+
+`plan`, `archive` and `checksum` run only when there is a media directory. Each
+step reads what the previous ones did from `.work/<stamp>/state.json`, does its
+own work and hands over to the next. A failure therefore costs one step, not the
+whole backup: a database dump that verified is not taken again because the
+fourth media part failed.
+
+**One at a time, cluster-wide.** A lock in the database (one row in
+`backup_locks`) lets one chain run at a time across every node. A backup asked
+for while one runs waits behind it ([below](#back-up-while-another-backup-runs)).
+
+**Retries.** Each step has four attempts, 1, 5 and 15 minutes apart, and at
+most 2 hours per attempt. Neither is configurable. The run's log in History
+records each failed attempt. After the fourth, the backup fails.
+
+**Failures a retry cannot fix fail at once**, without spending the remaining
+attempts:
+
+| Failure | Error on the run | What to do |
+|---|---|---|
+| A media part changed on disk between being archived and being checksummed | "Media part(s) changed on disk between being archived and being checksummed: `<names>`. Something other than this backup wrote to the backup directory; Resume rebuilds the changed part(s)." | Find what writes to `BACKUP_DIR`, then **Resume**: it rebuilds only the parts whose hash no longer matches. |
+| A file refused before its off-site copy | "Off-site copy REFUSED for …" | [When an off-site copy is refused](#when-an-off-site-copy-is-refused). |
+| The work state is gone, or belongs to another backup | "The backup's work state (.work/`<stamp>`/state.json) is missing or belongs to another backup; nothing more can be done for this one" | Take a new backup. No failure manifest is written, so the panel keeps showing the previous backup. |
+
+**When a backup fails**, it writes a failure manifest (when its `state.json`
+is there to say what landed), marks the run `Failed`, releases the lock and
+starts the queued backup, if there is one. A backup the deployment cannot run
+at all (`BACKUP_ENABLED=false`, no `pg_dump` in the image on the node that
+picked up the start step) is a `Skipped` row and leaves `manifest.json` alone,
+as before.
+
+**Telemetry.** The chain emits, each with measurements `%{count: 1}`:
+
+| Event | Metadata | When |
+|---|---|---|
+| `[:kiln_cms, :backups, :chain, :settled]` | `chain`, `stamp`, `outcome` (`:ok` or `{:error, reason}`) | A chain ended: succeeded, failed, canceled or refused at its start. |
+| `[:kiln_cms, :backups, :request, :folded]` | `trigger`, `resume` | A request folded into the queued one. |
+| `[:kiln_cms, :backups, :lock, :reclaimed]` | `chain`, `stamp`, `step`, `node`, `outcome` (`:requeued` or `:interrupted`) | A step was taken back from a node that stopped responding ([below](#several-nodes-and-the-backup-lock)). |
+
+### Back up while another backup runs
+
+**Back up now** stays enabled while a backup runs. Platform admins only, like
+the rest of the page.
+
+1. Open **Backups** (`/editor/backups`). While a backup runs, a strip below
+   **Back up now** says which step it is on: "Starting a backup", "Dumping the
+   database", "Planning the media archive", "Archiving media: part 2 of 5",
+   "Checking the media parts", "Applying retention", "Copying off-site" or
+   "Finishing", with the backup's stamp. ("part 2 of 5" shows the total only on
+   a node that has the backup's directory.) The page refreshes every 3 seconds
+   while a backup runs, for up to an hour.
+2. Click **Back up now**. The page says "A backup is running; this one starts
+   when it finishes." and the strip adds "1 queued (requested 2026-11-09 03:17
+   UTC)".
+3. Click it again. The page says "A backup is running and another is already
+   queued; that queued backup covers this request." The strip adds "1 later
+   request folded into it". At most one backup waits; every later request
+   folds into it and is logged at `info`: "Backup request folded: a backup
+   (manual) was asked for while one runs and another is queued; the queued
+   backup covers it".
+4. When the running backup ends (succeeded, failed or canceled), the queued
+   one starts with a new stamp. Its log in History starts with "Started from
+   the queue (requested at …); 1 later request(s) folded into it".
+
+A **Resume** click queues and folds the same way. Resuming the backup that is
+running right now is refused: "That backup is running right now." A queued
+request cannot be removed; cancel it once it has started.
+
+### Cancel a running backup
+
+A platform admin can stop an in-app backup that is running. Its files are kept
+so it can be resumed later.
+
+1. Open **Backups** (`/editor/backups`) as a platform admin.
+2. Click **Cancel**, on the in-flight strip or on the `Running` row in
+   **History**. There is none until the backup's row appears in History, and
+   the strip drops it once the backup is finishing.
+3. Confirm "Cancel this backup? Its files are kept, so it can be resumed
+   later." (with "A queued backup will start next." when one is waiting).
+4. The page says "Backup canceled. Its files are kept, so it can be resumed."
+   The row reads `Canceled`, its error "Canceled by a platform admin", and its
+   log "Canceled by `<your email>`".
+
+What Cancel does:
+
+- It cancels the backup's step jobs. A step that is running is stopped, and
+  the `pg_dump`, `tar` or `rclone` it started is killed.
+- It releases the lock, so a queued backup starts next.
+- It does **not** write `manifest.json`: the status panel keeps showing the
+  last backup that finished.
+- It keeps every file and `.work/<stamp>/`. **Resume** on the `Canceled` row
+  continues from them. Retention does not delete a backup whose work directory
+  still exists; the work directory is swept after three days, like any other.
+- It records a **Backup canceled** event in the security log of the default
+  site, with the backup's stamp and the step it was on
+  ([security-events.md](security-events.md)).
+
+What can go wrong:
+
+| Message | Meaning |
+|---|---|
+| "Too late to cancel: the backup is finishing." | The backup has reached its `finish` step and is about to succeed. |
+| "That backup already finished." | It ended between the page loading and the click. |
+| "Only a platform admin can cancel a backup." | Your account is no longer a platform admin. |
+| "That backup can't be canceled." | Anything else, for example a run that is not an in-app backup. |
+
+### Several nodes and the backup lock
+
+The lock is held by a step job on some node. If that node stops, its step must
+not hold every later backup for ever, and two nodes must never write the same
+backup's files at once. Three things keep both true.
+
+**A heartbeat on every node.** Every 30 seconds each node writes a beat to
+`backup_node_beats`, timed by the database's clock, never the node's. It also
+looks at the lock:
+
+- A step on a node with no beat for 180 seconds, or on a node that has
+  restarted since it took the step, is taken back: its job is canceled and
+  requeued with the attempts it had left, under the same stamp, so it reuses
+  every file already finished. The server log says "Backup step `<step>` of
+  `<stamp>` was on node `<node>`, which stopped responding: requeued (job
+  `<id>`)". With no attempts left the backup fails as "Interrupted: node
+  `<node>` stopped responding".
+- A step whose job ended without handing over (its last attempt timed out
+  after 2 hours, or the job was discarded or deleted) fails the backup as
+  "Interrupted: the backup's step job ended without finishing its step", and
+  the lock is released.
+- A node that cannot write its beat for 90 seconds (it lost the database)
+  stops its own backup steps before the others take them over.
+
+The same checks run before every backup request, so a stopped node's backup
+never makes a request queue behind it for good. The heartbeat is on by
+default (`config :kiln_cms, KilnCMS.Backups, heartbeat?: true`). Leave it on:
+it is off only in the test build. With it off, a stopped node's step is never
+reclaimed and holds the lock until Oban's Lifeline rescues it (about 3 hours)
+or a platform admin cancels it.
+
+**Node names must be unique.** A beat is keyed by the Oban node name: the
+Erlang node name when the release runs distributed (`kiln_cms@<hostname>` by
+default), else `DYNO`, else the hostname. Two nodes with the same name (say,
+replicas given one fixed `hostname:`) overwrite each other's beat, and a step
+can be taken from a node that is still running it. The server log then reports
+"Backup heartbeat: another node is beating as …".
+
+**Each backup directory has an id.** `<BACKUP_DIR>/.kiln-dir-id` (mode 0600)
+holds a random id, created the first time a node starts a backup there. Every
+step after `start` runs only on a node that reads the same id:
+
+- **One shared volume** mounted on every node: every node reads the same id,
+  so any node runs any step.
+- **A `BACKUP_DIR` per host**: the backup's steps stay on the host whose
+  directory its `start` wrote to. Another node that picks up a step waits
+  30 seconds and puts it back, up to 20 times (about 10 minutes) per attempt,
+  then fails the attempt (`:backup_dir_elsewhere`), which uses one of the four.
+  If that host is gone, the backup ends up failed; take a new one.
+- **A copied backup directory** (restored onto a new host, or cloned) carries
+  the old host's id. Delete `.kiln-dir-id` on the copy so it gets its own.
+
+**Resume needs the host with the files.** The Resume button shows only on a
+node that can see the backup's `.work/<stamp>/`, and the resume's `start` step
+must run on such a node too. On a cluster with a `BACKUP_DIR` per host, a
+resume whose `start` lands elsewhere is refused there (server log: "Backup
+resume refused: :no_state") and the row keeps its status; click **Resume**
+again.
+
+**Pool size.** The `backup_steps` queue runs one job at a time on each node.
+If you size `POOL_SIZE` as the sum of queue limits plus web traffic
+([performance.md](performance.md)), add one.
+
+**Cron is not locked.** `scripts/backup.sh` runs outside the application and
+does not take the lock, so a cron backup and an in-app backup can run at the
+same time. They write different stamps; schedule them apart to keep the load
+down.
+
+### Start a backup from a release console
+
+`KilnCMS.Backups.request/2` is how every in-app backup starts: the page's
+buttons call it as the signed-in platform admin, and a console calls it as the
+backup system actor. Run it on a running node with `rpc`:
+
+```bash
+bin/kiln_cms rpc '{:ok, result} = KilnCMS.Backups.request([trigger: "console"], KilnCMS.Backups.system()); IO.inspect(result)'
+# %{status: :started, chain: "5f0c7c1e-…"}
+```
+
+The match makes `rpc` fail loudly on a refusal rather than exit 0. The result
+is one of:
+
+| Result | Meaning |
+|---|---|
+| `{:ok, %{status: :started, chain: chain}}` | It is running. |
+| `{:ok, %{status: :queued, chain: running}}` | Another backup is running; this one starts after it. `chain` is the running one. |
+| `{:ok, %{status: :folded, chain: running}}` | One is already queued, and it covers this request. |
+| `{:error, reason}` | `:disabled`, `:no_database_url`, `:no_pg_dump` or `:no_pg_restore`; for a resume, `:invalid_stamp`, `:in_flight`, `:no_such_run`, `{:not_resumable, status}` or `:no_state`; or `:forbidden` for an actor who may not ask. |
+
+The trigger is cut to 64 characters, with credentials redacted, before it is
+stored. Other calls:
+
+- **Resume**: `KilnCMS.Backups.request([trigger: "console", resume: "20260805-031700"], KilnCMS.Backups.system())`.
+- **What is running**: `KilnCMS.Backups.in_flight()` returns `nil`, or the
+  chain, its stamp, trigger, step, part, `parts_total`, phase (`:running` or
+  `:finishing`), `acquired_at` and the queued request
+  (`%{trigger, resume, requested_at, folds}` or `nil`).
+- **Wait for it**: `KilnCMS.Backups.await(chain)` returns `:ok` once that
+  chain's backup succeeded, else `{:error, reason}`: the run's error,
+  `:canceled`, `{:skipped, error}`, `:no_run` or `:timeout`. It polls the
+  database (every 2 s, for up to 3 hours by default; `:interval` and
+  `:timeout` in ms), so it works from any node. A timeout stops the wait, not
+  the backup.
+
+**Deprecated.** `KilnCMS.Backups.enqueue/1` is `request/2` as the system actor
+and returns the same map (it returned the `Oban.Job` before #2218).
+`KilnCMS.Backups.Worker.run/3` no longer runs a backup inline in the console:
+it requests one and waits for it, returning `:ok` or `{:error, reason}`, and
+`{:error, :queued}` or `{:error, :folded}` without waiting when another backup
+is running. For an off-site failure the reason is the run's error text. Both,
+the `backups` queue and `KilnCMS.Backups.Worker` are removed in the next minor
+release.
 
 ### Media backups in parts (#2218)
 
@@ -429,32 +655,36 @@ matches what was hashed, **and** a SHA-256 was recorded. An imported cron
 backup stays `unverified (imported)`; its sidecar supplies the hash recorded
 on the row, but nothing is re-checked on import.
 
-**Interrupted? Resume it.** A failed or killed backup leaves its finished work
-in `<BACKUP_DIR>/.work/<stamp>/`: the file lists and a `state.json` recording
-each finished step and part with its hash. The directory is mode 0700, the
-files 0600, and it is removed only when the backup and its off-site copy both
-succeed, so a run that failed off-site can be resumed too. A directory older
-than three days is swept automatically, and with it the chance to resume.
+**Interrupted? Resume it.** A failed, killed or canceled backup leaves its
+finished work in `<BACKUP_DIR>/.work/<stamp>/`: the file lists and a
+`state.json` recording each finished step and part with its hash. Every in-app
+backup has this directory, a database-only one (S3 media adapter, or no media
+directory) included. The directory is mode 0700, the files 0600, and it is
+removed only when the backup and its off-site copy both succeed, so a run that
+failed off-site can be resumed too. A directory older than three days is swept
+automatically, and with it the chance to resume.
 
 1. Open **Backups** (`/editor/backups`) as a platform admin and scroll to
    **History**.
-2. On the failed (or "Interrupted") row, click **Resume**. The button shows
-   only when the work files are still there. A succeeded, skipped or imported
-   row, or a run that is still working, has none.
+2. On the `Failed` (or "Interrupted") or `Canceled` row, click **Resume**. The
+   button shows only when the work files are still there. A succeeded, skipped
+   or imported row, or a run that is still working, has none.
 3. The page shows "Backup resumed — this page updates when it finishes." The
-   same row goes back to `Running`, keeping its stamp and start time.
+   same row goes back to `Running`, keeping its stamp and start time. If
+   another backup is running, the resume
+   [queues behind it](#back-up-while-another-backup-runs) instead.
 
 A resume reuses a part only if its recorded SHA-256 still matches the file on
 disk; anything else is rebuilt. The file list is the one frozen by the first
 attempt. A resumed set can therefore mix times (some parts from the first
 attempt, some from the resume), and the Run's log says which parts were reused.
 Because finished parts are durable, a library too big to finish in one attempt
-converges over repeated resumes. From a release console:
-`KilnCMS.Backups.enqueue(resume: "20260805-031700")` queues it, or
-`KilnCMS.Backups.Worker.run("console", nil, resume: "20260805-031700")` runs it
-inline. A stamp with no failed or stale-running run, or whose work files are
-gone, is refused; a resume never turns into a fresh backup. Re-running the
-whole backup remains the fallback.
+converges over repeated resumes. From a release console, pass `resume:` to
+`KilnCMS.Backups.request/2` ([Start a backup from a release
+console](#start-a-backup-from-a-release-console)). A stamp with no failed,
+canceled or stale-running run, or whose work files are gone, is refused; a
+resume never turns into a fresh backup. Re-running the whole backup remains
+the fallback.
 
 > **Operators who copy the backup directory with `rclone sync $BACKUP_DIR`:**
 > exclude `.work/**`. It holds lists of media file names (and is removed on
@@ -471,9 +701,13 @@ Off-site copies the dump, each
 part and each sidecar, one `rclone copy` per file, each after its own re-hash.
 A failed copy, of a data file or of a sidecar, fails the run: a part set whose
 sidecar never left the host is one `restore.sh` refuses to restore from the
-remote. There is no retry in Kiln itself; rclone's own retries are the retries
-(`--retries`, 3 by default, settable with `RCLONE_RETRIES` in the environment of
-the app or the cron line). The run is marked failed only after those.
+remote. rclone's own retries come first (`--retries`, 3 by default, settable
+with `RCLONE_RETRIES` in the environment of the app or the cron line). In the
+app, a copy that still failed retries the whole off-site step, up to four
+attempts 1, 5 and 15 minutes apart
+([How an in-app backup runs](#how-an-in-app-backup-runs-2218)); rclone skips
+the files the remote already holds unchanged. The run is marked failed only
+after the last attempt. Cron does not retry.
 
 The app prunes before its off-site copy, so expired backups are removed even
 when the off-site copy then fails. Cron prunes only at the end of a run that
@@ -565,18 +799,17 @@ with the digest the error names (`sha256sum <file>`).
 
 1. If you want the changed file as evidence, copy it out of `BACKUP_DIR`
    first. A resume replaces it.
-2. **App, with a media directory:** open **Backups** as a platform admin and
+2. **App:** open **Backups** as a platform admin and
    click **Resume** on the failed History row (see [Interrupted? Resume
    it.](#media-backups-in-parts-2218)). Files that still match `state.json`
    are reused, and only a file that changed (or was replaced by a symlink or
    other non-regular file) is rebuilt. A rebuilt dump is a fresh `pg_dump`,
    taken at resume time. Every file is re-hashed and copied off-site again;
    rclone skips a file the remote already holds unchanged. The row goes back to
-   `Running` and ends `Succeeded`, or `Failed` again and still resumable.
-3. **App, database only** (S3 media adapter, or no media directory): there is
-   no work directory, so there is no Resume. Click **Back up now** for a new
-   backup; the error says "run a new backup to try the off-site copy again".
-4. **Cron:** run `backup.sh all` again (or wait for the next run). Cron has no
+   `Running` and ends `Succeeded`, or `Failed` again and still resumable. A
+   database-only backup (S3 media adapter, or no media directory) resumes the
+   same way.
+3. **Cron:** run `backup.sh all` again (or wait for the next run). Cron has no
    resume; the next run is a new stamp.
 
 A copy that failed (rather than was refused) is retried the same way, after
@@ -664,11 +897,12 @@ admins only, like the rest of the page.
 
 1. Open **Backups** (`/editor/backups`) as a platform admin.
 2. Scroll to **History**. Each row shows the trigger, a status (`Succeeded`,
-   `Failed`, `Running` or `Skipped`), **Database** and **Media** badges, the
+   `Failed`, `Running`, `Skipped` or `Canceled`), **Database** and **Media** badges, the
    size, whether it was verified, its destinations, and whether its files are
    still on this host. A media set written in several parts shows "N parts".
-   A failed or interrupted run shows **Resume**
-   ([above](#media-backups-in-parts-2218)).
+   A failed, interrupted or canceled run shows **Resume**
+   ([above](#media-backups-in-parts-2218)), and a running in-app one
+   **Cancel** ([above](#cancel-a-running-backup)).
 3. Use **Previous** / **Next** to page ("Page 1 of 3").
 
 The files column reads:
@@ -695,11 +929,13 @@ hashed or checked on import (a sidecar's hashes are recorded on the row, not re-
 
 **A failed or refused attempt is history too.** A refusal (for example no
 `pg_dump` in the image) is a `Skipped` row with the reason, and still leaves
-`manifest.json` alone. A backup job killed mid-run stays `Running` until
-it has been quiet for 2h15m (measured from the later of its start and its last
-update, so a resumed run is not failed for its first attempt's age), then reads
-`Failed` ("Interrupted"). Failing to write a row never
-fails the backup itself.
+`manifest.json` alone. A backup whose node stopped is requeued or failed
+("Interrupted") by the heartbeat within a few minutes
+([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)). A
+`Running` row the lock no longer holds (a run from before the upgrade, or one
+the heartbeat could not reach) reads `Failed` ("Interrupted") once it has been
+quiet for 2h15m, measured from the later of its start and its last update.
+Failing to write a row never fails the backup itself.
 
 ### Cron's backups appear in History
 
@@ -743,7 +979,7 @@ system actor and is purged by the staging scrub (`backup_runs_purged`).
 
 ### It needs the client tools in the image
 
-The worker calls `pg_dump`/`pg_restore`, so the runtime image installs
+An in-app backup calls `pg_dump`/`pg_restore`, so the runtime image installs
 `postgresql-client-17`. **Its major version must match the server** — `pg_dump`
 refuses to run against a newer one — so bump the pin in the `Dockerfile`
 alongside your Postgres upgrade.
