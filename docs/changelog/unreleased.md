@@ -1001,6 +1001,17 @@ carries the reasoning.
 
 ## Breaking
 
+<a id="purge-trashed-only"></a>
+
+- **Overlay and plugin code: `purge_<type>` (`purge_page`, `purge_post`,
+  `purge_entry`, …) and `purge_media_item` now refuse a record that isn't in
+  the trash (#2531).** The call returns `Ash.Error.Invalid` containing
+  `Ash.Error.Changes.StaleRecord` and changes nothing. Trash the record first
+  (`destroy_<type>` / `destroy_media_item`), then purge it. Media still being
+  quarantined by the upload pipeline can be purged without trashing. The API
+  never exposed `:purge`, so HTTP clients are unaffected; the nightly
+  trash purge only ever read trashed rows.
+
 <a id="backup-request-api"></a>
 
 - **Console and overlay callers: `KilnCMS.Backups.enqueue/1` returns
@@ -3983,6 +3994,55 @@ carries the reasoning.
     has a new name; delete superseded items in the media library.
 
 ## Fixed
+
+<a id="purge-refuses-restored-rows"></a>
+
+- **A permanent delete no longer removes a record someone restored after the
+  Trash page loaded (#2531).** The trash is a soft delete, and the content
+  and media `:purge` actions were left outside its read filter so they could
+  reach trashed rows. They did not check that the row was still trashed,
+  though, so the Trash page (or the media library's trash view) acted on the
+  row it had listed, whatever had happened to it since. If another admin
+  restored a document and someone then clicked **Delete permanently** on the
+  stale row, the live document was hard-deleted: its pages and artifacts were
+  left in place, and no `deleted` webhook went out. A media file was deleted
+  along with its stored original, variants and cached transforms.
+  - **What changed.** Content `:purge` (every type built on
+    `KilnCMS.CMS.Content`, overlays' included) now deletes only a row whose
+    `archived_at` is set, the mirror of the check `:restore` gained in
+    #2528. `KilnCMS.CMS.MediaItem`'s `:purge` deletes a trashed item or a
+    quarantined one; the second keeps the media pipeline's purge of an upload
+    it refused or that never finished processing (#1659) working. Anything
+    else is refused with an `Ash.Error.Invalid` holding an
+    `Ash.Error.Changes.StaleRecord`, and the purge's hooks roll back with it.
+    The media library deletes stored files only after the purge succeeds, so
+    a refused one leaves them.
+  - **Editors and admins.** On the Trash page, **Restore** or **Delete
+    permanently** on an item another admin restored says *Someone else
+    already restored that item.*; on one someone permanently deleted it says
+    *That item is no longer in the trash — someone permanently deleted it.*
+    Either way the list reloads without the row, so the next click can't
+    fail the same way. Before this, a second restore said *Couldn't restore
+    that item.* and the row stayed listed, failing on every retry. Other
+    refusals keep *Couldn't restore that item.* / *Couldn't delete that
+    item.* and the row. **Empty trash** counts a row that left the trash
+    while it ran as neither deleted nor skipped. In the media library's trash,
+    **Delete permanently** on a file someone restored says *That item is no
+    longer in the trash — someone else restored or deleted it.*
+  - **Restore with a unique field.** Restore on the Trash page now acts on
+    the full row rather than on the narrow one the list reads. The
+    unique-field re-check on restore (#2276) reads `custom_fields`, which the
+    list leaves out, so restoring a document of a type with a `unique` custom
+    field failed there; it now restores, or says *Couldn't restore that
+    item.* when another document holds the value.
+  - **Developers.** Code that calls `purge_<type>` or `purge_media_item` on a
+    record that is not in the trash now gets the `StaleRecord` error. Trash
+    it first (`destroy_<type>`), then purge. The nightly purge reads only
+    trashed rows and is unaffected. New
+    `KilnCMS.CMS.ContentTypes.can_restore?/4` and `can_purge?/4` ask the
+    `:restore` and `:purge` policies for one record. The API never exposes
+    `:purge`, so no API response changes. No migration and no config.
+    Guide: [Trash and restore](../trash.md#delete-permanently).
 
 <a id="unconfirmed-applicant-confirm-first"></a>
 

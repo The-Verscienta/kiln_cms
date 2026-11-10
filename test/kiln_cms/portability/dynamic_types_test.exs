@@ -161,7 +161,8 @@ defmodule KilnCMS.Portability.DynamicTypesTest do
 
       {:ok, envelope} = Export.run([ctx.name], scope(ctx))
 
-      ContentTypes.purge(ctx.name, original, scope(ctx))
+      :ok = ContentTypes.destroy(ctx.name, original, scope(ctx))
+      :ok = ContentTypes.purge(ctx.name, original, scope(ctx))
 
       {:ok, report} = Import.run_envelope(envelope, scope(ctx) ++ [skip_media: true])
 
@@ -184,7 +185,9 @@ defmodule KilnCMS.Portability.DynamicTypesTest do
       {:ok, _} = ContentTypes.transition(ctx.name, "publish", original, scope(ctx))
 
       {:ok, envelope} = Export.run([ctx.name], scope(ctx))
-      ContentTypes.purge(ctx.name, reload(ctx, original.slug), scope(ctx))
+      published = reload(ctx, original.slug)
+      :ok = ContentTypes.destroy(ctx.name, published, scope(ctx))
+      :ok = ContentTypes.purge(ctx.name, published, scope(ctx))
 
       {:ok, report} = Import.run_envelope(envelope, scope(ctx) ++ [skip_media: true])
       assert report.failed == []

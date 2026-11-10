@@ -8,6 +8,7 @@ defmodule KilnCMSWeb.TrashLive do
 
   import Ash.Expr, only: [expr: 1]
 
+  alias Ash.Error.Changes.StaleRecord
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Errors.TargetStillConnected
 
@@ -38,7 +39,9 @@ defmodule KilnCMSWeb.TrashLive do
   # `Cache.key/5` as `%Ash.NotLoaded{}` and raised inside `BustContentCache`'s
   # `after_action`, so the transaction rolled back and Restore in this very
   # LiveView simply failed — before #1025 gave the action a second consumer of
-  # the same attribute (`FireArtifacts` puts it in the Oban args).
+  # the same attribute (`FireArtifacts` puts it in the Oban args). Restore and
+  # purge now act on the full row (`current/4`, #2531); this projection still
+  # feeds the list and the `can_*?` checks that run before them.
   @list_fields [
     :id,
     :org_id,
@@ -99,20 +102,9 @@ defmodule KilnCMSWeb.TrashLive do
   @impl true
   def handle_event("restore", %{"kind" => kind, "id" => id}, socket)
       when is_binary(kind) and is_binary(id) do
-    actor = socket.assigns.actor
-
     case find_item(socket.assigns.items, kind, id) do
-      nil ->
-        {:noreply, socket}
-
-      record ->
-        case do_restore(kind, record, actor, socket.assigns.current_org) do
-          {:ok, _} ->
-            {:noreply, socket |> load_items() |> put_flash(:info, gettext("Restored."))}
-
-          _ ->
-            {:noreply, put_flash(socket, :error, gettext("Couldn't restore that item."))}
-        end
+      nil -> {:noreply, socket}
+      record -> {:noreply, restore(socket, kind, record)}
     end
   end
 
@@ -120,24 +112,9 @@ defmodule KilnCMSWeb.TrashLive do
   # the button; the destroy itself is admin-only at the resource policy.
   def handle_event("purge", %{"kind" => kind, "id" => id}, socket)
       when is_binary(kind) and is_binary(id) do
-    actor = socket.assigns.actor
-
     case find_item(socket.assigns.items, kind, id) do
-      nil ->
-        {:noreply, socket}
-
-      record ->
-        case do_purge(kind, record, actor, socket.assigns.current_org) do
-          :ok ->
-            {:noreply,
-             socket |> load_items() |> put_flash(:info, gettext("Permanently deleted."))}
-
-          {:error, error} ->
-            {:noreply, put_flash(socket, :error, purge_error(error, record))}
-
-          _ ->
-            {:noreply, put_flash(socket, :error, gettext("Couldn't delete that item."))}
-        end
+      nil -> {:noreply, socket}
+      record -> {:noreply, purge(socket, kind, record)}
     end
   end
 
@@ -202,17 +179,50 @@ defmodule KilnCMSWeb.TrashLive do
     end
   end
 
-  defp do_purge(kind, record, actor, org),
-    do: ContentTypes.purge(kind, record, actor: actor, tenant: org)
+  # The purge runs on the row as it is now, read in full: the list holds a
+  # narrow projection (`@list_fields`), and Ash loads the missing columns
+  # before a destroy — which raises for a row someone purged meanwhile
+  # (#2531). The policy is asked first, so a refused editor gets the generic
+  # message rather than a trash read filtered to nothing reading as "gone".
+  defp purge(socket, kind, record) do
+    %{actor: actor, current_org: org} = socket.assigns
+    failed = gettext("Couldn't delete that item.")
+
+    with true <- ContentTypes.can_purge?(kind, record, actor, tenant: org),
+         %{} = row <- current(kind, record, actor, org),
+         :ok <- ContentTypes.purge(kind, row, actor: actor, tenant: org) do
+      socket |> load_items() |> put_flash(:info, gettext("Permanently deleted."))
+    else
+      false ->
+        put_flash(socket, :error, failed)
+
+      nil ->
+        stale(socket, kind, record, failed)
+
+      {:error, error} ->
+        if stale?(error),
+          do: stale(socket, kind, record, failed),
+          else: put_flash(socket, :error, purge_error(error, record))
+    end
+  end
+
+  # `record`'s row in full while it is still in the trash, else `nil`.
+  defp current(kind, record, actor, org) do
+    kind
+    |> ContentTypes.list_trashed!(actor: actor, tenant: org, query: [filter: [id: record.id]])
+    |> List.first()
+  end
 
   # Purge one type's trash in @page_size batches, walking oldest-first behind
   # an archived_at cursor so rows whose purge failed are never refetched (and
   # never loop). Totals are {purged, skipped}. Every read/purge is scoped to
-  # `org` (epic #336).
+  # `org` (epic #336). Full rows, not `@list_fields`: a row someone purged
+  # mid-walk must come back as a `StaleRecord`, and a narrow one makes Ash
+  # load the rest first, which raises for a row that is gone (#2531).
   defp purge_all(ct, actor, org, {ok, skipped, held}, cursor) do
     query =
       if(cursor, do: [{:filter, expr(archived_at > ^cursor)}], else: []) ++
-        [select: @list_fields, sort: [archived_at: :asc], limit: @page_size]
+        [sort: [archived_at: :asc], limit: @page_size]
 
     batch = ContentTypes.list_trashed!(ct, actor: actor, tenant: org, query: query)
 
@@ -232,8 +242,14 @@ defmodule KilnCMSWeb.TrashLive do
   # rule kept (R5), counted apart so the flash can say why.
   defp tally(:ok, {ok, skipped, held}), do: {ok + 1, skipped, held}
 
+  # A row someone else restored or purged mid-walk (#2531) left the trash on
+  # its own: neither purged here nor skipped.
   defp tally({:error, error}, {ok, skipped, held}) do
-    if still_connected(error), do: {ok, skipped, held + 1}, else: {ok, skipped + 1, held}
+    cond do
+      stale?(error) -> {ok, skipped, held}
+      still_connected(error) -> {ok, skipped, held + 1}
+      true -> {ok, skipped + 1, held}
+    end
   end
 
   defp tally(_other, {ok, skipped, held}), do: {ok, skipped + 1, held}
@@ -256,6 +272,39 @@ defmodule KilnCMSWeb.TrashLive do
     end
   end
 
+  # `:restore` and `:purge` both take only a row still in the trash (#2531),
+  # so a held row someone else restored or purged since this page rendered
+  # comes back as a `StaleRecord`.
+  defp stale?(%Ash.Error.Invalid{errors: errors}),
+    do: Enum.any?(errors, &match?(%StaleRecord{}, &1))
+
+  defp stale?(_error), do: false
+
+  # Which of the two it was: one read by id as the editor, which never sees
+  # trashed rows — found means it is live again, not found means it is gone.
+  # Either way the row leaves the list, so the next click can't fail the same
+  # way. Any other read failure keeps the action's generic `failed` message.
+  defp stale(socket, kind, record, failed) do
+    message =
+      case ContentTypes.get_record(kind, record.id,
+             actor: socket.assigns.actor,
+             tenant: socket.assigns.current_org
+           ) do
+        {:ok, _live} ->
+          gettext("Someone else already restored that item.")
+
+        {:error, %Ash.Error.Invalid{errors: errors}} ->
+          if Enum.any?(errors, &match?(%Ash.Error.Query.NotFound{}, &1)),
+            do: gettext("That item is no longer in the trash — someone permanently deleted it."),
+            else: failed
+
+        {:error, _error} ->
+          failed
+      end
+
+    socket |> load_items() |> put_flash(:error, message)
+  end
+
   defp still_connected(%TargetStillConnected{} = error), do: error
 
   defp still_connected(%{errors: errors}) when is_list(errors),
@@ -269,8 +318,29 @@ defmodule KilnCMSWeb.TrashLive do
     end)
   end
 
-  defp do_restore(kind, record, actor, org),
-    do: ContentTypes.restore(kind, record, actor: actor, tenant: org)
+  # On the full row, like `purge/3`: the unique-field re-check on `:restore`
+  # reads the custom field values, which `@list_fields` leaves out.
+  defp restore(socket, kind, record) do
+    %{actor: actor, current_org: org} = socket.assigns
+    failed = gettext("Couldn't restore that item.")
+
+    with true <- ContentTypes.can_restore?(kind, record, actor, tenant: org),
+         %{} = row <- current(kind, record, actor, org),
+         {:ok, _} <- ContentTypes.restore(kind, row, actor: actor, tenant: org) do
+      socket |> load_items() |> put_flash(:info, gettext("Restored."))
+    else
+      false ->
+        put_flash(socket, :error, failed)
+
+      nil ->
+        stale(socket, kind, record, failed)
+
+      {:error, error} ->
+        if stale?(error),
+          do: stale(socket, kind, record, failed),
+          else: put_flash(socket, :error, failed)
+    end
+  end
 
   @impl true
   def render(assigns) do
