@@ -502,7 +502,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **`mix kiln.fields.convert` and `mix kiln.media.resnapshot` now also process trashed documents, without firing them, so a document restored after a contract release has the new shape. A trashed record that fails is reported as `(trashed)` and blocks nothing; re-run both right before the contract release.**
-  ([#2533](https://github.com/The-Verscienta/kiln_cms/issues/2533) · [long form](docs/changelog/unreleased.md#contract-backfills-reach-trash))
+  ([#2622](https://github.com/The-Verscienta/kiln_cms/pull/2622) · [long form](docs/changelog/unreleased.md#contract-backfills-reach-trash))
 
 - **Field locks (collaborative editing): a field its holder leaves while a takeover waits on their save now stays theirs until that save lands, then goes to the taker, so a third editor can no longer grab it and then lose it, unsaved, when the takeover went through.**
   ([#2619](https://github.com/The-Verscienta/kiln_cms/pull/2619) · [long form](docs/changelog/unreleased.md#field-lock-release-mid-flush))
