@@ -485,7 +485,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2165](https://github.com/The-Verscienta/kiln_cms/issues/2165) · [long form](docs/changelog/unreleased.md#public-image-weight))
 
 - **The console sidebar and the thin page shell render the built-in logo at its small size too, instead of the 95 KB 278x379 original.**
-  A custom `logo_url` is still a plain `<img>`. `KilnCMSWeb.Layouts.brand_logo/1` is removed; use `Layouts.brand_mark/1`.
+  A custom `logo_url` is still a plain `<img>`. The `KilnCMSWeb.Layouts.brand_logo` helper is removed; use `Layouts.brand_mark/1`.
   ([#2400](https://github.com/The-Verscienta/kiln_cms/issues/2400) · [long form](docs/changelog/unreleased.md#console-brand-mark))
 
 - **CSV exports write a negative number as `-5`, not `'-5`; text starting with `=`, `+`, `-` or `@` is still prefixed.**

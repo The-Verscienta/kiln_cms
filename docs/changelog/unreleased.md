@@ -4022,7 +4022,7 @@ carries the reasoning.
   `brand_mark/1`: a `<picture>` of `logo-mark-sm.webp` over
   `logo-mark-sm.png` when the brand uses the built-in logo, and a plain
   `<img>` of exactly the configured URL otherwise.
-  - **Overlays.** `KilnCMSWeb.Layouts.brand_logo/1`, which returned the
+  - **Overlays.** The `KilnCMSWeb.Layouts.brand_logo` helper, which returned the
     resolved logo URL and had no other callers in core, is removed. An
     overlay that called it can use
     `KilnCMS.Branding.for_org(org).logo_url`, or render
