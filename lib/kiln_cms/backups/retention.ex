@@ -19,7 +19,7 @@ defmodule KilnCMS.Backups.Retention do
 
     1. **Recovery point.** A `kiln-<stamp>.keep` entry in `db/` or `media/`
        (`Artifact.keep_name/1`) pins every component of that stamp. Only its
-       presence counts; nothing here reads, writes or deletes a marker, and a
+       presence counts; nothing here reads, writes or deletes a `.keep`, and a
        marker never ages as a stray.
     2. **In flight.** The stamp's Run is `running`, `.work/<stamp>` exists, or
        a `.partial` of that unit is younger than `partial_grace_s/0`.
@@ -41,8 +41,25 @@ defmodule KilnCMS.Backups.Retention do
 
   "Older than `keep_days`" is `find -mtime +keep_days`: an age of at least
   `keep_days + 1` whole days. A `kiln-*` file in `db/` or `media/` that is no
-  unit's member (a "stray") ages alone under the same rule; markers and
-  `.partial` files are never strays.
+  unit's member (a "stray") ages alone under the same rule; markers (`.keep`
+  and `.good`) and `.partial` files are never strays.
+
+  ## The last-good marker
+
+  `kiln-<stamp>.good` (`Artifact.good_name/1`) in `db/` or `media/` names the
+  newest verified unit of that kind (rule 3), for `backup.sh prune`, which has
+  no run history to find it by. This module writes it and is the only thing
+  that removes it: `sync_last_good/1` after a run succeeds, and `run/2` before
+  its first delete (never on a dry run). Per kind, the new marker is written
+  first and the other `.good` entries of that directory are removed only once
+  it is there, so a failed write (a warning and a
+  `[:kiln_cms, :backups, :last_good, :failed]` event) leaves the old marker
+  pinning the previous backup. A kind with no verified unit keeps whatever
+  marker it has. Only regular files are removed; anything else of that name
+  is left and logged.
+
+  The app never reads a `.good` as a keep rule: it works out rule 3 itself,
+  so a stale marker pins nothing here, and its unit ages like any other.
 
   ## Fail closed, loudly
 
@@ -59,9 +76,12 @@ defmodule KilnCMS.Backups.Retention do
   ## What cron can't see
 
   `backup.sh prune` has no database: rules 1, 2 (except a running Run), 4 and
-  6 apply there, and rule 3 does not, so cron can delete the newest verified
-  backup when a newer complete set from a failed run exists. It never deletes
-  strays.
+  6 apply there, and rule 3 only through the last-good marker: a unit with a
+  `.good` in its own directory is kept, so cron keeps the newest verified
+  backup even when a newer complete set from a failed run exists. That holds
+  as long as the app keeps the marker in step; a host whose copy of
+  `backup.sh` predates the marker ignores it. Cron never deletes strays or
+  markers.
   """
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Importer, Recorder, WorkState}
@@ -105,7 +125,15 @@ defmodule KilnCMS.Backups.Retention do
           reason: term()
         }
 
-  @type plan :: %{delete: [entry()], keep: [entry()]}
+  @typedoc """
+  The plan. `last_good` is the newest verified stamp of each kind (rule 3),
+  or `nil`: what the `.good` markers should name.
+  """
+  @type plan :: %{
+          delete: [entry()],
+          keep: [entry()],
+          last_good: %{db: String.t() | nil, media: String.t() | nil}
+        }
 
   @doc """
   How long a `.partial` counts as a live writer's work: younger, and its unit
@@ -115,7 +143,7 @@ defmodule KilnCMS.Backups.Retention do
   def partial_grace_s, do: @partial_grace_s
 
   @doc """
-  Import, plan and delete. Returns `{:ok, %{deleted: names, units: count,
+  Import, plan, sync the last-good markers and delete. Returns `{:ok, %{deleted: names, units: count,
   plan: plan, stopped: nil | reason}}` — `names` are the file names removed,
   already marked `pruned` on their runs; `stopped` is set when the deleting
   itself broke off part-way (what was removed by then is still in `names`) —
@@ -127,7 +155,8 @@ defmodule KilnCMS.Backups.Retention do
       `{:ok, policy} | {:error, reason}`. Defaults to
       `Policy.legacy(Backups.keep_days())`.
     * `:now` - posix seconds (default: now).
-    * `:dry_run` - plan only; delete nothing (default `false`).
+    * `:dry_run` - plan only; delete nothing and write no marker (default
+      `false`).
   """
   @spec run(Path.t(), keyword()) ::
           {:ok,
@@ -166,8 +195,10 @@ defmodule KilnCMS.Backups.Retention do
   end
 
   # Whatever was deleted is marked on its runs, even when the deleting stopped
-  # part-way.
+  # part-way. The markers move first: nothing below deletes the newest
+  # verified unit, and a cron prune that runs meanwhile sees the new one.
   defp execute(dir, plan, opts) do
+    _ = sync(dir, plan.last_good, opts)
     {deleted, units, stopped} = apply_plan(dir, plan, Keyword.take(opts, [:before_unit]))
     Recorder.mark_pruned(deleted)
     if stopped, do: stopped(deleted, stopped)
@@ -239,6 +270,160 @@ defmodule KilnCMS.Backups.Retention do
     end
   end
 
+  ## The last-good marker
+
+  @doc """
+  Bring the `.good` markers in `dir` in step with the newest verified unit of
+  each kind, deleting no backup: the importer, the scan and the Run read of
+  `run/2`, then the marker sync it does before its deletes. Called right
+  after a run succeeds, so the marker names that run before any later run can
+  fail and leave a newer complete set behind.
+
+  Returns `{:ok, %{db: stamp | nil, media: stamp | nil}}` (what the markers
+  should name; a failed write is logged and reported by telemetry, not here),
+  or `{:error, reason}` with no marker written or removed when any step
+  before the sync fails.
+
+  Call it only while holding the backup lock (as the chain's `succeed` and
+  `prune` steps do): two syncs racing on different stamps can each remove
+  the other's marker.
+  """
+  @spec sync_last_good(Path.t(), keyword()) ::
+          {:ok, %{db: String.t() | nil, media: String.t() | nil}} | {:error, term()}
+  def sync_last_good(dir \\ Backups.dir(), opts \\ []) do
+    now = Keyword.get_lazy(opts, :now, fn -> System.os_time(:second) end)
+
+    result =
+      try do
+        with {:ok, _summary} <- import_first(dir),
+             {:ok, inventory} <- scan(dir),
+             {:ok, runs} <- read_runs(stamps(inventory)) do
+          {_units, newest} = newest_slots(inventory, runs, now)
+          last_good = last_good(newest)
+          _ = sync(dir, last_good, opts)
+          {:ok, last_good}
+        end
+      rescue
+        error -> {:error, {:crashed, error.__struct__}}
+      catch
+        # An exit (a DB call timing out) or a throw must not escape either:
+        # the caller releases the backup lock after this returns.
+        kind, _reason -> {:error, {:crashed, kind}}
+      end
+
+    with {:error, reason} <- result do
+      Logger.warning("Backup last-good marker not updated: #{describe(reason)}")
+      marker_failed(%{reason: reason})
+      {:error, reason}
+    end
+  end
+
+  defp last_good(newest) do
+    Map.new([:db, :media], fn kind -> {kind, get_in(newest, [kind, :verified])} end)
+  end
+
+  # Per kind with a verified unit: write its marker, and only once it is
+  # there remove the kind's other markers. A kind with none keeps its marker.
+  # `create_marker:` (tests only) stands in for creating the file, so a test
+  # can fail the write without also failing the removes.
+  defp sync(dir, last_good, opts) do
+    create = Keyword.get(opts, :create_marker, &create_marker/1)
+
+    for {kind, stamp} <- last_good, is_binary(stamp), into: %{} do
+      sub = Artifact.subdir(kind)
+      name = Artifact.good_name(stamp)
+
+      case ensure_marker(dir, sub, name, create) do
+        :ok ->
+          remove_other_markers(dir, sub, name)
+          {kind, :ok}
+
+        {:error, reason} ->
+          Logger.warning(
+            "Backup last-good marker #{sub}/#{name} couldn't be written " <>
+              "(#{inspect(reason)}); the previous marker stays"
+          )
+
+          marker_failed(%{kind: kind, stamp: stamp, reason: reason})
+          {kind, {:error, reason}}
+      end
+    end
+  end
+
+  defp marker_failed(metadata),
+    do: :telemetry.execute([:kiln_cms, :backups, :last_good, :failed], %{count: 1}, metadata)
+
+  # An entry of that name already there, whatever it is, counts: `backup.sh`
+  # reads the listing, not the entry.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp ensure_marker(dir, sub, name, create) do
+    path = Path.join([dir, sub, name])
+
+    case File.lstat(path) do
+      {:ok, _stat} -> :ok
+      {:error, :enoent} -> create.(path)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp create_marker(path) do
+    case File.open(path, [:write, :exclusive]) do
+      {:ok, io} ->
+        File.close(io)
+        File.chmod(path, 0o600)
+
+      {:error, :eexist} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp remove_other_markers(dir, sub, keep) do
+    case File.ls(Path.join(dir, sub)) do
+      {:ok, names} ->
+        for name <- names, name != keep, match?({:ok, _}, Artifact.parse_good_name(name)) do
+          remove_marker(Path.join([dir, sub, name]), "#{sub}/#{name}")
+        end
+
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Couldn't list #{sub}/ to remove old last-good markers (#{inspect(reason)})"
+        )
+
+        :ok
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp remove_marker(path, label) do
+    case File.lstat(path) do
+      {:ok, %{type: :regular}} ->
+        case File.rm(path) do
+          result when result in [:ok, {:error, :enoent}] ->
+            :ok
+
+          {:error, reason} ->
+            # A marker left behind pins its unit for `backup.sh prune` for
+            # good, so it surfaces in telemetry, not only in the log.
+            Logger.warning("Couldn't remove old last-good marker #{label} (#{inspect(reason)})")
+            marker_failed(%{marker: label, reason: {:remove, reason}})
+        end
+
+      {:ok, %{type: type}} ->
+        Logger.warning("Left #{label} in place: a #{type}, not a regular file")
+        marker_failed(%{marker: label, reason: {:not_regular, type}})
+
+      {:error, _gone_or_unreadable} ->
+        :ok
+    end
+  end
+
   ## Scan
 
   @doc """
@@ -286,6 +471,11 @@ defmodule KilnCMS.Backups.Retention do
 
       # A marker-shaped name with a bad stamp pins nothing, and is not a stray.
       String.ends_with?(name, ".keep") ->
+        :ignore
+
+      # A last-good marker is never a keep rule here (the plan works out the
+      # newest verified unit itself) and never a stray; `sync/2` manages it.
+      String.ends_with?(name, ".good") and String.starts_with?(name, "kiln-") ->
         :ignore
 
       true ->
@@ -418,13 +608,25 @@ defmodule KilnCMS.Backups.Retention do
   ## Plan
 
   @doc """
-  The plan for an inventory, pure: `%{delete: entries, keep: entries}`, each
-  entry naming its unit (or stray), its regular files in deletion order and
-  the reason. `runs` maps stamp to Run (or anything with `status`, `origin`
+  The plan for an inventory, pure: `%{delete: entries, keep: entries,
+  last_good: %{db: stamp | nil, media: stamp | nil}}`, each entry naming its
+  unit (or stray), its regular files in deletion order and the reason;
+  `last_good` is the newest verified stamp of each kind (rule 3). `runs` maps stamp to Run (or anything with `status`, `origin`
   and `artifacts`); `now` is posix seconds.
   """
   @spec plan(inventory(), %{String.t() => map()}, Policy.t(), integer()) :: plan()
   def plan(inventory, runs, %Policy{} = policy, now) do
+    {units, newest} = newest_slots(inventory, runs, now)
+
+    entries =
+      Enum.map(units, &decide(&1, runs[&1.stamp], newest, inventory, policy, now)) ++
+        Enum.map(inventory.strays, &decide_stray(&1, policy, now))
+
+    {delete, keep} = Enum.split_with(entries, &(elem(&1, 0) == :delete))
+    %{delete: entries(delete), keep: entries(keep), last_good: last_good(newest)}
+  end
+
+  defp newest_slots(inventory, runs, now) do
     units = inventory.units |> Map.values() |> Enum.filter(&deletable?/1)
 
     candidates =
@@ -433,14 +635,7 @@ defmodule KilnCMS.Backups.Retention do
           not in_flight?(unit, runs[unit.stamp], inventory, now)
       end)
 
-    newest = newest(units, candidates, runs)
-
-    entries =
-      Enum.map(units, &decide(&1, runs[&1.stamp], newest, inventory, policy, now)) ++
-        Enum.map(inventory.strays, &decide_stray(&1, policy, now))
-
-    {delete, keep} = Enum.split_with(entries, &(elem(&1, 0) == :delete))
-    %{delete: entries(delete), keep: entries(keep)}
+    {units, newest(units, candidates, runs)}
   end
 
   defp entries(tagged),

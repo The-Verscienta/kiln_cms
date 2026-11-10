@@ -70,8 +70,20 @@ defmodule KilnCMS.Backups.RetentionRunTest do
     put(dir, "media", "kiln-media-#{@new}.tar.gz", 1)
   end
 
+  # The backups left, without the last-good markers a run now writes (#2219);
+  # `goods/1` lists those, and the tests that are about them use it.
   defp left(dir) do
-    for sub <- ["db", "media"], name <- File.ls!(Path.join(dir, sub)), do: "#{sub}/#{name}"
+    for sub <- ["db", "media"],
+        name <- File.ls!(Path.join(dir, sub)),
+        Artifact.parse_good_name(name) == :error,
+        do: "#{sub}/#{name}"
+  end
+
+  defp goods(dir) do
+    for sub <- ["db", "media"],
+        name <- File.ls!(Path.join(dir, sub)),
+        String.ends_with?(name, ".good"),
+        do: "#{sub}/#{name}"
   end
 
   defp stored(stamp), do: Backups.get_run_by_stamp!(stamp, actor: Backups.system())
@@ -249,6 +261,203 @@ defmodule KilnCMS.Backups.RetentionRunTest do
 
       assert {:ok, %{deleted: [_, _]}} =
                Retention.run(dir, policy: fn -> {:ok, Policy.legacy(3)} end)
+    end
+  end
+
+  describe "the last-good marker (#2219)" do
+    setup do
+      test_pid = self()
+      handler = "last-good-failed-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler,
+        [:kiln_cms, :backups, :last_good, :failed],
+        fn _event, measurements, metadata, _ ->
+          send(test_pid, {:last_good_failed, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+      :ok
+    end
+
+    test "is written in db/ and media/ for the newest verified unit, empty and 0600",
+         %{dir: dir} do
+      newest(dir)
+      dump(dir, @old, 400)
+
+      assert {:ok, %{plan: %{last_good: %{db: @new, media: @new}}}} = Retention.run(dir)
+
+      assert goods(dir) == ["db/kiln-#{@new}.good", "media/kiln-#{@new}.good"]
+
+      for sub <- ["db", "media"] do
+        path = Path.join([dir, sub, Artifact.good_name(@new)])
+        assert File.read!(path) == ""
+        assert File.stat!(path).access == :read_write
+        assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o600
+      end
+    end
+
+    test "moves: the new marker is written and the kind's old ones removed", %{dir: dir} do
+      newest(dir)
+      dump(dir, @old, 1)
+      put(dir, "db", Artifact.good_name(@old), 1, "")
+      put(dir, "db", Artifact.good_name(@older), 1, "")
+      put(dir, "media", Artifact.good_name(@old), 1, "")
+
+      assert {:ok, %{deleted: []}} = Retention.run(dir)
+      assert goods(dir) == ["db/kiln-#{@new}.good", "media/kiln-#{@new}.good"]
+      refute_received {:last_good_failed, _, _}
+    end
+
+    test "a stale marker pins nothing in the app: its unit ages as usual", %{dir: dir} do
+      newest(dir)
+      dump(dir, @old, 400)
+      put(dir, "db", Artifact.good_name(@old), 400, "")
+
+      assert {:ok, %{deleted: deleted, plan: plan}} = Retention.run(dir)
+      assert Enum.sort(deleted) == ["kiln-db-#{@old}.dump", Artifact.sidecar_name(:db, @old)]
+      refute Enum.any?(plan.delete ++ plan.keep, &(&1.kind == :stray))
+      assert goods(dir) == ["db/kiln-#{@new}.good", "media/kiln-#{@new}.good"]
+    end
+
+    test "a dry run writes and removes no marker", %{dir: dir} do
+      newest(dir)
+      put(dir, "db", Artifact.good_name(@old), 1, "")
+
+      assert {:ok, %{plan: %{last_good: %{db: @new}}}} = Retention.run(dir, dry_run: true)
+      assert goods(dir) == ["db/kiln-#{@old}.good"]
+    end
+
+    test "a kind with no verified unit keeps the marker it has", %{dir: dir} do
+      # A part without its sidecar: not complete, so no media unit is verified.
+      dump(dir, @new, 1)
+      put(dir, "media", Artifact.part_name(@old, 1), 1)
+      put(dir, "media", Artifact.good_name(@older), 1, "")
+
+      assert {:ok, %{plan: %{last_good: %{db: @new, media: nil}}}} = Retention.run(dir)
+      assert goods(dir) == ["db/kiln-#{@new}.good", "media/kiln-#{@older}.good"]
+    end
+
+    test "retention skipped (grant revoked): no marker written or removed", %{dir: dir} do
+      newest(dir)
+      put(dir, "db", Artifact.good_name(@old), 1, "")
+
+      assert {:error, {:import, _}} = Backups.with_actor(nil, fn -> Retention.run(dir) end)
+      assert goods(dir) == ["db/kiln-#{@old}.good"]
+    end
+
+    test "a write that fails warns, reports, keeps the old marker, and pruning goes on",
+         %{dir: dir} do
+      newest(dir)
+      dump(dir, @old, 400)
+      put(dir, "db", Artifact.good_name(@old), 1, "")
+      put(dir, "media", Artifact.good_name(@old), 1, "")
+      db_marker = Path.join([dir, "db", Artifact.good_name(@new)])
+
+      # Only the db marker's write fails; removing the old one would work.
+      create = fn
+        ^db_marker -> {:error, :enospc}
+        path -> File.write(path, "")
+      end
+
+      log =
+        capture_log([level: :warning], fn ->
+          assert {:ok, %{deleted: deleted}} = Retention.run(dir, create_marker: create)
+
+          assert Enum.sort(deleted) ==
+                   Enum.sort(["kiln-db-#{@old}.dump", Artifact.sidecar_name(:db, @old)])
+        end)
+
+      assert log =~ "Backup last-good marker db/kiln-#{@new}.good couldn't be written"
+      assert_received {:last_good_failed, %{count: 1}, %{kind: :db, stamp: @new, reason: :enospc}}
+      assert goods(dir) == ["db/kiln-#{@old}.good", "media/kiln-#{@new}.good"]
+    end
+
+    test "a directory it can't write to: the old marker stays, the rest goes on", %{dir: dir} do
+      newest(dir)
+      media_set(dir, @old, [400])
+      put(dir, "db", Artifact.good_name(@old), 1, "")
+      db = Path.join(dir, "db")
+      File.chmod!(db, 0o500)
+      on_exit(fn -> File.chmod(db, 0o700) end)
+
+      if match?({:error, _}, File.write(Path.join(db, "probe"), "")) do
+        assert {:ok, %{deleted: deleted}} = Retention.run(dir)
+        File.chmod!(db, 0o700)
+
+        assert Enum.sort(deleted) ==
+                 Enum.sort([Artifact.part_name(@old, 1), Artifact.sidecar_name(:media, @old)])
+
+        assert_received {:last_good_failed, _, %{kind: :db, reason: :eacces}}
+        assert goods(dir) == ["db/kiln-#{@old}.good", "media/kiln-#{@new}.good"]
+      else
+        # Running as root: permissions don't bind, so there is nothing to test.
+        File.chmod!(db, 0o700)
+      end
+    end
+
+    test "an old marker that is not a regular file is never removed", %{dir: dir} do
+      newest(dir)
+      File.mkdir_p!(Path.join([dir, "db", Artifact.good_name(@old)]))
+      File.ln_s!("/nonexistent", Path.join([dir, "media", Artifact.good_name(@old)]))
+
+      assert {:ok, _} = Retention.run(dir)
+
+      # A marker the app can't clear pins its unit for cron for good: it
+      # surfaces in telemetry, not only in the log.
+      assert_received {:last_good_failed, %{count: 1}, %{reason: {:not_regular, :directory}}}
+      assert_received {:last_good_failed, %{count: 1}, %{reason: {:not_regular, :symlink}}}
+
+      assert goods(dir) == [
+               "db/kiln-#{@new}.good",
+               "db/kiln-#{@old}.good",
+               "media/kiln-#{@new}.good",
+               "media/kiln-#{@old}.good"
+             ]
+
+      assert File.dir?(Path.join([dir, "db", Artifact.good_name(@old)]))
+    end
+
+    test "sync_last_good/1 moves the markers and deletes no backup", %{dir: dir} do
+      newest(dir)
+      dump(dir, @old, 400)
+      put(dir, "db", Artifact.good_name(@old), 1, "")
+      before = Enum.sort(left(dir))
+
+      assert {:ok, %{db: @new, media: @new}} = Retention.sync_last_good(dir)
+      assert Enum.sort(left(dir)) == before
+      assert goods(dir) == ["db/kiln-#{@new}.good", "media/kiln-#{@new}.good"]
+    end
+
+    test "sync_last_good/1 is total: an exit inside it is reported, not raised", %{dir: dir} do
+      newest(dir)
+      put(dir, "db", Artifact.good_name(@old), 1, "")
+
+      capture_log([level: :warning], fn ->
+        assert {:error, {:crashed, :exit}} =
+                 Retention.sync_last_good(dir, create_marker: fn _path -> exit(:timeout) end)
+      end)
+
+      assert_received {:last_good_failed, %{count: 1}, %{reason: {:crashed, :exit}}}
+      assert goods(dir) == ["db/kiln-#{@old}.good"]
+    end
+
+    test "sync_last_good/1 fails closed: a refused history writes and removes nothing",
+         %{dir: dir} do
+      newest(dir)
+      put(dir, "db", Artifact.good_name(@old), 1, "")
+
+      log =
+        capture_log([level: :warning], fn ->
+          assert {:error, {:import, _}} =
+                   Backups.with_actor(nil, fn -> Retention.sync_last_good(dir) end)
+        end)
+
+      assert log =~ "Backup last-good marker not updated"
+      assert_received {:last_good_failed, %{count: 1}, %{reason: {:import, _}}}
+      assert goods(dir) == ["db/kiln-#{@old}.good"]
     end
   end
 

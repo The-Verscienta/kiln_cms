@@ -9,7 +9,8 @@
 #   ./scripts/backup.sh verify   # sanity-check every file of the newest backup(s)
 #   ./scripts/backup.sh prune    # delete backups older than $BACKUP_KEEP_DAYS,
 #                                # except recovery points (kiln-<stamp>.keep),
-#                                # the newest complete one, and work in flight
+#                                # last-good backups (kiln-<stamp>.good), the
+#                                # newest complete one, and work in flight
 #
 # Environment:
 #   DATABASE_URL         source database (required for `db`/`all`; read-only)
@@ -1056,15 +1057,20 @@ cmd_verify() {
 #
 #   - a recovery point pins its stamp: `kiln-<stamp>.keep` (any kind of entry)
 #     in db/ or media/. Only its presence counts; prune never removes one.
+#   - it is the last good backup of its kind: `kiln-<stamp>.good` (any kind of
+#     entry) in ITS OWN directory, so db/kiln-<stamp>.good keeps the dump and
+#     not the media of that stamp. The app writes it on the newest backup its
+#     run history says verified, and moves it; prune never removes one.
 #   - it is in flight: `.work/<stamp>` exists, or one of its `.partial` files is
 #     younger than 60 minutes (the app's partial grace).
 #   - it is the newest COMPLETE unit of its kind (see unit_complete) that is
 #     not in flight and whose stamp is a real date no later than tomorrow.
 #   - any of its regular files is not older than BACKUP_KEEP_DAYS (`-mtime +N`).
 #
-# The app also keeps the newest VERIFIED backup and anything its run history
-# says is running; this script has no database, so it cannot. It never deletes
-# a `.partial`, a symlink, a directory, or a file that is no unit's member.
+# The app also keeps anything its run history says is running; this script has
+# no database, so it cannot, and it knows the newest VERIFIED backup only
+# through the `.good` marker the app keeps on it. It never deletes a
+# `.partial`, a symlink, a directory, or a file that is no unit's member.
 # Only regular files count, judged with `find` (`[ -f ]` follows symlinks).
 
 PART_NUM_ERE='(0[1-9]|[1-9][0-9]|[1-9][0-9]{2,})'
@@ -1198,6 +1204,17 @@ is_pinned() {
   has_line "$PRUNE_PINS" "kiln-${1}.keep"
 }
 
+# Whether the app marked unit ($1 = kind, $2 = stamp) its last good backup of
+# that kind: an entry named `kiln-<stamp>.good` (of any kind) in the listing of
+# that kind's own directory ($PRUNE_DB_NAMES or $PRUNE_MEDIA_NAMES).
+is_last_good() {
+  if [ "$1" = db ]; then
+    has_line "$PRUNE_DB_NAMES" "kiln-${2}.good"
+  else
+    has_line "$PRUNE_MEDIA_NAMES" "kiln-${2}.good"
+  fi
+}
+
 # Whether unit ($2 = kind, $3 = stamp) in $1 has a `.partial` younger than the
 # 60-minute grace. Fails closed: if `find` itself fails, the unit counts as in
 # flight.
@@ -1250,6 +1267,8 @@ cmd_prune() {
     if [ "$kind" = db ]; then db_names="$names"; else media_names="$names"; fi
   done
   PRUNE_PINS="$(printf '%s\n%s\n' "$db_names" "$media_names")"
+  PRUNE_DB_NAMES="$db_names"
+  PRUNE_MEDIA_NAMES="$media_names"
 
   # A backup in flight keeps `.work/<stamp>`; a `.work` that exists but can't
   # be listed means none of them can be ruled out.
@@ -1277,6 +1296,7 @@ cmd_prune() {
       members="$(unit_members "$kind" "$stamp" "$names")"
       [ -n "$members" ] || continue
       is_pinned "$stamp" && continue
+      is_last_good "$kind" "$stamp" && continue
       in_flight "$dir" "$kind" "$stamp" && continue
       [ "$stamp" = "$newest" ] && continue
 

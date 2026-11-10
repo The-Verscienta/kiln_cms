@@ -326,6 +326,54 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert {:ok, %{type: :symlink}} = File.lstat(media_marker)
     end
 
+    test "a last-good marker keeps its own component only (#2219)", ctx do
+      [marked, newest] = ~w(20260101-000000 20260301-000000)
+      marked_files = set_files!(ctx, marked)
+      age!(marked_files ++ set_files!(ctx, newest), 400)
+      File.write!(Path.join(ctx.backups, "db/kiln-#{marked}.good"), "")
+
+      assert {_out, 0} = backup(ctx, "prune")
+
+      {marked_db, marked_media} = Enum.split_with(marked_files, &String.contains?(&1, "/db/"))
+      assert Enum.all?(marked_db, &File.exists?/1)
+      assert Enum.all?(marked_media, &(not File.exists?(&1)))
+    end
+
+    # The owner's sign-off for #2219: a backup the app verified must not be
+    # taken by cron because a later run failed after writing a complete set.
+    test "SIGN-OFF: the newest verified set survives a newer complete set from a failed run",
+         ctx do
+      [older, verified, failed] = ~w(20260101-000000 20260201-000000 20260301-000000)
+      files = Map.new([older, verified, failed], &{&1, set_files!(ctx, &1)})
+      age!(Enum.flat_map(Map.values(files), & &1), 400)
+      # What the app writes on the newest backup its run history verified.
+      File.write!(Path.join(ctx.backups, "db/kiln-#{verified}.good"), "")
+      File.write!(Path.join(ctx.backups, "media/kiln-#{verified}.good"), "")
+
+      assert {_out, 0} = backup(ctx, "prune")
+
+      assert Enum.all?(files[verified], &File.exists?/1)
+      assert Enum.all?(files[failed], &File.exists?/1)
+      assert Enum.all?(files[older], &(not File.exists?(&1)))
+    end
+
+    test "a last-good marker is never deleted, of any kind or age", ctx do
+      newest = "20260301-000000"
+      age!(set_files!(ctx, newest), 400)
+      regular = Path.join(ctx.backups, "db/kiln-20250101-000000.good")
+      link = Path.join(ctx.backups, "media/kiln-20250101-000000.good")
+      current = Path.join(ctx.backups, "db/kiln-#{newest}.good")
+      File.write!(regular, "")
+      File.write!(current, "")
+      File.ln_s!("/nonexistent", link)
+      age!([regular, current], 400)
+
+      assert {_out, 0} = backup(ctx, "prune")
+      assert File.exists?(regular)
+      assert File.exists?(current)
+      assert {:ok, %{type: :symlink}} = File.lstat(link)
+    end
+
     test "a .work/<stamp> or a fresh .partial keeps its unit; an old .partial doesn't", ctx do
       [working, writing, stale, newest] =
         ~w(20260101-000000 20260201-000000 20260301-000000 20260401-000000)
@@ -414,13 +462,29 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     end
 
     # The app and the script must agree wherever the script can see what the
-    # app's rules need: with no run history, `Retention.plan/4` IS the script's
-    # rule set (recovery points, work in flight, newest complete, age).
-    test "PARITY: the app's plan with no history and cron's prune keep the same files", ctx do
+    # app's rules need: recovery points, work in flight, newest complete, age,
+    # and newest verified, which the script sees through the `.good` markers
+    # the app keeps on it (#2219). The app reads its run history instead (the
+    # runs below), never the markers.
+    test "PARITY: the app's plan and cron's prune keep the same files", ctx do
       expected = parity_fixture!(ctx)
 
+      runs = %{
+        "20250315-000000" => %{
+          status: :succeeded,
+          origin: :app,
+          artifacts: [%{kind: :db, verified: true}, %{kind: :media, verified: true}]
+        },
+        "20250701-000000" => %{
+          status: :failed,
+          origin: :app,
+          artifacts: [%{kind: :db, verified: false}]
+        }
+      }
+
       {:ok, inventory} = Retention.scan(ctx.backups)
-      plan = Retention.plan(inventory, %{}, Policy.legacy(14), System.os_time(:second))
+      plan = Retention.plan(inventory, runs, Policy.legacy(14), System.os_time(:second))
+      assert plan.last_good == %{db: "20250315-000000", media: "20250315-000000"}
       planned = for e <- plan.delete, name <- e.files, into: MapSet.new(), do: "#{e.sub}/#{name}"
       app_survivors = MapSet.difference(listing(ctx), planned)
 
@@ -511,6 +575,20 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     for i <- 1..2, do: put.("media/kiln-media-20251201-000000.part0#{i}.tar.gz", 1, "p")
     put.("media/kiln-20240101-000000.keep", 400, "")
 
+    # S14 (#2219): a verified set older than the newest complete ones (S7's
+    # dump is a failed run's) → kept, by its run in the app and by its `.good`
+    # markers in cron. A stale `.good` on a gone stamp → untouched by both.
+    put.("db/kiln-db-20250315-000000.dump", 400, "d")
+    put.("db/kiln-db-20250315-000000.sha256", 400, "s")
+    put.("media/kiln-media-20250315-000000.tar.gz", 400, "m")
+    # The names the script reads are the ones the app writes.
+    assert KilnCMS.Backups.Artifact.good_name("20250315-000000") == "kiln-20250315-000000.good"
+    assert KilnCMS.Backups.Artifact.subdir(:db) == "db"
+    assert KilnCMS.Backups.Artifact.subdir(:media) == "media"
+    put.("db/kiln-20250315-000000.good", 400, "")
+    put.("media/kiln-20250315-000000.good", 400, "")
+    put.("db/kiln-20240101-000000.good", 400, "")
+
     [
       {"db/kiln-db-20250101-000000.dump", false},
       {"media/kiln-media-20250101-000000.tar.gz", false},
@@ -534,6 +612,12 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       {"db/kiln-db-20251101-000000.dump", true},
       {"media/kiln-media-20251201-000000.part01.tar.gz", true},
       {"media/kiln-20240101-000000.keep", true},
+      {"db/kiln-db-20250315-000000.dump", true},
+      {"db/kiln-db-20250315-000000.sha256", true},
+      {"media/kiln-media-20250315-000000.tar.gz", true},
+      {"db/kiln-20250315-000000.good", true},
+      {"media/kiln-20250315-000000.good", true},
+      {"db/kiln-20240101-000000.good", true},
       {"db/kiln-db-29991231-000000.dump", false},
       {"media/kiln-media-20251399-000000.tar.gz", false},
       {"db/kiln-db-20251131-000000.dump", false},

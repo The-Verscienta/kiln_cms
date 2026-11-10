@@ -285,6 +285,19 @@ defmodule KilnCMS.Backups.ImporterTest do
       assert {:ok, %{imported: 0}} = Importer.run()
     end
 
+    test "a last-good marker is never imported (#2219)", %{dir: dir} do
+      stamp = "20260801-031700"
+
+      for sub <- ["db", "media"] do
+        path = Path.join([dir, sub, Artifact.good_name(stamp)])
+        File.write!(path, "")
+        File.touch!(path, System.os_time(:second) - 3600)
+      end
+
+      assert {:ok, %{imported: 0, pending: 0, skipped: 0}} = Importer.run()
+      assert all_runs() == []
+    end
+
     test "an impossible stamp is skipped with a count, never a crash", %{dir: dir} do
       put(dir, :db, "20261340-996199")
       put(dir, :db, "20260801-031700")

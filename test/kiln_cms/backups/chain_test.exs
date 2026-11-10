@@ -667,6 +667,54 @@ defmodule KilnCMS.Backups.ChainTest do
       assert prune_at < offsite_at
       refute File.exists?(old)
     end
+
+    # #2219, critic amendment A-1: the marker lands when the run succeeds, not
+    # at the next prune, so a run that fails in between can't leave cron a
+    # newer complete set to keep instead of the verified one.
+    test "a run that succeeds is marked last good at once, and cron's prune keeps it after a " <>
+           "later run fails leaving a newer complete dump",
+         %{base: base, dir: dir} do
+      assert :ok = BackupChain.run()
+      assert [%{stamp: good, status: :succeeded}] = runs()
+
+      assert File.exists?(Path.join([dir, "db", Artifact.good_name(good)]))
+      assert File.exists?(Path.join([dir, "media", Artifact.good_name(good)]))
+
+      # The next run dumps the database, then fails planning the media.
+      set_config(media_dir: Path.join(base, "gone"))
+      assert {:error, _} = BackupChain.run()
+
+      assert [%{stamp: failed, status: :failed}] =
+               Enum.filter(runs(), &(&1.stamp != good))
+
+      newer_dump = Path.join([dir, "db", "kiln-db-#{failed}.dump"])
+      assert File.regular?(newer_dump) and File.stat!(newer_dump).size > 0
+      assert failed > good
+
+      # The failed run's `.work/<stamp>` keeps it in flight for a resume until
+      # the sweep removes it (`Steps.sweep_work_dirs/2`, days later): gone here,
+      # as it will be by the time its files are past BACKUP_KEEP_DAYS.
+      assert File.dir?(Path.join([dir, ".work", failed]))
+      File.rm_rf!(Path.join([dir, ".work", failed]))
+
+      # Past BACKUP_KEEP_DAYS, everything: only the rules can keep a file now.
+      long_ago = System.os_time(:second) - 30 * 24 * 3600
+
+      for sub <- ["db", "media"],
+          name <- File.ls!(Path.join(dir, sub)),
+          do: File.touch!(Path.join([dir, sub, name]), long_ago)
+
+      script = Path.expand("../../../scripts/backup.sh", __DIR__)
+
+      assert {_out, 0} =
+               System.cmd("bash", [script, "prune"],
+                 env: [{"BACKUP_DIR", dir}, {"BACKUP_KEEP_DAYS", "14"}, {"MEDIA_DIR", nil}],
+                 stderr_to_stdout: true
+               )
+
+      assert File.exists?(Path.join([dir, "db", "kiln-db-#{good}.dump"]))
+      assert File.exists?(newer_dump)
+    end
   end
 
   defp wait_until(fun, tries \\ 400) do

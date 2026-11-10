@@ -195,6 +195,33 @@ defmodule KilnCMS.Backups.RetentionTest do
     end
   end
 
+  describe "last_good (#2219)" do
+    test "is the newest verified stamp of each kind, never a newer complete one" do
+      runs = %{
+        @a => ok_run([:db, :media]),
+        @b => ok_run([:db]),
+        @c => %{run_with(:failed) | artifacts: [%{kind: :db, verified: false}]}
+      }
+
+      units = [db(@a, 400), media(@a, 400), db(@b, 400), db(@c, 400), media(@c, 1)]
+
+      assert %{last_good: %{db: @b, media: @a}} = plan(units, runs)
+    end
+
+    test "is nil for a kind with no verified unit, or none at all" do
+      runs = %{@a => run_with(:failed)}
+
+      assert %{last_good: %{db: nil, media: nil}} = plan([db(@a, 400)], runs)
+      assert %{last_good: %{db: nil, media: nil}} = plan([])
+    end
+
+    test "never names a unit in flight" do
+      runs = Map.new([@a, @b], &{&1, ok_run([:db])})
+
+      assert %{last_good: %{db: @a}} = plan([db(@a, 400), db(@b, 0)], runs, work: [@b])
+    end
+  end
+
   describe "who may hold the newest slots" do
     test "a run in flight never takes newest complete from the last finished backup" do
       # Every earlier run failed, so nothing is verified; @c is the worker's
@@ -426,7 +453,7 @@ defmodule KilnCMS.Backups.RetentionTest do
 
     test "a unit of nothing but symlinks is not in the plan at all" do
       only_links = media(@a, 400, part_opts: %{1 => [type: :symlink]}, sidecar?: false)
-      assert plan([only_links]) == %{delete: [], keep: []}
+      assert plan([only_links]) == %{delete: [], keep: [], last_good: %{db: nil, media: nil}}
     end
 
     test "a stray ages alone under keep_days" do
