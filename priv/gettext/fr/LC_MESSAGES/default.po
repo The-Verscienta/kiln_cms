@@ -24054,6 +24054,11 @@ msgstr "Vous ne pouvez pas créer ce contenu."
 msgid "You can't create this here."
 msgstr "Vous ne pouvez pas créer ceci ici."
 
+#: lib/kiln_cms_web/workflow_messages.ex
+#, elixir-autogen, elixir-format
+msgid "You can't edit this content type."
+msgstr "Vous ne pouvez pas modifier ce type de contenu."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "You can't restore versions of this content."
