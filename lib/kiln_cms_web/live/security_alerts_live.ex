@@ -88,7 +88,7 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
 
     socket
     |> assign(:settings, settings)
-    |> assign(:no_member_admins?, Alerts.site_recipients(socket.assigns.current_org) == [])
+    |> assign(:no_member_admins?, not Alerts.member_admins?(socket.assigns.current_org))
     |> assign(:form, to_form(settings_params(settings), as: :alerts))
   end
 
@@ -216,14 +216,14 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
         :if={@no_member_admins?}
         id="security-alerts-no-admins"
         role="status"
-        class="mt-6 flex gap-3 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm"
+        class="mt-6 flex gap-3 rounded-lg border border-info/40 bg-info/10 p-4 text-sm"
       >
-        <.icon name="hero-exclamation-triangle" class="mt-0.5 size-5 shrink-0" />
+        <.icon name="hero-information-circle" class="mt-0.5 size-5 shrink-0" />
         <div>
           <p class="font-medium">{gettext("This site has no admins of its own.")}</p>
           <p class="mt-1 text-base-content/70">
             {gettext(
-              "Site alerts go only to people who are admins of this site through their membership. With none, they reach nobody by bell or email; webhooks subscribed to security events still receive them."
+              "Until someone is an admin of this site through their membership, its alerts and notices go to the platform admins instead. Once the site has an admin of its own, they go to its admins only."
             )}
           </p>
         </div>

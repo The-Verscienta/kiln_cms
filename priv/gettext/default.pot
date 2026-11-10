@@ -18960,11 +18960,6 @@ msgstr ""
 msgid "Site admin"
 msgstr ""
 
-#: lib/kiln_cms_web/live/security_alerts_live.ex
-#, elixir-autogen, elixir-format
-msgid "Site alerts go only to people who are admins of this site through their membership. With none, they reach nobody by bell or email; webhooks subscribed to security events still receive them."
-msgstr ""
-
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Site default (completes it)"
@@ -23066,6 +23061,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Until"
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Until someone is an admin of this site through their membership, its alerts and notices go to the platform admins instead. Once the site has an admin of its own, they go to its admins only."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex

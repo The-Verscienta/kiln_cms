@@ -194,16 +194,48 @@ defmodule KilnCMS.Security.DeliverAlertTest do
           do: refute(to_string(user.email) in sent)
     end
 
-    test "a site with no member admins tells nobody, but its webhooks still go", ctx do
+    test "a site with no member admins tells the platform admins instead (OC-1)", ctx do
       bare = org("deliver-bare")
+      muted_platform = user(:admin, %{notify_on_security_alert: false})
       endpoint!(bare.id, ["security.lockout"], ctx.platform)
 
       lockout(bare.id)
       SecurityAlerts.deliver()
 
-      assert bells() == []
-      assert mails() == []
+      bell_users = bell_users(:security_alert)
+      assert ctx.platform.id in bell_users
+      assert muted_platform.id in bell_users
+      # The site's bell, not the default site's: it is the site's alert.
+      assert Enum.all?(bells(), &(&1.org_id == bare.id))
+      # Their email follows the site-alert mute, like a member admin's.
+      to = recipients(mails())
+      assert to_string(ctx.platform.email) in to
+      refute to_string(muted_platform.email) in to
+      # No member admin of another site hears about it.
+      refute ctx.other_admin.id in bell_users
       assert [%{event: "security.lockout"}] = deliveries()
+    end
+
+    test "a site with no member admins sends its notices to the platform admins (OC-2)", ctx do
+      bare = org("deliver-bare-notice")
+
+      KilnCMS.Security.AlertGate.insert_notice!(bare.id, %{
+        change: "kind_disabled",
+        kinds: ["lockout"],
+        actor_id: ctx.platform.id
+      })
+
+      SecurityAlerts.deliver()
+
+      assert ctx.platform.id in bell_users(:security_notice)
+      refute ctx.admin.id in bell_users(:security_notice)
+    end
+
+    test "a site with member admins never adds the platform admins", ctx do
+      lockout(ctx.org.id)
+      SecurityAlerts.deliver()
+
+      refute ctx.platform.id in bell_users(:security_alert)
     end
 
     test "a kind the site turned off sends nothing, not even its summary", ctx do

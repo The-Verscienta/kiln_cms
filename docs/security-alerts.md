@@ -62,9 +62,9 @@ Platform alerts (always on):
 
 | | Bell | Email | Webhook |
 |---|---|---|---|
-| Site alert | Each **member admin** of the site, unless the site switched admin notifications off | The same people, except those who muted the email | The site's endpoints subscribed to `security.<kind>` |
+| Site alert | Each **member admin** of the site (the platform admins when it has none), unless the site switched admin notifications off | The same people, except those who muted the email | The site's endpoints subscribed to `security.<kind>` |
 | Platform alert | Every platform admin, in the **default site's** bell | Every platform admin; no mute applies | None in this release |
-| Silencing notice | Each member admin of the site | Each member admin; no setting or mute applies | The site's endpoints subscribed to `security.alerts_silenced` |
+| Silencing notice | Each member admin of the site (the platform admins when it has none) | The same people; no setting or mute applies | The site's endpoints subscribed to `security.alerts_silenced` |
 
 A **member admin** is an account with an active membership on the site whose
 role there is admin, standing or by a live temporary grant, that is not a
@@ -75,12 +75,13 @@ Platform admins get platform alerts, not site alerts, even on a site where
 they also hold an admin membership: on an installation with many sites they
 would otherwise hear about every site's lockouts.
 
-**A site with no member admins gets no bell or email for its site alerts.**
-On a single-site installation the operator is often a platform admin with no
-membership on the site, and then nobody is told by bell or email. Webhooks
-still go. The Security alerts page warns when this is the case: "This site has
-no admins of its own." To fix it, give at least one person an admin
-membership on the site (Team).
+**A site with no member admins sends its alerts and notices to the platform
+admins.** On a single-site installation the operator is often a platform admin
+with no membership on the site; they are then the only admins the site has, so
+its site alerts and silencing notices go to them, in that site's bell, and its
+alert email follows their **Your settings** mute like a member admin's. The
+Security alerts page says so: "This site has no admins of its own." As soon as
+the site has a member admin, alerts go to its member admins only.
 
 A platform alert's bell row lives in the default site, because the bell is per
 site. A platform admin sees it in the bell while working in the default site's
@@ -423,7 +424,7 @@ are two deliveries.
 
 | You see | Meaning |
 |---|---|
-| No alerts at all on a site | The site has no member admins (the page says "This site has no admins of its own."), or **Notify this site's admins by bell and email** is off, or the kind is off. |
+| No alerts at all on a site | **Notify this site's admins by bell and email** is off, or the kind is off. (A site with no member admins sends its alerts to the platform admins.) |
 | An alert email is missing, the bell row is there | You muted the email in **Your settings**. Platform alerts and notices ignore the mute. |
 | A platform alert is not in the bell | Platform alerts are in the default site's bell. Switch to the default site. |
 | Several events, one alert | They fell in one 15-minute window. The summary follows about a minute after the window closes. |

@@ -385,7 +385,16 @@ defmodule KilnCMS.Security.AlertsTest do
       _platform = user(:admin)
 
       assert ids(Alerts.site_recipients(org.id)) == ids([member_admin, temp_admin])
-      assert Alerts.site_recipients(org("alerts-empty").id) == []
+      assert Alerts.member_admins?(org.id)
+    end
+
+    test "a site with no member admins falls back to the platform admins (OC-1)" do
+      platform = user(:admin)
+      empty = org("alerts-empty")
+
+      refute Alerts.member_admins?(empty.id)
+      assert ids(Alerts.site_recipients(empty.id)) == ids(Alerts.platform_recipients())
+      assert platform.id in Enum.map(Alerts.site_recipients(empty.id), & &1.id)
     end
 
     test "platform recipients are every platform admin, temporary included, erased excluded" do

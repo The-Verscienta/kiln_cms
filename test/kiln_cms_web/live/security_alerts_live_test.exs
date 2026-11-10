@@ -97,7 +97,7 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
       {:ok, lv, _html} =
         conn |> org_conn(org) |> log_in(platform) |> live(~p"/editor/security-alerts")
 
-      assert has_element?(lv, "#security-alerts-no-admins", "reach nobody by bell or email")
+      assert has_element?(lv, "#security-alerts-no-admins", "go to the platform admins instead")
     end
 
     test "does not warn when the site has a member admin", ctx do
