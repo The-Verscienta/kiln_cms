@@ -238,6 +238,45 @@ defmodule KilnCMS.Security.Cidr do
   def shared_space?(ip) when is_tuple(ip), do: any_contains?(@shared_ranges, ip)
   def shared_space?(_), do: false
 
+  # Never a client on the public internet: "this network" and the unspecified
+  # address, multicast, the reserved 240/4 block (which holds the limited
+  # broadcast address) and IPv6 multicast.
+  @non_unicast_ranges [
+    {:inet, 0, 8},
+    {:inet, 224 <<< 24, 4},
+    {:inet, 240 <<< 24, 4},
+    {:inet6, 0, 128},
+    {:inet6, 0xFF00 <<< 112, 8}
+  ]
+
+  @doc """
+  Is `ip` a public unicast address: not loopback, not `shared_space?/1`
+  (private, carrier-grade NAT, unique local, link-local), not unspecified or
+  "this network" (`0.0.0.0/8`, `::`), and not multicast or reserved
+  (`224.0.0.0/4`, `240.0.0.0/4`, `ff00::/8`)? An IPv4-mapped address is judged
+  as the IPv4 address it carries. Anything that is not an address tuple is
+  `false`.
+
+  The documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`,
+  `203.0.113.0/24`, `2001:db8::/32`) count as public: no real client arrives
+  from them, and the test suites use them as stand-in public addresses.
+
+  The scanner guard's "is this one visitor" test and crawler verification's
+  "is this worth a DNS lookup" test both read this, so they cannot disagree.
+
+      iex> KilnCMS.Security.Cidr.public_unicast?({66, 249, 66, 1})
+      true
+
+      iex> KilnCMS.Security.Cidr.public_unicast?({0, 0, 0, 0, 0, 0xFFFF, 0x0A00, 0x0001})
+      false
+  """
+  @spec public_unicast?(ip() | nil) :: boolean()
+  def public_unicast?(ip) when tuple_size(ip) in [4, 8] do
+    not loopback?(ip) and not shared_space?(ip) and not any_contains?(@non_unicast_ranges, ip)
+  end
+
+  def public_unicast?(_), do: false
+
   defp check_floor(family, prefix) do
     if prefix < @min_prefix[family], do: {:error, :too_broad}, else: :ok
   end

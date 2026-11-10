@@ -156,11 +156,22 @@ Never counted, so a person or a service is not blocked by mistake:
 - A request with a forwarding header (`X-Forwarded-For` and similar) when no
   proxy is trusted: the address is then the proxy's.
 - An address already on the block list.
-- For the **miss threshold only**, a client whose `User-Agent` claims to be a
-  known crawler (Googlebot, Bingbot, DuckDuckBot, Applebot, YandexBot,
-  Baiduspider, Slurp, facebookexternalhit, Twitterbot, LinkedInBot). The
-  claim is not verified (no reverse DNS), so it is spoofable, which is why
-  **bait paths still count** for them.
+- For the **miss threshold only**, a client whose `User-Agent` names a search
+  engine (Googlebot, Google-InspectionTool, Bingbot, DuckDuckBot, Applebot,
+  YandexBot, Baiduspider) and no AI crawler, unless reverse DNS has proven the claim false (see
+  [Verified search engines](bot-budgets.md#verified-search-engines)). A claim
+  still being checked, or one DNS could not answer, keeps the exemption, so a
+  real crawler's first misses from a new address never count. DuckDuckBot
+  cannot be checked and is always exempt. With `KILN_CRAWLER_VERIFICATION=false`
+  the six names Googlebot, Bingbot, DuckDuckBot, Applebot, YandexBot and
+  Baiduspider in the user agent are enough. **Bait paths count for everyone**:
+  no crawler has a reason to ask for one.
+
+Link-preview fetchers (`facebookexternalhit`, `Twitterbot`, `LinkedInBot`) and
+Yahoo's `Slurp` are **not** exempt, since #2254: anyone can claim to be one,
+and there is nothing to check them against. A site whose shared links often
+point at pages that 404 can see a preview fetcher's address blocked; remove the
+block on `/editor/ip-blocks` and fix or redirect the links.
 
 An IPv6 client is counted and blocked as its `/64`, because a host can rotate
 through its whole prefix. IPv4 is blocked as a single address.

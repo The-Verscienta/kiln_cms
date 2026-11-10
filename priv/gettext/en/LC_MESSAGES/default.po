@@ -9637,7 +9637,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot and Applebot."
+msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot and Applebot, when the address checks out as theirs. A claim proven false counts as No user agent."
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -16584,7 +16584,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Requests that don't say what they are."
+msgid "Requests that don't say what they are, and claimed search engines proven not to be them."
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -21805,6 +21805,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
 msgid "This segment has no confirmed subscribers. Pick another segment, or add and confirm subscribers first."
+msgstr ""
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "This server does not check search-engine claims, so any client naming one gets this budget."
 msgstr ""
 
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex

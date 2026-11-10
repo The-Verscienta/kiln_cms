@@ -91,6 +91,12 @@ defmodule KilnCMS.Application do
       # instance so a content bust never empties it and a flood of orgs cannot
       # evict published pages.
       KilnCMS.Security.IpBlocklist,
+      # Search-engine claims checked against DNS (#2254): the per-address
+      # result cache, the single-flight table and a capped lookup supervisor.
+      # Before the Endpoint, so the first request can already start a lookup;
+      # a lookup that cannot start (busy, restarting) goes unchecked rather
+      # than failing the request.
+      KilnCMS.CrawlerVerification.Supervisor,
       # Content-addressed embedding vectors for the compute-on-demand path
       # (#852). Its OWN instance so an editing session cannot evict the
       # published records `Firing.Delivery` serves from during a DB outage
