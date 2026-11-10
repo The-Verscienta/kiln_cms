@@ -28,6 +28,14 @@ defmodule KilnCMSWeb.BackupLive do
   runs would show "never" on precisely the deployments that are backing up
   correctly — the most dangerous wrong answer this screen could give.
 
+  ## One line per component (#2219)
+
+  A backup may cover only the database or only the media, so the headline has
+  a line for each component this deployment backs up (`Backups.status/0`'s
+  `components`), and the tone is alarming when any of them failed or went
+  stale. The artifacts and the "Last run failed" box below still show the
+  manifest: the last backup, whatever it covered.
+
   ## History
 
   Below the panels, `Backups.Run` rows (#2217) list every attempt: the app's own
@@ -183,6 +191,15 @@ defmodule KilnCMSWeb.BackupLive do
 
       {:ok, %{status: status}} ->
         {:noreply, watch(socket, queued_message(status))}
+
+      # #2219: the queued resume backs up less than this would.
+      {:error, :resume_queued} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           gettext("A resume is queued that doesn't cover this backup. Try again once it starts.")
+         )}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, unavailable_message(reason))}
@@ -483,7 +500,14 @@ defmodule KilnCMSWeb.BackupLive do
               ]}
             />
             <div class="min-w-0 flex-1">
-              <p class="font-medium">{headline(@status)}</p>
+              <p
+                :for={component <- @status.expected}
+                id={"backup-headline-#{component}"}
+                class="font-medium"
+              >
+                <span class="text-base-content/70">{component_label(component)}:</span>
+                {headline(@status.components[component])}
+              </p>
               <p
                 :if={@status.manifest && @status.manifest.artifacts != []}
                 class="mt-1 text-sm text-base-content/70"
@@ -613,6 +637,9 @@ defmodule KilnCMSWeb.BackupLive do
         </p>
         <p :if={@in_flight.waiting} data-role="queued" class="text-xs text-base-content/70">
           {queued_label(@in_flight.waiting)}
+          <span :if={is_nil(@in_flight.waiting.resume)} data-role="queued-components">
+            · {components_label(@in_flight.waiting.components)}
+          </span>
         </p>
       </div>
       <button
@@ -669,6 +696,12 @@ defmodule KilnCMSWeb.BackupLive do
       _ ->
         queued
     end
+  end
+
+  # A queued fresh backup's components (#2219); nil is everything this
+  # deployment backs up.
+  defp components_label(components) do
+    Enum.map_join(components || Backups.expected_components(), " + ", &component_label/1)
   end
 
   defp cancel_confirm(%{waiting: nil}),
@@ -873,20 +906,19 @@ defmodule KilnCMSWeb.BackupLive do
 
   # NOT just `stale?`. A backup that failed a minute ago is not stale — it is
   # recent and it is worthless — and tone driven by age alone rendered "The
-  # last backup failed" with a green tick and a success border.
-  defp alarming?(%{stale?: true}), do: true
-  defp alarming?(%{manifest: %Manifest{ok: false}}), do: true
-  defp alarming?(_status), do: false
+  # last backup failed" with a green tick and a success border. Any component
+  # (#2219): a fresh database backup doesn't make stale media fine.
+  defp alarming?(status), do: status.stale? or status.failed?
 
-  defp headline(%{manifest: nil}), do: gettext("No backup has ever been recorded")
+  # One component's line (#2219).
+  defp headline(%{failed?: true}), do: gettext("The last backup failed")
 
-  defp headline(%{manifest: %Manifest{ok: false}}), do: gettext("The last backup failed")
-
-  defp headline(%{stale?: true, manifest: %Manifest{finished_at: at}}),
+  defp headline(%{last_good: %{at: at}, stale?: true}),
     do: gettext("Last backup was %{ago} ago", ago: ago(at))
 
-  defp headline(%{manifest: %Manifest{finished_at: at}}),
-    do: gettext("Backed up %{ago} ago", ago: ago(at))
+  defp headline(%{last_good: %{at: at}}), do: gettext("Backed up %{ago} ago", ago: ago(at))
+
+  defp headline(_never), do: gettext("No backup has ever been recorded")
 
   defp summary(%Manifest{} = manifest) do
     gettext("%{size} · %{count} file(s) · %{trigger}",
