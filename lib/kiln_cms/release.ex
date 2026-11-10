@@ -206,6 +206,28 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
+  `mix kiln.reserved_paths` for a release (#2374): list the stored records
+  whose slug or path alias a router-owned URL shadows.
+
+      bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'
+
+  Returns `:ok` when there are none, `{:error, message}` otherwise; see
+  `KilnCMS.CMS.ReservedPathAudit`.
+  """
+  @spec reserved_paths() :: :ok | {:error, String.t()}
+  def reserved_paths do
+    load_app()
+
+    {:ok, result, _} =
+      Ecto.Migrator.with_repo(hd(repos()), fn _repo ->
+        KilnCMS.CMS.ReservedPathAudit.run_and_report(&IO.puts/1)
+      end)
+
+    with {:error, message} <- result, do: IO.puts(message)
+    result
+  end
+
+  @doc """
   Rewrite every block tree still stored in a legacy shape to the typed shape
   (#1537) — `mix kiln.blocks.backfill` for a release, which has no Mix:
 
