@@ -32,7 +32,13 @@ metric "headless API p95 under 50 ms" (#1546).
   rate here means every concurrent request is hitting the database at once).
 - **CDN offload.** Published HTML sends `Cache-Control: public, max-age=60,
   stale-while-revalidate=300`, a content `ETag` (→ `304` on `If-None-Match`), and
-  `Vary: Accept-Language`. 404s send `Cache-Control: no-store`. The in-BEAM cache is
+  `Vary: Accept-Language`. The `ETag` also names the running build
+  (`KilnCMSWeb.BuildFingerprint`: the code of Kiln, its overlay and plugins,
+  the version of every application they depend on, and the asset manifest), so a deploy
+  that changes markup is not `304`ed to a client holding the old page. Nodes
+  of one image agree; during a rolling deploy the tag flips between old and
+  new nodes until it finishes. A markup change made only by runtime
+  configuration does not move it. 404s send `Cache-Control: no-store`. The in-BEAM cache is
   single-node, so a CDN in front is what absorbs a viral spike.
 - **Flushing by hand.** Invalidation is automatic and precise on writes, so a
   manual purge is not part of publishing. For the states precise invalidation
