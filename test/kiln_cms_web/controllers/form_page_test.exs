@@ -56,7 +56,9 @@ defmodule KilnCMSWeb.FormPageTest do
   end
 
   describe "an active form" do
-    test "is served as a page in the site's chrome, posting to /forms/<slug>", %{conn: conn} do
+    # Posts under the default locale's prefix on this multi-locale site
+    # (#2595): an unprefixed POST would answer in the session's language.
+    test "is served as a page in the site's chrome, posting to /en/forms/<slug>", %{conn: conn} do
       form = form!()
 
       conn = get(conn, "/forms/#{form.slug}")
@@ -68,7 +70,7 @@ defmodule KilnCMSWeb.FormPageTest do
       assert body =~ "Your email"
 
       assert doc |> LazyHTML.query("form.kiln-form") |> LazyHTML.attribute("action") ==
-               ["/forms/#{form.slug}"]
+               ["/en/forms/#{form.slug}"]
 
       # An on-site submission, not an embedded one: no `_kiln_embed` marker, so
       # the POST answers under the site's own CSP.

@@ -103,13 +103,16 @@ defmodule KilnCMSWeb.CodeBlockDeliveryTest do
   end
 
   # A fallback-served page is in the record's language, and so is its label:
-  # `<html lang>` follows `record.locale`, not the URL.
+  # the article says so with its own `lang`, while `<html lang>` is the
+  # reader's, the URL's (#2595).
   test "an English page served at /fr/ by fallback keeps the English label", %{conn: conn} do
     page = page(%{locale: "en", blocks: [rich([code("x = 1", "cobol")])]})
 
     html = conn |> get("/fr/#{page.slug}") |> html_response(200)
+    doc = LazyHTML.from_document(html)
 
-    assert html =~ ~s(lang="en")
+    assert doc |> LazyHTML.query("html") |> LazyHTML.attribute("lang") == ["fr"]
+    assert doc |> LazyHTML.query("article.public-article") |> LazyHTML.attribute("lang") == ["en"]
     assert html =~ ~s(aria-label="Code sample")
     refute html =~ ~s(aria-label="Exemple de code")
   end

@@ -197,6 +197,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Breaking
 
+- **Public pages take their language from the URL only. On a fallback page `<html lang>` and `Content-Language` now name the reader's (URL) language; the new `x-kiln-locale` header and `<article lang>` name the record's. Style articles with `.public-article:lang(xx)`, not `html[lang]`.**
+  Unprefixed URLs serve only the default locale (a French-only page is a 404 there), and a form page or embed posts under a prefix. Headless APIs unchanged.
+  ([#2646](https://github.com/The-Verscienta/kiln_cms/pull/2646) · [long form](docs/changelog/unreleased.md#public-chrome-follows-url-locale))
+
 - **Overlay and plugin code: `restore_<type>_version` now refuses a record read before a later write (`StaleRecord`) and increments `lock_version`. Read the record again before restoring, and use the one it returns.**
   The revisions restore route answers a lost race with `409` `invalid_state_transition`, not `422`.
   ([#2616](https://github.com/The-Verscienta/kiln_cms/pull/2616) · [long form](docs/changelog/unreleased.md#restore-version-stale-struct))
@@ -524,6 +528,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A visitor's session language no longer reaches shared caches: unprefixed public pages, the blog and event indexes, `index.json`, the stock home and form pages and embeds were cached `public` in whichever language the first visitor's session chose.**
+  ([#2646](https://github.com/The-Verscienta/kiln_cms/pull/2646) · [long form](docs/changelog/unreleased.md#public-delivery-session-locale-leak))
+
 - **`mix kiln.fields.convert` and `mix kiln.media.resnapshot` now also process trashed documents, without firing them, so a document restored after a contract release has the new shape. A trashed record that fails is reported as `(trashed)` and blocks nothing; re-run both right before the contract release.**
   ([#2622](https://github.com/The-Verscienta/kiln_cms/pull/2622) · [long form](docs/changelog/unreleased.md#contract-backfills-reach-trash))
 
@@ -554,7 +561,7 @@ Every summary line below that was shortened links to its own entry there.
 - **A refused workflow action now says why: "Only an admin …" only to an editor (publish, unpublish, archive: where only admins publish; return: any site), "You can't edit this content type." to an editor scoped away from the type (never for the trash), the plain sentence to everyone else.**
   ([#2600](https://github.com/The-Verscienta/kiln_cms/pull/2600) · [long form](docs/changelog/unreleased.md#refusal-wording-names-the-reason))
 
-- **Kiln's own text inside a content page's article (form and sign-up labels and messages, byline and date, the verification widget, an untitled embed's title) now follows the page's `<html lang>`, not the visitor's.**
+- **Kiln's own text inside a content page's article (form and sign-up labels and messages, byline and date, the verification widget, an untitled embed's title) now follows the article's `lang`, not the visitor's.**
   On a multilingual site form and sign-up blocks post to `/<locale>/forms/<slug>` and `/<locale>/newsletter/subscribe`, default locale included; select them by class, not `action`.
   ([#2598](https://github.com/The-Verscienta/kiln_cms/pull/2598) · [long form](docs/changelog/unreleased.md#block-strings-follow-page-locale))
 

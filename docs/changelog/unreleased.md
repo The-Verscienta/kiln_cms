@@ -1123,6 +1123,79 @@ carries the reasoning.
 
 ## Breaking
 
+<a id="public-chrome-follows-url-locale"></a>
+
+- **Public pages take their language from the URL alone, and on a fallback
+  page the chrome is the reader's while the article stays the record's
+  (#2595).** A reader on `/fr/about`, answered by the English page because
+  there is no French one, now gets French chrome around an English article.
+  Before, the whole page claimed the record's language, and an unprefixed URL
+  took its language from the visitor's session (see
+  [Fixed](#public-delivery-session-locale-leak) for why that had to go).
+  - **What follows the reader** (the URL's prefix, or the site's default
+    language without one): `<html lang>`, the `Content-Language` header, the
+    header and footer menus, the stock **Blog** and **Search** links (which
+    keep the prefix), the language switcher, feed autodiscovery, and Kiln's
+    own text outside the article.
+  - **What follows the record:** `<article class="public-article">` now
+    always carries `lang`; a new `x-kiln-locale` response header names it, as
+    it does on the headless APIs; `og:locale`, the canonical URL, `hreflang`
+    and the JSON-LD; and, as since #2465, the text inside the article and the
+    `action` of its form and sign-up blocks. On the locked-page and
+    members-only teaser pages, the document's title and summary carry its
+    `lang` and the rest is chrome.
+  - **Why the reader's.** The words around the article are in the reader's
+    language, so `<html lang>` has to say so for screen readers and
+    hyphenation; the article says its own. The machine-facing description
+    stays with the record so a search engine is not told an English page is
+    French.
+  - **Why it is Breaking.** In v1.8.0 a fallback page sent
+    `<html lang="en">` and `Content-Language: en`, and both were documented.
+    `Content-Language` on the built-in site's HTML now names the URL's
+    language; read `x-kiln-locale` for the served document. A theme that
+    styles article text with `html[lang="fr"]` (quotation marks, hyphenation,
+    a typeface) stops matching fallback articles: use
+    `.public-article:lang(fr)`. Headless APIs (artifact, `/api/resolve`,
+    JSON:API, GraphQL, `/api/menus`) are unchanged: both headers there still
+    name the served locale.
+  - **Unprefixed URLs serve only the default locale.** A document that
+    exists only in French used to answer at `/<slug>` for a visitor whose
+    session said French; now it is a 404 there, and so is an unprefixed old
+    URL that only an `fr` redirect matched. Link to `/fr/<slug>`. A site with
+    one locale is unaffected.
+  - **Form actions.** A form's own page and its embed, on a multilingual
+    site, now post under a language prefix even when the page has none:
+    `/forms/<slug>` and `/forms/<slug>/embed` post to `/en/forms/<slug>`
+    (English being the default). A locked page's passphrase form posts to
+    `/<locale>/_unlock`, so unlocking under `/fr/` returns to `/fr/<slug>`.
+    Select forms by class (`.kiln-form`), not `action`.
+  - **For consistency, not caching:** search (`private, no-cache`), the 404
+    page, and the locked-page and members-only screens also use the URL's
+    language, so `/search` with a French session searches and answers in the
+    default language. Sign-in, the account pages and the console still
+    follow the session.
+  - **Plugin blocks** with their own Gettext backend render in the URL's
+    language, which on a fallback page can differ from `<article lang>`.
+  - **Every delivery `ETag` changes once**, since it now names the URL's
+    language; revalidating clients and CDNs get one round of `200`s. Rolling
+    the pin back is safe and costs another round.
+  - **Known gaps:** the header's brand link points to `/` and drops the
+    reader's prefix
+    ([#2636](https://github.com/The-Verscienta/kiln_cms/issues/2636)); a
+    locale without a Gettext catalog shows English chrome under its own
+    `<html lang>`
+    ([#2637](https://github.com/The-Verscienta/kiln_cms/issues/2637)); and
+    public pages still render a few session-derived bits, such as the CSRF
+    meta tag
+    ([#2630](https://github.com/The-Verscienta/kiln_cms/issues/2630)).
+  - **Developers.** `KilnCMSWeb.Plugs.UrlLocale` sets the locale, the
+    `:locale` assign and the Gettext locale from `path_locale` or the
+    default; `UrlLocale.locale/1` is the same rule as a function. It is
+    plugged on `ContentController`, `EventIndexController`, and
+    `FormController`'s embed. Templates rendered by `ContentController` get
+    `@content_locale` (the record's) next to `@locale` (the reader's).
+    `KilnCMS.I18n.pinned_path/2` is unchanged.
+
 <a id="purge-trashed-only"></a>
 
 - **Overlay and plugin code: `purge_<type>` (`purge_page`, `purge_post`,
@@ -4311,6 +4384,29 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="public-delivery-session-locale-leak"></a>
+
+- **A visitor's session language no longer ends up in shared caches for
+  everyone else (#2595).** On an unprefixed URL Kiln took the language from
+  the visitor's session, then sent the page as `public, max-age=60` with only
+  `Vary: Accept-Language`. A CDN or shared proxy stored the first visitor's
+  French page under `/about` and served it to every visitor for the window.
+  And since the `ETag` named only the record, a validator from `/fr/x` could
+  `304` a request for `/x` answered by the same record in other chrome.
+  The same applied to the blog and event indexes, `/<plural>/index.json`,
+  the stock home, and a form's page and its embed.
+  - **What changed.** Those responses now take their language from the URL
+    alone: the prefix, or the site's default without one. The `ETag` names
+    that language as well as the record's. The visitor's session still sets
+    the language of the console, sign-in and account pages.
+  - **Why not `Vary: Cookie`.** Every browser carries a session cookie, so it
+    would split the cache per visitor, and many CDNs treat it as a bypass.
+    Serving French at `/about` also contradicted that page's canonical,
+    `hreflang` and sitemap entries.
+  - The visible consequences (an unprefixed French-only page is now a 404,
+    prefixed form actions) are under
+    [Breaking](#public-chrome-follows-url-locale).
+
 <a id="contract-backfills-reach-trash"></a>
 
 - **`mix kiln.fields.convert` and `mix kiln.media.resnapshot` now also
@@ -4642,8 +4738,10 @@ carries the reasoning.
   language, and a form or newsletter sign-up on the page answers in it
   (#2465).** A page can be served in a language other than the visitor's: a
   French reader sent to an English page with no French translation gets the
-  English one, with `<html lang="en">` and `Content-Language: en`. The
-  article's blocks were built in English, but Kiln's own strings in them were
+  English one, its `<article>` marked `lang="en"` (since #2595, `<html lang>`
+  and `Content-Language` name the reader's French; see
+  [Breaking](#public-chrome-follows-url-locale)). The article's blocks were
+  built in English, but Kiln's own strings in them were
   rendered in the request's language, so the page mixed the two: an English
   sign-up heading over French **Nom** and **E-mail** fields.
   - **Inside the article** now follows the page: the byline and its date, a
@@ -4652,9 +4750,8 @@ carries the reasoning.
     embed title is also translated in fired `web` artifacts, which render in
     the document's locale.
   - **The chrome around the article** (header, search, language switcher,
-    footer) still follows the request. Whether it should follow the page is
-    an open decision, tracked with a related caching problem in
-    [#2595](https://github.com/The-Verscienta/kiln_cms/issues/2595).
+    footer) follows the reader: the URL's language, never the session's
+    (#2595, see [Breaking](#public-chrome-follows-url-locale)).
   - **Submit paths change on multilingual sites only.** A form block on a
     content page posts to `/<locale>/forms/<slug>` and a sign-up block to
     `/<locale>/newsletter/subscribe`, in the page's language with the default
@@ -4670,9 +4767,11 @@ carries the reasoning.
     stylesheet, script or analytics rule that selects these forms by `action` should select
     `.kiln-form` or `.kiln-newsletter-signup` instead.
   - **Not covered yet:** a plugin block with its own Gettext backend still
-    renders in the request's language; the locked-page and members-only
-    teaser pages; a locale attribute on the `embed.js` snippet; and the
-    language of the newsletter confirmation email.
+    renders in the request's language; a locale attribute on the `embed.js`
+    snippet; and the language of the newsletter confirmation email. The
+    locked-page and members-only teaser pages are settled by #2595: Kiln's
+    text there is chrome, in the reader's language, and the document's title
+    and summary carry its own `lang`.
 
 <a id="render-etags"></a>
 

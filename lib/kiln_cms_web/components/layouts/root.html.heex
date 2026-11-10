@@ -122,12 +122,16 @@
     <meta :if={social.description} property="og:description" content={social.description} />
     <meta :if={social.image} property="og:image" content={social.image} />
     <meta property="og:type" content={assigns[:og_type] || "website"} />
-    <meta :if={assigns[:locale]} property="og:locale" content={@locale} />
+    <%!-- The document's locale, which on a fallback page is not the chrome's
+          `<html lang>` (#2595): `og:locale` stays with the record, as the
+          canonical and hreflang do. --%>
+    <% og_locale = assigns[:content_locale] || assigns[:locale] %>
+    <meta :if={og_locale} property="og:locale" content={og_locale} />
     <meta :if={assigns[:canonical_url]} property="og:url" content={@canonical_url} />
     <%!-- Other published locales as og:locale:alternate (#164). --%>
     <meta
       :for={alt <- assigns[:hreflang] || []}
-      :if={alt.hreflang not in ["x-default", assigns[:locale]]}
+      :if={alt.hreflang not in ["x-default", og_locale]}
       property="og:locale:alternate"
       content={alt.hreflang}
     />

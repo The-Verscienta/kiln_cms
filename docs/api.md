@@ -1152,6 +1152,12 @@ They are accepted by `GET /api/content/:type/:slug` (and `POST …/unlock`),
   locale. `/api/resolve` and `/api/menus` also carry it as `locale` in the body;
   the artifact `json` surface carries it in the document, and the JSON:API
   resource in `attributes.locale`.
+- **The built-in HTML site is the exception** (#2595). Its pages are in two
+  languages on a fallback: the chrome around the article is in the URL's
+  language and the article in the record's. `x-kiln-locale` names the served
+  document, as above; `Content-Language` names the URL's locale (the prefix,
+  or the default), matching `<html lang>`. Read `x-kiln-locale` if you scrape
+  or proxy these pages.
 - **GraphQL** cannot set a header per field: select `locale` on the result.
 - **ETags** name the served locale, and every cache key in front of Kiln is
   the URL — which carries the *requested* locale and the fallback parameters —
