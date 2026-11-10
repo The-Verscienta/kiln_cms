@@ -128,6 +128,11 @@ defmodule KilnCMSWeb.ContentEditor.NewDraft do
   the editor's normal `validate` right after, which re-derives the slug from it
   (an `untitled-…` slug counts as underived) and autosaves — a title that fails
   validation then shows as a field error instead of refusing the create.
+
+  For the same reason a required custom field with no default does not refuse
+  it: the create defers `required` (`custom_fields_required: :defer`, see
+  `KilnCMS.CMS.Changes.ApplyCustomFields`), and the editor's first save — which
+  also runs before Publish and Submit for review — asks for the value.
   """
   def create(kind, actor, org, extra \\ %{}) do
     scaffold = %{
@@ -140,7 +145,14 @@ defmodule KilnCMSWeb.ContentEditor.NewDraft do
       slug: "untitled-#{Slug.random_suffix()}"
     }
 
-    {:ok, ContentTypes.create!(kind, Map.merge(scaffold, extra), actor: actor, tenant: org)}
+    {:ok,
+     ContentTypes.create!(
+       kind,
+       Map.merge(scaffold, extra),
+       actor: actor,
+       tenant: org,
+       context: %{custom_fields_required: :defer}
+     )}
   rescue
     error in [Ash.Error.Forbidden, Ash.Error.Invalid] -> {:error, error}
   end

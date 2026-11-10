@@ -108,12 +108,14 @@ defmodule KilnCMS.CMS.CustomFieldSerializersTest do
       lib/kiln_cms/cms/content_links/target_delete.ex
       lib/kiln_cms/cms/reference_edits.ex
       lib/kiln_cms/cms/slugs.ex
+      lib/kiln_cms/cms/validations/required_custom_fields.ex
       lib/kiln_cms/i18n/validations/shared_fields_read_only.ex
       lib/kiln_cms/media/resnapshot.ex
       lib/kiln_cms/seo/pattern.ex
       lib/kiln_cms/seo/patterns.ex
       lib/kiln_cms/slug/pattern.ex
       lib/kiln_cms_web/graphql/reference_writes.ex
+      lib/kiln_cms_web/live/content_editor/new_draft.ex
     ),
     copy: ~w(
       lib/kiln_cms/cms/content_copy.ex
