@@ -339,4 +339,92 @@ defmodule KilnCMS.Security.EventTest do
       assert length(stored()) == 1
     end
   end
+
+  # A type a newer release added, read by this one during a rolling deploy or
+  # after a rollback: it must neither break the log nor escape erasure.
+  describe "a type a newer release recorded (#2509)" do
+    alias KilnCMS.NewerReleaseRows
+    alias KilnCMS.Types.UnknownAtom
+
+    test "lists, as an UnknownAtom keeping the stored name, beside known events" do
+      known = record!(%{type: :sign_in})
+      unknown_id = NewerReleaseRows.security_event!(%{actor_label: "new@example.com"})
+      admin = user(:admin)
+      name = NewerReleaseRows.unknown()
+
+      events = Security.list_events!(%{}, actor: admin, tenant: org_id())
+
+      assert %{type: %UnknownAtom{value: ^name}, actor_label: "new@example.com"} =
+               Enum.find(events, &(&1.id == unknown_id))
+
+      assert %{type: :sign_in} = Enum.find(events, &(&1.id == known.id))
+    end
+
+    test "a known type filter leaves it out, and paging walks past it" do
+      first = seed_at(%{type: :sign_in}, 3)
+      unknown_id = NewerReleaseRows.security_event!(%{inserted_at: days_ago(2)})
+      last = seed_at(%{type: :sign_in}, 1)
+      admin = user(:admin)
+
+      assert Security.list_events!(%{type: :sign_in}, actor: admin, tenant: org_id())
+             |> Enum.map(& &1.id) == [last.id, first.id]
+
+      page = Security.list_events!(%{}, actor: admin, tenant: org_id(), page: [limit: 1])
+      page2 = Ash.page!(page, :next)
+      page3 = Ash.page!(page2, :next)
+
+      assert Enum.map([page, page2, page3], fn p -> hd(p.results).id end) ==
+               [last.id, unknown_id, first.id]
+    end
+
+    test "recording one is still refused" do
+      for type <- [NewerReleaseRows.unknown(), %UnknownAtom{value: "sign_in"}] do
+        assert {:error, %Ash.Error.Invalid{}} =
+                 Security.record(%{type: type}, actor: Security.system(), tenant: org_id())
+      end
+    end
+
+    test "anonymize_actor/1 scrubs it and keeps its type" do
+      gone = Ash.UUID.generate()
+
+      acted =
+        NewerReleaseRows.security_event!(%{
+          actor_id: gone,
+          actor_label: "gone@example.com",
+          ip: "198.51.100.4",
+          user_agent: "UA",
+          metadata: %{"name" => "my laptop"}
+        })
+
+      targeted =
+        NewerReleaseRows.security_event!(%{
+          target_type: "user",
+          target_id: gone,
+          metadata: %{"role" => "editor"}
+        })
+
+      assert :ok = Security.anonymize_actor(gone)
+
+      a = NewerReleaseRows.stored_row("security_events", acted)
+
+      assert {a["actor_id"], a["actor_label"], a["ip"], a["user_agent"], a["metadata"]} ==
+               {nil, nil, nil, nil, %{}}
+
+      assert a["type"] == NewerReleaseRows.unknown()
+
+      t = NewerReleaseRows.stored_row("security_events", targeted)
+      assert {t["target_id"], t["metadata"], t["type"]} == {nil, %{}, NewerReleaseRows.unknown()}
+    end
+
+    test "prune/1 deletes it once it is past the window" do
+      old = NewerReleaseRows.security_event!(%{inserted_at: days_ago(400)})
+      fresh = seed_at(%{}, 10)
+
+      assert {:ok, 1} = Security.prune(org_id: org_id(), retention_days: 365)
+      assert [%{id: id}] = stored()
+      assert id == fresh.id and id != old
+    end
+
+    defp days_ago(days), do: DateTime.add(DateTime.utc_now(), -days * 86_400, :second)
+  end
 end

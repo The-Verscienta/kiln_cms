@@ -22727,6 +22727,11 @@ msgstr "Non lu"
 msgid "Unread (%{count})"
 msgstr "Non lu (%{count})"
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Unrecognized event (%{type})"
+msgstr "Événement non reconnu (%{type})"
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex

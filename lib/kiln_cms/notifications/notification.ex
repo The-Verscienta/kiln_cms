@@ -281,7 +281,11 @@ defmodule KilnCMS.Notifications.Notification do
     # under, so one vocabulary covers all three channels — `:comment_mention`
     # included, which is a distinct event from `:comment_added` precisely
     # because being named is the stronger signal.
-    attribute :event, :atom do
+    #
+    # `KnownAtom`, not `:atom`: an event a newer release added loads as
+    # `KilnCMS.Types.UnknownAtom` instead of failing the bell, the inbox and
+    # mark-all-read (#2509). Writes stay limited to the list below.
+    attribute :event, KilnCMS.Types.KnownAtom do
       allow_nil? false
       public? true
 
