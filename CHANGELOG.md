@@ -458,6 +458,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **While a backup runs, a request folds into the queued one only when it is the same kind: Back up now into a queued fresh backup, Resume into a queued resume of the same backup. Any other request is refused with "Try again once the queue clears", and the queue is left as it was.**
+  ([#2540](https://github.com/The-Verscienta/kiln_cms/issues/2540) · [long form](docs/changelog/unreleased.md#backup-fold-like-into-like))
+
 - **Release images no longer ship `priv/static/images/logo-lockup.png` (234 KB), which nothing in Kiln referenced. An overlay that linked `/images/logo-lockup.png` must ship its own copy.**
   ([#2401](https://github.com/The-Verscienta/kiln_cms/issues/2401))
 

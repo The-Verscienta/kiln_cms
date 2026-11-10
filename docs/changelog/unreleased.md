@@ -3912,6 +3912,33 @@ carries the reasoning.
 
 ## Changed
 
+<a id="backup-fold-like-into-like"></a>
+
+- **A backup request folds into the queued one only when it is the same kind
+  (#2540).** Since #2218 every request made while one backup ran and another
+  was queued folded into the queued one. That dropped work when the two
+  differed: a **Back up now** folded into a queued **Resume** never took its
+  own backup (the resume finishes the old backup), and a Resume folded into a
+  queued fresh backup (or a resume of another backup) never resumed anything.
+  Now:
+  - **Back up now** folds into a queued fresh backup, and **Resume** into a
+    queued resume of the same backup, as before. The page says "A backup is
+    running and a resume of this backup is already queued; that queued resume
+    covers this request." for the second.
+  - **Any other combination is refused.** The page says, for example, "A backup
+    is running and a resume of 20261101-101010 is queued after it, so this
+    backup was not queued. Try again once the queue clears." Nothing is queued,
+    no run is created and the fold count is unchanged.
+  - **From the console**, `KilnCMS.Backups.request/2` returns
+    `{:error, {:queue_busy, :backup | {:resume, stamp}}}`, naming what is
+    queued. A legacy `KilnCMS.Backups.Worker` job that gets it waits a minute
+    and asks again instead of being canceled.
+  - **Scheduled backups** (#2219, not yet released) get the same answer when a
+    resume is queued, so a scheduled tick never folds into a Resume; the
+    scheduler retries on its next tick.
+
+  See [backups.md](../backups.md#back-up-while-another-backup-runs).
+
 <a id="custom-field-range-index-changed"></a>
 
 - **Custom-field range filters read a stored JSON `null`, array or object as

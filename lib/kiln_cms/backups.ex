@@ -24,7 +24,8 @@ defmodule KilnCMS.Backups do
   `KilnCMS.Backups.Worker` job and the console's `Worker.run/3` (as
   `system/0`), and a future scheduler, which must call
   `request(trigger: "schedule")` as `system/0`. A request while a backup runs
-  queues behind it; at most one waits, and later requests fold into that one.
+  queues behind it; at most one waits, and later requests of the same kind fold
+  into that one (a different kind is refused: `KilnCMS.Backups.Chain.request/1`).
   `scripts/backup.sh` runs outside the application and does not take the lock.
 
   ## The shell scripts stay canonical
@@ -479,8 +480,12 @@ defmodule KilnCMS.Backups do
     * `{:ok, %{status: :started, chain: chain}}`: it is running.
     * `{:ok, %{status: :queued, chain: running}}`: it starts when the running
       chain finishes.
-    * `{:ok, %{status: :folded, chain: running}}`: one is already queued; that
-      one covers this request (logged).
+    * `{:ok, %{status: :folded, chain: running}}`: one of the same kind is
+      already queued (a fresh backup, or a resume of the same stamp); that one
+      covers this request (logged).
+    * `{:error, {:queue_busy, queued}}`: one of another kind is queued
+      (`queued` is `:backup` or `{:resume, stamp}`). Nothing changed; ask again
+      once the queue clears (#2540).
     * `{:error, reason}`: `availability/0`'s reason, a resume refusal
       (`resumable_run/2`: `:invalid_stamp`, `:in_flight`, `:no_such_run`,
       `{:not_resumable, status}`, `:no_state`), or `:forbidden` for an actor the

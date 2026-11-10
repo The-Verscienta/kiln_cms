@@ -6,8 +6,8 @@ defmodule KilnCMS.Backups.Chain do
   A backup is a chain of `KilnCMS.Backups.StepWorker` jobs (start, dump, plan,
   archive per part, checksum, prune, offsite, finish). One chain holds the
   backup pipeline at a time, recorded on the singleton `KilnCMS.Backups.Lock`
-  row; at most one request waits behind it, and later requests fold into that
-  one.
+  row; at most one request waits behind it, and later requests of the same kind
+  fold into that one (`request/1`).
 
   ## One transaction, one lock
 
@@ -106,8 +106,21 @@ defmodule KilnCMS.Backups.Chain do
   `{:ok, %{status: :started | :queued | :folded, chain: chain | nil}}`, where
   `chain` is the new chain for `:started` and the running one otherwise; or
   `{:error, reason}`: `availability/0`'s reason, a resume refusal
-  (`Backups.resumable_run/2`), or `:in_flight` when the stamp to resume is the
-  one the running chain holds.
+  (`Backups.resumable_run/2`), `:in_flight` when the stamp to resume is the
+  one the running chain holds, or `{:queue_busy, :backup | {:resume, stamp}}`
+  (the queued request's kind) when the queued request is not like this one.
+
+  ## Like folds only into like (#2540)
+
+  A request folds into the queued one only when that one does the same work: a
+  fresh backup into a queued fresh backup, a resume into a queued resume of the
+  same stamp. Anything else is refused and leaves the queue as it was, because
+  folding would drop it: a fresh backup folded into a queued resume never takes
+  its own (the resume backs up the old stamp), and a resume folded into a
+  queued fresh backup (or another stamp's resume) never resumes. The caller
+  asks again once the queue clears; a scheduler (#2219, not yet built) must
+  roll its window back and retry on a later tick, so a scheduled backup is
+  never folded into a Resume.
   """
   @spec request(map()) :: {:ok, map()} | {:error, term()}
   def request(attrs) do
@@ -163,11 +176,18 @@ defmodule KilnCMS.Backups.Chain do
 
         {:ok, %{status: :queued, chain: row.chain_id}}
 
-      true ->
+      row.waiting_resume_stamp == resume ->
         write!(&Backups.fold_backup_request!/3, row, %{})
         {:ok, %{status: :folded, chain: row.chain_id}}
+
+      true ->
+        {:error, {:queue_busy, queued_kind(row)}}
     end
   end
+
+  # What the queued request is, for a request that may not fold into it.
+  defp queued_kind(%{waiting_resume_stamp: nil}), do: :backup
+  defp queued_kind(%{waiting_resume_stamp: stamp}), do: {:resume, stamp}
 
   defp announce_fold(trigger, resume) do
     what = if resume, do: "a resume of #{resume}", else: "a backup (#{trigger})"

@@ -1539,6 +1539,26 @@ msgstr "No se puede crear una copia de seguridad en esta instalación."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "A backup is running and a new backup is queued after it, so this resume was not queued. Try again once the queue clears."
+msgstr "Hay una copia de seguridad en curso y otra nueva está en cola detrás de ella, así que esta reanudación no se ha puesto en cola. Inténtalo de nuevo cuando la cola se vacíe."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running and a resume of %{stamp} is queued after it, so this backup was not queued. Try again once the queue clears."
+msgstr "Hay una copia de seguridad en curso y una reanudación de %{stamp} está en cola detrás de ella, así que esta copia no se ha puesto en cola. Inténtalo de nuevo cuando la cola se vacíe."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running and a resume of %{stamp} is queued after it, so this resume was not queued. Try again once the queue clears."
+msgstr "Hay una copia de seguridad en curso y una reanudación de %{stamp} está en cola detrás de ella, así que esta reanudación no se ha puesto en cola. Inténtalo de nuevo cuando la cola se vacíe."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running and a resume of this backup is already queued; that queued resume covers this request."
+msgstr "Hay una copia de seguridad en curso y ya hay una reanudación de esta copia en cola; esa reanudación en cola cubre esta solicitud."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "A backup is running and another is already queued; that queued backup covers this request."
 msgstr "Hay una copia de seguridad en curso y otra ya en cola; la copia en cola cubre esta solicitud."
 

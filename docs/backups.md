@@ -530,17 +530,38 @@ the rest of the page.
    UTC)".
 3. Click it again. The page says "A backup is running and another is already
    queued; that queued backup covers this request." The strip adds "1 later
-   request folded into it". At most one backup waits; every later request
-   folds into it and is logged at `info`: "Backup request folded: a backup
-   (manual) was asked for while one runs and another is queued; the queued
-   backup covers it".
+   request folded into it". At most one backup waits; every later request of
+   the same kind folds into it and is logged at `info`: "Backup request
+   folded: a backup (manual) was asked for while one runs and another is
+   queued; the queued backup covers it".
 4. When the running backup ends (succeeded, failed or canceled), the queued
    one starts with a new stamp. Its log in History starts with "Started from
    the queue (requested at …); 1 later request(s) folded into it".
 
-A **Resume** click queues and folds the same way. Resuming the backup that is
-running right now is refused: "That backup is running right now." A queued
-request cannot be removed; cancel it once it has started.
+A **Resume** click queues the same way. Resuming the backup that is running
+right now is refused: "That backup is running right now." A queued request
+cannot be removed; cancel it once it has started.
+
+**Only like folds into like (#2540).** A request folds into the queued one
+only when the queued one does the same work:
+
+| You click | A fresh backup is queued | A resume of the same backup is queued | A resume of another backup is queued |
+|---|---|---|---|
+| **Back up now** | Folds | Refused | Refused |
+| **Resume** | Refused | Folds: "A backup is running and a resume of this backup is already queued; that queued resume covers this request." | Refused |
+
+A refused request changes nothing: no backup is queued, no run appears in
+History and the fold count stays the same. The page says what is queued, for
+example "A backup is running and a resume of 20261101-101010 is queued after
+it, so this backup was not queued. Try again once the queue clears." Click
+again once the queued backup has started (the strip no longer shows "1
+queued").
+
+Folding them would lose work: a resume finishes the old backup's stamp, so a
+fresh backup folded into it would never be taken, and a resume folded into a
+fresh backup would never resume. In-app schedules (#2219, not yet released)
+get the same answer: a scheduled tick is never folded into a queued Resume,
+and is retried on a later tick once the queue clears.
 
 ### Cancel a running backup
 
@@ -666,7 +687,8 @@ is one of:
 |---|---|
 | `{:ok, %{status: :started, chain: chain}}` | It is running. |
 | `{:ok, %{status: :queued, chain: running}}` | Another backup is running; this one starts after it. `chain` is the running one. |
-| `{:ok, %{status: :folded, chain: running}}` | One is already queued, and it covers this request. |
+| `{:ok, %{status: :folded, chain: running}}` | One of the same kind is already queued (a fresh backup, or a resume of the same stamp), and it covers this request. |
+| `{:error, {:queue_busy, queued}}` | One of another kind is queued (`queued` is `:backup` or `{:resume, stamp}`). Nothing changed; ask again once it has started ([above](#back-up-while-another-backup-runs)). |
 | `{:error, reason}` | `:disabled`, `:no_database_url`, `:no_pg_dump` or `:no_pg_restore`; for a resume, `:invalid_stamp`, `:in_flight`, `:no_such_run`, `{:not_resumable, status}` or `:no_state`; or `:forbidden` for an actor who may not ask. |
 
 The trigger is cut to 64 characters, with credentials redacted, before it is
@@ -689,7 +711,8 @@ and returns the same map (it returned the `Oban.Job` before #2218).
 `KilnCMS.Backups.Worker.run/3` no longer runs a backup inline in the console:
 it requests one and waits for it, returning `:ok` or `{:error, reason}`, and
 `{:error, :queued}` or `{:error, :folded}` without waiting when another backup
-is running. For an off-site failure the reason is the run's error text. Both,
+is running (`{:error, {:queue_busy, queued}}` when one of another kind is
+queued). For an off-site failure the reason is the run's error text. Both,
 the `backups` queue and `KilnCMS.Backups.Worker` are removed in the next minor
 release.
 

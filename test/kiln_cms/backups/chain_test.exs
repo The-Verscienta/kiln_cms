@@ -249,6 +249,133 @@ defmodule KilnCMS.Backups.ChainTest do
     end
   end
 
+  describe "like folds only into like (#2540)" do
+    # A failed in-app run that kept its state: one `request(resume: stamp)` takes.
+    defp resumable!(dir, stamp) do
+      run =
+        Backups.start_run!(%{stamp: stamp, trigger: "manual", components: [:db, :media]},
+          actor: Backups.system()
+        )
+
+      Backups.fail_run!(run, %{error: "tar exited 2"}, actor: Backups.system())
+      work = WorkState.path(dir, stamp)
+      File.mkdir_p!(work)
+      :ok = WorkState.write(work, WorkState.new(stamp))
+      stamp
+    end
+
+    # What a refused request must leave alone: the lock row's queue, the Runs
+    # and the step jobs.
+    defp snapshot do
+      row = lock()
+
+      {Map.take(row, [
+         :chain_id,
+         :step_job_id,
+         :waiting_trigger,
+         :waiting_resume_stamp,
+         :waiting_requested_at,
+         :waiting_requested_by,
+         :waiting_folds,
+         :last_folded_at
+       ]), Enum.map(runs(), & &1.id) |> Enum.sort(), Repo.aggregate(Oban.Job, :count)}
+    end
+
+    test "a fresh backup folds into a queued fresh backup" do
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(trigger: "schedule")
+
+      assert {:ok, %{status: :folded}} = request(trigger: "manual")
+      assert %{waiting: %{resume: nil, folds: 1}} = Backups.in_flight()
+    end
+
+    test "a resume folds into a queued resume of the same stamp", %{dir: dir} do
+      stamp = resumable!(dir, "20261101-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(resume: stamp)
+
+      assert {:ok, %{status: :folded}} = request(resume: stamp)
+      assert %{waiting: %{resume: ^stamp, folds: 1}} = Backups.in_flight()
+    end
+
+    test "a fresh backup is refused while a resume is queued; nothing changes", %{dir: dir} do
+      stamp = resumable!(dir, "20261101-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(resume: stamp)
+      before = snapshot()
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [[:kiln_cms, :backups, :request, :folded]])
+
+      assert {:error, {:queue_busy, {:resume, ^stamp}}} = request(trigger: "manual")
+      assert {:error, {:queue_busy, {:resume, ^stamp}}} = request(trigger: "schedule")
+
+      assert snapshot() == before
+      assert %{waiting: %{resume: ^stamp, folds: 0}} = Backups.in_flight()
+      refute_received {[:kiln_cms, :backups, :request, :folded], ^ref, _, _}
+    end
+
+    test "a resume is refused while a fresh backup is queued; nothing changes", %{dir: dir} do
+      stamp = resumable!(dir, "20261101-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(trigger: "schedule")
+      before = snapshot()
+
+      assert {:error, {:queue_busy, :backup}} = request(resume: stamp)
+
+      assert snapshot() == before
+      assert %{waiting: %{resume: nil, trigger: "schedule", folds: 0}} = Backups.in_flight()
+    end
+
+    test "a resume is refused while a resume of another stamp is queued", %{dir: dir} do
+      queued = resumable!(dir, "20261101-101010")
+      other = resumable!(dir, "20261102-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(resume: queued)
+      before = snapshot()
+
+      assert {:error, {:queue_busy, {:resume, ^queued}}} = request(resume: other)
+      assert snapshot() == before
+    end
+
+    test "once the queue clears, the refused request is accepted", %{dir: dir} do
+      stamp = resumable!(dir, "20261101-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(resume: stamp)
+      {:error, {:queue_busy, _}} = request()
+
+      # The running chain ends: the queued resume is promoted, and the queue
+      # is free again, so the fresh backup now queues behind the resume.
+      assert {:ok, promoted} = Chain.with_lock(&Chain.release_in_txn/1)
+      assert %{chain: ^promoted, stamp: ^stamp, waiting: nil} = Backups.in_flight()
+
+      assert {:ok, %{status: :queued, chain: ^promoted}} = request()
+      assert %{waiting: %{resume: nil}} = Backups.in_flight()
+    end
+
+    test "a legacy Worker job waits and asks again while a resume is queued", %{dir: dir} do
+      stamp = resumable!(dir, "20261101-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(resume: stamp)
+
+      assert {:snooze, 60} = Worker.perform(%Oban.Job{id: 7, args: %{"trigger" => "manual"}})
+      assert %{waiting: %{resume: ^stamp, folds: 0}} = Backups.in_flight()
+    end
+
+    test "a legacy resume job waits while a fresh backup is queued; Worker.run/3 says why",
+         %{dir: dir} do
+      stamp = resumable!(dir, "20261101-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(trigger: "schedule")
+
+      assert {:snooze, 60} =
+               Worker.perform(%Oban.Job{id: 7, args: %{"trigger" => "manual", "resume" => stamp}})
+
+      assert {:error, {:queue_busy, :backup}} = Worker.run("console", nil, resume: stamp)
+      assert %{waiting: %{resume: nil, folds: 0}} = Backups.in_flight()
+    end
+  end
+
   describe "fencing" do
     test "a step of another chain, or an old job of this one, does not begin" do
       {:ok, %{status: :started, chain: chain}} = request()

@@ -34,7 +34,8 @@ defmodule KilnCMS.Backups.Lock do
   ## The queued request
 
   `waiting_*` hold at most one request behind the holder. A further request
-  folds into it (`:fold`: `waiting_folds` + 1); `:hold` clears the waiting
+  of the same kind folds into it (`:fold`: `waiting_folds` + 1; any other is
+  refused, `KilnCMS.Backups.Chain.request/1`); `:hold` clears the waiting
   fields because it is either a free lock (nothing waits) or the waiting request
   being promoted.
 

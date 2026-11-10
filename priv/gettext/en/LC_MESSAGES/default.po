@@ -1539,6 +1539,26 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "A backup is running and a new backup is queued after it, so this resume was not queued. Try again once the queue clears."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running and a resume of %{stamp} is queued after it, so this backup was not queued. Try again once the queue clears."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running and a resume of %{stamp} is queued after it, so this resume was not queued. Try again once the queue clears."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running and a resume of this backup is already queued; that queued resume covers this request."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "A backup is running and another is already queued; that queued backup covers this request."
 msgstr ""
 
