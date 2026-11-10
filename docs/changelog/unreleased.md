@@ -3306,8 +3306,10 @@ carries the reasoning.
 - **Admins can rotate a webhook endpoint's signing secret (#2347).** Each row
   on `/editor/webhooks` has a **Rotate secret** button (admin only, with a
   confirmation). It replaces the secret and reveals the new one so you can
-  copy it into the receiver. Before this, the only way to change a secret was
-  to delete the endpoint and add it again, which also lost its settings.
+  copy it into the receiver; a hint under it says deliveries already use the
+  new secret, until you hide it (#2384). Before this, the only way to change
+  a secret was to delete the endpoint and add it again, which also lost its
+  settings.
   Rotation takes effect immediately and there is no dual-secret window: it is
   the remedy for a leaked secret, so the old one must stop working. Queued and
   retried deliveries sign at send time and use the new secret; one attempt
