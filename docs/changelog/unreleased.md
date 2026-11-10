@@ -1038,11 +1038,15 @@ carries the reasoning.
     **Unpublish** on the page (nor in the **Live · draft** menu), **Unpublish**
     in a content-list row's menu, or **Unpublish** and **Archive** in the bulk
     bar. **Scheduled unpublish at** is locked on a live or scheduled page, with
-    a note saying an admin sets it. A refused action says "Only an admin can
-    unpublish content on this site." or "Only an admin can archive content on
-    this site."; dragging a live page's unpublish chip on the calendar says
-    "Only an admin can move the unpublish date of a live page on this site.",
-    and a publish chip "Only an admin can move a publish date on this site."
+    a note saying an admin sets it. When an editor on such a site is refused,
+    an unpublish says "Only an admin can unpublish content on this site.", an
+    archive "Only an admin can archive content on this site.", and on the
+    calendar dragging a live page's unpublish chip says "Only an admin can
+    move the unpublish date of a live page on this site." and a publish chip
+    "Only an admin can move a publish date on this site." Those sentences go
+    only to that editor, judged at the moment of the refusal (so a live
+    temporary grant counts); everyone else is told why they were actually
+    refused ([refusal wording](#refusal-wording-names-the-reason)).
   - **Rolling back** is safe: there is no migration and no data change, and
     the previous release's policies apply again.
   - **Guides.** [The editorial workflow](../editorial-workflow.md#7-take-it-down),
@@ -3956,6 +3960,52 @@ carries the reasoning.
     has a new name; delete superseded items in the media library.
 
 ## Fixed
+
+<a id="refusal-wording-names-the-reason"></a>
+
+- **A refused workflow action now names the reason it was refused, instead
+  of saying "Only an admin can …" to people for whom that is not the reason
+  (#2473).** A refusal carries no record of which rule refused it, so before,
+  every refused publish said "Only an admin can publish. Submit the draft for
+  review instead." and every refused return "Only an admin can return content
+  to draft.", whoever was refused and on whichever site. The sentence is now
+  chosen from the actor's effective tier on the site (a live temporary grant
+  counts), their content-type scope, and the site's **Team → Publishing**
+  switch, read at the moment of the refusal, in this order:
+  1. An admin or a viewer sees "You don't have permission to do that."
+  2. An editor refused **Return to draft** sees "Only an admin can return
+     content to draft.", whatever the switch and whatever their scope:
+     returning is an admin's step.
+  3. An editor whose **Content types they may edit** (on **Team**) leave this
+     type out sees "You can't edit this content type." for a publish,
+     unpublish, archive, submit, unarchive, publish changes or mark reviewed,
+     whatever the switch, since letting editors publish would not have
+     helped them. Never for the trash: that is admin-only, so a wider scope
+     would not help either.
+  4. An editor on a site where only admins publish, refused a publish,
+     unpublish or archive, sees "Only an admin can publish. Submit the draft
+     for review instead.", "Only an admin can unpublish content on this
+     site." or "Only an admin can archive content on this site." On the
+     calendar the same editor sees "Only an admin can move a publish date on
+     this site." or "Only an admin can move the unpublish date of a live page
+     on this site."
+  5. Anyone else (an editor where editors may publish, or refused the trash
+     or another action the switch does not govern) sees "You don't have
+     permission to do that."
+  - **Calendar.** Dragging a chip whose record was trashed, or fell outside
+    what you may read, since the calendar loaded now says "That item is no
+    longer on the calendar — reload to see why." Before it showed the raw
+    error, or (unreleased) an admin sentence.
+  - **Bulk bar.** A refused bulk verb on the content list is judged on the
+    tier and the switch alone, because a selection can span content types.
+  - **Developers.** `KilnCMSWeb.WorkflowMessages.error/3` and `forbidden/2`
+    take a context (`actor:`, `org:`, and `resource:` as a record or
+    resource module); `error/2` and `forbidden/1` are gone. `refusal/2`
+    returns `:out_of_scope`, `:needs_publisher`, `:needs_admin` or
+    `:not_permitted`, and `refusal_message/2` turns that decision and the
+    action into the sentence, so a caller with its own wording for one case
+    (the calendar) decides once and falls back to the shared copy for the
+    rest. No policy changed: the same people are refused as before.
 
 <a id="render-etags"></a>
 

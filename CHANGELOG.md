@@ -490,6 +490,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A refused workflow action now says why: "Only an admin …" only to an editor (publish, unpublish, archive: where only admins publish; return: any site), "You can't edit this content type." to an editor scoped away from the type (never for the trash), the plain sentence to everyone else.**
+  ([#2473](https://github.com/The-Verscienta/kiln_cms/issues/2473) · [long form](docs/changelog/unreleased.md#refusal-wording-names-the-reason))
+
 - **A re-fire or a deploy that changes rendered markup is no longer answered `304` to a client holding the old copy: a fired artifact's `ETag` is now a digest of the body served, and a Kiln-rendered page's names the running build.**
   ([#2583](https://github.com/The-Verscienta/kiln_cms/pull/2583) · [long form](docs/changelog/unreleased.md#render-etags))
 
