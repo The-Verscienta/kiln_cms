@@ -547,6 +547,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Security
 
+- **Accepting an invitation over an unconfirmed account now also removes its two-step verification, passkeys, identity-provider links and push devices, and revokes its API keys (#2453).**
+  ([long form](docs/changelog/unreleased.md#invitation-takeover-credentials))
+
 - **Sign-in, reset, magic link, registration, newsletter, SSO and passkey answer a known and an unknown address alike; the per-surface matrix is in the threat model.**
   ([long form](docs/changelog/unreleased.md#account-enumeration-audit))
 

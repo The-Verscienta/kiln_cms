@@ -50,6 +50,18 @@ steps.
   side is non-zero) rejects the assertion (`:sign_count_regression`).
 - **Erasure**: GDPR anonymization (#212) deletes the account's passkeys — a
   surviving credential would let the erased account sign straight back in.
+- **Invitation takeover**: accepting a site invitation with a password over an
+  unconfirmed account deletes its passkeys (`Passkey` `:forget_on_takeover`,
+  #2453), since whoever registered the address first may have enrolled them.
+  Only the invitations system actor may call that action, never a person, a
+  platform admin included; an owner or admin removes a passkey with
+  `:destroy`. See
+  [What taking over an account removes](account-administration.md#what-taking-over-an-account-removes).
+  A registration already under way when the takeover starts cannot outlive
+  it: `:register` takes the account's row first (`Changes.GuardAccountTakeover`)
+  and either commits before the takeover, which then deletes it, or waits and
+  is refused with `KilnCMS.Accounts.Errors.AccountTakenOver`. The settings
+  page shows its usual "Couldn't verify that passkey — try again."
 
 ## Scope notes
 

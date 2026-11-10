@@ -72,6 +72,29 @@ defmodule KilnCMS.Accounts.AccountLock do
   @spec exclusive(Ash.UUID.t()) :: {:ok, state()} | {:error, :not_found}
   def exclusive(user_id), do: lock(user_id, :update)
 
+  @typedoc "The account's credentials as read under the lock."
+  @type credentials :: %{hashed_password: String.t() | nil, totp_pending_secret: binary() | nil}
+
+  @doc """
+  Take the user row in `mode` for the rest of the transaction and return the
+  credentials a stale request is checked against
+  (`KilnCMS.Accounts.Changes.GuardAccountTakeover`, #2453):
+
+    * `:share` (`FOR SHARE`) — for a write that attaches a credential to the
+      account (`Passkey.:register`, `PushSubscription.:subscribe`). It waits for
+      an invitation's takeover of the account, which holds the row
+      `FOR NO KEY UPDATE`, and two such writers never wait on each other;
+    * `:no_key_update` (`FOR NO KEY UPDATE`) — for an update of the row itself
+      (`User.:confirm_totp`), the lock its own UPDATE takes anyway.
+
+  Neither conflicts with `share/1`'s `FOR KEY SHARE`. Both conflict with
+  `exclusive/1`.
+  """
+  @spec credentials(Ash.UUID.t(), :share | :no_key_update) ::
+          {:ok, credentials()} | {:error, :not_found}
+  def credentials(user_id, mode) when mode in [:share, :no_key_update],
+    do: lock(user_id, mode)
+
   defp lock(user_id, mode) do
     if not Repo.in_transaction?() do
       raise ArgumentError,
@@ -87,6 +110,17 @@ defmodule KilnCMS.Accounts.AccountLock do
 
   defp locked(user_id, :key_share), do: from(_u in row(user_id), lock: "FOR KEY SHARE")
   defp locked(user_id, :update), do: from(_u in row(user_id), lock: "FOR UPDATE")
+  defp locked(user_id, :share), do: from(_u in credentials_row(user_id), lock: "FOR SHARE")
+
+  defp locked(user_id, :no_key_update),
+    do: from(_u in credentials_row(user_id), lock: "FOR NO KEY UPDATE")
+
+  defp credentials_row(user_id) do
+    from(u in "users",
+      where: u.id == type(^user_id, Ecto.UUID),
+      select: %{hashed_password: u.hashed_password, totp_pending_secret: u.totp_pending_secret}
+    )
+  end
 
   defp row(user_id) do
     from(u in "users",

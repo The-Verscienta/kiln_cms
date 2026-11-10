@@ -3373,6 +3373,11 @@ msgstr "Tous les statuts"
 msgid "Any tag"
 msgstr "N'importe quelle étiquette"
 
+#: lib/kiln_cms_web/live/invite_live.ex
+#, elixir-autogen, elixir-format
+msgid "Any two-step verification, passkeys or API keys set up on this address before were removed; set them up again."
+msgstr "La validation en deux étapes, les clés d'accès et les clés d’API configurées auparavant sur cette adresse ont été supprimées ; configurez-les à nouveau."
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Any uploader"
