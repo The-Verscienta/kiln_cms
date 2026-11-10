@@ -3957,6 +3957,58 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="generation-tokens-survive-clears"></a>
+
+- **Clearing or evicting the delivery cache no longer moves a site's
+  `<head>` and menus generation tokens back, so a browser holding an old page
+  is no longer answered `304` with a stale `<head>` or navigation (#2502).**
+  A page's `ETag` folds the site's head-generation token, and cached menu
+  trees are keyed on its menus-generation token; a save of branding, code
+  injection, feed settings or a menu draws a new one of each on every node.
+  Both tokens lived in the delivery cache and fell back to `"0"` when absent,
+  so anything that emptied it put every site back on `"0"`, the token its
+  pages carried before the first such save on that node. A browser revalidating
+  a page from then got `304 Not Modified` and kept the `<head>` (feed links,
+  branding, injected code) and navigation the save had replaced. These
+  emptied it:
+  - editing a media item, a bulk media action and a portability import,
+    which drop every published record because any page may reference an
+    asset, and promoting a dynamic content type to a compiled one
+    (`mix kiln.promote_data`);
+  - the **Flush delivery cache** button on System, `mix kiln.cache.flush` and
+    `KilnCMS.Cache.flush_delivery/0`;
+  - the delivery cache's 10,000-entry cap, whose least-recently-written
+    eviction reached the rarely written token keys first.
+
+  The tokens now live in a Cachex instance of their own
+  (`KilnCMS.Cache.generation_cache_name/0`) with no size cap, which no clear
+  or flush touches. Each site's last-known admin allowlist moves there too,
+  so the copy that stops a late read from moving the allowlist backwards
+  survives a clear: a site last seen with the allowlist off still stays off
+  through a database outage after a media edit or a flush (the copy keeps its
+  24-hour expiry).
+
+  **What changes for operators.**
+  - A site whose settings and menus have not been saved since a node started
+    no longer carries `"0"`: the node draws a random token on first read. On
+    a cluster without sticky sessions, two nodes can therefore tag the same
+    page differently until the site's next save, which costs a `200` where a
+    `304` would have done, never a stale `304`. A restart also moves a site's
+    page `ETag`s, as a deploy already did (#2463).
+  - Rolling deploys keep bumps cluster-wide in both directions: tokens still
+    travel as the message the previous release sends and understands, and
+    each node files the keys into the right store on arrival.
+  - No migration and no configuration. Rolling the pin back is safe; it
+    brings back the old behavior.
+
+  **For overlay and plugin authors.** The keys keep their names
+  (`head_generation:<org_id>`, `menus_generation:<org_id>`,
+  `admin_allowlist:last_known:<org_id>`) but are no longer in
+  `KilnCMS.Cache.cache_name/0`. Code that read them from that instance with
+  Cachex directly now sees nothing; call `KilnCMS.Cache.head_generation/1` and
+  `KilnCMS.Cache.menus_generation/1` instead. `KilnCMS.Cache.peek/1` and
+  `KilnCMS.Cache.put/3` route these keys to the right store.
+
 <a id="block-strings-follow-page-locale"></a>
 
 - **The text Kiln writes into a content page's article is in the page's

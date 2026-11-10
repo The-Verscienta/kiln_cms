@@ -490,6 +490,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A media edit, a content-type promotion, a portability import, a bulk media action, the delivery-cache flush or the cache's 10k-entry eviction no longer moves a site's `<head>` and menus tokens back, which could answer `304` with an old `<head>` or navigation.**
+  An unsaved site's `ETag` now differs per node and per restart until its next settings save: extra `200`s, never a stale `304` ([#2502](https://github.com/The-Verscienta/kiln_cms/issues/2502)).
+  ([long form](docs/changelog/unreleased.md#generation-tokens-survive-clears))
+
 - **Kiln's own text inside a content page's article (form and sign-up labels and messages, byline and date, the verification widget, an untitled embed's title) now follows the page's `<html lang>`, not the visitor's.**
   On a multilingual site form and sign-up blocks post to `/<locale>/forms/<slug>` and `/<locale>/newsletter/subscribe`, default locale included; select them by class, not `action`.
   ([#2598](https://github.com/The-Verscienta/kiln_cms/pull/2598) · [long form](docs/changelog/unreleased.md#block-strings-follow-page-locale))
