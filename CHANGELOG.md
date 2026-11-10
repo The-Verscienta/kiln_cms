@@ -491,7 +491,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **A refused workflow action now says why: "Only an admin …" only to an editor (publish, unpublish, archive: where only admins publish; return: any site), "You can't edit this content type." to an editor scoped away from the type (never for the trash), the plain sentence to everyone else.**
-  ([#2473](https://github.com/The-Verscienta/kiln_cms/issues/2473) · [long form](docs/changelog/unreleased.md#refusal-wording-names-the-reason))
+  ([#2600](https://github.com/The-Verscienta/kiln_cms/pull/2600) · [long form](docs/changelog/unreleased.md#refusal-wording-names-the-reason))
 
 - **Kiln's own text inside a content page's article (form and sign-up labels and messages, byline and date, the verification widget, an untitled embed's title) now follows the page's `<html lang>`, not the visitor's.**
   On a multilingual site form and sign-up blocks post to `/<locale>/forms/<slug>` and `/<locale>/newsletter/subscribe`, default locale included; select them by class, not `action`.
