@@ -58,6 +58,9 @@ defmodule KilnCMS.CMS.FormField do
     update :update do
       primary? true
       require_atomic? false
+
+      # A rename carries the form's autoresponder template along (#2343).
+      change KilnCMS.CMS.Changes.RewriteAutoresponderTokens
     end
 
     destroy :destroy do
@@ -120,6 +123,11 @@ defmodule KilnCMS.CMS.FormField do
 
     # A :select field is meaningless without choices.
     validate KilnCMS.CMS.Validations.SelectOptions
+
+    # Deleting a field (or moving it to another form) that an enabled
+    # autoresponder still names would blank that token in every
+    # confirmation (#2343).
+    validate KilnCMS.CMS.Validations.AutoresponderFieldInUse, on: [:update, :destroy]
   end
 
   # Multi-tenancy (epic #336): a field belongs to the same site as its form.
