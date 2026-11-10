@@ -98,36 +98,19 @@ FieldDefinition  name: "sections"  field_type: :flexible   (top-level, owned by 
   a designer can add a "Background" knob without touching the content schema,
   and delivery/search can ignore them. Paragraphs "behaviors" without a second
   table.
-* **Depth is capped at one flexible level**: a flexible field cannot be an item
-  sub-field, and an item type cannot contain another item type. Paragraphs'
-  nested composites are what cause its N+1 and parent/child revision drift; the
-  inline-JSON model avoids both only if the tree stays bounded. Nesting is a
-  follow-up with a stated cost, not a v1 option.
-* **Item types are group-typed rows that pass today's "top-level" test.** About
-  twenty sites define a top-level field as `link_of_id IS NULL AND group_of_id
-  IS NULL`, and an item type satisfies that. Left alone it would keep
-  `localized`, `searchable`, `private`, `unique`, `deliver_*` and
-  `default_source`, and be picked up by unscoped reads. PR 1 owns an **explicit
-  audit table, one decision per site**, and a test that creates an item type
-  with `private`, `searchable` and `unique` and expects each refused or cleared.
-  Sites found: reads (`private_fields.ex:114` — an unscoped org-wide query,
-  `field_access.ex:173`, `hidden_fields.ex:163`, `field_widgets.ex:185`,
-  `portable_fields.ex:58`, `enforce_custom_field_grants.ex:173`,
-  `scope_pickers.ex:296`, `reporting/view_sql.ex:206`,
-  `graphql/custom_fields.ex:343`) and Ash changes/validations that decide "is
-  this a sub-field" (`clear_multiple.ex:66`, `clear_link_field_options.ex:23`,
-  `clear_deliver_plain.ex:20`, `clear_deliver_portable.ex:22`,
-  `clear_default_source.ex:36`, `validations/field_constraints.ex:177`,
-  `validations/private_field.ex:55`). `ClearMultiple` must keep
-  `min_items`/`max_items` on an item type *by design* (the per-type cap), not by
-  accident. `private` on an item *sub-field* is rejected explicitly
-  (`PrivateFields.load` is unscoped by owner and would mask it by name at top
-  level).
-* **Tenancy.** A new `FlexibleField` validation (item type → a top-level
-  `:flexible` parent of the same site; item types do not nest) resolves the
-  parent under `changeset.to_tenant` exactly as `GroupField` does, with a
-  cross-org-id test. The identity is `[org_id, flex_of_id, name]`, like the
-  existing ones.
+* **Nesting is allowed (decided, Q4), capped.** A flexible field may be a
+  sub-field of an item type, so an item can hold its own list of mixed items.
+  The inline-JSON model keeps Paragraphs' N+1 and revision-drift away, but only
+  while the tree is bounded, so: a hard depth cap (default 3 flexible levels,
+  `FlexibleField` validation, and the same bound on the GraphQL reader's
+  `@max_group_depth`, `FieldDisplay`, schema export and `SyncFieldValues` SQL
+  recursion); an item type's owner may therefore itself be an item sub-field
+  (`flex_of_id` → a row with `group_of_id`), so every owner walk in §8
+  ("two-hop") becomes N-hop up to the cap; item paths are `_id` chains, never
+  indexes; per-item-type grants apply at the top level only; per-item diff and
+  editor cards recurse. This enlarges PR 1 (validation, recursion in
+  `resolve_flexible`, owner walks) and PR 2 (nested cards) and is the main
+  reason PR 1's test matrix must include a three-level fixture.
 * **Schema change**, via `mix ash.codegen`, expand-only: `flex_of_id uuid NULL`
   (FK to the same table, `on_delete: :delete`, mirrors `group_of_id`), identity
   `[flex_of_id, name]`, and `item_setting boolean NOT NULL DEFAULT false`
@@ -376,20 +359,17 @@ Parallelism after 1: 2 and 4 can run together; 6 can run once 3 lands its
 `extending-content.md`; the CHANGELOG feature entry waits for 2.
 ---
 
-## 10. Open questions for the maintainer
+## 10. Decisions (maintainer, 2026-11-10) and the open questions behind them
 
-1. **Parity for `:group`.** Lifting media/reference into items (PR 3) is the
-   same work for groups. Do groups get it too (recommended: yes, one list
-   `item_field_types`, since the cost is shared and the group gap is already a
-   complaint), or items only?
-2. **`:llm` / `:json_ld`.** The issue says all fired surfaces must see items;
-   today custom fields reach neither (groups included). Ship a generic
-   "deliver custom text to `:llm`" (a new field option, applies to all text
-   fields) in PR 7, or leave `:json` as the contract for v1?
-3. **Shared items** (§7): is a `:reference` sub-field to an entry an acceptable
-   reading of "reuse Fragments", or is fragment-style inlining of a block tree
-   into an item what you want (larger, separate plan)?
-4. **Nesting.** Confirm one flexible level for v1 (§2).
+1. **Parity for `:group`: yes.** Media and reference sub-fields are lifted for
+   groups and items alike through one `item_field_types` list (PR 3).
+2. **`:llm` / `:json_ld`: add projection in v1.** PR 7 delivers items to both
+   surfaces (a generic opt-in for custom text, applying to all text fields,
+   groups included); the exact option name and format are PR 7's first design
+   question.
+3. **Shared items: a `:reference` sub-field to an entry** is the reuse of
+   Fragments (§7). Inlining a block tree into an item stays out of scope.
+4. **Nesting: allowed**, capped (§2). Supersedes the earlier one-level proposal.
 
 ## 11. Risks
 
