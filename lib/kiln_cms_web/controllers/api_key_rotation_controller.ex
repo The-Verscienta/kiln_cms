@@ -55,7 +55,7 @@ defmodule KilnCMSWeb.ApiKeyRotationController do
         rotate_as(conn, actor)
 
       :error ->
-        ApiKeyReuse.check(plaintext)
+        ApiKeyReuse.check(plaintext, KilnCMS.Security.Recorder.context(conn))
         unauthorized(conn)
     end
   end

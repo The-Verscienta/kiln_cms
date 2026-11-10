@@ -193,6 +193,7 @@ defmodule KilnCMS.Accounts.User do
       :notify_on_return_to_draft,
       :notify_on_comment,
       :notify_on_registration,
+      :notify_on_security_alert,
       :nav_preset,
       :status_marks,
       :content_list_columns
@@ -301,8 +302,17 @@ defmodule KilnCMS.Accounts.User do
         :notify_on_publish,
         :notify_on_return_to_draft,
         :notify_on_comment,
-        :notify_on_registration
+        :notify_on_registration,
+        :notify_on_security_alert
       ]
+
+      # The validation below compares the actor with the row being changed.
+      require_atomic? false
+
+      # The security alert mute is the account holder's own (#2245): a platform
+      # admin may edit the other preferences of anyone, but not silence a site
+      # admin's security alerts.
+      validate KilnCMS.Accounts.Validations.OwnSecurityAlertMute
     end
 
     # Admin-only: assign a user's editorial role (authoring privilege) and the
@@ -1554,6 +1564,17 @@ defmodule KilnCMS.Accounts.User do
     # still sees the queue is waiting. One flag for every site the account
     # administers.
     attribute :notify_on_registration, :boolean do
+      default true
+      allow_nil? false
+      public? true
+    end
+
+    # Security alerts (#2245): email me a site's security alerts. Mutes the
+    # email of SITE alerts only — the bell row is always written, and the
+    # platform's alerts and the `alerts_silenced` notices ignore it. One flag
+    # for every site the account administers; only the account holder can
+    # change it (`Validations.OwnSecurityAlertMute`).
+    attribute :notify_on_security_alert, :boolean do
       default true
       allow_nil? false
       public? true

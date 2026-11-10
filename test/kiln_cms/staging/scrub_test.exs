@@ -126,6 +126,21 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert Repo.aggregate(KilnCMS.Security.Event, :count) == 0
     end
 
+    test "purges pending security alerts (they would notify production admins)" do
+      KilnCMS.Repo.transaction(fn ->
+        KilnCMS.Security.AlertGate.insert_notice!(KilnCMS.Accounts.default_org_id(), %{
+          change: "kind_disabled"
+        })
+      end)
+
+      assert Repo.aggregate(KilnCMS.Security.AlertDispatch, :count) >= 1
+
+      summary = Scrub.run([])
+
+      assert summary.security_alert_dispatches_purged >= 1
+      assert Repo.aggregate(KilnCMS.Security.AlertDispatch, :count) == 0
+    end
+
     test "purges pending site invitations (production addresses, live links)" do
       KilnCMS.Accounts.invite_to_org!(
         %{

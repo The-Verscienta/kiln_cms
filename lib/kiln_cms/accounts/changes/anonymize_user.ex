@@ -44,6 +44,7 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       notify_on_return_to_draft: true,
       notify_on_comment: true,
       notify_on_registration: true,
+      notify_on_security_alert: true,
       anonymized_at: DateTime.utc_now()
     })
     |> Ash.Changeset.after_action(fn _changeset, user ->

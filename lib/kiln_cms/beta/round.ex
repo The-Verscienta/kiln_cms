@@ -212,11 +212,17 @@ defmodule KilnCMS.Beta.Round do
   # drops the live sockets that authorized under the old role.
   defp ensure_role(%{role: role} = user, role), do: user
 
-  defp ensure_role(user, role),
+  defp ensure_role(user, role) do
+    # A user's role is global, so its audit event (#2241) needs an org to land
+    # in: the default org's, where the operator reads it and where the security
+    # alerts (#2245) look for a platform role change.
+    context = %{KilnCMS.Security.Recorder.tenant_key() => Accounts.default_org_id()}
+
     # authorize?: false — `:manage_access` is a platform admin's, and this
     # operator tool has no signed-in actor. The action itself still runs, so its
     # `EvictSessions` change drops the demoted account's live sockets.
-    do: Accounts.manage_user_access!(user, %{role: role}, authorize?: false)
+    Accounts.manage_user_access!(user, %{role: role}, authorize?: false, context: context)
+  end
 
   # A seat that exists otherwise keeps its password — the point of the default
   # is that re-running to add a fifth tester does not lock out the four already
