@@ -528,6 +528,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The `401` for an unverifiable bearer token now matches the scheme case-insensitively and treats a bare `Bearer` as invalid, on every `Authorization` value; the response is `private, no-store` with `Vary: Authorization`, and `/gql` answers in GraphQL's error shape (`extensions.code: "unauthenticated"`, plus `code: "invalid_token"`) while `/api` keeps `invalid_token`. A lower-case `bearer <jwt>`, which used to be served as anonymous, is now a `401`.**
+  ([#2318](https://github.com/The-Verscienta/kiln_cms/issues/2318) · [long form](docs/changelog/unreleased.md#bearer-401-hardening))
+
+
 - **A visitor's session language no longer reaches shared caches: unprefixed public pages, the blog and event indexes, `index.json`, the stock home and form pages and embeds were cached `public` in whichever language the first visitor's session chose.**
   ([#2646](https://github.com/The-Verscienta/kiln_cms/pull/2646) · [long form](docs/changelog/unreleased.md#public-delivery-session-locale-leak))
 

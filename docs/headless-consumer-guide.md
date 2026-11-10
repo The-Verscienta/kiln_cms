@@ -543,8 +543,12 @@ every paying member's content as well — not just rate-limit headroom.
 
 A malformed, expired or foreign JWT in `Authorization: Bearer …` is answered
 `401` with an `invalid_token` error envelope and
-`WWW-Authenticate: Bearer error="invalid_token"`, on `/api/json`, `/gql` and the
-other `/api` routes. It used to be served as anonymous, so a client with a
+`WWW-Authenticate: Bearer error="invalid_token"`, on `/api/json` and the other
+`/api` routes. On `/gql` the body is GraphQL-shaped:
+`{"errors":[{"message":…,"code":"invalid_token","extensions":{"code":"unauthenticated"}}]}`.
+The response is `Cache-Control: private, no-store` with `Vary: Authorization`.
+Send the scheme exactly as `Bearer`: `bearer …` and a bare `Bearer` are refused
+too, because the token loader reads only that spelling. It used to be served as anonymous, so a client with a
 stale token read public content and took it for success; treat this `401` as
 "re-authenticate", not as "forbidden". A request with no `Authorization` header
 is still anonymous, and a bad `kiln_` key was always a `401`.
