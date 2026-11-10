@@ -210,6 +210,11 @@ msgid_plural "%{count} endpoints given up on"
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} failed sign-ins in %{minutes} minutes on this site. Off by default."
+msgstr ""
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} failing"
@@ -2292,6 +2297,11 @@ msgstr[1] ""
 msgid "Account erased. Its content was left as it was."
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Account locked out"
+msgstr ""
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Account menu"
@@ -2928,6 +2938,11 @@ msgstr ""
 msgid "Age in years"
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Alerts"
+msgstr ""
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/inbox_live.ex
@@ -3158,6 +3173,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "An accordion is a heading editors open and close; a fieldset is always open; tabs show one section at a time, and every tab section of the type joins one tab set at the place of the first. Sections keep the order of their first field."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "An account is locked out of signing in after too many failed attempts."
 msgstr ""
 
 #: lib/kiln_cms_web/live/invite_live.ex
@@ -7147,6 +7167,7 @@ msgid "Delivered"
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delivery"
 msgstr ""
@@ -8845,6 +8866,11 @@ msgstr ""
 msgid "Failed sign-in"
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Failed sign-ins"
+msgstr ""
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Failures"
@@ -9492,6 +9518,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Full"
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Full addresses are personal data. They will be copied into every admin's inbox and sent to every subscribed webhook, where this site's retention setting no longer reaches them."
 msgstr ""
 
 #: lib/kiln_cms_web/live/feed_settings_live.ex
@@ -12416,6 +12447,11 @@ msgstr ""
 msgid "New accounts from this site's single sign-on wait for approval too"
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "New admin"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "New category"
@@ -13507,6 +13543,11 @@ msgstr ""
 msgid "Not saved yet. The draft is created as soon as you give it a title."
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not set here"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "Not sure which surface to use? Start with the consumer guide:"
@@ -13781,6 +13822,11 @@ msgstr ""
 msgid "Notify people"
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Notify this site's admins by bell and email"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "November"
@@ -13844,6 +13890,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Off - don't warn"
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Off, alerts still go to webhooks subscribed to security events. Each admin can also mute the emails in their own settings."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Off, an alert shows only the address's network (the first three parts of an IPv4 address). The security log keeps the full address either way."
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
@@ -15038,6 +15094,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Platform access"
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Platform alerts (new platform admins, platform role changes, new API keys and reuse of a stolen API key) go to the platform's admins and can't be turned off here."
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -17026,6 +17087,11 @@ msgstr ""
 msgid "Role granted"
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Role raised"
+msgstr ""
+
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Role revoked"
@@ -17112,6 +17178,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "Rotated"
+msgstr ""
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Rotated API key used again"
 msgstr ""
 
 #: lib/kiln_cms_web/live/api_key_live.ex
@@ -17340,6 +17411,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/presentation_live.ex
 #: lib/kiln_cms_web/live/registrations_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #: lib/kiln_cms_web/live/session_policy_live.ex
@@ -17572,6 +17644,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/registrations_live.ex
 #: lib/kiln_cms_web/live/safety_fields_live.ex
 #: lib/kiln_cms_web/live/search_synonym_live.ex
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #: lib/kiln_cms_web/live/session_policy_live.ex
@@ -17857,6 +17930,37 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sections of %{type}"
+msgstr ""
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "Security alert"
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Security alert settings saved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Security alert settings saved. Every admin of this site has been sent a notice."
+msgstr ""
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts"
+msgstr ""
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts were turned down"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts — email me about security events on sites I administer"
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -18440,6 +18544,11 @@ msgstr ""
 msgid "Show the Compliance panel in the editor"
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Show the full IP address in alerts"
+msgstr ""
+
 #: lib/kiln_cms_web/components/advisory_components.ex
 #, elixir-autogen, elixir-format
 msgid "Show this in the editor"
@@ -18809,6 +18918,7 @@ msgstr ""
 msgid "Single sign-on"
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Single sign-on changed"
@@ -18848,6 +18958,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Site admin"
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Site alerts go only to people who are admins of this site through their membership. With none, they reach nobody by bell or email; webhooks subscribed to security events still receive them."
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
@@ -19067,6 +19182,21 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
 #, elixir-autogen, elixir-format
 msgid "Someone is editing a block right now. Try the Markdown view again once they're done."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Someone is made an admin of this site: by their role, a temporary grant, or an approved registration."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Someone removes a second factor from their account."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Someone's role on this site is raised, or they are given a temporary role."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/form_controller.ex
@@ -21047,6 +21177,11 @@ msgstr ""
 msgid "The section editors see it under"
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "The security alert settings could not be saved."
+msgstr ""
+
 #: lib/kiln_cms/security/posture/checks/core_security_notices.ex
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -21822,6 +21957,11 @@ msgstr ""
 msgid "This member already holds the highest tier on this site."
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "This mutes the email for site alerts only; they still appear in your notifications. Platform alerts, and notices that a site's alerts were turned down, are always sent."
+msgstr ""
+
 #: lib/kiln_cms_web/live/automation_live/preview.ex
 #, elixir-autogen, elixir-format
 msgid "This one couldn't be previewed. The rule itself is unaffected."
@@ -22014,6 +22154,11 @@ msgstr ""
 msgid "This site has no administrators or editors of its own."
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site has no admins of its own."
+msgstr ""
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #: lib/kiln_cms_web/live/locale_settings_live.ex
@@ -22152,6 +22297,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/sign_in_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site's single sign-on is unavailable right now. Sign in another way."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's single sign-on provider is changed."
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -22330,6 +22480,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "To publish checkpoints outside the database, set this on the server:"
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "To send alerts to another system, subscribe a webhook endpoint to the %{events} events."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -22587,6 +22742,11 @@ msgstr ""
 msgid "Turn the admin allowlist off? Anyone will be able to sign in from any network."
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Turning an alert off or switching off admin notifications sends every admin of this site a notice. That notice can't be turned off or muted."
+msgstr ""
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "Turning this on makes the server request every third-party URL your published content links to, on a schedule. Requests are paced per domain and identify themselves as Kiln. Nothing here has been checked until you switch it on."
@@ -22617,6 +22777,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication is on."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Two-factor authentication turned off"
 msgstr ""
 
 #: lib/kiln_cms/security/posture/checks/second_factor.ex
@@ -23563,6 +23728,7 @@ msgstr ""
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/controllers/page_html.ex
 #: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Webhooks"
@@ -23850,6 +24016,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Which records connect"
+msgstr ""
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Which security events alert this site's admins."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Which security events on this site are worth telling its admins about, by the bell and by email. One alert per kind every 15 minutes; the rest of that time arrives as one summary."
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -24338,6 +24514,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's search instance."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's security alerts."
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_txt_live.ex

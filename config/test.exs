@@ -62,6 +62,12 @@ config :kiln_cms, KilnCMS.Federation,
 # to `no-store` under tests that assert cache headers.
 config :kiln_cms, KilnCMS.Experiments, enabled: false
 
+# Security alerts (#2245) off for the suite: recording an event claims a row
+# lock on its alert window, and two sandboxed tests minting an API key would
+# wait on each other's uncommitted claim of the same platform window. Tests
+# about alerts turn them on for themselves (async: false).
+config :kiln_cms, KilnCMS.Security.Alerts, enabled: false
+
 # Outbound link checking (#474). Every request goes to a Req.Test stub; nothing
 # in the suite may reach the real web. The per-host throttle is widened to
 # effectively off, because pacing is tested directly (`Links.Throttle`) and

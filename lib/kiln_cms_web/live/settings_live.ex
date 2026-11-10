@@ -42,6 +42,9 @@ defmodule KilnCMSWeb.SettingsLive do
        :registration_notices?,
        KilnCMS.Notifications.Registrations.administers_any_site?(user)
      )
+     # The security-alert mute (#2245), for a member admin of some site: only
+     # they get site alerts, and the mute is one per account, across sites.
+     |> assign(:security_alert_mute?, KilnCMS.Security.Alerts.member_admin_anywhere?(user))
      |> assign(:profile_form, profile_form(user))
      # A "Saved" line beside the button (#1828), cleared by the next edit: the
      # flash alone was easy to miss on a long page.
@@ -1251,6 +1254,22 @@ defmodule KilnCMSWeb.SettingsLive do
                     )
                   }
                 />
+                <div :if={@security_alert_mute?} id="notify-on-security-alert">
+                  <.input
+                    field={@form[:notify_on_security_alert]}
+                    type="checkbox"
+                    label={
+                      gettext(
+                        "Security alerts — email me about security events on sites I administer"
+                      )
+                    }
+                  />
+                  <p class="-mt-1 ml-6 text-xs text-base-content/70">
+                    {gettext(
+                      "This mutes the email for site alerts only; they still appear in your notifications. Platform alerts, and notices that a site's alerts were turned down, are always sent."
+                    )}
+                  </p>
+                </div>
 
                 <.button type="submit" variant="primary">
                   {gettext("Save preferences")}

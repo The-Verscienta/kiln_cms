@@ -627,6 +627,9 @@ defmodule KilnCMSWeb.Router do
       # roles, API keys. Admin-only by the tier gate AND the `Security.Event` policy;
       # the CSV download is the controller route below.
       live "/editor/security-log", SecurityLogLive, :index
+      # Which security events alert the site's admins, and how (#2245).
+      # Admin-only by the tier gate AND the `CMS.SiteSecurityAlerts` policy.
+      live "/editor/security-alerts", SecurityAlertsLive, :index
       # Which security settings are on, and what to fix first (#2252).
       # Admin-only by the tier gate AND the `Security.PostureReport` policy;
       # the deployment's checks are shown to platform admins only.

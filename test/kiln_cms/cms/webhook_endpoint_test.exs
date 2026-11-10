@@ -201,4 +201,30 @@ defmodule KilnCMS.CMS.WebhookEndpointTest do
       assert is_binary(WebhookEndpoint.secret(rotated))
     end
   end
+
+  describe "security events (#2245)" do
+    test "a site's endpoint can subscribe to the site alert kinds and the silencing notice" do
+      events = WebhookEndpoint.events()
+
+      for kind <- KilnCMS.Security.Alerts.site_kinds(),
+          do: assert("security.#{kind}" in events)
+
+      assert "security.alerts_silenced" in events
+      assert WebhookEndpoint.security_events() == KilnCMS.Security.Alerts.webhook_events()
+    end
+
+    test "platform kinds are not webhook events, and none is subscribed by default" do
+      events = WebhookEndpoint.events()
+
+      for kind <- [:platform_role_changed, :new_api_key, :api_key_abuse],
+          do: refute("security.#{kind}" in events)
+
+      refute Enum.any?(WebhookEndpoint.default_events(), &String.starts_with?(&1, "security."))
+    end
+
+    test "they are domain events, reserving the `security` namespace" do
+      assert "security.lockout" in WebhookEndpoint.domain_events()
+      assert "security" in WebhookEndpoint.reserved_namespaces()
+    end
+  end
 end

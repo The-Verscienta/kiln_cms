@@ -122,8 +122,19 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   def domain_events do
     @release_events ++
       @experiment_events ++
-      @form_events ++ KilnCMS.Billing.MembershipWebhooks.events() ++ taxonomy_events()
+      @form_events ++
+      KilnCMS.Billing.MembershipWebhooks.events() ++ taxonomy_events() ++ security_events()
   end
+
+  @doc """
+  The security alert events (#2245): `security.<kind>` for each site alert
+  kind and `security.alerts_silenced` (`KilnCMS.Security.Alerts.webhook_events/0`).
+  Opt-in, never in `default_events/1`, and sent only by the alert delivery
+  (`KilnCMS.Webhooks.enqueue_security!/4`), never by `KilnCMS.Webhooks.dispatch/4`.
+  They reserve the `security` namespace (`reserved_namespaces/0`).
+  """
+  @spec security_events() :: [String.t()]
+  def security_events, do: KilnCMS.Security.Alerts.webhook_events()
 
   @doc """
   The namespaces of every built-in event that is not a content type's:
@@ -207,7 +218,8 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   (#499), `membership.activated`/`membership.canceled` for paid
   memberships (`KilnCMS.Billing.MembershipWebhooks`), and
   `tag.*`/`tag_group.*`/`category.*` (`created`, `updated`, `deleted`) for
-  taxonomy (`taxonomy_events/0`, #1965). Derived at
+  taxonomy (`taxonomy_events/0`, #1965), and `security.*` for the site's
+  security alerts (`security_events/0`, #2245). Derived at
   runtime so generated and admin-defined types get events for free.
 
   Dynamic types are per-org (epic #336), so the console passes the request's
@@ -221,7 +233,8 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
       @form_events ++
       @task_events ++
       @release_events ++
-      @experiment_events ++ KilnCMS.Billing.MembershipWebhooks.events() ++ taxonomy_events()
+      @experiment_events ++
+      KilnCMS.Billing.MembershipWebhooks.events() ++ taxonomy_events() ++ security_events()
   end
 
   @doc """
@@ -258,8 +271,16 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   end
 
   actions do
-    defaults [:read, :destroy]
+    defaults [:read]
     default_accept [:url, :events, :active]
+
+    # Not the atomic default: an endpoint subscribed to security alerts that
+    # is deleted raises an `alerts_silenced` notice in the transaction (#2245).
+    destroy :destroy do
+      primary? true
+      require_atomic? false
+      change KilnCMS.Security.Changes.NoticeWebhookSilenced
+    end
 
     create :create do
       primary? true
@@ -301,6 +322,9 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
           changeset
         end
       end
+
+      # Re-pointed, switched off or unsubscribed from security alerts (#2245).
+      change KilnCMS.Security.Changes.NoticeWebhookSilenced
     end
 
     # Replace the signing secret (#2347). The old one stops working at once: no
@@ -315,6 +339,10 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
       accept []
 
       change set_attribute(:secret_encrypted, &__MODULE__.generate_encrypted_secret/0)
+
+      # A receiver of security alerts stops verifying them until it has the
+      # new secret (#2245).
+      change KilnCMS.Security.Changes.NoticeWebhookSilenced
 
       change after_action(fn _changeset, endpoint, context ->
                actor = context.actor
@@ -366,6 +394,9 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
           changeset
         end
       end
+
+      # Auto-disabling an endpoint subscribed to security alerts (#2245).
+      change KilnCMS.Security.Changes.NoticeWebhookSilenced
     end
   end
 

@@ -38,6 +38,14 @@ defmodule KilnCMS.Accounts.ThrottleStore do
 
   `KilnCMS.Collab.Crdt.DocServer` makes the same call for its checkpoint upsert.
 
+  ## Tallies
+
+  `count/3` and `window_count/3` use the same table for a counter that is not
+  a budget: the security alerts' failed-sign-in tally per site (#2245). It
+  never refuses, returns the window index alongside the count, and keeps its
+  row an hour past the window's end (through `expires_at`, so the prune needs
+  no special case) for the summary that reads the closed window's total.
+
   ## Never inside a transaction
 
   A charge made inside a transaction is **refunded by its rollback** — and a
@@ -134,6 +142,86 @@ defmodule KilnCMS.Accounts.ThrottleStore do
     case shared_hit(bucket, hash, scale, cost) do
       {:ok, count, retry_after_ms} -> verdict(count, limit, retry_after_ms)
       {:unavailable, reason} -> local_hit(bucket, hash, scale, limit, cost, reason)
+    end
+  end
+
+  # `hit/5`'s upsert for a counter that is a tally rather than a budget
+  # (`count/3`): it also returns the window index, and keeps the row `$4` ms
+  # past the window's end so a reader that comes after the window closed (a
+  # summary sent a minute later) still finds the total.
+  @count_sql """
+  INSERT INTO throttle_counters AS c (bucket, key_hash, window_index, count, expires_at)
+  SELECT $1::text, $2::bytea, w.idx, 1,
+         to_timestamp((((w.idx + 1) * $3::bigint) + $4::bigint)::float8 / 1000) AT TIME ZONE 'UTC'
+  FROM (SELECT floor(extract(epoch FROM clock_timestamp()) * 1000 / $3::bigint)::bigint AS idx) AS w
+  ON CONFLICT (bucket, key_hash, window_index) DO UPDATE SET count = c.count + 1
+  RETURNING c.count, c.window_index
+  """
+
+  # How long a `count/3` row outlives its window. The security-alert summary
+  # (#2245) reads a closed window's total a minute or so after it closes, and
+  # the prune runs every five minutes: without the grace a window could be
+  # deleted between closing and being summarized.
+  @count_grace :timer.hours(1)
+
+  @doc """
+  Adds one to `key`'s **current** window in `bucket` (a fixed window of
+  `scale` ms, by the database clock, as `hit/5`) and returns
+  `{count, window_index}`: the window's total so far, and which window it is.
+
+  A tally, not a gate: it never refuses, so it has no limit. The caller
+  decides what a count means — the failed-sign-in alert (#2245) fires once,
+  on the call that brings the total to its threshold, and reads the window's
+  final total later with `window_count/3`. So the row is kept an hour past
+  the window's end rather than pruned the moment the window closes.
+
+  Raises `ArgumentError` inside a transaction, as `hit/5` does: a rollback
+  would refund the count. When the database cannot answer, it counts on this
+  node's fallback (the index then comes from this node's clock).
+  """
+  @spec count(String.t(), String.t(), pos_integer()) :: {pos_integer(), integer()}
+  def count(bucket, key, scale)
+      when is_binary(bucket) and is_binary(key) and is_integer(scale) and scale > 0 do
+    refuse_in_transaction!(bucket)
+    hash = key_hash(key)
+
+    case shared(fn ->
+           Repo.query!(@count_sql, [bucket, hash, scale, @count_grace], timeout: @timeout)
+         end) do
+      {:ok, %{rows: [[count, window_index]]}} ->
+        {count, window_index}
+
+      {:unavailable, reason} ->
+        log_fallback(bucket, reason)
+        # A limit no tally reaches: the fallback is only counting.
+        {:allow, count} = Local.hit({bucket, hash}, scale, 1_000_000_000)
+        {count, div(System.system_time(:millisecond), scale)}
+    end
+  end
+
+  @window_count_sql """
+  SELECT c.count FROM throttle_counters AS c
+  WHERE c.bucket = $1 AND c.key_hash = $2 AND c.window_index = $3
+  """
+
+  @doc """
+  The total `count/3` reached in window `window_index` of `key` in `bucket`,
+  current or closed. `nil` when there is no such row (pruned, or never
+  counted on the shared store) or the database cannot answer: the caller
+  cannot tell those apart from "nothing happened", so it must not read `nil`
+  as zero.
+  """
+  @spec window_count(String.t(), String.t(), integer()) :: non_neg_integer() | nil
+  def window_count(bucket, key, window_index)
+      when is_binary(bucket) and is_binary(key) and is_integer(window_index) do
+    hash = key_hash(key)
+
+    case shared(fn ->
+           Repo.query!(@window_count_sql, [bucket, hash, window_index], timeout: @timeout)
+         end) do
+      {:ok, %{rows: [[count]]}} -> count
+      {:ok, %{rows: []}} -> nil
+      {:unavailable, _reason} -> nil
     end
   end
 
@@ -255,7 +343,8 @@ defmodule KilnCMS.Accounts.ThrottleStore do
   end
 
   @doc """
-  Deletes every row whose window has closed. Returns how many went.
+  Deletes every row past its `expires_at`: the window's end, or for a
+  `count/3` tally an hour after it. Returns how many went.
 
   Run by `KilnCMS.Accounts.ThrottleCounter`'s scheduled `:prune` action; the
   node-local fallback is swept by Hammer's own cleaner.

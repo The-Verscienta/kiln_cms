@@ -6,6 +6,10 @@ role, who made or revoked an API key, and who changed the site's sign-in or
 other settings (#2241). Use it to answer "who did this, and from where?" after
 the fact, and to hand an auditor a file.
 
+Some of these events also raise a [security alert](security-alerts.md): a bell
+notification and an email to the site's admins, or to the platform admins, as
+it happens.
+
 It is for administrators only, it belongs to one site (organization), and it
 cannot be edited: no person, an admin included, can create, change or delete an
 event. Events leave the log in exactly two ways, both automatic: the retention
@@ -19,8 +23,8 @@ and are refused if they open its address.
 1. Open **Security log** under **Organization** in the console sidebar, or go to
    `/editor/security-log`.
 2. Read the table, newest first: **Time**, **Event**, **Who**, **Target**,
-   **IP address** and **Browser**. Failed sign-ins and lockouts are marked with
-   a warning badge. **Load more** fetches the next 50.
+   **IP address** and **Browser**. Failed sign-ins, lockouts, refused unlock
+   links and a rotated API key used again are marked with a warning badge. **Load more** fetches the next 50.
 3. To narrow it, use the filters above the table and select **Apply**:
    - **Event**: one event type (the list below), or **All events**.
    - **Who (email)**: the address of the person who acted. It matches only
@@ -117,12 +121,12 @@ a type may carry only the keys below; anything else is dropped.
 | `recovery_code_used` | Recovery code used | A recovery code was spent at the code prompt | `remaining` |
 | `passkey_added` | Passkey added | A passkey was registered | `name` |
 | `passkey_removed` | Passkey removed | A passkey was deleted, by its owner or an admin, or when an invitation took over an unconfirmed account | `name`, `via` |
-| `role_granted` | Role granted | A membership was created, or a role was raised | `role`, `previous_role` |
-| `role_revoked` | Role revoked | A role was lowered, a membership removed, or a temporary elevation ended early | `role` |
+| `role_granted` | Role granted | A membership was created, or a role was raised | `role`, `previous_role`, `level`, `via` |
+| `role_revoked` | Role revoked | A role was lowered, a membership removed, a temporary elevation ended early, or a live temporary admin grant replaced by a lower one | `role`, `level`, `change` |
 | `member_invited` | Member invited | An admin invited an address to the site, or resent an invitation | `role`, `resent` |
 | `invitation_revoked` | Invitation revoked | An admin revoked a pending invitation, or changed the tier or custom role of the person it names, or removed them, which retires it | `role` |
-| `elevation_granted` | Temporary elevation granted | A time-boxed role was granted | `role`, `minutes` |
-| `api_key_created` | API key created | A key was minted, or a draft-write key was rotated into a new one | `name`, `scope` |
+| `elevation_granted` | Temporary elevation granted | A time-boxed role was granted | `role`, `minutes`, `level`, `via` |
+| `api_key_created` | API key created | A key was minted, or a draft-write key was rotated into a new one | `name`, `scope`, `via` |
 | `api_key_revoked` | API key revoked | A key was revoked by an admin, or when an invitation took over its unconfirmed account (a repeat revoke records nothing) | `name` |
 | `sso_config_changed` | Single sign-on changed | The site's identity provider or a verified SSO domain was saved, verified or removed | `provider`, `change` |
 | `org_setting_changed` | Site setting changed | Any other site-level setting, or a blocked-address rule, was saved or removed | `setting` |
@@ -139,6 +143,7 @@ a type may carry only the keys below; anything else is dropped.
 | `registration_approved` | Registration approved | A waiting or rejected registration was approved: by a site admin on Registrations, by the applicant accepting an invitation to the site (no person), or by a platform admin adding the address on Team. The target is the applicant | `role`, `via` |
 | `registration_rejected` | Registration rejected | A site admin rejected a waiting registration. The person is the admin; the target is the applicant, or none when the account was erased | `outcome` |
 | `backup_canceled` | Backup canceled | A platform admin [canceled a running backup](backups.md#cancel-a-running-backup). Always in the default site's log. The person is the admin; the target is the backup run (target type `backup_run`) | `stamp`, `step` |
+| `api_key_reuse_detected` | Rotated API key used again | A draft-write key that had been rotated away was presented to `POST /api/keys/rotate` more than 120 seconds after its rotation, so two parties held it, and the live key of its lineage was revoked ([self-rotation](headless-consumer-guide.md#keeping-the-key-alive-self-rotation)). No person; the target is the presented key (target type `api_key`), the IP the request's. Raises the platform's `api_key_abuse` [alert](security-alerts.md) | `name`, `revoked` |
 
 `method` is `password`, `password_reset`, `magic_link`, `sso`, `passkey`,
 `second_factor` or `other`. `reason` is `invalid_credentials`,
@@ -149,6 +154,32 @@ with no token, records nothing: it is not a failed attempt. `scope` is `account`
 `settings`. `change` is `created`, `updated` or `removed`; `provider` is
 `site_oidc` or `site_sso_domain`. `setting` is the settings resource's short
 name, for example `site_mail_relay`; it names the setting and never its value.
+
+The role events carry what the [security alerts](security-alerts.md) need to
+tell a new site admin from a new platform admin (#2245):
+
+- `level` (on `role_granted`, `role_revoked` and `elevation_granted`) is
+  `site` for a membership and `platform` for the account's own role.
+- `change` (on `role_revoked`) is `removed` (the membership was deleted),
+  `demoted` (the role was lowered) or `grant_revoked` (a temporary role ended
+  early). For `removed`, `role` is the role the member effectively held, so
+  removing a member whose admin power came from a live temporary grant
+  records `admin`.
+- `via` (on `role_granted` and `elevation_granted`) is `legacy_carry` when an
+  account from before multi-site memberships got its first membership and its
+  standing role or grant was copied onto it. It held that role already.
+  Absent otherwise.
+
+Replacing a member's live temporary **admin** grant with a lower temporary
+role records two events: the `elevation_granted` of the new grant, and a
+`role_revoked` (`role` `admin`, `change` `grant_revoked`) for the admin power
+it ended.
+
+For `api_key_created`, `via` is `rotate` when the key was minted by rotating
+its predecessor (absent for a key an admin minted). For
+`api_key_reuse_detected`, `name` is the presented key's name and `revoked` the
+number of live keys of its lineage the detection revoked; a lineage that is
+already dead records nothing.
 
 For `session_idle_expired`, `timeout_minutes` is the timeout that applied,
 `tier` is `admin` when it was the administrators' own timeout and `member` when
@@ -267,7 +298,10 @@ other's budget). Anyone can post made-up unlock links, so
 its `/64`, because one client can rotate through its whole prefix.
 Each lockout is written once per subject and scope per 15 minutes (a locked
 account refuses every attempt until its window rolls, and one event says so).
-Both counters live in the same database-backed store as the sign-in throttles
+When a site has the `failed_sign_ins` [alert](security-alerts.md#failed-sign-ins-are-counted-per-site)
+turned on, every failed sign-in is also counted on the site's alert tally
+before sampling, and the one attempt that brings the site to 10 in a window is
+written even when its address has used up its 5. Both counters live in the same database-backed store as the sign-in throttles
 (`KilnCMS.Accounts.ThrottleStore`), so they hold across nodes and restarts.
 
 ### Which site's log
@@ -283,7 +317,10 @@ the invited site's log. Registration events go to the log of the site the regist
 waits on, which may be the default site for a sign-up on another site's host,
 whichever host the deciding admin was on. A canceled backup belongs to the
 whole installation, not to a site, so `backup_canceled` always goes to the
-default site's log.
+default site's log. A reused API key (`api_key_reuse_detected`) goes to the log
+of the key owner's site when the owner has exactly one active membership, and
+to the default site's otherwise; the host the request named never decides,
+since whoever presents the key chooses it.
 
 ## Event matrix: where each event comes from
 
@@ -317,8 +354,8 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `role_granted` / `role_revoked` | `lib/kiln_cms/security/changes/record_role_change.ex`, on `User` `:manage_access` and `OrgMembership` `:create`, `:update`, `:destroy`, `:raise_role_by_invitation` (`lib/kiln_cms/accounts/org_membership.ex`) | in txn; an edit that leaves the role alone (audiences, type scopes) writes nothing |
 | `member_invited` | `Accounts.Invitation` `:invite` and `:resend` (`lib/kiln_cms/accounts/invitation.ex`), also reached through `:add_or_invite` | in txn; `role`, `resent`; tenant is the invitation's site |
 | `invitation_revoked` | `Accounts.Invitation` `:revoke`, and `:retire` (#2452, from `Changes.RetirePendingInvitation` on `OrgMembership` `:update` and `:destroy`, as `SystemActor.new(:invitations)`) | in txn; `role` is the invitation's tier; for `:retire`, the person is the admin who made the membership change, or none when system code made it |
-| `elevation_granted`, and `role_revoked` when cleared early | `lib/kiln_cms/security/changes/record_elevation.ex`, on `User` and `OrgMembership` `:grant_temporary_role` | in txn; `minutes` until it lapses |
-| `api_key_created` | `Accounts.ApiKey` `:create` and `:rotate` (`lib/kiln_cms/accounts/api_key.ex`) | in txn; `name`, `scope` (the key's `access`); never the key or its hash |
+| `elevation_granted`, and `role_revoked` when cleared early or when a live admin grant is replaced by a lower one | `lib/kiln_cms/security/changes/record_elevation.ex`, on `User` and `OrgMembership` `:grant_temporary_role` | in txn; `minutes` until it lapses; `level`; `change: "grant_revoked"` on the `role_revoked` |
+| `api_key_created` | `Accounts.ApiKey` `:create` and `:rotate` (`lib/kiln_cms/accounts/api_key.ex`) | in txn; `name`, `scope` (the key's `access`), and `via: "rotate"` from `:rotate`; never the key or its hash |
 | `api_key_revoked` | `Accounts.ApiKey` `:revoke` and `:retire_rotated`; `:revoke` is also called by `Changes.ForgetPriorCredentials` (#2453) for each live key of an account an invitation takes over, with no person | in txn; only when the key was not already revoked; target is the key |
 | `sso_config_changed` | `CMS.SiteSsoProvider` (every write, via the `audit: :sso_config` option of `use KilnCMS.CMS.OrgSettings`, `lib/kiln_cms/cms/site_sso_provider.ex`), and `CMS.SiteSsoDomain` `:add`, `:verify`, `:remove` (`lib/kiln_cms/cms/site_sso_domain.ex`) | in txn; never the issuer, client id, secret or domain |
 | `org_setting_changed` | `lib/kiln_cms/cms/org_settings.ex`: the `use KilnCMS.CMS.OrgSettings` macro adds `Changes.RecordOrgSetting` to every write of every settings resource, and `CMS.IpBlockRule` `:create`, `:destroy` (`lib/kiln_cms/cms/ip_block_rule.ex`) | in txn; names the setting, never a value. The retention setting itself is one of them |
@@ -333,13 +370,14 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sign_in_unlock_refused` | `sign_in_unlock.ex`: `redeem/2` on every refusal, including the loser of two concurrent redeems (`AuthEvents.sign_in_unlock_refused/3`) | sampled, after commit; `reason` |
 | `registration_queued`, `registration_approved`, `registration_rejected` | `lib/kiln_cms/security/changes/record_registration.ex`, on `OrgMembership` `:queue_registration` (from `Changes.QueueRegistration` inside `User` `:register_with_password`, and from `SiteSso.Admission` for a new site single sign-on account), `:approve_registration`, `:approve_registration_by_invitation` (from `Invitations.grant_membership/4` when an invitation is accepted, and from `Invitations.AddOrInvite`) and `:reject_registration` (`lib/kiln_cms/accounts/org_membership.ex`) | in txn; tenant is the membership's site |
 | `backup_canceled` | `KilnCMS.Security.Changes.Record` on `Backups.Run` `:cancel` (`lib/kiln_cms/backups/run.ex`), called from the Backups page | in txn, with the cancel: if the event cannot be written the backup is not canceled; tenant is the default site |
+| `api_key_reuse_detected` | `lib/kiln_cms/accounts/api_key_reuse.ex`: `check/2`, called by `KilnCMSWeb.ApiKeyRotationController` with the request context, after the lineage's live keys are revoked | `Recorder.record/2` outside any transaction, with `alert_required: true`: if its `api_key_abuse` alert cannot be claimed the event is not written either, and when the event is not written the platform admins get the plain reuse email instead |
 
 `org_setting_changed` covers every resource built with `use
 KilnCMS.CMS.OrgSettings`, so a new settings resource cannot forget it:
 `CMS.FeedSettings`, `FormSpamSettings`, `SiteAiProvider`, `SiteBotBudgets`, `SiteBranding`,
 `SiteCodeInjection`, `SiteCompliance`, `SiteEditorialSettings`,
 `SiteEmbedSettings`, `SiteLinkCheck`, `SiteLocaleSettings`, `SiteMailRelay`,
-`SiteMeilisearch`, `SitePasswordPolicy`, `SiteRegistration`, `SiteSafetyFields`, `SiteSecurityLog`,
+`SiteMeilisearch`, `SitePasswordPolicy`, `SiteRegistration`, `SiteSafetyFields`, `SiteSecurityAlerts`, `SiteSecurityLog`,
 `SiteSecurityTxt`, `SiteSessionPolicy`, `SiteStorage`, `SiteVapidKey` and
 `Federation.SiteFederation`. (`SiteSsoProvider` is the exception that records
 `sso_config_changed` instead, and `SiteAdminAllowlist` the one that records
@@ -413,6 +451,10 @@ telemetry events:
 |---|---|
 | `[:kiln_cms, :security, :event_failed]` | An event could not be written. Metadata: `type`. Wire an alert to this one. |
 | `[:kiln_cms, :security, :event_sampled_out]` | An event was dropped on purpose: a failed sign-in, an admin allowlist refusal or a refused unlock link over the per-address cap, or a repeat lockout in the same window. Metadata: `type`. A sustained rate of `sign_in_failed` is a guessing attack. |
+
+Security alerts have a telemetry event of their own,
+`[:kiln_cms, :security, :alert_failed]`; see
+[Security alerts](security-alerts.md#for-operators).
 
 Events written inside a transaction (credentials, roles, API keys, settings)
 are different: if the event cannot be written, the change rolls back and the

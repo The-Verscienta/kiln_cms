@@ -59,8 +59,12 @@ Every summary line below that was shortened links to its own entry there.
 - **Update the host's copy of `scripts/backup.sh` so cron's prune honors the new `kiln-<stamp>.good` marker, which the app keeps on the newest verified backup of each component (part of #2219).** No migration; rolling back is safe.
   ([#2552](https://github.com/The-Verscienta/kiln_cms/pull/2552) · [long form](docs/changelog/unreleased.md#backup-last-good-marker-upgrade))
 
-- **Before rolling back to v1.8.0, run `DELETE FROM notifications WHERE event = 'registration_pending';` and `DELETE FROM api_keys WHERE access = 'draft_write';` (re-mint those keys after rolling forward; never `UPDATE` them). Check #2605 first if any site has `key_value` or `telephone` fields.**
+- **Before rolling back to v1.8.0, run `DELETE FROM notifications WHERE event IN ('registration_pending', 'security_alert', 'security_notice');` and `DELETE FROM api_keys WHERE access = 'draft_write';` (re-mint those keys after rolling forward; never `UPDATE` them). Check #2605 first if any site has `key_value` or `telephone` fields.**
   ([#2606](https://github.com/The-Verscienta/kiln_cms/pull/2606) · [long form](docs/changelog/unreleased.md#rollback-to-1-8-0-upgrade))
+
+- **Run `mix ash.migrate` (new tables `security_alert_dispatches`, `site_security_alerts`; `users.notify_on_security_alert`, `NOT NULL DEFAULT true`). Site member admins now get security alert emails for every kind but failed sign-ins; platform admins get platform alerts they can't mute. A site with no member admins gets none by bell or email.**
+  The stolen-key email is now an alert, with the old email as fallback; alert email uses the instance relay. `security` is a reserved webhook namespace. Before rolling back past #2509, delete the new notifications and `api_key_reuse_detected` events.
+  ([#2638](https://github.com/The-Verscienta/kiln_cms/pull/2638) · [long form](docs/changelog/unreleased.md#security-alerts-upgrade))
 
 - **Every `/api/content` `ETag` and every Kiln-rendered page's `ETag` changes once on this deploy, so revalidating clients and CDNs get one round of `200`s. Page tags now also change on every deploy whose code or assets differ.**
   No migration; rolling the pin back is safe (another one-time round of `200`s).
@@ -213,6 +217,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
 
 ### Added
+
+- **Security alerts: site admins get a bell notice and an email when someone becomes an admin, a role is raised, an account is locked out, two-factor is turned off or single sign-on changes; platform admins when a platform admin or API key is created or a stolen key is reused. Organization → Security alerts picks the kinds.**
+  One alert per kind per 15 minutes plus a summary; opt-in `security.*` webhook events; turning alerts down sends the site's member admins a notice nobody can mute. Guide: [docs/security-alerts.md](docs/security-alerts.md).
+  ([#2638](https://github.com/The-Verscienta/kiln_cms/pull/2638) · [long form](docs/changelog/unreleased.md#security-alerts))
 
 - **Security posture gains a Security notices for Kiln line (`core.security_notices`): Fix now, at any severity, when a published notice's affected range covers the running Kiln. System's Updates card shows the same.**
   Off with `KILN_UPDATE_CHECK=false`; shares the plugin check's notices fetch, which `KILN_PLUGIN_HEALTH_CHECK=false` no longer stops. Guide: [docs/security-posture.md](docs/security-posture.md#security-notices-for-kiln).

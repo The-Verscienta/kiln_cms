@@ -58,11 +58,13 @@ carries the reasoning.
   `String.to_existing_atom/1` and fails the whole read on a value it does not
   know, and two columns gained values since:
   ```sql
-  DELETE FROM notifications WHERE event = 'registration_pending';
+  DELETE FROM notifications
+  WHERE event IN ('registration_pending', 'security_alert', 'security_notice');
   DELETE FROM api_keys WHERE access = 'draft_write';
   ```
   Without the first, the bell, the inbox and "mark all read" fail on v1.8.0
-  for everyone holding a registration notice. Draft-write keys stop working on
+  for everyone holding a registration notice or a
+  [security alert](#security-alerts-upgrade). Draft-write keys stop working on
   v1.8.0 whatever you do (it has no such scope); left in place, the key's own
   lookup and the site's API keys page fail, so delete them and mint new ones
   after rolling forward. Never `UPDATE` them to `'read'`: that silently
@@ -73,6 +75,77 @@ carries the reasoning.
   [#2605](https://github.com/The-Verscienta/kiln_cms/issues/2605) before
   rolling back if any site uses them. Details in
   [New values in an atom column](../releasing.md#new-values-in-an-atom-column).
+
+<a id="security-alerts-upgrade"></a>
+
+- **Run `mix ash.migrate` for security alerts (#2245). From the deploy on,
+  each site's member admins get a bell notice and an email for every site
+  alert kind except failed sign-ins, and every platform admin gets the
+  platform's alerts, which can't be muted. Before rolling back past #2509,
+  delete the new notifications (and, on a build with the security log, the
+  new security event), or roll forward.**
+  - **The migration.** `20261110145904_add_security_alerts`, additive: new
+    tables `security_alert_dispatches` (the alert queue, pruned hourly) and
+    `site_security_alerts` (one settings row per site, created on the first
+    save), and `users.notify_on_security_alert` (`boolean NOT NULL DEFAULT
+    true`). Nothing is backfilled, and nothing is alerted about events from
+    before the deploy.
+  - **Who starts getting mail.** A site's **member admins**: accounts whose
+    active membership on the site is admin, standing or by a live temporary
+    grant, and that are not platform admins. They get `new_admin`,
+    `role_elevation`, `lockout`, `two_factor_disabled` and
+    `sso_config_changed`; `failed_sign_ins` starts off. A site admin can turn
+    any of them off on **Organization** → **Security alerts**, and each person
+    can mute the email for themselves under **Your settings** → **Email
+    notifications**. Platform admins get `new_admin` (platform level),
+    `platform_role_changed`, `new_api_key` and `api_key_abuse`, by bell (in
+    the default site) and email, with no setting and no mute: expect one
+    email per new API key.
+  - **A site with no member admins gets no bell or email for its site
+    alerts.** On a single-site install run by a platform admin with no
+    membership on the site, that is nobody; the Security alerts page warns
+    about it. Give someone an admin membership on the site if you want them.
+  - **The stolen-key email is now an alert.** A rotated-away API key
+    presented again was a plain email to the platform admins; it is now the
+    `api_key_abuse` platform alert and a new security event,
+    `api_key_reuse_detected`. When the event can't be recorded, the old email
+    is sent instead.
+  - **Alert email uses the instance relay** (`KilnCMS.Mailer`), never a
+    site's own SMTP relay, so check that the instance mailer delivers. It
+    goes through the `mail` queue as usual. No new queue: delivery runs on
+    `default`.
+  - **`security` is now a reserved webhook namespace.** A new content type
+    can't be named `security`. A dynamic content type already called
+    `security` keeps working and can still be edited, but its events
+    (`security.published`, …) now share the prefix with the alert events and
+    are listed in the same `security` group on **Webhooks**: tell them apart
+    by the full event name.
+  - **During a rolling deploy.** Events handled by an older node raise no
+    alert. An older node that has #2509 loads the new notifications as an
+    unknown event: the bell shows the generic "Notification" line and links to
+    `/editor/inbox`, and its security log shows `api_key_reuse_detected` as
+    "Unrecognized event (api_key_reuse_detected)". Both read normally once
+    every node runs this release.
+  - **Before rolling back** to a build without #2509 (v1.8.0, or an earlier
+    `main` pin), run in `psql` against the deployment's database:
+
+    ```sql
+    DELETE FROM notifications WHERE event IN ('security_alert', 'security_notice');
+    ```
+
+    For v1.8.0 this is part of the [one-time cleanup](#rollback-to-1-8-0-upgrade).
+    If the build has the security log (#2441) but not #2509, also export what
+    you need (**Download CSV** on `/editor/security-log`) and run:
+
+    ```sql
+    DELETE FROM security_events WHERE type = 'api_key_reuse_detected';
+    ```
+
+    A build that has #2509 needs neither. The new tables and column are
+    ignored by an older release. Alert jobs already queued fail there as
+    unknown workers until their attempts run out, which is harmless; alerts still queued
+    when you roll forward again are sent if they are less than a day old.
+  See also [the Added entry](#security-alerts).
 
 <a id="render-etags-upgrade"></a>
 
@@ -1303,6 +1376,56 @@ carries the reasoning.
     previous release is safe, since it ignores the indexes. Until the
     migration finishes, queries on the field answer correctly from the table.
     Renaming a field is a drop and a create.
+
+<a id="security-alerts"></a>
+
+- **Security alerts: a site's admins hear about a new admin, a raised role,
+  a lockout, two-factor turned off or a single sign-on change as it happens,
+  by bell and email, and platform admins about new platform admins, new API
+  keys and a stolen API key used again (#2245, first of three parts).** The
+  security log (#2241) said what happened only to someone who went and read
+  it.
+  - **What alerts.** Site kinds `new_admin`, `role_elevation`,
+    `failed_sign_ins` (10 failed sign-ins on the site in 15 minutes; off by
+    default), `lockout`, `two_factor_disabled` and `sso_config_changed`.
+    Platform kinds `new_admin` (an account's own role made admin),
+    `platform_role_changed`, `new_api_key` (not a rotation) and
+    `api_key_abuse`. Alerts are raised from security log events, in the
+    event's own transaction.
+  - **Who hears.** A site alert goes to the site's member admins only, not to
+    platform admins; a platform alert goes to every platform admin, in the
+    default site's bell. Editors, viewers and other sites' admins never do.
+  - **How often.** One alert per kind per 15-minute window (per site, or for
+    the platform), then one summary with the window's count if more
+    followed. Failed sign-ins are counted per site, never per address or
+    account an attacker picks.
+  - **Organization → Security alerts** (`/editor/security-alerts`, admins):
+    tick the site kinds, switch the admins' bell and email off (webhooks still
+    go), and choose whether alerts show the full IP address or only its
+    `/24` or `/48`, the default. Platform alerts always show the network only.
+  - **Your settings → Email notifications → Security alerts** mutes the
+    email of site alerts for yourself; the bell row is still written.
+    Platform alerts and notices ignore it, and only the account holder can
+    change it.
+  - **Turning alerts down is never silent.** Switching a kind or the admins'
+    notifications off, changing, deleting, re-keying or auto-disabling a
+    webhook subscribed to `security.*`, another person removing, demoting or
+    ending the temporary grant of a site admin, and changing the site's mail
+    relay each send the site's member admins an `alerts_silenced` notice that
+    no setting or mute stops. If the notice can't be written, the change is
+    refused.
+  - **Webhooks.** Opt-in `security.<site kind>` and `security.alerts_silenced`
+    events, signed like every other delivery, with `phase` `alert`, `summary`
+    or `notice`. Platform alerts are not webhook events yet.
+  - **Security log.** New event type `api_key_reuse_detected`. Role events
+    gain `level` (`site` or `platform`), `role_revoked` gains `change`
+    (`removed`, `demoted`, `grant_revoked`), `role_granted` and
+    `elevation_granted` gain `via` (`legacy_carry`), and `api_key_created`
+    gains `via: "rotate"`. Replacing a live temporary admin grant with a lower
+    one now also records a `role_revoked`.
+
+  Guide: [Security alerts](../security-alerts.md). Upgrade:
+  [the upgrade note](#security-alerts-upgrade).
 
 <a id="refire-notify"></a>
 

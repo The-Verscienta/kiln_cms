@@ -102,6 +102,22 @@ defmodule KilnCMSWeb.ConsoleNavTest do
       end
     end
 
+    test "the security screens sit together in Organization, alerts after the log" do
+      keys = Enum.map(group(authed_user(:admin), :organization).items, & &1.key)
+
+      assert keys == [
+               :governance,
+               :security_posture,
+               :security_txt,
+               :security_log,
+               :security_alerts,
+               :trash
+             ]
+
+      assert :security_alerts in found("alert", authed_user(:admin))
+      refute :security_alerts in found("alert", authed_user(:editor))
+    end
+
     test "every path is a route the router actually serves" do
       routes = MapSet.new(KilnCMSWeb.Router.__routes__(), & &1.path)
 
