@@ -528,6 +528,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The editor can start a new document of a type with a required custom field that has no default; it used to fail with "Couldn't create the draft" and log nothing. The field starts blank, the first save asks for it, and the refused-create path now logs its error.**
+  Publish and scheduled publish now refuse a document while a required custom field is blank, including drafts written before the field became required.
+  ([#2651](https://github.com/The-Verscienta/kiln_cms/pull/2651))
+
 - **A visitor's session language no longer reaches shared caches: unprefixed public pages, the blog and event indexes, `index.json`, the stock home and form pages and embeds were cached `public` in whichever language the first visitor's session chose.**
   ([#2646](https://github.com/The-Verscienta/kiln_cms/pull/2646) · [long form](docs/changelog/unreleased.md#public-delivery-session-locale-leak))
 
