@@ -10,7 +10,8 @@ defmodule KilnCMS.CMS.TrashedRowGuardTest do
   artifacts and sent `updated` after `deleted`.
 
   `KilnCMS.CMS.Changes.RefuseTrashed` puts a row filter on every update
-  action except `:restore` and `:clear_reference_target`, and `:restore` and
+  action except `:restore`, `:clear_reference_target` and the contract-step
+  backfills `:convert_custom_field` and `:resnapshot_media` (#2533), and `:restore` and
   `:destroy` each carry a compare-and-swap of their own so neither runs twice
   from one held struct. `:purge` takes only a row still in the trash (#2531):
   a held struct of a row someone restored meanwhile hard-deleted live content.
@@ -136,8 +137,13 @@ defmodule KilnCMS.CMS.TrashedRowGuardTest do
       end
     end
 
-    test "exactly :restore and :clear_reference_target are exempt, and both are update actions" do
-      assert RefuseTrashed.exempt_actions() == [:restore, :clear_reference_target]
+    test "exactly :restore, :clear_reference_target and the two contract-step backfills are exempt, all update actions" do
+      assert RefuseTrashed.exempt_actions() == [
+               :restore,
+               :clear_reference_target,
+               :convert_custom_field,
+               :resnapshot_media
+             ]
 
       for resource <- @content_resources, name <- RefuseTrashed.exempt_actions() do
         assert %{type: :update} = Ash.Resource.Info.action(resource, name),

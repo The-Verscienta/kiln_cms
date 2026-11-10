@@ -642,6 +642,16 @@ The cases that come up:
   one that belongs to the migration with `DROP INDEX CONCURRENTLY <name>;`,
   and run the migration again. The `custom_fields` GIN indexes (#2291) are an
   example: they are large on `entries`, so the build can take a while.
+- **A custom field's stored shape** changes with a task rather than a
+  migration: `mix kiln.fields.convert` moves a field's values into a new
+  field ([field-conversion.md](field-conversion.md)), and
+  `mix kiln.media.resnapshot --apply` rewrites stored media snapshots. Both
+  write records in the trash as well as live ones, so a document restored
+  after the contract release has the new shape (#2533). They read the live
+  records and the trashed ones separately, and a record trashed or restored
+  in between can be missed by both, so **run the task again right before
+  the contract release**. Records already converted or current are not
+  rewritten.
 
 ### The check
 
