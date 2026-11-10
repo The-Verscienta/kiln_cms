@@ -4491,12 +4491,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                 <div class="min-w-0 space-y-1">
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="font-medium">{definition.label}</span>
-                    <code class="text-xs text-base-content/60">{definition.name}</code>
+                    <code class="text-xs text-base-content/70">{definition.name}</code>
                     <span class="rounded bg-warning/20 px-1.5 py-0.5 text-xs text-warning">
                       {gettext("unknown type")}
                     </span>
                   </div>
-                  <p class="text-xs text-base-content/60">
+                  <p class="text-xs text-base-content/70">
                     {gettext("On %{owner}, of type %{type}.",
                       owner: unknown_owner(definition, @definitions, @dynamic_types),
                       type: to_string(definition.field_type)
