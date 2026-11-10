@@ -86,12 +86,16 @@ resize() {
       ;;
     *)
       local geom="${w}x"; [ "$h" != "-" ] && geom="x${h}"
-      # JPEG: drop metadata. PNG: 8-bit RGBA like sips writes (ImageMagick
+      # JPEG: drop metadata, and keep full-resolution color (4:4:4) like
+      # sips does. ImageMagick's default 4:2:0 subsampling made these
+      # screenshots ~40% smaller than the committed sips output at the same
+      # quality, by blurring the color edges of UI text (#2461's first CI run).
+      # PNG: 8-bit RGBA like sips writes (ImageMagick
       # would otherwise pick a palette when the colors fit), and no date:*
       # text or tIME chunk, so rerunning on the same input is byte-identical.
       local qa=() dst="$out"
       if [ "$fmt" = jpeg ]; then
-        qa=(-quality "$q" -strip)
+        qa=(-quality "$q" -sampling-factor 4:4:4 -strip)
       else
         qa=(-define "png:exclude-chunks=date,time")
         dst="PNG32:$out"
