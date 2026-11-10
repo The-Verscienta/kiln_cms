@@ -10785,8 +10785,8 @@ msgstr "Clés"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
-msgid "Keys this field's value in submissions. Entries already received keep the old key; exports and API clients use the new one from now on."
-msgstr "Identifie la valeur de ce champ dans les envois. Les entrées déjà reçues conservent l'ancienne clé ; les exports et les clients de l'API utilisent la nouvelle à partir de maintenant."
+msgid "Keys this field's value in submissions. Entries already received keep the old key: the Entries tab and CSV export show it as a renamed field; API clients and webhooks use the new name from now on."
+msgstr "Identifie la valeur de ce champ dans les envois. Les entrées déjà reçues conservent l'ancienne clé : l'onglet Envois et l'export CSV l'affichent comme un champ renommé ; les clients de l'API et les webhooks utilisent le nouveau nom à partir de maintenant."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format

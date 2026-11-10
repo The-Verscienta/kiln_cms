@@ -3563,6 +3563,35 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="form-export-renamed-field-keys"></a>
+
+- **A form's CSV export keeps the values stored under a renamed or removed
+  field's old machine name, in a column headed `<key> (renamed or removed)`
+  (#2342).** A submission keeps the keys it was received with, and the export
+  had one column per current field, so after a rename the entries received
+  before it lost that value from the file without a word, though the Entries
+  tab showed it under **From a renamed or removed field** (#2139). Now the
+  export adds one column per key the exported entries carry that no current
+  field is named, sorted by key, between the current fields' columns and
+  `status`, `spam_score`, `submitted_at`. Renaming `email` to `work_email`
+  gives the header
+  `work_email,email (renamed or removed),status,spam_score,submitted_at`.
+  - **Who sees a change.** Only exports whose entries carry an old key. A
+    form never renamed, or a `?status=` filter that leaves no entry with an
+    old key, exports exactly the columns it did before. A key that a current
+    field has taken again (a reused name) is that field's column, as on the
+    Entries tab.
+  - **The suffix is fixed English.** It is a data header that a spreadsheet
+    or import keys on, like the machine names and `status`, so it is not
+    translated.
+  - **In the builder.** The **Machine name** hint now reads "Entries already
+    received keep the old key: the Entries tab and CSV export show it as a
+    renamed field; API clients and webhooks use the new name from now on."
+  - **Operators.** No migration, no config. Rolling the pin back is safe and
+    brings back the old columns.
+
+  Guide: [Read entries after a rename](../forms.md#read-entries-after-a-rename).
+
 <a id="trashed-row-updates-refused"></a>
 
 - **Nothing can write into a document after it is moved to the trash (#2332).**
@@ -3728,7 +3757,8 @@ carries the reasoning.
   has under **From a renamed or removed field**.
 
   Stored submissions are not rewritten. Still open: the CSV export drops an
-  old key's values (#2342), an autoresponder `[field:old]` token renders
+  old key's values (#2342, since fixed: see
+  [above](#form-export-renamed-field-keys)), an autoresponder `[field:old]` token renders
   empty after a rename (#2343), and there is no option to rewrite old keys
   (#2344). Nothing to configure or migrate. See
   [Edit and rename form fields](../forms.md#edit-and-rename-form-fields).
