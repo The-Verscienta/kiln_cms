@@ -77,6 +77,33 @@ defmodule KilnCMS.CMS.MediaArchivalTest do
            )
   end
 
+  # #2531: `:purge` ignored `archived_at`, so a held struct of an item
+  # someone restored meanwhile hard-deleted a live one.
+  test "purge of a held item someone restored is refused, and the item stays live" do
+    admin = user(:admin)
+    item = media()
+    assert :ok = CMS.destroy_media_item!(item, actor: admin)
+
+    [held] = CMS.list_trashed_media_items!(actor: admin)
+    assert {:ok, _} = CMS.restore_media_item(held, actor: admin)
+
+    assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{} | _]}} =
+             CMS.purge_media_item(held, actor: admin)
+
+    assert CMS.get_media_item!(item.id, actor: admin).id == item.id
+    refute archived_at(item.id)
+  end
+
+  test "purge of an item that was never trashed is refused" do
+    admin = user(:admin)
+    item = media()
+
+    assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{} | _]}} =
+             CMS.purge_media_item(item, actor: admin)
+
+    assert CMS.get_media_item!(item.id, actor: admin).id == item.id
+  end
+
   test "delete, trash, and restore are admin-only" do
     editor = user(:editor)
     admin = user(:admin)

@@ -3674,6 +3674,12 @@ defmodule KilnCMS.CMS.Content do
         # nightly auto-purge; admin/system only via the destroy policy.
         destroy :purge do
           require_atomic? false
+          # Only a row still in the trash (#2531). AshArchival leaves `:purge`
+          # unfiltered (`exclude_destroy_actions`), so a held struct whose row
+          # someone restored meanwhile hard-deleted live content — no
+          # `deleted` webhook, no artifact cleanup. A miss is a `StaleRecord`,
+          # and the hooks below roll back with it. The mirror of `:restore`.
+          change filter(expr(not is_nil(^ref(:archived_at))))
           # No FK can reach the chunk table from every content table (#1940).
           change KilnCMS.CMS.Changes.DeleteChunkEmbeddings
           # Each connecting `:reference` field's `on_target_delete` rule (R5):

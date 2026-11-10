@@ -18950,6 +18950,11 @@ msgstr "Quelqu’un a modifié la page en ligne après l’enregistrement de vot
 msgid "Someone else already moved this to the trash or deleted it."
 msgstr "Quelqu’un d’autre a déjà placé ceci dans la corbeille ou l’a supprimé."
 
+#: lib/kiln_cms_web/live/trash_live.ex
+#, elixir-autogen, elixir-format
+msgid "Someone else already restored that item."
+msgstr "Quelqu’un d’autre a déjà restauré cet élément."
+
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
 msgid "Someone else changed this item's status first — reload to see where it stands."
@@ -20080,6 +20085,16 @@ msgstr "Cet élément n'est plus disponible — choisissez-en un autre."
 #, elixir-autogen, elixir-format
 msgid "That item is no longer available."
 msgstr "Cet élément n'est plus disponible."
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "That item is no longer in the trash — someone else restored or deleted it."
+msgstr "Cet élément n’est plus dans la corbeille — quelqu’un d’autre l’a restauré ou supprimé."
+
+#: lib/kiln_cms_web/live/trash_live.ex
+#, elixir-autogen, elixir-format
+msgid "That item is no longer in the trash — someone permanently deleted it."
+msgstr "Cet élément n’est plus dans la corbeille — quelqu’un l’a supprimé définitivement."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
