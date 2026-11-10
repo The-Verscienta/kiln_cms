@@ -61,7 +61,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Before rolling back to v1.8.0, run `DELETE FROM notifications WHERE event IN ('registration_pending', 'security_alert', 'security_notice');` and `DELETE FROM api_keys WHERE access = 'draft_write';` (re-mint those keys after rolling forward; never `UPDATE` them). Back up, then delete every `key_value` and `telephone` custom field (and its values).**
   Fields of the other types added since v1.8.0, and the new scalar lists, load there but can fail to save or open; the long form has the queries and a console loop.
-  ([#2606](https://github.com/The-Verscienta/kiln_cms/pull/2606) · [#2605](https://github.com/The-Verscienta/kiln_cms/issues/2605) · [long form](docs/changelog/unreleased.md#rollback-to-1-8-0-upgrade))
+  ([#2606](https://github.com/The-Verscienta/kiln_cms/pull/2606) · [#2670](https://github.com/The-Verscienta/kiln_cms/pull/2670) · [long form](docs/changelog/unreleased.md#rollback-to-1-8-0-upgrade))
 
 - **Run `mix ash.migrate` (new tables `security_alert_dispatches`, `site_security_alerts`; `users.notify_on_security_alert`, `NOT NULL DEFAULT true`). Site member admins now get security alert emails for every kind but failed sign-ins; platform admins get platform alerts they can't mute. A site with no member admins sends them to the platform admins.**
   The stolen-key email is now an alert, with the old email as fallback; alert email uses the instance relay. `security` is a reserved webhook namespace. Before rolling back past #2509, delete the new notifications and `api_key_reuse_detected` events.
@@ -534,7 +534,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **A custom field of a type this release doesn't know (a newer release's, after a rollback, or a removed plugin's) no longer breaks the Fields screen, the editor, saves and delivery: it is hidden, records keep its values, and Fields lists it under "Fields of an unknown type" with a Delete.**
-  ([#2605](https://github.com/The-Verscienta/kiln_cms/issues/2605) · [long form](docs/changelog/unreleased.md#unknown-field-type-rollback))
+  ([#2670](https://github.com/The-Verscienta/kiln_cms/pull/2670) · [long form](docs/changelog/unreleased.md#unknown-field-type-rollback))
 
 - **The editor can start a new document of a type with a required custom field that has no default; it used to fail with "Couldn't create the draft" and log nothing. The field starts blank, the first save asks for it, and the refused-create path now logs its error.**
   Publish and scheduled publish now refuse a document while a required custom field is blank, including drafts written before the field became required.
