@@ -561,7 +561,8 @@ defmodule KilnCMSWeb.ContentControllerTest do
 
       html = conn |> get(~p"/#{page.slug}") |> html_response(200)
 
-      assert html =~ ~s(action="/forms/#{form.slug}")
+      # Pinned to the page's locale: the test config is multi-locale (#2465).
+      assert html =~ ~s(action="/en/forms/#{form.slug}")
       assert html =~ "Your email"
       assert html =~ ~s(name="website")
 
@@ -706,6 +707,12 @@ defmodule KilnCMSWeb.ContentControllerTest do
   end
 
   describe "search page" do
+    # The page runs `KilnCMS.Search.global/2`, inside the search query budget.
+    # A hit missing from the page with no error may be a sweep the budget cut
+    # short on a loaded host (#2337): run the query through
+    # `KilnCMS.Search.global_report/2` and check `:partial`. `config/test.exs`
+    # sets the budget high for exactly this reason.
+
     test "shows category facet counts and filters by ?category=<slug>", %{conn: conn} do
       term = "harvest#{uniq()}"
 

@@ -14,9 +14,8 @@ defmodule KilnCMS.CMS.Changes.BustFormCache do
   Scoped to the form's site and to the delivery *payloads*
   (`KilnCMS.Cache.bust_form_payloads/1`) — the only shape that embeds a form.
   A full clear (`ClusterBust.broadcast_clear/0`) would also drop every site's
-  head-generation token back to `"0"` (a stale 304 for anyone holding an ETag
-  from before the last settings bump) and the fired-artifact cache, which only
-  carries a `data-kiln-form` placeholder.
+  published records and the fired-artifact cache, which only carries a
+  `data-kiln-form` placeholder.
 
   After the transaction rather than after the action: a page rebuilt between
   the bust and the commit would read the old form and be cached again.

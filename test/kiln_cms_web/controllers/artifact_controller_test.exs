@@ -135,4 +135,159 @@ defmodule KilnCMSWeb.ArtifactControllerTest do
     KilnCMS.DataCase.drain_oban()
     assert conn |> recycle() |> get(~p"/api/content/page/#{slug}") |> json_response(200)
   end
+
+  describe "the ETag is a digest of the body served (#2463)" do
+    alias KilnCMS.Firing.Cache
+    alias KilnCMS.SystemActor
+
+    defp org_id, do: KilnCMS.Accounts.default_org_id()
+
+    defp page_id(slug) do
+      %{rows: [[id]]} =
+        Ecto.Adapters.SQL.query!(KilnCMS.Repo, "SELECT id FROM pages WHERE slug = $1", [slug])
+
+      Ecto.UUID.cast!(id)
+    end
+
+    defp updated_at(id) do
+      %{rows: [[at]]} =
+        Ecto.Adapters.SQL.query!(KilnCMS.Repo, "SELECT updated_at FROM pages WHERE id = $1", [
+          Ecto.UUID.dump!(id)
+        ])
+
+      at
+    end
+
+    # A re-fire as an overlay asks for one (`KilnCMS.Firing.refire/3`): the
+    # stored artifact is rewritten and the document's timestamps are not.
+    defp refire(id) do
+      KilnCMS.Firing.refire!("page", [id], actor: SystemActor.new(:overlay), tenant: org_id())
+      KilnCMS.DataCase.drain_oban()
+    end
+
+    defp fetch(slug, etag \\ nil, query \\ "") do
+      conn = if etag, do: put_req_header(build_conn(), "if-none-match", etag), else: build_conn()
+      get(conn, "/api/content/page/#{slug}#{query}")
+    end
+
+    defp etag(conn), do: conn |> get_resp_header("etag") |> List.first()
+
+    test "names the record, locale and surface beside the digest" do
+      slug = published_page()
+      id = page_id(slug)
+
+      assert etag(fetch(slug)) =~ ~r/^W\/"#{id}-en-json-b[A-Za-z0-9_-]{16}"$/
+    end
+
+    test "a body rewritten without updated_at moving no longer revalidates" do
+      slug = published_page()
+      id = page_id(slug)
+      before = etag(fetch(slug))
+      edited_at = updated_at(id)
+
+      retitle_and_refire(id, "Re-rendered")
+      assert updated_at(id) == edited_at
+
+      served = fetch(slug, before)
+      assert json_response(served, 200)["title"] == "Re-rendered"
+      assert [after_refire] = get_resp_header(served, "etag")
+      refute after_refire == before
+
+      assert fetch(slug, after_refire).status == 304
+    end
+
+    test "a re-fire that changed nothing keeps the ETag" do
+      slug = published_page()
+      before = etag(fetch(slug))
+
+      refire(page_id(slug))
+
+      assert fetch(slug, before).status == 304
+      assert etag(fetch(slug)) == before
+    end
+
+    test "is the same whether the body was cached by a fire or read from the table" do
+      slug = published_page()
+      id = page_id(slug)
+
+      # More than 32 keys, so the map is not sorted on encode; atom and string
+      # keys, and DateTimes, as a fire's own map may carry before the table
+      # has turned it into JSON.
+      body =
+        Map.new(1..20, &{:"atom_key_#{&1}", DateTime.from_unix!(1_700_000_000 + &1)})
+        |> Map.merge(Map.new(1..20, &{"string_key_#{&1}", %{nested: &1}}))
+        |> Map.merge(%{"id" => id, "type" => "page", "title" => "Wide"})
+
+      {:ok, _} =
+        KilnCMS.Firing.upsert_artifact(
+          %{
+            document_type: :page,
+            document_id: id,
+            surface: :json,
+            format_version: KilnCMS.Firing.Engine.format_version(),
+            body: body,
+            fired_at: DateTime.utc_now()
+          },
+          actor: SystemActor.new(:firing),
+          tenant: org_id()
+        )
+
+      # What `Engine.persist_surface/6` does after the upsert.
+      Cache.put(org_id(), :page, id, :json, body)
+      from_fire = etag(fetch(slug))
+
+      Cache.evict(org_id(), :page, id)
+      from_table = fetch(slug)
+      assert json_response(from_table, 200)["title"] == "Wide"
+      assert etag(from_table) == from_fire
+
+      # And again, now that the table read has warmed the cache.
+      assert etag(fetch(slug)) == from_fire
+    end
+
+    # The stored tree changes under the artifact without an action, which is
+    # what a deploy that changes rendering looks like to a stored artifact.
+    defp retitle_and_refire(id, title) do
+      Ecto.Adapters.SQL.query!(KilnCMS.Repo, "UPDATE pages SET title = $1 WHERE id = $2", [
+        title,
+        Ecto.UUID.dump!(id)
+      ])
+
+      refire(id)
+    end
+
+    test "the llm surface digests its Markdown: stable until the Markdown changes" do
+      slug = published_page()
+      id = page_id(slug)
+      served = fetch(slug, nil, "?surface=llm")
+
+      assert response(served, 200) =~ "Welcome"
+      assert [tag] = get_resp_header(served, "etag")
+      assert tag =~ ~r/^W\/"#{id}-en-llm-b[A-Za-z0-9_-]{16}"$/
+
+      # A re-fire that changed nothing still revalidates…
+      refire(id)
+      assert fetch(slug, tag, "?surface=llm").status == 304
+
+      # …and one that changed the Markdown does not.
+      retitle_and_refire(id, "Re-rendered")
+      moved = fetch(slug, tag, "?surface=llm")
+      assert response(moved, 200) =~ "Re-rendered"
+      refute etag(moved) == tag
+    end
+
+    test "a ?fields= response moves when a re-fire changes a field it kept" do
+      slug = published_page()
+      id = page_id(slug)
+      tag = etag(fetch(slug, nil, "?fields=title"))
+
+      refire(id)
+      assert fetch(slug, tag, "?fields=title").status == 304
+
+      retitle_and_refire(id, "Re-rendered")
+      moved = fetch(slug, tag, "?fields=title")
+      assert json_response(moved, 200)["title"] == "Re-rendered"
+      refute etag(moved) == tag
+    end
+  end
 end

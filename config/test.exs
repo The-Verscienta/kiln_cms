@@ -89,6 +89,14 @@ config :kiln_cms, :unsplash, req_options: [plug: {Req.Test, KilnCMS.Unsplash}]
 # both be exercised by overriding this per-test.
 config :kiln_cms, Kiln.Updates, req_options: [plug: {Req.Test, Kiln.Updates}]
 
+# The plugin health check (#2244) is off by default here: it inherits the
+# update check's `enabled: true`, and with the dependency fixture plugin
+# installed every System or Security posture test would otherwise ask the
+# stub. Its tests enable it per case; requests go to a Req.Test stub.
+config :kiln_cms, Kiln.Plugins.Health,
+  enabled: false,
+  req_options: [plug: {Req.Test, Kiln.Plugins.Health}]
+
 # The HTTP governance witness (#733) reaches an operator-configured transparency
 # log. Never dialled for real in tests; the stub stands in for the log.
 config :kiln_cms, KilnCMS.Governance.Witness.HTTP,
@@ -418,3 +426,29 @@ config :kiln_cms, KilnCMS.Challenge,
 # `:async_analytics` above, so they stay on the test's sandbox connection;
 # `KilnCMS.Accounts.SignInUnlockAsyncTest` turns the hand-off back on.
 config :kiln_cms, KilnCMS.Accounts.SignInUnlock, async: false
+
+# Search's per-sweep time budget (#2166) is 1.5 s by default: a `Search.global/2`
+# sweep past it drops the legs it had not finished and answers those sections
+# empty (`partial` in `Search.global_report/2`). On a loaded host, an async
+# test's sweep can cross 1.5 s, and the test then fails on an empty result
+# (#2337: the search page, `KilnCMS.Ask` and synonym tests). A generous budget
+# keeps the budgeted path (deadlines, slots) under test without making the
+# host's load part of the assertion. It stays well under the 30 s section
+# ceiling (`@section_timeout`), so a wedged leg is cut at 10 s and the test
+# fails on its empty result inside ExUnit's 60 s test timeout, rather than
+# timing out the test. The tests about the budget set their own
+# (`query_budget_test.exs`, `search_api_budget_test.exs`).
+#
+# How to tell if it happens anyway: a search test that finds nothing where it
+# expected hits, with no error. Run the query through `Search.global_report/2`
+# and look at `:partial`.
+config :kiln_cms, KilnCMS.Search, query_budget: 10_000
+
+# Crawler verification (#2254) is on, like production, but asks
+# `KilnCMS.Test.StubCrawlerResolver` instead of DNS: every address has no PTR
+# record unless a test plants one, so nothing reaches the network. Tests that
+# need a settled result without a lookup plant it with
+# `KilnCMS.CrawlerVerification.put_result/4`.
+config :kiln_cms, KilnCMS.CrawlerVerification,
+  enabled: true,
+  resolver: KilnCMS.Test.StubCrawlerResolver

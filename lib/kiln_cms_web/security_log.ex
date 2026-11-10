@@ -27,6 +27,7 @@ defmodule KilnCMSWeb.SecurityLog do
   require Ash.Query
 
   alias KilnCMS.Security.Event
+  alias KilnCMS.Types.UnknownAtom
 
   @type filters :: %{
           required(String.t()) => String.t()
@@ -134,8 +135,11 @@ defmodule KilnCMSWeb.SecurityLog do
     end
   end
 
-  @doc "The label for an event type."
-  @spec type_label(atom()) :: String.t()
+  @doc """
+  The label for an event type. A type this release does not know (one a newer
+  release recorded, #2509) is labeled with its stored name.
+  """
+  @spec type_label(atom() | UnknownAtom.t()) :: String.t()
   def type_label(:sign_in), do: gettext("Sign-in")
   def type_label(:sign_in_failed), do: gettext("Failed sign-in")
   def type_label(:sign_in_locked), do: gettext("Sign-in locked out")
@@ -169,6 +173,9 @@ defmodule KilnCMSWeb.SecurityLog do
   def type_label(:registration_approved), do: gettext("Registration approved")
   def type_label(:registration_rejected), do: gettext("Registration rejected")
   def type_label(:backup_canceled), do: gettext("Backup canceled")
+
+  def type_label(%UnknownAtom{value: value}),
+    do: gettext("Unrecognized event (%{type})", type: value)
 
   def type_label(other), do: to_string(other)
 

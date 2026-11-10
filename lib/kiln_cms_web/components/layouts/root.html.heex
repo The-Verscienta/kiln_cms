@@ -110,16 +110,17 @@
       title={feed.title}
       href={feed.href}
     />
-    <meta :if={assigns[:page_title]} property="og:title" content={@page_title} />
-    <meta :if={assigns[:meta_description]} property="og:description" content={@meta_description} />
-    <%!-- The page's own image, else the site's branding one (#560) — a
-          brand-level fallback BENEATH the page-level value, never a
-          reordering of it. Absolute, on this request's own host. --%>
-    <meta
-      :if={social_image = Layouts.social_image(assigns)}
-      property="og:image"
-      content={social_image}
-    />
+    <%!-- Link previews: Open Graph, then the X (Twitter) Card (#164, #2258).
+          Both read ONE resolution (`Layouts.social_meta/1`) so they cannot
+          disagree. Every value there is a non-blank string or nil, and each
+          tag is emitted only for a value — never `content=""`. The image is
+          the page's own, else the site's branding one (#560), absolute on
+          this request's own host. `property=`/`name=` stay before `content=`:
+          tests and scrapers match on that order. --%>
+    <% social = Layouts.social_meta(assigns) %>
+    <meta property="og:title" content={social.title} />
+    <meta :if={social.description} property="og:description" content={social.description} />
+    <meta :if={social.image} property="og:image" content={social.image} />
     <meta property="og:type" content={assigns[:og_type] || "website"} />
     <meta :if={assigns[:locale]} property="og:locale" content={@locale} />
     <meta :if={assigns[:canonical_url]} property="og:url" content={@canonical_url} />
@@ -130,18 +131,11 @@
       property="og:locale:alternate"
       content={alt.hreflang}
     />
-    <%!-- Twitter Card (#164): falls back to the Open Graph values above. --%>
-    <meta
-      name="twitter:card"
-      content={(Layouts.social_image(assigns) && "summary_large_image") || "summary"}
-    />
-    <meta :if={assigns[:page_title]} name="twitter:title" content={@page_title} />
-    <meta :if={assigns[:meta_description]} name="twitter:description" content={@meta_description} />
-    <meta
-      :if={social_image = Layouts.social_image(assigns)}
-      name="twitter:image"
-      content={social_image}
-    />
+    <meta name="twitter:card" content={social.card} />
+    <meta :if={social.site} name="twitter:site" content={social.site} />
+    <meta name="twitter:title" content={social.title} />
+    <meta :if={social.description} name="twitter:description" content={social.description} />
+    <meta :if={social.image} name="twitter:image" content={social.image} />
     <link
       :for={alt <- assigns[:hreflang] || []}
       rel="alternate"

@@ -84,6 +84,14 @@ defmodule KilnCMS.Application do
       KilnCMS.Media.TransformGate,
       # Bounded LRW content cache (see `KilnCMS.Cache.child_spec/1`).
       KilnCMS.Cache,
+      # Generation tokens and last-known admin allowlists (#2502): unbounded
+      # (a few keys per site) and never cleared, so a delivery flush or the
+      # content cache's eviction cannot move one back. Explicit id for the
+      # reason the WebAuthn store below gives.
+      Supervisor.child_spec(
+        {Cachex, [name: KilnCMS.Cache.generation_cache_name(), transactions: true]},
+        id: KilnCMS.Cache.generation_cache_name()
+      ),
       # Host→org resolution, on its own eviction schedule and the only cache
       # that remembers a miss (#659).
       KilnCMS.Cache.Hosts,
@@ -91,6 +99,12 @@ defmodule KilnCMS.Application do
       # instance so a content bust never empties it and a flood of orgs cannot
       # evict published pages.
       KilnCMS.Security.IpBlocklist,
+      # Search-engine claims checked against DNS (#2254): the per-address
+      # result cache, the single-flight table and a capped lookup supervisor.
+      # Before the Endpoint, so the first request can already start a lookup;
+      # a lookup that cannot start (busy, restarting) goes unchecked rather
+      # than failing the request.
+      KilnCMS.CrawlerVerification.Supervisor,
       # Content-addressed embedding vectors for the compute-on-demand path
       # (#852). Its OWN instance so an editing session cannot evict the
       # published records `Firing.Delivery` serves from during a DB outage
@@ -203,6 +217,12 @@ defmodule KilnCMS.Application do
       # {KilnCMS.Worker, arg},
       # Start to serve requests, typically the last entry
       KilnCMSWeb.Endpoint,
+      # The build fingerprint the HTML ETag names (#2463), computed off the
+      # boot path so the first pages find it ready. Temporary: a request
+      # computes it itself if this has not finished, or did not.
+      Supervisor.child_spec({Task, &KilnCMSWeb.BuildFingerprint.warm/0},
+        id: KilnCMSWeb.BuildFingerprint
+      ),
       {Absinthe.Subscription, KilnCMSWeb.Endpoint},
       {AshAuthentication.Supervisor, [otp_app: :kiln_cms]},
       # Dev only: warns (log + console banner) when the watchers leave a stale

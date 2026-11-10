@@ -102,6 +102,7 @@ defmodule KilnCMS.CMS.JoinGraduationTest do
       )
 
     # A purged target leaves a broken edge behind (by design, #1594).
+    CMS.destroy_page!(gone, actor: admin)
     CMS.purge_page!(gone, actor: admin)
 
     {:ok, spec} = JoinGraduation.resolve("post.#{name}")

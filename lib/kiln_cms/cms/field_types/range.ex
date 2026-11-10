@@ -16,6 +16,13 @@ defmodule KilnCMS.CMS.FieldTypes.Range do
   (±9,007,199,254,740,991), and `NaN`, `Infinity` and a date-time are refused.
   A mix of a number and a date is refused.
 
+  The JSON Schema (`json_schema/1`) is deliberately looser than `cast/2`: it
+  lets each bound be a number or a date, so a number with a date is valid by
+  the schema and refused on write. Expressing "both the same kind" needs a
+  `oneOf` of two inline object shapes, which the TypeScript, Swift and Kotlin
+  generators do not yet render (they only follow `$ref` members); a follow-up
+  from #2435.
+
   Ranges are not filterable (other than for presence) or sortable, and are
   served through GraphQL as the generic JSON value. They are never indexed for
   search, even when flagged `searchable`: a bound is a number or a date, not
@@ -63,6 +70,7 @@ defmodule KilnCMS.CMS.FieldTypes.Range do
         label: gettext("From"),
         type: "text",
         required?: false,
+        help: gettext("A number or a date (YYYY-MM-DD)."),
         attrs: %{placeholder: "10 / 2026-01-31", autocomplete: "off"}
       },
       %{
@@ -70,6 +78,7 @@ defmodule KilnCMS.CMS.FieldTypes.Range do
         label: gettext("To"),
         type: "text",
         required?: false,
+        help: gettext("The same kind as From: two numbers or two dates."),
         attrs: %{placeholder: "20 / 2026-12-31", autocomplete: "off"}
       }
     ]

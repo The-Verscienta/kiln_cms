@@ -42,7 +42,16 @@ The `:form` content block references a form by slug:
   submission shows the form's success message. An inactive form renders
   nothing (a form or field edit drops the site's cached pages on every node
   at once, and a page that renders a form carries the form in its `ETag`, so
-  a revalidating client sees the edit too).
+  a revalidating client sees the edit too). Kiln's own text in the form (the
+  **Submit** label, "required", **Select…**, error messages, the
+  human-verification widget) is in the page's language, the one its
+  `<html lang>` declares. On a multilingual site the block posts to
+  `/<locale>/forms/<slug>` in that language, the default language's included
+  (`/en/forms/<slug>`), so a refused submission re-renders and the thank-you
+  page answers in the language the visitor was reading. A single-language
+  site and the editor previews post to the bare `/forms/<slug>`. A theme
+  stylesheet or analytics rule that matched the form by its `action` should
+  match the `.kiln-form` class instead.
 - **Fired `:web` artifacts** carry `<div data-kiln-form="<slug>"></div>` —
   headless frontends fetch the schema from `GET /api/forms/<slug>` (fields,
   labels, types, options, honeypot field name, submit URL, and the
@@ -90,12 +99,19 @@ You need the **admin** role: the Forms pages are admin-only.
    name). Kiln does not rewrite stored submissions: entries received before
    the rename are keyed by the old name, and entries from now on by the new
    one.
+6. If the **Confirmations** subject or body used the field's old token, the
+   panel also says *The autoresponder now uses [field:full_name] where it used
+   [field:string].* (with the two names). Kiln has rewritten the template in
+   the same save; see
+   [Autoresponder tokens follow a rename](#autoresponder-tokens-follow-a-rename).
 
 For example, renaming `string` to `full_name` on a contact form that has two
-entries: the preview shows `full_name` under the field, the panel says
-*Saved.* and *Entries already received keep the old key “string”.*, and the
-next submission is stored as `{"full_name": "…"}` while the two earlier ones
-stay `{"string": "…"}`.
+entries and an autoresponder subject of `Thanks, [field:string]!`: the preview
+shows `full_name` under the field, the panel says *Saved.*, *Entries already
+received keep the old key “string”.* and *The autoresponder now uses
+[field:full_name] where it used [field:string].*, the **Confirmations** tab
+shows `Thanks, [field:full_name]!`, and the next submission is stored as
+`{"full_name": "…"}` while the two earlier ones stay `{"string": "…"}`.
 
 ### Read entries after a rename
 
@@ -109,28 +125,90 @@ So after the rename above, the two earlier entries show their value in that
 box under `string`, and new entries show it under the field's label, with
 `full_name` beside it.
 
+**Export CSV** on the same tab keeps the old keys too. After the current
+fields' columns, in form order, it adds one column per old key the exported
+entries carry, headed with the key and ` (renamed or removed)`, sorted by key,
+then `status`, `spam_score` and `submitted_at`. An entry with no value under a
+column leaves that cell empty. After the rename above, the export's header is:
+
+```csv
+full_name,string (renamed or removed),status,spam_score,submitted_at
+```
+
+The two earlier entries have their value in the `string (renamed or
+removed)` column and an empty `full_name`; new entries are the other way
+round. The suffix is always in English, whatever the admin's language,
+because a spreadsheet or import script keys on the header the way it keys on
+the machine names.
+
+The extra columns come only from the entries being exported: with
+**New**, **Reviewed** or **Spam** selected above the list, the export holds
+only those entries (`?status=`), and only their old keys get a column. A
+form whose fields were never renamed or removed, or a filter that leaves no
+entry with an old key, exports exactly the current fields' columns, as
+before.
+
+### Autoresponder tokens follow a rename
+
+Renaming a field rewrites every `[field:<old name>]` token in the
+**Confirmations** subject and body to `[field:<new name>]`, in the same save
+as the rename. Without that, the old token would render empty in every
+confirmation email from then on, because no field has that name any more.
+
+- **Exact tokens only.** Renaming `email` rewrites `[field:email]` and leaves
+  `[field:email2]` alone.
+- **On or off.** A template is rewritten whether **Email the submitter a
+  confirmation** is ticked or not, so switching it on later does not find a
+  token for a field that was only renamed.
+- **One save.** If the template cannot be saved, the rename is refused too,
+  and the field keeps its old name.
+- **Older broken tokens stay.** A token left behind by a field deleted
+  earlier, or by a rename before this release, is not repaired, and it does not
+  hold up the rename of a different field. Fix it in the **Confirmations** tab;
+  while the autoresponder is on, that tab refuses to save until every token
+  names a current field.
+
+The builder reloads the **Confirmations** tab with the rewritten template, so
+a later save there does not write the old token back.
+
 ### What a rename does not carry over
 
-- **CSV export.** **Export CSV** has one column per current machine name, so
-  an old key's values are not in the file
-  ([#2342](https://github.com/The-Verscienta/kiln_cms/issues/2342)). Export
-  before renaming if you need them in one sheet.
-- **Autoresponder.** A `[field:<old name>]` token in the **Confirmations**
-  subject or body renders empty once no field has that name
-  ([#2343](https://github.com/The-Verscienta/kiln_cms/issues/2343)), and
-  nothing warns you. Update the template to the new name after renaming: while
-  the autoresponder is on, the tab refuses to save a template whose tokens
-  name no current field, so its next save fails until the token is fixed.
 - **Headless clients and webhook consumers.** `GET /api/forms/<slug>` and
   new `form.submitted` payloads carry the new name straight away; a frontend
   or integration that reads the old key needs changing at the same time.
 - **Reusing an old name.** If you rename `email` to `work_email` and later
   give another field the machine name `email`, the old entries' `email`
   values show under that new field on the Entries tab, because the key
-  matches it.
+  matches it. **Export CSV** merges them the same way: they land in the
+  `email` column, with no `email (renamed or removed)` column.
 
 Kiln has no option to rewrite the keys in existing entries
 ([#2344](https://github.com/The-Verscienta/kiln_cms/issues/2344)).
+
+### Delete a field the autoresponder uses
+
+While the autoresponder is on, Kiln refuses to delete a field whose
+`[field:<name>]` token is in the **Confirmations** subject or body: every
+confirmation from then on would show nothing where the value was. To delete
+such a field (admin role):
+
+1. Click the trash icon on the field in the preview and confirm **Delete this
+   field?**. The field stays, and a message at the corner of the screen says
+   *The autoresponder uses [field:email]: remove it from the Confirmations
+   template first.* (with the field's name).
+2. Open the **Confirmations** tab and either remove the token from **Subject**
+   and **Body**, or untick **Email the submitter a confirmation**. Click
+   **Save**.
+3. Go back to **Fields** and delete the field again. It disappears from the
+   preview.
+
+With the autoresponder off, a field is deleted even if the template names it.
+The token then stays in the template, and the tab refuses to save with the
+autoresponder switched back on until you remove or replace it.
+
+Moving a field to another form (changing its `form_id`, which the builder does
+not offer) is refused the same way while the old form's autoresponder is on and
+uses the field's token, with an error on `form_id`.
 
 ### Errors you can see
 
@@ -139,6 +217,7 @@ Kiln has no option to rewrite the keys in existing entries
 | must be lowercase letters, digits and underscores, starting with a letter | The machine name has a capital, a space, a hyphen or another character outside `a-z`, `0-9` and `_`, or starts with a digit or underscore. |
 | has already been taken | Another field on this form already has that machine name. Machine names are unique per form. |
 | a select field must list at least one option | A dropdown's **Options** box is empty. Enter at least one option, one per line. |
+| The autoresponder uses [field:email]: remove it from the Confirmations template first. | Shown when you delete a field: the autoresponder is on and its subject or body uses this field's token. See [Delete a field the autoresponder uses](#delete-a-field-the-autoresponder-uses). |
 
 An error that belongs to no input in the panel, such as a permission error,
 shows as a message at the corner of the screen instead.
@@ -176,6 +255,11 @@ redirect for it.
 On a multilingual site the page answers under each language prefix too:
 `/fr/forms/contact` renders the form in French and posts back to
 `/fr/forms/contact`, so the thank-you page and any error messages stay in
+French. The default language's prefix is kept the same way: `/en/forms/contact`
+posts back to `/en/forms/contact`, because an unprefixed post takes its
+language from the visitor's session and could answer an English page in
+French. The embed works alike: `/fr/forms/contact/embed` posts to
+`/fr/forms/contact`, and a refused submission re-renders inside the frame in
 French.
 
 What the page sends with it:
@@ -475,3 +559,15 @@ Saving with the toggle on requires a non-blank subject and body, both
 referencing only tokens the form currently has; saving with it off skips both
 checks, so a draft template — even one written against a field you haven't
 added yet — never blocks an unrelated save.
+
+The template follows the form's fields (#2343). Renaming a field rewrites its
+exact `[field:<old>]` tokens to `[field:<new>]`, enabled or not, in the
+rename's own transaction (`KilnCMS.CMS.Changes.RewriteAutoresponderTokens` on
+`FormField`'s `:update`); that write skips the token check above, so a stale
+token from an earlier delete cannot refuse the rename of another field.
+Deleting a field, or moving it to another form, is refused while the
+autoresponder is on and uses its token
+(`KilnCMS.CMS.Validations.AutoresponderFieldInUse`). Both live on the resource,
+so every writer of `FormField` gets them, not only the builder. See
+[Autoresponder tokens follow a rename](#autoresponder-tokens-follow-a-rename)
+and [Delete a field the autoresponder uses](#delete-a-field-the-autoresponder-uses).

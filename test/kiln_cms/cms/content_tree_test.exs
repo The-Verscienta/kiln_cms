@@ -233,6 +233,7 @@ defmodule KilnCMS.CMS.ContentTreeTest do
       parent = page(admin)
       child = page(admin, %{parent_id: parent.id})
 
+      CMS.destroy_page!(parent, actor: admin)
       CMS.purge_page!(parent, actor: admin)
 
       reloaded = CMS.get_page!(child.id, actor: admin)

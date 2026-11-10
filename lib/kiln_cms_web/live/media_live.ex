@@ -800,7 +800,8 @@ defmodule KilnCMSWeb.MediaLive do
   # Permanent delete: drop the row and reclaim the original + variant blobs,
   # and the on-the-fly transforms cached from it. Those are listed BEFORE the
   # purge: their rows go with the item through the foreign key, and after that
-  # nothing records where the blobs are.
+  # nothing records where the blobs are. Blobs go only on `:ok`: `:purge`
+  # refuses an item someone restored meanwhile (#2531), and its files stay.
   defp purge_item(socket, item, actor) do
     derivatives = Derivatives.blobs(item)
 
@@ -812,10 +813,25 @@ defmodule KilnCMSWeb.MediaLive do
         Derivatives.delete_blobs(derivatives, item)
         put_flash(socket, :info, gettext("Permanently deleted %{name}.", name: item.filename))
 
-      _ ->
-        put_flash(socket, :error, gettext("You don't have permission to delete media."))
+      {:error, %Ash.Error.Invalid{errors: errors}} = error ->
+        if Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1)),
+          do:
+            put_flash(
+              socket,
+              :error,
+              gettext(
+                "That item is no longer in the trash — someone else restored or deleted it."
+              )
+            ),
+          else: purge_refused(socket, error)
+
+      other ->
+        purge_refused(socket, other)
     end
   end
+
+  defp purge_refused(socket, _error),
+    do: put_flash(socket, :error, gettext("You don't have permission to delete media."))
 
   defp find_trashed(socket, id), do: Enum.find(socket.assigns.trashed, &(&1.id == id))
 

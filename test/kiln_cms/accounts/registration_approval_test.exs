@@ -847,7 +847,7 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
       {applicant, row} = applicant(ctx.site.id)
       invitation = invite!(ctx.site, applicant.email, ctx.admin)
 
-      assert {:ok, :accepted} = accept_existing(invitation)
+      assert {:ok, %{outcome: :joined}} = accept_existing(invitation)
 
       assert %{status: :active, role: :editor, decided_at: %DateTime{}} = reload(row)
       assert Scoping.effective_tier(applicant, ctx.site) == :editor
@@ -892,11 +892,11 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
       assert DateTime.compare(resent.last_sent_at, reload(row).decided_at) == :gt
       assert DateTime.compare(resent.inserted_at, reload(row).decided_at) == :lt
 
-      assert {:ok, :accepted} = accept_existing(resent)
+      assert {:ok, %{outcome: :joined}} = accept_existing(resent)
       assert %{status: :active, role: :editor} = reload(row)
     end
 
-    test "a row approved between the read and the lock is a membership, not an invalid invitation",
+    test "a row approved between the read and the lock is a membership, raised to the invited tier",
          ctx do
       {applicant, row} = applicant(ctx.site.id)
       invitation = invite!(ctx.site, applicant.email, ctx.admin)
@@ -918,16 +918,17 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
       assert_receive {:latch_started, :invitation_race, 1}, 2_000
 
       # `grant_membership` reads the row as still pending, then waits on the
-      # lock the approval holds, and finds it decided.
+      # lock the approval holds, and finds it decided: an active `:viewer` row
+      # now, which the `:editor` invitation raises (#2452).
       grant =
         Task.async(fn -> KilnCMS.Accounts.Invitations.grant_membership(applicant, invitation) end)
 
       assert [_] = Latch.release_all(:invitation_race)
       assert {:ok, %{status: :active}} = Task.await(approve)
-      assert {:ok, :already_member} = Task.await(grant)
+      assert {:ok, %{outcome: :raised, membership: %{role: :editor}}} = Task.await(grant)
       refute_received {:latch_timeout, _, _}
 
-      assert %{status: :active, role: :viewer} = reload(row)
+      assert %{status: :active, role: :editor} = reload(row)
     end
 
     test "the approval's eviction leaves after the accept commits, and never on a rollback",
@@ -940,7 +941,7 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
       {:error, :rolled_back} =
         KilnCMS.AfterCommit.deferring(fn ->
           Repo.transaction(fn ->
-            {:ok, :accepted} = accept_existing(invitation)
+            {:ok, %{outcome: :joined}} = accept_existing(invitation)
             Repo.rollback(:rolled_back)
           end)
         end)
@@ -953,7 +954,7 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
           {:ok, :inside} =
             KilnCMS.AfterCommit.deferring(fn ->
               Repo.transaction(fn ->
-                {:ok, :accepted} = accept_existing(invitation)
+                {:ok, %{outcome: :joined}} = accept_existing(invitation)
                 refute_received %Phoenix.Socket.Broadcast{event: "disconnect"}
                 :inside
               end)
@@ -1009,7 +1010,7 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
       {:ok, _rejected} = Accounts.reject_registration(row, %{}, actor: ctx.site_admin)
       invitation = invite!(ctx.site, applicant.email, ctx.admin)
 
-      assert {:ok, :accepted} = accept_existing(invitation)
+      assert {:ok, %{outcome: :joined}} = accept_existing(invitation)
       assert %{status: :active, role: :editor} = reload(row)
     end
 
@@ -1084,13 +1085,14 @@ defmodule KilnCMS.Accounts.RegistrationApprovalTest do
       assert role_id == role.id
     end
 
-    test "an active member accepting is left as they are", ctx do
+    # Raised to the invited tier (#2452), but not as a registration approved.
+    test "an active member accepting is raised, not approved", ctx do
       member = user(:viewer)
       row = member!(member, ctx.site.id, :viewer)
       invitation = invite!(ctx.site, member.email, ctx.admin)
 
-      assert {:ok, :accepted} = accept_existing(invitation)
-      assert %{status: :active, role: :viewer, decided_at: nil} = reload(row)
+      assert {:ok, %{outcome: :raised, role: :editor}} = accept_existing(invitation)
+      assert %{status: :active, role: :editor, decided_at: nil} = reload(row)
       assert approvals(ctx.site.id, member) == []
     end
 

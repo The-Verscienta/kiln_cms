@@ -241,6 +241,48 @@ defmodule KilnCMSWeb.NotificationBellTest do
       assert Notifications.unread_count(me, nil) == 0
     end
 
+    # An event a newer release added (#2509), read by this one during a
+    # rolling deploy or after a rollback: one such row used to fail the bell's
+    # read, and with it every console page.
+    test "an event a newer release wrote is listed generically and opens the inbox", %{
+      conn: conn
+    } do
+      me = authed_user()
+      known = notify(me)
+      id = KilnCMS.NewerReleaseRows.notification!(me.id, %{title: "From the future"})
+
+      {:ok, lv, html} = conn |> log_in(me) |> live(~p"/editor/tasks")
+
+      assert badge(html) == "2"
+      assert html =~ "Grace mentioned you"
+      assert html =~ "phx-value-id=\"#{known.id}\""
+
+      item =
+        lv |> element(".bell-item[phx-value-id='#{id}']") |> render() |> Floki.parse_fragment!()
+
+      assert item |> Floki.find(".bell-item-head .font-medium") |> Floki.text() =~ "Notification"
+      assert item |> Floki.find(".bell-item-sub") |> Floki.text() == "From the future"
+
+      assert {:error, {:live_redirect, %{to: "/editor/inbox"}}} =
+               lv |> element(".bell-item[phx-value-id='#{id}']") |> render_click()
+
+      assert Notifications.unread_count(me, nil) == 1
+    end
+
+    test "mark-all-read clears an event a newer release wrote too", %{conn: conn} do
+      me = authed_user()
+      notify(me)
+      KilnCMS.NewerReleaseRows.notification!(me.id)
+
+      {:ok, lv, html} = conn |> log_in(me) |> live(~p"/editor/tasks")
+      assert badge(html) == "2"
+
+      lv |> element(".bell-action") |> render_click()
+
+      assert badge(render_after_broadcast(lv)) == ""
+      assert Notifications.unread_count(me, nil) == 0
+    end
+
     # A colleague's id never reaches the component through this test: LiveView
     # test helpers can push an arbitrary event to the root view but not to a
     # component, so the hand-crafted-push case is pinned where it *can* be —

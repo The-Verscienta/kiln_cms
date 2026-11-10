@@ -92,7 +92,8 @@ defmodule KilnCMSWeb.ReferenceExpansion do
   The expansion of `fields` on `record` (a published document of `org_id`):
   `{:ok, expanded, tag}`, where `expanded` maps every requested field to its
   list (empty when the field has no readable targets) and `tag` changes
-  whenever any expanded target does, for the response's ETag. `:unavailable`
+  whenever any expanded target does. The artifact API no longer puts `tag` in
+  its `ETag`: that is a digest of the expanded body (#2463). `:unavailable`
   when the database cannot be reached.
 
   `edges: :from_record` derives the edges from `record`'s own `:reference`

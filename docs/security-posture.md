@@ -18,7 +18,8 @@ shows the settings as they are at that moment.
 - **Platform administrators** see **This site** for the site they are on,
   and also **This installation**: lines about the whole deployment. These
   cover HTTPS, exposed endpoints, API keys, human verification, the Kiln
-  version, and the platform administrators' own two-step sign-in. Most of
+  version, the installed plugins, and the platform administrators' own
+  two-step sign-in. Most of
   these are set with environment variables, not in the console, so a site
   administrator could not fix them anyway.
 
@@ -54,6 +55,106 @@ You need to be an administrator of the site.
    that describes the check.
 6. After changing a setting, come back and select **Run checks again**. The
    line should move to **OK**.
+
+## Check your installed plugins
+
+**Operations → System** shows each plugin built into this release with a
+badge saying whether it still checks out against hex.pm and the security
+notices feed (#2244). The **Installed plugins** line on this page is the
+summary of the same check. You need to be a platform administrator.
+
+1. In the console, open **Operations**, then **System**
+   (`/editor/system`), and scroll to **Plugins**.
+   Under the introduction you see "Checking plugins..." the first time the
+   page asks, then "Checked 2026-11-09 14:02 UTC." (the time of the answer,
+   in UTC). Each plugin's name now has a badge.
+2. Read each badge:
+
+   | Badge | Meaning | What to do |
+   | --- | --- | --- |
+   | **OK** | Hex publishes the checksum this build recorded, no security notice covers the installed version, Hex hasn't retired it, it had a release on Hex in the last 24 months, and its `kiln_plugin` requirement accepts this Kiln's SDK. | Nothing. |
+   | **Changed on Hex since this build** (red) | The checksum hex.pm publishes for this version differs from the one in the lockfile this release was built from. The plugin row shows both, shortened: "Locked …, Hex has …". | Find out which cause applies before you rebuild: the release was replaced on Hex (or Hex's record was tampered with), your build fetched from a Hex mirror or an offline cache, or someone edited the lockfile by hand. Check the package's page on hex.pm. The running code is the code you built; this says Hex's record no longer matches it. |
+   | **Security notice** (red for high, critical or unrated; amber for low or medium) | A notice covers the installed version. Each one is listed as an **Advisory *id*** link. | Read the advisory, update the plugin to a fixed version (`mix deps.update <package>`), rebuild and redeploy. |
+   | **Not on Hex** (amber) | Hex has no such package or version. | Check whether it was removed from Hex, or whether the lockfile names a version that was never published there. |
+   | **Retired** (red if retired for security, otherwise amber) | Hex marks the installed release as retired, and the reason is given ("security", "deprecated", "invalid", "renamed" or "other"). | Move to a release Hex hasn't retired, or to the plugin that replaced it. |
+   | **No recent release** (amber) | The package has had no release on Hex for 24 months (`KILN_PLUGIN_STALE_MONTHS`). The newest release counts, not the installed one. | Decide whether you still trust an unmaintained plugin. Nothing here is broken yet. |
+   | **Incompatible with this Kiln** (amber) | The plugin's `kiln_plugin` requirement doesn't accept the SDK this Kiln bundles, or can't be read. | Update the plugin. `mix kiln.plugins.doctor` reports the same problem before a deploy. |
+   | **Can't verify** | A git or path plugin, or one from a private Hex repository. Hex has no checksum to compare. Its `kiln_plugin` requirement, and the notices feed when it is on, were checked and found nothing. | Nothing to fix. Review the plugin's source yourself, as for any code you build in. |
+   | **Built from this project** | A plugin in `projects/`, compiled with the core. Nothing upstream to compare with. | Nothing. |
+   | **Unknown** | Hex or the notices feed did not answer, or plugin checks are turned off (a Hex plugin can't be compared then). Unknown is never OK. | See the line under the introduction, and the table below. |
+
+   Under the badge, each problem has its own line, in the same words as the
+   **Installed plugins** line here. A Hex plugin also shows "Latest on Hex:
+   *version*".
+3. To ask again, select **Check plugins now**. The badges show nothing
+   while it runs, then the new answer. The button is there only when the
+   checks are on and some plugin comes from Hex, git or a path. Hex and the
+   notices feed are asked at most once a minute: a second press within the
+   minute shows the answer already cached.
+
+The answer is cached on each server for 24 hours (15 minutes after a request
+failed) and is lost when the server restarts, so a new deploy asks again the
+first time a platform administrator opens System or this page.
+
+### From the command line
+
+`mix kiln.plugins.list --health` runs the same check from the project and
+prints each plugin's status under its line. Without `--health` the list
+makes no request. With it, the task asks hex.pm and the notices feed even
+when the server's check is turned off, and says so first. It always asks
+afresh and doesn't touch a server's cache. `KILN_SECURITY_NOTICES_URL=false`
+keeps the notices feed out of it, as on the server.
+
+For a project with two Hex plugins, one of them unmaintained:
+
+```console
+$ mix kiln.plugins.list --health
+2 plugin(s) installed:
+
+* ratings v0.3.1 — Ratings.Plugin
+    contributes: 1 block
+    health: ok
+* legacy_embeds v1.0.2 — LegacyEmbeds.Plugin
+    contributes: 1 block
+    health: warning
+      - no release on Hex since 2023-05-02
+
+Checked against hex.pm and the security notices feed.
+```
+
+The other statuses print as `FAIL`, `unknown (not ok: a source did not
+answer)`, `can't verify (git or path: no registry checksum)` and `built from
+this project`.
+
+### Turn the check off, or keep it off kilncms.dev
+
+The check asks hex.pm about each Hex plugin, which tells hex.pm that plugin's
+package name and version from your server's address. To make no request at
+all:
+
+```bash
+KILN_PLUGIN_HEALTH_CHECK=false
+```
+
+`KILN_UPDATE_CHECK=false` turns it off too, unless `KILN_PLUGIN_HEALTH_CHECK`
+is set. To keep the Hex comparison but not ask kilncms.dev for notices, set
+`KILN_SECURITY_NOTICES_URL=false`. A fork or mirror (`KILN_UPDATE_REPO`,
+`KILN_UPDATE_RELEASES_URL`, or `KILN_UPDATE_FEED_URL=false`) doesn't ask
+kilncms.dev unless `KILN_SECURITY_NOTICES_URL` names it. See
+[the variables](environment-variables.md#plugin-health-check-2244).
+
+### When the plugin check goes wrong
+
+| What you see | What it means |
+| --- | --- |
+| "Hex or the notices feed could not be reached; these results are unknown, not OK." | A request failed or the check did not finish in 90 seconds. The plugins it concerns show **Unknown**. Kiln asks again on the first visit after 15 minutes, or when you select **Check plugins now**. A server that can't reach `hex.pm` or `kilncms.dev` through its firewall always ends here. |
+| "Plugin checks are off." | `KILN_PLUGIN_HEALTH_CHECK=false`, or `KILN_UPDATE_CHECK=false` with `KILN_PLUGIN_HEALTH_CHECK` unset. Hex plugins show **Unknown**; there is no **Check plugins now**. |
+| "No dependency plugins to check." | Every plugin is built from this project. No request is made. |
+| "The security notices feed is turned off; only Hex's own advisories were checked." | `KILN_SECURITY_NOTICES_URL=false`, or a fork or mirror that doesn't name a notices feed. |
+| "You need admin access to do that." | You selected **Check plugins now** after losing platform administrator rights (a temporary grant that expired, say). Nothing was asked. |
+| Every Hex, git and path plugin is **Unknown**, and the log says "KILN_SECURITY_NOTICES_URL is not an absolute http(s) URL; plugin security notices are unknown." | Fix the value: it must be `http://` or `https://` with a host. |
+| Every plugin is **Unknown** with `KILN_SECURITY_NOTICES_URL` pointing at an internal mirror | Requests go through Kiln's outbound guard, which refuses private and loopback addresses. Serve the mirror on a public address, or set `KILN_SECURITY_NOTICES_URL=false`. |
+| The log says "Plugin health check failed for: *name* (*reason*)" | A check that just asked Hex found a plugin that fails. Open System for the details. Kiln sends no alert for it. |
 
 ## Reading the page
 
@@ -105,6 +206,7 @@ Each check has an id, used in logs, telemetry and by plugins. A check with no
 | API keys (`core.api_keys`) | This installation | Every valid API key on the installation and its owner | A read-write key owned by an administrator | A key over 180 days old, or expiring more than a year from now | N/A: no valid keys | **Operations → API keys** (`/editor/api-keys`) |
 | Human verification (`core.human_verification`) | This installation | The human-verification settings | | No usable provider, both checks off, or `KILN_CHALLENGE_DISABLED` | | Environment |
 | Kiln version (`core.release`) | This installation | The cached answer of the update check | | A newer release exists | Unknown: no answer yet, or the update check failed. N/A: `KILN_UPDATE_CHECK=false` | **Operations → System** (`/editor/system`) |
+| Installed plugins (`core.plugin_health`) | This installation | The cached answer of the plugin health check: each plugin against hex.pm and the security notices feed | A plugin's package changed on Hex since this build, a high, critical or unrated security notice covers it, or Hex retired it for security | A low or medium notice, not on Hex, retired for another reason, no release on Hex for 24 months, or a `kiln_plugin` requirement this Kiln doesn't meet | Unknown: no answer yet, or Hex or the notices feed didn't answer. N/A: no plugin from Hex, git or a path, or plugin checks are off | **Operations → System** (`/editor/system`) |
 
 Every check is **OK** when none of its other conditions hold. A check that
 reads people or keys from the database (the two two-step sign-in checks and
@@ -234,6 +336,62 @@ falling back to GitHub, carrying nothing that identifies the installation
 administrator opens the page, and at most one runs at a time on each server.
 `KILN_UPDATE_CHECK=false` turns it off on both pages.
 
+### Installed plugins
+
+Whether each plugin built into this release still checks out (#2244), from
+the same check as **Operations → System → Plugins**. A plugin is checked when
+it comes from Hex, git or a path; a plugin built from this project
+(`projects/`) has nothing upstream to compare with and is left out.
+
+| Line | When |
+| --- | --- |
+| **Fix now** | Any plugin fails: its package changed on Hex since this build, a security notice of high, critical or unrated severity covers the installed version, or Hex retired the release for security. |
+| **Review** | Any plugin warns: a low or medium notice, the version is not published on Hex, Hex retired it for another reason, no release on Hex for 24 months (`KILN_PLUGIN_STALE_MONTHS`), or its `kiln_plugin` requirement doesn't accept the SDK this Kiln bundles. |
+| **Unknown** | "Checking plugins; reopen this page in a minute." (nothing cached yet), or "Could not reach Hex or the security notices feed. Open System to check." |
+| **OK** | "Every plugin matches Hex and has no known security notice." With a git or path plugin installed, the line reads "No installed plugin has a known security notice or SDK problem." and a detail says those plugins were checked for security notices and SDK support only. |
+| **Not applicable** | "No plugins are installed from Hex, git or a path.", or plugin checks are turned off. With checks off, a plugin whose `kiln_plugin` requirement this Kiln doesn't meet is still **Review**: that part needs no request. |
+
+**Details** lists up to ten reasons, one sentence each, the same sentences
+System shows under each plugin. **Fix** opens System, where each plugin has
+its own badge; see [Check your installed plugins](#check-your-installed-plugins).
+
+Like the Kiln version line, this one never waits on the network. On a cold
+cache (after a restart, a day after the last answer, or 15 minutes after a
+check that failed) it starts one check in the background and shows
+**Unknown**; reopen the page after a minute.
+
+**What is sent, and where.** For each plugin locked from hex.pm, two
+requests to hex.pm, which tell hex.pm the plugin's package name and version.
+And one request (up to five pages) to the security notices feed on
+kilncms.dev, which carries nothing about this installation. A deployment
+with no plugin from Hex, git or a path sends nothing. Turn the check
+off with `KILN_PLUGIN_HEALTH_CHECK=false`; `KILN_UPDATE_CHECK=false` turns it
+off too unless `KILN_PLUGIN_HEALTH_CHECK` is set
+([variables](environment-variables.md#plugin-health-check-2244),
+[data flows](data-flows.md)).
+
+**What it can and can't tell you.**
+
+- **"Changed on Hex" is about Hex, not about your server.** The check
+  compares the checksum this build's lockfile recorded with the one hex.pm
+  publishes for that version now. `mix deps.get` already refuses a lockfile
+  whose checksum differs from Hex's, so a difference after the build means
+  Hex's record changed (the release was replaced, or the registry was
+  tampered with), the build used a mirror or an offline cache, or the
+  lockfile was edited by hand. The check does not re-hash the compiled code
+  in the running release.
+- **Git and path plugins can't be verified.** Hex has no checksum for them.
+  They are still checked against the notices feed and for their
+  `kiln_plugin` requirement, which is why they can pass here while System shows **Can't
+  verify**. A plugin from a private Hex repository is treated the same way.
+- **The kilncms.dev feed lists first-party notices only**: Kiln and the
+  Kiln project's own plugins. For a third-party plugin, the only notices
+  checked are the ones Hex lists on the installed release.
+- **A notice naming several packages** carries one set of version ranges
+  for all of them, so the check can tell that a plugin is outside every
+  range, but not that a range is its own. Inside one, the plugin reads
+  **Unknown** rather than matched.
+
 ## How the checks are run
 
 All the checks run at once, each in its own process with its own deadline,
@@ -279,8 +437,8 @@ starts one process per check:
 ## What it does not check yet
 
 - Whether two-factor sign-in is *required* for administrators.
-- Plugins with advisories or integrity problems, and security notices that
-  apply to the installed versions.
+- Security notices that apply to the installed Kiln version itself. The
+  installed plugins line reads notices for plugins only.
 - When an API key was last used.
 
 There is no machine-readable (JSON) output yet: the page is the only way to
@@ -295,6 +453,8 @@ see the report.
 | "The checks are already running for this site. Try again in a moment." | Three reports of this site are already running on this server. Wait for one to finish. |
 | A line says "This check could not run: ..." | That one check failed; the rest of the page is current. See [How the checks are run](#how-the-checks-are-run). |
 | Kiln version says "Checking for updates; reopen this page in a minute." | Nothing was cached yet, and the update check has started in the background. |
+| Installed plugins says "Checking plugins; reopen this page in a minute." | Nothing was cached yet, and the plugin check has started in the background. |
+| Installed plugins says "Could not reach Hex or the security notices feed. Open System to check." | A request failed. The answer is kept for 15 minutes, then the next visit asks again. **Details** names each plugin that could not be checked. See the System table in [Check your installed plugins](#check-your-installed-plugins). |
 | A plugin's line is missing | The plugin's check doesn't meet the contract, or uses an id already taken. The server log says "Security posture: ... is not a usable check and is skipped", "... takes the reserved id ...", or "... repeats the id ..."; `mix kiln.plugins.doctor` reports the same before deploy. |
 
 ## Add a check from a plugin

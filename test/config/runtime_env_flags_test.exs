@@ -52,6 +52,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_ANALYTICS_LOW_COUNT_THRESHOLD
             KILN_AUDIT_ANCHORS_ENABLED KILN_AUDIT_ANCHOR_EVERY_WRITE
             KILN_UPDATE_REPO KILN_UPDATE_RELEASES_URL KILN_UPDATE_FEED_URL KILN_PIN_PATH
+            KILN_PLUGIN_HEALTH_CHECK KILN_SECURITY_NOTICES_URL KILN_PLUGIN_STALE_MONTHS
             MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
             KILN_PROVENANCE_ENABLED TENANT_STRICT_HOST API_DOCS_ENABLED
             GRAPHQL_INTROSPECTION_ENABLED KILN_API_REJECT_INVALID_BEARER
@@ -67,6 +68,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             BREACHED_PASSWORD_CHECK BREACHED_PASSWORD_POLICY
             KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT KILN_BOT_BUDGET_AI_CRAWLER_PERCENT
             KILN_BOT_BUDGET_DECLARED_BOT_PERCENT KILN_BOT_BUDGET_EMPTY_UA_PERCENT
+            KILN_CRAWLER_VERIFICATION
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
             AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
             KILN_IMAGE_TRANSFORM_KEY KILN_IMAGE_TRANSFORM_UNSIGNED
@@ -426,6 +428,85 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
     test "a URL is written trimmed" do
       assert feed_url(" https://site.example/api/json/entries/published\n") ==
                {:ok, "https://site.example/api/json/entries/published"}
+    end
+  end
+
+  # #2244. Unset must write nothing, so the check keeps following
+  # KILN_UPDATE_CHECK; only an explicit value overrides it.
+  describe "KILN_PLUGIN_HEALTH_CHECK" do
+    defp plugin_health(vars) do
+      vars
+      |> eval()
+      |> get_in([:kiln_cms, Kiln.Plugins.Health])
+      |> Kernel.||([])
+    end
+
+    test "unset writes nothing, so the check follows KILN_UPDATE_CHECK" do
+      refute Keyword.has_key?(plugin_health(%{"KILN_PLUGIN_HEALTH_CHECK" => nil}), :enabled)
+
+      config = eval(%{"KILN_UPDATE_CHECK" => "false"})
+      assert get_in(config, [:kiln_cms, Kiln.Updates, :enabled]) == false
+      refute Keyword.has_key?(get_in(config, [:kiln_cms, Kiln.Plugins.Health]) || [], :enabled)
+    end
+
+    test "off-spellings disable it, on-spellings enable it explicitly" do
+      for value <- ["false", "OFF", "0", "no"] do
+        assert plugin_health(%{"KILN_PLUGIN_HEALTH_CHECK" => value})[:enabled] == false
+      end
+
+      assert plugin_health(%{"KILN_PLUGIN_HEALTH_CHECK" => "True"})[:enabled] == true
+    end
+
+    test "an explicit on overrides KILN_UPDATE_CHECK=false" do
+      config = plugin_health(%{"KILN_UPDATE_CHECK" => "false", "KILN_PLUGIN_HEALTH_CHECK" => "1"})
+      assert config[:enabled] == true
+    end
+
+    test "an unrecognized value leaves the setting alone" do
+      refute Keyword.has_key?(plugin_health(%{"KILN_PLUGIN_HEALTH_CHECK" => "nope"}), :enabled)
+    end
+  end
+
+  describe "KILN_SECURITY_NOTICES_URL" do
+    defp notices_url(value) do
+      %{"KILN_SECURITY_NOTICES_URL" => value}
+      |> eval()
+      |> get_in([:kiln_cms, Kiln.Plugins.Health])
+      |> Kernel.||([])
+      |> Keyword.fetch(:notices_url)
+    end
+
+    test "unset or blank writes nothing, so the default applies" do
+      assert notices_url(nil) == :error
+      assert notices_url("  ") == :error
+    end
+
+    test "an off-spelling writes false" do
+      for value <- ["false", "OFF", "0", "no"] do
+        assert notices_url(value) == {:ok, false}
+      end
+    end
+
+    test "a URL is written trimmed" do
+      assert notices_url(" https://site.example/api/json/entries/published\n") ==
+               {:ok, "https://site.example/api/json/entries/published"}
+    end
+  end
+
+  describe "KILN_PLUGIN_STALE_MONTHS" do
+    defp stale_months(value) do
+      %{"KILN_PLUGIN_STALE_MONTHS" => value}
+      |> eval()
+      |> get_in([:kiln_cms, Kiln.Plugins.Health])
+      |> Kernel.||([])
+      |> Keyword.get(:stale_after_months)
+    end
+
+    test "a positive integer is written; anything else writes nothing" do
+      assert stale_months("12") == 12
+      assert stale_months(nil) == nil
+      assert stale_months("0") == nil
+      assert stale_months("soon") == nil
     end
   end
 
@@ -1469,6 +1550,40 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
     test "nothing is written in the test env, so an exported value cannot change the suite" do
       assert bot_budgets(%{"KILN_BOT_BUDGET_EMPTY_UA_PERCENT" => "5"}, :test) == nil
+    end
+  end
+
+  describe "KILN_CRAWLER_VERIFICATION (#2254)" do
+    defp crawler_verification(vars, env \\ :prod) do
+      vars
+      |> eval(env)
+      |> get_in([:kiln_cms, KilnCMS.CrawlerVerification, :enabled])
+    end
+
+    test "unset or blank writes nothing, so verification stays on" do
+      assert crawler_verification(%{}) == nil
+      assert crawler_verification(%{"KILN_CRAWLER_VERIFICATION" => "  "}) == nil
+    end
+
+    test "an off-spelling turns it off" do
+      for value <- ["false", "False", "0", "no", "off"] do
+        assert crawler_verification(%{"KILN_CRAWLER_VERIFICATION" => value}) == false
+      end
+    end
+
+    test "an on-spelling writes on" do
+      assert crawler_verification(%{"KILN_CRAWLER_VERIFICATION" => "true"}) == true
+    end
+
+    test "an unrecognized value keeps the default and warns" do
+      {config, stderr} = eval_io(%{"KILN_CRAWLER_VERIFICATION" => "enabled"}, :prod)
+
+      assert get_in(config, [:kiln_cms, KilnCMS.CrawlerVerification, :enabled]) == nil
+      assert stderr =~ "KILN_CRAWLER_VERIFICATION"
+    end
+
+    test "nothing is written in the test env, so an exported value cannot change the suite" do
+      assert crawler_verification(%{"KILN_CRAWLER_VERIFICATION" => "false"}, :test) == nil
     end
   end
 end

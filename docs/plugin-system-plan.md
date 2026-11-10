@@ -169,6 +169,9 @@ the block union and the router need the list during compilation.
   dedicated effort. The hosted catalog itself — submissions, verification,
   per-version compatibility — is designed in
   `docs/plugin-registry-plan.md` (#1447).
+- **Checking installed plugins against their source** — ~~deferred with the
+  registry~~ **shipped (#2244)** without one: hex.pm and the security notices
+  feed are the sources. See §7.
 - **Public plugin routes** — content types already get public delivery;
   arbitrary public routes invite router-conflict complexity for no proven
   need.
@@ -202,3 +205,86 @@ the block union and the router need the list during compilation.
    precommit pipeline. Plugin story documented in
    `docs/extending-content.md` §5. Contract polish: `X.Plugin` default-names
    itself after `X`, not the convention suffix.
+
+## 7. Plugin health checks (#2244)
+
+The registry (#1447) is frozen, so nothing on kilncms.dev records a plugin's
+checksum or compatibility. The check uses what exists instead: **hex.pm** for
+the package (it is the trust root the registry plan named anyway) and
+**kilncms.dev's security notices feed** (#1873) for advisories. Operators read
+it at **Operations → System → Plugins** and in the Security posture line
+`core.plugin_health`; how to read the badges is in
+[Security posture](security-posture.md#check-your-installed-plugins).
+
+### The trust chain, and where this sits in it
+
+1. `mix deps.get` checks each downloaded tarball against the checksum in the
+   lockfile, and refuses a lockfile whose checksum differs from Hex's
+   registry.
+2. The build compiles what was fetched. `Kiln.Plugins.LockRecord` records the
+   lockfile's coordinates at compile time (package, version, repository and
+   outer checksum for a Hex entry; URL and commit for a git one), because a
+   release carries neither `mix.lock` nor `deps/`. It reads the lock as
+   literal data, never evaluates it, and never touches the network.
+3. At runtime, `Kiln.Plugins.Health` compares that recorded checksum with the
+   one hex.pm publishes for the same version **now**.
+
+So a mismatch at step 3 says Hex's record changed after the build (a
+replaced release, or a compromised registry), the build used a mirror or an
+offline cache, or the lockfile was edited by hand. It says nothing about the
+compiled code in the running release: nothing re-hashes it, and there is no
+known-good hash of compiled code to compare with. Signing a build manifest
+would cover that; it is not part of this.
+
+### Three dimensions and a rollup
+
+Each plugin gets a `Kiln.Plugins.Health.PluginStatus`, computed by the pure
+`Kiln.Plugins.Health.Evaluate` from the installed plugins and whatever the
+fetchers brought back:
+
+| Dimension | Source | Values |
+|---|---|---|
+| Integrity | the recorded outer checksum vs hex.pm's release `checksum` | `:ok`, `{:mismatch, …}`, `:not_found`, `{:unverifiable, :git \| :path \| :private_repo \| :no_checksum \| :unknown_source}`, `:not_applicable` (built from this project), `:unknown`, `:disabled` |
+| Advisories | Hex's `security_advisories` on the installed release (already version-scoped; withdrawn ones dropped), and kilncms.dev notices whose `package` names the plugin's package or app and whose `affected_versions` range covers the installed version, pre-releases included | `{:ok, notices}` or `{:unknown, notices}`; the same advisory from both sources is kept once, as Hex's |
+| Abandonment | Hex's retirement of the installed release; the newest release of the package older than `KILN_PLUGIN_STALE_MONTHS` (24); the plugin's `kiln_plugin` requirement against the SDK this core bundles, matched as `mix kiln.plugins.doctor` matches it | a list of reasons, plus whether it is known |
+
+`Kiln.Plugins.Health.Evaluate.rollup/1` picks the first that applies:
+`:fail` (mismatch; a high, critical or unrated notice; retired for security),
+`:warn` (not on Hex; a low or medium notice; any other retirement, staleness
+or SDK problem), `:unknown`, `:unverifiable`, `:not_applicable`, `:ok`. `:ok`
+needs every dimension to have answered positively.
+
+### Rules that keep it honest
+
+- **Unknown is never OK.** A source that failed, timed out or answered
+  something unreadable makes its dimension `:unknown`. A source that is
+  turned off (the notices feed for a fork) contributes nothing: that was a
+  choice, not a failure.
+- **A truncated notices list is a failure.** The feed is read at 100 a page,
+  for at most five pages, on its own origin; a `next` link past either limit
+  makes the answer unknown, since the unread page could hold the notice.
+- **A notice naming several packages** is published with their ranges joined
+  and no record of which range is whose. Outside every range is "not
+  affected"; inside one is unknown, not a match.
+- **Git and path plugins** can't be verified (no registry checksum), but their
+  notices and SDK requirement are checked. The posture line passes them with a
+  note; System shows **Can't verify**. Staleness has no source for them and
+  does not lower the answer.
+- **First-party feed.** kilncms.dev publishes notices for Kiln and the Kiln
+  project's plugins only; a third-party plugin's notices come from Hex.
+
+### Caching and egress
+
+Modeled on `Kiln.Updates`: `check/1` fetches on a cold cache (or `force: true`,
+floored at one round a minute), `cached/1` never touches the network, `warm/0`
+runs one background check per node. The fetched data, not the verdict, sits in
+`:persistent_term` for 24 hours (15 minutes after a failure), so staleness is
+re-evaluated on each read. No table, no Oban job, no request at boot, no
+alert (alerting is #2245); a fresh check that finds a failing plugin logs one
+warning. The requests, what each reveals and how to turn them off are in
+[data flows](data-flows.md) and
+[the variables](environment-variables.md#plugin-health-check-2244).
+
+`mix kiln.plugins.list --health` runs the same check from the project. The
+doctor stays offline: it runs in precommit and CI, which must not depend on
+hex.pm.

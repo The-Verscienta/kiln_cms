@@ -472,6 +472,83 @@ defmodule KilnCMSWeb.BrandingLiveTest do
     end
   end
 
+  # #2258: the X (Twitter) username behind `twitter:site`. Saving it is the
+  # same org-admin act as every other token; these pin that the new field did
+  # not open a side door, refusing every actor short of this site's admin.
+  describe "X (Twitter) username" do
+    test "saves the normalized handle", %{conn: conn, org: org} do
+      {:ok, lv, _html} =
+        conn |> org_conn(org) |> log_in(authed_user(:admin)) |> live(~p"/editor/branding")
+
+      assert lv |> has_element?("#branding-form input[name='branding[twitter_site]']")
+
+      lv
+      |> form("#branding-form", branding: %{twitter_site: "https://x.com/kilncms"})
+      |> render_submit()
+
+      assert {:ok, [row]} = CMS.list_site_branding(tenant: org, authorize?: false)
+      assert row.twitter_site == "@kilncms"
+    end
+
+    test "an invalid handle re-renders with the error and saves nothing", %{
+      conn: conn,
+      org: org
+    } do
+      {:ok, lv, _html} =
+        conn |> org_conn(org) |> log_in(authed_user(:admin)) |> live(~p"/editor/branding")
+
+      html =
+        lv
+        |> form("#branding-form", branding: %{site_name: "Acme", twitter_site: "@kiln-cms"})
+        |> render_submit()
+
+      assert html =~ "must be an X (Twitter) username like @kilncms"
+      assert {:ok, []} = CMS.list_site_branding(tenant: org, authorize?: false)
+    end
+
+    test "an org editor cannot set it", %{org: org} do
+      user = authed_user(:editor)
+      grant_tier(user, org, :editor)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.save_site_branding(%{twitter_site: "@x"}, actor: user, tenant: org)
+    end
+
+    test "an org viewer cannot set it", %{org: org} do
+      user = authed_user(:viewer)
+      grant_tier(user, org, :viewer)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.save_site_branding(%{twitter_site: "@x"}, actor: user, tenant: org)
+    end
+
+    test "another site's admin cannot set it", %{org: org} do
+      other = seed_org()
+      on_exit(fn -> KilnCMS.Cache.bust_branding(other.id) end)
+
+      user = authed_user(:editor)
+      grant_org_admin(user, other)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.save_site_branding(%{twitter_site: "@x"}, actor: user, tenant: org)
+    end
+
+    test "a DEFAULT-org admin cannot set it on another site", %{org: org} do
+      user = authed_user(:editor)
+      grant_org_admin(user, Accounts.default_org())
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.save_site_branding(%{twitter_site: "@x"}, actor: user, tenant: org)
+    end
+
+    test "no actor cannot set it", %{org: org} do
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.save_site_branding(%{twitter_site: "@x"}, tenant: org)
+
+      assert {:ok, []} = CMS.list_site_branding(tenant: org, authorize?: false)
+    end
+  end
+
   # `/uploads/...` is read through `KilnCMS.Storage`, not over HTTP, so the
   # fixture is a real file at a real key — libvips reads its actual header, which
   # is the whole point of the probe.

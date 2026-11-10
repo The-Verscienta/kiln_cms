@@ -407,14 +407,7 @@ defmodule KilnCMS.DocumentProcessorTest do
       assert {:error, :encrypted} = DocumentProcessor.strip_metadata(encrypted)
     end
 
-    test "reports unavailable — and refuses — when there is no capable qpdf" do
-      # The posture that distinguishes this from AVProcessor: no stripper means
-      # the upload fails, never "stored as it came".
-      :persistent_term.put({DocumentProcessor, :available?}, false)
-      on_exit(&DocumentProcessor.reset_available_cache/0)
-
-      refute DocumentProcessor.available?()
-      assert {:error, :unavailable} = DocumentProcessor.strip_metadata(pdf_with_metadata())
-    end
+    # "Reports unavailable" is in KilnCMS.DocumentProcessorUnavailableTest: it
+    # overrides the VM-wide `available?/0` cache, so it runs async: false (#2380).
   end
 end
