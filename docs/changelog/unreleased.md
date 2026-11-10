@@ -4037,6 +4037,22 @@ carries the reasoning.
     `BACKUP_KEEP_DAYS`.
   Guide: [What retention deletes and what it keeps](../backups.md#what-retention-deletes-and-what-it-keeps).
 
+<a id="console-brand-mark"></a>
+
+- **The console and the thin page shell use the small built-in logo (#2400).**
+  #2165 moved the public header, footer and sign-in brand to
+  `KilnCMSWeb.Layouts.brand_mark/1`, but the console sidebar and the thin
+  shell (`Layouts.app`) still fetched `logo-mark.png`, the 95 KB 278x379
+  original, to show it at 28 to 32 pixels. Both now render through
+  `brand_mark/1`: a `<picture>` of `logo-mark-sm.webp` over
+  `logo-mark-sm.png` when the brand uses the built-in logo, and a plain
+  `<img>` of exactly the configured URL otherwise.
+  - **Overlays.** The `KilnCMSWeb.Layouts.brand_logo` helper, which returned the
+    resolved logo URL and had no other callers in core, is removed. An
+    overlay that called it can use
+    `KilnCMS.Branding.for_org(org).logo_url`, or render
+    `<Layouts.brand_mark brand={...} />` to get the sized variant.
+
 <a id="public-image-weight"></a>
 
 - **The signed-out home page and the built-in logo no longer ship oversized
