@@ -1,6 +1,12 @@
 defmodule Mix.Tasks.Kiln.Gen.ContentTest do
   @moduledoc false
-  use ExUnit.Case, async: true
+
+  # Not async (#2559). `test_project/1` and `Igniter.compose_task/3` evaluate
+  # the project's config and apply it with `Application.put_all_env/1`, then
+  # put back a snapshot of each app's whole env, and the setup below writes
+  # `:test`'s `:ash_domains`. Concurrently, that swaps env under other tests
+  # (#2380, `Mix.Tasks.Kiln.Gen.PluginTest`).
+  use ExUnit.Case, async: false
 
   import Igniter.Test
 
