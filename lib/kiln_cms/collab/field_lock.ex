@@ -235,9 +235,9 @@ defmodule KilnCMS.Collab.FieldLock do
        idle_ms: setting(opts, config, :idle_ms, @idle_ms),
        flush_ms: setting(opts, config, :flush_ms, @flush_ms),
        pubsub: Keyword.get(opts, :pubsub, true),
-       # field => holder (private shape: adds gen + timers)
+       # field => holder (private shape: adds gen, timers and the idle ref)
        locks: %{},
-       # field => %{user, pid, timer}
+       # field => %{user, pid, timer, ref}
        pending: %{},
        # pid => monitor ref; one monitor per holder process
        monitors: %{}
@@ -316,8 +316,9 @@ defmodule KilnCMS.Collab.FieldLock do
       true ->
         holder = state.locks[field]
         send(holder.pid, {:lock_flush, state.topic, field})
-        timer = Process.send_after(self(), {:flush_timeout, field, holder.gen}, state.flush_ms)
-        pending = Map.put(state.pending, field, %{user: user, pid: pid, timer: timer})
+        ref = make_ref()
+        timer = Process.send_after(self(), {:flush_timeout, field, ref}, state.flush_ms)
+        pending = Map.put(state.pending, field, %{user: user, pid: pid, timer: timer, ref: ref})
         {:reply, :pending, %{state | pending: pending}}
     end
   end
@@ -332,11 +333,27 @@ defmodule KilnCMS.Collab.FieldLock do
 
   @impl true
   # The holder did not answer in time: whoever waits on this field gets it.
-  def handle_info({:flush_timeout, field, _gen}, state),
-    do: {:noreply, transfer(state, field)}
+  # The timeout carries the pending takeover's own ref, not the holder's gen:
+  # a holder that releases mid-flush drops the field but leaves the takeover
+  # waiting, and a gen check would strand that requester. A timeout from a
+  # takeover already settled by `flushed/2` finds a different ref (or none)
+  # and is ignored, so a later takeover is not granted before its own flush.
+  def handle_info({:flush_timeout, field, ref}, state) do
+    case state.pending[field] do
+      %{ref: ^ref} -> {:noreply, transfer(state, field)}
+      _ -> {:noreply, state}
+    end
+  end
 
-  def handle_info({:grace_over, field, gen}, state), do: expire(state, field, gen)
-  def handle_info({:idle_over, field, gen}, state), do: expire(state, field, gen)
+  # The grace timer is set once per holder (only while `grace_timer` is nil)
+  # and cancelled by `drop/2`; a re-give mints a new gen. So the gen alone
+  # tells a live grace from a stale one.
+  def handle_info({:grace_over, field, gen}, state), do: expire(state, field, :gen, gen)
+
+  # The idle timer is re-armed on every keystroke while the gen stays, so it
+  # carries a ref of its own: a timeout that fired just before a keystroke
+  # cancelled it finds a newer ref on the holder and is ignored.
+  def handle_info({:idle_over, field, ref}, state), do: expire(state, field, :idle_ref, ref)
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
     state = %{state | monitors: Map.delete(state.monitors, pid)}
@@ -371,7 +388,8 @@ defmodule KilnCMS.Collab.FieldLock do
       acquired_at: now,
       last_keystroke_at: now,
       grace_timer: nil,
-      idle_timer: nil
+      idle_timer: nil,
+      idle_ref: nil
     }
 
     state
@@ -413,9 +431,10 @@ defmodule KilnCMS.Collab.FieldLock do
   defp notify_displaced(holder, topic, field, user, _pid),
     do: send(holder.pid, {:lock_taken, topic, field, Map.take(user, [:id, :name])})
 
-  defp expire(state, field, gen) do
+  # Expires the field only if the timer that fired is still the holder's own.
+  defp expire(state, field, key, value) do
     case state.locks[field] do
-      %{gen: ^gen} -> state |> drop(field) |> announce() |> stop_noreply()
+      %{^key => ^value} -> state |> drop(field) |> announce() |> stop_noreply()
       _ -> {:noreply, state}
     end
   end
@@ -435,8 +454,9 @@ defmodule KilnCMS.Collab.FieldLock do
   defp reset_idle(state, field) do
     update_in(state, [:locks, field], fn holder ->
       cancel(holder.idle_timer)
-      timer = Process.send_after(self(), {:idle_over, field, holder.gen}, state.idle_ms)
-      %{holder | idle_timer: timer}
+      ref = make_ref()
+      timer = Process.send_after(self(), {:idle_over, field, ref}, state.idle_ms)
+      %{holder | idle_timer: timer, idle_ref: ref}
     end)
   end
 

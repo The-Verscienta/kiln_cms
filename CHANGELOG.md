@@ -459,6 +459,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Accepting an invitation raises a lower membership on the site to the invited tier (never lowers one) and the page says which happened; changing a member's tier or removing them retires their pending invitation.**
   ([#2452](https://github.com/The-Verscienta/kiln_cms/issues/2452) · [long form](docs/changelog/unreleased.md#invitation-raises-lower-membership))
 
+- **Field locks: an idle or takeover-flush timeout that fires just as it is reset is now ignored. Two narrow races: a keystroke at the idle limit lost the field, and a stale flush timeout granted the next takeover unflushed.**
+  ([#2556](https://github.com/The-Verscienta/kiln_cms/pull/2556) · [long form](docs/changelog/unreleased.md#field-lock-stale-timers))
+
 - **A form's CSV export keeps values stored under a renamed or removed field's old machine name, in a column headed `<key> (renamed or removed)`; forms never renamed export the same columns as before.**
   ([#2555](https://github.com/The-Verscienta/kiln_cms/pull/2555) · [long form](docs/changelog/unreleased.md#form-export-renamed-field-keys))
 
