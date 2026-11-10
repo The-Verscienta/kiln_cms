@@ -460,6 +460,10 @@ for the previous minor, use a branch:
 **A security fix's notice.** Fill in the private advisory's affected and
 patched versions per line (`>= 1.0.0, < 1.0.3` and `1.0.3`; `>= 1.1.0, <
 1.1.1` and `1.1.1`), and publish it before you publish the GitHub release.
+Deployed instances decide from the affected range alone; `patched_versions`
+is display text ("fixed in 1.0.3"). So the affected range must end before
+each fixed release, or instances already on the fix read as covered
+([Security notices for Kiln](security-posture.md#security-notices-for-kiln)).
 Publishing a release runs `.github/workflows/publish-security.yml`, which
 turns every published advisory into a notice at
 `kilncms.dev/security-notices/<ghsa-id>`, lists it on `/security`, and puts

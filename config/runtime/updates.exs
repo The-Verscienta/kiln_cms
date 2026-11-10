@@ -122,8 +122,9 @@ end
 # for its `security_notice` entries. Unset, kilncms.dev's — but only while the
 # update check's release feed is kilncms.dev's too, so a fork, a mirror or
 # KILN_UPDATE_FEED_URL=false keeps kilncms.dev out of this check as well. An
-# off-spelling turns the notices leg off; blank is unset. See
-# `Kiln.Plugins.Health.notices_url/0`.
+# off-spelling turns the notices leg off; blank is unset. The feed is fetched
+# and cached once for everything that reads it; each reader gates on its own
+# switch above. See `Kiln.SecurityNotices.url/0`.
 notices_url = "KILN_SECURITY_NOTICES_URL" |> System.get_env("") |> String.trim()
 
 cond do
@@ -131,10 +132,10 @@ cond do
     :ok
 
   String.downcase(notices_url) in Env.false_values() ->
-    config :kiln_cms, Kiln.Plugins.Health, notices_url: false
+    config :kiln_cms, Kiln.SecurityNotices, url: false
 
   true ->
-    config :kiln_cms, Kiln.Plugins.Health, notices_url: notices_url
+    config :kiln_cms, Kiln.SecurityNotices, url: notices_url
 end
 
 # Months without a release on Hex after which a plugin reads as stale.

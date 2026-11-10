@@ -3,7 +3,7 @@ defmodule Mix.Tasks.Kiln.Plugins.ListHealthTest do
   `mix kiln.plugins.list --health` (#2244): off by default, so the plain
   listing makes no request; with the flag it checks every plugin even when the
   server's own check is turned off. Requests go to the `Kiln.Plugins.Health`
-  Req.Test stub.
+  and `Kiln.SecurityNotices` Req.Test stubs.
   """
   # async: false - the task flips `Kiln.Plugins.Health`'s app env for the
   # length of the check, and the check's cache is a VM-wide :persistent_term.
@@ -19,10 +19,16 @@ defmodule Mix.Tasks.Kiln.Plugins.ListHealthTest do
 
   setup do
     original = Application.get_env(:kiln_cms, Health, [])
+    notices = Application.get_env(:kiln_cms, Kiln.SecurityNotices, [])
     Health.clear_cache()
+
+    # The notices feed is off in the test config; unset, it follows the update
+    # feed (kilncms.dev's), as in production.
+    Application.put_env(:kiln_cms, Kiln.SecurityNotices, Keyword.put(notices, :url, nil))
 
     on_exit(fn ->
       Application.put_env(:kiln_cms, Health, original)
+      Application.put_env(:kiln_cms, Kiln.SecurityNotices, notices)
       Health.clear_cache()
     end)
 
@@ -32,10 +38,15 @@ defmodule Mix.Tasks.Kiln.Plugins.ListHealthTest do
   defp stub(notices) do
     test = self()
 
-    Req.Test.stub(Health, fn conn ->
+    fun = fn conn ->
       send(test, {:health_request, conn.request_path})
       notices.(conn)
-    end)
+    end
+
+    # Both names: Hex is asked through `Kiln.Plugins.Health`'s options, the
+    # notices feed through `Kiln.SecurityNotices`'s.
+    Req.Test.stub(Health, fun)
+    Req.Test.stub(Kiln.SecurityNotices, fun)
   end
 
   defp run_task(argv), do: capture_io(fn -> assert List.run(argv) == :ok end)

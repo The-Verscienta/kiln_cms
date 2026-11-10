@@ -2,10 +2,13 @@ defmodule Kiln.Plugins.HealthTest do
   @moduledoc """
   The plugin health check's orchestration (#2244): when it asks hex.pm and the
   notices feed, what it caches, and that nothing it cannot confirm reads as OK.
-  Every request goes to a `Req.Test` stub (`config/test.exs`).
+  Every request goes to a `Req.Test` stub (`config/test.exs`); the notices
+  feed is asked through `Kiln.SecurityNotices`, so each stub is registered
+  under both names.
   """
   # async: false - the cache is a :persistent_term shared VM-wide, and these
-  # cases flip `Kiln.Plugins.Health` and `Kiln.Updates` app env.
+  # cases flip `Kiln.Plugins.Health`, `Kiln.SecurityNotices` and `Kiln.Updates`
+  # app env.
   use ExUnit.Case, async: false
 
   # A check that finds a failing plugin logs a warning; several cases do.
@@ -14,6 +17,7 @@ defmodule Kiln.Plugins.HealthTest do
   alias Kiln.Plugins.Health
   alias Kiln.Plugins.Health.Installed
   alias Kiln.Plugins.Health.Report
+  alias Kiln.SecurityNotices
 
   @fixtures Path.expand("../../support/fixtures/hex", __DIR__)
   @locked "b0c823996102bcd0239b3c2444eb00409b72f6a140c1950bc8b457d836b30684"
@@ -21,12 +25,14 @@ defmodule Kiln.Plugins.HealthTest do
 
   setup do
     health = Application.get_env(:kiln_cms, Health, [])
+    notices = Application.get_env(:kiln_cms, SecurityNotices, [])
     updates = Application.get_env(:kiln_cms, Kiln.Updates, [])
 
     Health.clear_cache()
 
     on_exit(fn ->
       Application.put_env(:kiln_cms, Health, health)
+      Application.put_env(:kiln_cms, SecurityNotices, notices)
       Application.put_env(:kiln_cms, Kiln.Updates, updates)
       Health.clear_cache()
     end)
@@ -42,6 +48,14 @@ defmodule Kiln.Plugins.HealthTest do
     )
   end
 
+  defp put_notices(pairs) do
+    Application.put_env(
+      :kiln_cms,
+      SecurityNotices,
+      Keyword.merge(Application.get_env(:kiln_cms, SecurityNotices, []), pairs)
+    )
+  end
+
   defp put_updates(pairs) do
     Application.put_env(
       :kiln_cms,
@@ -50,7 +64,19 @@ defmodule Kiln.Plugins.HealthTest do
     )
   end
 
-  defp enable, do: put_health(enabled: true)
+  # The notices feed is off in the test config; unset, it follows the update
+  # feed (kilncms.dev's), as in production.
+  defp enable do
+    put_health(enabled: true)
+    put_notices(url: nil)
+  end
+
+  # Both names: Hex is asked through `Kiln.Plugins.Health`'s options, the
+  # notices feed through `Kiln.SecurityNotices`'s.
+  defp stub_both(fun) do
+    Req.Test.stub(Health, fun)
+    Req.Test.stub(SecurityNotices, fun)
+  end
 
   defp fixture(name), do: @fixtures |> Path.join(name) |> File.read!() |> Jason.decode!()
 
@@ -100,7 +126,7 @@ defmodule Kiln.Plugins.HealthTest do
     notices = Keyword.get(opts, :notices, %{"data" => []})
     hex = Keyword.get(opts, :hex)
 
-    Req.Test.stub(Health, fn conn ->
+    stub_both(fn conn ->
       send(test, {:request, conn.host, conn.request_path})
 
       case {conn.host, conn.request_path} do
@@ -183,7 +209,7 @@ defmodule Kiln.Plugins.HealthTest do
     test "a fetch that crashes reads as unknown and leaves the caller standing" do
       enable()
 
-      Req.Test.stub(Health, fn conn ->
+      stub_both(fn conn ->
         if conn.host == "hex.pm", do: raise("boom"), else: exit(:boom)
       end)
 
@@ -450,49 +476,10 @@ defmodule Kiln.Plugins.HealthTest do
     end
   end
 
-  describe "notices_url/0" do
-    @default "https://kilncms.dev/api/json/entries/published"
-
+  describe "the notices feed's URL" do
     setup do
       put_updates(repo: nil, releases_url: nil, feed_url: nil)
-      put_health(notices_url: nil)
       :ok
-    end
-
-    test "defaults to kilncms.dev while the update feed is kilncms.dev's" do
-      assert Health.notices_url() == {:ok, @default}
-    end
-
-    test "a fork (KILN_UPDATE_REPO) gets no default feed" do
-      put_updates(repo: "someone/fork")
-      assert Health.notices_url() == :disabled
-    end
-
-    test "a mirror (KILN_UPDATE_RELEASES_URL) gets no default feed" do
-      put_updates(releases_url: "https://ghe.example/api/v3/repos/a/b/releases/latest")
-      assert Health.notices_url() == :disabled
-    end
-
-    test "KILN_UPDATE_FEED_URL=false turns the default off" do
-      put_updates(feed_url: false)
-      assert Health.notices_url() == :disabled
-    end
-
-    test "an explicit URL wins over the fork rule" do
-      put_updates(repo: "someone/fork")
-      put_health(notices_url: "https://fork.example/api/json/entries/published")
-      assert Health.notices_url() == {:ok, "https://fork.example/api/json/entries/published"}
-    end
-
-    test "explicit false is off; blank is unset; garbage is an error" do
-      put_health(notices_url: false)
-      assert Health.notices_url() == :disabled
-
-      put_health(notices_url: "  ")
-      assert Health.notices_url() == {:ok, @default}
-
-      put_health(notices_url: "kilncms.dev/feed")
-      assert Health.notices_url() == {:error, :invalid_notices_url}
     end
 
     test "a fork asks Hex but not kilncms.dev" do

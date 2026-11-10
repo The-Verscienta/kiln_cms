@@ -143,6 +143,12 @@ is set. To keep the Hex comparison but not ask kilncms.dev for notices, set
 kilncms.dev unless `KILN_SECURITY_NOTICES_URL` names it. See
 [the variables](environment-variables.md#plugin-health-check-2244).
 
+`KILN_PLUGIN_HEALTH_CHECK=false` stops the hex.pm requests, but not the
+notices feed: [Security notices for Kiln](#security-notices-for-kiln) reads
+the same feed for the core while `KILN_UPDATE_CHECK` is on. To ask no feed
+at all, set `KILN_SECURITY_NOTICES_URL=false` or `KILN_UPDATE_CHECK=false`
+(with `KILN_PLUGIN_HEALTH_CHECK` unset).
+
 ### When the plugin check goes wrong
 
 | What you see | What it means |
@@ -152,7 +158,7 @@ kilncms.dev unless `KILN_SECURITY_NOTICES_URL` names it. See
 | "No dependency plugins to check." | Every plugin is built from this project. No request is made. |
 | "The security notices feed is turned off; only Hex's own advisories were checked." | `KILN_SECURITY_NOTICES_URL=false`, or a fork or mirror that doesn't name a notices feed. |
 | "You need admin access to do that." | You selected **Check plugins now** after losing platform administrator rights (a temporary grant that expired, say). Nothing was asked. |
-| Every Hex, git and path plugin is **Unknown**, and the log says "KILN_SECURITY_NOTICES_URL is not an absolute http(s) URL; plugin security notices are unknown." | Fix the value: it must be `http://` or `https://` with a host. |
+| Every Hex, git and path plugin is **Unknown**, and the log says "KILN_SECURITY_NOTICES_URL is not an absolute http(s) URL; security notices are unknown." | Fix the value: it must be `http://` or `https://` with a host. The same value makes [Security notices for Kiln](#security-notices-for-kiln) **Unknown** too. |
 | Every plugin is **Unknown** with `KILN_SECURITY_NOTICES_URL` pointing at an internal mirror | Requests go through Kiln's outbound guard, which refuses private and loopback addresses. Serve the mirror on a public address, or set `KILN_SECURITY_NOTICES_URL=false`. |
 | The log says "Plugin health check failed for: *name* (*reason*)" | A check that just asked Hex found a plugin that fails. Open System for the details. Kiln sends no alert for it. |
 
@@ -206,6 +212,7 @@ Each check has an id, used in logs, telemetry and by plugins. A check with no
 | API keys (`core.api_keys`) | This installation | Every valid API key on the installation and its owner | A read-write key owned by an administrator | A key over 180 days old, or expiring more than a year from now | N/A: no valid keys | **Operations → API keys** (`/editor/api-keys`) |
 | Human verification (`core.human_verification`) | This installation | The human-verification settings | | No usable provider, both checks off, or `KILN_CHALLENGE_DISABLED` | | Environment |
 | Kiln version (`core.release`) | This installation | The cached answer of the update check | | A newer release exists | Unknown: no answer yet, or the update check failed. N/A: `KILN_UPDATE_CHECK=false` | **Operations → System** (`/editor/system`) |
+| Security notices for Kiln (`core.security_notices`) | This installation | The cached security notices feed, against the running Kiln's version | A notice of any severity covers this version | | Unknown: no answer yet, the feed didn't answer or its URL is invalid, a notice names Kiln but can't be matched, or this build's version can't be read. N/A: `KILN_UPDATE_CHECK=false`, or the notices feed is off | **Operations → System** (`/editor/system`) |
 | Installed plugins (`core.plugin_health`) | This installation | The cached answer of the plugin health check: each plugin against hex.pm and the security notices feed | A plugin's package changed on Hex since this build, a high, critical or unrated security notice covers it, or Hex retired it for security | A low or medium notice, not on Hex, retired for another reason, no release on Hex for 24 months, or a `kiln_plugin` requirement this Kiln doesn't meet | Unknown: no answer yet, or Hex or the notices feed didn't answer. N/A: no plugin from Hex, git or a path, or plugin checks are off | **Operations → System** (`/editor/system`) |
 
 Every check is **OK** when none of its other conditions hold. A check that
@@ -336,6 +343,103 @@ falling back to GitHub, carrying nothing that identifies the installation
 administrator opens the page, and at most one runs at a time on each server.
 `KILN_UPDATE_CHECK=false` turns it off on both pages.
 
+### Security notices for Kiln
+
+Whether a security notice kilncms.dev publishes covers the Kiln version this
+server runs (#2522). **Kiln version** above only says a newer release exists,
+which is **Review**; this line is **Fix now** when the release you run has a
+known hole.
+
+| Line | When |
+| --- | --- |
+| **Fix now** | A notice covers this version, at any severity: "A security notice covers Kiln 1.8.0." **Details** lists each one: "GHSA-xxxx-xxxx-xxxx (high): fixed in 1.8.1.", or "... no fixed release is listed yet." |
+| **Unknown** | A notice names Kiln but can't be placed against this version (see below), the feed didn't answer ("Could not reach the security notices feed. Open System to check."), `KILN_SECURITY_NOTICES_URL` isn't a usable URL, or nothing is cached yet ("Checking security notices; reopen this page in a minute."). |
+| **OK** | "No published security notice covers Kiln 1.8.0." |
+| **Not applicable** | `KILN_UPDATE_CHECK=false` ("Security notice checks are turned off (KILN_UPDATE_CHECK=false)."), even if the plugin check has the feed cached; or the feed is off: `KILN_SECURITY_NOTICES_URL=false`, or a fork or mirror of the update feed that names no notices feed. |
+
+Plugin notices work differently: a low or medium notice on a plugin is
+**Review**. A notice on the running core is a known way into the whole
+installation, whatever its rating, so here every severity is **Fix now**.
+
+**How a notice is matched.** A notice concerns Kiln when one of its packages
+is `kiln_cms`. The publishing script writes that name for every advisory
+vulnerability that names no package, including one listed beside a named
+plugin. Then:
+
+- **Only the affected range decides.** A notice covers this version when the
+  version falls inside its `affected_versions`, release candidates included.
+  `patched_versions` is shown ("fixed in 1.8.1") and never consulted: the
+  publisher leaves out a line that has no fix yet, so reading it as a verdict
+  would clear an unfixed newer line, or a version inside a range that
+  reopened after a fix. Plugin notices follow the same rule.
+- **An unreadable range is Unknown**: empty, malformed, or the word
+  `unknown`. Details: "*id*: its affected versions can't be read."
+- **A notice naming several packages is Unknown when this version is inside
+  its ranges.** The ranges of all its packages are published joined, with no
+  record of whose is whose, so the one that matched may be a plugin's.
+  Details: "*id* names several packages; whether it covers Kiln can't be
+  told." Outside every range, the notice doesn't concern this version.
+- **A version that can't be read is Unknown** ("Could not read this Kiln's
+  version."), but only while some notice names Kiln. A build without a
+  version reports `0.0.0`, which counts as unreadable.
+
+**What it can't tell you.**
+
+- **A build from `main` between releases can read as affected after the fix
+  merged.** Kiln's version is raised to the next release only when that
+  release is cut, so a build from `main` that already has the fix still
+  reports the affected version. Run a tagged release, or check the advisory
+  against your commit.
+- **Notices that name `kiln_plugin` match nothing.** The plugin SDK is built
+  into Kiln, but neither this line nor **Installed plugins** reads its
+  version.
+- **A loose range errs on the strict side.** A notice whose affected range
+  was never narrowed to exclude the fixed releases flags them as covered.
+
+**What is sent, and when.** One request (up to five pages) to the security
+notices feed, which carries nothing about this installation. It is the same
+fetch and the same cache as the [Installed plugins](#installed-plugins)
+line, so the two lines make at most one request between them, and the feed
+is now asked even when no plugin is installed. Like the Kiln version line,
+this one never waits on the network: on a cold cache (after a restart, a day
+after the last answer, or 15 minutes after a failed request) it starts one
+background request and shows **Unknown**. System asks too, when a platform
+administrator opens it with nothing cached, and when they select **Check
+now** ([data flows](data-flows.md)).
+
+When a fresh answer shows the running Kiln covered, the server log says, once
+per request: "Kiln 1.8.0 is covered by security notice(s) GHSA-xxxx-xxxx-xxxx;
+update it (System, Updates)." It names only the notice ids, and it is
+written only while `KILN_UPDATE_CHECK` is on.
+
+#### Check whether a notice covers your Kiln
+
+You need to be a platform administrator.
+
+1. In the console, open **Operations**, then **System** (`/editor/system`).
+   The **Updates** card has a **Security notices** line under the update
+   status. It says "Checking security notices..." the first time, then the
+   same sentence the Security posture line shows. The line is missing when
+   `KILN_UPDATE_CHECK=false`.
+2. Read it. A covered version has a red **Security notice** badge, one line
+   per notice with the release that fixes it, and an **Advisory *id*** link
+   to each notice. A notice that can't be matched has an **Unknown** badge.
+   A clean version has no badge.
+3. To ask past the cache, select **Check now**. It checks for updates and
+   asks the notices feed again; a second press within a minute shows the
+   answer already cached.
+4. If a notice covers you, read the advisory and update Kiln to the fixed
+   release ([Updating a project to a release](releasing.md#updating-a-project-to-a-release)).
+   After the deploy, the line reads "No published security notice covers
+   Kiln *version*."
+
+| What you see | What it means |
+| --- | --- |
+| "Couldn't reach the security notices feed. This says nothing about whether a notice covers this version." | The request failed or took longer than a minute. The failure is kept for 15 minutes; select **Check now** to ask sooner. A server that can't reach `kilncms.dev` through its firewall always ends here. |
+| "KILN_SECURITY_NOTICES_URL is not an absolute http(s) URL, so no notice was checked." | Fix the value: it must be `http://` or `https://` with a host. |
+| "The security notices feed is turned off (KILN_SECURITY_NOTICES_URL=false, or a fork or mirror of the update feed)." | Nothing is asked. A fork that publishes its own notices sets `KILN_SECURITY_NOTICES_URL` to its site. |
+| "You need admin access to do that." | You selected **Check now** after losing platform administrator rights. Nothing was asked. |
+
 ### Installed plugins
 
 Whether each plugin built into this release still checks out (#2244), from
@@ -363,8 +467,10 @@ check that failed) it starts one check in the background and shows
 **What is sent, and where.** For each plugin locked from hex.pm, two
 requests to hex.pm, which tell hex.pm the plugin's package name and version.
 And one request (up to five pages) to the security notices feed on
-kilncms.dev, which carries nothing about this installation. A deployment
-with no plugin from Hex, git or a path sends nothing. Turn the check
+kilncms.dev, which carries nothing about this installation, shared with
+[Security notices for Kiln](#security-notices-for-kiln). A deployment with
+no plugin from Hex, git or a path sends nothing for this line, though the
+Kiln line still asks the notices feed. Turn the check
 off with `KILN_PLUGIN_HEALTH_CHECK=false`; `KILN_UPDATE_CHECK=false` turns it
 off too unless `KILN_PLUGIN_HEALTH_CHECK` is set
 ([variables](environment-variables.md#plugin-health-check-2244),
@@ -390,7 +496,13 @@ off too unless `KILN_PLUGIN_HEALTH_CHECK` is set
 - **A notice naming several packages** carries one set of version ranges
   for all of them, so the check can tell that a plugin is outside every
   range, but not that a range is its own. Inside one, the plugin reads
-  **Unknown** rather than matched.
+  **Unknown** rather than matched. That includes a notice that covers both
+  Kiln and a plugin: the publisher names the core `kiln_cms` beside the
+  plugin, so the plugin reads **Unknown** rather than **Security notice**
+  (#2566 tracks publishing ranges per package).
+- **Only the affected range decides.** A notice's fixed-in versions are
+  shown, never used to clear a plugin; see
+  [how a notice is matched](#security-notices-for-kiln).
 
 ## How the checks are run
 
@@ -437,8 +549,8 @@ starts one process per check:
 ## What it does not check yet
 
 - Whether two-factor sign-in is *required* for administrators.
-- Security notices that apply to the installed Kiln version itself. The
-  installed plugins line reads notices for plugins only.
+- Security notices for `kiln_plugin`, the plugin SDK built into Kiln:
+  neither notices line reads its version.
 - When an API key was last used.
 
 There is no machine-readable (JSON) output yet: the page is the only way to
@@ -453,6 +565,8 @@ see the report.
 | "The checks are already running for this site. Try again in a moment." | Three reports of this site are already running on this server. Wait for one to finish. |
 | A line says "This check could not run: ..." | That one check failed; the rest of the page is current. See [How the checks are run](#how-the-checks-are-run). |
 | Kiln version says "Checking for updates; reopen this page in a minute." | Nothing was cached yet, and the update check has started in the background. |
+| Security notices for Kiln says "Checking security notices; reopen this page in a minute." | Nothing was cached yet, and the notices feed is being asked in the background. |
+| Security notices for Kiln says "Could not reach the security notices feed. Open System to check." | The request failed. The answer is kept for 15 minutes, then the next visit asks again. See [Security notices for Kiln](#security-notices-for-kiln). |
 | Installed plugins says "Checking plugins; reopen this page in a minute." | Nothing was cached yet, and the plugin check has started in the background. |
 | Installed plugins says "Could not reach Hex or the security notices feed. Open System to check." | A request failed. The answer is kept for 15 minutes, then the next visit asks again. **Details** names each plugin that could not be checked. See the System table in [Check your installed plugins](#check-your-installed-plugins). |
 | A plugin's line is missing | The plugin's check doesn't meet the contract, or uses an id already taken. The server log says "Security posture: ... is not a usable check and is skipped", "... takes the reserved id ...", or "... repeats the id ..."; `mix kiln.plugins.doctor` reports the same before deploy. |

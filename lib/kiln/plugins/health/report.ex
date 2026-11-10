@@ -13,7 +13,7 @@ defmodule Kiln.Plugins.Health.Report do
       Hex, git or a path, so no request was made);
     * `notices` — the security notices feed: `:ok`, `:unknown` (it failed) or
       `:disabled` (turned off, or off by default for a fork; see
-      `Kiln.Plugins.Health.notices_url/0`).
+      `Kiln.SecurityNotices.url/0`).
   """
 
   alias Kiln.Plugins.Health.PluginStatus
