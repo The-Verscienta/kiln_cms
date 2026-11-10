@@ -1867,13 +1867,14 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       id={cf_part_id(@definition, @part)}
       name={"#{@name}[#{@part.key}]"}
       aria-invalid={@errors != [] && "true"}
-      aria-describedby={@errors != [] && cf_errors_id(@definition)}
+      aria-describedby={composite_part_describedby(@definition, @part, @errors)}
       class="field-input"
     >
       <option :for={{value, text} <- @part.options} value={value} selected={value == @current}>
         {text}
       </option>
     </select>
+    <.composite_part_help definition={@definition} part={@part} />
     """
   end
 
@@ -1889,11 +1890,40 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       value={composite_part_value(@value, @part.key)}
       required={@definition.required && Map.get(@part, :required?, true)}
       aria-invalid={@errors != [] && "true"}
-      aria-describedby={@errors != [] && cf_errors_id(@definition)}
+      aria-describedby={composite_part_describedby(@definition, @part, @errors)}
       class="field-input"
       {Map.get(@part, :attrs, %{})}
     />
+    <.composite_part_help definition={@definition} part={@part} />
     """
+  end
+
+  # A part's optional `:help` line (translatable, unlike a placeholder),
+  # linked to its control by `aria-describedby`.
+  attr :definition, :map, required: true
+  attr :part, :map, required: true
+
+  defp composite_part_help(assigns) do
+    ~H"""
+    <p
+      :if={Map.get(@part, :help)}
+      id={cf_part_help_id(@definition, @part)}
+      class="mt-0.5 text-xs text-base-content/60"
+    >
+      {@part.help}
+    </p>
+    """
+  end
+
+  defp composite_part_describedby(definition, part, errors) do
+    ids =
+      [
+        Map.get(part, :help) && cf_part_help_id(definition, part),
+        errors != [] && cf_errors_id(definition)
+      ]
+      |> Enum.filter(& &1)
+
+    if ids == [], do: nil, else: Enum.join(ids, " ")
   end
 
   # The same spellings `Kiln.FieldType` implementations accept, because a value
@@ -2017,6 +2047,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   defp cf_hook_id(definition), do: "cf-hook-#{definition.name}"
   defp cf_errors_id(definition), do: "custom-field-#{definition.name}-errors"
   defp cf_part_id(definition, part), do: "custom-field-#{definition.name}-#{part.key}"
+  defp cf_part_help_id(definition, part), do: "#{cf_part_id(definition, part)}-help"
 
   # One part of a composite value: the stored/mid-edit map's entry for that key.
   # The value may still be the raw param map during a validate round-trip, so
