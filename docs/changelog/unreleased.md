@@ -3563,6 +3563,30 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="composite-field-part-help"></a>
+
+- **Range and link inputs explain themselves, and `Kiln.FieldType` input parts
+  may declare `help:` (#2435).** An `input_parts/1` entry now takes an optional
+  translatable `help:` string, rendered under its control and tied to it by
+  `aria-describedby` (a `placeholder` cannot be translated). Range's two
+  inputs say "a number or a date (YYYY-MM-DD)" and "the same kind as From";
+  link's `Rel` input lists `noopener, noreferrer, nofollow, sponsored, ugc,
+  external`. Additive: a part without `help:` renders as before.
+  - **Verified, no change needed.** A hostile link address (`javascript:`,
+    `//host`, `data:`, `tel:`) posted over real JSON:API HTTP is refused and
+    nothing is stored (`test/kiln_cms_web/link_field_json_api_test.exs`); the
+    `:kotlinc` golden compiles and decodes (run locally with kotlinx
+    serialization 1.7.3); a Playwright spec
+    (`e2e/tests/composite_fields.spec.js`) fills, saves and reloads the range,
+    key/value and link widgets in a real browser, including the blank-first
+    "Opens in" select and a refused address that keeps the typed text; dialyzer
+    is clean.
+  - **Left as is.** The range type's JSON Schema still lets each bound be a number or
+    a date: saying "both the same kind" needs a `oneOf` of inline objects,
+    which the TypeScript, Swift and Kotlin generators only support for `$ref`
+    members. The server (`cast/2`) enforces it on write. Noted in the
+    module docs.
+
 <a id="trashed-row-updates-refused"></a>
 
 - **Nothing can write into a document after it is moved to the trash (#2332).**
