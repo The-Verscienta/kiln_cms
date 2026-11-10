@@ -561,7 +561,8 @@ defmodule KilnCMSWeb.ContentControllerTest do
 
       html = conn |> get(~p"/#{page.slug}") |> html_response(200)
 
-      assert html =~ ~s(action="/forms/#{form.slug}")
+      # Pinned to the page's locale: the test config is multi-locale (#2465).
+      assert html =~ ~s(action="/en/forms/#{form.slug}")
       assert html =~ "Your email"
       assert html =~ ~s(name="website")
 

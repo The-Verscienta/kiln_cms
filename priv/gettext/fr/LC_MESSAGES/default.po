@@ -8089,6 +8089,7 @@ msgstr "Intégrer sur un autre site"
 msgid "Embedded HTML or external content"
 msgstr "HTML intégré ou contenu externe"
 
+#: lib/kiln_cms/blocks/embed.ex
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "Embedded media"

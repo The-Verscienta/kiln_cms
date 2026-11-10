@@ -102,6 +102,33 @@ on the next request. The cached tree is resolved for the **anonymous**
 audience only — it is shared across visitors, so it must never carry a link
 only a signed-in audience may see.
 
+## Which language the page text is in
+
+A content page can be served in a language other than the visitor's: a
+visitor reading French follows a link to a page that has no French
+translation and gets the English one. Kiln writes some text of its own into
+the page, and which language it uses depends on where on the page it is:
+
+* **Inside the article** (`.public-article`): the page's language, the one
+  `<html lang>` and the `Content-Language` header declare. That covers the
+  byline and its date, a form block's labels and messages, a newsletter
+  sign-up's fields, the human-verification widget and an untitled embed's
+  title.
+* **The chrome around it** (header links, search, the language switcher,
+  the footer): the language of the request, from the URL prefix or else the
+  visitor's session. Whether the chrome should follow the page instead is an
+  open decision, tracked with a caching problem it causes in
+  [#2595](https://github.com/The-Verscienta/kiln_cms/issues/2595).
+
+A plugin block that ships its own Gettext backend renders in the request's
+language, not the page's.
+
+On a multilingual site, form and newsletter sign-up blocks on a content page
+post under the page's language prefix (`/en/forms/<slug>`,
+`/fr/newsletter/subscribe`), so a stylesheet or script that selects them by
+`action` no longer matches. Select `.kiln-form` and
+`.kiln-newsletter-signup` instead.
+
 ## Custom CSS
 
 A plain-CSS field on the code-injection screen, served inside a

@@ -113,7 +113,7 @@ defmodule KilnCMSWeb.FormController do
         # rule published HTML already follows (docs/performance.md).
         |> put_resp_header("vary", "accept-language")
         |> put_view(KilnCMSWeb.FormHTML)
-        |> render(:embed, form: form)
+        |> render(:embed, form: form, action: pinned_action(conn, form))
     end
   end
 
@@ -263,7 +263,8 @@ defmodule KilnCMSWeb.FormController do
       errors: errors,
       values: submitted_values(form, params),
       rendered_at: submitted_rendered_at(params),
-      variant: Params.string(params, Forms.variant_field())
+      variant: Params.string(params, Forms.variant_field()),
+      action: pinned_action(conn, form)
     ]
 
     conn = conn |> put_status(422) |> put_view(KilnCMSWeb.FormHTML)
@@ -281,15 +282,18 @@ defmodule KilnCMSWeb.FormController do
           [
             current_org: conn.assigns[:current_org],
             locale: Gettext.get_locale(KilnCMSWeb.Gettext),
-            page_title: form.name,
-            # Posted from `/fr/forms/<slug>` (#2138), the corrected re-submit
-            # keeps the `/fr` prefix and so the visitor's language.
-            action:
-              KilnCMS.I18n.localized_path(conn.assigns[:path_locale], "/forms/" <> form.slug)
+            page_title: form.name
           ]
       )
     end
   end
+
+  # Where a served form posts back to. Posted from `/fr/forms/<slug>` (#2138),
+  # or from a content page whose form is pinned to its language (#2465), the
+  # corrected re-submit keeps the prefix and so the visitor's language — the
+  # default locale's too, since an unprefixed path would take the session's.
+  defp pinned_action(conn, form),
+    do: KilnCMS.I18n.pinned_path(conn.assigns[:path_locale], "/forms/" <> form.slug)
 
   # The re-render draws a fresh widget when the form asks for one (#2249), so
   # its policy must allow the provider; any other refusal keeps the strict one.

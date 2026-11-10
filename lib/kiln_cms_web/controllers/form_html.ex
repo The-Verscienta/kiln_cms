@@ -21,6 +21,9 @@ defmodule KilnCMSWeb.FormHTML do
   attr :errors, :map, default: %{}
   attr :rendered_at, :string, default: nil
   attr :variant, :string, default: nil
+  # Where the form posts — pinned to the locale the embed was served under
+  # (#2465), so a refused submission re-renders in it. nil is the bare path.
+  attr :action, :string, default: nil
 
   def embed(assigns) do
     ~H"""
@@ -42,6 +45,7 @@ defmodule KilnCMSWeb.FormHTML do
           errors={@errors}
           rendered_at={@rendered_at}
           variant={@variant}
+          action={@action}
         />
         <script defer src={~p"/embed-frame.js"}>
         </script>
