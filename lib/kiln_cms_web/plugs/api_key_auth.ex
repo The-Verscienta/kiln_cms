@@ -18,7 +18,11 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   expired, signed by another instance) to **anonymous**, so a client with a
   broken credential reads public content and takes it for success. So an
   `Authorization: Bearer …` header that left no actor behind is answered `401`
-  in the standard `KilnCMSWeb.ApiError` envelope instead. A request with no
+  in the standard `KilnCMSWeb.ApiError` envelope instead (on `/gql`:
+  `{"errors": [{"message", "extensions": {"code": "unauthenticated"}}]}`), with
+  `cache-control: private, no-store` and `vary: authorization`. The scheme is
+  matched case-insensitively across every `authorization` value, and a bare
+  `Bearer` is invalid too. A request with no
   `Authorization` header stays anonymous, and so does one using another scheme.
 
   **On by default.** It shipped off for one release and flipped on in the next
@@ -35,7 +39,7 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   `surface: :json_api | :graphql | :media | :other`, `read?: boolean()` (a
   `GET`/`HEAD`, or anything on `/gql`: the nearest cheap proxy for "a public
   route that never needed the token") and `reason: :expired | :malformed |
-  :invalid` (read from the unverified payload, never sent to the client;
+  :invalid | :api_key_scheme` (`:api_key_scheme` is a `kiln_…` key sent with a non-canonical scheme such as `bearer`; read from the unverified payload, never sent to the client;
   revoked, deleted-user and bad-signature tokens are all `:invalid`). No token,
   user or address is in the event.
 
@@ -98,21 +102,22 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   defp reason(conn) do
     token =
       case bearer_headers(conn) do
-        ["Bearer " <> token | _] -> String.trim(token)
+        [value | _] -> value |> String.trim() |> String.split(~r/\s+/, parts: 2) |> Enum.at(1)
         _ -> nil
       end
 
-    case token && Joken.peek_claims(token) do
-      {:ok, %{"exp" => exp}} when is_number(exp) ->
-        if exp < System.os_time(:second), do: :expired, else: :invalid
-
-      {:ok, _claims} ->
-        :invalid
-
-      _ ->
-        :malformed
+    cond do
+      is_nil(token) -> :malformed
+      String.starts_with?(token, KilnCMS.Accounts.ApiKey.prefix() <> "_") -> :api_key_scheme
+      true -> token |> Joken.peek_claims() |> classify_claims()
     end
   end
+
+  defp classify_claims({:ok, %{"exp" => exp}}) when is_number(exp),
+    do: if(exp < System.os_time(:second), do: :expired, else: :invalid)
+
+  defp classify_claims({:ok, _claims}), do: :invalid
+  defp classify_claims(_error), do: :malformed
 
   @doc "Whether an unverifiable bearer token is a `401` (`KILN_API_REJECT_INVALID_BEARER`)."
   @spec reject_invalid_bearer?() :: boolean()
@@ -123,23 +128,55 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   # A `Bearer` header, not a `kiln_` key (handled above), and no actor: the
   # JWT in it did not verify. A verified one has set the actor by now.
   defp unverified_bearer?(conn) do
-    match?([_ | _], bearer_headers(conn)) and is_nil(Ash.PlugHelpers.get_actor(conn))
+    match?([_ | _], bearer_headers(conn)) and is_nil(Ash.PlugHelpers.get_actor(conn)) and
+      is_nil(conn.assigns[:current_user])
   end
 
+  # Every `authorization` value whose scheme is `Bearer`, matched
+  # case-insensitively (RFC 7235), including a bare `Bearer` with no token. A
+  # proxy may append a second value; a bearer among them that did not
+  # authenticate must not slip past.
   defp bearer_headers(conn) do
-    for "Bearer " <> _ = value <- Plug.Conn.get_req_header(conn, "authorization"), do: value
+    for value <- Plug.Conn.get_req_header(conn, "authorization"),
+        value
+        |> String.trim_leading()
+        |> String.split(~r/\s+/, parts: 2)
+        |> hd()
+        |> String.downcase() ==
+          "bearer",
+        do: value
   end
 
+  @message "The bearer token is invalid or expired. Send a valid token or API key, or omit the Authorization header to read public content."
+
+  # Never cacheable, and keyed on the credential (#2318).
   defp reject(conn) do
     conn
     |> Plug.Conn.put_resp_header("www-authenticate", ~s(Bearer error="invalid_token"))
-    |> KilnCMSWeb.ApiError.send(
-      :unauthorized,
-      "invalid_token",
-      "The bearer token is invalid or expired. Send a valid token or API key, or omit the Authorization header to read public content."
-    )
+    |> Plug.Conn.put_resp_header("cache-control", "private, no-store")
+    |> KilnCMSWeb.Plugs.PublicCache.put_vary(["authorization"])
+    |> send_error()
     |> Plug.Conn.halt()
   end
+
+  # `/gql` speaks GraphQL's error shape; every other surface keeps the
+  # `ApiError` envelope with `401 invalid_token`.
+  defp send_error(%Plug.Conn{path_info: ["gql" | _]} = conn) do
+    # `code` is kept alongside `extensions.code` so a client that read
+    # `errors[0].code == "invalid_token"` from the old envelope still matches.
+    body = %{
+      errors: [
+        %{message: @message, code: "invalid_token", extensions: %{code: "unauthenticated"}}
+      ]
+    }
+
+    conn
+    |> Plug.Conn.put_resp_content_type("application/json")
+    |> Plug.Conn.send_resp(401, Jason.encode!(body))
+  end
+
+  defp send_error(conn),
+    do: KilnCMSWeb.ApiError.send(conn, :unauthorized, "invalid_token", @message)
 
   defp api_key_request?(conn) do
     case Plug.Conn.get_req_header(conn, "authorization") do
