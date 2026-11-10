@@ -138,6 +138,7 @@ defmodule KilnCMS.Accounts.AnonymizeUserTest do
   end
 
   describe "the security audit log (#2241)" do
+    alias KilnCMS.NewerReleaseRows
     alias KilnCMS.Security
     alias KilnCMS.Security.Event
 
@@ -187,6 +188,50 @@ defmodule KilnCMS.Accounts.AnonymizeUserTest do
       assert t.target_id == nil
       # The admin who acted keeps their own identity on the event.
       assert t.actor_id == admin.id and t.ip == "192.0.2.8"
+    end
+
+    # Rows a newer release wrote, with a type or event this release does not
+    # know (#2509): erasure must still reach them, not fail on reading them.
+    test "erasure completes over a security event and notifications a newer release wrote" do
+      admin = user(:admin)
+      subject = user(:editor)
+      recipient = user(:editor)
+
+      acted =
+        NewerReleaseRows.security_event!(%{
+          actor_id: subject.id,
+          actor_label: "x@example.com",
+          ip: "192.0.2.7",
+          user_agent: "UA",
+          metadata: %{"name" => "laptop"}
+        })
+
+      caused =
+        NewerReleaseRows.notification!(recipient.id, %{
+          actor_id: subject.id,
+          actor_name: "Jane Editor"
+        })
+
+      received = NewerReleaseRows.notification!(subject.id)
+
+      assert {:ok, _} = Accounts.anonymize_user(subject, actor: admin)
+
+      a = NewerReleaseRows.stored_row("security_events", acted)
+
+      assert {a["actor_id"], a["actor_label"], a["ip"], a["user_agent"], a["metadata"]} ==
+               {nil, nil, nil, nil, %{}}
+
+      assert a["type"] == NewerReleaseRows.unknown()
+
+      c = NewerReleaseRows.stored_row("notifications", caused)
+
+      assert {c["actor_id"], c["actor_name"], c["event"]} ==
+               {nil, nil, NewerReleaseRows.unknown()}
+
+      assert %{num_rows: 0} =
+               KilnCMS.Repo.query!("SELECT 1 FROM notifications WHERE id = $1", [
+                 Ecto.UUID.dump!(received)
+               ])
     end
 
     test "a failed security-log scrub fails and rolls back the erasure" do

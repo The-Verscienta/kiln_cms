@@ -433,6 +433,17 @@ person sees the usual error, so a credential change is never unrecorded.
 - A new event type needs an entry in `KilnCMS.Security.Event` (`@types`, and its
   `metadata` keys), a label in `KilnCMSWeb.SecurityLog.type_label/1`, and a row
   in the matrix above.
+- `type` is a `KilnCMS.Types.KnownAtom` column (#2509). A type this release
+  does not know (one a newer release recorded, read during a rolling deploy or
+  after a rollback) loads as `%KilnCMS.Types.UnknownAtom{value: "the_type"}`
+  instead of failing the read. So code that reads `event.type` gets either one
+  of `Event.types/0` or that struct: match the known atoms and let the struct
+  fall through to a catch-all. `Event.metadata_keys/1` returns `[]` for it, and
+  `KilnCMSWeb.SecurityLog.type_label/1` labels it "Unrecognized event (name)".
+  Writes stay strict: `KilnCMS.Security.record/2` refuses a type outside
+  `@types`, and an `UnknownAtom` too. Adding a type is safe for an older release only if
+  that release already has this column as `KnownAtom`; see
+  [New values in an atom column](releasing.md#new-values-in-an-atom-column).
 - Authorization: reads are org-admin only. The recorder, the erasure sweep and
   the prune run as `KilnCMS.Security.system/0`. See
   *Security audit log* in [policy-matrix.md](policy-matrix.md).
@@ -446,5 +457,6 @@ person sees the usual error, so a credential change is never unrecorded.
 | "The log could not be loaded." | The read failed; try again, and check the application log. |
 | "No member of this site has that email address." | The **Who** filter matched no actor label in this site's log. Check the spelling, or that the person has an event on this site. |
 | An expected event is missing | Check the "Not recorded" table; then the sampling cap for failed sign-ins; then `[:kiln_cms, :security, :event_failed]` and the log. |
+| "Unrecognized event (some_name)" in a gray badge | A newer release recorded this event, and the release now running does not know the type: usually during a rolling deploy, or after rolling back. The row is kept and shown, the CSV carries the raw name in `type`, the erasure sweep scrubs it and the prune deletes it on schedule. The **Type** filter lists only the types this release knows, so filtering by one hides these rows. They read normally again once every node runs the newer release. |
 | `413` on the CSV | More rows match than the export cap. Narrow the date range. |
 | Old events are still there | The prune runs once a day, and `KILN_SECURITY_LOG_PRUNE_CRON=false` turns it off; or retention is 0. |
