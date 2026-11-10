@@ -60,7 +60,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374) · [long form](docs/changelog/unreleased.md#reserved-paths-upgrade))
 
 - **Run `mix ash.migrate` (new nullable `backup_locks.waiting_*` columns; `backup_runs.scheduled_components` and `schedule_ids`, default empty). While older nodes still run, a database-only or media-only backup request may back up everything (part of #2219). Rolling back is safe.**
-  ([long form](docs/changelog/unreleased.md#backup-components-upgrade))
+  ([#2685](https://github.com/The-Verscienta/kiln_cms/pull/2685) · [long form](docs/changelog/unreleased.md#backup-components-upgrade))
 
 - **Update the host's copy of `scripts/backup.sh` so cron's prune honors the new `kiln-<stamp>.good` marker, which the app keeps on the newest verified backup of each component (part of #2219).** No migration; rolling back is safe.
   ([#2552](https://github.com/The-Verscienta/kiln_cms/pull/2552) · [long form](docs/changelog/unreleased.md#backup-last-good-marker-upgrade))
@@ -234,7 +234,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Back up only the database or only the media from a release console (`KilnCMS.Backups.request([components: [:db]], actor)`); the Backups page and the overview report each component's last backup and alarm when either failed or went stale (part of #2219).**
   Guide: [docs/backups.md](docs/backups.md#back-up-only-the-database-or-only-the-media).
-  ([long form](docs/changelog/unreleased.md#backup-components))
+  ([#2685](https://github.com/The-Verscienta/kiln_cms/pull/2685) · [long form](docs/changelog/unreleased.md#backup-components))
 
 - **Security alerts: site admins get a bell notice and an email when someone becomes an admin, a role is raised, an account is locked out, two-factor is turned off or single sign-on changes; platform admins when a platform admin or API key is created or a stolen key is reused. Organization → Security alerts picks the kinds.**
   One alert per kind per 15 minutes plus a summary; opt-in `security.*` webhook events; turning alerts down sends the site's member admins a notice nobody can mute. Guide: [docs/security-alerts.md](docs/security-alerts.md).
