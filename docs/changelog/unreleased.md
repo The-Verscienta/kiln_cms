@@ -5475,3 +5475,22 @@ carries the reasoning.
   about 10 ms. Verscienta reported 1.6–4.0 s for the leg on multi-word queries
   after #2205; that figure has not been re-measured on their data.
   ([#2367](https://github.com/The-Verscienta/kiln_cms/pull/2367))
+
+<a id="bearer-401-hardening"></a>
+
+- **Bearer `401` hardening (#2318).** Four refinements to the unverifiable-bearer
+  rejection from #2161, all in `KilnCMSWeb.Plugs.ApiKeyAuth`:
+  - **Detection.** The `Authorization` scheme is matched case-insensitively
+    (RFC 7235) and a bare `Bearer` with no token is invalid. Every
+    `Authorization` value is checked, and a request counts as authenticated only
+    if neither the Ash actor nor `current_user` is set. `bearer <jwt>` is
+    refused rather than quietly served as anonymous, because the JWT loader
+    only reads the exact `Bearer` spelling.
+  - **Headers.** The `401` carries `cache-control: private, no-store` and
+    `vary: authorization`.
+  - **`/gql` body.** `{"errors": [{"message": …, "extensions": {"code":
+    "unauthenticated"}}]}`; `/api` keeps the `invalid_token` envelope.
+  - **Telemetry.** The bare and mixed-case forms reach
+    `[:kiln_cms, :api, :invalid_bearer]` (`reason: :malformed` for a bare
+    `Bearer`).
+

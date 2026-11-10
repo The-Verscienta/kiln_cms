@@ -77,3 +77,38 @@ two decisions are separable.
 > `[:kiln_cms, :api, :invalid_bearer]` telemetry event. To buy time set
 > `KILN_API_REJECT_INVALID_BEARER=false`; the variable is removed in the next
 > release.
+
+## Amendment (2026-11-10): the escape hatch's removal is gated on the count
+
+[#2318](https://github.com/The-Verscienta/kiln_cms/issues/2318). The reasoning
+above rejects gating the *flip* on a telemetry threshold. It does not cover
+removing `KILN_API_REJECT_INVALID_BEARER`, which has not happened, and that
+removal is gated:
+
+- **Signal.** `[:kiln_cms, :api, :invalid_bearer]` events with `enforced: false`
+  and `read?: true`: stale tokens still reaching public reads while the hatch is
+  open. (Only an operator who set the variable to `false` produces
+  `enforced: false`, so the count is read on the instances that use the hatch.)
+- **Who reads it.** kilncms.dev and the Verscienta sites (production consumers)
+  report the count before the release that removes the variable.
+- **Fallback.** If the count is not zero when the removal release arrives, the
+  hatch stays one more release, and this record is amended again; the same check
+  is repeated before the release after. The telemetry only informs the
+  release-note wording if removal is eventually forced.
+
+Read `enforced: true` alongside it: those are the `401`s actually served, which
+say whether removal hurts anyone. `enforced: false` alone is zero by
+construction on an instance that never set the hatch, so zero there is not
+evidence about stale clients elsewhere. Core attaches no handler or metric to
+the event; the reporting sites attach their own (`:telemetry.attach/4`).
+
+The `/gql` `401` body (#2318) is now GraphQL-shaped and keeps `code:
+"invalid_token"` beside `extensions.code: "unauthenticated"`, so a client that
+read the old envelope's `code` still matches; the case-insensitive scheme match
+also turns a `bearer <jwt>` that used to be served as anonymous into a `401`.
+Both go under Breaking in the release note.
+
+This changes the "removed in the next release" wording in the release note
+above and in ADR 0012's table: removal is *planned* for the next release and
+happens only when the count is zero.
+

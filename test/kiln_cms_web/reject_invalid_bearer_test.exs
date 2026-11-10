@@ -81,12 +81,19 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
     assert [~s(Bearer error="invalid_token")] = get_resp_header(conn, "www-authenticate")
   end
 
+  defp assert_gql_error(conn) do
+    assert conn.status == 401
+
+    assert [%{"message" => _, "extensions" => %{"code" => "unauthenticated"}}] =
+             Jason.decode!(conn.resp_body)["errors"]
+  end
+
   describe "flag on" do
     setup do: flag(true)
 
     test "a garbled bearer is a 401 envelope on JSON:API and GraphQL" do
       assert_envelope(api_get("Bearer not.a.jwt"))
-      assert_envelope(gql("Bearer not.a.jwt"))
+      assert_gql_error(gql("Bearer not.a.jwt"))
       assert_envelope(api_get("Bearer "))
     end
 
@@ -144,7 +151,7 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
         )
 
       assert_envelope(api_get("Bearer " <> token))
-      assert_envelope(gql("Bearer " <> token))
+      assert_gql_error(gql("Bearer " <> token))
     end
 
     # `:api_spec` runs `ApiKeyAuth` without `:load_from_bearer`, so a valid
@@ -164,12 +171,69 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
     end
   end
 
+  describe "detection, headers and body (#2318)" do
+    setup do: flag(true)
+
+    test "scheme is case-insensitive and a bare Bearer is invalid" do
+      for value <- ["bearer abc", "BEARER abc", "bEaReR abc", "Bearer", "bearer", "Bearer   "] do
+        assert_envelope(api_get(value))
+      end
+
+      assert gql("bearer abc").status == 401
+      assert gql("Bearer").status == 401
+    end
+
+    test "a valid JWT with a lower-case scheme is not served as an authenticated caller" do
+      # `:load_from_bearer` only reads the exact scheme, so it is refused rather
+      # than silently downgraded to anonymous.
+      assert_envelope(api_get("bearer " <> jwt(user(:editor))))
+    end
+
+    test "every authorization value is checked" do
+      conn =
+        put_req_header(build_conn(), "accept", @accept)
+
+      conn = %{
+        conn
+        | req_headers: [
+            {"authorization", "Basic dXNlcjpwYXNz"},
+            {"authorization", "Bearer junk"} | conn.req_headers
+          ]
+      }
+
+      assert_envelope(get(conn, "/api/json/posts"))
+    end
+
+    test "the 401 is private, no-store and varies on authorization" do
+      for conn <- [api_get("Bearer junk"), gql("Bearer junk")] do
+        assert get_resp_header(conn, "cache-control") == ["private, no-store"]
+        assert [vary] = get_resp_header(conn, "vary")
+        assert "authorization" in Enum.map(String.split(vary, ","), &String.trim/1)
+        assert get_resp_header(conn, "surrogate-key") == []
+      end
+    end
+
+    test "/gql answers in GraphQL's error shape, /api keeps invalid_token" do
+      conn = gql("Bearer junk")
+      assert conn.status == 401
+
+      assert %{"errors" => [%{"message" => msg, "extensions" => %{"code" => "unauthenticated"}}]} =
+               Jason.decode!(conn.resp_body)
+
+      assert is_binary(msg)
+      assert [content_type] = get_resp_header(conn, "content-type")
+      assert content_type =~ "application/json"
+
+      assert_envelope(api_get("Bearer junk"))
+    end
+  end
+
   describe "default (unset)" do
     test "unset config is on: an unverifiable bearer is a 401" do
       Application.delete_env(:kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth)
       assert KilnCMSWeb.Plugs.ApiKeyAuth.reject_invalid_bearer?()
       assert_envelope(api_get("Bearer not.a.jwt"))
-      assert_envelope(gql("Bearer not.a.jwt"))
+      assert_gql_error(gql("Bearer not.a.jwt"))
     end
 
     test "unset config still serves a request with no Authorization header" do
@@ -225,6 +289,25 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
 
       gql("Bearer garbage")
       assert_receive {@event, _, %{surface: :graphql, read?: true}}
+    end
+
+    test "a kiln_ key under a lower-case scheme is told apart from a stale JWT" do
+      flag(true)
+      assert api_get("bearer kiln_nonsense").status == 401
+      assert_receive {@event, _, %{reason: :api_key_scheme}}
+    end
+
+    test "bare and mixed-case schemes reach the event" do
+      flag(true)
+
+      api_get("Bearer")
+      assert_receive {@event, _, %{reason: :malformed, enforced: true}}
+
+      api_get("bEaReR garbage")
+      assert_receive {@event, _, %{reason: :malformed}}
+
+      api_get("bearer " <> expired_jwt())
+      assert_receive {@event, _, %{reason: :expired}}
     end
 
     test "fires with the escape hatch on, marked not enforced" do
