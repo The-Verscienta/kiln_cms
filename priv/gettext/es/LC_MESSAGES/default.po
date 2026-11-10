@@ -10835,6 +10835,11 @@ msgstr "Se quita de todos los registros que lo enlazan, y los publicados se actu
 msgid "It manages settings that apply to the whole installation, so only a platform admin can open it, not even an admin of a single site."
 msgstr "Gestiona ajustes que afectan a toda la instalación, así que solo un administrador de la plataforma puede abrirla, ni siquiera el administrador de un único sitio."
 
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
+#, elixir-autogen, elixir-format
+msgid "It may belong to a different site, or your registration here may still be waiting for approval. If you meant to use another account, sign out and sign in with that one."
+msgstr "Puede que pertenezca a otro sitio, o que tu registro aquí siga pendiente de aprobación. Si querías usar otra cuenta, cierra sesión e inicia sesión con esa."
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Italic"
@@ -18705,6 +18710,7 @@ msgid "Sign in with your device's fingerprint, face, or PIN instead of a passwor
 msgstr "Inicie sesión con la huella, el rostro o el PIN de su dispositivo en lugar de una contraseña. Una clave de acceso le verifica en el dispositivo, así que cuenta por sí sola como dos factores."
 
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
 #: lib/kiln_cms_web/live/auth_page_title.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -22460,6 +22466,11 @@ msgstr "Para obtener acceso, pide a un administrador de %{site} que cambie tu ro
 
 #: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
 #, elixir-autogen, elixir-format
+msgid "To get access, ask an admin of %{site} to give your account a role."
+msgstr "Para obtener acceso, pide a un administrador de %{site} que asigne un rol a tu cuenta."
+
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
+#, elixir-autogen, elixir-format
 msgid "To get access, ask the person who administers this installation."
 msgstr "Para obtener acceso, consulta a la persona que administra esta instalación."
 
@@ -24309,6 +24320,11 @@ msgstr "Ha cerrado la sesión"
 #, elixir-autogen, elixir-format
 msgid "You are signed in as %{role} on %{site}."
 msgstr "Has iniciado sesión como %{role} en %{site}."
+
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
+#, elixir-autogen, elixir-format
+msgid "You are signed in, but your account has no role on %{site}."
+msgstr "Has iniciado sesión, pero tu cuenta no tiene ningún rol en %{site}."
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format

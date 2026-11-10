@@ -145,6 +145,37 @@ defmodule KilnCMSWeb.AccessDeniedTest do
       refute html =~ ~s(id="access-denied-sign-in")
     end
 
+    test "says a signed-in account with no role on this site has none (#2372)", %{conn: conn} do
+      # A member of another site only: no tier on the default org this request
+      # runs under, so it must not be told it is a viewer here.
+      account = user(:editor)
+
+      other =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "Elsewhere #{System.unique_integer([:positive])}",
+          slug: "elsewhere-#{System.unique_integer([:positive])}"
+        })
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: account.id,
+        organization_id: other.id,
+        role: :editor
+      })
+
+      assert KilnCMS.Accounts.Scoping.effective_tier(account, KilnCMS.Accounts.default_org_id()) ==
+               :none
+
+      html = conn |> log_in(account) |> get(AccessDenied.path(:editor)) |> html_response(403)
+
+      assert html =~ "You are signed in, but your account has no role on"
+      assert html =~ "give your account a role"
+      assert html =~ ~s(id="access-denied-sign-out")
+      refute html =~ "You are signed in as"
+      refute html =~ ~s(id="access-denied-account")
+      refute html =~ ~s(id="access-denied-console")
+      refute html =~ ~s(id="access-denied-sign-in")
+    end
+
     test "names the admin role for an editor and links back to the console", %{conn: conn} do
       html = conn |> log_in(user(:editor)) |> get(AccessDenied.path(:admin)) |> html_response(403)
 
