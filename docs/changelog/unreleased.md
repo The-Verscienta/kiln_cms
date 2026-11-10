@@ -1188,6 +1188,47 @@ carries the reasoning.
 
 ## Added
 
+<a id="custom-field-range-index"></a>
+
+- **A site can index custom fields for range filters and `custom_sort`
+  (#2359, tier 2 of #2291).** For operators; editors and API consumers see
+  only speed.
+  - **How.** List the field names: `config :kiln_cms, :indexed_custom_fields,
+    ["price", "rating"]` (every content table), or per table,
+    `%{"entries" => ["price"]}`. Run `mix ash.codegen`: each name becomes two
+    expression btrees per table, `org_id` first, one `ASC NULLS LAST` and one
+    `DESC NULLS LAST`, built `CONCURRENTLY`. Apply the migration with
+    `mix ash.migrate`. The list is read at compile time, so it belongs in the
+    config of the build that runs codegen (an overlay's own `config/`). Core
+    lists nothing.
+  - **What it speeds up.** `custom_filter` `gt`/`gte`/`lt`/`lte` and
+    `custom_sort` (either direction, including the keyset page after the
+    first) on a listed field. `eq` and `in` keep using the GIN index of #2291.
+    `not_eq`, `ilike`, `contains`, `null`, `has_none` and `count` are not
+    indexed. For a listed name only, the query puts the field name in the SQL
+    as a literal: with a bound name Postgres can lose the index once it
+    switches to a generic plan. The name is checked against the config and a
+    strict pattern first, so it cannot carry SQL.
+  - **Which fields.** Integer, float, date and datetime. A string btree can
+    exceed the index row limit; a boolean index is nearly useless.
+    `mix kiln.custom_fields.index --check` reports a listed name with no
+    index, an invalid index (a failed concurrent build), an index no name asks
+    for, a name no field carries and an ineligible type. It is read-only and
+    exits non-zero on drift.
+  - **Cost.** Measured at 100,000 rows (see
+    [benchmarks](../benchmarks.md#range-and-sort-indexes-for-custom-fields)):
+    a range returning 1% falls from 17 ms to 0.6 ms and a sort with a limit
+    from 17 ms to 1.2 ms; each btree is about 36% of the table's heap; 100,000
+    inserts took 1.7x as long and 20,000 saves that leave the field alone 6x
+    as long with the GIN index and four btrees (two fields) as against the GIN
+    index alone. Index the fields you sort or range-filter on, not all of
+    them.
+  - **Upgrading.** Adding or removing a name is an additive migration (a
+    concurrent `CREATE INDEX` or a `DROP INDEX`); rolling back to the
+    previous release is safe, since it ignores the indexes. Until the
+    migration finishes, queries on the field answer correctly from the table.
+    Renaming a field is a drop and a create.
+
 <a id="refire-notify"></a>
 
 - **`mix kiln.refire_all --notify` re-fires every published document and
@@ -3434,6 +3475,17 @@ carries the reasoning.
   - Guide: [Constrain the values of a field](../extending-content.md#constrain-the-values-of-a-field).
 
 ## Changed
+
+<a id="custom-field-range-index-changed"></a>
+
+- **Custom-field range filters read a stored JSON `null`, array or object as
+  no value (#2359).** `custom_filter[price][gt]=0` used to match a record
+  whose `price` was `[1]` or `{"a": 1}`, because jsonb orders arrays and
+  objects above every number. It now matches only numbers (strings for a
+  text-like value, as before), the same reading `custom_sort` has always had.
+  The change applies to every field, indexed or not, so the same request
+  returns the same rows whatever a site has configured. A record only holds
+  such a value if its field was retyped after the record was written.
 
 <a id="scanner-guard-exemption-narrowed"></a>
 

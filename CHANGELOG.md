@@ -214,6 +214,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A site can index custom fields for range filters and `custom_sort`: list the field names in `config :kiln_cms, :indexed_custom_fields`, run `mix ash.codegen`, and `gt`/`gte`/`lt`/`lte` and sort-with-a-limit on them read an index instead of scanning the table.**
+  Two btrees per name per content table (ascending and descending), built concurrently; nothing is indexed by default, and `mix kiln.custom_fields.index --check` reports drift. Cost and limits: [docs/json-api.md](docs/json-api.md#which-custom-filters-use-an-index), [ADR 0025](docs/decisions/0025-a-site-declares-which-custom-fields-get-range-and-sort-indexes-in-config.md).
+  ([#2359](https://github.com/The-Verscienta/kiln_cms/issues/2359) · [#2551](https://github.com/The-Verscienta/kiln_cms/pull/2551) · [long form](docs/changelog/unreleased.md#custom-field-range-index))
+
 - **`mix kiln.refire_all --notify` (`KilnCMS.Firing.Sweep.run(notify: true)`) announces each re-fired document to webhook endpoints and the change feed as `<type>.updated` with `"reason": "refire"`, which `Firing.refire/3`'s `updated` now carries too.**
   Not to automation, federation or the CDN purge. Guide: [docs/releasing.md](docs/releasing.md#re-render-published-content-after-an-upgrade).
   ([#2583](https://github.com/The-Verscienta/kiln_cms/pull/2583) · [long form](docs/changelog/unreleased.md#refire-notify))
@@ -429,6 +433,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2256](https://github.com/The-Verscienta/kiln_cms/issues/2256) · [long form](docs/changelog/unreleased.md#robots-flags))
 
 ### Changed
+
+- **A custom-field range filter (`gt`, `gte`, `lt`, `lte`) no longer matches a record whose stored value is a JSON `null`, array or object.**
+  They compare as "no value", as `custom_sort` already read them; before, JSON ordering made an array greater than every number. Only rows whose field was retyped or written off-type are affected.
+  ([#2359](https://github.com/The-Verscienta/kiln_cms/issues/2359) · [#2551](https://github.com/The-Verscienta/kiln_cms/pull/2551) · [long form](docs/changelog/unreleased.md#custom-field-range-index-changed))
 
 - **The smart 404 guard no longer exempts link-preview fetchers or Slurp from its miss threshold, and exempts a search-engine claim only until DNS proves it false.**
   ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#scanner-guard-exemption-narrowed))
