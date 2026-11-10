@@ -153,7 +153,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161) · [long form](docs/changelog/unreleased.md#reject-invalid-bearer-default-on))
 
 - **Overlay and plugin code: `purge_<type>` and `purge_media_item` now refuse a record that isn't in the trash (`StaleRecord`). Trash it first (`destroy_<type>`).** The API never exposed `:purge`.
-  ([#2531](https://github.com/The-Verscienta/kiln_cms/issues/2531) · [long form](docs/changelog/unreleased.md#purge-trashed-only))
+  ([#2609](https://github.com/The-Verscienta/kiln_cms/pull/2609) · [long form](docs/changelog/unreleased.md#purge-trashed-only))
 
 - **Overlays: run `mix ash.codegen`. Content tables gain a generated `name_lexemes`
   column, filled for every row by the migration (a table rewrite). Nothing else to run.**
@@ -498,7 +498,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Permanently deleting a trashed page, post, entry or media file that someone else had restored in the meantime no longer hard-deletes the live record, with no `deleted` webhook and no artifact cleanup. `:purge` now takes only a trashed row.**
   The Trash page now says when someone else restored or permanently deleted an item and reloads the list. Code that purges a live record must trash it first.
-  ([#2531](https://github.com/The-Verscienta/kiln_cms/issues/2531) · [long form](docs/changelog/unreleased.md#purge-refuses-restored-rows))
+  ([#2609](https://github.com/The-Verscienta/kiln_cms/pull/2609) · [long form](docs/changelog/unreleased.md#purge-refuses-restored-rows))
 
 - **An applicant waiting for approval who hasn't confirmed their address is now told on `/account` to confirm first, by resetting their password or following the confirmation link; a magic-link sign-in never confirmed an address, and the setting that claimed it did is gone.**
   ([#2608](https://github.com/The-Verscienta/kiln_cms/pull/2608) · [long form](docs/changelog/unreleased.md#unconfirmed-applicant-confirm-first))
