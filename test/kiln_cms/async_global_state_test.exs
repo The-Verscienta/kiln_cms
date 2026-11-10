@@ -22,6 +22,15 @@ defmodule KilnCMS.AsyncGlobalStateTest do
       `:draft_write_key_max_ttl_days` to 3 while
       `KilnCMSWeb.DraftWriteKeyProvenanceReadTest` minted 7-day keys.
 
+  The node-wide delivery caches are the same kind of state (#2504):
+  `KilnCMS.Cache.flush_delivery/0`, `KilnCMS.Cache.ClusterBust.broadcast_clear/0`,
+  `KilnCMS.Firing.Cache.clear/0`, or a `Cachex.clear/1` of `KilnCMS.Cache` or
+  `KilnCMS.Firing.Cache`, empties them under every async test that warmed an
+  entry and is about to read it back (`KilnCMS.Firing.DeliveryTest`'s warm
+  reads came back `:unavailable` in a full run). Those calls count as writes
+  too. Only the direct calls: a helper that clears on a test's behalf
+  (`KilnCMS.Demo.restore/1`, the System page's flush button) is not seen.
+
   So the rule is checked instead of remembered. `async: false` costs almost
   nothing: ExUnit runs sync modules after the async ones, so the time moves
   phase rather than adding up.
@@ -146,6 +155,54 @@ defmodule KilnCMS.AsyncGlobalStateTest do
                    use ExUnit.Case, async: true
                    test "t", do: Application.put_env(:kiln_cms, :k, 1)
                  end
+               end
+               """)
+    end
+
+    test "an async module that clears a delivery cache" do
+      assert [
+               %{call: "KilnCMS.Cache.flush_delivery", key: "delivery caches"},
+               %{call: "ClusterBust.broadcast_clear"},
+               %{call: "KilnCMS.Firing.Cache.clear"},
+               %{call: "Cache.clear"},
+               %{call: "Cachex.clear"},
+               %{call: "Cachex.clear"},
+               %{call: "Cachex.clear"}
+             ] =
+               offenders_in("""
+               defmodule A do
+                 use KilnCMS.DataCase, async: true
+                 test "t" do
+                   KilnCMS.Cache.flush_delivery()
+                   ClusterBust.broadcast_clear()
+                   KilnCMS.Firing.Cache.clear()
+                   Cache.clear()
+                   Cachex.clear(KilnCMS.Cache.cache_name())
+                   Cachex.clear(Firing.Cache.cache_name())
+                   Cachex.clear(:kiln_cms_firing_cache)
+                 end
+               end
+               """)
+    end
+
+    test "another cache's clear, or a sync module's, is not a delivery-cache write" do
+      assert [] =
+               offenders_in("""
+               defmodule A do
+                 use KilnCMS.DataCase, async: true
+                 test "t" do
+                   Cachex.clear(VectorCache.cache_name())
+                   Cachex.clear(PasswordNotice.cache())
+                   KilnCMS.Cache.bust(:page, "slug")
+                 end
+               end
+               """)
+
+      assert [] =
+               offenders_in("""
+               defmodule A do
+                 use KilnCMS.DataCase, async: false
+                 test "t", do: KilnCMS.Cache.flush_delivery()
                end
                """)
     end
@@ -318,6 +375,7 @@ defmodule KilnCMS.AsyncGlobalStateTest do
   end
 
   @app_writes [:put_env, :delete_env, :put_all_env]
+  @delivery_caches "delivery caches"
   @term_writes [:put, :erase]
 
   defp calls(ast) do
@@ -339,6 +397,12 @@ defmodule KilnCMS.AsyncGlobalStateTest do
         when fun in @term_writes ->
           {node, [write(meta, ":persistent_term.#{fun}", {nil, Macro.to_string(key)}) | acc]}
 
+        {{:., _, [{:__aliases__, _, parts}, fun]}, meta, args} = node, acc ->
+          case cache_clear(parts, fun, args) do
+            nil -> {node, acc}
+            call -> {node, [write(meta, call, {nil, @delivery_caches}) | acc]}
+          end
+
         node, acc ->
           {node, acc}
       end)
@@ -352,4 +416,27 @@ defmodule KilnCMS.AsyncGlobalStateTest do
   defp app_key(_fun, _args), do: {"?", "?"}
 
   defp write(meta, call, {app, key}), do: %{line: meta[:line], call: call, app: app, key: key}
+
+  # The delivery caches' clears, recognized by the module's last alias segment
+  # so an aliased call (`Cache.clear()` after `alias KilnCMS.Firing.Cache`)
+  # counts. `KilnCMS.Cache` has no `clear/0`, so `Cache.clear` is the firing
+  # cache's. `Cachex.clear/1` only when its cache is one of the two.
+  @delivery_cache_name ~r/(^|\.)Cache\.cache_name\(\)$|^:kiln_cms_(content|firing)_cache$/
+
+  defp cache_clear(parts, :flush_delivery, _args) when parts != [],
+    do: if(List.last(parts) == :Cache, do: "#{alias_name(parts)}.flush_delivery")
+
+  defp cache_clear(parts, :broadcast_clear, _args) when parts != [],
+    do: if(List.last(parts) == :ClusterBust, do: "#{alias_name(parts)}.broadcast_clear")
+
+  defp cache_clear(parts, :clear, []) when parts != [],
+    do: if(List.last(parts) == :Cache, do: "#{alias_name(parts)}.clear")
+
+  defp cache_clear([:Cachex], :clear, [cache | _]) do
+    if Macro.to_string(cache) =~ @delivery_cache_name, do: "Cachex.clear"
+  end
+
+  defp cache_clear(_parts, _fun, _args), do: nil
+
+  defp alias_name(parts), do: Enum.map_join(parts, ".", &Atom.to_string/1)
 end
