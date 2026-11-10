@@ -17,7 +17,8 @@ defmodule KilnCMS.HTMLSanitizer.RichText do
   A `<pre>` keeps only `class="highlight"` here. The `tabindex`, `role` and
   `aria-label` it carries on delivery are added after this pass, by
   `KilnCMS.CodeBlocks.focusable/2` in the `:web` renderer (#2164), so an
-  author cannot set them.
+  author cannot set them. The same holds for the `.kiln-table-wrap` around a
+  table, named by `KilnCMS.ScrollableTables.focusable/2` (#2464).
   """
 
   use HtmlSanitizeEx, extend: :strip_tags

@@ -148,28 +148,43 @@ only. Two rules, both enforced:
 `style-src` already allows inline styles, so no CSP work accompanies the
 field. The 64 KB bound and the paper trail come with the resource.
 
-### Keep the code-block focus ring
+### Keep the focus rings on code blocks and tables
 
-Every code block on a public page is a keyboard stop
-(`<pre tabindex="0" role="group" aria-label="Code sample">`), so a reader
-without a mouse can Tab to it and scroll a long line with the arrow keys
-([#2164](https://github.com/The-Verscienta/kiln_cms/issues/2164)). The
-outline that `pre[tabindex="0"]:focus-visible` draws is the only sign of
-where focus went. Custom CSS and presets may change its colour, but must not
-remove it:
+Every code block and every table on a public page is a keyboard stop, so a
+reader without a mouse can Tab to it and scroll it with the arrow keys:
+
+- a code block is `<pre tabindex="0" role="group" aria-label="Code sample">`
+  ([#2164](https://github.com/The-Verscienta/kiln_cms/issues/2164));
+- a table sits in
+  `<div class="kiln-table-wrap" tabindex="0" role="group" aria-label="Scrollable table">`
+  ([#2464](https://github.com/The-Verscienta/kiln_cms/issues/2464)).
+
+The outline each one draws on `:focus-visible` is the only sign of where
+focus went. Custom CSS and presets may change its color, but must not remove
+it:
 
 ```css
 /* Don't: a keyboard reader can no longer see which block has focus. */
-.public-body pre:focus { outline: none; }
+.public-body pre:focus,
+.public-body .kiln-table-wrap:focus { outline: none; }
 
-/* Fine: a different colour, still a visible outline. */
-pre[tabindex="0"]:focus-visible { outline-color: #0b5394; }
+/* Fine: a different color, still a visible outline. */
+pre[tabindex="0"]:focus-visible,
+.kiln-table-wrap[tabindex="0"]:focus-visible { outline-color: #0b5394; }
 ```
 
-The stock rule is `outline: 2px solid var(--color-primary-ink)` with
-`outline-offset: -2px`. It is drawn inside the block, so a parent with
-`overflow: hidden` or `overflow-x: clip` (monograph sets the latter) cannot
-trim it. A replacement colour needs 3:1 against the block's background
-(`--color-base-200`) in both light and dark mode (WCAG 1.4.11). A broader
-reset such as `*:focus { outline: none }` takes this ring away too, along
+Both stock rules are `outline: 2px solid var(--color-primary-ink)`; they
+differ in where the outline sits:
+
+- **Code block:** `outline-offset: -2px`, drawn inside the block, so a parent
+  with `overflow: hidden` or `overflow-x: clip` (monograph sets the latter)
+  cannot trim it. A replacement color needs 3:1 against the block's background
+  (`--color-base-200`).
+- **Table:** `outline-offset: 2px`, drawn outside the wrapper, because inside
+  it would land on the cells' `--color-base-300` borders and the header's
+  `--color-base-200` fill. A replacement color needs 3:1 against the page
+  background (`--color-base-100`).
+
+Check a replacement in both light and dark mode (WCAG 1.4.11). A broader
+reset such as `*:focus { outline: none }` takes these rings away too, along
 with every other focus indicator on the page.

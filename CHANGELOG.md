@@ -180,6 +180,10 @@ Every summary line below that was shortened links to its own entry there.
   Revalidating clients get the new HTML; add `--notify` to tell webhook receivers too. No migration.
   ([#2467](https://github.com/The-Verscienta/kiln_cms/pull/2467) · [long form](docs/changelog/unreleased.md#focusable-code-blocks-upgrade))
 
+- **Optional: `mix kiln.refire_all` after deploying puts the new table focus attributes, and the wrapper around old bare tables, into `:web` artifacts fired before the upgrade.**
+  Same sweep and `--notify` choice as the code-block note above; no migration, safe to roll back.
+  ([#2596](https://github.com/The-Verscienta/kiln_cms/pull/2596) · [long form](docs/changelog/unreleased.md#scrollable-tables-upgrade))
+
 ### Breaking
 
 - **Console and overlays: `Backups.enqueue/1` returns `{:ok, %{status:, chain:}}`, not an `Oban.Job`, and `Backups.Worker.run/3` requests a backup and waits for it instead of running it inline; both are deprecated for `Backups.request/2`.**
@@ -573,6 +577,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Code blocks take keyboard focus and a name ("Code sample", translated), with a visible focus ring, so the arrow keys can scroll a line wider than the column.**
   ([#2467](https://github.com/The-Verscienta/kiln_cms/pull/2467) · [long form](docs/changelog/unreleased.md#focusable-code-blocks))
+
+- **Tables in rich text take keyboard focus and a name ("Scrollable table", translated), with a visible focus ring, so the arrow keys can scroll a table wider than the column.**
+  ([#2596](https://github.com/The-Verscienta/kiln_cms/pull/2596) · [long form](docs/changelog/unreleased.md#scrollable-tables))
 
 ### Security
 

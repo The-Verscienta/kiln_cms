@@ -17589,6 +17589,11 @@ msgstr "Planifier et publier un lancement nécessite un accès administrateur."
 msgid "Scripts"
 msgstr "Scripts"
 
+#: lib/kiln_cms/scrollable_tables.ex
+#, elixir-autogen, elixir-format
+msgid "Scrollable table"
+msgstr "Tableau défilant"
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/content_controller.ex

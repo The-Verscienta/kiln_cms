@@ -140,6 +140,42 @@ defmodule KilnCMS.Firing.FiringTest do
       assert html =~ ~s(action="/newsletter/subscribe")
     end
 
+    # #2464: a fired table's scroll wrapper takes focus and a name, in the
+    # document's language rather than the worker's.
+    test "the web artifact's tables are focusable and named in the document's locale" do
+      org = KilnCMS.Accounts.default_org_id()
+      actor = admin()
+
+      table = %{
+        "_type" => "table",
+        "rows" => [
+          %{"cells" => [%{"children" => [%{"_type" => "span", "text" => "a", "marks" => []}]}]}
+        ]
+      }
+
+      fr =
+        CMS.create_page!(
+          %{
+            title: "Tableau",
+            slug: slug(),
+            locale: "fr",
+            blocks: [%{"_type" => "rich_text", "body" => [table]}]
+          },
+          actor: actor
+        )
+
+      CMS.publish_page!(fr, actor: actor)
+      KilnCMS.DataCase.drain_oban()
+
+      {:ok, %{"html" => html}} = Engine.read(org, :page, fr.id, :web)
+
+      assert html =~
+               ~s(<div class="kiln-table-wrap" tabindex="0" role="group" aria-label="Tableau défilant"><table>)
+
+      {:ok, %{"blocks" => [block]}} = Engine.read(org, :page, fr.id, :json)
+      refute inspect(block) =~ "tabindex"
+    end
+
     test "the json artifact carries structured intent" do
       org = KilnCMS.Accounts.default_org_id()
       page = published_page(admin())
