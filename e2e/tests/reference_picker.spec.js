@@ -156,7 +156,11 @@ test.describe("reference picker", () => {
     await title.press("Enter");
     await expect.poll(titles).toEqual([`Fresh ${stamp}`]);
     await expect(rows.nth(0)).toContainText("Draft");
-    await expect(rows.nth(0).locator('a[href^="/editor/content/page/"]')).toHaveCount(1);
+    // One link, to the new page's edit route by shape, not an
+    // `/editor/content/page/` prefix that `/new` would also satisfy (#2391).
+    const rowLinks = rows.nth(0).locator('a[href^="/editor/content/"]');
+    await expect(rowLinks).toHaveCount(1);
+    await expect(rowLinks).toHaveAttribute("href", /^\/editor\/content\/page\/[0-9a-f-]{36}$/);
     await expect(form).toHaveCount(0);
     await expect(page.locator(`#custom-field-${field}-search`)).toBeFocused();
 
