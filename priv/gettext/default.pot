@@ -21343,7 +21343,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
-msgid "This address already has an account. Accept to add this site to it; nothing else about the account changes."
+msgid "This address already has an account. Accept to add this site to it, or to take the invited role there if yours is lower; nothing else about the account changes."
 msgstr ""
 
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
@@ -24325,6 +24325,11 @@ msgstr ""
 msgid "You'll also get a draft home page to write. Once you publish it, it's what visitors see at your site's address."
 msgstr ""
 
+#: lib/kiln_cms_web/live/invite_live.ex
+#, elixir-autogen, elixir-format
+msgid "You're already a member of %{site} as %{tier}; nothing changed."
+msgstr ""
+
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format
 msgid "You're connected over IPv4. If your network also uses IPv6, add its range too, or you may be refused when your browser switches."
@@ -24343,6 +24348,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "You're not signed in anywhere else."
+msgstr ""
+
+#: lib/kiln_cms_web/live/invite_live.ex
+#, elixir-autogen, elixir-format
+msgid "You're now %{tier} on %{site} — sign in to continue."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/offline_controller.ex
@@ -24423,6 +24433,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your account is ready — sign in to %{site}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/invite_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your account is ready. You were already a member of %{site} as %{tier}, and that is unchanged."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex

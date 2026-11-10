@@ -1327,7 +1327,26 @@ creates an account and grants a site tier.
   can invite or resend (`StandingAdminOnly`): a temporary admin's invitation
   would outlast the grant. An `:admin` invitation is honoured at accept time
   only while its sender is still a standing platform admin, not erased and not
-  deleted.
+  deleted. A `:viewer` or `:editor` invitation is honored whatever has
+  happened to its sender since, and that now includes raising a lower
+  membership (below), as it already included creating one.
+- **An invitation raises, never lowers, and a later decision retires it
+  (#2452).** Accepting over an active membership below the invited tier raises
+  it (`OrgMembership.:raise_role_by_invitation`, admitted only for the
+  `:invitations` system actor and a platform admin). The comparison is made on
+  the membership row locked `FOR UPDATE`, against its standing tier, so a site
+  admin's edit between the page load and the click is what is judged; an equal
+  or higher tier is refused before any write and the invitation is simply
+  used up. The other grant axes are kept, and the invitee's sessions are
+  evicted after the commit. Because accepting can now raise, a pending
+  invitation would otherwise outlive a demotion: `OrgMembership` `:update`
+  (when it changes `role` or `role_id`) and `:destroy` delete the pending
+  invitation for the member's address on the membership's own site
+  (`Changes.RetirePendingInvitation`, through the system-only
+  `Invitation.:retire`), locking it before the membership row, the same order
+  as the accept, so an edit and an accept racing on one person serialize. The
+  retirement is logged as `invitation_revoked`, with the admin who made the
+  membership change as the actor, so an invitation never vanishes untraced.
 - **Mail as a weapon.** The admin names any address. Invitation mail is budgeted
   per address (`mail:invitation`, the shared mail budget, 5 per hour by
   default), and a spent budget or a suppressed address is refused by name, so
@@ -1358,12 +1377,14 @@ creates an account and grants a site tier.
   whoever opens it first; the account it creates has the invited address,
   and an admin can remove the membership from Team. (4) *Accepting through single sign-on is not supported*, so an
   invitee whose organisation signs in by SSO must still accept with a password
-  or an existing account first. (5) *An existing membership wins.* If the
-  invitee is already a member when they accept (they joined through the site's
-  own SSO in between, say), the membership is left as it is and the
-  invitation is used up; the invited tier is not applied. (6) Taking over an
-  unconfirmed account replaces its password and ends its sessions, but does not
-  remove a second factor, passkey or linked SSO identity the account may hold.
+  or an existing account first. (5) *Pending invitations from before #2452.*
+  A tier change or removal made on a build that had invitations but not #2452
+  did not retire the member's pending invitation, so for up to 7 days after
+  upgrading such a link raises a demoted member back (and, as before, re-adds
+  a removed one). Admins check **Pending invitations** on Team. (6) Taking
+  over an unconfirmed account (#2453) replaces its password and ends its
+  sessions, but does not remove a second factor, passkey or linked SSO
+  identity the account may hold.
   A self-registered account is a `:viewer` and cannot reach `/editor/settings`,
   where those are enrolled, so this needs another route to them to matter.
 

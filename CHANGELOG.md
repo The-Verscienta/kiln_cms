@@ -60,6 +60,10 @@ Every summary line below that was shortened links to its own entry there.
   `/api/sync` mirrors and clients revalidating with `If-None-Match` keep the old body until a document is edited (#2463). Rolling the pin back is safe.
   ([#2582](https://github.com/The-Verscienta/kiln_cms/pull/2582) · [long form](docs/changelog/unreleased.md#twitter-card-upgrade))
 
+- **Accepting an invitation now raises a member below the invited tier; before this, demoting or removing a member left their pending invitation live. For 7 days after upgrading, check Team → Pending invitations for such members and revoke those invitations.**
+  No migration; rolling the pin back is safe.
+  ([#2573](https://github.com/The-Verscienta/kiln_cms/pull/2573) · [long form](docs/changelog/unreleased.md#invitation-raise-tier-upgrade))
+
 - **New on by default: with a plugin from Hex installed, opening System or Security posture asks hex.pm about it, which tells hex.pm that plugin's package name and version. Opt out with `KILN_PLUGIN_HEALTH_CHECK=false` (`KILN_UPDATE_CHECK=false` also does, unless the first is set).**
   No migration; rolling the pin back is safe.
   ([#2562](https://github.com/The-Verscienta/kiln_cms/pull/2562) · [long form](docs/changelog/unreleased.md#plugin-health-egress-upgrade))
@@ -459,6 +463,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
 
 ### Fixed
+
+- **Accepting an invitation raises a lower membership on the site to the invited tier (never lowers one) and the page says which happened; changing a member's tier or removing them retires their pending invitation.**
+  ([#2573](https://github.com/The-Verscienta/kiln_cms/pull/2573) · [long form](docs/changelog/unreleased.md#invitation-raises-lower-membership))
 
 - **Field locks: an idle or takeover-flush timeout that fires just as it is reset is now ignored. Two narrow races: a keystroke at the idle limit lost the field, and a stale flush timeout granted the next takeover unflushed.**
   ([#2556](https://github.com/The-Verscienta/kiln_cms/pull/2556) · [long form](docs/changelog/unreleased.md#field-lock-stale-timers))

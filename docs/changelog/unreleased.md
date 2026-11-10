@@ -43,6 +43,24 @@ carries the reasoning.
     and logs at most once a minute that an artifact is newer than the build;
     `mix kiln.refire_all` on the older release rewrites them in its own shape.
 
+<a id="invitation-raise-tier-upgrade"></a>
+
+- **After upgrading, check Team → Pending invitations on each site for
+  members you demoted or removed while their invitation was still pending
+  (#2452).** Accepting an invitation now raises a member who holds a lower
+  tier on the site ([below](#invitation-raises-lower-membership)), and
+  changing a member's tier or custom role, or removing them, now deletes their
+  pending invitation there. A change made before this upgrade deleted
+  nothing. So for up to 7 days after deploying (an invitation's lifetime), a
+  link left pending for a member you demoted raises them back to the tier it
+  names, where before it did nothing; a link left pending for a member you
+  removed re-adds them, as it already did. Revoke any such invitation with the
+  **×** on its row. Only instances that ran a build with site invitations
+  (#2448) are affected; v1.8.0 has no invitations. No migration, and nothing is
+  rewritten: an older build ignores the new behavior, and rolling the pin back
+  is safe (an accept then leaves a lower membership as it is again; an
+  invitation retired meanwhile stays deleted).
+
 <a id="plugin-health-egress-upgrade"></a>
 
 - **A new outbound request is on by default, and it is the first that tells
@@ -3740,6 +3758,57 @@ carries the reasoning.
     has a new name; delete superseded items in the media library.
 
 ## Fixed
+
+<a id="invitation-raises-lower-membership"></a>
+
+- **Accepting an invitation raises a lower membership on the site to the
+  invited tier, and says so; a later tier change or removal retires the
+  pending invitation (#2452).** Before, an invitee who was already a member
+  (they signed in through the site's own single sign-on first, or registered
+  and were approved) kept their lower tier, the invitation was used up, and
+  the page said "You've joined (site)" as if it had worked. Now:
+  - **Lower than invited:** the membership takes the invited tier, and the
+    invitation's custom role when it names one. Audiences, content type
+    scopes, field grants, and a custom role the invitation doesn't replace
+    are kept. The security log records *Role granted* with `previous_role`
+    and no person, and the member's sessions are signed out after the commit
+    so their next request runs with the new tier. A temporary role at or
+    below the new tier is cleared.
+  - **The invited tier or higher:** nothing changes; an invitation never
+    lowers anyone. The flash reads "You're already a member of (site) as
+    (tier); nothing changed." (or, on the password path, "Your account is
+    ready. You were already a member of (site) as (tier), and that is
+    unchanged."). A raise reads "You're now (tier) on (site) — sign in to
+    continue."
+  - The comparison is with the member's standing tier, made on the
+    membership row as locked by the accept, so a site admin's edit between
+    loading the page and clicking is what counts. A temporary role is not
+    compared.
+  - **Retiring:** `OrgMembership` `:update` (when it changes `role` or
+    `role_id`) and `:destroy` delete the pending invitation for the member's
+    address on the membership's own site, so a member you demote cannot use
+    an older link to raise themselves back. The security log records the
+    retirement as *Invitation revoked* (`invitation_revoked`, metadata
+    `role`), with the admin who made the membership change as the person.
+    Editing only audiences or type scopes, or a temporary role, leaves it
+    alone.
+  - A `:viewer` or `:editor` invitation whose sender has since lost the admin
+    role still raises, as it already created a membership; an `:admin`
+    invitation still needs a standing admin sender.
+
+  For code: `OrgMembership` gains the system-only action
+  `:raise_role_by_invitation` (code interface
+  `Accounts.raise_membership_role_by_invitation`), admitted for
+  `SystemActor.new(:invitations)` and a platform admin, and `Invitation`
+  gains the destroy action `:retire`, admitted for
+  `SystemActor.new(:invitations)` only (declared above the platform-admin
+  bypass; an admin withdraws an invitation with `:revoke`).
+  `Invitations.grant_membership/4` now returns
+  `{:ok, %{outcome: :joined | :raised | :already_member, membership: membership}}`
+  instead of `{:ok, membership}` or `{:ok, :already_member}`, and
+  `Invitation` `:accept_existing` returns `%{outcome: ..., role: tier}`
+  instead of `:accepted`. Both are system-only; only the invitation page
+  calls them. See [Account administration](../account-administration.md#if-the-invitee-is-already-a-member).
 
 <a id="field-lock-stale-timers"></a>
 

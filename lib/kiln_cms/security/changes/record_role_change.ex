@@ -1,8 +1,8 @@
 defmodule KilnCMS.Security.Changes.RecordRoleChange do
   @moduledoc """
   The audit events (#2241) of a role change, for the actions that write one:
-  `User.:manage_access`, and `OrgMembership`'s `:create`, `:update` and
-  `:destroy`. Built on `KilnCMS.Security.Changes.Record`, in the transaction,
+  `User.:manage_access`, and `OrgMembership`'s `:create`, `:update`,
+  `:destroy` and `:raise_role_by_invitation` (#2452, always a raise). Built on `KilnCMS.Security.Changes.Record`, in the transaction,
   so the event commits or rolls back with the role.
 
     * a membership created, or a role raised: `:role_granted` (`role`, and
