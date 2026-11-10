@@ -318,15 +318,15 @@ wired to `document.blocks`. Reuse that does not fight this:
 * **Computed fields** cannot read inside items (not in `@link_field_types`);
   unchanged and documented. A computed field reading `count(sections)` is a
   natural follow-up, not v1.
-* **Two-hop owner walks.** An item sub-field's parent is an item type, whose
+* **Multi-hop owner walks (N-hop once nesting is on, §2).** An item sub-field's parent is an item type, whose
   own owner is the flexible field. `BustTypeRegistry` (`:93`, `:117`) reads the
   parent's `type_definition_id`/`content_type` and would resolve **nil**, so no
   `Firing.Sweep.sweep_type` runs after an item sub-field is renamed or purged —
   stale fired output with no error. The same single-hop assumption sits in
   `SyncFieldValues.sync/2` (`:130`), `FieldSync` (`@owner_keys` `:81`, `kid_of?`
   `:655`, `governing` `:748`, `owner_ids` `:984`) and `FieldCondition` scope
-  resolution (`:261`, `:280`). PR 1 adds the second hop everywhere, with a test
-  that renames an item sub-field and asserts the type is swept. Reading
+  resolution (`:261`, `:280`). PR 1 makes every walk loop up to the nesting cap, with a test
+  that renames an item sub-field at depth 1 and depth 3 and asserts the type is swept. Reading
   `item_types` with nested `group_fields` is also another query per type per
   registry fill; measure it with the cache cold.
 * **`SyncFieldValues`**: rename of an item sub-field renames the key inside
@@ -346,8 +346,8 @@ until PR 2**.
 
 | # | PR | Contents | Depends on |
 |---|---|---|---|
-| 1 | **Model + write path** | `:flexible` core type (reserved name); `flex_of_id`, `item_setting` (codegen, expand-only); `OneFieldScope`/`GroupField`/new `FlexibleField` validations; the §2 top-level-predicate audit table + tests; `resolve_flexible` with `_id`/`_type`/`_settings`, bounds, conditions, constraints; `FieldKind`/`FieldTypes` entries and **minimal handling in the schema emitters** (the exhaustive `field_kind_test` and golden tests force it here: typed as generic JSON until PR 5); exclusions (private, searchable, list column, index, filter, unique); reporting-view exclusion test; two-hop owner walks in `BustTypeRegistry`/`SyncFieldValues`/`FieldCondition`; deletion guard; code interfaces; an ADR (next free number at PR time) covering §1–3 and rollback. API-level tests only. | — |
-| 2 | **Admin + editor (one PR)** | "Item types" panel, "Setting" checkbox, per-type `max_items`, purge-count warning; `FieldSync` `item_types` nesting; item cards, add menu, drag/move/duplicate/remove, collapse, settings section, `_id` wire form, error paths, scalar sub-fields; e2e. Split admin from editor only if size demands, because the admin panel alone is a dead end. Gettext for new strings. | 1 |
+| 1 | **Model + write path** | `:flexible` core type (reserved name); `flex_of_id`, `item_setting` (codegen, expand-only); `OneFieldScope`/`GroupField`/new `FlexibleField` validations; the §2 top-level-predicate audit table + tests; `resolve_flexible` with `_id`/`_type`/`_settings`, bounds, conditions, constraints; `FieldKind`/`FieldTypes` entries and **minimal handling in the schema emitters** (the exhaustive `field_kind_test` and golden tests force it here: typed as generic JSON until PR 5); exclusions (private, searchable, list column, index, filter, unique); reporting-view exclusion test; N-hop owner walks (to the nesting cap) in `BustTypeRegistry`/`SyncFieldValues`/`FieldCondition`; deletion guard; depth cap (default 3) and a three-level fixture across validation, coercion, owner walks and SQL purge/rename; code interfaces; an ADR (next free number at PR time) covering §1–3 and rollback. API-level tests only. | — |
+| 2 | **Admin + editor (one PR)** | "Item types" panel, "Setting" checkbox, per-type `max_items`, purge-count warning; `FieldSync` `item_types` nesting; item cards (recursive for nested flexible sub-fields, each level collapsible), add menu, drag/move/duplicate/remove, collapse, settings section, `_id` wire form, error paths, scalar sub-fields; e2e. Split admin from editor only if size demands, because the admin panel alone is a dead end. Gettext for new strings. | 1 |
 | 3 | **Media + reference inside items** | `item_field_types` = link types + `:media` + `:reference` (group parity, Q1); snapshots at write; path pickers addressed by `_id`; `Firing.CustomFields` refresh recursion; edges with path + re-fire; `FieldDisplay.collect`; `SyncFieldValues`. Highest risk; changes the `GroupValue` shape if groups are included. | 2 |
 | 4 | **Grants** | Per-item-type grants, validators and pickers, `_id`-based `EnforceCustomFieldGrants` rewrite, copy-path handling. | 1 |
 | 5 | **API + typed export** | GraphQL `FlexibleValue`, `SchemaExport` `oneOf`, TS/Swift/Kotlin/GraphQL emitters, goldens, `clients/` (js, elixir) and `kiln_client`, docs. **After 3**, so the emitters and goldens change once. | 1, 3 |
@@ -397,6 +397,7 @@ Parallelism after 1: 2 and 4 can run together; 6 can run once 3 lands its
 * **Private/hidden masking** deliberately does not apply (a flexible field
   cannot be private); a test pins `refute :flexible in PrivateFields.types()`
   like the existing group guard.
+* **Nesting multiplies every recursion** (coercion paths, `SyncFieldValues` SQL, display, diff, GraphQL reader, emitters, editor cards). One shared depth constant, enforced at definition time, with tests at the cap and cap+1; the default stays 3 until measured.
 * **Scope creep to "page builder".** Items are data with settings, not layout;
   `columns` stays the layout primitive in the body. The doc and the admin copy
   must say so.
