@@ -13,12 +13,16 @@ defmodule KilnCMSWeb.BotBudgetsLive do
   The page shows, per class, the effective percentage, what it comes to in
   requests per address, where it comes from (this site, the server, or the
   default), and the server's value, which is the most a site may set
-  (`KilnCMS.BotBudgets`). A blank field inherits the server's value.
+  (`KilnCMS.BotBudgets`). A blank field inherits the server's value. The
+  search-engine hint says that a claim is checked against DNS
+  (`KilnCMS.CrawlerVerification`, #2254), or that it is not when the operator
+  turned verification off.
   """
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.BotBudgets
   alias KilnCMS.CMS
+  alias KilnCMS.CrawlerVerification
 
   @impl true
   def mount(_params, _session, socket) do
@@ -168,6 +172,7 @@ defmodule KilnCMSWeb.BotBudgetsLive do
     |> assign(:effective, BotBudgets.effective(socket.assigns.current_org))
     |> assign(:delivery_limit, BotBudgets.delivery_limit())
     |> assign(:window_ms, delivery_window_ms())
+    |> assign(:crawler_verification?, CrawlerVerification.enabled?())
     |> assign(:form, form(form_params(row), []))
   end
 
@@ -211,7 +216,10 @@ defmodule KilnCMSWeb.BotBudgetsLive do
   defp class_label(:empty), do: gettext("No user agent")
 
   defp class_hint(:search_engine),
-    do: gettext("Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot and Applebot.")
+    do:
+      gettext(
+        "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot and Applebot, when the address checks out as theirs. A claim proven false counts as No user agent."
+      )
 
   defp class_hint(:ai_crawler),
     do: gettext("GPTBot, ClaudeBot, CCBot, PerplexityBot, Bytespider, Amazonbot and similar.")
@@ -222,7 +230,11 @@ defmodule KilnCMSWeb.BotBudgetsLive do
         "Clients that name themselves as tools or bots: curl, python-requests, headless browsers, link previews, SEO crawlers."
       )
 
-  defp class_hint(:empty), do: gettext("Requests that don't say what they are.")
+  defp class_hint(:empty),
+    do:
+      gettext(
+        "Requests that don't say what they are, and claimed search engines proven not to be them."
+      )
 
   defp source_label(%{clamped?: true, site_percent: site}),
     do:
@@ -311,6 +323,15 @@ defmodule KilnCMSWeb.BotBudgetsLive do
             placeholder={to_string(@effective[class].operator_percent)}
           />
           <p class="-mt-1 text-xs text-base-content/70">{class_hint(class)}</p>
+          <p
+            :if={class == :search_engine and not @crawler_verification?}
+            id="bot-budget-search_engine-unchecked"
+            class="mt-1 text-xs text-base-content/70"
+          >
+            {gettext(
+              "This server does not check search-engine claims, so any client naming one gets this budget."
+            )}
+          </p>
           <p id={"bot-budget-#{class}-effective"} class="mt-2 text-sm">
             <span class="font-medium">{@effective[class].percent}%</span>
             - {per_window(@effective[class].limit, @window_ms)} {gettext("per address")}

@@ -443,3 +443,12 @@ config :kiln_cms, KilnCMS.Accounts.SignInUnlock, async: false
 # expected hits, with no error. Run the query through `Search.global_report/2`
 # and look at `:partial`.
 config :kiln_cms, KilnCMS.Search, query_budget: 10_000
+
+# Crawler verification (#2254) is on, like production, but asks
+# `KilnCMS.Test.StubCrawlerResolver` instead of DNS: every address has no PTR
+# record unless a test plants one, so nothing reaches the network. Tests that
+# need a settled result without a lookup plant it with
+# `KilnCMS.CrawlerVerification.put_result/4`.
+config :kiln_cms, KilnCMS.CrawlerVerification,
+  enabled: true,
+  resolver: KilnCMS.Test.StubCrawlerResolver

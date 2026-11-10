@@ -9637,8 +9637,8 @@ msgstr "Bien"
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot and Applebot."
-msgstr "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot y Applebot."
+msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot and Applebot, when the address checks out as theirs. A claim proven false counts as No user agent."
+msgstr "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot y Applebot, cuando se comprueba que la dirección es suya. Una identificación que resulta falsa cuenta como Sin agente de usuario."
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/governance_live.ex
@@ -16584,8 +16584,8 @@ msgstr "Las peticiones o las cookies pueden viajar por HTTP sin cifrar."
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Requests that don't say what they are."
-msgstr "Solicitudes que no dicen qué son."
+msgid "Requests that don't say what they are, and claimed search engines proven not to be them."
+msgstr "Solicitudes que no dicen qué son, y supuestos buscadores que se ha comprobado que no lo son."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -21811,6 +21811,11 @@ msgstr "Este security.txt ha caducado."
 #, elixir-autogen, elixir-format
 msgid "This segment has no confirmed subscribers. Pick another segment, or add and confirm subscribers first."
 msgstr "Este segmento no tiene suscriptores confirmados. Elige otro segmento, o añade y confirma suscriptores primero."
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "This server does not check search-engine claims, so any client naming one gets this budget."
+msgstr "Este servidor no comprueba si un cliente es realmente el buscador que dice ser, así que cualquiera que nombre uno recibe este presupuesto."
 
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format

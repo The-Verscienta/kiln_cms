@@ -750,10 +750,19 @@ probes bait paths. Off unless `KILN_SCANNER_BLOCKING` is on; see
   link-local, CGNAT or in `TRUSTED_PROXIES` are never counted, and a forwarded
   request with no trusted proxy is never counted, so a shared proxy or office
   NAT is not blocked as one scanner.
-- **Spoofable good-bot exemption.** A `User-Agent` naming a known crawler skips
-  the miss threshold only, never the bait threshold. No reverse DNS is done, so a
-  scanner that claims to be Googlebot can make misses without being blocked
-  by volume, but not probe bait paths.
+- **Search-engine exemption, checked by DNS.** A `User-Agent` naming a search
+  engine (`KilnCMS.BotClass.search_engine/1`) skips the miss threshold only,
+  never the bait threshold, and only until crawler verification (#2254, below)
+  proves the claim false. A claim not yet checked, skipped, or whose DNS gave no
+  answer keeps the exemption, so a real crawler's first misses from a new
+  address never count. A scanner claiming to be Googlebot is therefore counted
+  once its address fails the reverse-DNS check, but one whose PTR zone never
+  answers (an attacker's own reverse zone left silent) keeps the exemption, as
+  every claim did before #2254. A DuckDuckBot claim cannot be checked and is
+  always exempt. With `KILN_CRAWLER_VERIFICATION=false` the six search-engine
+  names in the user agent are enough, as before. Link-preview fetchers
+  (`facebookexternalhit`, `Twitterbot`, `LinkedInBot`) and `Slurp` are not
+  exempt in either mode: anyone can claim them and there is nothing to check.
 - **Bounded blast radius.** One rule per address, always with an expiry (60 minutes
   by default), so a false positive heals itself; an admin can remove one at any
   time. At most 300 automatic rules per site, so spreading a scan over many
@@ -785,11 +794,54 @@ see [bot-budgets.md](bot-budgets.md).
 - **What it stops.** Volume from clients that say what they are: a runaway
   `curl` loop, a crawler with no user agent, an over-eager SEO tool. Defaults
   are 50% of the browser limit for other bots and 20% for no user agent.
-- **What it does not.** Anything that lies. The user agent is spoofable, so a
-  class grants nothing: search engines and AI crawlers default to 100%, the same
-  as a browser, precisely so that typing "Googlebot" earns no more than a
-  browser does. Raising either class by environment raises it for every spoofer
-  too. Verifying a crawler by reverse DNS is #2254.
+- **What it does not.** Anything that lies about being a browser, an AI
+  crawler or a script. The user agent is spoofable, so those classes grant
+  nothing: AI crawlers default to 100%, the same as a browser, and raising that
+  class by environment raises it for every spoofer too. Search engines also
+  default to 100%, but their claims are checked (next point).
+- **Search-engine claims are checked by DNS (#2254).**
+  `KilnCMS.CrawlerVerification` looks up the address's PTR name, requires it
+  under the engine's published domain (label-aligned, so `evilgooglebot.com`
+  fails), and requires the name's forward lookup to contain the address. Only a
+  claim **proven** false (no PTR, wrong domain, forward mismatch) is charged as
+  no user agent. Everything not proven either way (lookup pending, skipped, DNS
+  error or timeout, DuckDuckBot, a non-public address, untrusted forwarding)
+  keeps the search-engine class but held to the `:delivery` limit, so a
+  search-engine value above 100% is spent only on verified addresses, and with
+  the defaults the outcome is #2243's until a spoof is proven. A DNS outage or a
+  busy verifier therefore never refuses a real crawler; the cost is that a
+  spoofer whose claim cannot be settled gets what a browser gets. The lookup
+  runs off the request path, so a request never waits on DNS.
+- **Lookups as an amplification surface.** An anonymous client can make the
+  node send DNS queries by naming a search engine from a new address. Bounded:
+  at most 3 queries per address (1 PTR, forward only for up to 2 of the first
+  3 names, only the client's family), a 3-second deadline per lookup,
+  single-flight per address, results cached per address (6 h verified, 1 h
+  proven false, 5 min DNS error), at most 16 concurrent lookups per node with
+  no queue, and new lookups rate limited per network (IPv4 `/24` 30 and `/16`
+  120 a minute; IPv6 `/64` 30, `/48` 60, `/32` 120) and per node (600 a
+  minute). The cache is bounded (50,000 addresses, evicted oldest-written
+  first) and is its own Cachex instance, so a flood of new addresses cannot
+  evict anything else. No address, hostname, user agent or org is in any
+  verification event or log line.
+- **Residual: lookup starvation.** An attacker who controls a slow or silent
+  reverse zone can hold lookup slots until the deadline, and an attacker with
+  many addresses can spend the per-network and per-node lookup budgets or churn
+  the cache. Either way new real-crawler addresses stay unverified for longer.
+  That only costs anything when the operator has set the search-engine value
+  above 100%, because an unverified claim is held to the browser limit, not
+  refused.
+- **Residual: no IP-range verification.** DuckDuckBot publishes IP ranges only,
+  so its claims are never verified (and never proven false); the other
+  engines' published ranges are not read either.
+- **Outbound DNS to the system resolver.** Each node sends PTR, A and AAAA
+  queries for visitors' addresses to the nameservers in its `/etc/resolv.conf`
+  (`:inet_res`, not `SafeFetch`: no HTTP, and the names queried are the
+  `in-addr.arpa` / `ip6.arpa` name of the client's address, then PTR names
+  that matched an engine's domain). The resolver, and the authoritative server
+  of the address's reverse zone, learn that this server was visited from that
+  address; see [data-flows.md](data-flows.md#optional-subprocessors).
+  `KILN_CRAWLER_VERIFICATION=false` turns all of it off.
 - **Switching user agents gains nothing.** Every class charges the one
   per-address counter, so an address never gets past the highest single class
   ceiling. The cost of sharing is that a browser-heavy shared address (an office
@@ -802,7 +854,8 @@ see [bot-budgets.md](bot-budgets.md).
   feeds, `/up`, `/ready`) and `/live`, so crawlers can always read the files
   that tell them what to do and probes are never throttled by class.
 - **No user agent, address or org in the metric.** The counter
-  `kiln_cms.delivery.client_class.count` carries only `class` and `result`.
+  `kiln_cms.delivery.client_class.count` carries only `class` and `result`;
+  `class` is the class charged, so a proven spoof is counted as `empty`.
 
 ### Public forms
 - **CSRF** — deliberately absent: forms are meant to be posted from third-party
