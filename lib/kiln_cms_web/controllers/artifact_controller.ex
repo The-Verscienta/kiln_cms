@@ -44,6 +44,7 @@ defmodule KilnCMSWeb.ArtifactController do
   alias KilnCMS.CMS.ContentPassword
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Experiments
+  alias KilnCMS.Firing.Cache
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Firing.PointInTime
@@ -58,9 +59,9 @@ defmodule KilnCMSWeb.ArtifactController do
   @surfaces KilnCMS.Firing.Surfaces.name_map()
   # How long clients should wait before retrying a still-compiling artifact.
   @retry_after_seconds 2
-  # Artifacts are immutable per publish (republish updates `updated_at` and
-  # evicts the firing cache), so they're cacheable; the ETag lets a CDN/static
-  # build revalidate cheaply after the window (#188).
+  # Artifacts change only when a fire rewrites them, so they're cacheable; the
+  # ETag (a digest of the body, `validate/6`) lets a CDN/static build revalidate
+  # cheaply after the window (#188), and moves whenever a fire changed the body.
   @max_age_seconds 300
 
   def show(conn, %{"as_of" => _} = params), do: show_point_in_time(conn, params)
@@ -609,52 +610,72 @@ defmodule KilnCMSWeb.ArtifactController do
     end
   end
 
-  # Weak ETag keyed on the record + surface + last-modified time, so it changes
-  # whenever the document is republished — and on the variant, so a conditional
-  # request can never 304 a caller into an arm it was not assigned. The served
-  # locale is named too: the record id already differs per locale variant, but
-  # a validator that says which translation it validates is one a front end can
-  # reason about when a chain change moves a URL from one to another.
+  # The validator, and the body as `respond/3` sends it.
   #
-  # An `?expand=` response also depends on its targets, which can change while
-  # the source does not, so their fingerprint is named as well
-  # (`ReferenceExpansion.expand/3`).
+  # The ETag is a digest of the body served (#2463). A stored artifact can be
+  # rewritten without its document's `updated_at` moving — a re-fire after a
+  # deploy that changes what firing produces, or `KilnCMS.Firing.refire/3` — so
+  # an ETag of the record's timestamps went on answering `304` to a client
+  # holding the old body. A digest moves exactly when the bytes do, and stays
+  # put across a republish or a re-fire that changed nothing.
+  #
+  # The record id, the served locale and the surface are named beside it, so
+  # a front end can tell which document and translation a validator is for,
+  # and the variant, so a conditional request can never `304` a caller into an
+  # arm it was not assigned. A `?fields=` or `?expand=` response is digested
+  # after the cut or the expansion, so it outlives a republish that changed
+  # none of what it kept, and every spelling of one fieldset shares it.
   #
   # Weak because Bandit will not gzip a response carrying a strong one (a
   # strong validator promises byte-identical bodies, and the compressed body is
   # not), and `If-None-Match` compares weakly anyway — so a client still holding
   # the strong form from before revalidates against the weak one.
-  defp etag(record, surface, variant, expansion_tag) do
-    ~s(W/"#{record.id}-#{record.locale}-#{surface}-#{DateTime.to_unix(record.updated_at)}#{variant_suffix(variant)}#{expansion_suffix(expansion_tag)}")
+  defp validate(
+         record,
+         "llm",
+         %{"markdown" => markdown} = body,
+         variant,
+         _expansion_tag,
+         _fields
+       ),
+       do: {etag(record, "llm", markdown, variant), body}
+
+  # The whole artifact, untouched: the firing cache already holds its JSON
+  # (`KilnCMS.Firing.Cache.get_json/4`), so neither a `304` nor a `200` encodes
+  # it again. The cache stores a body and its JSON in one write, normalized so
+  # a body cached from a fire and one cached from the table encode alike.
+  defp validate(record, surface, body, nil, nil, nil) do
+    json =
+      case Cache.get_json(
+             record.org_id,
+             Engine.document_type(record),
+             record.id,
+             @surfaces[surface]
+           ) do
+        {:ok, json} -> json
+        :miss -> Jason.encode_to_iodata!(body)
+      end
+
+    {etag(record, surface, json, nil), {:encoded, json}}
+  end
+
+  defp validate(record, surface, body, variant, _expansion_tag, _fields) do
+    json = Jason.encode_to_iodata!(body)
+    {etag(record, surface, json, variant), {:encoded, json}}
+  end
+
+  defp etag(record, surface, served, variant) do
+    digest =
+      :sha256
+      |> :crypto.hash(served)
+      |> binary_part(0, 12)
+      |> Base.url_encode64(padding: false)
+
+    ~s(W/"#{record.id}-#{record.locale}-#{surface}-b#{digest}#{variant_suffix(variant)}")
   end
 
   defp variant_suffix(nil), do: ""
   defp variant_suffix(variant), do: "-#{variant.id}"
-
-  defp expansion_suffix(nil), do: ""
-  defp expansion_suffix(tag), do: "-x#{tag}"
-
-  # The validator, and the body as `respond/3` sends it. A `?fields=` response
-  # is tagged by a digest of the filtered body itself, so it outlives a
-  # republish that changed none of the fields it kept — the case a phone
-  # revalidating a list row most wants a `304` for — and every spelling of one
-  # fieldset shares it. The body is encoded once, here, for both. The variant
-  # stays named; the expansion is in the body.
-  defp validate(record, surface, body, variant, expansion_tag, nil),
-    do: {etag(record, surface, variant, expansion_tag), body}
-
-  defp validate(record, surface, body, variant, _expansion_tag, _fields) do
-    json = Jason.encode_to_iodata!(body)
-
-    digest =
-      :sha256
-      |> :crypto.hash(json)
-      |> binary_part(0, 12)
-      |> Base.url_encode64(padding: false)
-
-    {~s(W/"#{record.id}-#{record.locale}-#{surface}-b#{digest}#{variant_suffix(variant)}"),
-     {:encoded, json}}
-  end
 
   # No `Vary`. The assignment key is a **query parameter**, so it is already part
   # of the cache key — every distinct `?variant_key=` is a distinct URL, and a
