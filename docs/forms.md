@@ -44,8 +44,9 @@ The `:form` content block references a form by slug:
   at once, and a page that renders a form carries the form in its `ETag`, so
   a revalidating client sees the edit too). Kiln's own text in the form (the
   **Submit** label, "required", **Select…**, error messages, the
-  human-verification widget) is in the page's language, the one its
-  `<html lang>` declares. On a multilingual site the block posts to
+  human-verification widget) is in the article's language, the one its
+  `<article lang>` declares, which a fallback page can make differ from the
+  reader's `<html lang>`. On a multilingual site the block posts to
   `/<locale>/forms/<slug>` in that language, the default language's included
   (`/en/forms/<slug>`), so a refused submission re-renders and the thank-you
   page answers in the language the visitor was reading. A single-language
@@ -255,19 +256,23 @@ redirect for it.
 On a multilingual site the page answers under each language prefix too:
 `/fr/forms/contact` renders the form in French and posts back to
 `/fr/forms/contact`, so the thank-you page and any error messages stay in
-French. The default language's prefix is kept the same way: `/en/forms/contact`
-posts back to `/en/forms/contact`, because an unprefixed post takes its
-language from the visitor's session and could answer an English page in
-French. The embed works alike: `/fr/forms/contact/embed` posts to
-`/fr/forms/contact`, and a refused submission re-renders inside the frame in
-French.
+French. The page's language comes from its address alone: the prefix, or the
+site's default language when there is none, never the visitor's session.
+The default language's prefix is kept on the way back, so `/forms/contact`
+and `/en/forms/contact` both post to `/en/forms/contact` (with English as
+the default): an unprefixed post takes its language from the visitor's
+session and could answer an English page in French. The embed works alike:
+`/fr/forms/contact/embed` posts to `/fr/forms/contact`, `/forms/contact/embed`
+posts to `/en/forms/contact`, and a refused submission re-renders inside the
+frame in the language it was posted under. A single-language site keeps the
+bare `/forms/contact`.
 
 What the page sends with it:
 
 | Header | Value | Why |
 | --- | --- | --- |
 | `Cache-Control` | `public, max-age=60, stale-while-revalidate=300` | The page changes only when an admin edits the form. A form deactivated within that minute refuses the submission anyway. |
-| `Vary` | `Accept-Language` | The text Kiln adds around your form (the default **Submit** label, the site's chrome) follows the visitor's language. |
+| `Vary` | `Accept-Language` | Kept as published HTML sends it. The text Kiln adds around your form (the default **Submit** label, the site's chrome) follows the address's language prefix, which is already part of the cache key. |
 | `X-Robots-Tag` | `noindex` | A form is somewhere a link sends people, not content to find by search. The embed document carries `noindex` for the same reason, and forms are not listed in `sitemap.xml`. |
 
 The page is not a route of its own. It is the last thing Kiln tries for a

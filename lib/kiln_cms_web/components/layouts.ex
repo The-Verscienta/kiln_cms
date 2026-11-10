@@ -1300,7 +1300,14 @@ defmodule KilnCMSWeb.Layouts do
   # Links to the current page in each available locale (`%{locale, href,
   # current}`); rendered as a language switcher when there's more than one.
   attr :locale_links, :list, default: []
-  attr :locale, :string, default: nil, doc: "active locale, to keep nav links locale-prefixed"
+  # The reader's locale, the URL's (#2595): the menus, the stock links and the
+  # switcher's current entry follow it. On a fallback page it differs from the
+  # article's own language, which the article marks with its own `lang`. The
+  # Gettext locale is the caller's to set (`KilnCMSWeb.Plugs.UrlLocale`); this
+  # layout does not read it.
+  attr :locale, :string,
+    default: nil,
+    doc: "the reader's locale, for the menus and to keep nav links locale-prefixed"
 
   # Defaults to nil, which resolves the DEFAULT org's branding — so omitting it
   # on a tenant's page shows another site's name and logo. That is #656, and it

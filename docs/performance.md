@@ -32,7 +32,15 @@ metric "headless API p95 under 50 ms" (#1546).
   rate here means every concurrent request is hitting the database at once).
 - **CDN offload.** Published HTML sends `Cache-Control: public, max-age=60,
   stale-while-revalidate=300`, a content `ETag` (→ `304` on `If-None-Match`), and
-  `Vary: Accept-Language`. The `ETag` also names the running build
+  `Vary: Accept-Language`. The URL is the whole cache key: a public page,
+  the blog and event indexes (`/<plural>/index.json` too), the stock home and
+  a form's page and embed take their language from the path prefix, or the
+  site's default without one, never from the visitor's session (#2595). Kiln
+  does not read `Accept-Language` for these; the `Vary` header is kept
+  unchanged. The `ETag` names the URL's language
+  as well as the record's, so `/fr/x` and `/x`, which can be answered by one
+  English record in two different chromes, never `304` each other. The `ETag`
+  also names the running build
   (`KilnCMSWeb.BuildFingerprint`: the code of Kiln, its overlay and plugins,
   the version of every application they depend on, and the asset manifest), so a deploy
   that changes markup is not `304`ed to a client holding the old page. Nodes

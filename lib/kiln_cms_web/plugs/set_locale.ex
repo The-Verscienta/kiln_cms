@@ -16,6 +16,11 @@ defmodule KilnCMSWeb.Plugs.SetLocale do
 
   Runs in the endpoint before the router, so a single set of routes serves every
   locale.
+
+  The session fallback is for the console, the sign-in screens and the other
+  per-visitor pages. A public delivery response that a shared cache may store
+  must not depend on it, so those controllers plug `KilnCMSWeb.Plugs.UrlLocale`
+  on top, which puts back the URL's locale: the prefix, or the default (#2595).
   """
   @behaviour Plug
 

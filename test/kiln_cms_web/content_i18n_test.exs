@@ -18,6 +18,21 @@ defmodule KilnCMSWeb.ContentI18nTest do
 
   defp slug, do: "i18n-#{System.unique_integer([:positive])}"
 
+  defp html_lang(html),
+    do:
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("html")
+      |> LazyHTML.attribute("lang")
+      |> hd()
+
+  defp article_lang(html),
+    do:
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("article.public-article")
+      |> LazyHTML.attribute("lang")
+
   defp page(attrs) do
     Ash.Seed.seed!(Page, Map.merge(%{state: :published, locale: "en"}, attrs))
   end
@@ -38,7 +53,8 @@ defmodule KilnCMSWeb.ContentI18nTest do
 
     html = conn |> get(~p"/#{s}") |> html_response(200)
     assert html =~ "About"
-    assert html =~ ~s(lang="en")
+    assert html_lang(html) == "en"
+    assert article_lang(html) == ["en"]
   end
 
   test "a locale prefix serves that locale's content", %{conn: conn} do
@@ -48,7 +64,8 @@ defmodule KilnCMSWeb.ContentI18nTest do
 
     html = conn |> get("/fr/#{s}") |> html_response(200)
     assert html =~ "À propos"
-    assert html =~ ~s(lang="fr")
+    assert html_lang(html) == "fr"
+    assert article_lang(html) == ["fr"]
     refute html =~ "About"
   end
 
@@ -56,9 +73,15 @@ defmodule KilnCMSWeb.ContentI18nTest do
     s = slug()
     page(%{title: "Only English", slug: s, locale: "en"})
 
-    # No :es variant exists, so the default (en) is served.
-    html = conn |> get("/es/#{s}") |> html_response(200)
+    # No :es variant exists, so the default (en) is served: in the reader's
+    # chrome, the article marked as the English it is (#2595).
+    conn = get(conn, "/es/#{s}")
+    html = html_response(conn, 200)
     assert html =~ "Only English"
+    assert html_lang(html) == "es"
+    assert article_lang(html) == ["en"]
+    assert get_resp_header(conn, "content-language") == ["es"]
+    assert get_resp_header(conn, "x-kiln-locale") == ["en"]
   end
 
   test "hreflang alternates list every published locale plus x-default", %{conn: conn} do
@@ -157,7 +180,14 @@ defmodule KilnCMSWeb.ContentI18nTest do
       html = conn |> get("/fr/blog") |> html_response(200)
       assert html =~ "Hello, World"
       assert html =~ ~s(href="/fr/blog/#{s}")
-      assert html =~ ~s(lang="en")
+      # The page is French; the English post's link says it is not.
+      assert html_lang(html) == "fr"
+
+      assert html
+             |> LazyHTML.from_document()
+             |> LazyHTML.query(~s(a[href="/fr/blog/#{s}"]))
+             |> LazyHTML.attribute("lang") == ["en"]
+
       assert html =~ "Pas encore traduit"
       refute html =~ "Aucun article pour le moment."
     end

@@ -38,7 +38,12 @@ defmodule KilnCMSWeb.EventIndexController do
   use KilnCMSWeb, :controller
 
   alias KilnCMSWeb.EventIndex
+  alias KilnCMSWeb.Plugs.UrlLocale
   alias KilnCMSWeb.Tenant
+
+  # `public` and shared-cacheable, so the locale is the URL's prefix or the
+  # default, never the session's (#2595).
+  plug UrlLocale
 
   # Shorter than the feeds' five minutes: this document reorders as events
   # start, and it is cheap to regenerate.
@@ -62,7 +67,7 @@ defmodule KilnCMSWeb.EventIndexController do
   defp send_index(conn, org, descriptor, params) do
     {from, until} = EventIndex.window(params)
     page = EventIndex.page(params)
-    locale = conn.assigns[:locale] || KilnCMS.I18n.default_locale()
+    locale = UrlLocale.locale(conn)
 
     %{entries: entries, more?: more?} =
       EventIndex.fetch(descriptor, org,

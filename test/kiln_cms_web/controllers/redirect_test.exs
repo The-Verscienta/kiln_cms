@@ -101,15 +101,20 @@ defmodule KilnCMSWeb.RedirectTest do
     assert redirected_to(get(conn, "/en/#{old_slug}"), 301) == "/#{renamed.slug}"
   end
 
-  # The 301 carries no `Vary`, so its destination must depend on the URL alone —
-  # a session preference must not leak a locale prefix into a cacheable response.
-  test "a session locale preference does not prefix the 301", %{conn: conn} do
+  # The 301 carries no `Vary`, so its answer must depend on the URL alone. The
+  # French redirect lives at `/fr/<old>` (above); an unprefixed URL is the
+  # default locale's, whatever the session says (#2595), so it resolves no
+  # French redirect and 404s rather than leaking the session into a cacheable
+  # response.
+  test "a session locale preference does not resolve a redirect at an unprefixed URL", %{
+    conn: conn
+  } do
     page = page(%{locale: "fr"})
     old_slug = page.slug
-    renamed = rename!(page, "rd-pg-#{uniq()}")
+    rename!(page, "rd-pg-#{uniq()}")
 
     conn = conn |> Plug.Test.init_test_session(locale: "fr") |> get("/#{old_slug}")
-    assert redirected_to(conn, 301) == "/#{renamed.slug}"
+    assert html_response(conn, 404)
   end
 
   test "the JSON:API redirects list is world-readable and filterable", %{conn: conn} do

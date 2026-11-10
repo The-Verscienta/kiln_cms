@@ -90,7 +90,10 @@ variant. So:
 
 - **Always read back which locale you got.** `x-kiln-locale` /
   `Content-Language` on HTTP responses, `locale` on the JSON:API resource and
-  the GraphQL result, `locale` in `/api/resolve` and `/api/menus` bodies. A
+  the GraphQL result, `locale` in `/api/resolve` and `/api/menus` bodies. On
+  the built-in site's HTML pages read `x-kiln-locale` only: there
+  `Content-Language` names the URL's language, which the page's chrome is in,
+  not the served document's. A
   static build that generates `/fr-ca/…` pages should decide whether an
   English answer there is a page it wants (and whether it canonicalises to the
   English URL) — the API tells you, it does not decide for you.
