@@ -613,6 +613,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The sign-in, register and reset pages now have a header landmark, one `h1`, and `autocomplete` on their email and password boxes.**
   ([#2162](https://github.com/The-Verscienta/kiln_cms/issues/2162) · [long form](docs/changelog/unreleased.md#auth-pages-landmarks-autocomplete))
 
+- **The first-run setup page's logo row is now a header landmark, and the invite-only sign-in page is tested for one `h1`, one header and one main.**
+  ([#2390](https://github.com/The-Verscienta/kiln_cms/issues/2390) · [long form](docs/changelog/unreleased.md#setup-header-invite-only-landmarks))
+
 - **`custom_sort` ranks a stored JSON `null`, array or object as no value (last in either direction), and page 2 of a keyset-paged sort no longer fails on one.**
   ([long form](docs/changelog/unreleased.md#custom-sort-json-null-last))
 

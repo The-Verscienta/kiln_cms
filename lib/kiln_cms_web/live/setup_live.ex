@@ -256,17 +256,20 @@ defmodule KilnCMSWeb.SetupLive do
     ~H"""
     <Layouts.flash_group flash={@flash} />
 
-    <div :if={KilnCMS.Environment.label()} class="mt-6 flex justify-center">
-      <Layouts.environment_banner />
-    </div>
-
-    <main id="main" class="mx-auto w-full max-w-xl px-4 py-12 sm:px-6">
+    <%!-- The banner and brand row are the page's `<header>` landmark, as in
+          `Layouts.auth/1`, so nothing sits outside a landmark (#2390). --%>
+    <header class="mx-auto w-full max-w-xl px-4 pt-12 sm:px-6">
+      <div :if={KilnCMS.Environment.label()} class="-mt-6 mb-6 flex justify-center">
+        <Layouts.environment_banner />
+      </div>
       <%!-- The same brand row as the sign-in pages this wizard hands off to
             (#1681). Before an admin exists no site has branding, so this is the
             stock mark — which is the point: a new install's first screen should
             look like the product it is setting up. --%>
-      <Layouts.auth_brand brand={@brand} class="mb-8" />
+      <Layouts.auth_brand brand={@brand} />
+    </header>
 
+    <main id="main" class="mx-auto w-full max-w-xl px-4 pt-8 pb-12 sm:px-6">
       <div class="mb-8 text-center">
         <h1 class="auth-title">{gettext("Set up your site")}</h1>
         <p class="mt-2 text-sm text-base-content/70">
