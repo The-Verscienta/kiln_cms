@@ -213,6 +213,38 @@ defmodule Kiln.SecurityCheckTest do
       end
     end
 
+    test "replaces invalid UTF-8 in the summary, details, fact keys and fact values" do
+      bad = "a" <> <<0xFF>>
+
+      {:ok, clean} =
+        Result.sanitize(Check.warn(bad, details: [bad], facts: %{bad => 1, "text" => bad}))
+
+      assert clean.summary == "a�"
+      assert clean.details == ["a�"]
+      assert clean.facts == %{"a�" => 1, "text" => "a�"}
+      assert String.valid?(clean.summary)
+    end
+
+    test "trims by graphemes after replacing invalid bytes" do
+      {:ok, clean} = Result.sanitize(Check.pass(String.duplicate(<<0xFF>>, 400)))
+
+      assert String.valid?(clean.summary)
+      assert String.length(clean.summary) == 300
+    end
+
+    test "drops a fix path or docs URL that is not valid UTF-8" do
+      assert {:ok, %{fix_path: nil, docs_url: nil}} =
+               Result.sanitize(
+                 Check.pass("ok",
+                   fix_path: "/editor/team" <> <<0xFF>>,
+                   docs_url: "https://example.com/" <> <<0xFF>>
+                 )
+               )
+
+      assert Result.fix_path("/editor/" <> <<0xC3>>) == nil
+      assert Result.docs_url("https://example.com/" <> <<0xC3, 0x28>>) == nil
+    end
+
     test "is :error for anything that is not a result" do
       assert Result.sanitize(:ok) == :error
       assert Result.sanitize(%{status: :pass, summary: "ok"}) == :error

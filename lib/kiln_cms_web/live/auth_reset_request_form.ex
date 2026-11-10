@@ -17,8 +17,9 @@ defmodule KilnCMSWeb.AuthResetRequestForm do
   component swapped for `KilnCMSWeb.AuthIdentityInput.identity_field/1`, and
   every setting read under upstream's name through
   `KilnCMSWeb.AuthOverrides.override_for/4`. `KilnCMSWeb.AuthOverridesTest`
-  does not yet compare it with upstream's, so on an `ash_authentication_phoenix`
-  bump re-read `render/1` against `Password.ResetForm` by hand.
+  renders it against `Password.ResetForm` and asserts they differ by nothing
+  but `autocomplete`, so an upstream change to the form fails that test rather
+  than going stale here (#2389).
   """
   use KilnCMSWeb, :live_component
 

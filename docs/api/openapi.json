@@ -16880,7 +16880,7 @@
       "name": "KilnCMS",
       "url": "https://github.com/The-Verscienta/kiln_cms"
     },
-    "description": "The [JSON:API](https://jsonapi.org/)-compliant headless surface of\n**KilnCMS**: reads, search and — since #330 — writes, for the core content\ntypes **Page** and **Post**, admin-defined types through **Entry**\n(`/api/json/entries`, described by `/api/json/type-definitions`), the\n**MediaItem** library, and the taxonomy (**Tag**, **TagGroup**, **Category**)\nplus **Redirect**.\n\n## Authentication\n\nRequests are **anonymous by default** and resolved through each resource's read\npolicy, so an unauthenticated caller only ever sees **published** content — no\ncredentials are required for the public delivery use case.\n\nA credential widens that, as far as its account's role allows. Both kinds go\nin the same header:\n\n```\nAuthorization: Bearer <credential>\n```\n\n  * **API key** (`kiln_…`, the `apiKeyAuth` scheme) — minted at\n    `/editor/api-keys`, acting as the account that minted it and bounded by\n    the key's `access` scope. A `read` key reads what its account may read;\n    a `read_write` key may also **write**: create and update drafts, submit\n    for review, and — on an admin account — publish, unpublish, return to\n    draft and soft-delete. A `draft_write` key may only create drafts and\n    edit its own drafts (no review, publishing, deletes or media). The key\n    for server-to-server use.\n  * **User JWT** (the `bearerAuth` scheme) — an AshAuthentication token from\n    **`POST /api/auth/sign_in`** (documented below), with that user's role.\n\nEither credential also authenticates the GraphQL endpoint (`POST /gql`) and\nits WebSocket. See `docs/api.md` and, for the write routes, `docs/json-api.md`\n→ \"Writing\".\n\n## Content negotiation\n\nEvery request and response uses the JSON:API media type:\n\n```\nAccept: application/vnd.api+json\nContent-Type: application/vnd.api+json\n```\n\n## Filtering, sorting & pagination\n\nCollection routes accept `filter[<field>]=`, `sort=<field>` (prefix `-` for\ndescending) and the `page[...]` family (`page[limit]` defaults to 25, capped\nat 100; `page[offset]`, `page[after]`/`page[before]` keyset cursors,\n`page[count]=true`). Full reference: `docs/json-api.md`.\n\n## Beyond JSON:API\n\nThe JSON:API router is one of several headless surfaces. Those with an\noperation below are marked; the rest are in `docs/api.md`.\n\n  * **GraphQL** delivery, search and authoring at `POST /gql`\n    (`docs/headless-graphql-api.md`); its schema as SDL at\n    `GET /api/graphql/schema.graphql` (operation below).\n  * **Fired artifacts** — the rendered block tree — at\n    `GET /api/content/:type/:slug` (operation below).\n  * **Media upload** at `POST /api/media` (multipart), `POST /api/media/import-url`\n    and the presigned direct-upload pair under `/api/media/uploads`\n    (`docs/api.md` → \"Uploading media\"). Metadata edits are the JSON:API\n    `PATCH /api/json/media-items/{id}` below.\n  * **Search, resolve, menus, locales, forms, related, ask, provenance** under\n    `/api/*`.\n  * **MCP** for LLM authoring clients at `/mcp` (`docs/mcp.md`).\n  * **Outbound webhooks** (HMAC-signed) on publish/unpublish/update.\n  * **Signed preview URLs** for unpublished content at `GET /preview/:token`\n    (operation below).\n\n## This document\n\nA production build serves it only to a caller holding an API key, unless the\noperator turns the public documentation on (`API_DOCS_ENABLED`). The copy\ncommitted at `docs/api/openapi.json` describes the stock build.\n",
+    "description": "The [JSON:API](https://jsonapi.org/)-compliant headless surface of\n**KilnCMS**: reads, search and — since #330 — writes, for the core content\ntypes **Page** and **Post**, admin-defined types through **Entry**\n(`/api/json/entries`, described by `/api/json/type-definitions`), the\n**MediaItem** library, and the taxonomy (**Tag**, **TagGroup**, **Category**)\nplus **Redirect**.\n\n## Authentication\n\nRequests are **anonymous by default** and resolved through each resource's read\npolicy, so an unauthenticated caller only ever sees **published** content — no\ncredentials are required for the public delivery use case.\n\nA credential widens that, as far as its account's role allows. Both kinds go\nin the same header:\n\n```\nAuthorization: Bearer <credential>\n```\n\n  * **API key** (`kiln_…`, the `apiKeyAuth` scheme) — minted at\n    `/editor/api-keys`, acting as the account that minted it and bounded by\n    the key's `access` scope. A `read` key reads what its account may read;\n    a `read_write` key may also **write**: create and update drafts, submit\n    for review, and — on an admin account — publish, unpublish, return to\n    draft and soft-delete. A `draft_write` key may only create drafts and\n    edit its own drafts (no review, publishing, deletes or media). The key\n    for server-to-server use.\n  * **User JWT** (the `bearerAuth` scheme) — an AshAuthentication token from\n    **`POST /api/auth/sign_in`** (documented below), with that user's role.\n\nEither credential also authenticates the GraphQL endpoint (`POST /gql`) and\nits WebSocket. See `docs/api.md` and, for the write routes, `docs/json-api.md`\n→ \"Writing\".\n\n## Content negotiation\n\nEvery request and response uses the JSON:API media type:\n\n```\nAccept: application/vnd.api+json\nContent-Type: application/vnd.api+json\n```\n\n## Filtering, sorting & pagination\n\nCollection routes accept `filter[<field>]=`, `sort=<field>` (prefix `-` for\ndescending) and the `page[...]` family (`page[limit]` defaults to 25, capped\nat 100; `page[offset]`, `page[after]`/`page[before]` keyset cursors,\n`page[count]=true`). Full reference: `docs/json-api.md`.\n\n## Beyond JSON:API\n\nThe JSON:API router is one of several headless surfaces. Those with an\noperation below are marked; the rest are in `docs/api.md`.\n\n  * **GraphQL** delivery, search and authoring at `POST /gql`\n    (`docs/headless-graphql-api.md`); its schema as SDL at\n    `GET /api/graphql/schema.graphql` (operation below).\n  * **Fired artifacts** — the rendered block tree — at\n    `GET /api/content/:type/:slug` (operation below).\n  * **Media upload** at `POST /api/media` (multipart), `POST /api/media/import-url`\n    and the presigned direct-upload pair under `/api/media/uploads`\n    (`docs/api.md` → \"Uploading media\"). Metadata edits are the JSON:API\n    `PATCH /api/json/media-items/{id}` below.\n  * **Search, resolve, menus, locales, forms, related, ask, provenance** under\n    `/api/*`.\n  * **Security posture** for monitoring at `GET /api/security/posture`\n    (operation below): a site administrator's checks as JSON, behind the\n    site's admin allowlist.\n  * **MCP** for LLM authoring clients at `/mcp` (`docs/mcp.md`).\n  * **Outbound webhooks** (HMAC-signed) on publish/unpublish/update.\n  * **Signed preview URLs** for unpublished content at `GET /preview/:token`\n    (operation below).\n\n## This document\n\nA production build serves it only to a caller holding an API key, unless the\noperator turns the public documentation on (`API_DOCS_ENABLED`). The copy\ncommitted at `docs/api/openapi.json` describes the stock build.\n",
     "license": {
       "name": "MIT",
       "url": "https://github.com/The-Verscienta/kiln_cms/blob/main/LICENSE"
@@ -32533,6 +32533,290 @@
         "summary": "Finish a direct upload",
         "tags": [
           "Media"
+        ]
+      }
+    },
+    "/api/security/posture": {
+      "get": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "The Security posture page's checks as JSON, for monitoring (#2521). Needs a bearer JWT or API key of an administrator of the request's site (not a `draft_write` key); a platform administrator also gets the deployment's checks. Behind the site's admin allowlist. Runs the checks at most once per site and scope set every 30 seconds per node, so `generated_at` may be that old. Never includes a check's details. Additive only: read checks by `id`, and tolerate status values and `counts` keys you do not know. Every answer is `Cache-Control: private, no-store`.",
+        "operationId": "getSecurityPosture",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "checks": {
+                      "description": "One per check, sorted by `id` (not part of the contract)",
+                      "items": {
+                        "properties": {
+                          "docs_url": {
+                            "description": "An `https://` page explaining the check",
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "error": {
+                            "description": "Why a check produced no result: `crashed`, `timeout`, `invalid_result` or `busy` today",
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "facts": {
+                            "additionalProperties": {
+                              "nullable": true,
+                              "oneOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ]
+                            },
+                            "description": "Machine-readable values (at most 20); a check's own keys",
+                            "type": "object"
+                          },
+                          "fix_path": {
+                            "description": "A console path, relative to the site's console host",
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "id": {
+                            "description": "Stable id, e.g. `core.second_factor`",
+                            "type": "string"
+                          },
+                          "plugin": {
+                            "description": "The contributing plugin's name, for `source: plugin`",
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "scope": {
+                            "description": "`site` or `deployment` today",
+                            "type": "string"
+                          },
+                          "source": {
+                            "description": "`core`, `plugin` or `config` today",
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "`pass`, `warn`, `fail`, `unknown`, `n_a` or `error` today",
+                            "type": "string"
+                          },
+                          "summary": {
+                            "description": "English, for a person; not stable. `null` on an error",
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "title": {
+                            "description": "English, for a person; not stable",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "scope",
+                          "source",
+                          "plugin",
+                          "status",
+                          "title",
+                          "summary",
+                          "fix_path",
+                          "docs_url",
+                          "facts",
+                          "error"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "counts": {
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "description": "How many checks have each status: `fail`, `warn`, `error`, `unknown`, `pass`, `n_a` today, every one present",
+                      "type": "object"
+                    },
+                    "generated_at": {
+                      "description": "When the checks ran (up to 30 seconds ago for a cached answer)",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "org_id": {
+                      "description": "The site's id",
+                      "type": "string"
+                    },
+                    "scopes": {
+                      "items": {
+                        "description": "`site`, or `site` and `deployment` for a platform administrator",
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "status": {
+                      "description": "The worst status: `pass`, `warn` or `fail` today",
+                      "type": "string"
+                    },
+                    "version": {
+                      "description": "`1`. Changes only for a change that breaks this shape.",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "generated_at",
+                    "org_id",
+                    "scopes",
+                    "status",
+                    "counts",
+                    "checks"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The site's posture"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "No credential (`unauthenticated`), or one that does not verify (`invalid_token`)"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not an administrator of this site, or a `draft_write` key (`forbidden`); or an address outside the site's admin allowlist (`network_not_allowed`)"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "`api` bucket spent — see `Retry-After`"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "`temporarily_unavailable`: the site's checks are already running (`Retry-After: 5`), or its admin allowlist could not be read (`Retry-After: 30`)"
+          }
+        },
+        "security": [
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the site's security posture",
+        "tags": [
+          "Monitoring"
         ]
       }
     },

@@ -368,7 +368,7 @@ defmodule KilnCMSWeb.AdminAllowlistLive do
       <div class="mt-10 max-w-2xl space-y-3 rounded-lg bg-base-200 p-4 text-sm text-base-content/70">
         <p id="admin-allowlist-scope">
           {gettext(
-            "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected."
+            "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected, except that the security posture endpoint for monitoring (GET /api/security/posture) also answers only to listed networks."
           )}
         </p>
         <p id="admin-allowlist-members">

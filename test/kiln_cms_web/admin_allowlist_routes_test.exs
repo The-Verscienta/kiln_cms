@@ -19,7 +19,7 @@ defmodule KilnCMSWeb.AdminAllowlistRoutesTest do
     /password-reset/:token /register /reset /setup /sign-in /sign-in/unlock /sign-in/verify
   )
 
-  @gated_api ~w(/api/auth/sign_in /api/auth/sign_in/verify)
+  @gated_api ~w(/api/auth/sign_in /api/auth/sign_in/verify /api/security/posture)
 
   # Every route, with the `pipe_through` the router matched it to. A pattern
   # that matches an earlier route when read literally is that route's business.
@@ -74,7 +74,7 @@ defmodule KilnCMSWeb.AdminAllowlistRoutesTest do
     end
   end
 
-  test "the headless password sign-in is gated in JSON, and nothing else under /api is" do
+  test "the headless sign-in and the security posture are gated in JSON, and nothing else under /api is" do
     api = for route <- routes(), String.starts_with?(route.path, "/api"), do: route
 
     assert api |> Enum.filter(&gated_api?/1) |> Enum.map(& &1.path) |> Enum.uniq() |> Enum.sort() ==

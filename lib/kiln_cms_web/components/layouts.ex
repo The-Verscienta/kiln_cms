@@ -360,14 +360,12 @@ defmodule KilnCMSWeb.Layouts do
   @doc "The site name for an org, resolved through the branding fallback chain."
   def brand_name(org), do: Branding.for_org(org).site_name
 
-  @doc "The header logo URL for an org, resolved through the branding fallback chain."
-  def brand_logo(org), do: Branding.for_org(org).logo_url
-
   @doc """
   The brand's logo `<img>`, decorative (the site name sits beside it).
 
   The built-in mark is a 278x379 PNG that is shown at 20-40 css px, so it gets
-  a right-sized WebP/PNG pair in a `<picture>` (#2165). Anything else — an
+  a right-sized WebP/PNG pair in a `<picture>` (#2165) — on public pages, the
+  thin shell and the console sidebar alike (#2400). Anything else — an
   operator's own `logo_url` — renders as a plain `<img>` of that URL, untouched.
   The built-in mark carries explicit dimensions so the row does not shift while
   it loads; a custom URL's size is unknown, so it carries none rather than a wrong one.
@@ -456,12 +454,7 @@ defmodule KilnCMSWeb.Layouts do
     <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
       <div class="mx-auto flex max-w-6xl items-center justify-between gap-4">
         <a href="/" class="flex items-center gap-3">
-          <img
-            src={brand_logo(@current_org)}
-            class="h-8 w-auto"
-            alt=""
-            referrerpolicy="no-referrer"
-          />
+          <.brand_mark brand={Branding.for_org(@current_org)} class="h-8 w-auto" />
           <span class="text-sm font-semibold tracking-tight">{brand_name(@current_org)}</span>
         </a>
         <nav class="flex items-center gap-2 sm:gap-3">
@@ -606,12 +599,7 @@ defmodule KilnCMSWeb.Layouts do
         ]}
       >
         <div class="side-head flex h-16 shrink-0 items-center gap-2.5 px-4">
-          <img
-            src={brand_logo(@current_org)}
-            class="side-brand h-7 w-auto"
-            alt=""
-            referrerpolicy="no-referrer"
-          />
+          <.brand_mark brand={Branding.for_org(@current_org)} class="side-brand h-7 w-auto" />
           <span class="side-text min-w-0 flex-1 truncate font-semibold tracking-tight">
             {brand_name(@current_org)}
           </span>
@@ -1052,9 +1040,11 @@ defmodule KilnCMSWeb.Layouts do
         id="nav-essentials-hint"
         class="side-text mt-1 px-3 text-xs leading-5 text-base-content/70"
       >
-        {gettext(
+        {ngettext(
+          "%{screens} is under Configure. Use Show all tools to list every screen here.",
           "%{screens} are under Configure. Use Show all tools to list every screen here.",
-          screens: Enum.join(@hidden_screens, ", ")
+          length(@hidden_screens),
+          screens: KilnCMSWeb.ListFormat.to_sentence(@hidden_screens)
         )}
       </p>
       <.side_link

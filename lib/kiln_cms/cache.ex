@@ -478,6 +478,18 @@ defmodule KilnCMS.Cache do
   def admin_allowlist_key(org_id), do: "admin_allowlist:#{org_id}"
 
   @doc """
+  Cache key for a site's security posture snapshot (#2521), the detail-free
+  report `GET /api/security/posture` serves. Per site AND per scope set, in a
+  fixed order, so a site administrator is never served the deployment checks
+  a platform administrator's call left cached for the same site.
+  """
+  @spec security_posture_key(Ash.UUID.t(), [atom()]) :: String.t()
+  def security_posture_key(org_id, scopes) when is_binary(org_id) and is_list(scopes) do
+    "security_posture:#{org_id}:" <>
+      (scopes |> Enum.map(&Atom.to_string/1) |> Enum.sort() |> Enum.join("+"))
+  end
+
+  @doc """
   Key for the last admin allowlist this node read successfully for a site
   (#2248), kept for a day so a failed read can tell "the list was off" from
   "the list was on or is unknown". See `KilnCMS.Security.AdminAllowlist`.

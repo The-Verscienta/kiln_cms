@@ -27,9 +27,8 @@ defmodule KilnCMSWeb.AuthOverrides do
   opinion means.
 
   The library renders Kiln copies stand in for, which
-  `KilnCMSWeb.AuthOverridesTest` re-renders against upstream's (all but
-  `AuthResetRequestForm`, which needs a by-hand look) so a library bump shows
-  up there: `KilnCMSWeb.AuthSignInForm`,
+  `KilnCMSWeb.AuthOverridesTest` re-renders against upstream's so a library
+  bump shows up there: `KilnCMSWeb.AuthSignInForm`,
   `KilnCMSWeb.AuthRegisterForm`, `KilnCMSWeb.AuthResetForm`,
   `KilnCMSWeb.AuthResetRequestForm`, and the input copies
   `KilnCMSWeb.AuthPasswordInput` and `KilnCMSWeb.AuthIdentityInput` (#2162).

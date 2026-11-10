@@ -74,16 +74,16 @@ defmodule KilnCMSWeb.PageController do
 
   # `nil` for a signed-out visitor; otherwise the strongest role the viewer holds
   # on THIS site (`:platform` for a platform admin, who can open everything).
+  # `:none` is kept apart from `:viewer` (#2372): an account from another site, or
+  # one whose registration here awaits approval, holds no role here at all, and
+  # calling it a viewer would tell it something false.
   defp viewer_role(nil, _org), do: nil
 
   defp viewer_role(user, org) do
     if KilnCMSWeb.LiveUserAuth.platform_admin_user?(user) do
       :platform
     else
-      case KilnCMS.Accounts.Scoping.effective_tier(user, org.id) do
-        :none -> :viewer
-        tier -> tier
-      end
+      KilnCMS.Accounts.Scoping.effective_tier(user, org.id)
     end
   end
 

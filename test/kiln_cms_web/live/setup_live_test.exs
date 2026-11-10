@@ -49,10 +49,10 @@ defmodule KilnCMSWeb.SetupLiveTest do
       # <img> is the small fallback, not `brand.logo_url` itself.
       assert has_element?(
                lv,
-               "#main a.auth-brand[href='/'] picture img[src$='/logo-mark-sm.png']"
+               "header a.auth-brand[href='/'] picture img[src$='/logo-mark-sm.png']"
              )
 
-      assert lv |> element("#main a.auth-brand") |> render() =~ brand.site_name
+      assert lv |> element("header a.auth-brand") |> render() =~ brand.site_name
     end
 
     test "redirects home once an admin exists", %{conn: conn} do
@@ -96,6 +96,25 @@ defmodule KilnCMSWeb.SetupLiveTest do
                  password: "password1234!",
                  password_confirmation: "password1234!"
                })
+    end
+  end
+
+  describe "landmarks (#2390)" do
+    # The dead render, structurally: one h1, the brand row in a `<header>`
+    # outside `<main>`, and `main#main` for the skip link. Not an axe run.
+    test "one h1, one header with the brand row, one main#main", %{conn: conn} do
+      doc = conn |> get(~p"/setup") |> html_response(200) |> LazyHTML.from_document()
+      count = fn selector -> doc |> LazyHTML.query(selector) |> Enum.count() end
+
+      assert count.("h1") == 1
+      assert doc |> LazyHTML.query("h1") |> LazyHTML.text() |> String.trim() == "Set up your site"
+      assert count.("header") == 1
+      assert count.("header a.auth-brand") == 1
+      assert count.("main") == 1
+      assert count.("main#main") == 1
+      assert count.("main header") == 0
+      assert count.("main a.auth-brand") == 0
+      assert count.("a[href='#main']") == 1
     end
   end
 

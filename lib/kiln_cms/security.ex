@@ -10,8 +10,9 @@ defmodule KilnCMS.Security do
   (see `docs/policy-matrix.md`, "The system actor"). No person, admin
   included, can create, edit or delete an event.
 
-  It also holds `KilnCMS.Security.PostureReport` (#2252), the Security
-  posture page's one action, which reads settings and stores nothing.
+  It also holds `KilnCMS.Security.PostureReport` (#2252): the Security
+  posture page's action and monitoring's detail-free snapshot of it (#2521),
+  which read settings and store nothing.
 
   `KilnCMS.Security.IpBlocklist` and `KilnCMS.Security.Cidr` live in the same
   namespace but are unrelated to this domain.
@@ -58,9 +59,11 @@ defmodule KilnCMS.Security do
       define :prune_alert_dispatches, action: :prune
     end
 
-    # The Security posture page (#2252): computed on request, nothing stored.
+    # The Security posture page (#2252), and its detail-free snapshot for
+    # `GET /api/security/posture` (#2521, cached 30 s per site and scope set).
     resource KilnCMS.Security.PostureReport do
       define :run_posture, action: :run
+      define :posture_snapshot, action: :snapshot
     end
   end
 

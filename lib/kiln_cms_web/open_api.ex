@@ -92,6 +92,9 @@ defmodule KilnCMSWeb.OpenApi do
       `PATCH /api/json/media-items/{id}` below.
     * **Search, resolve, menus, locales, forms, related, ask, provenance** under
       `/api/*`.
+    * **Security posture** for monitoring at `GET /api/security/posture`
+      (operation below): a site administrator's checks as JSON, behind the
+      site's admin allowlist.
     * **MCP** for LLM authoring clients at `/mcp` (`docs/mcp.md`).
     * **Outbound webhooks** (HMAC-signed) on publish/unpublish/update.
     * **Signed preview URLs** for unpublished content at `GET /preview/:token`
@@ -116,7 +119,8 @@ defmodule KilnCMSWeb.OpenApi do
           spec.paths
           |> Map.merge(auth_paths())
           |> Map.merge(delivery_paths())
-          |> Map.merge(media_paths()),
+          |> Map.merge(media_paths())
+          |> Map.merge(admin_paths()),
         info: %{
           spec.info
           | title: "KilnCMS Headless API",
@@ -736,6 +740,142 @@ defmodule KilnCMSWeb.OpenApi do
         content: %{"application/json" => %OpenApiSpex.MediaType{schema: media_item_schema()}}
       })
     )
+  end
+
+  # Admin surfaces for machines (`KilnCMSWeb.SecurityPostureController`): a
+  # credential is required, so `security` lists no empty requirement. Value
+  # sets are open (`KilnCMSWeb.SecurityPostureJSON`'s contract), so no field
+  # carries an `enum`; the description lists today's values.
+  defp admin_paths do
+    %{
+      "/api/security/posture" => %OpenApiSpex.PathItem{
+        get: %OpenApiSpex.Operation{
+          tags: ["Monitoring"],
+          operationId: "getSecurityPosture",
+          summary: "Read the site's security posture",
+          description:
+            "The Security posture page's checks as JSON, for monitoring (#2521). " <>
+              "Needs a bearer JWT or API key of an administrator of the request's site " <>
+              "(not a `draft_write` key); a platform administrator also gets the " <>
+              "deployment's checks. Behind the site's admin allowlist. Runs the checks " <>
+              "at most once per site and scope set every 30 seconds per node, so " <>
+              "`generated_at` may be that old. Never includes a check's details. " <>
+              "Additive only: read checks by `id`, and tolerate status values and " <>
+              "`counts` keys you do not know. Every answer is `Cache-Control: " <>
+              "private, no-store`.",
+          security: [%{"apiKeyAuth" => []}, %{"bearerAuth" => []}],
+          responses: %{
+            200 => %OpenApiSpex.Response{
+              description: "The site's posture",
+              content: %{
+                "application/json" => %OpenApiSpex.MediaType{schema: posture_schema()}
+              }
+            },
+            401 =>
+              error_response(
+                "No credential (`unauthenticated`), or one that does not verify (`invalid_token`)"
+              ),
+            403 =>
+              error_response(
+                "Not an administrator of this site, or a `draft_write` key (`forbidden`); " <>
+                  "or an address outside the site's admin allowlist (`network_not_allowed`)"
+              ),
+            429 => error_response("`api` bucket spent — see `Retry-After`"),
+            503 =>
+              error_response(
+                "`temporarily_unavailable`: the site's checks are already running " <>
+                  "(`Retry-After: 5`), or its admin allowlist could not be read " <>
+                  "(`Retry-After: 30`)"
+              )
+          }
+        }
+      }
+    }
+  end
+
+  defp posture_schema do
+    string = fn description -> %OpenApiSpex.Schema{type: :string, description: description} end
+
+    nullable_string = fn description ->
+      %OpenApiSpex.Schema{type: :string, nullable: true, description: description}
+    end
+
+    %OpenApiSpex.Schema{
+      type: :object,
+      required: [:version, :generated_at, :org_id, :scopes, :status, :counts, :checks],
+      properties: %{
+        version: %OpenApiSpex.Schema{
+          type: :integer,
+          description: "`1`. Changes only for a change that breaks this shape."
+        },
+        generated_at: %OpenApiSpex.Schema{
+          type: :string,
+          format: :"date-time",
+          description: "When the checks ran (up to 30 seconds ago for a cached answer)"
+        },
+        org_id: string.("The site's id"),
+        scopes: %OpenApiSpex.Schema{
+          type: :array,
+          items: string.("`site`, or `site` and `deployment` for a platform administrator")
+        },
+        status: string.("The worst status: `pass`, `warn` or `fail` today"),
+        counts: %OpenApiSpex.Schema{
+          type: :object,
+          description:
+            "How many checks have each status: `fail`, `warn`, `error`, `unknown`, " <>
+              "`pass`, `n_a` today, every one present",
+          additionalProperties: %OpenApiSpex.Schema{type: :integer}
+        },
+        checks: %OpenApiSpex.Schema{
+          type: :array,
+          description: "One per check, sorted by `id` (not part of the contract)",
+          items: %OpenApiSpex.Schema{
+            type: :object,
+            required: [
+              :id,
+              :scope,
+              :source,
+              :plugin,
+              :status,
+              :title,
+              :summary,
+              :fix_path,
+              :docs_url,
+              :facts,
+              :error
+            ],
+            properties: %{
+              id: string.("Stable id, e.g. `core.second_factor`"),
+              scope: string.("`site` or `deployment` today"),
+              source: string.("`core`, `plugin` or `config` today"),
+              plugin: nullable_string.("The contributing plugin's name, for `source: plugin`"),
+              status: string.("`pass`, `warn`, `fail`, `unknown`, `n_a` or `error` today"),
+              title: string.("English, for a person; not stable"),
+              summary: nullable_string.("English, for a person; not stable. `null` on an error"),
+              fix_path: nullable_string.("A console path, relative to the site's console host"),
+              docs_url: nullable_string.("An `https://` page explaining the check"),
+              facts: %OpenApiSpex.Schema{
+                type: :object,
+                description: "Machine-readable values (at most 20); a check's own keys",
+                additionalProperties: %OpenApiSpex.Schema{
+                  oneOf: [
+                    %OpenApiSpex.Schema{type: :string},
+                    %OpenApiSpex.Schema{type: :number},
+                    %OpenApiSpex.Schema{type: :boolean}
+                  ],
+                  nullable: true
+                }
+              },
+              error:
+                nullable_string.(
+                  "Why a check produced no result: `crashed`, `timeout`, " <>
+                    "`invalid_result` or `busy` today"
+                )
+            }
+          }
+        }
+      }
+    }
   end
 
   # 401/403/429 answer every media route the same way.

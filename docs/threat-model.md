@@ -64,6 +64,7 @@ the router so preflights are answered before route matching).
 | Content unlock | `POST /api/content/:type/:slug/unlock`, `POST /_unlock` (CSRF) | passphrase | `:unlock` (`POST /_unlock` also `:delivery`) |
 | Media upload | `POST /api/media`, `/api/media/import-url`, `/api/media/uploads[/complete]` | JWT / API key; `:read_write` + editor, checked **before** `POST /api/media`'s body is parsed (the endpoint leaves it unread) | `:api` + `:media_upload` |
 | MCP (LLM authoring) | `/mcp` | **API key required** | `:api` |
+| Security posture (monitoring) | `GET /api/security/posture` (#2521) | **JWT or API key of an administrator of the request's site required** (never a `:draft_write` key); behind the site's admin allowlist, checked first | `:api` |
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
 | Form embed | `GET /forms/:slug/embed` | none | `:delivery` (framing CSP) |
 | Form page | `GET /forms/:slug` (#2138): not a route, the last fallback of `/:type/:slug` delivery; active forms of the serving org only | none | `:delivery` (site CSP) |
@@ -663,7 +664,9 @@ sign-in route to listed networks at `/editor/admin-allowlist`; see
 - **What it stops.** A stolen admin (or any) password, session cookie or
   remember-me cookie used from outside the listed networks to reach the
   console, its exports, `/setup` or any sign-in route, including the headless
-  password exchange `POST /api/auth/sign_in`. The password form checks the
+  password exchange `POST /api/auth/sign_in`, and any credential, API keys
+  included, used from outside to read the site's security posture
+  (`GET /api/security/posture`, #2521). The password form checks the
   password over its LiveView socket (`SignInLive`), so the socket join is gated
   as well as the HTTP request; otherwise an outsider could test passwords.
 - **Gated by route, not by path.** The HTTP gate is the router pipelines
@@ -717,8 +720,9 @@ sign-in route to listed networks at `/editor/admin-allowlist`; see
      (`/media/:id/download` and its siblings), which serve what the session
      may read. It cannot reach the console.
   5. **Issued JWTs and API keys keep working anywhere**, including a JWT
-     obtained from a listed network before the attacker left it. A per-key
-     allowlist is a follow-up.
+     obtained from a listed network before the attacker left it, on every
+     surface but `GET /api/security/posture` (#2521), which is behind the
+     allowlist whatever the credential. A per-key allowlist is a follow-up.
   6. **The kill switch is not in the security log.** `KILN_ADMIN_ALLOWLIST_DISABLED`
      has no site and no person; the boot log warns and the allowlist page
      shows a banner, and the platform's environment history is the only trail.
@@ -1840,16 +1844,53 @@ policy is under "Security posture" in [policy-matrix.md](policy-matrix.md).
   whether metrics, the API explorer or introspection are exposed, which
   administrators hold long-lived or read-write keys, and how far behind the
   release is. The per-site second-factor check leaves platform admins out, so
-  a site admin does not learn their two-factor status either.
+  a site admin does not learn their two-factor status either. The JSON
+  endpoint applies the same rule: a site admin's key gets no `:deployment`
+  entry.
 - **Email addresses are shown on the page and nowhere else.** A site admin
   sees the addresses of that site's administrators and editors who have no
   authenticator app (until now, a site admin who is not a platform admin
   could not read another account). A platform admin also sees the addresses
   of platform admins without one, and each flagged API key's name and owner.
   They are in a result's `details`, which only the page renders. `facts`
-  carry counts and booleans only, and the SDK contract forbids secrets and
-  addresses in them, because a later release may publish facts to monitoring.
-  Nothing is stored or logged.
+  carry counts, booleans and short values, and the SDK contract forbids
+  secrets and addresses in them, because they are published to monitoring
+  (below). Nothing is stored or logged; the only copy kept is the monitoring
+  snapshot, which has no `details`.
+- **Monitoring over HTTP (#2521).** `GET /api/security/posture`
+  (`KilnCMSWeb.SecurityPostureController`, `KilnCMSWeb.SecurityPostureJSON`)
+  serves the report as JSON through a second action, `:snapshot`, under the
+  same policy as `:run` and the same scope rule
+  (`Posture.scopes_for/1`). What a key reveals:
+  - **Credential.** A JWT or API key of an administrator of the request's
+    site; a platform administrator's also gets the deployment's lines. A
+    `:draft_write` key is refused by `forbid_if DraftWriteKey` on both
+    actions, even if its owner has since become an admin. Note that a
+    long-lived `read` key on an admin account now carries this map; the
+    page could only be read through a signed-in session.
+  - **Allowlist first.** The route is behind `:admin_allowlist_api` ahead of
+    the rate limit and the credential plugs, so a caller off the list gets
+    `403` `network_not_allowed` without learning whether its key is valid.
+    The allowlist's JSON refusal details are neutral ("Not available from
+    this network", "Temporarily unavailable") since they now answer more than
+    sign-in.
+  - **No details.** `Posture.without_details/1` empties every result's
+    `details` before the report is cached, and the serializer picks each
+    field by name, so no email address, key name, check description,
+    duration or module leaves the server. A field added to `Entry` or
+    `Result` stays private until the serializer names it.
+  - **Facts and summaries are published data.** A plugin's `facts` and
+    `summary` reach every admin of the site (site checks) or every platform
+    admin (deployment checks) who holds a key. The SDK documents that.
+    Every string is passed through `String.replace_invalid/1` and non-scalar
+    fact values become `null`, so a bad result cannot break the encoding.
+  - **Cache.** The detail-free report is kept 30 s in the node's Cachex,
+    keyed by site and scope set (`KilnCMS.Cache.security_posture_key/2`), so
+    a site admin is never served a platform admin's deployment lines, and one
+    site's answer never another's. A burst of monitors runs the checks once
+    per window; a busy answer is not cached. Every response is
+    uncacheable: `cache-control: private, no-store`, or `no-store` on the
+    allowlist's own refusals.
 - **Three system reads.** The two second-factor rosters and the API key list
   read with `authorize?: false` (`User` reads are self-only; `ApiKey` reads are
   platform-admin only), each with its reason at the call site. They select
@@ -1881,8 +1922,11 @@ policy is under "Security posture" in [policy-matrix.md](policy-matrix.md).
   `KILN_ADMIN_ALLOWLIST_DISABLED` on the node that runs the report, so in a
   cluster whose nodes disagree the line can change between page loads. (4)
   The per-site cap is per node: N nodes allow 3×N concurrent reports of one
-  site. (5) Opening the page sends the update check when nothing is cached,
-  below.
+  site; monitoring runs count against the same three. (5) Opening the page,
+  or a platform admin's call to `GET /api/security/posture`, sends the update
+  check when nothing is cached, below. (6) The monitoring snapshot is per
+  node, so a cluster runs the checks up to once per node per window, and two
+  answers a second apart can differ.
 
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;

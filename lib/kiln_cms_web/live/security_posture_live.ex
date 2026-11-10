@@ -83,7 +83,7 @@ defmodule KilnCMSWeb.SecurityPostureLive do
   end
 
   defp report_result(socket, {:ok, {:error, error}}) do
-    if busy?(error) do
+    if KilnCMS.Security.Errors.PostureBusy.in?(error) do
       socket
       |> assign(:report, AsyncResult.failed(socket.assigns.report, :busy))
       |> put_flash(
@@ -97,13 +97,6 @@ defmodule KilnCMSWeb.SecurityPostureLive do
 
   defp report_result(socket, {:exit, reason}),
     do: assign(socket, :report, AsyncResult.failed(socket.assigns.report, {:exit, reason}))
-
-  defp busy?(error) do
-    error
-    |> Ash.Error.to_error_class()
-    |> Map.get(:errors, [])
-    |> Enum.any?(&match?(%KilnCMS.Security.Errors.PostureBusy{}, &1))
-  end
 
   defp too_soon?(nil), do: false
 

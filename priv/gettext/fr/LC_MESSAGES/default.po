@@ -854,6 +854,18 @@ msgstr "%{first}–%{last} sur %{total}"
 msgid "%{forms} form allowlist(s) and %{sites} site-wide embed default(s) name sites outside EMBED_ORIGINS, which caps which sites may frame forms on this deployment. Those sites are dropped from what is served, so an iframe of the form on them is blank. The saved lists are unchanged."
 msgstr "%{forms} liste(s) de sites autorisés de formulaires et %{sites} valeur(s) d’intégration par défaut de site nomment des sites hors de EMBED_ORIGINS, qui plafonne les sites pouvant encadrer des formulaires sur ce déploiement. Ces sites sont retirés de ce qui est servi : une iframe du formulaire y reste donc vide. Les listes enregistrées ne changent pas."
 
+#: lib/kiln_cms_web/list_format.ex
+#, elixir-autogen, elixir-format
+msgctxt "list"
+msgid "%{head} and %{last}"
+msgstr "%{head} et %{last}"
+
+#: lib/kiln_cms_web/list_format.ex
+#, elixir-autogen, elixir-format
+msgctxt "list"
+msgid "%{head}, %{item}"
+msgstr "%{head}, %{item}"
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{hours} h %{min} min"
@@ -1145,8 +1157,10 @@ msgstr "%{scanned} analysés, %{changes} renommés jusqu'ici."
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
-msgid "%{screens} are under Configure. Use Show all tools to list every screen here."
-msgstr "%{screens} se trouvent dans Configurer. Utilisez « Afficher tous les outils » pour lister tous les écrans ici."
+msgid "%{screens} is under Configure. Use Show all tools to list every screen here."
+msgid_plural "%{screens} are under Configure. Use Show all tools to list every screen here."
+msgstr[0] "%{screens} se trouve dans Configurer. Utilisez « Afficher tous les outils » pour lister tous les écrans ici."
+msgstr[1] "%{screens} se trouvent dans Configurer. Utilisez « Afficher tous les outils » pour lister tous les écrans ici."
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
@@ -9492,8 +9506,8 @@ msgstr "Adresse d'expéditeur"
 
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format
-msgid "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected."
-msgstr "Depuis tout autre réseau, la console et toutes les pages de connexion répondent « Indisponible depuis ce réseau », et les pages de console ouvertes sont fermées dès l’enregistrement. Le site public, les clés d’API, les jetons d’applications existants, les aperçus et les médias ne sont pas concernés."
+msgid "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected, except that the security posture endpoint for monitoring (GET /api/security/posture) also answers only to listed networks."
+msgstr "Depuis tout autre réseau, la console et toutes les pages de connexion répondent « Indisponible depuis ce réseau », et les pages de console ouvertes sont fermées dès l’enregistrement. Le site public, les clés d’API, les jetons d’applications existants, les aperçus et les médias ne sont pas concernés, sauf le point d’accès de supervision de la posture de sécurité (GET /api/security/posture), qui ne répond, lui aussi, qu’aux réseaux listés."
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
@@ -10839,6 +10853,11 @@ msgstr "Il est retiré de chaque enregistrement qui y est lié, et ceux qui sont
 #, elixir-autogen, elixir-format
 msgid "It manages settings that apply to the whole installation, so only a platform admin can open it, not even an admin of a single site."
 msgstr "Elle gère des réglages valables pour toute l’installation : seul un administrateur de la plateforme peut l’ouvrir, pas même l’administrateur d’un seul site."
+
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
+#, elixir-autogen, elixir-format
+msgid "It may belong to a different site, or your registration here may still be waiting for approval. If you meant to use another account, sign out and sign in with that one."
+msgstr "Il appartient peut-être à un autre site, ou votre inscription ici attend encore d’être approuvée. Si vous vouliez utiliser un autre compte, déconnectez-vous et connectez-vous avec celui-ci."
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -13479,6 +13498,7 @@ msgid "Not available"
 msgstr "Indisponible"
 
 #: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
+#: lib/kiln_cms_web/plugs/admin_allowlist.ex
 #, elixir-autogen, elixir-format
 msgid "Not available from this network"
 msgstr "Indisponible depuis ce réseau"
@@ -18709,6 +18729,7 @@ msgid "Sign in with your device's fingerprint, face, or PIN instead of a passwor
 msgstr "Connectez-vous avec l'empreinte digitale, le visage ou le code PIN de votre appareil au lieu d'un mot de passe. Une clé d'accès vous authentifie sur l'appareil, elle compte donc à elle seule pour deux facteurs."
 
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
 #: lib/kiln_cms_web/live/auth_page_title.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -18775,13 +18796,7 @@ msgstr "Connexion et accès"
 msgid "Sign-in could not be completed right now. Try again in a moment."
 msgstr "La connexion n’a pas pu être finalisée pour le moment. Réessayez dans un instant."
 
-#: lib/kiln_cms_web/plugs/admin_allowlist.ex
-#, elixir-autogen, elixir-format
-msgid "Sign-in is not available from this network."
-msgstr "La connexion n’est pas disponible depuis ce réseau."
-
 #: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
-#: lib/kiln_cms_web/plugs/admin_allowlist.ex
 #, elixir-autogen, elixir-format
 msgid "Sign-in is temporarily unavailable. Try again in a minute."
 msgstr "La connexion est temporairement indisponible. Réessayez dans une minute."
@@ -19922,6 +19937,7 @@ msgid "Tells search engines not to list this page, or not to follow its links. I
 msgstr "Indique aux moteurs de recherche de ne pas référencer cette page ou de ne pas suivre ses liens. Si la page est déjà publiée, le changement prend effet à la publication."
 
 #: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
+#: lib/kiln_cms_web/plugs/admin_allowlist.ex
 #, elixir-autogen, elixir-format
 msgid "Temporarily unavailable"
 msgstr "Temporairement indisponible"
@@ -22464,6 +22480,11 @@ msgstr "Pour obtenir l’accès, demandez à un administrateur de %{site} de mod
 
 #: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
 #, elixir-autogen, elixir-format
+msgid "To get access, ask an admin of %{site} to give your account a role."
+msgstr "Pour obtenir l’accès, demandez à un administrateur de %{site} d’attribuer un rôle à votre compte."
+
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
+#, elixir-autogen, elixir-format
 msgid "To get access, ask the person who administers this installation."
 msgstr "Pour obtenir l’accès, demandez à la personne qui administre cette installation."
 
@@ -23128,6 +23149,11 @@ msgstr "Les vérifications de mise à jour sont désactivées (KILN_UPDATE_CHECK
 #, elixir-autogen, elixir-format
 msgid "Update command"
 msgstr "Commande de mise à jour"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Update your receiver now: deliveries already use this secret."
+msgstr "Mettez à jour votre récepteur maintenant : les envois utilisent déjà ce secret."
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
@@ -24313,6 +24339,11 @@ msgstr "Vous êtes maintenant déconnecté"
 #, elixir-autogen, elixir-format
 msgid "You are signed in as %{role} on %{site}."
 msgstr "Vous êtes connecté en tant que %{role} sur %{site}."
+
+#: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
+#, elixir-autogen, elixir-format
+msgid "You are signed in, but your account has no role on %{site}."
+msgstr "Vous êtes connecté, mais votre compte n’a aucun rôle sur %{site}."
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format

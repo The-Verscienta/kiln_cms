@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `access-denied` and path aliases under `/access-denied`, which the new access-denied page (#2143) shadows; give each a new slug or alias.** No migration; read-only.
+  ([#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374) · [long form](docs/changelog/unreleased.md#reserved-paths-upgrade))
+
 - **Run `mix ash.migrate` (new nullable `backup_locks.waiting_*` columns; `backup_runs.scheduled_components` and `schedule_ids`, default empty). While older nodes still run, a database-only or media-only backup request may back up everything (part of #2219). Rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#backup-components-upgrade))
 
@@ -224,6 +227,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
 
 ### Added
+
+- **`GET /api/security/posture` returns the Security posture checks as JSON for monitoring: an administrator's JWT or API key (never `draft_write`), behind the site's admin allowlist, no details, cached 30 s per node.**
+  The allowlist's JSON refusals now read "Not available from this network" / "Temporarily unavailable" (codes unchanged). Guide: [docs/api.md](docs/api.md#security-posture-monitoring).
+  ([#2521](https://github.com/The-Verscienta/kiln_cms/issues/2521) · [#2648](https://github.com/The-Verscienta/kiln_cms/pull/2648) · [long form](docs/changelog/unreleased.md#security-posture-json))
 
 - **Back up only the database or only the media from a release console (`KilnCMS.Backups.request([components: [:db]], actor)`); the Backups page and the overview report each component's last backup and alarm when either failed or went stale (part of #2219).**
   Guide: [docs/backups.md](docs/backups.md#back-up-only-the-database-or-only-the-media).
@@ -457,6 +464,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Release images no longer ship `priv/static/images/logo-lockup.png` (234 KB), which nothing in Kiln referenced. An overlay that linked `/images/logo-lockup.png` must ship its own copy.**
+  ([#2401](https://github.com/The-Verscienta/kiln_cms/issues/2401))
+
 - **A custom-field range filter (`gt`, `gte`, `lt`, `lte`) no longer matches a record whose stored value is a JSON `null`, array or object.**
   They compare as "no value", as `custom_sort` already read them; before, JSON ordering made an array greater than every number. Only rows whose field was retyped or written off-type are affected.
   ([#2359](https://github.com/The-Verscienta/kiln_cms/issues/2359) · [#2551](https://github.com/The-Verscienta/kiln_cms/pull/2551) · [long form](docs/changelog/unreleased.md#custom-field-range-index-changed))
@@ -486,6 +496,10 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The signed-out home page and the default logo ship right-sized images: page image weight drops from about 1,030 KB to about 100 KB (WebP).**
   ([#2165](https://github.com/The-Verscienta/kiln_cms/issues/2165) · [long form](docs/changelog/unreleased.md#public-image-weight))
+
+- **The console sidebar and the thin page shell render the built-in logo at its small size too, instead of the 95 KB 278x379 original.**
+  A custom `logo_url` is still a plain `<img>`. The `KilnCMSWeb.Layouts.brand_logo` helper is removed; use `Layouts.brand_mark/1`.
+  ([#2400](https://github.com/The-Verscienta/kiln_cms/issues/2400) · [long form](docs/changelog/unreleased.md#console-brand-mark))
 
 - **CSV exports write a negative number as `-5`, not `'-5`; text starting with `=`, `+`, `-` or `@` is still prefixed.**
   Affects any CSV that passes a negative number to `KilnCMSWeb.CSV`; text is unchanged.
@@ -534,6 +548,12 @@ Every summary line below that was shortened links to its own entry there.
   ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
 
 ### Fixed
+
+- **The `/access-denied` page no longer tells a signed-in account with no role on the site that it is signed in as viewer; it says the account has no role there and offers Sign out.**
+  ([#2372](https://github.com/The-Verscienta/kiln_cms/issues/2372) · [long form](docs/changelog/unreleased.md#access-denied-no-role))
+
+- **The Essentials sidebar hint now lists the screens it names the way each language does: "Forms, Webhooks, API keys and Trash" in English, "… y Papelera" in Spanish, "… et Corbeille" in French, instead of a bare comma list. A single screen reads "is under Configure".**
+  ([#2379](https://github.com/The-Verscienta/kiln_cms/issues/2379))
 
 - **The editor can start a new document of a type with a required custom field that has no default; it used to fail with "Couldn't create the draft" and log nothing. The field starts blank, the first save asks for it, and the refused-create path now logs its error.**
   Publish and scheduled publish now refuse a document while a required custom field is blank, including drafts written before the field became required.
@@ -615,6 +635,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The sign-in, register and reset pages now have a header landmark, one `h1`, and `autocomplete` on their email and password boxes.**
   ([#2162](https://github.com/The-Verscienta/kiln_cms/issues/2162) · [long form](docs/changelog/unreleased.md#auth-pages-landmarks-autocomplete))
+
+- **The first-run setup page's logo row is now a header landmark, and the invite-only sign-in page is tested for one `h1`, one header and one main.**
+  ([#2390](https://github.com/The-Verscienta/kiln_cms/issues/2390) · [long form](docs/changelog/unreleased.md#setup-header-invite-only-landmarks))
 
 - **`custom_sort` ranks a stored JSON `null`, array or object as no value (last in either direction), and page 2 of a keyset-paged sort no longer fails on one.**
   ([long form](docs/changelog/unreleased.md#custom-sort-json-null-last))

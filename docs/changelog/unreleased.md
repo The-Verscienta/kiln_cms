@@ -7,6 +7,29 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="reserved-paths-upgrade"></a>
+
+- **Run `mix kiln.reserved_paths` once after upgrading to list the records whose
+  URL the new `/access-denied` page shadows (#2374).** In a release:
+  `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`. Read-only; no
+  migration.
+  - **Why.** #2143 routes `GET /access-denied` ahead of delivery and adds
+    `access-denied` to the reserved segments. New writes were already refused:
+    a root-served (page) slug of `access-denied` fails `SlugAvailable`, and a
+    path alias starting `/access-denied` fails `PathAliasValid`; a post's
+    `/blog/access-denied` is unaffected. Both validations fire only when the
+    slug or alias changes, so a record stored earlier keeps its URL, and the
+    access-denied page is served there instead.
+  - **What it lists.** Every page (in any state, every organization) whose slug
+    is a reserved segment or another type's URL prefix, and every record whose
+    path alias starts with a reserved segment, with its type, id, state, locale
+    and title. The check is generic, so it also covers segments reserved later.
+  - **What to do.** Give each listed record a new slug or alias in the editor,
+    and add a redirect from the old URL if it was ever linked. Nothing is
+    renamed for you. The task exits non-zero while anything is listed, so it
+    can gate an upgrade script.
+  ([#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374))
+
 <a id="backup-components-upgrade"></a>
 
 - **Run `mix ash.migrate` for per-component backups (part of #2219). While
@@ -1370,6 +1393,76 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="security-posture-json"></a>
+
+- **The Security posture report is available as JSON for monitoring, at
+  `GET /api/security/posture` (#2521, part 2 of #2252).** The page told an
+  administrator what was off, but only when someone opened it; a monitor can
+  now poll the same checks and alert when a line turns **Fix now**. Guides:
+  [Security posture (monitoring)](../api.md#security-posture-monitoring) and
+  [Monitor the posture from a script](../security-posture.md#monitor-the-posture-from-a-script).
+  - **Who may call it.** An administrator of the request's site, with a
+    bearer JWT or an API key they own; a platform administrator also gets the
+    installation's checks (`"scopes": ["site", "deployment"]`). Use a
+    **Read-only** key: the posture's own **API keys** line reports a
+    read-write key on an administrator as **Fix now**. A `draft_write` key is
+    refused (`403` `forbidden`) even if its owner has since become an
+    administrator, because such a key may draft and nothing else. The
+    `PostureReport` policy gains that `forbid_if DraftWriteKey` on the page's
+    `:run` action too; a drafts-only key could never reach the page.
+  - **Behind the admin allowlist.** With a list on, the endpoint answers only
+    to listed networks, whatever the credential, so add the monitor's address.
+    This is the first API-key route the allowlist gates: the allowlist page's
+    note now reads "... The public site, API keys, existing app tokens,
+    previews and media are not affected, except that the security posture
+    endpoint for monitoring (GET /api/security/posture) also answers only to
+    listed networks."
+  - **The answer.** `version` (1), `generated_at`, `org_id`, `scopes`,
+    `status` (`pass` / `warn` / `fail`, the page's badge), `counts` per
+    status, and `checks`, each with `id`, `scope`, `source` (`core`, `plugin`,
+    `config`), `plugin`, `status`, `title`, `summary`, `fix_path` (relative
+    to the console host), `docs_url`, `facts` and `error`. Never a line's
+    **Details** (the email addresses and key names), its description, its
+    duration or its module.
+  - **The contract.** Additive only, with its own `version`. Value sets are
+    open (tolerate a status or `counts` key you don't know, and read it as a
+    warning); read checks by `id`, not position; core ids and core facts keys
+    are contract; `title` and `summary` are English text that may be
+    reworded.
+  - **Cached 30 seconds per node**, per site and scope set, without details:
+    a burst of monitors runs the checks once per window, and `generated_at`
+    can be that old. Every answer, refusals included, is
+    uncacheable (`cache-control: private, no-store`; the allowlist's refusals
+    send `no-store`). A platform administrator's call on a
+    cold cache starts the same background update, security-notices and
+    plugin checks the page does.
+  - **Status codes, in order:** `403` `network_not_allowed` or `503`
+    `temporarily_unavailable` (`retry-after: 30`) from the allowlist; `429`
+    from the `api` bucket; `401` `invalid_token` or `unauthenticated`; `403`
+    `forbidden`; `503` `temporarily_unavailable` with `retry-after: 5` while
+    three reports of the site are already running on the server.
+  - **Shorter allowlist refusal details on the JSON API.** Because the
+    allowlist's JSON refusals now answer more than sign-in, on
+    `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` too the `403`
+    detail changes from "Sign-in is not available from this network." to
+    "Not available from this network", and the `503` detail from "Sign-in is
+    temporarily unavailable. Try again in a minute." to "Temporarily
+    unavailable". The codes are unchanged; a client that matched on the
+    text should branch on `code`.
+  - **Plugin authors (`kiln_plugin` 1.4).** A check's `facts` and `summary`
+    are now published to every administrator who can see the line, so facts
+    must carry no secret, token or address (the SDK always said so).
+    `Kiln.Security.Check.Result.sanitize/1` now replaces invalid UTF-8
+    (U+FFFD) in the summary, details, fact keys and string fact values, and
+    `fix_path/1` and `docs_url/1` drop a non-UTF-8 value; the core repairs a
+    non-UTF-8 title or description the same way, and lists a plugin whose
+    `name/0` is not valid UTF-8 under its module name. A result that makes
+    the sanitizer raise is one **Could not run** line, not a failed report.
+  - **No migration, no new environment variable.** Rolling the pin back
+    removes the endpoint and restores the old detail text.
+  - **API spec.** `docs/api/openapi.json` describes the route
+    (`getSecurityPosture`, tag `Monitoring`), with no `enum` on any field.
 
 <a id="backup-components"></a>
 
@@ -3328,8 +3421,10 @@ carries the reasoning.
 - **Admins can rotate a webhook endpoint's signing secret (#2347).** Each row
   on `/editor/webhooks` has a **Rotate secret** button (admin only, with a
   confirmation). It replaces the secret and reveals the new one so you can
-  copy it into the receiver. Before this, the only way to change a secret was
-  to delete the endpoint and add it again, which also lost its settings.
+  copy it into the receiver; a hint under it says deliveries already use the
+  new secret, until you hide it (#2384). Before this, the only way to change
+  a secret was to delete the endpoint and add it again, which also lost its
+  settings.
   Rotation takes effect immediately and there is no dual-secret window: it is
   the remedy for a leaked secret, so the old one must stop working. Queued and
   retried deliveries sign at send time and use the new secret; one attempt
@@ -4034,6 +4129,22 @@ carries the reasoning.
     `BACKUP_KEEP_DAYS`.
   Guide: [What retention deletes and what it keeps](../backups.md#what-retention-deletes-and-what-it-keeps).
 
+<a id="console-brand-mark"></a>
+
+- **The console and the thin page shell use the small built-in logo (#2400).**
+  #2165 moved the public header, footer and sign-in brand to
+  `KilnCMSWeb.Layouts.brand_mark/1`, but the console sidebar and the thin
+  shell (`Layouts.app`) still fetched `logo-mark.png`, the 95 KB 278x379
+  original, to show it at 28 to 32 pixels. Both now render through
+  `brand_mark/1`: a `<picture>` of `logo-mark-sm.webp` over
+  `logo-mark-sm.png` when the brand uses the built-in logo, and a plain
+  `<img>` of exactly the configured URL otherwise.
+  - **Overlays.** The `KilnCMSWeb.Layouts.brand_logo` helper, which returned the
+    resolved logo URL and had no other callers in core, is removed. An
+    overlay that called it can use
+    `KilnCMS.Branding.for_org(org).logo_url`, or render
+    `<Layouts.brand_mark brand={...} />` to get the sized variant.
+
 <a id="public-image-weight"></a>
 
 - **The signed-out home page and the built-in logo no longer ship oversized
@@ -4475,6 +4586,23 @@ carries the reasoning.
     has a new name; delete superseded items in the media library.
 
 ## Fixed
+
+<a id="access-denied-no-role"></a>
+
+- **The access-denied page tells an account with no role on the site so,
+  instead of calling it a viewer (#2372).** The page (#2143) read the viewer's
+  tier on the current site and showed "no tier" as viewer. An account that
+  belongs only to another site, or whose registration here awaits approval
+  or was rejected, has no role here at all, so it was told "You are signed in
+  as viewer on <site>" and offered **Go to your account**. It now reads "You
+  are signed in, but your account has no role on <site>", says why that can
+  happen, asks for an admin to give the account a role, and offers **Sign
+  out** so someone signed in with the wrong account can switch. Viewers,
+  editors, admins and signed-out visitors see what they saw before. No
+  migration or setting; overlays that replace `access_denied.html.heex` keep
+  their own copy, and now receive `viewer_role: :none` for these accounts
+  where they used to receive `:viewer`.
+  ([#2372](https://github.com/The-Verscienta/kiln_cms/issues/2372))
 
 <a id="public-delivery-session-locale-leak"></a>
 
@@ -5185,6 +5313,22 @@ carries the reasoning.
     `ash_authentication_phoenix`; the `/reset` request form is not in that
     comparison, so re-read `AuthResetRequestForm` against upstream's
     `Password.ResetForm` by hand.
+
+<a id="setup-header-invite-only-landmarks"></a>
+
+- **The first-run setup page's logo row is now a header landmark, and the
+  invite-only sign-in page is tested for one `h1`, one header and one main
+  (#2390).** Follow-up to #2162.
+  - **`/setup`.** The environment banner and logo row moved out of `<main>`
+    into a `<header>`, as on the sign-in pages, so the page has a header
+    landmark beside its `h1` and `<main id="main">`. The spacing is unchanged.
+  - **Invite-only sign-in.** With `registration_enabled: false` the router
+    mounts sign-in without a register path, and it picks that branch at compile
+    time, so the test build never had it. A test router now mounts the same
+    route with the same arguments and asserts its `/sign-in` and `/reset`
+    pages for one `h1`, one header, one main and no link to `/register`. If the
+    invite-only `sign_in_route` in `KilnCMSWeb.Router` changes, change the
+    test router in `KilnCMSWeb.AuthLandmarksTest` with it.
     `AuthPasswordInput.password_field/1` and `password_confirmation_field/1`
     now require an `autocomplete` attribute; an overlay that calls them must
     pass one. No configuration, migration or upgrade step.

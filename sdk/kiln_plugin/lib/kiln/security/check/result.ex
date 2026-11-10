@@ -19,11 +19,13 @@ defmodule Kiln.Security.Check.Result do
       dropped.
     * `facts` — up to #{20} machine-readable values (`%{"admins_without" =>
       2}`): string or atom keys, and values that are `nil`, a boolean, a number
-      or a short string. A later release may publish them to monitoring, so
-      they must never carry a secret, a token or a person's address.
+      or a short string. They are published to monitoring at
+      `GET /api/security/posture`, so they must never carry a secret, a token
+      or a person's address.
 
   The core passes every result through `sanitize/1` before it is shown, so a
-  result over these limits is trimmed rather than refused.
+  result over these limits is trimmed rather than refused, and text that is
+  not valid UTF-8 has each bad byte sequence replaced with U+FFFD.
   """
 
   @statuses [:pass, :warn, :fail, :unknown, :n_a]
@@ -75,7 +77,9 @@ defmodule Kiln.Security.Check.Result do
   @doc """
   `term` held to the limits in the moduledoc: `{:ok, result}` with the summary
   and details trimmed, an unusable `fix_path` or `docs_url` dropped, and only
-  the facts that fit kept (keys as strings). `:error` when `term` is not a
+  the facts that fit kept (keys as strings). Invalid UTF-8 in the summary, a
+  detail, a fact key or a string fact value is replaced (U+FFFD) before it is
+  trimmed, so the result always encodes as JSON. `:error` when `term` is not a
   result at all, or its status or summary is not one a result may carry.
   """
   @spec sanitize(term()) :: {:ok, t()} | :error
@@ -84,7 +88,7 @@ defmodule Kiln.Security.Check.Result do
     {:ok,
      %__MODULE__{
        status: status,
-       summary: trim(summary, @max_summary),
+       summary: summary |> String.replace_invalid() |> trim(@max_summary),
        details: details(result.details),
        fix_path: fix_path(result.fix_path),
        docs_url: docs_url(result.docs_url),
@@ -102,7 +106,7 @@ defmodule Kiln.Security.Check.Result do
     list
     |> Enum.filter(&is_binary/1)
     |> Enum.take(@max_details)
-    |> Enum.map(&trim(&1, @max_detail))
+    |> Enum.map(&(&1 |> String.replace_invalid() |> trim(@max_detail)))
   end
 
   defp details(_other), do: []
@@ -110,21 +114,26 @@ defmodule Kiln.Security.Check.Result do
   @doc """
   `path` when it is a console path a fix link may point at: it starts with
   `/editor/`, holds no `//`, no backslash, no scheme and no whitespace.
-  `nil` otherwise.
+  `nil` otherwise, and for a path that is not valid UTF-8 (a link is dropped,
+  not repaired).
   """
   @spec fix_path(term()) :: String.t() | nil
   def fix_path(path) when is_binary(path) do
-    if String.starts_with?(path, "/editor/") and not String.contains?(path, ["//", "\\"]) and
+    if String.valid?(path) and String.starts_with?(path, "/editor/") and
+         not String.contains?(path, ["//", "\\"]) and
          not String.match?(path, ~r/[\s\x00-\x1f\x7f]/u) and String.length(path) <= 300,
        do: path
   end
 
   def fix_path(_path), do: nil
 
-  @doc "`url` when it is an `https://` URL with a host and no credentials, `nil` otherwise."
+  @doc """
+  `url` when it is an `https://` URL with a host and no credentials, `nil`
+  otherwise, and for a URL that is not valid UTF-8.
+  """
   @spec docs_url(term()) :: String.t() | nil
   def docs_url(url) when is_binary(url) do
-    case URI.new(url) do
+    case String.valid?(url) && URI.new(url) do
       {:ok, %URI{scheme: "https", host: host, userinfo: nil}}
       when is_binary(host) and host != "" ->
         if String.match?(url, ~r/[\s"'<>\\]/) or String.length(url) > 500, do: nil, else: url
@@ -157,6 +166,8 @@ defmodule Kiln.Security.Check.Result do
     do: fact_key(Atom.to_string(key))
 
   defp fact_key(key) when is_binary(key) do
+    key = String.replace_invalid(key)
+
     if key != "" and String.length(key) <= @max_key, do: {:ok, key}, else: :error
   end
 
@@ -165,6 +176,8 @@ defmodule Kiln.Security.Check.Result do
   defp fact_value(value) when is_nil(value) or is_boolean(value) or is_number(value),
     do: {:ok, value}
 
-  defp fact_value(value) when is_binary(value), do: {:ok, trim(value, @max_fact_string)}
+  defp fact_value(value) when is_binary(value),
+    do: {:ok, value |> String.replace_invalid() |> trim(@max_fact_string)}
+
   defp fact_value(_value), do: :error
 end
