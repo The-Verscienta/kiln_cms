@@ -11,7 +11,7 @@ defmodule KilnCMSWeb.RenderAsyncBudgetTest do
   `SiteStorageLiveTest` failed CI twice in one day (#1644, #1689).
 
   So the rule is checked instead of remembered, by a static read of the test
-  files, as `KilnCMS.Collab.PrototypeFlagIsolationTest` does for its flag.
+  files, as `KilnCMS.AsyncGlobalStateTest` does for app env.
   """
   use ExUnit.Case, async: true
 
