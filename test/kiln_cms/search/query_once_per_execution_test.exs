@@ -20,6 +20,7 @@ defmodule KilnCMS.Search.QueryOncePerExecutionTest do
   alias KilnCMS.CMS
   alias KilnCMS.Repo
   alias KilnCMS.Search
+  alias KilnCMS.Test.QueryCounting
 
   setup do
     original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
@@ -46,7 +47,7 @@ defmodule KilnCMS.Search.QueryOncePerExecutionTest do
       handler,
       [:kiln_cms, :repo, :query],
       fn _event, _measurements, meta, _config ->
-        if meta[:source] == "pages",
+        if meta[:source] == "pages" and QueryCounting.on_behalf_of?(test_pid),
           do: send(test_pid, {:page_sql, {meta[:query], meta[:params]}})
       end,
       nil

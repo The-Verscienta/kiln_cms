@@ -43,8 +43,9 @@ defmodule KilnCMS.Cache.ClusterBust do
   A broadcast is asynchronous even to the sending node's own subscriber, so a
   request that saves settings and immediately re-reads them could still see the
   old value. Deleting locally first makes the write's own node
-  read-your-writes consistent, and the redundant delete the broadcast then
-  triggers there is idempotent.
+  read-your-writes consistent. The broadcast then deletes the keys there a
+  second time, which is harmless: if a read cached a key again in between, that
+  entry is dropped too and the next read rebuilds it.
 
   ## Single-node deployments
 
