@@ -69,11 +69,79 @@ carries the reasoning.
   lookup and the site's API keys page fail, so delete them and mint new ones
   after rolling forward. Never `UPDATE` them to `'read'`: that silently
   changes what a key someone already holds can do. Security events need
-  nothing, since v1.8.0 has no security log. Field definitions of type
-  `key_value` or `telephone` also break v1.8.0's reads, and deleting them
-  loses data: check
-  [#2605](https://github.com/The-Verscienta/kiln_cms/issues/2605) before
-  rolling back if any site uses them. Details in
+  nothing, since v1.8.0 has no security log.
+
+  **Custom fields of a type newer than v1.8.0 (#2605).** Nine field types
+  were added after v1.8.0 (#2278): `email`, `telephone`, `color`, `slug`,
+  `time`, `json`, `range`, `key_value` and `link`. Scalar lists (#2289) also
+  let `integer`, `float`, `date`, `datetime` and `url` fields be `multiple`.
+  Deleting a field also deletes the values every record holds in it, so take
+  a backup first and decide per field:
+  1. **Find the fields v1.8.0 cannot read at all.** v1.8.0 has no atom for
+     `key_value` or `telephone`, so while one such row exists every
+     field-definition read fails there: the Fields screen, the content editor,
+     every save of a record with custom fields and delivery. Run in `psql`:
+     ```sql
+     SELECT org_id, content_type, type_definition_id, name, field_type
+     FROM field_definitions WHERE field_type IN ('key_value', 'telephone');
+     ```
+     No rows: skip to step 4.
+  2. **Back up.** A database backup (`/editor/backups` or
+     `scripts/backup.sh`) keeps the values. A field export
+     (`GET /editor/fields/export.json`, or `KilnCMS.CMS.FieldSync.export/1`)
+     keeps only the field definitions, not what records hold in them.
+  3. **Delete them on this release, before rolling back.** In a remote
+     console (`bin/kiln_cms remote`):
+     ```elixir
+     for org <- KilnCMS.Accounts.list_organizations!(authorize?: false),
+         field <-
+           KilnCMS.CMS.list_field_definitions!(
+             authorize?: false,
+             tenant: org.id,
+             query: [filter: [field_type: [in: [:key_value, :telephone]]]]
+           ) do
+       KilnCMS.CMS.destroy_field_definition!(field, authorize?: false, tenant: org.id)
+     end
+     ```
+     This deletes each field the way Delete on the Fields screen does: its
+     values are removed from every record and the type caches are cleared. A
+     field that another field's condition (Show when, Required when) reads is
+     refused with "is used in the conditions of …; remove those conditions
+     first". Edit that field, remove the condition, and run the loop again.
+
+     Without a console, `DELETE FROM field_definitions WHERE field_type IN
+     ('key_value', 'telephone');` also unblocks v1.8.0's reads, but the values
+     stay in each record's `custom_fields` until v1.8.0 next saves that
+     record, and a node still running keeps the deleted rows in its caches
+     until it restarts (the rollback restarts it). Prefer the console loop.
+  4. **The other new types load on v1.8.0 but don't fully work there.**
+     v1.8.0 reads an `email`, `color`, `slug`, `time`, `json`, `range` or
+     `link` field, but it refuses to save a record that holds a value in one
+     ("has an unregistered field type"). A map value (a `range`, a `link`, a
+     `json` object) can also stop v1.8.0's editor from opening the record.
+     Either delete those fields too (as in step 3, with those types in the
+     filter), or leave the records that use them alone until you roll
+     forward. To find them:
+     ```sql
+     SELECT org_id, content_type, type_definition_id, name, field_type
+     FROM field_definitions
+     WHERE field_type IN ('email', 'color', 'slug', 'time', 'json', 'range', 'link');
+     ```
+  5. **The same goes for the new scalar lists.** v1.8.0 has no `multiple` for
+     these types, so a record holding a list in one can fail to save or to
+     open there:
+     ```sql
+     SELECT org_id, content_type, type_definition_id, name, field_type
+     FROM field_definitions
+     WHERE multiple AND field_type IN ('integer', 'float', 'date', 'datetime', 'url');
+     ```
+
+  These steps were run against this release. What v1.8.0 does with the
+  remaining rows is read from its code, not tried on a v1.8.0 deployment.
+  From this release on, a rollback needs none of this for field types: a
+  field of a type the older release doesn't know is hidden there and its
+  values are kept ([unknown field types](#unknown-field-type-rollback)).
+  Details in
   [New values in an atom column](../releasing.md#new-values-in-an-atom-column).
 
 <a id="security-alerts-upgrade"></a>
@@ -4383,6 +4451,60 @@ carries the reasoning.
     has a new name; delete superseded items in the media library.
 
 ## Fixed
+
+<a id="unknown-field-type-rollback"></a>
+
+- **A custom field of a type this release doesn't know no longer breaks the
+  site: it is hidden, its values are kept, and an admin can delete it from
+  Fields (#2605).** Such a field comes from a newer release, read after a
+  rollback, or from a plugin that provided the type and was removed.
+  `FieldDefinition.field_type` loaded stored text as an atom, so a value
+  with no atom failed every field-definition read that met the row: the
+  Fields screen, the content editor, every save of a record of that type,
+  and delivery. That is what makes a rollback to v1.8.0 need
+  [a cleanup](#rollback-to-1-8-0-upgrade).
+  - **What changed.** `field_type` is now a `KilnCMS.Types.KnownAtom`, and
+    every read of field definitions leaves out, in SQL, a row whose type is
+    not registered. The content editor, fired delivery, the JSON:API
+    `type-definitions` include, the schema export and the field sync export
+    skip the field as if it were not defined.
+  - **Values are kept.** Every write carries the stored value through
+    unchanged: a save of the other fields, a title edit, a restore, a working
+    copy's promote, a duplicate. An API write that sends the field must send
+    the value it holds; a different value is refused with "can't be changed:
+    its field type (…) is not one this release knows". A duplicate leaves a
+    unique one blank, as it does every unique field. A content import does
+    not bring a value in under its name (it is the other site's field's), and
+    drops it with the usual warning.
+  - **Conditions stay.** A field whose Show when or Required when reads a
+    hidden field can still be edited and reordered, and renaming a field a
+    hidden field's condition reads rewrites that condition. The edit form
+    shows such a condition as a note with Remove condition.
+  - **Who sees the value.** A private field stays masked from readers below
+    editor. A public one is still in the raw `custom_fields` attribute of a
+    JSON:API read, as it is in the `kiln_reporting_v1` views, but fired
+    delivery (`/api/content`, `/api/sync`, webhooks, static export) leaves it
+    out.
+  - **Watch for:** a computed field, or a slug or SEO pattern, that reads a
+    hidden field reads it as missing, so its value changes on the record's
+    next write after the rollback.
+  - **The Fields screen** lists these fields under **Fields of an unknown
+    type**, with their type and owner, and offers only **Delete**, which
+    also deletes their values; a group sub-field or link field of an unknown
+    type is listed there too, under its parent. A delete another field's
+    condition blocks says which field ("… reads this field in a condition:
+    remove that condition first."). Any other update of such a field is
+    refused ("is
+    not a field type this release knows, so the field can't be changed").
+    Upgrade Kiln or reinstall the plugin to use it again. Guide:
+    [Delete a field of an unknown type](../extending-content.md#delete-a-field-of-an-unknown-type).
+  - **For developers.** `FieldDefinition.unknown_type?/1`, and
+    `FieldDefinition.all_types_context/0` for a read that must see these
+    rows (`context:` on the read; relationship loads stay filtered). The
+    filter is `KilnCMS.CMS.Preparations.RegisteredFieldTypes`. A new test,
+    `test/kiln_cms/atom_columns_test.exs`, fails on any new `:atom`
+    attribute without `one_of` in the core domains unless it is on its
+    reviewed list. No migration: the column stays text.
 
 <a id="public-delivery-session-locale-leak"></a>
 

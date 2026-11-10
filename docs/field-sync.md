@@ -97,6 +97,12 @@ must fail on a refused import.
   pass `--allow-data-loss`, which then behaves exactly as the same edit in the
   console (a delete purges the key from every record). A link or group
   sub-field is judged by its parent's key.
+- **A field of an unknown type is invisible to both directions.** A field
+  whose type this release doesn't know (after a rollback, or once its plugin
+  is removed) is left out of the export, and an import neither updates nor
+  prunes it. If the file defines a field of the same name on that type,
+  delete the hidden one first
+  ([Delete a field of an unknown type](extending-content.md#delete-a-field-of-an-unknown-type)).
 - **A rename is a delete plus a create.** Names are the key between
   environments, so a file that renames `dosage` to `dose` blocks on the old
   field if it holds data. Rename it in the target's console first (that moves

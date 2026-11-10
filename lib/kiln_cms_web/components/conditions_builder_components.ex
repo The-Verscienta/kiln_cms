@@ -108,9 +108,14 @@ defmodule KilnCMSWeb.ConditionsBuilderComponents do
         :if={@state.nested?}
         class="flex flex-wrap items-center justify-between gap-2 rounded border border-base-content/10 bg-base-200/40 p-2 text-xs"
       >
-        <span>
+        <span :if={!Map.get(@state, :held?)}>
           {gettext(
             "This field has a nested condition set through the API. It can't be edited here; it stays as it is until you remove it."
+          )}
+        </span>
+        <span :if={Map.get(@state, :held?)}>
+          {gettext(
+            "This condition reads a field of a type this version of Kiln doesn't know. It can't be edited here; it stays as it is until you remove it."
           )}
         </span>
         <button

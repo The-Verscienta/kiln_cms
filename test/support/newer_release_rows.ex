@@ -2,10 +2,11 @@ defmodule KilnCMS.NewerReleaseRows do
   @moduledoc """
   Rows a newer release wrote, for testing how this one reads them (#2509).
 
-  A security event or a notification whose type this release does not know
-  cannot be made through the resource (input stays strict), so it is inserted
-  as raw SQL, the way the newer release's code would have stored it. The
-  stored name is a string no code in this VM names as an atom.
+  A security event, a notification or a custom field definition (#2605)
+  whose type this release does not know cannot be made through the resource
+  (input stays strict), so it is inserted as raw SQL, the way the newer
+  release's code would have stored it. The stored name is a string no code in
+  this VM names as an atom.
   """
 
   @unknown "zz_from_a_newer_release_2509"
@@ -77,6 +78,51 @@ defmodule KilnCMS.NewerReleaseRows do
         attrs[:actor_name],
         attrs[:read_at],
         now
+      ]
+    )
+
+    id
+  end
+
+  @doc """
+  The stored name of a custom field type this release does not know (#2605):
+  no atom of it exists in this VM.
+  """
+  @spec unknown_field_type() :: String.t()
+  def unknown_field_type, do: "zz_field_type_from_a_newer_release_2605"
+
+  @doc """
+  Insert a `field_definitions` row whose `field_type` (default
+  `unknown_field_type/0`) this release may not know (#2605). Takes `:org_id`,
+  `:content_type` (a type name, default `"page"`; pass `nil` with
+  `:type_definition_id`), `:type_definition_id`, `:link_of_id`,
+  `:group_of_id`, `:name`, `:label`, `:field_type`, `:private`,
+  `:validation`, `:position`. Returns its id.
+  """
+  @spec field_definition!(map()) :: Ecto.UUID.t()
+  def field_definition!(attrs \\ %{}) do
+    id = Ecto.UUID.generate()
+
+    KilnCMS.Repo.query!(
+      """
+      INSERT INTO field_definitions
+        (id, org_id, content_type, type_definition_id, link_of_id, group_of_id,
+         name, label, field_type, private, validation, position)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      """,
+      [
+        dump(id),
+        dump(Map.get(attrs, :org_id, KilnCMS.Accounts.default_org_id())),
+        Map.get(attrs, :content_type, "page"),
+        dump(attrs[:type_definition_id]),
+        dump(attrs[:link_of_id]),
+        dump(attrs[:group_of_id]),
+        Map.get(attrs, :name, "newer_#{System.unique_integer([:positive])}"),
+        Map.get(attrs, :label, "From a newer release"),
+        Map.get(attrs, :field_type, unknown_field_type()),
+        Map.get(attrs, :private, false),
+        Map.get(attrs, :validation, %{}),
+        Map.get(attrs, :position, 0)
       ]
     )
 

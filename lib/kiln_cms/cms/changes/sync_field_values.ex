@@ -86,7 +86,12 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
         context
         |> Ash.Context.to_opts()
         |> Keyword.put(:tenant, changeset.to_tenant)
-        |> Keyword.put(:context, %{warn_on_transaction_hooks?: false})
+        # A dependent of a type this release does not know (#2605) has its
+        # rule rewritten too: `KnownFieldType` admits this one write to it.
+        |> Keyword.put(:context, %{
+          warn_on_transaction_hooks?: false,
+          kiln_condition_rename: true
+        })
 
       definition
       |> Map.put(:name, from)

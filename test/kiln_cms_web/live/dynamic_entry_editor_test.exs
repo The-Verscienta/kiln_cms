@@ -126,6 +126,53 @@ defmodule KilnCMSWeb.DynamicEntryEditorTest do
            ).id == entry.id
   end
 
+  # #2605: a field whose type this release does not know (a newer release's,
+  # after a rollback) is skipped, and a save keeps the value records hold.
+  test "a field of an unknown type is not shown, and a save keeps its value", %{conn: conn} do
+    admin = authed_user(:admin)
+    definition = define_recipe_type!(admin)
+
+    KilnCMS.NewerReleaseRows.field_definition!(%{
+      content_type: nil,
+      type_definition_id: definition.id,
+      name: "specs",
+      label: "Spec sheet"
+    })
+
+    entry =
+      CMS.create_entry!(
+        %{
+          title: "Waffles",
+          slug: "waffles-#{System.unique_integer([:positive])}",
+          type_definition_id: definition.id,
+          custom_fields: %{"servings" => 2}
+        },
+        actor: admin
+      )
+
+    held = %{"rows" => [%{"key" => "Iron", "value" => "cast"}]}
+
+    KilnCMS.Repo.query!(
+      "UPDATE entries SET custom_fields = custom_fields || $1 WHERE id = $2",
+      [%{"specs" => held}, Ecto.UUID.dump!(entry.id)]
+    )
+
+    {:ok, editor_lv, html} =
+      conn |> log_in(admin) |> live(~p"/editor/content/#{definition.name}/#{entry.id}")
+
+    assert html =~ "Servings"
+    refute html =~ "Spec sheet"
+
+    editor_lv
+    |> form("##{definition.name}-editor", %{
+      "form" => %{"title" => "Waffles", "custom_fields" => %{"servings" => "6"}}
+    })
+    |> render_submit()
+
+    saved = ContentTypes.get_record!(definition.name, entry.id, actor: admin)
+    assert saved.custom_fields == %{"servings" => 6, "specs" => held}
+  end
+
   test "media and reference pickers render and save write-time snapshots", %{conn: conn} do
     admin = authed_user(:admin)
 

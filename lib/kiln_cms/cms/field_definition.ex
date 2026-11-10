@@ -49,6 +49,21 @@ defmodule KilnCMS.CMS.FieldDefinition do
   the editor input — a select's radio buttons, plain text on one line, a
   plugin type's own — from what `KilnCMS.CMS.FieldWidgets` offers for the
   field's settings. It never changes what is stored or delivered.
+
+  ## A field type this release does not know
+
+  A row can hold a `field_type` this release does not register (#2605): one a
+  newer release added, read after a rollback, or a type whose plugin was
+  removed. Every read leaves such a row out
+  (`KilnCMS.CMS.Preparations.RegisteredFieldTypes`), so the editor, coercion,
+  filters, the schema export and freshly computed delivery skip the field as
+  if it were not defined. Its stored values are kept, not erased, by every
+  write (`KilnCMS.CMS.Changes.ApplyCustomFields`), and they are still what a
+  record holds: the content API's raw `custom_fields` and an as-stored replay
+  (a point-in-time read) return them, unless the field is private, which
+  stays masked. Deleting the field is what withdraws them; the Fields screen
+  lists such rows apart with a delete. See `unknown_type?/1` and
+  `all_types_context/0`.
   """
   use Ash.Resource,
     domain: KilnCMS.CMS,
@@ -213,6 +228,41 @@ defmodule KilnCMS.CMS.FieldDefinition do
       do: not KilnCMS.CMS.ContentTypes.type?(type)
 
   def orphaned?(_definition), do: false
+
+  @doc """
+  Whether `definition`'s `field_type` is one this release does not register
+  (#2605): stored text with no atom (it loads as a `KilnCMS.Types.UnknownAtom`),
+  or an atom `KilnCMS.CMS.FieldTypes.names/0` no longer lists.
+
+  A newer release's type read after a rollback, or a type whose plugin was
+  removed. Such a row is left out of every ordinary read
+  (`Preparations.RegisteredFieldTypes`); a read that passes
+  `all_types_context/0` sees it, and must handle it.
+
+      iex> KilnCMS.CMS.FieldDefinition.unknown_type?(%{field_type: :string})
+      false
+
+      iex> KilnCMS.CMS.FieldDefinition.unknown_type?(%{field_type: %KilnCMS.Types.UnknownAtom{value: "x"}})
+      true
+  """
+  @spec unknown_type?(t() | map()) :: boolean()
+  def unknown_type?(%{field_type: %KilnCMS.Types.UnknownAtom{}}), do: true
+
+  def unknown_type?(%{field_type: type}) when is_atom(type) and not is_nil(type),
+    do: type not in KilnCMS.CMS.FieldTypes.names()
+
+  def unknown_type?(_definition), do: false
+
+  @doc """
+  The read `context` that includes rows of an unknown field type
+  (`unknown_type?/1`), which every read leaves out otherwise
+  (`Preparations.RegisteredFieldTypes`). Top-level only: a relationship the
+  read loads (`link_fields`, `group_fields`) stays filtered.
+
+      CMS.list_field_definitions!(actor: actor, context: FieldDefinition.all_types_context())
+  """
+  @spec all_types_context() :: map()
+  def all_types_context, do: %{field_types: :all}
 
   @doc """
   The content type names a `:reference` definition may point at: its
@@ -432,6 +482,14 @@ defmodule KilnCMS.CMS.FieldDefinition do
     end
   end
 
+  preparations do
+    # A row whose `field_type` this release does not register (#2605) — a
+    # newer release's type after a rollback, a removed plugin's — is left out
+    # of every read, in SQL, unless the read passes `all_types_context/0`.
+    # Nothing downstream has a clause for such a type.
+    prepare KilnCMS.CMS.Preparations.RegisteredFieldTypes
+  end
+
   changes do
     # A formula belongs to a `:computed` field only — drop it on any other type
     # so switching an existing computed field away isn't a dead end (#429).
@@ -613,10 +671,22 @@ defmodule KilnCMS.CMS.FieldDefinition do
       public?: true,
       constraints: [max_length: KilnCMS.Limits.line()]
 
-    # No `one_of` constraint: the allowed set includes plugin-registered types
-    # (`KilnCMS.CMS.FieldTypes.names/0`), enforced by `Validations.KnownFieldType`
-    # so the check reads the registry rather than a compile-baked constraint.
-    attribute :field_type, :atom do
+    # The value type: a built-in or a plugin `Kiln.FieldType`
+    # (`KilnCMS.CMS.FieldTypes.names/0`), checked on write by
+    # `Validations.KnownFieldType`.
+    #
+    # `KnownAtom`, so a row whose type this release does not know (written by
+    # a newer release before a rollback, or by a plugin since removed) loads
+    # as a `KilnCMS.Types.UnknownAtom` instead of failing every read that
+    # meets it (#2605). Ordinary reads never see such a row:
+    # `Preparations.RegisteredFieldTypes` leaves it out. See
+    # `unknown_type?/1`.
+    #
+    # No `one_of`: the registry is compile-time too, but as a constraint it
+    # would put the installed plugin set into the JSON:API schema's enum (a
+    # spec diff per plugin), and make this resource compile through
+    # `FieldTypes` into every plugin module (a compile-cycle risk).
+    attribute :field_type, KilnCMS.Types.KnownAtom do
       default :string
       allow_nil? false
       public? true
