@@ -201,19 +201,28 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # --- inline edit -----------------------------------------------------------
 
   def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
-    form = edit_form(id, socket.assigns.actor, socket.assigns.current_org)
+    case edit_form(id, socket.assigns.actor, socket.assigns.current_org) do
+      {:ok, form} ->
+        {:noreply,
+         socket
+         |> assign(:edit, %{
+           id: id,
+           form: form,
+           builder: ComputedBuilder.new(form[:compute].value),
+           ctx: nil,
+           conds: edit_conds(socket.assigns, id),
+           cond_siblings: edit_siblings(socket.assigns, id)
+         })
+         |> assign_edit_builder()}
 
-    {:noreply,
-     socket
-     |> assign(:edit, %{
-       id: id,
-       form: form,
-       builder: ComputedBuilder.new(form[:compute].value),
-       ctx: nil,
-       conds: ConditionsBuilder.new(Enum.find(socket.assigns.definitions, &(&1.id == id))),
-       cond_siblings: edit_siblings(socket.assigns, id)
-     })
-     |> assign_edit_builder()}
+      # Gone since the page loaded, or a field of an unknown type (#2605),
+      # which no read but the list's returns: nothing to edit.
+      :error ->
+        {:noreply,
+         socket
+         |> load_definitions()
+         |> put_flash(:error, gettext("That field can't be edited."))}
+    end
   end
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
@@ -278,15 +287,33 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
+    # Unknown-type rows (#2605) included: deleting one is all this page
+    # offers for it.
     socket =
-      with {:ok, definition} <- CMS.get_field_definition(id, actor: actor, tenant: org),
+      with {:ok, definition} <-
+             CMS.get_field_definition(id,
+               actor: actor,
+               tenant: org,
+               context: FieldDefinition.all_types_context()
+             ),
+           :ok <- refuse_if_read(definition, org),
            :ok <- CMS.destroy_field_definition(definition, actor: actor, tenant: org) do
         socket
         |> drop_section_layout(definition)
         |> load_definitions()
         |> put_flash(:info, gettext("Field deleted."))
       else
-        _ -> put_flash(socket, :error, gettext("Couldn't delete that field."))
+        {:read_by, labels} ->
+          put_flash(
+            socket,
+            :error,
+            gettext("%{fields} reads this field in a condition: remove that condition first.",
+              fields: labels
+            )
+          )
+
+        _ ->
+          put_flash(socket, :error, gettext("Couldn't delete that field."))
       end
 
     {:noreply, assign(socket, :edit, nil)}
@@ -1228,8 +1255,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp refuse_duplicates(form, params, scopes, assigns) do
     name = params["name"]
 
+    # A field of an unknown type (#2605) still holds its name on its type.
     taken_on =
-      assigns.definitions
+      (assigns.definitions ++ assigns.unknown_type)
       |> Enum.filter(&(&1.name == name and scope_param(&1) in scopes))
       |> Enum.map(&group_heading(scope_key(&1), assigns.dynamic_types))
 
@@ -1249,21 +1277,58 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # --- data ------------------------------------------------------------------
 
+  # The edit form's condition rows. A rule naming a sibling of an unknown
+  # type (#2605) can't be shown as rows (the field picker offers no such
+  # field, and re-posting would rewrite it), so it is kept as stored.
+  defp edit_conds(assigns, id) do
+    definition = Enum.find(assigns.definitions, &(&1.id == id))
+
+    held =
+      for unknown <- assigns.unknown_type,
+          definition,
+          is_nil(FieldDefinition.parent_id(unknown)),
+          scope_key(unknown) == scope_key(definition),
+          do: unknown.name
+
+    definition |> ConditionsBuilder.new() |> ConditionsBuilder.hold(held)
+  end
+
+  # The resource refuses to delete a field another field's condition reads
+  # (`Validations.FieldCondition`); asked first, so the flash can say which.
+  defp refuse_if_read(definition, org) do
+    case FieldCondition.dependents(definition, org) do
+      [] -> :ok
+      dependents -> {:read_by, Enum.map_join(dependents, ", ", & &1.label)}
+    end
+  end
+
   defp load_definitions(socket) do
     {links, definitions} =
       CMS.list_field_definitions!(
         actor: socket.assigns.actor,
         tenant: socket.assigns.current_org,
-        query: [sort: [position: :asc, name: :asc]]
+        query: [sort: [position: :asc, name: :asc]],
+        context: FieldDefinition.all_types_context()
       )
       # Link fields (R3) are listed under their reference field, and a
       # group's sub-fields under their group — not as fields of a type.
       |> Enum.split_with(&(not is_nil(FieldDefinition.parent_id(&1))))
 
+    # A link field or sub-field of an unknown type (#2605) is listed with the
+    # other unknown-type fields, under its parent's name: its parent's editor
+    # offers only the plain types.
+    {unknown_links, links} = Enum.split_with(links, &FieldDefinition.unknown_type?/1)
+
     # A definition whose content type no longer exists (#1770) is listed on
     # its own, with only a delete: nothing renders, validates or delivers it,
     # and it cannot be saved back while it points at nothing.
-    {orphaned, owned} = Enum.split_with(definitions, &FieldDefinition.orphaned?/1)
+    {orphaned, definitions} = Enum.split_with(definitions, &FieldDefinition.orphaned?/1)
+
+    # So is one whose field type this release does not know (#2605): the
+    # editor and delivery skip it, its values are kept, and it cannot be
+    # edited or reordered — only deleted.
+    {unknown_type, owned} = Enum.split_with(definitions, &FieldDefinition.unknown_type?/1)
+    definitions = orphaned ++ owned
 
     grouped =
       owned
@@ -1293,6 +1358,22 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> Enum.group_by(&field_section_owner/1)
     )
     |> assign(:orphaned, Enum.sort_by(orphaned, &{to_string(&1.content_type), &1.name}))
+    |> assign(:unknown_type, unknown_type ++ unknown_links)
+  end
+
+  # Where a field of an unknown type (#2605) sits: its type, or for a link
+  # field or sub-field, its parent field.
+  defp unknown_owner(definition, definitions, dynamic_types) do
+    case FieldDefinition.parent_id(definition) do
+      nil ->
+        group_heading(scope_key(definition), dynamic_types)
+
+      parent_id ->
+        case Enum.find(definitions, &(&1.id == parent_id)) do
+          %{label: label} -> label
+          nil -> gettext("a field that is gone")
+        end
+    end
   end
 
   # A definition's owner: a compiled content type XOR a dynamic one — or, for
@@ -1332,7 +1413,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> to_form()
 
   defp edit_form(id, actor, org) do
-    CMS.get_field_definition!(id, actor: actor, tenant: org)
+    case CMS.get_field_definition(id, actor: actor, tenant: org) do
+      {:ok, definition} -> {:ok, update_form(definition, id, actor, org)}
+      {:error, _not_found} -> :error
+    end
+  end
+
+  defp update_form(definition, id, actor, org) do
+    definition
     |> AshPhoenix.Form.for_update(:update,
       actor: actor,
       tenant: org,
@@ -4370,6 +4458,61 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   phx-value-id={definition.id}
                   data-confirm={gettext("Delete this orphaned field?")}
                   aria-label={gettext("Delete orphaned field %{name}", name: definition.name)}
+                  class="btn btn-sm btn-default shrink-0 hover:text-error"
+                >
+                  <.icon name="hero-trash" class="size-4" />
+                  {gettext("Delete")}
+                </button>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <section
+          :if={@unknown_type != []}
+          id="unknown-type-fields"
+          class="space-y-3"
+          aria-labelledby="unknown-type-fields-heading"
+        >
+          <div>
+            <h2 id="unknown-type-fields-heading" class="flex items-center gap-2 text-lg font-medium">
+              <.icon name="hero-exclamation-triangle" class="size-5 text-warning" />
+              {gettext("Fields of an unknown type")}
+            </h2>
+            <p class="text-sm text-base-content/70">
+              {gettext(
+                "These fields use a field type this version of Kiln doesn't know — one added by a newer version, or by a plugin that is no longer installed. The editor doesn't show them and published pages leave them out, but records keep their values, and the content API still returns a value unless the field is private. Upgrade Kiln or reinstall the plugin to use them again, or delete them to withdraw their values for good."
+              )}
+            </p>
+          </div>
+          <ul class="card divide-y divide-base-content/10 border-warning/40">
+            <li :for={definition <- @unknown_type} id={"field-#{definition.id}"} class="p-4">
+              <div class="flex items-start justify-between gap-4">
+                <div class="min-w-0 space-y-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-medium">{definition.label}</span>
+                    <code class="text-xs text-base-content/70">{definition.name}</code>
+                    <span class="rounded bg-warning/20 px-1.5 py-0.5 text-xs text-warning">
+                      {gettext("unknown type")}
+                    </span>
+                  </div>
+                  <p class="text-xs text-base-content/70">
+                    {gettext("On %{owner}, of type %{type}.",
+                      owner: unknown_owner(definition, @definitions, @dynamic_types),
+                      type: to_string(definition.field_type)
+                    )}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  phx-click="delete"
+                  phx-value-id={definition.id}
+                  data-confirm={
+                    gettext(
+                      "Delete this field and the values records hold in it? This can't be undone."
+                    )
+                  }
+                  aria-label={gettext("Delete field %{name}", name: definition.name)}
                   class="btn btn-sm btn-default shrink-0 hover:text-error"
                 >
                   <.icon name="hero-trash" class="size-4" />

@@ -106,10 +106,13 @@ defmodule KilnCMS.Firing.CustomFields do
       # formulas nor the field registry of today may edit it — but what an
       # anonymous reader may see of it is today's question, so the unreadable
       # references are left out all the same (labels are not refreshed).
-      # Private fields (#2044) are today's question too.
+      # Private fields (#2044) are today's question too — a private field of
+      # a type this release does not know (#2605) included, which
+      # `definitions` leaves out and the site's private-field map does not.
       values =
         stored
         |> PrivateFields.drop(definitions)
+        |> PrivateFields.drop_for(document)
         |> mask_unreadable(Map.get(document, :org_id))
 
       %{values: values, definitions: definitions}

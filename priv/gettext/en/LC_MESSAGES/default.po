@@ -774,6 +774,11 @@ msgstr ""
 msgid "%{failed} failed in 24h · %{disabled} auto-disabled"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{fields} reads this field in a condition: remove that condition first."
+msgstr ""
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{field} %{op} %{value}"
@@ -6956,6 +6961,11 @@ msgstr ""
 msgid "Delete field %{label}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete field %{name}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/funnel_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete funnel"
@@ -7031,6 +7041,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete this draft experiment and its variants?"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete this field and the values records hold in it? This can't be undone."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -9058,6 +9073,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
 msgid "Fields of %{type} they may change"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Fields of an unknown type"
 msgstr ""
 
 #: lib/kiln_cms_web/live/safety_fields_live.ex
@@ -13950,6 +13970,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex
 #, elixir-autogen, elixir-format
 msgid "Older posts →"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "On %{owner}, of type %{type}."
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
@@ -20246,6 +20271,11 @@ msgstr ""
 msgid "That experiment doesn't exist."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "That field can't be edited."
+msgstr ""
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "That field filter is not valid here."
@@ -21533,6 +21563,11 @@ msgstr ""
 msgid "These fields belong to a content type that no longer exists — a removed plugin, or a type that was renamed or deleted. Nothing shows, checks or delivers them. Delete them to tidy up."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "These fields use a field type this version of Kiln doesn't know — one added by a newer version, or by a plugin that is no longer installed. The editor doesn't show them and published pages leave them out, but records keep their values, and the content API still returns a value unless the field is private. Upgrade Kiln or reinstall the plugin to use them again, or delete them to withdraw their values for good."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "These fields were changed on the live page since then. For each one, keep the live version or publish yours."
@@ -21696,6 +21731,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
 msgid "This check needs JavaScript."
+msgstr ""
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "This condition reads a field of a type this version of Kiln doesn't know. It can't be edited here; it stays as it is until you remove it."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
@@ -24993,6 +25033,11 @@ msgstr ""
 msgid "a divided by b. Empty when b is zero."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "a field that is gone"
+msgstr ""
+
 #: lib/kiln_cms/cms/computed.ex
 #, elixir-autogen, elixir-format
 msgid "a minus b."
@@ -26726,6 +26771,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "unknown file"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "unknown type"
 msgstr ""
 
 #: lib/kiln_cms_web/live/redirect_live.ex

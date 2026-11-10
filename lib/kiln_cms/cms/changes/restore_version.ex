@@ -259,8 +259,15 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   defp note_dropped_keys(changeset, stored) do
     declared =
       case ApplyCustomFields.stashed_definitions(changeset) do
-        nil -> nil
-        definitions -> MapSet.new(definitions, &to_string(&1.name))
+        nil ->
+          nil
+
+        # A held field (#2605) is declared too: its value was kept.
+        definitions ->
+          MapSet.new(
+            Enum.map(definitions, &to_string(&1.name)) ++
+              ApplyCustomFields.held_names(changeset)
+          )
       end
 
     dropped =

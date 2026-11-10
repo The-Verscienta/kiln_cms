@@ -18,6 +18,12 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
   **multiple** a field other rules read is refused when a rule would no
   longer be valid. A **rename**
   needs no guard: `Changes.SyncFieldValues` rewrites the rules that read it.
+
+  A sibling whose field type this release does not know (#2605,
+  `FieldDefinition.unknown_type?/1`) is still a sibling: a rule naming it
+  stays valid, and so does its own rule, so neither field turns unwritable
+  after a rollback. Such a target's type and operators are not checked —
+  this release cannot say what its value holds.
   """
   use Ash.Resource.Validation
   use Gettext, backend: KilnCMSWeb.Gettext
@@ -133,6 +139,9 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
   # What is wrong with testing `ops` against `target`, if anything.
   defp problem(target, ops) do
     cond do
+      FieldDefinition.unknown_type?(target) ->
+        nil
+
       target.private ->
         gettext("can't depend on %{field}, a private field", field: target.name)
 
@@ -253,7 +262,8 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
   attributes as a map with `content_type`, `type_definition_id`,
   `group_of_id`): the other fields in its scope, sub-fields loaded for a
   group's members. `[]` for a link field, which has none. Read as the cms
-  registry, under `tenant`.
+  registry, under `tenant`, with fields of a type this release does not know
+  included (#2605): a caller that offers siblings as choices filters them.
   """
   @spec siblings(Ash.Changeset.t() | map(), term()) :: [FieldDefinition.t()]
   def siblings(%Ash.Changeset{} = changeset, tenant) do
@@ -269,7 +279,8 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
     opts = [
       actor: KilnCMS.CMS.Housekeeping.system(:cms_registry),
       authorize_with: :error,
-      tenant: tenant
+      tenant: tenant,
+      context: FieldDefinition.all_types_context()
     ]
 
     all =
@@ -293,11 +304,14 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
     Enum.reject(all, &(not is_nil(scope.id) and &1.id == scope.id))
   end
 
+  # Read directly rather than as the group's loaded `group_fields`: a
+  # relationship load leaves out a sub-field of an unknown type (#2605).
   defp group_members(group_id, opts) do
-    case CMS.get_field_definition(group_id, Keyword.put(opts, :load, [:group_fields])) do
-      {:ok, group} -> FieldDefinition.group_fields(group)
-      _none -> []
-    end
+    ok_list(
+      CMS.list_field_definitions(
+        Keyword.put(opts, :query, filter: [group_of_id: group_id], sort: [position: :asc])
+      )
+    )
   end
 
   defp ok_list({:ok, list}), do: list
