@@ -165,6 +165,9 @@ defmodule KilnCMSWeb.BuildFingerprint do
     end
   end
 
+  # The app's own digest manifest under priv/static: a fixed path, never built
+  # from request or user input.
+  # sobelow_skip ["Traversal.FileModule"]
   defp manifest do
     path = Application.app_dir(:kiln_cms, "priv/static/cache_manifest.json")
 
