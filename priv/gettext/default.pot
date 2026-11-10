@@ -859,6 +859,18 @@ msgstr ""
 msgid "%{forms} form allowlist(s) and %{sites} site-wide embed default(s) name sites outside EMBED_ORIGINS, which caps which sites may frame forms on this deployment. Those sites are dropped from what is served, so an iframe of the form on them is blank. The saved lists are unchanged."
 msgstr ""
 
+#: lib/kiln_cms_web/list_format.ex
+#, elixir-autogen, elixir-format
+msgctxt "list"
+msgid "%{head} and %{last}"
+msgstr ""
+
+#: lib/kiln_cms_web/list_format.ex
+#, elixir-autogen, elixir-format
+msgctxt "list"
+msgid "%{head}, %{item}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{hours} h %{min} min"
@@ -1150,8 +1162,10 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
-msgid "%{screens} are under Configure. Use Show all tools to list every screen here."
-msgstr ""
+msgid "%{screens} is under Configure. Use Show all tools to list every screen here."
+msgid_plural "%{screens} are under Configure. Use Show all tools to list every screen here."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
@@ -23163,6 +23177,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Update command"
+msgstr ""
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Update your receiver now: deliveries already use this secret."
 msgstr ""
 
 #: lib/kiln_cms_web/live/redirect_live.ex

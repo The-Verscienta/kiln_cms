@@ -1052,9 +1052,11 @@ defmodule KilnCMSWeb.Layouts do
         id="nav-essentials-hint"
         class="side-text mt-1 px-3 text-xs leading-5 text-base-content/70"
       >
-        {gettext(
+        {ngettext(
+          "%{screens} is under Configure. Use Show all tools to list every screen here.",
           "%{screens} are under Configure. Use Show all tools to list every screen here.",
-          screens: Enum.join(@hidden_screens, ", ")
+          length(@hidden_screens),
+          screens: KilnCMSWeb.ListFormat.to_sentence(@hidden_screens)
         )}
       </p>
       <.side_link

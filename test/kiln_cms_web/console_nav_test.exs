@@ -377,7 +377,7 @@ defmodule KilnCMSWeb.ConsoleNavTest do
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor")
 
       assert lv |> element("#nav-essentials-hint") |> render() =~
-               "Forms, Webhooks, API keys, Trash are under Configure"
+               "Forms, Webhooks, API keys and Trash are under Configure"
     end
 
     test "an org admin's hint leaves out API keys, which their Configure does not have (#2144)",
@@ -397,7 +397,7 @@ defmodule KilnCMSWeb.ConsoleNavTest do
       {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor")
       html = lv |> element("#nav-essentials-hint") |> render()
 
-      assert html =~ "Forms, Webhooks, Trash are under Configure"
+      assert html =~ "Forms, Webhooks and Trash are under Configure"
       refute html =~ "API keys"
     end
 

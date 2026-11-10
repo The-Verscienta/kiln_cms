@@ -859,6 +859,18 @@ msgstr "%{first}–%{last} sur %{total}"
 msgid "%{forms} form allowlist(s) and %{sites} site-wide embed default(s) name sites outside EMBED_ORIGINS, which caps which sites may frame forms on this deployment. Those sites are dropped from what is served, so an iframe of the form on them is blank. The saved lists are unchanged."
 msgstr "%{forms} liste(s) de sites autorisés de formulaires et %{sites} valeur(s) d’intégration par défaut de site nomment des sites hors de EMBED_ORIGINS, qui plafonne les sites pouvant encadrer des formulaires sur ce déploiement. Ces sites sont retirés de ce qui est servi : une iframe du formulaire y reste donc vide. Les listes enregistrées ne changent pas."
 
+#: lib/kiln_cms_web/list_format.ex
+#, elixir-autogen, elixir-format
+msgctxt "list"
+msgid "%{head} and %{last}"
+msgstr "%{head} et %{last}"
+
+#: lib/kiln_cms_web/list_format.ex
+#, elixir-autogen, elixir-format
+msgctxt "list"
+msgid "%{head}, %{item}"
+msgstr "%{head}, %{item}"
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{hours} h %{min} min"
@@ -1150,8 +1162,10 @@ msgstr "%{scanned} analysés, %{changes} renommés jusqu'ici."
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
-msgid "%{screens} are under Configure. Use Show all tools to list every screen here."
-msgstr "%{screens} se trouvent dans Configurer. Utilisez « Afficher tous les outils » pour lister tous les écrans ici."
+msgid "%{screens} is under Configure. Use Show all tools to list every screen here."
+msgid_plural "%{screens} are under Configure. Use Show all tools to list every screen here."
+msgstr[0] "%{screens} se trouve dans Configurer. Utilisez « Afficher tous les outils » pour lister tous les écrans ici."
+msgstr[1] "%{screens} se trouvent dans Configurer. Utilisez « Afficher tous les outils » pour lister tous les écrans ici."
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
@@ -23164,6 +23178,11 @@ msgstr "Les vérifications de mise à jour sont désactivées (KILN_UPDATE_CHECK
 #, elixir-autogen, elixir-format
 msgid "Update command"
 msgstr "Commande de mise à jour"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Update your receiver now: deliveries already use this secret."
+msgstr "Mettez à jour votre récepteur maintenant : les envois utilisent déjà ce secret."
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format

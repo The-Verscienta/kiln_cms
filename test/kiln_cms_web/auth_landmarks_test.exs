@@ -13,6 +13,29 @@ defmodule KilnCMSWeb.AuthLandmarksTest do
   alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.TwoFactorFixtures
 
+  # The invite-only branch of `sign_in_route` (#2390). `KilnCMSWeb.Router`
+  # picks it with `compile_env(:kiln_cms, :registration_enabled)`, so the test
+  # build only ever has the open-registration one. This router mounts the other
+  # branch's arguments as they stand there: no `register_path`, and the same
+  # `live_view`, `layout`, `on_mount` and overrides. Keep the two in step.
+  defmodule InviteOnlyRouter do
+    use Phoenix.Router
+    use AshAuthentication.Phoenix.Router
+
+    scope "/", KilnCMSWeb do
+      sign_in_route reset_path: "/reset",
+                    auth_routes_prefix: "/auth",
+                    live_view: KilnCMSWeb.SignInLive,
+                    layout: {KilnCMSWeb.Layouts, :auth},
+                    on_mount: [
+                      {KilnCMSWeb.AdminAllowlist, :gated},
+                      {KilnCMSWeb.LiveUserAuth,
+                       [:restore_locale, :assign_current_org, :live_no_user]}
+                    ],
+                    overrides: [KilnCMSWeb.AuthOverrides]
+    end
+  end
+
   # `{path, h1 text}`. The text is the page's `page_title`, so a retitled page
   # changes the heading with it.
   @pages [
@@ -80,6 +103,33 @@ defmodule KilnCMSWeb.AuthLandmarksTest do
         |> html_response(401)
 
       assert_landmarks(doc(recovery), "Two-factor authentication", "verify recovery")
+    end
+  end
+
+  describe "invite-only sign-in (registration disabled)" do
+    # The real router's `:browser` pipeline runs (session, root layout, CSP),
+    # then the fixture router answers in its place.
+    defp invite_only(conn, path) do
+      conn
+      |> bypass_through(KilnCMSWeb.Router, [:browser])
+      |> get(path)
+      |> InviteOnlyRouter.call(InviteOnlyRouter.init([]))
+    end
+
+    for {path, h1} <- [{"/sign-in", "Sign in"}, {"/reset", "Reset your password"}] do
+      test "GET #{path}", %{conn: conn} do
+        html = conn |> invite_only(unquote(path)) |> html_response(200)
+        d = doc(html)
+        assert_landmarks(d, unquote(h1), "invite-only #{unquote(path)}")
+        # The branch under test: nothing links to /register. (The library
+        # still renders the register form, hidden, from the strategy alone;
+        # the action refuses it when registration is off.)
+        refute html =~ ~s(href="/register")
+      end
+    end
+
+    test "has no /register route", %{conn: conn} do
+      assert_raise Phoenix.Router.NoRouteError, fn -> invite_only(conn, "/register") end
     end
   end
 

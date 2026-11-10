@@ -7,6 +7,29 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="reserved-paths-upgrade"></a>
+
+- **Run `mix kiln.reserved_paths` once after upgrading to list the records whose
+  URL the new `/access-denied` page shadows (#2374).** In a release:
+  `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`. Read-only; no
+  migration.
+  - **Why.** #2143 routes `GET /access-denied` ahead of delivery and adds
+    `access-denied` to the reserved segments. New writes were already refused:
+    a root-served (page) slug of `access-denied` fails `SlugAvailable`, and a
+    path alias starting `/access-denied` fails `PathAliasValid`; a post's
+    `/blog/access-denied` is unaffected. Both validations fire only when the
+    slug or alias changes, so a record stored earlier keeps its URL, and the
+    access-denied page is served there instead.
+  - **What it lists.** Every page (in any state, every organization) whose slug
+    is a reserved segment or another type's URL prefix, and every record whose
+    path alias starts with a reserved segment, with its type, id, state, locale
+    and title. The check is generic, so it also covers segments reserved later.
+  - **What to do.** Give each listed record a new slug or alias in the editor,
+    and add a redirect from the old URL if it was ever linked. Nothing is
+    renamed for you. The task exits non-zero while anything is listed, so it
+    can gate an upgrade script.
+  ([#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374))
+
 <a id="backup-last-good-marker-upgrade"></a>
 
 - **Update the host's copy of `scripts/backup.sh`: the app now marks the newest
@@ -3374,8 +3397,10 @@ carries the reasoning.
 - **Admins can rotate a webhook endpoint's signing secret (#2347).** Each row
   on `/editor/webhooks` has a **Rotate secret** button (admin only, with a
   confirmation). It replaces the secret and reveals the new one so you can
-  copy it into the receiver. Before this, the only way to change a secret was
-  to delete the endpoint and add it again, which also lost its settings.
+  copy it into the receiver; a hint under it says deliveries already use the
+  new secret, until you hide it (#2384). Before this, the only way to change
+  a secret was to delete the endpoint and add it again, which also lost its
+  settings.
   Rotation takes effect immediately and there is no dual-secret window: it is
   the remedy for a leaked secret, so the old one must stop working. Queued and
   retried deliveries sign at send time and use the new secret; one attempt
@@ -5285,6 +5310,22 @@ carries the reasoning.
     `ash_authentication_phoenix`; the `/reset` request form is not in that
     comparison, so re-read `AuthResetRequestForm` against upstream's
     `Password.ResetForm` by hand.
+
+<a id="setup-header-invite-only-landmarks"></a>
+
+- **The first-run setup page's logo row is now a header landmark, and the
+  invite-only sign-in page is tested for one `h1`, one header and one main
+  (#2390).** Follow-up to #2162.
+  - **`/setup`.** The environment banner and logo row moved out of `<main>`
+    into a `<header>`, as on the sign-in pages, so the page has a header
+    landmark beside its `h1` and `<main id="main">`. The spacing is unchanged.
+  - **Invite-only sign-in.** With `registration_enabled: false` the router
+    mounts sign-in without a register path, and it picks that branch at compile
+    time, so the test build never had it. A test router now mounts the same
+    route with the same arguments and asserts its `/sign-in` and `/reset`
+    pages for one `h1`, one header, one main and no link to `/register`. If the
+    invite-only `sign_in_route` in `KilnCMSWeb.Router` changes, change the
+    test router in `KilnCMSWeb.AuthLandmarksTest` with it.
     `AuthPasswordInput.password_field/1` and `password_confirmation_field/1`
     now require an `autocomplete` attribute; an overlay that calls them must
     pass one. No configuration, migration or upgrade step.

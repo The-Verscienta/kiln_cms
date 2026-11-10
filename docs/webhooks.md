@@ -102,7 +102,8 @@ do this in order:
    so update the receiver with the new secret." Click **OK**.
 4. The page says "Signing secret replaced. Copy the new secret into your
    receiver; the old one no longer works." and the row's secret is already
-   revealed, with **Copy** beside it. Click **Copy** and put it in the
+   revealed, with **Copy** beside it and, under it, "Update your receiver
+   now: deliveries already use this secret." Click **Copy** and put it in the
    receiver ([Copy a webhook signing secret](#copy-a-webhook-signing-secret)).
 5. Once the receiver uses the new secret, remove the old one from it.
 6. Click **Ping** on the row and check the receiver accepts it.

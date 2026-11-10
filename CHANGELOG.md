@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `access-denied` and path aliases under `/access-denied`, which the new access-denied page (#2143) shadows; give each a new slug or alias.** No migration; read-only.
+  ([#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374) · [long form](docs/changelog/unreleased.md#reserved-paths-upgrade))
+
 - **Update the host's copy of `scripts/backup.sh` so cron's prune honors the new `kiln-<stamp>.good` marker, which the app keeps on the newest verified backup of each component (part of #2219).** No migration; rolling back is safe.
   ([#2552](https://github.com/The-Verscienta/kiln_cms/pull/2552) · [long form](docs/changelog/unreleased.md#backup-last-good-marker-upgrade))
 
@@ -455,6 +458,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Release images no longer ship `priv/static/images/logo-lockup.png` (234 KB), which nothing in Kiln referenced. An overlay that linked `/images/logo-lockup.png` must ship its own copy.**
+  ([#2401](https://github.com/The-Verscienta/kiln_cms/issues/2401))
+
 - **A custom-field range filter (`gt`, `gte`, `lt`, `lte`) no longer matches a record whose stored value is a JSON `null`, array or object.**
   They compare as "no value", as `custom_sort` already read them; before, JSON ordering made an array greater than every number. Only rows whose field was retyped or written off-type are affected.
   ([#2359](https://github.com/The-Verscienta/kiln_cms/issues/2359) · [#2551](https://github.com/The-Verscienta/kiln_cms/pull/2551) · [long form](docs/changelog/unreleased.md#custom-field-range-index-changed))
@@ -536,6 +542,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A custom field of a type this release doesn't know (a newer release's, after a rollback, or a removed plugin's) no longer breaks the Fields screen, the editor, saves and delivery: it is hidden, records keep its values, and Fields lists it under "Fields of an unknown type" with a Delete.**
   ([#2670](https://github.com/The-Verscienta/kiln_cms/pull/2670) · [long form](docs/changelog/unreleased.md#unknown-field-type-rollback))
 
+- **The Essentials sidebar hint now lists the screens it names the way each language does: "Forms, Webhooks, API keys and Trash" in English, "… y Papelera" in Spanish, "… et Corbeille" in French, instead of a bare comma list. A single screen reads "is under Configure".**
+  ([#2379](https://github.com/The-Verscienta/kiln_cms/issues/2379))
+
 - **The editor can start a new document of a type with a required custom field that has no default; it used to fail with "Couldn't create the draft" and log nothing. The field starts blank, the first save asks for it, and the refused-create path now logs its error.**
   Publish and scheduled publish now refuse a document while a required custom field is blank, including drafts written before the field became required.
   ([#2651](https://github.com/The-Verscienta/kiln_cms/pull/2651))
@@ -616,6 +625,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The sign-in, register and reset pages now have a header landmark, one `h1`, and `autocomplete` on their email and password boxes.**
   ([#2162](https://github.com/The-Verscienta/kiln_cms/issues/2162) · [long form](docs/changelog/unreleased.md#auth-pages-landmarks-autocomplete))
+
+- **The first-run setup page's logo row is now a header landmark, and the invite-only sign-in page is tested for one `h1`, one header and one main.**
+  ([#2390](https://github.com/The-Verscienta/kiln_cms/issues/2390) · [long form](docs/changelog/unreleased.md#setup-header-invite-only-landmarks))
 
 - **`custom_sort` ranks a stored JSON `null`, array or object as no value (last in either direction), and page 2 of a keyset-paged sort no longer fails on one.**
   ([long form](docs/changelog/unreleased.md#custom-sort-json-null-last))
