@@ -58,7 +58,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Run `mix ash.migrate` (new nullable `site_branding.twitter_site`). Fired `json` artifacts move to `format_version` 4 (new `social` key) and re-fire on their first uncached read; on a large site, run `mix kiln.refire_all` after the deploy.**
   `/api/sync` mirrors and clients revalidating with `If-None-Match` keep the old body until a document is edited (#2463). Rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#twitter-card-upgrade))
+  ([#2582](https://github.com/The-Verscienta/kiln_cms/pull/2582) · [long form](docs/changelog/unreleased.md#twitter-card-upgrade))
 
 - **New on by default: with a plugin from Hex installed, opening System or Security posture asks hex.pm about it, which tells hex.pm that plugin's package name and version. Opt out with `KILN_PLUGIN_HEALTH_CHECK=false` (`KILN_UPDATE_CHECK=false` also does, unless the first is set).**
   No migration; rolling the pin back is safe.
@@ -186,7 +186,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Site admins can set the site's X (Twitter) username under Branding, sent as `twitter:site`. Link-preview tags never go out empty, images are absolute on the site's own host, and the `json` artifact gains `social`.**
   Guide: [docs/seo.md](docs/seo.md#link-previews-open-graph-and-x-twitter-cards). Remove any `twitter:site` added under Code injection, or it appears twice.
-  ([long form](docs/changelog/unreleased.md#twitter-card-tags))
+  ([#2582](https://github.com/The-Verscienta/kiln_cms/pull/2582) · [long form](docs/changelog/unreleased.md#twitter-card-tags))
 
 - **Operations → System → Plugins shows whether each plugin still checks out: changed on Hex since this build, a security notice, retired or unmaintained on Hex, or a `kiln_plugin` requirement this Kiln doesn't meet. Security posture gains an Installed plugins line.**
   Unknown is never OK; git and path plugins can't be verified against Hex. `mix kiln.plugins.list --health` runs it too. Guide: [docs/security-posture.md](docs/security-posture.md#check-your-installed-plugins).
