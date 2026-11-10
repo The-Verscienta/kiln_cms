@@ -64,7 +64,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Run `mix ash.migrate` (new tables `security_alert_dispatches`, `site_security_alerts`; `users.notify_on_security_alert`, `NOT NULL DEFAULT true`). Site member admins now get security alert emails for every kind but failed sign-ins; platform admins get platform alerts they can't mute. A site with no member admins gets none by bell or email.**
   The stolen-key email is now an alert, with the old email as fallback; alert email uses the instance relay. `security` is a reserved webhook namespace. Before rolling back past #2509, delete the new notifications and `api_key_reuse_detected` events.
-  ([long form](docs/changelog/unreleased.md#security-alerts-upgrade))
+  ([#2638](https://github.com/The-Verscienta/kiln_cms/pull/2638) · [long form](docs/changelog/unreleased.md#security-alerts-upgrade))
 
 - **Every `/api/content` `ETag` and every Kiln-rendered page's `ETag` changes once on this deploy, so revalidating clients and CDNs get one round of `200`s. Page tags now also change on every deploy whose code or assets differ.**
   No migration; rolling the pin back is safe (another one-time round of `200`s).
@@ -220,7 +220,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Security alerts: site admins get a bell notice and an email when someone becomes an admin, a role is raised, an account is locked out, two-factor is turned off or single sign-on changes; platform admins when a platform admin or API key is created or a stolen key is reused. Organization → Security alerts picks the kinds.**
   One alert per kind per 15 minutes plus a summary; opt-in `security.*` webhook events; turning alerts down sends the site's member admins a notice nobody can mute. Guide: [docs/security-alerts.md](docs/security-alerts.md).
-  ([long form](docs/changelog/unreleased.md#security-alerts))
+  ([#2638](https://github.com/The-Verscienta/kiln_cms/pull/2638) · [long form](docs/changelog/unreleased.md#security-alerts))
 
 - **Security posture gains a Security notices for Kiln line (`core.security_notices`): Fix now, at any severity, when a published notice's affected range covers the running Kiln. System's Updates card shows the same.**
   Off with `KILN_UPDATE_CHECK=false`; shares the plugin check's notices fetch, which `KILN_PLUGIN_HEALTH_CHECK=false` no longer stops. Guide: [docs/security-posture.md](docs/security-posture.md#security-notices-for-kiln).
