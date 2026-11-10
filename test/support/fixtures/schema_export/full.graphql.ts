@@ -3,7 +3,7 @@
 // The `:json` fired-artifact shape served by
 // `GET /api/content/:type/:slug?surface=json`.
 //
-// Artifact format version: 3
+// Artifact format version: 4
 
 
 // -- Shared ------------------------------------------------------
@@ -283,6 +283,7 @@ export interface PageDocument {
   locale: string | null;
   robots?: { nofollow: boolean; noindex: boolean };
   slug: string | null;
+  social?: { description?: string; image?: string; title: string | null };
   title: string | null;
   type: "page";
 }
@@ -297,6 +298,7 @@ export interface PostDocument {
   locale: string | null;
   robots?: { nofollow: boolean; noindex: boolean };
   slug: string | null;
+  social?: { description?: string; image?: string; title: string | null };
   title: string | null;
   type: "post";
 }

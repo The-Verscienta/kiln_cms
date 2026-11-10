@@ -48,7 +48,8 @@ defmodule KilnCMS.Branding do
             css: nil,
             theme: :standard,
             header_menu_key: nil,
-            footer_menu_key: nil
+            footer_menu_key: nil,
+            twitter_site: nil
 
   @type t :: %__MODULE__{
           site_name: String.t(),
@@ -62,7 +63,8 @@ defmodule KilnCMS.Branding do
           css: String.t() | nil,
           theme: atom(),
           header_menu_key: String.t() | nil,
-          footer_menu_key: String.t() | nil
+          footer_menu_key: String.t() | nil,
+          twitter_site: String.t() | nil
         }
 
   # The public theme presets (#1318), in the order the settings form offers
@@ -192,11 +194,16 @@ defmodule KilnCMS.Branding do
       css: css_variables(color),
       theme: resolve_theme(field(row, :theme)),
       header_menu_key: present(field(row, :header_menu_key)),
-      footer_menu_key: present(field(row, :footer_menu_key))
+      footer_menu_key: present(field(row, :footer_menu_key)),
+      # Per site only — no config layer and no default (#2258): an operator
+      # handle inherited by every tenant would credit one account for every
+      # site's link previews. Normalized again here so a value that no longer
+      # passes the grammar renders no `twitter:site` rather than a wrong one.
+      twitter_site: BrandTokens.normalize_twitter_site(field(row, :twitter_site))
     }
   end
 
-  # `build/1` reads ten columns off a row that may be nil; folding the nil
+  # `build/1` reads eleven columns off a row that may be nil; folding the nil
   # check in here keeps its cyclomatic complexity out of credo's ceiling.
   defp field(nil, _key), do: nil
   defp field(row, key), do: Map.get(row, key)

@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (new nullable `site_branding.twitter_site`). Fired `json` artifacts move to `format_version` 4 (new `social` key) and re-fire on their first uncached read; on a large site, run `mix kiln.refire_all` after the deploy.**
+  `/api/sync` mirrors and clients revalidating with `If-None-Match` keep the old body until a document is edited (#2463). Rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#twitter-card-upgrade))
+
 - **Run `mix ash.migrate` (new tables `backup_locks`, `backup_node_beats`; `backup_runs` gains `chain_id` and status `canceled`). Backups run on a new Oban queue `backup_steps` (1 per node; add 1 to `POOL_SIZE`); drain the `backups` queue before the next minor. Node names must be unique.**
   Mid-deploy, don't start backups from an old node. Before rolling back, cancel running backups, then relabel `canceled` runs and delete `backup_canceled` events (#2509), or roll forward.
   ([#2537](https://github.com/The-Verscienta/kiln_cms/pull/2537) · [long form](docs/changelog/unreleased.md#backup-step-chain-upgrade))
@@ -175,6 +179,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
 
 ### Added
+
+- **Site admins can set the site's X (Twitter) username under Branding, sent as `twitter:site`. Link-preview tags never go out empty, images are absolute on the site's own host, and the `json` artifact gains `social`.**
+  Guide: [docs/seo.md](docs/seo.md#link-previews-open-graph-and-x-twitter-cards). Remove any `twitter:site` added under Code injection, or it appears twice.
+  ([long form](docs/changelog/unreleased.md#twitter-card-tags))
 
 - **A Slug field can now be marked unique: no two records of a content type (and language) may hold the same slug, on every way of saving.**
   Compared after the slug is tidied, so `Hello World` and `hello-world` collide; a record keeps its own value on update. Follow-up to the Slug field type.

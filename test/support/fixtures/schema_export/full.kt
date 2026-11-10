@@ -3,7 +3,7 @@
 // The `:json` fired-artifact shape served by
 // `GET /api/content/:type/:slug?surface=json`.
 //
-// Artifact format version: 3
+// Artifact format version: 4
 //
 // Needs the kotlinx.serialization compiler plugin and
 // `org.jetbrains.kotlinx:kotlinx-serialization-json`. Decode with `KilnJson`.
@@ -500,6 +500,8 @@ public data class PageDocument(
     /** The document's robots flags. Absent when neither is set; absent means both false. */
     public val robots: Robots? = null,
     public val slug: String? = null,
+    /** The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included. */
+    public val social: Social? = null,
     public val title: String? = null,
     public val type: String,
 ) : Document {
@@ -510,6 +512,13 @@ public data class PageDocument(
     public data class Robots(
         public val nofollow: Boolean,
         public val noindex: Boolean,
+    )
+
+    @Serializable
+    public data class Social(
+        public val description: String? = null,
+        public val image: String? = null,
+        public val title: String? = null,
     )
 }
 
@@ -528,6 +537,8 @@ public data class PostDocument(
     /** The document's robots flags. Absent when neither is set; absent means both false. */
     public val robots: Robots? = null,
     public val slug: String? = null,
+    /** The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included. */
+    public val social: Social? = null,
     public val title: String? = null,
     public val type: String,
 ) : Document {
@@ -661,6 +672,13 @@ public data class PostDocument(
     public data class Robots(
         public val nofollow: Boolean,
         public val noindex: Boolean,
+    )
+
+    @Serializable
+    public data class Social(
+        public val description: String? = null,
+        public val image: String? = null,
+        public val title: String? = null,
     )
 }
 

@@ -138,6 +138,48 @@ defmodule KilnCMSWeb.StructuredDataTest do
     end
   end
 
+  # #2258: a media-library `seo_image` is a site-relative path, which a crawler
+  # reading the JSON-LD cannot resolve — the same absolute URL as `og:image`.
+  describe "image (#2258)" do
+    test "build/4 makes a relative seo_image absolute on the org's own host" do
+      data =
+        StructuredData.build(
+          page(%{seo_image: "/uploads/hero.png"}),
+          ContentTypes.get(:page),
+          tenant_org()
+        )
+
+      assert data["image"] == "http://acme.localhost:4000/uploads/hero.png"
+    end
+
+    test "build/4 leaves an absolute seo_image alone" do
+      data =
+        StructuredData.build(
+          page(%{seo_image: "https://cdn.example.com/hero.png"}),
+          ContentTypes.get(:page),
+          tenant_org()
+        )
+
+      assert data["image"] == "https://cdn.example.com/hero.png"
+    end
+
+    test "build/4 omits a relative seo_image when there is no org to resolve it on" do
+      data =
+        StructuredData.build(page(%{seo_image: "/uploads/hero.png"}), ContentTypes.get(:page))
+
+      refute Map.has_key?(data, "image")
+    end
+
+    test "teaser/2 makes a relative seo_image absolute on the org's own host" do
+      record = post(%{audience: :member, seo_image: "/uploads/gated.png"})
+      teaser = KilnCMSWeb.Teaser.from_record(record, "http://acme.localhost:4000/blog/hello")
+
+      [node] = StructuredData.teaser(teaser, tenant_org())
+
+      assert node["image"] == "http://acme.localhost:4000/uploads/gated.png"
+    end
+  end
+
   describe "tenant-hosted org URLs (#557)" do
     test "build/3 and document/3 derive the url/breadcrumbs from the given org's host" do
       org = tenant_org()

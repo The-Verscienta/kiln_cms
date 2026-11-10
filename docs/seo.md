@@ -140,9 +140,11 @@ a locked-out reader reads rather than a meta tag.
 
 ### On a fired artifact, from the next publish
 
-The `:json_ld` surface is a stored artifact, fired when a document is published.
+The `:json_ld` surface is a stored artifact, fired when a document is published,
+and so is the `social` object on the `:json` surface
+([Link previews](headless-consumer-guide.md#link-previews-the-social-object)).
 Editing a type's pattern re-titles every *page* at once, but an artifact already
-on disk keeps the description it was fired with until that document is published
+on disk keeps the values it was fired with until that document is published
 again or re-fired (`mix kiln.refire_all`, or `KilnCMS.Firing.Sweep.run/0` on a
 release). Stale, in other words, where it used to be permanently wrong.
 
@@ -408,6 +410,111 @@ ignore the default; an editor whose field grant leaves the flags out still gets
 them copied, so a copy never makes a hidden page indexable. Defaults are not retroactive: documents that already exist
 keep what they have, and changing a default touches only documents created
 afterwards.
+
+## Link previews: Open Graph and X (Twitter) cards
+
+When someone shares a link, the app they share it in (X, Slack, LinkedIn,
+iMessage, Facebook) builds the preview card from tags in the page's `<head>`.
+Every page Kiln renders carries two sets: Open Graph (`og:*`), which most apps
+read, and the X (Twitter) Card (`twitter:*`), which X reads first (#164,
+#2258). Both sets come from one resolution (`KilnCMSWeb.Layouts.social_meta/1`),
+so the title, description and image in one always match the other.
+
+| Tags | Value | Left out when |
+|---|---|---|
+| `og:title`, `twitter:title` | The page's **SEO title**, else its title. A type's [default pattern](#per-type-default-patterns) fills a blank SEO title. A page with no title of its own (the stock home page) gets the site name. | Never |
+| `og:description`, `twitter:description` | The page's **SEO description**, or its type's pattern | There is no description |
+| `og:image`, `twitter:image` | The page's **Social image**, else the site's **Default social image** (Branding) | Neither is set |
+| `twitter:card` | `summary_large_image` when there is an image (the page's or the site's), else `summary` | Never |
+| `twitter:site` | The site's **X (Twitter) username** (Branding), as `@handle` | The username is blank |
+
+A tag with no value is left out rather than sent empty: no page carries
+`content=""`, which some apps read as "this page has no title" instead of
+falling back to the next tag. `og:type`, `og:url`, `og:locale` and
+`og:locale:alternate` are unchanged. The same tags are on a gated post's
+teaser and on a passphrase lock page, built from the teaser's fields.
+
+**Images are always absolute, on the site's own host.** A Social image picked
+from the media library is stored as a site-relative path (`/uploads/…`), and
+a preview bot fetching the page cannot resolve that. Kiln prefixes the site's
+own address: its custom domain if it has one, else its subdomain of
+`TENANT_BASE_HOST`, else `PUBLIC_BASE_URL` for the default site. That applies to
+the page's own image, the Default social image and the page's JSON-LD `image`
+alike. A full
+`https://` URL is used as typed. A relative image Kiln has no site to resolve
+against is left out rather than put on the wrong host.
+
+**There are no separate "social" override fields.** The SEO title, SEO
+description and Social image in the editor's **SEO & scheduling** section are
+the overrides: what a search result shows and what a link preview shows are the
+same claim about the page, and a second set of fields would let them drift
+apart with nothing to say which is current. To give a page a different preview
+title, change its SEO title.
+
+Two tags are not emitted yet: `twitter:creator` (the author's own account, which
+needs a per-author handle) and `og:image:alt` / `twitter:image:alt` (the Social
+image stores no alt text).
+
+### Show your site's X account on link previews
+
+`twitter:site` names the X account a card is credited to. It is set per site,
+by a site admin; there is no environment variable or instance-wide default, so
+one site's handle never appears on another site's pages.
+
+1. In the console, open **Delivery → Branding** (`/editor/branding`). You need
+   to be an admin of this site; editors and viewers can't open the page.
+2. In the **Identity** section, find **X (Twitter) username**, below
+   **Default social image**.
+3. Type the account. Any of these work: `kilncms`, `@kilncms`, or the
+   profile URL copied from the browser, such as `https://x.com/kilncms`,
+   `https://twitter.com/kilncms/` or `https://x.com/kilncms?s=21`
+   (`www.` and `mobile.` hosts are accepted too).
+4. Click **Save branding**. The page reloads with "Branding saved." and the
+   field shows the stored form, `@kilncms`.
+5. Check a page. Fetch any public page and look for the tags:
+
+   ```bash
+   curl -s https://www.example.com/blog/hello-world | grep -E 'og:|twitter:'
+   ```
+
+   For a post with an SEO title, an SEO description and a Social image, on a
+   site whose username is `@kilncms`:
+
+   ```html
+   <meta property="og:title" content="Hello, world">
+   <meta property="og:description" content="Our first post.">
+   <meta property="og:image" content="https://www.example.com/uploads/hello.png">
+   <meta property="og:type" content="article">
+   <meta property="og:locale" content="en">
+   <meta property="og:url" content="https://www.example.com/blog/hello-world">
+   <meta name="twitter:card" content="summary_large_image">
+   <meta name="twitter:site" content="@kilncms">
+   <meta name="twitter:title" content="Hello, world">
+   <meta name="twitter:description" content="Our first post.">
+   <meta name="twitter:image" content="https://www.example.com/uploads/hello.png">
+   ```
+
+   To see the card itself, paste the link into a new post on X (the preview
+   appears in the composer) or into a Slack message. Apps cache previews,
+   often for days, so a link shared before the change may keep its old card.
+
+To remove the username, clear the field and save; **Reset to defaults**
+clears it along with the rest of the branding.
+
+What can go wrong:
+
+- **"must be an X (Twitter) username like @kilncms"**, in an error banner,
+  and nothing is saved. The value is not 1 to 15 letters, digits or
+  underscores (`@kiln-cms`, a 16-character name, a space), or it is a URL
+  that isn't an X profile: another site, a post (`https://x.com/kilncms/status/1`),
+  or one of X's own pages such as `home`, `explore`, `search`, `settings` or
+  `i/…`. Those names are refused as bare handles too.
+- **`twitter:site` appears twice.** A site that added the tag by hand under
+  **Code injection** now gets it from Branding as well. Remove the one in
+  Code injection.
+- **No `twitter:site` on an error page.** Pages served before Kiln knows which
+  site the request is for (some error pages) carry no site handle and no
+  Default social image, rather than another site's.
 
 ## Google News sitemap
 

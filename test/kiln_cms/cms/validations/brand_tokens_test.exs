@@ -126,6 +126,94 @@ defmodule KilnCMS.CMS.Validations.BrandTokensTest do
     end
   end
 
+  # #2258: the handle lands in `<meta name="twitter:site">` on every page.
+  describe "twitter_site" do
+    test "normalize_twitter_site/1 accepts a handle and reduces a profile URL" do
+      for {input, expected} <- [
+            {"kilncms", "@kilncms"},
+            {"@kiln_cms", "@kiln_cms"},
+            {"  @kilncms  ", "@kilncms"},
+            {"@" <> String.duplicate("a", 15), "@" <> String.duplicate("a", 15)},
+            {"https://x.com/kilncms", "@kilncms"},
+            {"https://twitter.com/kilncms/", "@kilncms"},
+            {"https://www.x.com/kilncms", "@kilncms"},
+            {"http://www.twitter.com/@kilncms", "@kilncms"},
+            # As the X share sheet and mobile browsers copy it.
+            {"https://x.com/kilncms?s=21", "@kilncms"},
+            {"https://x.com/kilncms/?t=abc&s=09", "@kilncms"},
+            {"https://mobile.twitter.com/kilncms", "@kilncms"},
+            {"https://x.com/kilncms#top", "@kilncms"}
+          ] do
+        assert BrandTokens.normalize_twitter_site(input) == expected, "#{inspect(input)}"
+      end
+    end
+
+    test "normalize_twitter_site/1 refuses everything else" do
+      for bad <- [
+            String.duplicate("a", 16),
+            "@kiln-cms",
+            "@",
+            "@kiln cms",
+            "<script>alert(1)</script>",
+            "@@kilncms",
+            "https://example.com/kilncms",
+            "https://x.com.evil.example/kilncms",
+            "https://x.com/kilncms/status/1",
+            # X's own pages, not accounts: would publish a wrong twitter:site.
+            "https://x.com/home",
+            "https://x.com/i/flow/login",
+            "https://twitter.com/explore",
+            "https://x.com/settings?x=1",
+            "home",
+            "@Search",
+            "",
+            nil,
+            123
+          ] do
+        assert BrandTokens.normalize_twitter_site(bad) == nil, "#{inspect(bad)} was accepted"
+      end
+    end
+
+    test "stores the canonical @handle on write", ctx do
+      for {input, expected} <- [
+            {"kilncms", "@kilncms"},
+            {"@kiln_cms", "@kiln_cms"},
+            {"https://x.com/kilncms", "@kilncms"}
+          ] do
+        assert {:ok, row} =
+                 CMS.save_site_branding(%{twitter_site: input}, actor: ctx.admin, tenant: ctx.org)
+
+        assert row.twitter_site == expected
+      end
+    end
+
+    test "rejects a malformed handle at the action, writing no row", ctx do
+      for bad <- [
+            String.duplicate("a", 16),
+            "@kiln-cms",
+            "https://example.com/kilncms",
+            "@",
+            "@kiln cms",
+            "<script>alert(1)</script>"
+          ] do
+        assert {:error, %Ash.Error.Invalid{} = error} =
+                 CMS.save_site_branding(%{twitter_site: bad}, actor: ctx.admin, tenant: ctx.org),
+               "#{inspect(bad)} was accepted"
+
+        assert Exception.message(error) =~ "must be an X (Twitter) username like @kilncms"
+      end
+
+      assert {:ok, []} = CMS.list_site_branding(tenant: ctx.org, authorize?: false)
+    end
+
+    test "a blank value stores nil", ctx do
+      assert {:ok, row} =
+               CMS.save_site_branding(%{twitter_site: "   "}, actor: ctx.admin, tenant: ctx.org)
+
+      assert row.twitter_site == nil
+    end
+  end
+
   defp seed_org do
     Ash.Seed.seed!(Accounts.Organization, %{
       name: "Tokens Org",
