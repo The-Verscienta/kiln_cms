@@ -28,13 +28,19 @@
 #
 # Tools:
 #   cwebp    WebP encoder — `brew install webp` / `apt install webp`
-#   sips     (macOS, preinstalled) OR ImageMagick `magick`/`convert`, for the
-#            JPEG/PNG resizes
-# CI does not run this; the byte budgets in the page tests check the
-# committed output.
+#   sips     (macOS, preinstalled) OR ImageMagick 7 `magick` / ImageMagick 6
+#            `convert` + `identify`, for the JPEG/PNG resizes. Picked in that
+#            order; OPTIMIZE_RESIZER=sips|magick|convert forces one.
+#
+# OPTIMIZE_IMAGES_ROOT (default: the repo root) moves every input and output
+# under another directory, so a test can run this without touching the
+# committed images. The byte budgets in the page tests check the committed
+# output; the `optimize_images_script` CI job runs
+# scripts/ci/check_optimize_images.sh against both ImageMagick versions
+# (#2461), which only checks what the resizer drives.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="${OPTIMIZE_IMAGES_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 RAW="$ROOT/e2e/screenshots/raw"
 IMAGES="$ROOT/priv/static/images"
 HOME_OUT="$IMAGES/home"
@@ -45,7 +51,9 @@ die() { echo "optimize_home_images: $*" >&2; exit 1; }
 
 command -v cwebp >/dev/null || die "cwebp not found (brew install webp / apt install webp)"
 
-if command -v sips >/dev/null; then
+if [ -n "${OPTIMIZE_RESIZER:-}" ]; then
+  RESIZER="$OPTIMIZE_RESIZER"
+elif command -v sips >/dev/null; then
   RESIZER=sips
 elif command -v magick >/dev/null; then
   RESIZER=magick
@@ -54,6 +62,17 @@ elif command -v convert >/dev/null; then
 else
   die "need sips (macOS) or ImageMagick (magick/convert) to resize"
 fi
+
+case "$RESIZER" in
+  sips | magick) command -v "$RESIZER" >/dev/null || die "OPTIMIZE_RESIZER=$RESIZER but $RESIZER is not installed" ;;
+  # ImageMagick 6 measures with a separate `identify` binary.
+  convert)
+    if ! command -v convert >/dev/null || ! command -v identify >/dev/null; then
+      die "OPTIMIZE_RESIZER=convert needs ImageMagick 6's convert and identify"
+    fi
+    ;;
+  *) die "OPTIMIZE_RESIZER must be sips, magick or convert, not '$RESIZER'" ;;
+esac
 
 # resize <in> <out> <width|-> <height|-> <jpeg|png> [quality]
 resize() {
@@ -67,8 +86,19 @@ resize() {
       ;;
     *)
       local geom="${w}x"; [ "$h" != "-" ] && geom="x${h}"
-      local qa=(); [ "$fmt" = jpeg ] && qa=(-quality "$q" -strip)
-      "$RESIZER" "$in" -resize "$geom" ${qa[@]+"${qa[@]}"} "$out"
+      # JPEG: drop metadata. PNG: 8-bit RGBA like sips writes (ImageMagick
+      # would otherwise pick a palette when the colors fit), and no tIME chunk
+      # and no text chunk at all, so rerunning on the same input is
+      # byte-identical. `date` alone drops only date:create/date:modify, and
+      # a run that crossed a second boundary still differed (#2585).
+      local qa=() dst="$out"
+      if [ "$fmt" = jpeg ]; then
+        qa=(-quality "$q" -strip)
+      else
+        qa=(-define "png:exclude-chunks=date,time,tEXt,zTXt,iTXt")
+        dst="PNG32:$out"
+      fi
+      "$RESIZER" "$in" -resize "$geom" "${qa[@]}" "$dst"
       ;;
   esac
 }
@@ -87,12 +117,17 @@ home() {
   done
 }
 
-# image_width <file> — pixel width, with whichever tool resizes.
+# image_width <file> — pixel width, with whichever tool resizes. `[0]` reads
+# the first frame only; without it ImageMagick prints one width per frame.
 image_width() {
+  local w
   case "$RESIZER" in
-    sips) sips -g pixelWidth "$1" | awk '/pixelWidth/ {print $2}' ;;
-    *) "$RESIZER" identify -format '%w' "$1" 2>/dev/null || identify -format '%w' "$1" ;;
+    sips) w="$(sips -g pixelWidth "$1" | awk '/pixelWidth/ {print $2}')" ;;
+    magick) w="$(magick identify -format '%w' "$1[0]")" ;;
+    convert) w="$(identify -format '%w' "$1[0]")" ;;
   esac
+  [[ "$w" =~ ^[0-9]+$ ]] || die "could not read the width of $1 with $RESIZER (got '$w')"
+  echo "$w"
 }
 
 docs() {
