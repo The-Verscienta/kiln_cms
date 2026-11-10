@@ -4,12 +4,13 @@ defmodule KilnCMSWeb.EditorLiveColumnsQueriesTest do
   grow with the number of rows (labels are looked up once per page), and the
   select widens for columns and for the in-review badge independently.
   """
-  # async: false — the counters below attach a global telemetry handler and
-  # count every repo query in the VM, so no other test may run beside them.
+  # async: false — the counters attach a global telemetry handler, so no other
+  # test may run beside them. Sync is not enough on its own (#2504): see
+  # `KilnCMS.Test.QueryCounting` for what else keeps the counts this test's own.
   use KilnCMSWeb.ConnCase, async: false
   @moduletag :capture_log
 
-  import Phoenix.LiveViewTest
+  import KilnCMS.Test.QueryCounting
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.User
@@ -44,29 +45,6 @@ defmodule KilnCMSWeb.EditorLiveColumnsQueriesTest do
     user
   end
 
-  # Every repo query issued while `fun` runs, as `{source, sql}`.
-  defp queries(fun) do
-    handler = "colq-#{uniq()}"
-    {:ok, agent} = Agent.start_link(fn -> [] end)
-
-    :telemetry.attach(
-      handler,
-      [:kiln_cms, :repo, :query],
-      fn _event, _measure, meta, _config ->
-        Agent.update(agent, &[{meta[:source], meta[:query]} | &1])
-      end,
-      nil
-    )
-
-    try do
-      fun.()
-    after
-      :telemetry.detach(handler)
-    end
-
-    Agent.get(agent, & &1)
-  end
-
   defp seed_rows(prefix, count) do
     for n <- 1..count do
       target =
@@ -98,13 +76,7 @@ defmodule KilnCMSWeb.EditorLiveColumnsQueriesTest do
     end
   end
 
-  defp count_for(conn, prefix) do
-    queries(fn ->
-      {:ok, lv, _html} = live(conn, "/editor?type=page&q=#{prefix}")
-      render(lv)
-    end)
-    |> length()
-  end
+  defp list_queries(conn, prefix), do: page_queries(conn, "/editor?type=page&q=#{prefix}")
 
   setup %{conn: conn} do
     admin = admin()
@@ -146,9 +118,12 @@ defmodule KilnCMSWeb.EditorLiveColumnsQueriesTest do
     seed_rows(many, 30)
 
     # Warm the one-off caches (registries, settings) so both runs see the same ones.
-    count_for(conn, few)
+    list_queries(conn, few)
 
-    assert count_for(conn, many) == count_for(conn, few)
+    many_queries = list_queries(conn, many)
+    few_queries = list_queries(conn, few)
+
+    assert_same_queries(many_queries, few_queries, "30 rows minus 3 rows")
   end
 
   test "the select carries custom_fields for columns and the compliance fields for in_review, together",
@@ -157,11 +132,8 @@ defmodule KilnCMSWeb.EditorLiveColumnsQueriesTest do
     seed_rows(prefix, 1)
 
     page_selects = fn params ->
-      for {"pages", sql} <-
-            queries(fn ->
-              {:ok, lv, _} = live(conn, "/editor?type=page&q=#{prefix}&#{params}")
-              render(lv)
-            end),
+      for %{source: "pages", sql: sql} <-
+            page_queries(conn, "/editor?type=page&q=#{prefix}&#{params}"),
           sql =~ ~r/^SELECT/ and sql =~ "ORDER BY",
           do: sql
     end

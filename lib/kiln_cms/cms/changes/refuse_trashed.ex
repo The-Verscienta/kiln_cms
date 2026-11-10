@@ -40,12 +40,20 @@ defmodule KilnCMS.CMS.Changes.RefuseTrashed do
       included, or a restored referrer would still name a record that no
       longer exists. It fires and announces only a referrer that is not
       trashed.
+    * `:convert_custom_field` and `:resnapshot_media`: the backfills a
+      contract step relies on (`KilnCMS.CMS.FieldConversion`,
+      `KilnCMS.Media.Resnapshot`) walk the trash too, or a row trashed
+      before the step and restored after the contract release would come
+      back with the old field shape or a stale media snapshot (#2533). Each
+      fires only when the row its write returned is out of the trash
+      (`Changes.FireArtifacts`, `skip_trashed: true`): a trashed row's
+      artifacts were purged when it was trashed.
   """
   use Ash.Resource.Change
 
   require Ash.Expr
 
-  @exempt [:restore, :clear_reference_target]
+  @exempt [:restore, :clear_reference_target, :convert_custom_field, :resnapshot_media]
 
   @doc "The update actions allowed to write a trashed row. See the moduledoc."
   @spec exempt_actions() :: [atom()]

@@ -207,7 +207,9 @@ defmodule KilnCMSWeb.ContentController do
       form: form,
       # Under `/fr/forms/<slug>` the form posts to `/fr/forms/<slug>`, so the
       # thank-you page and a refused re-render stay in the visitor's language.
-      action: I18n.localized_path(conn.assigns[:path_locale], "/forms/" <> form.slug),
+      # Pinned, not localized (#2465): under `/en/` too, since an unprefixed
+      # POST would take the session's locale instead.
+      action: I18n.pinned_path(conn.assigns[:path_locale], "/forms/" <> form.slug),
       current_org: conn.assigns[:current_org],
       locale: locale(conn),
       page_title: form.name

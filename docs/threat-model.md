@@ -1373,8 +1373,43 @@ creates an account and grants a site tier.
   account for any address. So an unconfirmed account is never added to a site
   directly: the Team page invites it instead, and accepting sets a new
   password, confirms the account, revokes every token it held, signs out its
-  sessions and clears a display name the first registrant chose. Only a
-  confirmed account accepts with one click and keeps its password. An erased
+  sessions and clears a display name the first registrant chose. It also
+  forgets every other credential the first registrant could have set up
+  (#2453, `Changes.ForgetPriorCredentials`): two-step verification (the live
+  secret, recovery codes and any pending re-enrollment), passkeys,
+  identity-provider links and push devices are removed, and every live API
+  key is revoked. Whoever registered first can sign in with their own
+  password while the account is unconfirmed, and an admin can raise an
+  unconfirmed account's role (`:manage_access`, `:grant_temporary_role`) to one
+  that reaches `/editor/settings`, or mint it an API key. So "a self-registered
+  viewer cannot enroll a factor" is no defense. The removals run inside the accept's transaction, as
+  `SystemActor.new(:invitations)` (each action admits that actor and no
+  person; the passkey and push-device removals sit above the platform-admin
+  bypass), with reads that fail closed, so any error rolls the whole accept
+  back rather than handing over an account a stranger can still get into. The
+  TOTP columns are cleared from the row re-read `FOR NO KEY UPDATE` in the
+  transaction, not from the caller's possibly stale struct. Each removal is
+  logged with no person: `second_factor_removed` and `passkey_removed` with
+  `via` `invitation`, and `api_key_revoked`. A credential write the
+  stranger's session already had in flight cannot slip past the takeover. The
+  takeover holds the account's row (`FOR NO KEY UPDATE`) while it forgets the
+  account's credentials. A passkey registration, push subscription,
+  two-step confirmation, recovery-code regeneration or password change
+  (`Passkey` `:register`, `PushSubscription` `:subscribe`, `User`
+  `:confirm_totp`, `:regenerate_totp_recovery_codes`, `:change_password`)
+  that the stranger's session had in flight takes the account's row first
+  (`Changes.GuardAccountTakeover`, through `AccountLock.credentials/2`:
+  `FOR SHARE` for the two inserts, `FOR NO KEY UPDATE` for the three user
+  updates). If it gets there before the takeover, it commits first, and the
+  takeover removes or overwrites what it wrote. If it gets there after, it
+  waits, finds the password changed (or the staged secret cleared), and is
+  refused with `Errors.AccountTakenOver`. The stranger's sessions are evicted
+  once the takeover commits. `:setup_totp` and `:disable_totp` are left
+  unguarded on purpose: a secret staged from a stale session is enforced by
+  nothing until `:confirm_totp` promotes it, which the guard refuses, and the
+  invitee's own enrollment stages a fresh one over it; a stale disable can
+  only clear columns the takeover already cleared. Only a confirmed account accepts
+  with one click, and it keeps its password and every credential. An erased
   account cannot accept.
 - **Who can send, and for how long it counts.** Only a standing platform admin
   can invite or resend (`StandingAdminOnly`): a temporary admin's invitation
@@ -1434,12 +1469,18 @@ creates an account and grants a site tier.
   A tier change or removal made on a build that had invitations but not #2452
   did not retire the member's pending invitation, so for up to 7 days after
   upgrading such a link raises a demoted member back (and, as before, re-adds
-  a removed one). Admins check **Pending invitations** on Team. (6) Taking
-  over an unconfirmed account (#2453) replaces its password and ends its
-  sessions, but does not remove a second factor, passkey or linked SSO
-  identity the account may hold.
-  A self-registered account is a `:viewer` and cannot reach `/editor/settings`,
-  where those are enrolled, so this needs another route to them to matter.
+  a removed one). Admins check **Pending invitations** on Team. (6) *The
+  same takeover by another route keeps the stranger's credentials.*
+  `:confirm_new_user` and `:reset_password_with_token` confirm an
+  unconfirmed account without running the wipe above. A magic-link sign-in
+  (`:sign_in_with_magic_link`, a read) neither confirms the account nor takes
+  it over (#2516), so the stranger keeps a working password on an account the
+  address's owner now shares and that stays unconfirmed. Both are the general
+  pre-hijack residual, tracked in #2594. (7) *What the takeover does not touch:* memberships on
+  other sites, billing, and newsletter subscriptions stay as the first
+  registrant left them. (8) *Erasure leaves the TOTP columns.*
+  `Changes.AnonymizeUser` removes passkeys and identities but not
+  `totp_*`; a follow-up.
 
 ### Account unlock (#2250)
 

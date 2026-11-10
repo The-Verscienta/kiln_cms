@@ -167,6 +167,49 @@ defmodule KilnCMSWeb.ContentCacheTest do
     refute etag2 == etag
   end
 
+  # #2502: a media write clears the whole delivery cache (`BustMediaCache`), and
+  # so does the operator flush. The head-generation token used to live in that
+  # cache, so either one sent the site back to the ETag it had BEFORE its last
+  # settings save, and a browser still holding that ETag got a 304 for the old
+  # `<head>`. Each clear must keep the post-save ETag.
+  for {label, clear} <- [
+        {"a media write's full clear", &KilnCMS.CMS.Changes.BustMediaCache.bust/0},
+        {"the operator flush", &KilnCMS.Cache.flush_delivery/0}
+      ] do
+    test "#{label} does not bring back the ETag from before a settings save (#2502)",
+         %{conn: conn} do
+      page = published_page("Head Gen Kept")
+      assert [e0] = conn |> get(~p"/#{page.slug}") |> get_resp_header("etag")
+
+      admin =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "etag-clear-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password1234!"),
+          confirmed_at: DateTime.utc_now(),
+          role: :admin
+        })
+
+      CMS.save_feed_settings!(%{excluded_types: ["post"]},
+        actor: admin,
+        tenant: KilnCMS.Accounts.default_org_id()
+      )
+
+      assert [e1] = conn |> get(~p"/#{page.slug}") |> get_resp_header("etag")
+      refute e1 == e0
+
+      unquote(clear).()
+
+      stale = conn |> put_req_header("if-none-match", e0) |> get(~p"/#{page.slug}")
+      assert html_response(stale, 200) =~ "Head Gen Kept"
+      assert get_resp_header(stale, "etag") == [e1]
+
+      assert conn
+             |> put_req_header("if-none-match", e1)
+             |> get(~p"/#{page.slug}")
+             |> response(304)
+    end
+  end
+
   # The page is rendered by this request's code, so a deploy that changes the
   # markup must move the ETag even though no content changed. Pins the
   # fingerprint as a new build would, so it restores it after (this module is

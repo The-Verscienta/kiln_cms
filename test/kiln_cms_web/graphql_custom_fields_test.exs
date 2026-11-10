@@ -9,12 +9,14 @@ defmodule KilnCMSWeb.GraphqlCustomFieldsTest do
   parent and the resolver has to fetch them (as the request's actor) itself.
   """
   # async: false — the read-count tests listen to the repo's telemetry, which
-  # is global, and the org tests go through the endpoint.
+  # is global (`KilnCMS.Test.QueryCounting`), and the org tests go through the
+  # endpoint.
   use KilnCMSWeb.ConnCase, async: false
 
   import KilnCMS.OrgFixtures
 
   alias KilnCMS.CMS
+  alias KilnCMS.Test.QueryCounting
   alias KilnCMSWeb.Tenant
 
   @schema KilnCMSWeb.GraphqlSchema
@@ -620,37 +622,13 @@ defmodule KilnCMSWeb.GraphqlCustomFieldsTest do
     end
   end
 
-  # {field_definitions queries, posts queries} fired while `fun` runs.
+  # {field_definitions queries, posts queries} fired on this test's behalf
+  # while `fun` runs.
   defp counted(fun) do
-    ref = make_ref()
-    parent = self()
+    {_result, queries} = QueryCounting.queries(fun)
+    sqls = Enum.map(queries, & &1.sql)
 
-    :telemetry.attach(
-      {__MODULE__, ref},
-      [:kiln_cms, :repo, :query],
-      fn _event, _measurements, %{query: query}, _config ->
-        send(parent, {ref, query})
-      end,
-      nil
-    )
-
-    try do
-      fun.()
-    after
-      :telemetry.detach({__MODULE__, ref})
-    end
-
-    queries = drain(ref, [])
-
-    {Enum.count(queries, &(&1 =~ ~s(FROM "field_definitions"))),
-     Enum.count(queries, &(&1 =~ ~s(FROM "posts")))}
-  end
-
-  defp drain(ref, acc) do
-    receive do
-      {^ref, query} -> drain(ref, [query | acc])
-    after
-      0 -> acc
-    end
+    {Enum.count(sqls, &(&1 =~ ~s(FROM "field_definitions"))),
+     Enum.count(sqls, &(&1 =~ ~s(FROM "posts")))}
   end
 end

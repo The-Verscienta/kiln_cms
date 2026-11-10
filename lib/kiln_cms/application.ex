@@ -84,6 +84,14 @@ defmodule KilnCMS.Application do
       KilnCMS.Media.TransformGate,
       # Bounded LRW content cache (see `KilnCMS.Cache.child_spec/1`).
       KilnCMS.Cache,
+      # Generation tokens and last-known admin allowlists (#2502): unbounded
+      # (a few keys per site) and never cleared, so a delivery flush or the
+      # content cache's eviction cannot move one back. Explicit id for the
+      # reason the WebAuthn store below gives.
+      Supervisor.child_spec(
+        {Cachex, [name: KilnCMS.Cache.generation_cache_name(), transactions: true]},
+        id: KilnCMS.Cache.generation_cache_name()
+      ),
       # Host→org resolution, on its own eviction schedule and the only cache
       # that remembers a miss (#659).
       KilnCMS.Cache.Hosts,

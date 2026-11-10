@@ -224,6 +224,53 @@ defmodule KilnCMSWeb.InviteLiveTest do
     assert membership(squatter.id, Accounts.default_org_id()).role == :editor
   end
 
+  test "a takeover forgets the stranger's second factor and passkeys, says so, and logs it",
+       %{conn: conn} do
+    {invitation, token} = invite!()
+
+    squatter =
+      user(:viewer, %{email: to_string(invitation.email), confirmed_at: nil})
+      |> Ash.Seed.update!(%{
+        totp_secret: KilnCMS.Accounts.Totp.generate_secret(),
+        totp_confirmed_at: DateTime.utc_now()
+      })
+
+    {:ok, _passkey} = KilnCMS.PasskeyFixtures.enroll(squatter, "invite-live-cred-#{uniq()}")
+
+    {:ok, view, _html} = live(conn, ~p"/auth/invite/#{token}")
+
+    assert {:error, {:redirect, %{to: "/sign-in"}}} = submit_password(view)
+    assert %{"info" => info} = assert_redirect(view, "/sign-in")
+    assert info =~ "passkeys or API keys set up on this address before were removed"
+
+    {:ok, user} = Accounts.get_user_by_email(to_string(invitation.email), authorize?: false)
+    refute Accounts.totp_enabled?(user)
+
+    # Recorded in the log of the site the page was opened on, with no actor.
+    types =
+      KilnCMS.Security.list_events!(actor: user(:admin), tenant: Accounts.default_org_id())
+      |> then(fn
+        %{results: results} -> results
+        list -> list
+      end)
+      |> Enum.filter(&(&1.target_id == squatter.id and is_nil(&1.actor_id)))
+      |> Enum.map(& &1.type)
+
+    assert :second_factor_removed in types
+    assert :passkey_removed in types
+  end
+
+  test "a takeover with nothing to forget says nothing about it", %{conn: conn} do
+    {invitation, token} = invite!()
+    user(:viewer, %{email: to_string(invitation.email), confirmed_at: nil})
+
+    {:ok, view, _html} = live(conn, ~p"/auth/invite/#{token}")
+
+    assert {:error, {:redirect, %{to: "/sign-in"}}} = submit_password(view)
+    assert %{"info" => info} = assert_redirect(view, "/sign-in")
+    refute info =~ "were removed"
+  end
+
   test "invite-only mode does not stop an invitee", %{conn: conn} do
     previous = Application.get_env(:kiln_cms, :registration_enabled)
     Application.put_env(:kiln_cms, :registration_enabled, false)

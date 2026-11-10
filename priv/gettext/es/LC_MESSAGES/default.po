@@ -3410,6 +3410,11 @@ msgstr "Cualquier estado"
 msgid "Any tag"
 msgstr "Cualquier etiqueta"
 
+#: lib/kiln_cms_web/live/invite_live.ex
+#, elixir-autogen, elixir-format
+msgid "Any two-step verification, passkeys or API keys set up on this address before were removed; set them up again."
+msgstr "Se han eliminado la verificación en dos pasos, las claves de acceso y las claves de API que se configuraron antes en esta dirección; vuelve a configurarlas."
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Any uploader"
@@ -5415,6 +5420,11 @@ msgstr "Confirmar nueva contraseña"
 #, elixir-autogen, elixir-format
 msgid "Confirm your email"
 msgstr "Confirmar su correo electrónico"
+
+#: lib/kiln_cms_web/live/account_live.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm your email address first: an administrator can't approve your registration until you do."
+msgstr "Confirma primero tu dirección de correo: un administrador no puede aprobar tu registro hasta que lo hagas."
 
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
@@ -8147,6 +8157,7 @@ msgstr "Incrustar en otro sitio"
 msgid "Embedded HTML or external content"
 msgstr "HTML incrustado o contenido externo"
 
+#: lib/kiln_cms/blocks/embed.ex
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "Embedded media"
@@ -14406,6 +14417,11 @@ msgstr "O escribe un nombre abajo para añadir una."
 msgid "Or until (UTC)"
 msgstr "O hasta el (UTC)"
 
+#: lib/kiln_cms_web/live/account_live.ex
+#, elixir-autogen, elixir-format
+msgid "Or use the link in the confirmation email we sent, if it's still valid."
+msgstr "O usa el enlace del correo de confirmación que te enviamos, si aún es válido."
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "Order among siblings"
@@ -16729,6 +16745,11 @@ msgstr "Restablecer valores predeterminados"
 msgid "Reset your password"
 msgstr "Restablecer su contraseña"
 
+#: lib/kiln_cms_web/live/account_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reset your password to confirm it."
+msgstr "Restablece tu contraseña para confirmarla."
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Resolve thread"
@@ -17656,6 +17677,11 @@ msgstr "Programar y publicar un lanzamiento requiere acceso de administrador."
 #, elixir-autogen, elixir-format
 msgid "Scripts"
 msgstr "Scripts"
+
+#: lib/kiln_cms/scrollable_tables.ex
+#, elixir-autogen, elixir-format
+msgid "Scrollable table"
+msgstr "Tabla desplazable"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
@@ -19013,6 +19039,11 @@ msgstr "Alguien cambió la página publicada después de que guardaras tu borrad
 msgid "Someone else already moved this to the trash or deleted it."
 msgstr "Otra persona ya movió esto a la papelera o lo eliminó."
 
+#: lib/kiln_cms_web/live/trash_live.ex
+#, elixir-autogen, elixir-format
+msgid "Someone else already restored that item."
+msgstr "Otra persona ya restauró ese elemento."
+
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
 msgid "Someone else changed this item's status first — reload to see where it stands."
@@ -20143,6 +20174,16 @@ msgstr "Ese elemento ya no está disponible — elija de nuevo."
 #, elixir-autogen, elixir-format
 msgid "That item is no longer available."
 msgstr "Ese elemento ya no está disponible."
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "That item is no longer in the trash — someone else restored or deleted it."
+msgstr "Ese elemento ya no está en la papelera — otra persona lo restauró o lo eliminó."
+
+#: lib/kiln_cms_web/live/trash_live.ex
+#, elixir-autogen, elixir-format
+msgid "That item is no longer in the trash — someone permanently deleted it."
+msgstr "Ese elemento ya no está en la papelera — alguien lo eliminó definitivamente."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -22811,6 +22852,11 @@ msgstr "Sin leer"
 msgid "Unread (%{count})"
 msgstr "Sin leer (%{count})"
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Unrecognized event (%{type})"
+msgstr "Evento no reconocido (%{type})"
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
@@ -24137,6 +24183,11 @@ msgstr "No puedes crear este contenido."
 #, elixir-autogen, elixir-format
 msgid "You can't create this here."
 msgstr "No puedes crear esto aquí."
+
+#: lib/kiln_cms_web/workflow_messages.ex
+#, elixir-autogen, elixir-format
+msgid "You can't edit this content type."
+msgstr "No puedes editar este tipo de contenido."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format

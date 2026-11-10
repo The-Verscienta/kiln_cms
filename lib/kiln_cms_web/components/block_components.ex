@@ -13,6 +13,7 @@ defmodule KilnCMSWeb.BlockComponents do
   alias KilnCMS.Blocks
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.HTMLSanitizer
+  alias KilnCMS.I18n
   alias KilnCMSWeb.ChallengeComponents
 
   # The rendered width of an image block in the stock reading column.
@@ -21,6 +22,36 @@ defmodule KilnCMSWeb.BlockComponents do
   @doc "The image `sizes` for a block laid out in the reading column."
   @spec column_image_sizes() :: String.t()
   def column_image_sizes, do: @column_image_sizes
+
+  @doc """
+  Renders its inner block with Gettext in `locale` — a content record's — so
+  the strings Kiln writes into a page's article (a form's labels, a sign-up's
+  fields, an embed's fallback title, the byline) are in the language the page
+  declares in `<html lang>`, not the request's (#2465).
+
+  Wrapping a component call in `Gettext.with_locale/3` cannot do this: HEEx
+  evaluates a template's dynamic parts when the outermost template is turned
+  into iodata, long after the wrapper returned. So the slot is rendered to
+  iodata here, eagerly, inside the locale, and handed back as already-escaped
+  safe HTML. A `nil` locale renders the slot as it is, in the request's locale.
+  """
+  attr :locale, :string, default: nil
+  slot :inner_block, required: true
+
+  def in_locale(%{locale: nil} = assigns) do
+    ~H"{render_slot(@inner_block)}"
+  end
+
+  def in_locale(assigns) do
+    html =
+      KilnCMS.CodeBlocks.with_content_locale(assigns.locale, fn ->
+        Phoenix.HTML.Safe.to_iodata(~H"{render_slot(@inner_block)}")
+      end)
+
+    assigns = assign(assigns, :html, {:safe, html})
+
+    ~H"{@html}"
+  end
 
   attr :block, :map, required: true
   # An image block's `sizes`. Delivery passes `100vw` for a theme that bleeds
@@ -31,6 +62,11 @@ defmodule KilnCMSWeb.BlockComponents do
   # The experiment variant this page was rendered with (#499), threaded down so
   # a form block can carry it back on submission. `nil` on every ordinary page.
   attr :variant, :string, default: nil
+  # The locale of the page this block is on. On a multi-locale site a form or
+  # sign-up block posts to a path pinned to it (`KilnCMS.I18n.pinned_path/2`),
+  # so the response to a submission is in the page's language (#2465). nil —
+  # the previews — posts to the bare path.
+  attr :locale, :string, default: nil
 
   def render_block(%{block: %{type: type}} = assigns) do
     assigns = assign(assigns, :type, type)
@@ -96,7 +132,12 @@ defmodule KilnCMSWeb.BlockComponents do
                 safe as an attribute value. --%>
           <div class="kiln-columns" style={@block[:style]}>
             <div :for={col <- @block[:columns] || []} class="kiln-column space-y-2">
-              <.render_block :for={child <- col.blocks} block={child} variant={@variant} />
+              <.render_block
+                :for={child <- col.blocks}
+                block={child}
+                variant={@variant}
+                locale={@locale}
+              />
             </div>
           </div>
         <% @type == "gallery" -> %>
@@ -211,9 +252,14 @@ defmodule KilnCMSWeb.BlockComponents do
           <hr class="border-base-300" />
         <% @type == "form" -> %>
           <%!-- nil form (inactive/unknown slug) renders nothing on-site. --%>
-          <.public_form :if={@block[:form]} form={@block[:form]} variant={@variant} />
+          <.public_form
+            :if={@block[:form]}
+            form={@block[:form]}
+            variant={@variant}
+            action={I18n.pinned_path(@locale, "/forms/" <> @block[:form].slug)}
+          />
         <% @type == "newsletter_signup" -> %>
-          <.newsletter_signup block={@block} />
+          <.newsletter_signup block={@block} locale={@locale} />
         <% @type == "embed" -> %>
           <%!-- Two shapes, and only the allowlisted hosts get an iframe. --%>
           <div :if={embed = HTMLSanitizer.safe_embed_url(@block.content)} class="aspect-video">
@@ -397,6 +443,7 @@ defmodule KilnCMSWeb.BlockComponents do
   # (#1870): same action, same inputs, same honeypot, in the site's kit
   # classes. No CSRF token — `/newsletter/subscribe` is on `:public_form`.
   attr :block, :map, required: true
+  attr :locale, :string, default: nil
 
   defp newsletter_signup(assigns) do
     assigns = assign(assigns, :id_prefix, "kiln-newsletter-" <> (assigns.block[:id] || "signup"))
@@ -404,7 +451,7 @@ defmodule KilnCMSWeb.BlockComponents do
     ~H"""
     <form
       method="post"
-      action={KilnCMS.Blocks.NewsletterSignup.action()}
+      action={I18n.pinned_path(@locale, KilnCMS.Blocks.NewsletterSignup.action())}
       class="kiln-newsletter-signup space-y-3 rounded-lg border border-base-300 p-4"
     >
       <h2 :if={present?(@block.content)} class="text-xl font-bold">{@block.content}</h2>

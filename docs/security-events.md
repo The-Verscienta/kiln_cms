@@ -113,17 +113,17 @@ a type may carry only the keys below; anything else is dropped.
 | `sign_in_failed` | Failed sign-in | A wrong password, a wrong second-factor code, or a password sign-in refused by [human verification](human-verification.md) (a token that did not pass, or the provider down past the point where sign-ins are let through). Sampled: see below | `method`, `reason` |
 | `sign_in_locked` | Sign-in locked out | A throttle refused an attempt. First refusal per subject and scope each 15 minutes | `method`, `scope` |
 | `second_factor_enrolled` | Second factor added | An authenticator app was confirmed | `kind` |
-| `second_factor_removed` | Second factor removed | Two-factor sign-in was turned off | `kind` |
+| `second_factor_removed` | Second factor removed | Two-factor sign-in was turned off, or removed when an invitation took over an unconfirmed account (see below) | `kind`, `via` |
 | `recovery_code_used` | Recovery code used | A recovery code was spent at the code prompt | `remaining` |
 | `passkey_added` | Passkey added | A passkey was registered | `name` |
-| `passkey_removed` | Passkey removed | A passkey was deleted | `name` |
+| `passkey_removed` | Passkey removed | A passkey was deleted, by its owner or an admin, or when an invitation took over an unconfirmed account | `name`, `via` |
 | `role_granted` | Role granted | A membership was created, or a role was raised | `role`, `previous_role` |
 | `role_revoked` | Role revoked | A role was lowered, a membership removed, or a temporary elevation ended early | `role` |
 | `member_invited` | Member invited | An admin invited an address to the site, or resent an invitation | `role`, `resent` |
 | `invitation_revoked` | Invitation revoked | An admin revoked a pending invitation, or changed the tier or custom role of the person it names, or removed them, which retires it | `role` |
 | `elevation_granted` | Temporary elevation granted | A time-boxed role was granted | `role`, `minutes` |
 | `api_key_created` | API key created | A key was minted, or a draft-write key was rotated into a new one | `name`, `scope` |
-| `api_key_revoked` | API key revoked | A key was revoked (a repeat revoke records nothing) | `name` |
+| `api_key_revoked` | API key revoked | A key was revoked by an admin, or when an invitation took over its unconfirmed account (a repeat revoke records nothing) | `name` |
 | `sso_config_changed` | Single sign-on changed | The site's identity provider or a verified SSO domain was saved, verified or removed | `provider`, `change` |
 | `org_setting_changed` | Site setting changed | Any other site-level setting, or a blocked-address rule, was saved or removed | `setting` |
 | `ip_auto_blocked` | Address blocked automatically | The [scanner guard](ip-blocking.md#block-scanners-automatically) temporarily blocked an address for racking up 404s or probing bait paths. The address is the event's IP; there is no acting person | `reason`, `count`, `window_minutes`, `block_minutes` |
@@ -242,6 +242,18 @@ When the invitee had a waiting or rejected registration on
 the site, accepting approves that row instead, recorded as
 `registration_approved` with `via` `invitation` and no `role_granted`.
 
+When the invitee sets a password over an account someone registered for the
+address but never confirmed, accepting takes that account over and removes
+every credential the first registrant could have set up (#2453). Each removal
+is recorded with no person, beside the membership's own event: `second_factor_removed`
+(`kind` `totp`, `via` `invitation`) when the account had confirmed two-step
+verification, `passkey_removed` (`name`, `via` `invitation`) for each passkey,
+targeting the account, and `api_key_revoked` (`name`) for each key that was
+still live, targeting the key. They go to the log of the site the invitation
+page was opened on, or the invited site when the request names none. A
+confirmed account accepting with one click loses nothing and records none of
+these. `via` is absent on the events a person causes.
+
 ### Failed sign-ins, allowlist and unlock refusals are sampled, lockouts are not
 
 A password-guessing flood must not fill the log, so at most **5 failed
@@ -298,16 +310,16 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sign_in_locked` (second factor at sign-in) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` on a denied budget | after commit; `scope: "second_factor"` |
 | `sign_in_locked` (second factor in settings) | `lib/kiln_cms/accounts/changes/throttle_second_factor.ex`: on a denied budget (turning 2FA off, regenerating recovery codes) | after commit; `scope: "settings"` |
 | `second_factor_enrolled` | `User` `:confirm_totp` (`lib/kiln_cms/accounts/user.ex`) | in txn; `kind: "totp"` |
-| `second_factor_removed` | `User` `:disable_totp` | in txn; `kind: "totp"` |
+| `second_factor_removed` | `User` `:disable_totp`, and `lib/kiln_cms/accounts/changes/forget_prior_credentials.ex` on `User` `:accept_invitation_with_password` (#2453) when the row it re-reads under lock had a confirmed factor | in txn; `kind: "totp"`; from the takeover, also `via: "invitation"` and no person |
 | `recovery_code_used` | `User` `:consume_totp_recovery_code` | in txn; `remaining` is the count left |
 | `passkey_added` | `Accounts.Passkey` `:register` (`lib/kiln_cms/accounts/passkey.ex`) | in txn; `name` |
-| `passkey_removed` | `Accounts.Passkey` `:destroy` | in txn; `name`; target is the owner |
+| `passkey_removed` | `Accounts.Passkey` `:destroy`, and `:forget_on_takeover` (#2453, from `Changes.ForgetPriorCredentials`, as `SystemActor.new(:invitations)`) | in txn; `name`; target is the owner; from the takeover, also `via: "invitation"` and no person |
 | `role_granted` / `role_revoked` | `lib/kiln_cms/security/changes/record_role_change.ex`, on `User` `:manage_access` and `OrgMembership` `:create`, `:update`, `:destroy`, `:raise_role_by_invitation` (`lib/kiln_cms/accounts/org_membership.ex`) | in txn; an edit that leaves the role alone (audiences, type scopes) writes nothing |
 | `member_invited` | `Accounts.Invitation` `:invite` and `:resend` (`lib/kiln_cms/accounts/invitation.ex`), also reached through `:add_or_invite` | in txn; `role`, `resent`; tenant is the invitation's site |
 | `invitation_revoked` | `Accounts.Invitation` `:revoke`, and `:retire` (#2452, from `Changes.RetirePendingInvitation` on `OrgMembership` `:update` and `:destroy`, as `SystemActor.new(:invitations)`) | in txn; `role` is the invitation's tier; for `:retire`, the person is the admin who made the membership change, or none when system code made it |
 | `elevation_granted`, and `role_revoked` when cleared early | `lib/kiln_cms/security/changes/record_elevation.ex`, on `User` and `OrgMembership` `:grant_temporary_role` | in txn; `minutes` until it lapses |
 | `api_key_created` | `Accounts.ApiKey` `:create` and `:rotate` (`lib/kiln_cms/accounts/api_key.ex`) | in txn; `name`, `scope` (the key's `access`); never the key or its hash |
-| `api_key_revoked` | `Accounts.ApiKey` `:revoke` and `:retire_rotated` | in txn; only when the key was not already revoked |
+| `api_key_revoked` | `Accounts.ApiKey` `:revoke` and `:retire_rotated`; `:revoke` is also called by `Changes.ForgetPriorCredentials` (#2453) for each live key of an account an invitation takes over, with no person | in txn; only when the key was not already revoked; target is the key |
 | `sso_config_changed` | `CMS.SiteSsoProvider` (every write, via the `audit: :sso_config` option of `use KilnCMS.CMS.OrgSettings`, `lib/kiln_cms/cms/site_sso_provider.ex`), and `CMS.SiteSsoDomain` `:add`, `:verify`, `:remove` (`lib/kiln_cms/cms/site_sso_domain.ex`) | in txn; never the issuer, client id, secret or domain |
 | `org_setting_changed` | `lib/kiln_cms/cms/org_settings.ex`: the `use KilnCMS.CMS.OrgSettings` macro adds `Changes.RecordOrgSetting` to every write of every settings resource, and `CMS.IpBlockRule` `:create`, `:destroy` (`lib/kiln_cms/cms/ip_block_rule.ex`) | in txn; names the setting, never a value. The retention setting itself is one of them |
 | `ip_auto_blocked` | `lib/kiln_cms/security/scanner_guard.ex`, after the guard's `CMS.IpBlockRule` `:create` succeeds, via `Recorder.record_after_commit/2` | outside the transaction, off the request path; skipped when the guard is off, the cap is reached or a recent sign-in from the address exists |
@@ -354,6 +366,7 @@ recorded as long as it names a user actor and a tenant.
 | An invitation used up, or pruned | Not recorded | Accepting destroys the row through `Invitation` `:consume`; the `role_granted` of the membership it became or raised is the record. An accept by someone who already held the invited tier or higher changes nothing and records nothing. (An invitation retired by a membership change is recorded, as `invitation_revoked`.) The daily `:prune_expired` sweep removes rows long past expiry, which no one decided. |
 | A session signed out by an earlier "sign out everyone" when it is next used | Not recorded | A session that recorded no site (signed in before #2246) is caught later, on its next use on the site. `all_sessions_revoked` already records the decision; the late catch is its consequence. |
 | A session used on another site's host | Not recorded | The cookie was copied; it is served signed out there and nothing is written to it. |
+| Identity-provider links and push devices removed when an invitation takes over an unconfirmed account | Not recorded | There is no event type for either, and none is recorded when one is made. The second factor, passkeys and API keys removed by the same takeover are recorded (#2453). |
 | An unlock request that mails nothing, or opening an unlock link | Not recorded | A request for an unknown, unpaused or non-member address is answered like any other and leaves no trace, so the log names no address that was not mailed. Opening the link only shows a button; mail scanners do it too. |
 | Unknown host | Not recorded | No site to attribute it to; the event is skipped. |
 | A save of the admin allowlist refused because it would lock you out | Not recorded | Nothing changed. |
@@ -420,6 +433,17 @@ person sees the usual error, so a credential change is never unrecorded.
 - A new event type needs an entry in `KilnCMS.Security.Event` (`@types`, and its
   `metadata` keys), a label in `KilnCMSWeb.SecurityLog.type_label/1`, and a row
   in the matrix above.
+- `type` is a `KilnCMS.Types.KnownAtom` column (#2509). A type this release
+  does not know (one a newer release recorded, read during a rolling deploy or
+  after a rollback) loads as `%KilnCMS.Types.UnknownAtom{value: "the_type"}`
+  instead of failing the read. So code that reads `event.type` gets either one
+  of `Event.types/0` or that struct: match the known atoms and let the struct
+  fall through to a catch-all. `Event.metadata_keys/1` returns `[]` for it, and
+  `KilnCMSWeb.SecurityLog.type_label/1` labels it "Unrecognized event (name)".
+  Writes stay strict: `KilnCMS.Security.record/2` refuses a type outside
+  `@types`, and an `UnknownAtom` too. Adding a type is safe for an older release only if
+  that release already has this column as `KnownAtom`; see
+  [New values in an atom column](releasing.md#new-values-in-an-atom-column).
 - Authorization: reads are org-admin only. The recorder, the erasure sweep and
   the prune run as `KilnCMS.Security.system/0`. See
   *Security audit log* in [policy-matrix.md](policy-matrix.md).
@@ -433,5 +457,6 @@ person sees the usual error, so a credential change is never unrecorded.
 | "The log could not be loaded." | The read failed; try again, and check the application log. |
 | "No member of this site has that email address." | The **Who** filter matched no actor label in this site's log. Check the spelling, or that the person has an event on this site. |
 | An expected event is missing | Check the "Not recorded" table; then the sampling cap for failed sign-ins; then `[:kiln_cms, :security, :event_failed]` and the log. |
+| "Unrecognized event (some_name)" in a gray badge | A newer release recorded this event, and the release now running does not know the type: usually during a rolling deploy, or after rolling back. The row is kept and shown, the CSV carries the raw name in `type`, the erasure sweep scrubs it and the prune deletes it on schedule. The **Type** filter lists only the types this release knows, so filtering by one hides these rows. They read normally again once every node runs the newer release. |
 | `413` on the CSV | More rows match than the export cap. Narrow the date range. |
 | Old events are still there | The prune runs once a day, and `KILN_SECURITY_LOG_PRUNE_CRON=false` turns it off; or retention is 0. |

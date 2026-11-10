@@ -7,6 +7,29 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="rollback-to-1-8-0-upgrade"></a>
+
+- **Before rolling back to v1.8.0, delete the rows v1.8.0 cannot read (#2509).**
+  Nothing to do when upgrading. v1.8.0 loads an atom column with
+  `String.to_existing_atom/1` and fails the whole read on a value it does not
+  know, and two columns gained values since:
+  ```sql
+  DELETE FROM notifications WHERE event = 'registration_pending';
+  DELETE FROM api_keys WHERE access = 'draft_write';
+  ```
+  Without the first, the bell, the inbox and "mark all read" fail on v1.8.0
+  for everyone holding a registration notice. Draft-write keys stop working on
+  v1.8.0 whatever you do (it has no such scope); left in place, the key's own
+  lookup and the site's API keys page fail, so delete them and mint new ones
+  after rolling forward. Never `UPDATE` them to `'read'`: that silently
+  changes what a key someone already holds can do. Security events need
+  nothing, since v1.8.0 has no security log. Field definitions of type
+  `key_value` or `telephone` also break v1.8.0's reads, and deleting them
+  loses data: check
+  [#2605](https://github.com/The-Verscienta/kiln_cms/issues/2605) before
+  rolling back if any site uses them. Details in
+  [New values in an atom column](../releasing.md#new-values-in-an-atom-column).
+
 <a id="render-etags-upgrade"></a>
 
 - **Every fired-artifact `ETag` (`/api/content/…`, every surface) and every
@@ -960,7 +983,55 @@ carries the reasoning.
   Rolling the pin back is safe: the extra attributes are inert to the
   previous release.
 
+<a id="scrollable-tables-upgrade"></a>
+
+- **Optional: run `mix kiln.refire_all` after deploying to put the new table
+  markup into fired `:web` artifacts published before the upgrade (#2464).**
+  No migration and no setting. Public pages rendered by Kiln itself pick the
+  change up as soon as the deploy lands. A fired `:web` artifact keeps its old
+  markup (an unfocusable `.kiln-table-wrap`, or a bare `legacy_html` table with
+  no wrapper) until its document is next published, edited or re-fired:
+  `format_version` does not change, so a read does not re-fire it. The sweep
+  is the same one the [code-block note](#focusable-code-blocks-upgrade)
+  describes, and one run covers both: `mix kiln.refire_all` (on a release,
+  `/app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`). Clients that
+  revalidate with `If-None-Match` get the new HTML on their next revalidation,
+  because the artifact `ETag` is a digest of the body
+  ([#2463](#render-etags)); a consumer that waits for a webhook hears about it
+  only from `mix kiln.refire_all --notify`
+  ([how](../releasing.md#re-render-published-content-after-an-upgrade)).
+  Rolling the pin back is safe: the previous release ignores the extra
+  attributes and the wrapper.
+
 ## Breaking
+
+<a id="purge-trashed-only"></a>
+
+- **Overlay and plugin code: `purge_<type>` (`purge_page`, `purge_post`,
+  `purge_entry`, …) and `purge_media_item` now refuse a record that isn't in
+  the trash (#2531).** The call returns `Ash.Error.Invalid` containing
+  `Ash.Error.Changes.StaleRecord` and changes nothing. Trash the record first
+  (`destroy_<type>` / `destroy_media_item`), then purge it. Media still being
+  quarantined by the upload pipeline can be purged without trashing. The API
+  never exposed `:purge`, so HTTP clients are unaffected; the nightly
+  trash purge only ever read trashed rows.
+
+<a id="restore-version-stale-struct"></a>
+
+- **Overlay and plugin code: `restore_<type>_version` (`restore_page_version`,
+  `restore_post_version`, …) now refuses a record read before a later write,
+  and a restore increments `lock_version` (#2532).** The call returns an
+  error containing `Ash.Error.Changes.StaleRecord` and writes nothing when the
+  row's `lock_version` or `state` no longer matches the record passed in.
+  Before, it could succeed while writing nothing, or restore onto a page
+  published since the read without the publish-time gates. Read the record
+  again (`get_<type>`) right before restoring, and use the returned record
+  afterwards: a record held from before the restore is now stale for
+  `update_<type>` and every other action that carries the optimistic lock.
+  Over HTTP, the revisions restore route answers a lost race with `409`
+  `invalid_state_transition` instead of `422` `restore_failed`, and a
+  document trashed meanwhile with `404` (see
+  [Fixed](#restore-refuses-stale-copy)).
 
 <a id="backup-request-api"></a>
 
@@ -1022,11 +1093,15 @@ carries the reasoning.
     **Unpublish** on the page (nor in the **Live · draft** menu), **Unpublish**
     in a content-list row's menu, or **Unpublish** and **Archive** in the bulk
     bar. **Scheduled unpublish at** is locked on a live or scheduled page, with
-    a note saying an admin sets it. A refused action says "Only an admin can
-    unpublish content on this site." or "Only an admin can archive content on
-    this site."; dragging a live page's unpublish chip on the calendar says
-    "Only an admin can move the unpublish date of a live page on this site.",
-    and a publish chip "Only an admin can move a publish date on this site."
+    a note saying an admin sets it. When an editor on such a site is refused,
+    an unpublish says "Only an admin can unpublish content on this site.", an
+    archive "Only an admin can archive content on this site.", and on the
+    calendar dragging a live page's unpublish chip says "Only an admin can
+    move the unpublish date of a live page on this site." and a publish chip
+    "Only an admin can move a publish date on this site." Those sentences go
+    only to that editor, judged at the moment of the refusal (so a live
+    temporary grant counts); everyone else is told why they were actually
+    refused ([refusal wording](#refusal-wording-names-the-reason)).
   - **Rolling back** is safe: there is no migration and no data change, and
     the previous release's policies apply again.
   - **Guides.** [The editorial workflow](../editorial-workflow.md#7-take-it-down),
@@ -3437,9 +3512,12 @@ carries the reasoning.
   fired, no webhook, no job enqueued.
   - **Exempt** (`KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0`):
     `:restore`, which now requires the opposite (the row must still be
-    trashed), and `:clear_reference_target`, which a purge runs on every
-    referrer, trashed ones included. `:destroy` now also refuses a row that
-    is already trashed.
+    trashed); `:clear_reference_target`, which a purge runs on every
+    referrer, trashed ones included; and `:convert_custom_field` and
+    `:resnapshot_media`, which `mix kiln.fields.convert` and
+    `mix kiln.media.resnapshot` run on trashed rows too
+    ([below](#contract-backfills-reach-trash)). `:destroy` now also refuses a
+    row that is already trashed.
   - **Overlays.** An update action you defined on a content resource that
     writes trashed rows on purpose now fails with `StaleRecord`. There is no
     opt-out today; if you need one, open an issue. Code that writes
@@ -4012,6 +4090,369 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="contract-backfills-reach-trash"></a>
+
+- **`mix kiln.fields.convert` and `mix kiln.media.resnapshot` now also
+  process documents in the trash, so a document restored after a contract
+  release has the new field shape and current media snapshots (#2533).**
+  Both read only live records, and since #2332 their writes were refused on
+  a trashed row anyway. A document trashed before a conversion and restored
+  after the release that deleted the source field came back without its
+  values; one restored after a media shape change came back with the old
+  snapshot.
+  - **What changed.** Each task reads the live records, then the trashed
+    ones (`ContentTypes.list_trashed!/2`), and their actions
+    (`:convert_custom_field`, `:resnapshot_media`) are now exempt from
+    `KilnCMS.CMS.Changes.RefuseTrashed`. A trashed record's write fires no
+    artifact: its artifacts were removed when it was trashed, and a restore
+    rebuilds them. The check is made on the row the `UPDATE` returned
+    (`KilnCMS.CMS.Changes.FireArtifacts`, new option `skip_trashed: true`),
+    so a record restored between the task's read and its write is still
+    fired with the new shape.
+  - **Field conversion.** All or nothing now applies to live records only.
+    A trashed record that cannot be converted is listed with `(trashed)`
+    after its id, keeps its string and does not block `--apply`; the
+    `invalid record(s); nothing written` error counts only live ones. The
+    summary line reads `(N published, N trashed)`: `published` no longer
+    includes trashed records, and the new `trashed` count is the trashed
+    records converted (or, on a dry run, that would be). Each problem in the
+    report (and `--report` JSON) gains `trashed?`. For a multiple select
+    target, `terms` and `new_terms` include the terms of trashed records,
+    since a restored record needs its terms in the options too. New
+    `KilnCMS.CMS.FieldConversion.blocking/1` returns the problems that stop
+    `--apply`.
+  - **Media resnapshot.** The report gains `trashed` (trashed records
+    re-snapshotted, or that would be) and `trashed_failed`. A trashed record
+    that fails, often because it names an item deleted since, is printed
+    with `(trashed)` and does not fail the task. The summary reads
+    `re-snapshotted N (N trashed)`.
+  - **Operators.** The live and trashed records are two reads, so a record
+    trashed or restored during a run can be missed by both. Run either task
+    once more right before the release that relies on it; records already
+    converted or current are not rewritten. No migration, no config.
+  - **Not covered.** The daily refresh of computed fields
+    (`:refresh_computed`) and `mix kiln.occurrences.backfill` still skip
+    trashed records.
+
+<a id="field-lock-release-mid-flush"></a>
+
+- **Field locks: a field released while a takeover waits on its holder's
+  save is never left free (#2557).** In collaborative editing a takeover
+  asks the holder to save, then hands the field over. If the holder clicked
+  out of the field meanwhile, the field went free: a third editor who
+  focused it was given it, and when the takeover's wait ran out it was taken
+  from them without asking them to save, so what they had typed was lost.
+  - **A click-away during a takeover waits for the save.** The holder keeps
+    the field (others are told it is held) until their save answers or the
+    wait runs out, then it goes to the taker. The holder is not told it was
+    "taken" from them. Clicking back in cancels the click-away.
+  - **Where no save can come, the hand-over is immediate:** an idle or
+    closed-tab timeout, or the holder leaving the editor.
+  - **Only the field's current holder can answer "saved"** (`KilnCMS.Collab.FieldLock.flushed/3`
+    takes the holder's pid, defaulting to the caller), so a late answer from
+    an earlier holder cannot hand over the next holder's field unsaved.
+  - A taker who has left is handed nothing, and leaving the editor withdraws
+    your own waiting takeovers, so a field is never locked to a closed tab.
+  - No migration or configuration. Collaborative editing is off by default.
+
+<a id="restore-refuses-stale-copy"></a>
+
+- **Restoring a version from a copy of the document that someone has since
+  changed is now refused, instead of reporting success and writing nothing or
+  skipping the publish-time checks (#2532).** `:restore_version` writes the
+  old version's values onto the record the caller holds and judges that
+  record: its workflow state decides whether the compliance-claim and
+  alt-text gates run, and Ash drops any value equal to it. A copy read before
+  a later save therefore restored nothing whenever the old version matched
+  the copy (the editor still said *Restored that version.*), and a draft copy
+  held across a publish put the old text on the live page without the gates
+  a published page gets.
+  - **What changed.** The restore now matches only a row whose
+    `lock_version` and `state` are still those of the copy it was given
+    (`state` too, because publish, unpublish, archive and unarchive keep
+    `lock_version`). Anything else is refused with
+    `Ash.Error.Changes.StaleRecord` and writes nothing, not even a version
+    row. A document moved to the trash meanwhile is refused the same way.
+  - **Editors.** Confirming *Restore this version* after someone else saved
+    the page shows the conflict banner a stale save shows: *Someone else saved
+    changes to this content. Saving is paused so you don't overwrite their
+    work.*, with **Reload latest**. Your unsaved text stays in the form until
+    you reload. If the page was trashed meanwhile, the banner says so and
+    offers **Back to content**.
+  - **API.** `POST /api/content/:type/:id/revisions/:version_id/restore`
+    answers `409` `invalid_state_transition` when a save lands between the
+    route's read and its restore (before: success that might write nothing,
+    or `422` `restore_failed`), and `404` `not_found` when the document was
+    trashed meanwhile (before: `422`). A credential the content policies
+    refuse still gets `403`. On a `409`, read the document again and retry;
+    `kiln_client` and the JS client already map `409` to their conflict
+    error. Guide: [api.md](../api.md#version-history-revisions).
+  - **Still not covered.** Writes that keep both `lock_version` and `state`
+    do not make a held copy stale: the computed-field refresh, field
+    conversion, `:resnapshot_media`, `:set_oembed_metadata`, `:move` and
+    `:reassign_author`. None of them changes the state, slug or text the
+    restore judges.
+  - No migration and no config. Overlay code that restores from a record
+    read before a later write must read it again first
+    ([Breaking](#restore-version-stale-struct)).
+
+<a id="restore-bumps-lock-version"></a>
+
+- **A save from a tab opened before a version restore no longer silently
+  undoes the restore (#2532).** A restore left `lock_version` alone, so the
+  other tab's copy still passed the optimistic lock and its save wrote the
+  pre-restore text back over the restored one without a conflict. A restore
+  now increments `lock_version`, so that save is refused as stale and the
+  other tab shows the conflict banner with **Reload latest**. No migration
+  and no config.
+
+<a id="purge-refuses-restored-rows"></a>
+
+- **A permanent delete no longer removes a record someone restored after the
+  Trash page loaded (#2531).** The trash is a soft delete, and the content
+  and media `:purge` actions were left outside its read filter so they could
+  reach trashed rows. They did not check that the row was still trashed,
+  though, so the Trash page (or the media library's trash view) acted on the
+  row it had listed, whatever had happened to it since. If another admin
+  restored a document and someone then clicked **Delete permanently** on the
+  stale row, the live document was hard-deleted: its pages and artifacts were
+  left in place, and no `deleted` webhook went out. A media file was deleted
+  along with its stored original, variants and cached transforms.
+  - **What changed.** Content `:purge` (every type built on
+    `KilnCMS.CMS.Content`, overlays' included) now deletes only a row whose
+    `archived_at` is set, the mirror of the check `:restore` gained in
+    #2528. `KilnCMS.CMS.MediaItem`'s `:purge` deletes a trashed item or a
+    quarantined one; the second keeps the media pipeline's purge of an upload
+    it refused or that never finished processing (#1659) working. Anything
+    else is refused with an `Ash.Error.Invalid` holding an
+    `Ash.Error.Changes.StaleRecord`, and the purge's hooks roll back with it.
+    The media library deletes stored files only after the purge succeeds, so
+    a refused one leaves them.
+  - **Editors and admins.** On the Trash page, **Restore** or **Delete
+    permanently** on an item another admin restored says *Someone else
+    already restored that item.*; on one someone permanently deleted it says
+    *That item is no longer in the trash — someone permanently deleted it.*
+    Either way the list reloads without the row, so the next click can't
+    fail the same way. Before this, a second restore said *Couldn't restore
+    that item.* and the row stayed listed, failing on every retry. Other
+    refusals keep *Couldn't restore that item.* / *Couldn't delete that
+    item.* and the row. **Empty trash** counts a row that left the trash
+    while it ran as neither deleted nor skipped. In the media library's trash,
+    **Delete permanently** on a file someone restored says *That item is no
+    longer in the trash — someone else restored or deleted it.*
+  - **Restore with a unique field.** Restore on the Trash page now acts on
+    the full row rather than on the narrow one the list reads. The
+    unique-field re-check on restore (#2276) reads `custom_fields`, which the
+    list leaves out, so restoring a document of a type with a `unique` custom
+    field failed there; it now restores, or says *Couldn't restore that
+    item.* when another document holds the value.
+  - **Developers.** Code that calls `purge_<type>` or `purge_media_item` on a
+    record that is not in the trash now gets the `StaleRecord` error. Trash
+    it first (`destroy_<type>`), then purge. The nightly purge reads only
+    trashed rows and is unaffected. New
+    `KilnCMS.CMS.ContentTypes.can_restore?/4` and `can_purge?/4` ask the
+    `:restore` and `:purge` policies for one record. The API never exposes
+    `:purge`, so no API response changes. No migration and no config.
+    Guide: [Trash and restore](../trash.md#delete-permanently).
+
+<a id="unconfirmed-applicant-confirm-first"></a>
+
+- **An applicant whose registration waits for approval and who hasn't
+  confirmed their address is now told on `/account` to confirm it first, and
+  how (#2516).** An administrator can't approve an unconfirmed address, and
+  nothing told the applicant that, so they could wait for an approval that
+  could never come. Under "Waiting for approval on (site)", **Your account**
+  now adds "Confirm your email address first: an administrator can't approve
+  your registration until you do.", a **Reset your password to confirm it.**
+  link to `/reset`, and "Or use the link in the confirmation email we sent,
+  if it's still valid." The reset comes first because it always works: every
+  unconfirmed account signed up with a password, and finishing a reset
+  confirms the address. The confirmation link lasts 3 days and can't be sent
+  again. A confirmed applicant, or an unconfirmed account with no waiting
+  registration, sees no change.
+
+  A magic-link sign-in does not confirm an address, and never did. The
+  confirmation settings on `User` listed `:sign_in_with_magic_link` among the
+  actions that confirm, but with magic-link registration off that action is
+  a read, and confirmation runs only on a create or an update, so the entry
+  did nothing. It is removed, so the code no longer claims otherwise. Behavior
+  is unchanged: the confirmation link, a password reset, single sign-on and
+  site single sign-on registration, accepting an invitation, and the
+  first-run admin still confirm. Confirming on a magic-link sign-in has to
+  settle what happens to credentials an earlier registrant of the address
+  set up (forgetting them would also delete a genuine registrant's own
+  password), so it is left to #2594.
+
+  No migration and no setting; rolling back is safe.
+
+<a id="unknown-atom-values-load"></a>
+
+- **A security event type or notification event a newer release wrote no
+  longer breaks the release reading it (#2509).** `Security.Event.type` and
+  `Notification.event` were plain `:atom` columns, and Ash loads one with
+  `String.to_existing_atom/1`: a stored value the running release did not
+  know failed the whole read, not just its row. During a rolling deploy, or
+  after a rollback, one such row took down the security log page, its CSV
+  export, `Security.anonymize_actor/1` (and so account erasure), the
+  notification bell, the inbox and "mark all read".
+
+  Both columns are now `KilnCMS.Types.KnownAtom`, which loads a value outside
+  the column's `one_of` as `%KilnCMS.Types.UnknownAtom{value: "the_name"}`
+  and never creates an atom from database text. What readers do with it:
+  - **Security log:** the row shows as "Unrecognized event (name)" in a
+    neutral badge; the CSV export carries the raw name in `type`; filtering
+    by a known type excludes it; erasure still scrubs its actor, IP address,
+    user agent and metadata, and the retention prune still deletes it.
+  - **Notifications:** the row shows the generic "Notification" headline and
+    links to `/editor/inbox`; marking it read or unread works.
+
+  Writes stay strict: recording or notifying with a value outside the list is
+  refused, an `UnknownAtom` included. No migration: the storage is still text.
+  This protects only from this release on. A release that predates it still
+  fails on a newer value, which is why a column has to switch to `KnownAtom`
+  at least one release before it gains a value
+  ([New values in an atom column](../releasing.md#new-values-in-an-atom-column)),
+  and why rolling back to v1.8.0 needs the
+  [one-time cleanup](#rollback-to-1-8-0-upgrade). `ApiKey.access` is still
+  a plain `:atom` column
+  ([#2604](https://github.com/The-Verscienta/kiln_cms/issues/2604)).
+
+<a id="generation-tokens-survive-clears"></a>
+
+- **Clearing or evicting the delivery cache no longer moves a site's
+  `<head>` and menus generation tokens back, so a browser holding an old page
+  is no longer answered `304` with a stale `<head>` or navigation (#2502).**
+  A page's `ETag` folds the site's head-generation token, and cached menu
+  trees are keyed on its menus-generation token; a save of branding, code
+  injection, feed settings or a menu draws a new one of each on every node.
+  Both tokens lived in the delivery cache and fell back to `"0"` when absent,
+  so anything that emptied it put every site back on `"0"`, the token its
+  pages carried before the first such save on that node. A browser revalidating
+  a page from then got `304 Not Modified` and kept the `<head>` (feed links,
+  branding, injected code) and navigation the save had replaced. These
+  emptied it:
+  - editing a media item, a bulk media action and a portability import,
+    which drop every published record because any page may reference an
+    asset, and promoting a dynamic content type to a compiled one
+    (`mix kiln.promote_data`);
+  - the **Flush delivery cache** button on System, `mix kiln.cache.flush` and
+    `KilnCMS.Cache.flush_delivery/0`;
+  - the delivery cache's 10,000-entry cap, whose least-recently-written
+    eviction reached the rarely written token keys first.
+
+  The tokens now live in a Cachex instance of their own
+  (`KilnCMS.Cache.generation_cache_name/0`) with no size cap, which no clear
+  or flush touches. Each site's last-known admin allowlist moves there too,
+  so the copy that stops a late read from moving the allowlist backwards
+  survives a clear: a site last seen with the allowlist off still stays off
+  through a database outage after a media edit or a flush (the copy keeps its
+  24-hour expiry).
+
+  **What changes for operators.**
+  - A site whose settings and menus have not been saved since a node started
+    no longer carries `"0"`: the node draws a random token on first read. On
+    a cluster without sticky sessions, two nodes can therefore tag the same
+    page differently until the site's next save, which costs a `200` where a
+    `304` would have done, never a stale `304`. A restart also moves a site's
+    page `ETag`s, as a deploy already did (#2463).
+  - Rolling deploys keep bumps cluster-wide in both directions: tokens still
+    travel as the message the previous release sends and understands, and
+    each node files the keys into the right store on arrival.
+  - No migration and no configuration. Rolling the pin back is safe; it
+    brings back the old behavior.
+
+  **For overlay and plugin authors.** The keys keep their names
+  (`head_generation:<org_id>`, `menus_generation:<org_id>`,
+  `admin_allowlist:last_known:<org_id>`) but are no longer in
+  `KilnCMS.Cache.cache_name/0`. Code that read them from that instance with
+  Cachex directly now sees nothing; call `KilnCMS.Cache.head_generation/1` and
+  `KilnCMS.Cache.menus_generation/1` instead. `KilnCMS.Cache.peek/1` and
+  `KilnCMS.Cache.put/3` route these keys to the right store.
+
+<a id="refusal-wording-names-the-reason"></a>
+
+- **A refused workflow action now names the reason it was refused, instead
+  of saying "Only an admin can …" to people for whom that is not the reason
+  (#2473).** A refusal carries no record of which rule refused it, so before,
+  every refused publish said "Only an admin can publish. Submit the draft for
+  review instead." and every refused return "Only an admin can return content
+  to draft.", whoever was refused and on whichever site. The sentence is now
+  chosen from the actor's effective tier on the site (a live temporary grant
+  counts), their content-type scope, and the site's **Team → Publishing**
+  switch, read at the moment of the refusal, in this order:
+  1. An admin or a viewer sees "You don't have permission to do that."
+  2. An editor refused **Return to draft** sees "Only an admin can return
+     content to draft.", whatever the switch and whatever their scope:
+     returning is an admin's step.
+  3. An editor whose **Content types they may edit** (on **Team**) leave this
+     type out sees "You can't edit this content type." for a publish,
+     unpublish, archive, submit, unarchive, publish changes or mark reviewed,
+     whatever the switch, since letting editors publish would not have
+     helped them. Never for the trash: that is admin-only, so a wider scope
+     would not help either.
+  4. An editor on a site where only admins publish, refused a publish,
+     unpublish or archive, sees "Only an admin can publish. Submit the draft
+     for review instead.", "Only an admin can unpublish content on this
+     site." or "Only an admin can archive content on this site." On the
+     calendar the same editor sees "Only an admin can move a publish date on
+     this site." or "Only an admin can move the unpublish date of a live page
+     on this site."
+  5. Anyone else (an editor where editors may publish, or refused the trash
+     or another action the switch does not govern) sees "You don't have
+     permission to do that."
+  - **Calendar.** Dragging a chip whose record was trashed, or fell outside
+    what you may read, since the calendar loaded now says "That item is no
+    longer on the calendar — reload to see why." Before it showed the raw
+    error, or (unreleased) an admin sentence.
+  - **Bulk bar.** A refused bulk verb on the content list is judged on the
+    tier and the switch alone, because a selection can span content types.
+  - **Developers.** `KilnCMSWeb.WorkflowMessages.error/3` and `forbidden/2`
+    take a context (`actor:`, `org:`, and `resource:` as a record or
+    resource module); `error/2` and `forbidden/1` are gone. `refusal/2`
+    returns `:out_of_scope`, `:needs_publisher`, `:needs_admin` or
+    `:not_permitted`, and `refusal_message/2` turns that decision and the
+    action into the sentence, so a caller with its own wording for one case
+    (the calendar) decides once and falls back to the shared copy for the
+    rest. No policy changed: the same people are refused as before.
+
+<a id="block-strings-follow-page-locale"></a>
+
+- **The text Kiln writes into a content page's article is in the page's
+  language, and a form or newsletter sign-up on the page answers in it
+  (#2465).** A page can be served in a language other than the visitor's: a
+  French reader sent to an English page with no French translation gets the
+  English one, with `<html lang="en">` and `Content-Language: en`. The
+  article's blocks were built in English, but Kiln's own strings in them were
+  rendered in the request's language, so the page mixed the two: an English
+  sign-up heading over French **Nom** and **E-mail** fields.
+  - **Inside the article** now follows the page: the byline and its date, a
+    form block's labels, hints and error messages, a newsletter sign-up's
+    fields, the human-verification widget, and an untitled embed's title. The
+    embed title is also translated in fired `web` artifacts, which render in
+    the document's locale.
+  - **The chrome around the article** (header, search, language switcher,
+    footer) still follows the request. Whether it should follow the page is
+    an open decision, tracked with a related caching problem in
+    [#2595](https://github.com/The-Verscienta/kiln_cms/issues/2595).
+  - **Submit paths change on multilingual sites only.** A form block on a
+    content page posts to `/<locale>/forms/<slug>` and a sign-up block to
+    `/<locale>/newsletter/subscribe`, in the page's language with the default
+    language included (`/en/…`): an unprefixed post takes its language from
+    the visitor's session. A refused form submission re-renders, and the
+    thank-you or "check your inbox" page answers, in the page's language. The
+    form embed served at `/fr/forms/<slug>/embed` now posts to
+    `/fr/forms/<slug>`, and the form's own page under any language prefix,
+    the default's included, posts back under it. Single-language sites,
+    editor previews and fired `web` artifacts keep the bare `/forms/<slug>`
+    and `/newsletter/subscribe`, as do the sign-up `action` in the `json`
+    artifact and `submit_url` in `GET /api/forms/<slug>`. A theme
+    stylesheet, script or analytics rule that selects these forms by `action` should select
+    `.kiln-form` or `.kiln-newsletter-signup` instead.
+  - **Not covered yet:** a plugin block with its own Gettext backend still
+    renders in the request's language; the locked-page and members-only
+    teaser pages; a locale attribute on the `embed.js` snippet; and the
+    language of the newsletter confirmation email.
+
 <a id="render-etags"></a>
 
 - **A change to rendered output that came without an edit no longer leaves
@@ -4582,7 +5023,99 @@ carries the reasoning.
   - **Not covered.** Code inside a plugin block's `:web` output, and wide
     tables, which have the same problem (#2464).
 
+<a id="scrollable-tables"></a>
+
+- **A table wider than the column can now be reached and scrolled from the
+  keyboard (#2464).** A table scrolls sideways inside its `.kiln-table-wrap`,
+  and a scroll container with nothing focusable in it can only be scrolled
+  with a mouse or touch, so a keyboard user could not reach the columns past
+  the edge of the screen (axe's `scrollable-region-focusable`, WCAG 2.1.1).
+  Every table wrapper in a rich-text block now renders as
+  `<div class="kiln-table-wrap" tabindex="0" role="group" aria-label="Scrollable table">`.
+  Tab stops on it, the arrow keys scroll it, and a screen reader announces
+  "Scrollable table" before the table itself. Whether a table overflows
+  depends on the reader's screen, which the server cannot know, so every
+  table is focusable, not only the wide ones. This is the code-block fix
+  ([#2164](#focusable-code-blocks)) applied to tables, by
+  `KilnCMS.ScrollableTables.focusable/2`.
+  - **Old `legacy_html` tables get a wrapper.** A table stored as HTML (the
+    old TipTap shape, and imported prose) had no scroll wrapper at all, so a
+    wide one pushed past the column. A top-level `<table>` there is now
+    wrapped in the same focusable `.kiln-table-wrap` and scrolls inside it. A
+    table nested in another table's cell scrolls with its parent and is left
+    alone. Prose whose table tags don't balance is left as it was.
+  - **Where.** The same place as the code-block attributes, at the end of the
+    rich-text block's `:web` render: public pages, editor previews, fired
+    `:web` artifacts, and through them feeds, newsletter email and the static
+    export.
+  - **Label language.** "Scrollable table" is translated (French "Tableau
+    défilant", Spanish "Tabla desplazable") and follows the content's locale
+    the way the code-block label does, including on a cached second hit and
+    in a fired artifact.
+  - **Focus ring.** `.kiln-table-wrap[tabindex="0"]:focus-visible` draws a
+    2px solid `--color-primary-ink` outline, drawn 2px outside the wrapper
+    (`outline-offset: 2px`). Unlike the code block's ring it is not inset: on
+    the inside it would sit on the cells' `base-300` borders and the header's
+    `base-200` fill; outside, it sits on the page background, where the ink
+    shade clears the 3:1 of WCAG 1.4.11 in both themes. A site's custom CSS
+    should leave it in place
+    ([Keep the focus rings](../public-theming.md#keep-the-focus-rings-on-code-blocks-and-tables)).
+  - **Authors cannot set or remove them.** The rich-text sanitizer keeps only
+    `class="kiln-table-wrap"` on that `div` and no attribute on a `<table>`,
+    so a pasted `tabindex="-1"` cannot take a table out of the Tab order; the
+    attributes are added after it. A `div` an author gives the class without a
+    table directly inside is not made focusable. The editor's own copy of the
+    prose, `KilnCMS.Blocks.PortableText.to_html/1`, and the `:json` artifact
+    are unchanged.
+  - **Headless consumers.** The `:web` artifact's HTML gains the three
+    attributes on every table wrapper, and a `legacy_html` table that used to
+    arrive bare now arrives inside a `div.kiln-table-wrap`. A stylesheet that
+    targets a table as a direct child (`.kiln-block > table`) no longer
+    matches it there; `.kiln-block table` still does. `format_version` is
+    unchanged, so an artifact fired before the upgrade keeps the old markup
+    until it is re-fired ([upgrade note](#scrollable-tables-upgrade)). The
+    `:json` artifact stays plain
+    ([Tables in rendered HTML](../headless-consumer-guide.md#tables-in-rendered-html)).
+  - **Not covered.** The gallery block's carousel scrolls sideways with
+    nothing focusable in it and has the same problem (#2590). Tables in a
+    plugin block's own `:web` output carry whatever the plugin renders.
+
 ## Security
+
+<a id="invitation-takeover-credentials"></a>
+
+- **Accepting an invitation over an unconfirmed account now removes every credential the first registrant could have set up, not just their password and sessions (#2453).**
+  Anyone can register an unconfirmed account for any address, sign in with
+  the password they chose, and, once an admin raises the account's role or
+  mints it a key, enroll an authenticator app, add passkeys, subscribe a push
+  device or hold an API key. The invitee who then accepted with a password
+  took over the account but left all of that in place: the stranger could
+  still sign in with a passkey or a key, and the invitee was asked for a code
+  only the stranger had. `User` `:accept_invitation_with_password` now also
+  clears two-step verification (the secret, recovery codes and any pending
+  enrollment), deletes passkeys, identity-provider links and push devices,
+  and revokes every live API key, draft-write keys included, so they no
+  longer authenticate or rotate. It all happens in the accept's transaction
+  as `SystemActor.new(:invitations)`; if any removal fails, the whole accept
+  rolls back and the invitee can retry. The security log records
+  `second_factor_removed` and `passkey_removed` (new metadata key `via`,
+  `invitation`) and `api_key_revoked`, each with no person, and the
+  invitee's flash adds "Any two-step verification, passkeys or API keys set
+  up on this address before were removed; set them up again." when one of
+  those was removed. A confirmed account's one-click accept changes none of
+  this. A passkey registration, push subscription, two-step confirmation,
+  recovery-code regeneration or password change that the stranger's session
+  had in flight takes the account's row first
+  (`Changes.GuardAccountTakeover`): if it gets there before the takeover, it
+  commits first, and the takeover removes or overwrites what it wrote; if
+  after, it waits, finds the password changed (or the staged secret
+  cleared), and is refused. The
+  stranger's sessions are evicted once the takeover commits. The same guard
+  makes `:confirm_totp` refuse a secret a second tab's `:setup_totp` replaced
+  after the confirmation was built. The threat model records the same wipe on
+  confirmation, password reset and magic-link sign-in of an unconfirmed
+  account as a follow-up. No migration; rolling the pin back is safe.
+  See [What taking over an account removes](../account-administration.md#what-taking-over-an-account-removes).
 
 <a id="account-enumeration-audit"></a>
 

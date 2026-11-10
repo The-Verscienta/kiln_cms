@@ -129,7 +129,7 @@ defmodule KilnCMSWeb.ContentControllerChallengeTest do
       conn = %{build_conn() | host: host} |> get("/#{page.slug}")
 
       html = html_response(conn, 200)
-      assert html =~ ~s(action="/forms/#{required.slug}")
+      assert html =~ ~s(action="/en/forms/#{required.slug}")
       refute html =~ "data-kiln-challenge"
       refute csp(conn) =~ @provider
     end
@@ -276,7 +276,7 @@ defmodule KilnCMSWeb.ContentControllerChallengeTest do
       conn = fetch(page.slug)
       html = html_response(conn, 200)
 
-      assert html =~ ~s(action="/forms/#{required.slug}")
+      assert html =~ ~s(action="/en/forms/#{required.slug}")
       assert html =~ "data-kiln-challenge"
       assert csp(conn) =~ @provider
     end

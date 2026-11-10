@@ -12,7 +12,9 @@ defmodule Mix.Tasks.Kiln.Media.Resnapshot do
 
   A **dry run is the default**: each record's write is built and compared, and
   the count is what `--apply` would write. Re-running is safe — a record
-  whose snapshots are already current is not written.
+  whose snapshots are already current is not written. Records in the trash
+  are re-snapshotted too, so a restore finds the current shape; one that
+  fails is reported as `(trashed)` and does not fail the task.
 
   Fired artifacts do not need this (they re-read the items on every fire, and
   an artifact older than the media shape re-fires on its next read); this is

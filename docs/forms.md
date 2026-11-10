@@ -42,7 +42,16 @@ The `:form` content block references a form by slug:
   submission shows the form's success message. An inactive form renders
   nothing (a form or field edit drops the site's cached pages on every node
   at once, and a page that renders a form carries the form in its `ETag`, so
-  a revalidating client sees the edit too).
+  a revalidating client sees the edit too). Kiln's own text in the form (the
+  **Submit** label, "required", **Select…**, error messages, the
+  human-verification widget) is in the page's language, the one its
+  `<html lang>` declares. On a multilingual site the block posts to
+  `/<locale>/forms/<slug>` in that language, the default language's included
+  (`/en/forms/<slug>`), so a refused submission re-renders and the thank-you
+  page answers in the language the visitor was reading. A single-language
+  site and the editor previews post to the bare `/forms/<slug>`. A theme
+  stylesheet or analytics rule that matched the form by its `action` should
+  match the `.kiln-form` class instead.
 - **Fired `:web` artifacts** carry `<div data-kiln-form="<slug>"></div>` —
   headless frontends fetch the schema from `GET /api/forms/<slug>` (fields,
   labels, types, options, honeypot field name, submit URL, and the
@@ -246,6 +255,11 @@ redirect for it.
 On a multilingual site the page answers under each language prefix too:
 `/fr/forms/contact` renders the form in French and posts back to
 `/fr/forms/contact`, so the thank-you page and any error messages stay in
+French. The default language's prefix is kept the same way: `/en/forms/contact`
+posts back to `/en/forms/contact`, because an unprefixed post takes its
+language from the visitor's session and could answer an English page in
+French. The embed works alike: `/fr/forms/contact/embed` posts to
+`/fr/forms/contact`, and a refused submission re-renders inside the frame in
 French.
 
 What the page sends with it:

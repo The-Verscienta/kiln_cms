@@ -196,17 +196,23 @@ defmodule KilnCMS.SystemActorGrants do
         record = struct(resource, Map.merge(%{org_id: tenant}, Map.get(@records, resource, %{})))
         answer!(Ash.can({record, action}, actor, opts))
 
-      _create_or_generic ->
+      # With the required arguments, as a read gets: a change that reads one
+      # while the changeset is built (`UserIdentity.upsert`) has it to read.
+      :create ->
+        answer!(Ash.can({resource, action, arguments(resource, action)}, actor, opts))
+
+      _generic ->
         answer!(Ash.can({resource, action}, actor, opts))
     end
   end
 
   defp answer!({:ok, answer}), do: answer
 
-  # A value for each required argument of a read. Left `nil`, an argument the
-  # action filters on (`user_id == ^arg(:user_id)`) can template to the same
-  # expression a refused actor's filter does (`user_id == ^actor(:id)`, `nil`
-  # for a system actor), and the two answers would be indistinguishable.
+  # A value for each required argument of a read or a create. Left `nil`, an
+  # argument the action filters on (`user_id == ^arg(:user_id)`) can template
+  # to the same expression a refused actor's filter does (`user_id ==
+  # ^actor(:id)`, `nil` for a system actor), and the two answers would be
+  # indistinguishable.
   defp arguments(resource, action) do
     for argument <- Ash.Resource.Info.action(resource, action).arguments,
         not argument.allow_nil?,
@@ -228,6 +234,7 @@ defmodule KilnCMS.SystemActorGrants do
   defp sample(Ash.Type.UtcDatetimeUsec, _), do: ~U[2026-01-01 00:00:00.000000Z]
   defp sample(Ash.Type.UtcDatetime, _), do: ~U[2026-01-01 00:00:00Z]
   defp sample(Ash.Type.Date, _), do: ~D[2026-01-01]
+  defp sample(Ash.Type.Map, _), do: %{}
 
   defp sample(Ash.Type.Atom, constraints) do
     case constraints[:one_of] do

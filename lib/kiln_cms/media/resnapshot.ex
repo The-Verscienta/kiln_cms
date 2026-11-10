@@ -28,6 +28,21 @@ defmodule KilnCMS.Media.Resnapshot do
   included: their stored value is served to editors on the same APIs. A
   snapshot whose item no longer resolves (deleted, or not readable) fails that
   record, as a save of it would, and is reported rather than rewritten.
+
+  ## Trashed records
+
+  Records in the trash are visited too, after the live ones (#2533): a
+  record trashed before a release that relies on the new shape, and restored
+  after it, would otherwise come back with the old snapshot. A trashed
+  record's write fires nothing (its artifacts were purged when it was
+  trashed). `trashed` counts the trashed records re-snapshotted (or, on a dry
+  run, that would be). A trashed record that fails is listed under
+  `trashed_failed`, not `failed`: it is reported, but it does not fail the
+  task, as a trashed record often names an item deleted since.
+
+  The live and trashed records are two reads, so a record trashed or
+  restored during a run can be missed by both; run again right before the
+  release that relies on the new shape (a current record is not rewritten).
   """
 
   require Logger
@@ -36,12 +51,18 @@ defmodule KilnCMS.Media.Resnapshot do
 
   @batch 100
 
-  @typedoc "Per-run counts. `failed` lists `{type, id, message}`."
+  @typedoc """
+  Per-run counts. `failed` lists `{type, id, message}` for the live records,
+  `trashed_failed` the same for records in the trash. `trashed` counts the
+  stale records in the trash (written, unless a dry run).
+  """
   @type report :: %{
           scanned: non_neg_integer(),
           stale: non_neg_integer(),
           written: non_neg_integer(),
-          failed: [{String.t(), Ash.UUID.t(), String.t()}]
+          trashed: non_neg_integer(),
+          failed: [{String.t(), Ash.UUID.t(), String.t()}],
+          trashed_failed: [{String.t(), Ash.UUID.t(), String.t()}]
         }
 
   @doc """
@@ -58,10 +79,14 @@ defmodule KilnCMS.Media.Resnapshot do
     |> Enum.flat_map(fn {descriptor, names} ->
       descriptor
       |> records(org_id, batch)
-      |> Enum.map(&visit(&1, descriptor, names, org_id, dry_run?))
+      |> Enum.map(&{visit(&1, descriptor, names, org_id, dry_run?), trashed?(&1)})
     end)
-    |> Enum.reduce(%{scanned: 0, stale: 0, written: 0, failed: []}, &tally/2)
+    |> Enum.reduce(
+      %{scanned: 0, stale: 0, written: 0, trashed: 0, failed: [], trashed_failed: []},
+      &count/2
+    )
     |> Map.update!(:failed, &Enum.reverse/1)
+    |> Map.update!(:trashed_failed, &Enum.reverse/1)
   end
 
   @doc "A one-paragraph summary of `report` for the task's output."
@@ -70,11 +95,17 @@ defmodule KilnCMS.Media.Resnapshot do
     verb = if dry_run?, do: "would re-snapshot", else: "re-snapshotted"
 
     failures =
-      Enum.map(report.failed, fn {type, id, message} -> "\n  #{type} #{id}: #{message}" end)
+      Enum.map(report.failed, fn {type, id, message} -> "\n  #{type} #{id}: #{message}" end) ++
+        Enum.map(report.trashed_failed, fn {type, id, message} ->
+          "\n  #{type} #{id} (trashed): #{message}"
+        end)
+
+    failed = length(report.failed) + length(report.trashed_failed)
 
     "org #{org_id}: scanned #{report.scanned} record(s), #{verb} " <>
-      "#{if dry_run?, do: report.stale, else: report.written}" <>
-      if(report.failed == [], do: ".", else: ", #{length(report.failed)} failed:") <>
+      "#{if dry_run?, do: report.stale, else: report.written} " <>
+      "(#{report.trashed} trashed)" <>
+      if(failed == 0, do: ".", else: ", #{failed} failed:") <>
       Enum.join(failures) <>
       if(dry_run? and report.stale > 0, do: "\nRun again with --apply to write.", else: "")
   end
@@ -111,8 +142,16 @@ defmodule KilnCMS.Media.Resnapshot do
   # Keyset pages, read without a policy check as `Computed.DailyRefresh` reads
   # its records: one tenant, one type, and it must see drafts, gated and
   # locked records — a system grant on the content READ policy would hand
-  # every system caller the whole corpus. The write is authorized.
+  # every system caller the whole corpus. The write is authorized. The live
+  # records, then the trashed ones (#2533).
   defp records(descriptor, org_id, batch) do
+    Stream.concat(
+      pages(descriptor, org_id, batch, &ContentTypes.list!/2),
+      pages(descriptor, org_id, batch, &ContentTypes.list_trashed!/2)
+    )
+  end
+
+  defp pages(descriptor, org_id, batch, read) do
     Stream.unfold(:start, fn
       :done ->
         nil
@@ -120,7 +159,7 @@ defmodule KilnCMS.Media.Resnapshot do
       cursor ->
         filter = if cursor == :start, do: [], else: [id: [greater_than: cursor]]
 
-        ContentTypes.list!(descriptor,
+        read.(descriptor,
           # authorize?: false — one tenant, one type, the write is authorized (above)
           authorize?: false,
           tenant: org_id,
@@ -180,6 +219,18 @@ defmodule KilnCMS.Media.Resnapshot do
 
   defp message(errors) when is_list(errors), do: errors |> Ash.Error.to_error_class() |> message()
   defp message(error), do: error |> Ash.Error.to_error_class() |> Exception.message()
+
+  defp trashed?(record), do: Map.get(record, :archived_at) != nil
+
+  # A trashed record's failure is listed apart, and its write counted apart
+  # too (moduledoc).
+  defp count({{:failed, failure}, true}, acc),
+    do: %{acc | scanned: acc.scanned + 1, trashed_failed: [failure | acc.trashed_failed]}
+
+  defp count({outcome, true}, acc) when outcome in [:stale, :written],
+    do: tally(outcome, %{acc | trashed: acc.trashed + 1})
+
+  defp count({outcome, _trashed?}, acc), do: tally(outcome, acc)
 
   defp tally(:empty, acc), do: %{acc | scanned: acc.scanned + 1}
   defp tally(:current, acc), do: %{acc | scanned: acc.scanned + 1}

@@ -3394,6 +3394,23 @@ defmodule KilnCMS.CMS.Content do
           # `:notable`. Ignored when no safety field changed.
           argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           argument :version_id, :uuid, allow_nil?: false
+          # The row must still be the struct the caller holds (#2532), checked
+          # FIRST. `RestoreVersion` writes from a `before_action` and judges
+          # the struct: its state picks the claim and alt-text gates, its slug
+          # the redirect, and a force-change equal to it is dropped. So the
+          # write is filtered on the held `lock_version` (and bumps it, which
+          # makes every pre-restore struct stale in turn) and on the held
+          # `state`, because the workflow writes (`:publish`, `:unpublish` and
+          # their scheduled twins, which fold a working copy into the text,
+          # `:archive`, `:unarchive`) keep `lock_version`. A miss on either is
+          # `StaleRecord`, and the trash is `Changes.RefuseTrashed`'s filter.
+          # Known gap: a write that keeps both still lets a held struct pass,
+          # with that write's columns stale: the computed-field refresh and
+          # field conversion and `:resnapshot_media` (`custom_fields`),
+          # `:set_oembed_metadata` (fetched embed data inside blocks), `:move`
+          # and `:reassign_author`. None of them moves the state, slug or text.
+          change optimistic_lock(:lock_version)
+          change KilnCMS.CMS.Changes.StateUnchangedSinceRead
           change KilnCMS.CMS.Changes.RestoreVersion
 
           # A restore is a content write, so everything derived from content has
@@ -3674,6 +3691,12 @@ defmodule KilnCMS.CMS.Content do
         # nightly auto-purge; admin/system only via the destroy policy.
         destroy :purge do
           require_atomic? false
+          # Only a row still in the trash (#2531). AshArchival leaves `:purge`
+          # unfiltered (`exclude_destroy_actions`), so a held struct whose row
+          # someone restored meanwhile hard-deleted live content — no
+          # `deleted` webhook, no artifact cleanup. A miss is a `StaleRecord`,
+          # and the hooks below roll back with it. The mirror of `:restore`.
+          change filter(expr(not is_nil(^ref(:archived_at))))
           # No FK can reach the chunk table from every content table (#1940).
           change KilnCMS.CMS.Changes.DeleteChunkEmbeddings
           # Each connecting `:reference` field's `on_target_delete` rule (R5):
@@ -3942,13 +3965,20 @@ defmodule KilnCMS.CMS.Content do
         # (`UnchangedSinceRead`). Versioned, because what it writes is
         # delivered (`custom_fields` on every API surface) and the sync delta
         # API reads changes from version rows. A published record re-fires.
+        # A trashed row is written too, and not fired. Its version row is
+        # harmless: the sync API classifies a changed document by its current
+        # row, so a trashed one is at most a tombstone (`KilnCMS.Firing.Sync`).
         update :resnapshot_media do
           require_atomic? false
           accept []
           change KilnCMS.CMS.Changes.UnchangedSinceRead
           change {KilnCMS.CMS.Changes.ApplyCustomFields, resnapshot: :media}
           change KilnCMS.CMS.Changes.KeepUpdatedAt
-          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+          # Exempt from `Changes.RefuseTrashed` (#2533): a contract step must
+          # reach trashed rows too. Fired only when the row the write returned
+          # is out of the trash, not judged on the struct: a restore between
+          # the read and this write bumps no `lock_version`.
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published, skip_trashed: true}
         end
 
         # Internal: move a JSON-in-text value into a `:group` field (written by
@@ -3962,7 +3992,8 @@ defmodule KilnCMS.CMS.Content do
         # keeps `updated_at` and `lock_version`, sends no webhook, and loses to
         # an editor's save in between. Versioned, because the group is
         # delivered content and the sync delta API reads version rows. A
-        # published record re-fires. A live record's pending working copy gets
+        # published record re-fires; a trashed one is written and not fired,
+        # as on `:resnapshot_media`. A live record's pending working copy gets
         # the same conversion of its own held value, or publishing the copy
         # would put back a map without the group.
         update :convert_custom_field do
@@ -3971,7 +4002,11 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.UnchangedSinceRead
           change {KilnCMS.CMS.Changes.ApplyCustomFields, convert: true}
           change KilnCMS.CMS.Changes.KeepUpdatedAt
-          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+          # Exempt from `Changes.RefuseTrashed` (#2533): a contract step must
+          # reach trashed rows too. Fired only when the row the write returned
+          # is out of the trash, not judged on the struct: a restore between
+          # the read and this write bumps no `lock_version`.
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published, skip_trashed: true}
         end
 
         # Internal: advance the materialized "what's on" sort key once an
@@ -4032,8 +4067,9 @@ defmodule KilnCMS.CMS.Content do
         # row filter `is_nil(archived_at)`, so a struct loaded before someone
         # trashed the record can no longer write into it (an autosave, a
         # *Publish changes* that re-fires and announces `updated` after
-        # `deleted`). `:restore` and `:clear_reference_target` are exempt;
-        # see the change module.
+        # `deleted`). `:restore`, `:clear_reference_target` and the two
+        # contract-step backfills (`:convert_custom_field`,
+        # `:resnapshot_media`) are exempt; see the change module.
         change KilnCMS.CMS.Changes.RefuseTrashed, on: [:update]
 
         change KilnCMS.CMS.Changes.BustContentCache, on: [:create, :update, :destroy]

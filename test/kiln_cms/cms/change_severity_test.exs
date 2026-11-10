@@ -566,10 +566,13 @@ defmodule KilnCMS.CMS.ChangeSeverityTest do
       # `title` is listed under "entry" only; the record's type is `name`.
       entry = CMS.update_entry!(entry, %{title: "Tea 2"}, actor: admin)
 
+      # The newest version `action` wrote. The read has no ORDER BY, so sort
+      # as `versions/1` does: in heap order the older `:update` can come last
+      # (#2550).
       version = fn action ->
         CMS.list_entry_versions!(authorize?: false, tenant: entry.org_id)
         |> Enum.filter(&(&1.version_source_id == entry.id and &1.version_action_name == action))
-        |> List.last()
+        |> Enum.max_by(&{DateTime.to_unix(&1.version_inserted_at, :microsecond), &1.id})
       end
 
       assert version.(:update).change_severity == nil

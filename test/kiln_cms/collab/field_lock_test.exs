@@ -59,6 +59,23 @@ defmodule KilnCMS.Collab.FieldLockTest do
     end
   end
 
+  # A stand-in session that reports every message it gets to the test,
+  # tagged, so a test can assert what a third party was (never) told.
+  defp recorder(tag) do
+    test = self()
+
+    spawn_link(fn ->
+      Stream.repeatedly(fn ->
+        receive do
+          msg -> send(test, {tag, msg})
+        end
+      end)
+      |> Stream.run()
+    end)
+  end
+
+  @carol %{id: "carol", name: "Carol"}
+
   # A stand-in session: a process that lives until told otherwise.
   defp session do
     spawn_link(fn ->
@@ -271,7 +288,7 @@ defmodule KilnCMS.Collab.FieldLockTest do
       assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
 
       assert :pending = FieldLock.takeover(topic, "title", @bob, self())
-      FieldLock.flushed(topic, "title")
+      FieldLock.flushed(topic, "title", holder)
 
       assert_receive {:lock_granted, ^topic, "title"}
     end
@@ -306,7 +323,7 @@ defmodule KilnCMS.Collab.FieldLockTest do
 
       assert :pending = FieldLock.takeover(topic, "title", @bob, bob)
       %{ref: stale} = lock_state(topic).pending["title"]
-      FieldLock.flushed(topic, "title")
+      FieldLock.flushed(topic, "title", holder)
       assert_receive {:field_locks, ^topic, %{"title" => %{user_id: "bob"}}}
 
       assert :pending = FieldLock.takeover(topic, "title", %{id: "carol", name: "Carol"}, self())
@@ -323,12 +340,32 @@ defmodule KilnCMS.Collab.FieldLockTest do
       assert %{"title" => %{user_id: "carol"}} = FieldLock.locks(topic)
     end
 
-    test "a holder released mid-flush still lets the timeout grant the field",
+    test "a holder released mid-flush keeps the field until its flush answers",
+         %{topic: topic} do
+      start(topic, flush_ms: 60_000)
+      holder = recorder(:alice)
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+
+      assert :pending = FieldLock.takeover(topic, "title", @bob, self())
+      assert :ok = FieldLock.release(topic, "title", holder)
+
+      # The holder's text is still being saved: the taker waits for it, and
+      # the field never sits free for anyone else (#2557).
+      refute_receive {:lock_granted, ^topic, "title"}, 50
+      assert %{"title" => %{user_id: "alice"}} = FieldLock.locks(topic)
+
+      FieldLock.flushed(topic, "title", holder)
+      assert_receive {:lock_granted, ^topic, "title"}
+      assert %{"title" => %{user_id: "bob"}} = FieldLock.locks(topic)
+      # She let go herself: nobody "took" it from her.
+      refute_receive {:alice, {:lock_taken, _, _, _}}, 50
+    end
+
+    test "a holder released mid-flush whose flush never comes is settled by the timeout",
          %{topic: topic} do
       start(topic, flush_ms: 60_000)
       holder = session()
       assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
-
       assert :pending = FieldLock.takeover(topic, "title", @bob, self())
       %{ref: ref} = lock_state(topic).pending["title"]
       assert :ok = FieldLock.release(topic, "title", holder)
@@ -336,6 +373,18 @@ defmodule KilnCMS.Collab.FieldLockTest do
       send(lock_pid(topic), {:flush_timeout, "title", ref})
       assert_receive {:lock_granted, ^topic, "title"}
       assert %{"title" => %{user_id: "bob"}} = FieldLock.locks(topic)
+    end
+
+    test "re-focusing a field released mid-flush takes the release back", %{topic: topic} do
+      holder = recorder(:alice)
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+      assert :pending = FieldLock.takeover(topic, "title", @bob, self())
+      assert :ok = FieldLock.release(topic, "title", holder)
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+
+      FieldLock.flushed(topic, "title", holder)
+      assert_receive {:lock_granted, ^topic, "title"}
+      assert_receive {:alice, {:lock_taken, ^topic, "title", %{id: "bob"}}}
     end
 
     test "a holder whose tab is gone is displaced at once — nothing to flush", %{topic: topic} do
@@ -357,7 +406,7 @@ defmodule KilnCMS.Collab.FieldLockTest do
       assert :pending = FieldLock.takeover(topic, "title", @bob, first)
       assert :pending = FieldLock.takeover(topic, "title", %{id: "carol", name: "Carol"}, self())
 
-      FieldLock.flushed(topic, "title")
+      FieldLock.flushed(topic, "title", holder)
       assert_receive {:lock_granted, ^topic, "title"}
       assert %{"title" => %{user_id: "carol"}} = FieldLock.locks(topic)
     end
@@ -373,6 +422,209 @@ defmodule KilnCMS.Collab.FieldLockTest do
       send(lock_pid(topic), {:flush_timeout, "title", ref})
       assert_receive {:lock_granted, ^topic, "title"}
       assert %{"title" => %{user_id: "carol"}} = FieldLock.locks(topic)
+    end
+
+    test "a field released mid-flush is never granted to a third party, then taken without a flush",
+         %{topic: topic} do
+      start(topic, flush_ms: 60_000)
+      holder = session()
+      bob = recorder(:bob)
+      carol = recorder(:carol)
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+
+      assert :pending = FieldLock.takeover(topic, "title", @bob, bob)
+      %{ref: ref} = lock_state(topic).pending["title"]
+      assert :ok = FieldLock.release(topic, "title", holder)
+
+      # Carol arrives after the release, mid-flush: the field is not free.
+      assert {:held, %{user_id: "alice"}} = FieldLock.acquire(topic, "title", @carol, carol)
+
+      FieldLock.flushed(topic, "title", holder)
+      assert_receive {:bob, {:lock_granted, ^topic, "title"}}
+
+      # Now Bob holds it, and Bob's takeover timeout firing late displaces nobody.
+      assert {:held, %{user_id: "bob"}} = FieldLock.acquire(topic, "title", @carol, carol)
+      send(lock_pid(topic), {:flush_timeout, "title", ref})
+      refute_receive {:carol, {:lock_taken, _, _, _}}, 50
+      refute_receive {:bob, {:lock_taken, _, _, _}}, 10
+      assert %{"title" => %{user_id: "bob"}} = FieldLock.locks(topic)
+    end
+
+    test "a takeover after a release mid-flush waits on the same flush", %{topic: topic} do
+      start(topic, flush_ms: 60_000)
+      holder = session()
+      bob = recorder(:bob)
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+      assert :pending = FieldLock.takeover(topic, "title", @bob, bob)
+      assert :ok = FieldLock.release(topic, "title", holder)
+
+      # Not a free grant: the newest asker joins the flush in flight.
+      assert :pending = FieldLock.takeover(topic, "title", @carol, self())
+      refute_receive {:lock_granted, ^topic, "title"}, 50
+
+      FieldLock.flushed(topic, "title", holder)
+      assert_receive {:lock_granted, ^topic, "title"}
+      assert %{"title" => %{user_id: "carol"}} = FieldLock.locks(topic)
+    end
+
+    test "a flush answered late by a former holder does not hand over the next holder's field",
+         %{topic: topic} do
+      start(topic, flush_ms: 60_000)
+      alice = session()
+      bob = recorder(:bob)
+      assert :ok = FieldLock.acquire(topic, "title", @alice, alice)
+      assert :pending = FieldLock.takeover(topic, "title", @bob, bob)
+      FieldLock.flushed(topic, "title", alice)
+      assert_receive {:bob, {:lock_granted, ^topic, "title"}}
+
+      assert :pending = FieldLock.takeover(topic, "title", @carol, self())
+      assert_receive {:bob, {:lock_flush, ^topic, "title"}}
+
+      # Alice's answer, late or repeated: she no longer holds the field.
+      FieldLock.flushed(topic, "title", alice)
+      refute_receive {:lock_granted, ^topic, "title"}, 50
+      assert %{"title" => %{user_id: "bob"}} = FieldLock.locks(topic)
+
+      FieldLock.flushed(topic, "title", bob)
+      assert_receive {:lock_granted, ^topic, "title"}
+      assert %{"title" => %{user_id: "carol"}} = FieldLock.locks(topic)
+    end
+
+    test "a requester who has gone is not handed the field", %{topic: topic} do
+      start(topic, flush_ms: 60_000)
+      holder = session()
+      bob = session()
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+      assert :pending = FieldLock.takeover(topic, "title", @bob, bob)
+      assert :ok = FieldLock.release(topic, "title", holder)
+
+      send(bob, :stop)
+      await_exit(bob)
+      FieldLock.flushed(topic, "title", holder)
+
+      # Nobody holds it and nobody waits: the record's process ends.
+      assert unregistered?(topic)
+    end
+
+    test "release_all/2 by a requester withdraws its takeover", %{topic: topic} do
+      start(topic, flush_ms: 60_000)
+      holder = recorder(:alice)
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+      assert :pending = FieldLock.takeover(topic, "title", @bob, self())
+      %{ref: ref} = lock_state(topic).pending["title"]
+
+      assert :ok = FieldLock.release_all(topic, self())
+      assert lock_state(topic).pending == %{}
+
+      send(lock_pid(topic), {:flush_timeout, "title", ref})
+      refute_receive {:lock_granted, ^topic, "title"}, 50
+      refute_receive {:alice, {:lock_taken, _, _, _}}, 10
+      assert %{"title" => %{user_id: "alice"}} = FieldLock.locks(topic)
+    end
+
+    test "release_all/2 mid-flush hands each waiting field over at once", %{topic: topic} do
+      start(topic, flush_ms: 60_000)
+      holder = session()
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+      assert :ok = FieldLock.acquire(topic, "summary", @alice, holder)
+
+      assert :pending = FieldLock.takeover(topic, "title", @bob, self())
+      assert :ok = FieldLock.release_all(topic, holder)
+
+      assert_receive {:lock_granted, ^topic, "title"}
+      assert %{"title" => %{user_id: "bob"}} = locks = FieldLock.locks(topic)
+      refute Map.has_key?(locks, "summary")
+      assert lock_state(topic).pending == %{}
+    end
+
+    test "a holder that goes idle mid-flush hands the field to the waiting taker",
+         %{topic: topic} do
+      start(topic, flush_ms: 60_000, idle_ms: 60_000)
+      assert :ok = FieldLock.acquire(topic, "title", @alice, session())
+      assert :pending = FieldLock.takeover(topic, "title", @bob, self())
+
+      %{idle_ref: idle_ref} = lock_state(topic).locks["title"]
+      send(lock_pid(topic), {:idle_over, "title", idle_ref})
+
+      assert_receive {:lock_granted, ^topic, "title"}
+      assert %{"title" => %{user_id: "bob"}} = FieldLock.locks(topic)
+    end
+
+    test "a takeover of a gone holder supersedes one already waiting, and its timeout displaces nobody",
+         %{topic: topic} do
+      start(topic, flush_ms: 60_000, grace_ms: 60_000)
+      holder = session()
+      bob = recorder(:bob)
+      carol = recorder(:carol)
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+      assert :pending = FieldLock.takeover(topic, "title", @bob, bob)
+      %{ref: ref} = lock_state(topic).pending["title"]
+
+      send(holder, :stop)
+      await_exit(holder)
+      await_holder(topic, "title", &(&1.grace_timer != nil))
+
+      assert :ok = FieldLock.takeover(topic, "title", @carol, carol)
+      assert %{"title" => %{user_id: "carol"}} = FieldLock.locks(topic)
+      assert lock_state(topic).pending == %{}
+
+      send(lock_pid(topic), {:flush_timeout, "title", ref})
+      refute_receive {:carol, {:lock_taken, _, _, _}}, 50
+      refute_receive {:bob, {:lock_granted, _, _}}, 10
+      assert %{"title" => %{user_id: "carol"}} = FieldLock.locks(topic)
+    end
+
+    test "the same user returning to a gone tab yields to a takeover already waiting",
+         %{topic: topic} do
+      start(topic, flush_ms: 60_000, grace_ms: 60_000)
+      holder = session()
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+      assert :pending = FieldLock.takeover(topic, "title", @bob, self())
+
+      send(holder, :stop)
+      await_exit(holder)
+      await_holder(topic, "title", &(&1.grace_timer != nil))
+
+      returning = recorder(:alice)
+      assert {:held, %{user_id: "bob"}} = FieldLock.acquire(topic, "title", @alice, returning)
+      assert_receive {:lock_granted, ^topic, "title"}
+      assert %{"title" => %{user_id: "bob"}} = FieldLock.locks(topic)
+      refute_receive {:alice, {:lock_taken, _, _, _}}, 50
+    end
+
+    test "the same user returning to a gone tab gets the field when the waiting taker has gone too",
+         %{topic: topic} do
+      start(topic, flush_ms: 60_000, grace_ms: 60_000)
+      holder = session()
+      bob = session()
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+      assert :pending = FieldLock.takeover(topic, "title", @bob, bob)
+
+      send(holder, :stop)
+      await_exit(holder)
+      send(bob, :stop)
+      await_exit(bob)
+      await_holder(topic, "title", &(&1.grace_timer != nil))
+
+      assert :ok = FieldLock.acquire(topic, "title", @alice, self())
+      assert %{"title" => %{user_id: "alice", pid: pid}} = FieldLock.locks(topic)
+      assert pid == self()
+    end
+
+    test "a field released mid-flush is freed when the waiting takeover is withdrawn",
+         %{topic: topic} do
+      start(topic, flush_ms: 60_000)
+      holder = session()
+      bob = session()
+      assert :ok = FieldLock.acquire(topic, "title", @alice, holder)
+      assert :pending = FieldLock.takeover(topic, "title", @bob, bob)
+      assert :ok = FieldLock.release(topic, "title", holder)
+
+      # Bob leaves the editor: nobody waits any more, and Alice had let go.
+      assert :ok = FieldLock.release_all(topic, bob)
+      assert_receive {:field_locks, ^topic, locks} when map_size(locks) == 0
+      FieldLock.flushed(topic, "title", holder)
+      assert unregistered?(topic)
     end
 
     test "taking over a field you already hold is a no-op", %{topic: topic} do

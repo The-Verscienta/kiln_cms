@@ -1737,6 +1737,15 @@ pre.highlight .gs {
 .kiln-block .kiln-table-wrap {
   overflow-x: auto;
 }
+/* The wrapper takes keyboard focus so the arrow keys can scroll it (#2464,
+   `KilnCMS.ScrollableTables`). Outset, unlike the code block's ring: inset it
+   would sit on the cells' own `base-300` borders and `base-200` header fill.
+   Outside, it sits on the page background, where the ink token clears
+   WCAG 1.4.11's 3:1 in both modes. */
+.kiln-table-wrap[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--color-primary-ink);
+  outline-offset: 2px;
+}
 .kiln-block table {
   border-collapse: collapse;
   width: 100%;

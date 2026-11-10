@@ -10,7 +10,8 @@ defmodule KilnCMS.Security.Event do
 
   ## Shape
 
-    * `type` - one of `types/0`.
+    * `type` - one of `types/0`, or a `KilnCMS.Types.UnknownAtom` for a type
+      a newer release recorded (#2509).
     * `actor_id` / `actor_label` - who did it. `actor_id` is a plain uuid (no
       foreign key: erasure nils it, and a deleted account must not cascade into
       the log). `actor_label` is an email snapshot, recorded only for known
@@ -68,10 +69,10 @@ defmodule KilnCMS.Security.Event do
     sign_in_failed: ~w(method reason),
     sign_in_locked: ~w(method scope),
     second_factor_enrolled: ~w(kind),
-    second_factor_removed: ~w(kind),
+    second_factor_removed: ~w(kind via),
     recovery_code_used: ~w(remaining),
     passkey_added: ~w(name),
-    passkey_removed: ~w(name),
+    passkey_removed: ~w(name via),
     role_granted: ~w(role previous_role),
     role_revoked: ~w(role),
     member_invited: ~w(role resent),
@@ -103,8 +104,8 @@ defmodule KilnCMS.Security.Event do
   @spec types() :: [atom()]
   def types, do: @types
 
-  @doc "The metadata keys `type` may carry (strings)."
-  @spec metadata_keys(atom() | nil) :: [String.t()]
+  @doc "The metadata keys `type` may carry (strings). None for an unknown type."
+  @spec metadata_keys(atom() | KilnCMS.Types.UnknownAtom.t() | nil) :: [String.t()]
   def metadata_keys(type), do: Map.get(@metadata_keys, type, [])
 
   @doc false
@@ -249,7 +250,10 @@ defmodule KilnCMS.Security.Event do
       public? false
     end
 
-    attribute :type, :atom do
+    # `KnownAtom`, not `:atom`: a type a newer release added loads as
+    # `KilnCMS.Types.UnknownAtom` instead of failing every read of the log
+    # (#2509). Writes stay limited to `@types`.
+    attribute :type, KilnCMS.Types.KnownAtom do
       allow_nil? false
       constraints one_of: @types
       public? true

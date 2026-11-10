@@ -35,6 +35,30 @@ defmodule KilnCMS.Cache.ClusterBustTest do
 
   defp seed(key), do: Cachex.put(Cache.cache_name(), key, :stale)
 
+  defp bump_both(org) do
+    Cache.bump_head_generation(org)
+    Cache.bump_menus_generation(org)
+    {Cache.head_generation(org), Cache.menus_generation(org)}
+  end
+
+  defp tokens(org), do: {Cache.head_generation(org), Cache.menus_generation(org)}
+
+  defp await_queued(pid, count, tries \\ 200) do
+    {:message_queue_len, len} = Process.info(pid, :message_queue_len)
+
+    cond do
+      len >= count ->
+        :ok
+
+      tries == 0 ->
+        flunk("nothing reached #{inspect(pid)}'s mailbox")
+
+      true ->
+        Process.sleep(5)
+        await_queued(pid, count, tries - 1)
+    end
+  end
+
   describe "the writing node" do
     # Read-your-writes: a broadcast is asynchronous even to this node's own
     # subscriber, so a request that saves settings and immediately re-reads them
@@ -65,14 +89,28 @@ defmodule KilnCMS.Cache.ClusterBustTest do
     test "puts a new head-generation token locally and broadcasts it (#1079)", %{org: org} do
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, ClusterBust.topic())
 
-      assert Cache.head_generation(org) == "0"
+      before = Cache.head_generation(org)
 
       Cache.bump_head_generation(org)
       token = Cache.head_generation(org)
-      refute token == "0"
+      refute token == before
 
       assert_receive {:put_keys, [{key, ^token}]}, 2_000
       assert key == Cache.head_generation_key(org)
+      assert {:ok, ^token} = Cachex.get(Cache.generation_cache_name(), key)
+      assert {:ok, nil} = Cachex.get(Cache.cache_name(), key)
+    end
+
+    test "puts a new menus-generation token the same way (#1318)", %{org: org} do
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, ClusterBust.topic())
+
+      Cache.bump_menus_generation(org)
+      token = Cache.menus_generation(org)
+
+      assert_receive {:put_keys, [{key, ^token}]}, 2_000
+      assert key == Cache.menus_generation_key(org)
+      assert {:ok, ^token} = Cachex.get(Cache.generation_cache_name(), key)
+      assert {:ok, nil} = Cachex.get(Cache.cache_name(), key)
     end
 
     # Keys, not a name for the thing being invalidated. A node running older
@@ -180,12 +218,49 @@ defmodule KilnCMS.Cache.ClusterBustTest do
 
     test "puts the values it is told about (#1079)", %{org: org} do
       key = Cache.head_generation_key(org)
-      Cachex.del(Cache.cache_name(), key)
+      Cachex.del(Cache.generation_cache_name(), key)
 
       send(ClusterBust, {:put_keys, [{key, "gen-from-peer"}]})
+
       _ = :sys.get_state(ClusterBust)
 
       assert Cache.head_generation(org) == "gen-from-peer"
+    end
+
+    # #2502: bumps and allowlist saves travel as `{:put_keys, …}` from every
+    # node, including one still on the release before the generation store
+    # during a rolling deploy. The receiver must route them to where it reads
+    # them, not into the delivery cache.
+    test "routes a peer's {:put_keys, ...} for a generation key to the generation store",
+         %{org: org} do
+      head = Cache.head_generation_key(org)
+      menus = Cache.menus_generation_key(org)
+      last_known = Cache.admin_allowlist_last_known_key(org)
+      Enum.each([head, menus, last_known], &Cachex.del(Cache.generation_cache_name(), &1))
+
+      send(
+        ClusterBust,
+        {:put_keys,
+         [{head, "head-from-old-peer"}, {menus, "menus-from-old-peer"}, {last_known, {nil, :off}}]}
+      )
+
+      _ = :sys.get_state(ClusterBust)
+
+      assert Cache.head_generation(org) == "head-from-old-peer"
+      assert Cache.menus_generation(org) == "menus-from-old-peer"
+      assert Cache.peek(last_known) == {nil, :off}
+
+      for key <- [head, menus, last_known] do
+        assert {:ok, nil} = Cachex.get(Cache.cache_name(), key)
+      end
+    end
+
+    test "still puts any other key from {:put_keys, ...} into the delivery cache", %{org: org} do
+      key = Cache.branding_key(org)
+      send(ClusterBust, {:put_keys, [{key, :from_peer}]})
+      _ = :sys.get_state(ClusterBust)
+
+      assert {:ok, :from_peer} = Cachex.get(Cache.cache_name(), key)
     end
 
     test "leaves keys it was not told about alone", %{org: org} do
@@ -281,6 +356,113 @@ defmodule KilnCMS.Cache.ClusterBustTest do
       assert origin == Node.self()
       refute cached?(key)
       assert KilnCMS.Firing.Cache.get(org, :post, doc_id, :html) == :miss
+    end
+  end
+
+  # #2502: the tokens a delivery ETag and the menu keys fold in live apart
+  # from the delivery cache, so nothing that empties that cache moves them.
+  # Before, every clear (and the size cap's eviction) sent a site back to
+  # `"0"`, and a browser holding an ETag from before its last settings bump
+  # got a 304 for the old `<head>`.
+  describe "the generation store" do
+    test "an unbumped site reads a token of its own, the same on every read", %{org: org} do
+      first = Cache.head_generation(org)
+
+      refute first == "0"
+      assert Cache.head_generation(org) == first
+      refute Cache.head_generation(Ash.UUID.generate()) == first
+    end
+
+    test "concurrent first reads on a node agree on one token" do
+      org = Ash.UUID.generate()
+
+      tokens =
+        1..50
+        |> Enum.map(fn _ -> Task.async(fn -> Cache.menus_generation(org) end) end)
+        |> Task.await_many()
+
+      assert [_one] = Enum.uniq(tokens)
+    end
+
+    # A bump's put and a first read's mint on one key must serialize. A plain
+    # `Cachex.put/3` checks for a lock and then writes from its own process, so
+    # it could land between the mint's read and its commit and be overwritten,
+    # leaving this node off the cluster's token until the next bump. That gap
+    # is too narrow to hit on purpose, so this pins what closes it: the put
+    # goes through the cache's lock queue, the process the mint runs in.
+    # Suspending that process (a Cachex internal, named `<cache>_locksmith`)
+    # holds both in order: the mint first, the put behind it.
+    test "a put queues behind a first read's mint, and its value is the one kept", %{org: org} do
+      key = Cache.head_generation_key(org)
+      queue = Process.whereis(:"#{Cache.generation_cache_name()}_locksmith")
+      assert is_pid(queue)
+
+      :sys.suspend(queue)
+      on_exit(fn -> if Process.alive?(queue), do: :sys.resume(queue) end)
+
+      minting = Task.async(fn -> Cache.head_generation(org) end)
+      await_queued(queue, 1)
+
+      putting = Task.async(fn -> ClusterBust.broadcast_put([{key, "bumped"}]) end)
+
+      # Waiting in the queue, not written straight into the store.
+      assert Task.yield(putting, 100) == nil
+      assert {:ok, nil} = Cachex.get(Cache.generation_cache_name(), key)
+
+      :sys.resume(queue)
+
+      minted = Task.await(minting)
+      assert Task.await(putting) == :ok
+      refute minted == "bumped"
+
+      _ = :sys.get_state(ClusterBust)
+      assert Cache.head_generation(org) == "bumped"
+    end
+
+    test "survives bust_published/0", %{org: org} do
+      bumped = bump_both(org)
+      Cache.bust_published()
+      assert tokens(org) == bumped
+    end
+
+    test "survives a full clear on the writing node", %{org: org} do
+      bumped = bump_both(org)
+      ClusterBust.broadcast_clear()
+      assert tokens(org) == bumped
+    end
+
+    test "survives a full clear on a receiving node", %{org: org} do
+      bumped = bump_both(org)
+      send(ClusterBust, {:bust_all, :other@host})
+      _ = :sys.get_state(ClusterBust)
+      assert tokens(org) == bumped
+    end
+
+    test "survives flush_delivery/0, which still clears and broadcasts", %{org: org} do
+      bumped = bump_both(org)
+      key = Cache.branding_key(org)
+      seed(key)
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, ClusterBust.topic())
+
+      assert %{published: published} = Cache.flush_delivery()
+      assert published >= 1
+      assert_receive {:bust_all, _origin}, 2_000
+      refute cached?(key)
+
+      assert tokens(org) == bumped
+    end
+
+    # The size cap's eviction drops least-recently-written entries, and a token
+    # written once at a settings save is exactly that. What eviction removes
+    # from the delivery cache is stood in for by emptying it outright.
+    test "survives eviction from the delivery cache", %{org: org} do
+      bumped = bump_both(org)
+
+      Cachex.del(Cache.cache_name(), Cache.head_generation_key(org))
+      Cachex.del(Cache.cache_name(), Cache.menus_generation_key(org))
+      Cachex.clear(Cache.cache_name())
+
+      assert tokens(org) == bumped
     end
   end
 end

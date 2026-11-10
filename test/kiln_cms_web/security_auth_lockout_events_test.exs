@@ -7,7 +7,8 @@ defmodule KilnCMSWeb.SecurityAuthLockoutEventsTest do
 
   Not `async: true`: `Application.put_env` is global, and the shipped budgets
   are too large for a test to reach, so this file tightens `AccountThrottle`'s
-  for its own tests (the test config raises them for every other file).
+  for its own tests (the test config raises them for every other file). The
+  per-address test also widens `RateLimit`'s `:auth` window for its duration.
   """
   use KilnCMSWeb.ConnCase, async: false
 
@@ -16,6 +17,7 @@ defmodule KilnCMSWeb.SecurityAuthLockoutEventsTest do
   alias KilnCMS.Accounts.Preparations.ThrottleSignIn
   alias KilnCMS.Accounts.SecondFactor
   alias KilnCMS.Accounts.User
+  alias KilnCMS.RateLimitHelpers
   alias KilnCMS.Security.Event
   alias KilnCMS.TwoFactorFixtures
   alias KilnCMSWeb.RateLimit
@@ -112,14 +114,28 @@ defmodule KilnCMSWeb.SecurityAuthLockoutEventsTest do
     assert known.__struct__ == unknown.__struct__
   end
 
+  # The address budget is spent in ONE charge of the whole limit, inside a
+  # window no test run straddles, and both counts are read back from the shared
+  # store (#2504). Spent one request at a time in the test env's one-minute
+  # window (500 round trips), the fill could straddle a minute under load and
+  # leave the sign-in's own charge alone in a fresh window, admitted.
+  #
+  # What can still fail here, and says so: the sign-in's charge reaching
+  # `ThrottleStore`'s node-local fallback (the store's 2 s timeout) is admitted
+  # against an empty local counter, and the `spent` check after it names that.
   test "a spent per-address budget is an address lockout and names no account" do
+    RateLimitHelpers.restore_limits_on_exit()
+    {limit, _scale} = Map.fetch!(RateLimit.limits(), :auth)
+    RateLimitHelpers.put_limit(:auth, limit, :timer.hours(24 * 365 * 100))
+
     user = seed_user()
     ip = unique_ip()
-    {limit, _scale} = Map.fetch!(RateLimit.limits(), :auth)
-    Enum.each(1..limit, fn _ -> RateLimit.check(:auth, ip) end)
+    assert RateLimit.check(:auth, ip, limit) == :allow
+    assert RateLimitHelpers.spent(:auth, ip) == limit
 
     context = Map.merge(ctx(ip), ThrottleSignIn.client_ip_context(ip))
     assert {:error, _} = sign_in(to_string(user.email), @password, context)
+    assert RateLimitHelpers.spent(:auth, ip) == limit + 1
 
     assert [event] = locked(ip)
     assert event.actor_id == nil

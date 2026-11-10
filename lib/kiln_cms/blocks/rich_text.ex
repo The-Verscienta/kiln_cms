@@ -51,8 +51,9 @@ defmodule KilnCMS.Blocks.RichText do
 
     # Code blocks scroll sideways, so each takes keyboard focus and a name
     # (#2164). Here, after the scrubber, so the attributes are always ours.
-    # Not on `:json`: that carries the stored prose as data.
-    KilnCMS.CodeBlocks.focusable(html)
+    # Not on `:json`: that carries the stored prose as data. Tables scroll
+    # inside their wrapper the same way (#2464).
+    html |> KilnCMS.CodeBlocks.focusable() |> KilnCMS.ScrollableTables.focusable()
   end
 
   def render(block, :json) do

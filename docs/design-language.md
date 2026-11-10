@@ -146,6 +146,39 @@ Limits: the scan reads source, not rendered pages, so it misses a scrolling
 `<pre>` styled another way (a custom class, an inline style), and it does not
 see templates outside this repo, such as a plugin's.
 
+### Scrolling tables
+
+A content table scrolls sideways inside its `.kiln-table-wrap`
+(`.kiln-block .kiln-table-wrap { overflow-x: auto }`), and the wrapper takes
+keyboard focus for the same reason a code block does
+([#2464](https://github.com/The-Verscienta/kiln_cms/issues/2464)). The
+rich-text renderer adds it, through `KilnCMS.ScrollableTables`, so there is
+nothing to add in a block template:
+
+```html
+<div class="kiln-table-wrap" tabindex="0" role="group" aria-label="Scrollable table">
+  <table>…</table>
+</div>
+```
+
+- The wrapper, not the table, takes focus and the name. The table keeps its
+  native `display` and so its own table semantics; `display: block` on a
+  `<table>` would strip them.
+- `role="group"` and not `region`, as for code blocks.
+- A bare `<table>` in `legacy_html` is wrapped by the same pass, so every
+  content table on a page has the wrapper.
+
+The ring is `.kiln-table-wrap[tabindex="0"]:focus-visible` in `app.css`: 2px
+solid `--color-primary-ink`, with `outline-offset: 2px`. It is outset, unlike
+the code block's, because inset it would sit on the cells' `base-300` borders
+and the header's `base-200` fill; outside, it sits on the page background,
+where the ink token clears WCAG 1.4.11's 3:1 in both themes. Don't add
+another outline to the wrapper, and don't set `outline: none` on it.
+
+This covers content tables only. The console's own wide tables sit in
+`overflow-x-auto` wrappers without these attributes, and no test scans for
+them the way `scrollable_code_focus_test.exs` scans `<pre>`s.
+
 ## Component kit (`@layer components` in `app.css`)
 
 These are plain, token-driven CSS classes so a control looks identical whether

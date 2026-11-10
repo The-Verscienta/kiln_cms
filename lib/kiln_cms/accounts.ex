@@ -56,7 +56,12 @@ defmodule KilnCMS.Accounts do
     end
 
     # External IdP links for OIDC SSO (#331) — managed by AshAuthentication.
-    resource KilnCMS.Accounts.UserIdentity
+    # The two below are the invitation takeover's (#2453), as
+    # `SystemActor.new(:invitations)` only.
+    resource KilnCMS.Accounts.UserIdentity do
+      define :list_user_identities_for_takeover, action: :for_user, args: [:user_id]
+      define :forget_user_identity_on_takeover, action: :forget_on_takeover
+    end
 
     # WebAuthn credentials (#331 passkeys) — written only by the verified
     # ceremony (KilnCMS.Accounts.WebAuthn); self-managed from /editor/settings.
@@ -65,6 +70,8 @@ defmodule KilnCMS.Accounts do
       define :get_passkey, action: :read, get_by: [:id]
       define :get_passkey_by_credential_id, action: :read, get_by: [:credential_id]
       define :remove_passkey, action: :destroy
+      # The invitation takeover's (#2453), as `SystemActor.new(:invitations)`.
+      define :forget_passkey_on_takeover, action: :forget_on_takeover
       # Ceremony-only writes (KilnCMS.Accounts.WebAuthn, `authorize?: false`
       # after Wax verification).
       define :register_passkey_credential, action: :register
@@ -86,6 +93,8 @@ defmodule KilnCMS.Accounts do
 
       define :subscribe_to_push, action: :subscribe
       define :remove_push_subscription, action: :destroy
+      # The invitation takeover's (#2453), as `SystemActor.new(:invitations)`.
+      define :forget_push_subscription_on_takeover, action: :forget_on_takeover
     end
 
     # The tenant registry (epic #336) + the user↔org membership join. The org is
@@ -228,6 +237,10 @@ defmodule KilnCMS.Accounts do
       define :set_content_list_columns,
         action: :set_content_list_columns,
         args: [:org_id, :type, :names]
+
+      # Self-service password change — pass `actor: user` (self). The settings
+      # page drives it through an AshPhoenix form.
+      define :change_password, action: :change_password
 
       # Two-factor (TOTP) self-service (issue #331) — pass `actor: user` (self).
       define :setup_totp, action: :setup_totp

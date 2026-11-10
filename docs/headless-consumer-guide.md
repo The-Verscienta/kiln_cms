@@ -302,6 +302,69 @@ If you can't wait for the re-fire, add the attributes on your side as you
 would for the `json` surface, skipping any `<pre>` that already has
 `tabindex`.
 
+## Tables in rendered HTML
+
+A table wider than your column scrolls sideways inside its wrapper, and a
+keyboard user can scroll it only if the wrapper takes focus
+([#2464](https://github.com/The-Verscienta/kiln_cms/issues/2464)). It works
+like [code blocks](#code-blocks-in-rendered-html): Kiln adds the markup on the
+`web` surface, and on the `json` surface you add it yourself.
+
+### Tables on the `web` surface
+
+Every table in a rich-text block arrives inside a `div.kiln-table-wrap` that
+carries `tabindex="0"`, `role="group"` and an `aria-label`:
+
+```json
+{
+  "html": "<div class=\"kiln-table-wrap\" tabindex=\"0\" role=\"group\" aria-label=\"Scrollable table\"><table><tbody><tr><td>Flour</td></tr></tbody></table></div>"
+}
+```
+
+- **A `legacy_html` table is wrapped too.** Before this, a table stored as
+  HTML reached the `web` surface as a bare `<table>` with no wrapper. It now
+  arrives in the same `div.kiln-table-wrap`. If your stylesheet targets
+  tables as direct children (`.kiln-block > table`), switch to a descendant
+  selector (`.kiln-block table`) or style `.kiln-table-wrap > table`.
+- The label is translated into the document's locale, like the code-block
+  label: "Scrollable table", "Tableau défilant" (`fr`), "Tabla desplazable"
+  (`es`).
+- Authors cannot set these attributes; the sanitizer strips them and Kiln
+  adds them afterwards.
+- A table nested inside another table's cell gets no wrapper of its own; it
+  scrolls with the outer one.
+
+Give the wrapper a horizontal scroll and a focus ring. Kiln's stylesheet does
+not travel with the HTML. Kiln's own rules, minus its `.kiln-block` scope:
+
+```css
+.kiln-table-wrap {
+  overflow-x: auto;
+}
+.kiln-table-wrap[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--your-accent);
+  outline-offset: 2px; /* outside the wrapper, clear of the cell borders */
+}
+```
+
+Pick a color with 3:1 contrast against the page background around the table
+(WCAG 1.4.11). Keep the wrapper and its attributes if you post-process the
+HTML.
+
+### Tables on the `json` surface
+
+The `json` surface carries the stored prose unchanged: a Portable Text
+`"_type": "table"` block in `body`, or sanitized HTML in `legacy_html`, where a
+table is either bare or in a `div.kiln-table-wrap` with no other attributes.
+If you render either one, put each top-level table in a scrolling wrapper with
+`tabindex="0"`, `role="group"` and a translated `aria-label`, and add the
+focus ring above.
+
+An artifact fired before the release that added this keeps its old table
+markup until it is re-fired; [After a Kiln upgrade](#after-a-kiln-upgrade)
+covers how that reaches you. If you add the wrapper on your side meanwhile,
+skip any `.kiln-table-wrap` that already has `tabindex`.
+
 ## Images: sizes, crops and formats on request
 
 A `media_item` (JSON:API `/api/json/media-items`, GraphQL `featuredImage`)

@@ -17,6 +17,15 @@ defmodule KilnCMS.Cache do
   delivery ETag (#1079) should not have to wait out a TTL on the nodes they did
   not happen to hit (#739).
 
+  The generation tokens (`head_generation/1`, `menus_generation/1`) and each
+  site's last-known admin allowlist live in a second, small instance of their
+  own (`generation_cache_name/0`), not in this one. They are values that must
+  *move* and never come back: a full clear (`bust_published/0`,
+  `flush_delivery/0`) or the size cap's eviction would otherwise drop them
+  back to an earlier value, and a browser still holding the ETag built from it
+  would get a stale 304 (#2502). That instance has no size cap and nothing
+  clears it.
+
   Set `config :kiln_cms, KilnCMS.Cache, enabled: false` to bypass the cache
   (every read hits the source) without removing the supervised process.
   """
@@ -40,8 +49,60 @@ defmodule KilnCMS.Cache do
   # An evented LRW policy reclaims ~10% of entries once the cap is hit.
   @max_entries 10_000
 
+  # Values that must outlive a clear of `@cache` (#2502) — see the moduledoc.
+  # Routed here by key prefix (`store_for/1`), so the key names are unchanged.
+  @generation_cache :kiln_cms_generation_cache
+  @generation_prefixes ["head_generation:", "menus_generation:", "admin_allowlist:last_known:"]
+
   @doc "The Cachex instance name (started in the application supervision tree)."
   def cache_name, do: @cache
+
+  @doc """
+  The Cachex instance holding the generation tokens and last-known allowlists
+  (#2502), started in the application supervision tree. No size cap, no
+  default TTL, and no clear reaches it: it holds two tokens per site plus one
+  allowlist, and it exists so a clear or an eviction of `cache_name/0` cannot
+  move any of them backwards.
+
+  Every write to it holds the key's lock: a first read mints through
+  `Cachex.get_and_update/3`, and a put goes through `put_routed/3`, which wraps
+  it in `Cachex.transaction/3`. A plain `Cachex.put/3` only checks for a lock
+  before writing from its own process, so it could land between a first read's
+  read and its commit and be overwritten by the minted token.
+  """
+  def generation_cache_name, do: @generation_cache
+
+  @doc false
+  # Which instance holds `key`. Public because `KilnCMS.Cache.ClusterBust`
+  # routes the `{:put_keys, …}` it receives through it: during a rolling deploy
+  # a node running the release before #2502 still broadcasts head-generation
+  # tokens and last-known allowlists that way.
+  @spec store_for(term()) :: atom()
+  def store_for(key) when is_binary(key) do
+    if String.starts_with?(key, @generation_prefixes), do: @generation_cache, else: @cache
+  end
+
+  def store_for(_key), do: @cache
+
+  @doc false
+  # Write `value` under `key` in the instance `store_for/1` names. A
+  # generation-store key is written inside a transaction on that key, in the
+  # cache's lock queue, so it serializes with a first read's mint
+  # (`first_generation/1`) rather than racing it. Public because
+  # `KilnCMS.Cache.ClusterBust` writes the pairs a `{:put_keys, …}` carries
+  # through it, on the sending node and on every receiving one.
+  @spec put_routed(term(), term(), keyword()) :: term()
+  def put_routed(key, value, opts \\ []) do
+    case store_for(key) do
+      @generation_cache ->
+        Cachex.transaction(@generation_cache, [key], fn ->
+          Cachex.put(@generation_cache, key, value, opts)
+        end)
+
+      cache ->
+        Cachex.put(cache, key, value, opts)
+    end
+  end
 
   @doc """
   Supervisor child spec for the content cache, bounded to `#{@max_entries}`
@@ -411,7 +472,7 @@ defmodule KilnCMS.Cache do
   """
   @spec put(String.t(), term(), pos_integer()) :: :ok
   def put(key, value, ttl) do
-    if enabled?(), do: Cachex.put(@cache, key, value, expire: ttl)
+    if enabled?(), do: put_routed(key, value, expire: ttl)
     :ok
   end
 
@@ -424,8 +485,9 @@ defmodule KilnCMS.Cache do
   @spec put_unless_kept(String.t(), pos_integer(), (term() -> term() | :keep)) :: :ok
   def put_unless_kept(key, ttl, fun) when is_function(fun, 1) do
     if enabled?() do
-      result = Cachex.get_and_update(@cache, key, &keep_or_commit(fun, &1))
-      if match?({:commit, _}, result), do: Cachex.expire(@cache, key, ttl)
+      cache = store_for(key)
+      result = Cachex.get_and_update(cache, key, &keep_or_commit(fun, &1))
+      if match?({:commit, _}, result), do: Cachex.expire(cache, key, ttl)
     end
 
     :ok
@@ -442,7 +504,7 @@ defmodule KilnCMS.Cache do
   @spec peek(String.t()) :: term() | nil
   def peek(key) do
     if enabled?() do
-      case Cachex.get(@cache, key) do
+      case Cachex.get(store_for(key), key) do
         {:ok, value} -> value
         _error -> nil
       end
@@ -459,6 +521,11 @@ defmodule KilnCMS.Cache do
   read that began before the save from writing the old list back afterwards
   (`KilnCMS.Security.AdminAllowlist`).
   """
+  #
+  # The last-known copy lives in the generation store, so a content clear or
+  # an eviction cannot erase the version that keeps it from moving backwards.
+  # It still travels as `broadcast_put/1`, which routes it there by prefix:
+  # a node running the release before #2502 understands that message too.
   @spec bust_admin_allowlist(Ash.UUID.t(), term()) :: :ok
   def bust_admin_allowlist(org_id, last_known) do
     if enabled?() do
@@ -499,37 +566,34 @@ defmodule KilnCMS.Cache do
   def head_generation_key(org_id), do: "head_generation:#{org_id}"
 
   @doc """
-  The current head-generation token for `org_id`, or `"0"` when nothing has
-  bumped it yet. Stable across requests until `bump_head_generation/1`.
+  The current head-generation token for `org_id`. Stable across requests until
+  `bump_head_generation/1`.
+
+  Kept in the generation store (`generation_cache_name/0`), which no clear or
+  eviction reaches (#2502). The first read on a node mints a random token and
+  commits it, so a restart or a missed bump gives a site a token it has never
+  served under rather than a fixed default every earlier boot also served. On
+  a cluster without sticky sessions an unbumped site's nodes can therefore
+  disagree, which costs a 200 where a 304 would do, never a stale 304. `"0"`
+  only when the cache is off.
   """
   @spec head_generation(Ash.UUID.t()) :: String.t()
-  def head_generation(org_id) do
-    if enabled?() do
-      case Cachex.get(@cache, head_generation_key(org_id)) do
-        {:ok, value} when is_binary(value) and value != "" -> value
-        _ -> "0"
-      end
-    else
-      "0"
-    end
-  end
+  def head_generation(org_id), do: generation(head_generation_key(org_id))
 
   @doc """
   Mint a new head-generation token for `org_id` and put it on every node.
 
   Called from the same settings writes that already bust layout-facing caches
   (`BustBranding`, `BustCodeInjection`, `BustFeedSettings`, `BustTypeRegistry`).
-  A delete-only bust would be wrong here: every miss would fall back to `"0"`,
-  which is the ETag the page carried *before* the write.
+  A put, not a delete: a delete would leave every node to mint its own token on
+  the next read, so the cluster would disagree until each node had one.
   """
   @spec bump_head_generation(Ash.UUID.t()) :: :ok
   def bump_head_generation(org_id) do
-    if enabled?() do
-      token =
-        :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
-
-      ClusterBust.broadcast_put([{head_generation_key(org_id), token}])
-    end
+    # `broadcast_put/1` routes the key to the generation store on both ends,
+    # and a node still on the release before #2502 understands the message too,
+    # so a rolling deploy does not leave old nodes on the previous token.
+    if enabled?(), do: ClusterBust.broadcast_put([{head_generation_key(org_id), token()}])
 
     :ok
   end
@@ -553,20 +617,13 @@ defmodule KilnCMS.Cache do
     do: {:public_menu, org_id, menus_generation(org_id), key, locale}
 
   @doc """
-  The current public-menus generation token for `org_id`, `"0"` until a menu
-  write bumps it. Folded into `public_menu_key/3`.
+  The current public-menus generation token for `org_id`, folded into
+  `public_menu_key/3`. Kept and first minted like `head_generation/1`, so a
+  clear or an eviction of the delivery cache cannot bring back a token that
+  older menu entries were cached under (#2502).
   """
   @spec menus_generation(Ash.UUID.t()) :: String.t()
-  def menus_generation(org_id) do
-    if enabled?() do
-      case Cachex.get(@cache, menus_generation_key(org_id)) do
-        {:ok, value} when is_binary(value) and value != "" -> value
-        _ -> "0"
-      end
-    else
-      "0"
-    end
-  end
+  def menus_generation(org_id), do: generation(menus_generation_key(org_id))
 
   @doc "Storage key for the public-menus generation token (#1318)."
   @spec menus_generation_key(Ash.UUID.t()) :: String.t()
@@ -575,18 +632,46 @@ defmodule KilnCMS.Cache do
   @doc """
   Mint a new public-menus generation token for `org_id` on every node, orphaning
   every cached `public_menu_key/3` entry at once. A put, not a delete, for the
-  reason `bump_head_generation/1` gives: a delete would fall back to `"0"`,
-  which is a token old keys were already built under.
+  reason `bump_head_generation/1` gives.
   """
   @spec bump_menus_generation(Ash.UUID.t()) :: :ok
   def bump_menus_generation(org_id) do
-    if enabled?() do
-      token = :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
-      ClusterBust.broadcast_put([{menus_generation_key(org_id), token}])
-    end
+    if enabled?(), do: ClusterBust.broadcast_put([{menus_generation_key(org_id), token()}])
 
     :ok
   end
+
+  defp generation(key) do
+    if enabled?() do
+      case Cachex.get(@generation_cache, key) do
+        {:ok, value} when is_binary(value) and value != "" -> value
+        _ -> first_generation(key)
+      end
+    else
+      "0"
+    end
+  end
+
+  # The miss path only, so a hit stays one ETS read. `get_and_update` runs in
+  # the cache's lock queue holding the key's lock, so concurrent first readers
+  # on a node agree on one token. A bump's put (`put_routed/3`) queues on the
+  # same lock, so it lands either before the mint, which then keeps it, or
+  # after it, overwriting the minted token. Never in between.
+  defp first_generation(key) do
+    update = fn
+      value when is_binary(value) and value != "" -> {:ignore, value}
+      _missing -> {:commit, token()}
+    end
+
+    case Cachex.get_and_update(@generation_cache, key, update) do
+      {_tag, value} when is_binary(value) -> value
+      # Nothing could be stored: a token no response has carried yet is never
+      # a stale 304, where a fixed fallback would be.
+      _error -> token()
+    end
+  end
+
+  defp token, do: :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
 
   @doc """
   Cache key for a site's resolved code injection (#490) — the snippet **and**
@@ -1052,8 +1137,7 @@ defmodule KilnCMS.Cache do
 
   The payload is the one shape that embeds forms (the controller enriches its
   `:form` blocks), and a form names no page, so the site's payloads go by
-  prefix. Records, head-generation tokens, other sites and the fired-artifact
-  cache are left alone. `nil` (a write whose site could not be read) drops
+  prefix. Records, other sites and the fired-artifact cache are left alone. `nil` (a write whose site could not be read) drops
   every site's payloads.
   """
   @spec bust_form_payloads(Ash.UUID.t() | nil) :: :ok
@@ -1072,6 +1156,9 @@ defmodule KilnCMS.Cache do
   radius isn't a single `{type, slug}` (e.g. a media-item edit that may be
   referenced by any number of pages); prefer `bust/2` where the affected record
   is known.
+
+  The generation tokens and last-known allowlists are not in this instance
+  (`generation_cache_name/0`), so this leaves them where they are (#2502).
   """
   @spec bust_published() :: :ok
   def bust_published do
@@ -1099,6 +1186,10 @@ defmodule KilnCMS.Cache do
   Prefer `ClusterBust.broadcast_clear/0` when you do not need the drop counts.
   `bust_published/0` stays node-local on purpose: its callers include a path
   that fires on every media download.
+
+  Like `bust_published/0`, it leaves the generation store alone (#2502), so
+  a flush never moves a site's head-generation token back to one browsers
+  already hold an ETag for.
 
   Returns the number of entries dropped **on this node** (the one that served
   the purge), for the operator to see that something happened. Other nodes are

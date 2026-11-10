@@ -66,6 +66,14 @@ The document comes back in the state it was trashed in. A published document
 goes straight back on the live site: its rendered pages are rebuilt and the
 search index picks it up again. A draft comes back as a draft.
 
+It also comes back with every field conversion (`mix kiln.fields.convert`)
+and media snapshot refresh (`mix kiln.media.resnapshot`) an operator ran
+while it was in the trash: both tasks process trashed documents too
+(#2533), so a field deleted in the meantime does not take the document's
+values with it. Two other background passes still skip the trash: the
+daily refresh of date-based computed fields, which the next save or daily
+run catches up, and `mix kiln.occurrences.backfill`.
+
 A trashed draft is never published by its schedule. If its **Scheduled
 publish at** time passed while it was in the trash, restoring it publishes it
 on the scheduler's next run, within about a minute. A trashed document can't
@@ -81,6 +89,19 @@ trash longer than the retention period. A document that a reference field set
 to keep linked records from being deleted (`on_target_delete: :restrict`)
 still points at is never purged; it stays in the trash until the link is
 removed ([extending-content.md](extending-content.md)).
+
+Only a document that is still in the trash can be deleted permanently. If
+another admin restores it after your Trash page loaded, your **Delete
+permanently** is refused and the document stays on the site, rather than
+being hard-deleted while live. **Empty trash** reads the trash afresh as it
+goes, so a document restored or deleted by someone else while it runs is not
+counted as deleted or as skipped.
+
+The media library's trash (**Media**, then **Trash**, admins only) works the
+same way: **Delete permanently** removes a file that is still in the trash,
+along with its stored original, variants and cached transforms. If someone
+restored the file after your list loaded, the file and everything stored for
+it stay.
 
 ## What can go wrong
 
@@ -104,11 +125,26 @@ removed ([extending-content.md](extending-content.md)).
 - *This content was moved to the trash or deleted.* (any editor) Someone
   trashed or permanently deleted the document while you had it open. See
   [If someone is still editing it](#if-someone-is-still-editing-it).
-- *Couldn't restore that item.* (Trash page) The restore was refused. When
-  two admins restore the same document, the second one gets this: it was
-  already out of the trash, and restoring it again would rebuild its pages
-  and send `restored` twice. Reload the Trash page; if the row is gone, the
+- *Someone else already restored that item.* (Trash page) You clicked
+  **Restore** or **Delete permanently** on a document another admin restored
+  after your Trash page loaded. Nothing more was done: a second restore would
+  rebuild its pages and send `restored` twice, and a permanent delete would
+  remove a live document. The list reloads without the row, and the
   document is back in the content list.
+- *That item is no longer in the trash — someone permanently deleted it.*
+  (Trash page) Another admin, or the nightly purge, deleted the document for
+  good after your Trash page loaded. The list reloads without the row.
+- *Couldn't restore that item.* or *Couldn't delete that item.* (Trash page)
+  The action was refused for another reason, and the row stays in the list.
+  Usually your role changed after the page loaded. For a restore, another
+  document may now hold a value this one has in a field set to be unique.
+  Delete permanently on a document that a "Don't allow it" reference field
+  still links to says which field instead (see
+  [Delete permanently](#delete-permanently)).
+- *That item is no longer in the trash — someone else restored or deleted
+  it.* (Media, Trash view) You clicked **Delete permanently** on a file another
+  admin restored or deleted after the trash list loaded. A restored file is
+  left in the library with all its stored files. The trash list reloads.
 
 ## If someone is still editing it
 
@@ -174,14 +210,48 @@ were never saved, so paste them in again after the restore.
   loaded before the trash is refused too. A refused write raises
   `Ash.Error.Changes.StaleRecord`, and nothing after it runs: no artifacts
   fired, no webhook, no job enqueued.
-- Two update actions are exempt, listed by
-  `KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0`: `:restore`, which
-  instead requires the row to still be trashed (a second restore is refused),
-  and `:clear_reference_target`, which a purge uses to clear the purged record
-  out of every referrer, trashed ones included, without re-firing or
-  announcing a trashed referrer. `:destroy` (the trash itself) also refuses a
-  row that is already trashed. An overlay action that must write a trashed
-  row has no opt-out.
+- Four update actions are exempt, listed by
+  `KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0`:
+  - `:restore`, which instead requires the row to still be trashed (a second
+    restore is refused);
+  - `:clear_reference_target`, which a purge uses to clear the purged record
+    out of every referrer, trashed ones included, without re-firing or
+    announcing a trashed referrer;
+  - `:convert_custom_field` and `:resnapshot_media`, the writes of
+    `KilnCMS.CMS.FieldConversion` and `KilnCMS.Media.Resnapshot` (#2533).
+    Both tasks read the live rows and then the trashed ones
+    (`ContentTypes.list_trashed!/2`), so a contract step reaches every row.
+    They fire artifacts only when the row the `UPDATE` returned is out of
+    the trash (`KilnCMS.CMS.Changes.FireArtifacts` with
+    `skip_trashed: true`), judged on that row rather than the struct read
+    earlier, because a trash or restore in between bumps no
+    `lock_version`.
+
+  `:destroy` (the trash itself) also refuses a row that is already trashed.
+  An overlay action that must write a trashed row has no opt-out.
+- `:purge` (the hard delete) takes only a row that is still trashed (#2531).
+  It filters the delete on the row (`not is_nil(archived_at)`), so a struct
+  loaded while the record was in the trash is refused once someone restores
+  it. The refusal is an `Ash.Error.Invalid` holding an
+  `Ash.Error.Changes.StaleRecord`, the same as for a row that is already
+  gone, and the purge's hooks roll back with it: no chunk embeddings or
+  reference edges are touched. Code that hard-deletes a live record (a test,
+  an overlay's cleanup) must trash it first:
+
+  ```elixir
+  :ok = CMS.destroy_page!(page, actor: admin)
+  :ok = CMS.purge_page!(page, actor: admin)
+  ```
+
+  `KilnCMS.CMS.MediaItem`'s `:purge` takes a trashed item or a quarantined
+  one, the second being the media pipeline's purge of an upload it refused
+  or that never finished processing. A caller that deletes stored files
+  should do so only after the purge returns `:ok`, as the media library does.
+- `KilnCMS.CMS.ContentTypes.can_restore?/4` and
+  `KilnCMS.CMS.ContentTypes.can_purge?/4` ask the `:restore` and `:purge`
+  policies for one record, like `can_destroy?/4` above. The Trash page asks
+  them before it re-reads the row, so a refused actor gets the generic
+  message rather than one that says the row is gone.
 - The API answers for a trashed id did not change: JSON:API, GraphQL and MCP
   read the record first, find nothing and answer not-found. Only a write that
   lands between that read and someone else's trash is now refused instead of

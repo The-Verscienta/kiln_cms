@@ -75,9 +75,22 @@ group repeating first.
 ### All or nothing
 
 The task checks every record before it writes anything. **Nothing is
-written while any record is invalid**, unless you pass `--skip-invalid`. With
-that flag the valid records are written, and the invalid ones keep only their
-old string until you fix them and run the task again.
+written while any live record is invalid**, unless you pass `--skip-invalid`.
+With that flag the valid records are written, and the invalid ones keep only
+their old string until you fix them and run the task again.
+
+A record in the trash never blocks the run. If it does not fit, the report
+lists it with `(trashed)` after its id and slug, and it keeps its string:
+
+```text
+3f2c…  (ashwagandha) (trashed) — unparseable:
+    is not JSON: "Take 2 g twice daily with food"
+1 trashed record(s) keep their string; they do not block --apply.
+```
+
+The site serves only live content, so only live content decides whether a
+run writes. Fix a trashed record you mean to restore, or restore it, fix it
+and run the task again.
 
 The source field is never modified.
 
@@ -93,15 +106,27 @@ you fix the invalid records, running it again converts just those.
 The task visits drafts as well as published records. A live record with a
 pending working copy (its unpublished edits) gets two conversions: the live
 value, and the held copy's own value. Otherwise "Publish changes" would bring
-back a map without the group. Trashed records are skipped: if you restore one
-later, run the task again.
+back a map without the group.
+
+Records in the trash are converted too, after the live ones, so a record
+restored after the contract release still holds the group (#2533). A trashed
+record's write fires nothing: its artifacts were removed when it was
+trashed, and restoring a published one rebuilds them. The report counts these writes
+as `trashed`.
+
+The live records and the trashed ones are two separate reads, so a record
+trashed or restored while the task runs can be missed by both. **Run the
+task once more right before the release that deletes the source field.** A
+second run is cheap: records already converted count as `kept` and are not
+written.
 
 ### What it costs
 
 Each converted record costs the same as `mix kiln.media.resnapshot`:
 
 - one versioned update, which the sync delta API sees as a change;
-- for a published record, one artifact re-fire job on the `:firing` queue.
+- for a published record that is not in the trash, one artifact re-fire job
+  on the `:firing` queue.
 
 There is **no webhook and no notification**. `updated_at` and
 `lock_version` stay unchanged, so an open editor does not hit a stale-record
@@ -126,7 +151,7 @@ Every report — a dry run included — lists the **distinct terms** with their
 counts, and the ones not yet in `options`, most used first:
 
 ```text
-herb: western_properties → properties: scanned 412, would convert 398 (391 published), …
+herb: western_properties → properties: scanned 412, would convert 398 (391 published, 2 trashed), …
 20 distinct term(s), 2 not in the options:
   nervine (14)
   anti-spasmodic (3)
@@ -134,10 +159,13 @@ herb: western_properties → properties: scanned 412, would convert 398 (391 pub
 
 That list is what an admin reviews before deciding: add the terms to
 `options`, or open the vocabulary with `allow_custom`. The JSON report
-(`--report`) carries the same `terms` and `new_terms`.
+(`--report`) carries the same `terms` and `new_terms`. Both include the terms
+of records in the trash: a trashed record can be restored, and its terms
+need to be options too.
 
 Every report also counts the **published** records a run converts: each of
-those writes re-fires the record's artifact.
+those writes re-fires the record's artifact. Records in the trash are not
+among them; `trashed` counts those, and their writes fire nothing.
 
 ## Into a list of values
 
@@ -148,7 +176,7 @@ field, see
 takes a JSON array of its items, or that array encoded again. A list of
 phrases takes strings (`["fatigue","insomnia"]`); a typed list takes its own
 values (`[3, 5]`, `["2026-03-01","2026-03-08"]`). Each item is checked and
-tidied exactly as the field's own save would, so a list of colours stores
+tidied exactly as the field's own save would, so a list of colors stores
 `#FFF` as `#ffffff`, repeats drop out except in a number list, and
 `min_items` / `max_items` apply. An item that does not fit makes the record
 invalid, and the report names it by its position from 1: `item 2 must be a
@@ -242,7 +270,9 @@ Verscienta stores `dosages`, `safety_warnings`, `drug_interactions` and
 4. Ship the clients reading `custom_fields.dosage_rows`. Until every client
    has moved, they can fall back to parsing `dosages`.
 
-**Release N+1 — contract.** Once no client reads `dosages`, delete the
+**Release N+1 — contract.** Right before it, run step 3 once more, to
+catch a record trashed or restored during the first run. Once no client
+reads `dosages`, delete the
 `dosages` field definition. Deleting it scrubs its stored values from every
 record (`Changes.SyncFieldValues`). If the clients should keep the old key,
 you can then rename `dosage_rows` to `dosages`. A rename moves the stored

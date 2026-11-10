@@ -108,11 +108,37 @@ defmodule KilnCMS.Firing.DeliveryTest do
     test "a cached artifact body reads with no DB access" do
       org = KilnCMS.Accounts.default_org_id()
       {slug, id} = fired_page()
-      # Firing warmed the body cache; make one resolution to be safe.
+      # Firing warmed the body cache. Said here, so a cold cache fails on this
+      # line rather than as an `:unavailable` below (#2504).
+      assert {:ok, _} = KilnCMS.Firing.Cache.get(org, :page, id, :json)
+      # A request resolves the slug before it reads the body.
       assert {:ok, _} = Delivery.published(org, :page, slug, "en")
+
+      # Warm it once more through the read under test, with the DB, right
+      # before the outage: the body read below must be this one's cache entry.
+      # The cache is node-wide; `KilnCMS.AsyncGlobalStateTest` keeps the calls
+      # that clear it out of async modules.
+      assert {:ok, %{"type" => "page"}} = Delivery.read_artifact(org, :page, id, :json)
 
       assert %{"type" => "page"} =
                without_db(fn -> unwrap(Delivery.read_artifact(org, :page, id, :json)) end)
+    end
+
+    # The cache above is node-wide, so this module (async) is only safe while
+    # nothing an async test does clears it. A form write used to (#2504: the
+    # body read above came back `:unavailable` in a full run); since #2501 it
+    # drops only its site's delivery payloads.
+    test "a form write leaves a cached artifact body in place" do
+      org = KilnCMS.Accounts.default_org_id()
+      {_slug, id} = fired_page()
+      assert {:ok, _} = Delivery.read_artifact(org, :page, id, :json)
+
+      CMS.create_form!(%{name: "Contact", slug: "del-form-#{System.unique_integer([:positive])}"},
+        actor: admin(),
+        tenant: org
+      )
+
+      assert {:ok, %{"type" => "page"}} = KilnCMS.Firing.Cache.get(org, :page, id, :json)
     end
   end
 

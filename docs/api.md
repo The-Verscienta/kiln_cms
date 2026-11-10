@@ -886,6 +886,18 @@ curl -s "http://localhost:4000/api/content/post/$POST_ID/revisions?limit=10" \
   `{"data": {"id", "type", "state", "restored_version_id", "revision": {…}}}`.
   A restore that cannot land (a category or media item deleted since that
   version) answers `422` `restore_failed`, naming the field.
+- **A restore that loses a race is refused whole.** The route reads the
+  document and restores onto what it read, and the restore only lands while
+  the row still has that read's `lock_version` and workflow `state` (#2532).
+  A save, publish, unpublish, archive or other write landing in between
+  answers `409` `invalid_state_transition` (*This document changed while the
+  version was being restored, so nothing was restored. Read it again and
+  retry.*) and writes nothing, not even a revision: send the restore again.
+  A document moved to the trash in between answers `404` `not_found`, the
+  same as one trashed before the request. A credential the content policies
+  refuse still gets `403`, whatever raced it. A successful restore increments
+  `lock_version`, so a client holding the document from before it gets a
+  conflict on its next write rather than overwriting the restore.
 
 **Who gets what.** Authorization is the version resources' own policies, with
 your credential as the actor and the request host's org as the tenant:
@@ -2047,7 +2059,7 @@ You get it from the headless sign-in, fired-artifact (`not_found` /
 `artifact_compiling`), related-content, provenance, form-schema and
 form-submission, visual-editing, media-upload ([§ Upload errors](#upload-errors)),
 version-history (`unauthenticated`, `invalid_id`, `invalid_cursor`,
-`forbidden`, `restore_failed`) and preview-token (`invalid_preview`)
+`forbidden`, `not_found`, `restore_failed`, `invalid_state_transition`) and preview-token (`invalid_preview`)
 endpoints — **and from the 429 when you exceed a rate-limit bucket**
 (`too_many_requests`, alongside `retry-after`). All of them render through one
 implementation, `KilnCMSWeb.ApiError.send/4`, and a test fails the build if a

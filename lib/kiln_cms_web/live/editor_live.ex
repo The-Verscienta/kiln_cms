@@ -904,7 +904,10 @@ defmodule KilnCMSWeb.EditorLive do
       confirming = if MapSet.size(socket.assigns.selected) > 0, do: verb
       {:noreply, assign(socket, :confirming_bulk, confirming)}
     else
-      {:noreply, put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.forbidden(verb))}
+      # No one record here: the selection can span types, so the sentence is
+      # decided from the tier and the publish switch alone.
+      context = [actor: socket.assigns.actor, org: socket.assigns.current_org]
+      {:noreply, put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.forbidden(verb, context))}
     end
   end
 
@@ -1372,7 +1375,10 @@ defmodule KilnCMSWeb.EditorLive do
             )
           )
         else
-          put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error(verb, error))
+          message =
+            KilnCMSWeb.WorkflowMessages.error(verb, error, refusal_context(socket, record))
+
+          put_flash(socket, :error, message)
         end
     end
   end
@@ -1424,12 +1430,25 @@ defmodule KilnCMSWeb.EditorLive do
           |> put_flash(:info, ContentTrash.moved(record))
 
         {:error, error} ->
-          put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.error("trash", error))
+          put_flash(
+            socket,
+            :error,
+            KilnCMSWeb.WorkflowMessages.error("trash", error, refusal_context(socket, record))
+          )
       end
     else
-      put_flash(socket, :error, KilnCMSWeb.WorkflowMessages.forbidden("trash"))
+      put_flash(
+        socket,
+        :error,
+        KilnCMSWeb.WorkflowMessages.forbidden("trash", refusal_context(socket, record))
+      )
     end
   end
+
+  # Who was refused, where, on what — `KilnCMSWeb.WorkflowMessages` decides the
+  # sentence from the actor's tier and scope on this site.
+  defp refusal_context(socket, record),
+    do: [actor: socket.assigns.actor, org: socket.assigns.current_org, resource: record]
 
   # The set of selection keys ("kind:id") for the currently loaded items (the
   # status/search filter already ran server-side).

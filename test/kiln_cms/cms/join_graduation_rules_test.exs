@@ -78,19 +78,23 @@ defmodule KilnCMS.CMS.JoinGraduationRulesTest do
 
       assert JoinGraduation.join_resources() |> Enum.member?(ctx.spec.module)
 
+      CMS.destroy_page!(target, actor: ctx.admin)
+
       assert {:error, %Ash.Error.Invalid{errors: errors}} =
                CMS.purge_page(target, actor: ctx.admin)
 
       assert [%TargetStillConnected{field_label: "Seats", count: 2}] =
                Enum.filter(errors, &match?(%TargetStillConnected{}, &1))
 
-      assert {:ok, _still_there} = CMS.get_page(target.id, actor: ctx.admin)
+      assert [_still_there] =
+               CMS.list_trashed_pages!(actor: ctx.admin, query: [filter: [id: target.id]])
     end
 
     test "lets the target go once nothing connects to it", ctx do
       target = page!(ctx.admin)
       {:ok, link} = JoinProbe.connect(ctx.spec, post!(ctx.admin), target, ctx.opts)
       Ash.destroy!(link, ctx.opts)
+      CMS.destroy_page!(target, actor: ctx.admin)
 
       assert :ok = CMS.purge_page!(target, actor: ctx.admin)
     end
@@ -104,6 +108,7 @@ defmodule KilnCMS.CMS.JoinGraduationRulesTest do
       source = post!(ctx.admin)
       {:ok, _} = JoinProbe.connect(ctx.spec, source, target, ctx.opts)
 
+      CMS.destroy_post!(source, actor: ctx.admin)
       assert :ok = CMS.purge_post!(source, actor: ctx.admin)
       assert JoinGraduation.connected_sources(ctx.spec.module, target.id, target.org_id) == []
     end
@@ -124,6 +129,7 @@ defmodule KilnCMS.CMS.JoinGraduationRulesTest do
       spec = graduate!(ctx.admin, %{on_target_delete: :clear})
       target = page!(ctx.admin)
       {:ok, _} = JoinProbe.connect(spec, post!(ctx.admin), target, ctx.opts)
+      CMS.destroy_page!(target, actor: ctx.admin)
 
       assert :ok = CMS.purge_page!(target, actor: ctx.admin)
       assert JoinGraduation.connected_sources(spec.module, target.id, target.org_id) == []
