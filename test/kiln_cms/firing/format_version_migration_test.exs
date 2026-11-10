@@ -165,6 +165,34 @@ defmodule KilnCMS.Firing.FormatVersionMigrationTest do
       assert Map.has_key?(artifact.body, "custom_fields")
     end
 
+    # #2258 bumped 3 → 4 so `social` reaches every existing document, not only
+    # those edited after the deploy: a v3 row must read as stale and converge.
+    test "a v3 artifact without `social` is stale and gains it on re-fire" do
+      page = published_page()
+
+      {:ok, artifact} =
+        Firing.get_artifact(:page, page.id, :json, authorize?: false, tenant: org())
+
+      v3 =
+        Ash.Seed.update!(artifact, %{
+          format_version: 3,
+          body: Map.delete(artifact.body, "social")
+        })
+
+      Cache.evict(org(), :page, page.id)
+      assert Engine.stale?(v3)
+
+      assert {:ok, first} = Engine.read(org(), :page, page.id, :json)
+      refute Map.has_key?(first, "social")
+      assert_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"id" => page.id})
+
+      drain_oban()
+      Cache.evict(org(), :page, page.id)
+
+      assert {:ok, second} = Engine.read(org(), :page, page.id, :json)
+      assert second["social"] == %{"title" => "Fired"}
+    end
+
     test "a document published on this build is not re-fired" do
       page = published_page()
 

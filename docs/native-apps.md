@@ -179,8 +179,10 @@ curl -s 'https://cms.example.com/api/content/recipe/pancakes?fields=title,slug,c
 ```
 
 - Comma-separated **top-level keys** (`title`, `slug`, `locale`, `blocks`,
-  `custom_fields`, `custom_fields_plain`, `custom_fields_portable`, and any
-  other key the artifact carries) plus
+  `custom_fields`, `custom_fields_plain`, `custom_fields_portable`, `social`
+  for a share sheet's link preview
+  ([the `social` object](headless-consumer-guide.md#link-previews-the-social-object)),
+  and any other key the artifact carries) plus
   **`custom_fields.<name>`** for one custom field. `custom_fields` on its own
   keeps all of them.
 - `id` and `type` are **always** kept. So is `expanded` when you also pass

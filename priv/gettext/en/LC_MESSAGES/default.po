@@ -18412,6 +18412,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
+msgid "Shown as the site's account on link previews in X (Twitter), e.g. @kilncms. Leave blank to omit it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
 msgid "Shown in the header, the page title, and sign-in emails."
 msgstr ""
 
@@ -23931,6 +23936,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #, elixir-autogen, elixir-format
 msgid "Writes new prose from your instruction. Describe what this section should say."
+msgstr ""
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "X (Twitter) username"
 msgstr ""
 
 #: lib/kiln_cms_web/live/translations_live.ex

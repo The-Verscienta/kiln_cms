@@ -263,6 +263,44 @@ defmodule KilnCMSWeb.Layouts do
   end
 
   @doc """
+  The link-preview values for this page, resolved once for both the Open Graph
+  and the X (Twitter) Card tags in `root.html.heex` (#2258), so the two sets
+  can never disagree.
+
+  Each value is a non-blank string or `nil`; the layout emits a tag only for a
+  non-`nil` value, so no tag ever carries `content=""`.
+
+    * `title` — the page's `page_title`, else the site name (what `<title>`
+      shows on a page with no title of its own, e.g. the stock home page).
+    * `description` — the page's `meta_description`, else `nil`.
+    * `image` — `social_image/1`: absolute, on this request's own host.
+    * `card` — `"summary_large_image"` when there is an image, else
+      `"summary"`.
+    * `site` — the branding `twitter_site` (`@handle`), else `nil`. Like the
+      brand image it is resolved only for a present, non-nil `:current_org`:
+      a nil org would resolve the DEFAULT org's branding, which on a
+      pre-router error page is not necessarily this host's site.
+  """
+  @spec social_meta(map()) :: %{
+          title: String.t(),
+          description: String.t() | nil,
+          image: String.t() | nil,
+          card: String.t(),
+          site: String.t() | nil
+        }
+  def social_meta(assigns) do
+    image = social_image(assigns)
+
+    %{
+      title: present(assigns[:page_title]) || brand_or_unbranded(assigns).site_name,
+      description: present(assigns[:meta_description]),
+      image: image,
+      card: if(image, do: "summary_large_image", else: "summary"),
+      site: with_org_brand(assigns, & &1.twitter_site)
+    }
+  end
+
+  @doc """
   The `og:image` for this page: the page's own, else the site's branding image
   (#560).
 
@@ -270,41 +308,54 @@ defmodule KilnCMSWeb.Layouts do
 
   **The page-level chain does not move.** Delivery reads `seo_image` alone and
   assigns it as `:og_image`; this only supplies a fallback *beneath* that, so a
-  page that sets one is byte-identical to before.
+  page that sets one still wins. A blank page value is no value: it falls
+  through to the brand image rather than emitting `content=""` (#2258).
 
   **The URL is made absolute against the REQUEST'S OWN host**
-  (`KilnCMSWeb.Tenant.base_url/1`, #557). That is why this was blocked: the only
-  base URL used to be the deployment-global `:public_base_url`, so on a tenant
-  subdomain or custom domain the tag would have advertised an image on the wrong
-  host — and a wrong absolute URL in a link preview is worse than no tag.
+  (`KilnCMSWeb.Tenant.absolute_url/2`, #557, #2258). That is why this was
+  blocked: the only base URL used to be the deployment-global
+  `:public_base_url`, so on a tenant subdomain or custom domain the tag would
+  have advertised an image on the wrong host — and a wrong absolute URL in a
+  link preview is worse than no tag. The page's own image goes through the
+  same rule as the brand one: a media-library `seo_image` is a site-relative
+  path, and a crawler cannot resolve that.
 
   **It fails closed**, like `brand_or_unbranded/1` and for the same reason: a
   missing `:current_org` key means no hook ran, and answering that with the
-  default org's branding would put another tenant's image on this page.
+  default org's branding would put another tenant's image on this page. A
+  relative page image with no org is dropped for the same reason.
   """
   @spec social_image(map()) :: String.t() | nil
   def social_image(assigns) do
-    assigns[:og_image] || brand_social_image(assigns)
+    page_social_image(assigns) ||
+      with_org_brand(
+        assigns,
+        &KilnCMSWeb.Tenant.absolute_url(assigns.current_org, &1.social_image_url)
+      )
   end
 
-  defp brand_social_image(assigns) do
-    with true <- Map.has_key?(assigns, :current_org),
-         org when not is_nil(org) <- assigns[:current_org],
-         image when is_binary(image) and image != "" <- Branding.for_org(org).social_image_url do
-      absolute(image, org)
-    else
+  defp page_social_image(assigns) do
+    case present(assigns[:og_image]) do
+      nil -> nil
+      image -> KilnCMSWeb.Tenant.absolute_url(assigns[:current_org], image)
+    end
+  end
+
+  # Applies `fun` to this site's resolved branding only when a hook resolved a
+  # real org — a missing key or a nil org yields `nil`, never the default org's
+  # values. `present/1` keeps a blank result from becoming `content=""`.
+  defp with_org_brand(assigns, fun) do
+    case assigns do
+      %{current_org: org} when not is_nil(org) -> org |> Branding.for_org() |> fun.() |> present()
       _ -> nil
     end
   end
 
-  # An operator may paste either a full URL or a site-relative path, and both
-  # are reasonable things to type into that field. Only the second needs a base.
-  defp absolute("http://" <> _ = url, _org), do: url
-  defp absolute("https://" <> _ = url, _org), do: url
-
-  defp absolute(path, org) do
-    KilnCMSWeb.Tenant.base_url(org) <> "/" <> String.trim_leading(path, "/")
+  defp present(value) when is_binary(value) do
+    if String.trim(value) == "", do: nil, else: value
   end
+
+  defp present(_value), do: nil
 
   @doc "The site name for an org, resolved through the branding fallback chain."
   def brand_name(org), do: Branding.for_org(org).site_name

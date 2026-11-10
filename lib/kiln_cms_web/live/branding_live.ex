@@ -50,7 +50,7 @@ defmodule KilnCMSWeb.BrandingLive do
   import Ash.Expr, only: [expr: 1]
   import KilnCMSWeb.ContentEditor.MediaPickerComponents, only: [image_picker: 1]
 
-  @fields ~w(site_name logo_url favicon_url social_image_url app_icon_url brand_color show_attribution theme header_menu_key footer_menu_key)
+  @fields ~w(site_name logo_url favicon_url social_image_url app_icon_url brand_color show_attribution theme header_menu_key footer_menu_key twitter_site)
 
   # The image fields: form field, upload name, the extensions the file chooser
   # offers, and the sniffed content types a library item must have to fill it.
@@ -644,6 +644,17 @@ defmodule KilnCMSWeb.BrandingLive do
             upload={@uploads.social_image_upload}
             label={gettext("Default social image")}
             hint={gettext("Used for link previews when a page has no image of its own.")}
+          />
+
+          <.input
+            field={@form[:twitter_site]}
+            label={gettext("X (Twitter) username")}
+            placeholder="@yoursite"
+            hint={
+              gettext(
+                "Shown as the site's account on link previews in X (Twitter), e.g. @kilncms. Leave blank to omit it."
+              )
+            }
           />
 
           <.image_field

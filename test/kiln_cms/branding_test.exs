@@ -98,6 +98,43 @@ defmodule KilnCMS.BrandingTest do
     end
   end
 
+  # #2258: the site's X (Twitter) account for `twitter:site`.
+  describe "twitter_site" do
+    test "is nil for an unbranded site, with no config layer", %{org: org} do
+      put_branding(site_name: "Operator CMS", twitter_site: "@operator")
+
+      assert Branding.for_org(org).twitter_site == nil
+      assert Branding.defaults().twitter_site == nil
+    end
+
+    test "a saved handle is stored and resolved as @handle", ctx do
+      save(ctx, %{twitter_site: "kilncms"})
+
+      assert {:ok, [row]} = CMS.list_site_branding(tenant: ctx.org, authorize?: false)
+      assert row.twitter_site == "@kilncms"
+      assert Branding.for_org(ctx.org).twitter_site == "@kilncms"
+    end
+
+    test "clearing it stores nil", ctx do
+      save(ctx, %{twitter_site: "@kilncms"})
+      save(ctx, %{twitter_site: ""})
+
+      assert {:ok, [row]} = CMS.list_site_branding(tenant: ctx.org, authorize?: false)
+      assert row.twitter_site == nil
+      assert Branding.for_org(ctx.org).twitter_site == nil
+    end
+
+    test "is per site", ctx do
+      other = seed_org()
+      on_exit(fn -> KilnCMS.Cache.bust_branding(other.id) end)
+
+      save(ctx, %{twitter_site: "@kilncms"})
+
+      assert Branding.for_org(other).twitter_site == nil
+      assert Branding.for_org(Accounts.default_org_id()).twitter_site == nil
+    end
+  end
+
   describe "read path" do
     test "never creates a row — an anonymous page view must not INSERT", ctx do
       Branding.for_org(ctx.org)

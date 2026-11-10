@@ -1188,6 +1188,11 @@ Notable properties:
   added after a document was last saved has no stored value and publishing does
   not invent one, while a point-in-time read (`?as_of=`) serves the values
   stored at that instant — which may include fields since removed;
+- `social`, the document's link-preview title, description and absolute image
+  ([headless-consumer-guide.md](headless-consumer-guide.md#link-previews-the-social-object)),
+  is optional: an artifact fired before `format_version` 4 lacks it until it
+  is re-fired. Inside it, `title` is required (a string or `null`) and
+  `description` and `image` are present only when set;
 - a `required: true` block field is listed in `required` (the key is always
   present) **and** is non-nullable — a container child now runs through the
   same Ash cast a top-level block does (#935), so a nested block cannot carry
