@@ -7,6 +7,29 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="reserved-paths-upgrade"></a>
+
+- **Run `mix kiln.reserved_paths` once after upgrading to list the records whose
+  URL the new `/access-denied` page shadows (#2374).** In a release:
+  `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`. Read-only; no
+  migration.
+  - **Why.** #2143 routes `GET /access-denied` ahead of delivery and adds
+    `access-denied` to the reserved segments. New writes were already refused:
+    a root-served (page) slug of `access-denied` fails `SlugAvailable`, and a
+    path alias starting `/access-denied` fails `PathAliasValid`; a post's
+    `/blog/access-denied` is unaffected. Both validations fire only when the
+    slug or alias changes, so a record stored earlier keeps its URL, and the
+    access-denied page is served there instead.
+  - **What it lists.** Every page (in any state, every organization) whose slug
+    is a reserved segment or another type's URL prefix, and every record whose
+    path alias starts with a reserved segment, with its type, id, state, locale
+    and title. The check is generic, so it also covers segments reserved later.
+  - **What to do.** Give each listed record a new slug or alias in the editor,
+    and add a redirect from the old URL if it was ever linked. Nothing is
+    renamed for you. The task exits non-zero while anything is listed, so it
+    can gate an upgrade script.
+  ([#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374))
+
 <a id="backup-last-good-marker-upgrade"></a>
 
 - **Update the host's copy of `scripts/backup.sh`: the app now marks the newest
