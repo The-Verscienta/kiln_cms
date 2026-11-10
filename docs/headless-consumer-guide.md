@@ -635,7 +635,7 @@ curl -X POST https://kiln.example.com/api/keys/rotate \
   are left), not from every worker on a 401.
 * **Never present a rotated-away key to this endpoint again.** Kiln reads that
   as a stolen key: more than 120 seconds after the rotation it revokes the
-  whole chain, including your current key, and alerts the admins. If you lose
+  whole chain, including your current key, and alerts the platform admins. If you lose
   the `201` (a network failure mid-request), do not retry with the old key;
   ask an admin to mint a new one.
 * `401` (`invalid_api_key`): no key, or it is revoked/expired. `403`

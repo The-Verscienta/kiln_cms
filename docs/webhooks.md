@@ -268,12 +268,19 @@ More event names exist outside the `<type>.<verb>` pattern:
   receiver that caches taxonomy (a tag cloud, a list of payers kept as a tag
   group) can invalidate on them instead of polling. See
   [Taxonomy events](#taxonomy-events) below.
+- **`security.new_admin`**, **`security.role_elevation`**,
+  **`security.failed_sign_ins`**, **`security.lockout`**,
+  **`security.two_factor_disabled`**, **`security.sso_config_changed`** and
+  **`security.alerts_silenced`** — the site's
+  [security alerts](security-alerts.md) and the notice that someone turned
+  them down ([#2245](https://github.com/The-Verscienta/kiln_cms/issues/2245));
+  opt in. See [Security alert events](#security-alert-events) below.
 - **`ping`** — a manual test delivery (see [Ping](#ping-and-redeliver) below);
   never subscribed to, and delivered on demand regardless of an endpoint's
   active state or event list.
 
 Each of these namespaces (`form`, `membership`, `task`, `release`,
-`experiment`, `tag`, `tag_group`, `category`) is reserved: a new content type
+`experiment`, `tag`, `tag_group`, `category`, `security`) is reserved: a new content type
 cannot take one as its name, so `release.published` always means a release
 and never a document of a type called `release`
 ([#1994](https://github.com/The-Verscienta/kiln_cms/issues/1994)). A type
@@ -311,6 +318,9 @@ dedupe key. `data` shape depends on the event:
   `updated` adds `previous_slug` when the slug changed and, for a tag,
   `previous_tag_group_id` when it moved group. A `deleted` is the record as it
   was. See [Taxonomy events](#taxonomy-events).
+- **Security alert events** (`security.*`) — the alert, its window's summary
+  or a silencing notice, told apart by `phase`. See
+  [Security alert events](#security-alert-events).
 - **`ping`** — `{"message": "KilnCMS webhook test", "endpoint_url": "...", "sent_at": "<ISO 8601>"}`.
 
 ```jsonc
@@ -372,6 +382,45 @@ receives none of them until an admin ticks them.
 - A content type cannot be named `tag`, `tag_group` or `category`, so these
   names always mean taxonomy. The same goes for every other namespace above
   (`form`, `membership`, `task`, `release`, `experiment`).
+
+### Security alert events
+
+A site's [security alerts](security-alerts.md) can be sent to its endpoints:
+one event per site alert kind, `security.<kind>`, and
+`security.alerts_silenced` for the notice that someone turned the alerts down
+(an alert kind or admin notifications switched off, a security webhook
+changed, deleted, re-keyed or auto-disabled, an admin removed or demoted, the
+site's mail relay changed).
+
+- **Opt in.** None is in the defaults, so an endpoint receives none until an
+  admin ticks them in the `security` group of its event list.
+- **When.** Within about a minute of the event. Alerts are grouped per kind
+  into 15-minute windows: the first event of a window is sent as an alert
+  (`"phase": "alert"`), and when more followed, one summary
+  (`"phase": "summary"`, with the window's `count`) about a minute after the
+  window closes. Notices are never grouped.
+- **What the site's settings change.** A kind the site turned off is sent to
+  nobody, webhooks included. Switching off the admins' bell and email leaves
+  webhooks on.
+- **What it carries.** The site, the window, and for an alert the security log
+  event that raised it (id, type, actor and target ids, metadata), with its IP
+  address cut to the network (`/24`, `/48`) unless the site shows full
+  addresses. Never an email address, user agent, secret or endpoint URL. The
+  full shape and examples are in
+  [Security alerts → Payload](security-alerts.md#payload).
+- **Platform alerts** (new platform admins, platform role changes, new API
+  keys, a stolen API key used again) are not webhook events in this release;
+  they go to the platform admins by bell and email only.
+- **Sent only to the endpoint.** A security event is not a content change:
+  it does not run [automation](automation.md) rules, federate, purge the CDN
+  or appear in the change feed. It is otherwise an ordinary delivery: on the
+  ledger, retried, redeliverable, and counted toward auto-disable.
+- **Changing a subscribed endpoint is announced.** Editing the URL of an
+  endpoint subscribed to any `security.*` event, unticking **Active** or one
+  of its `security.*` events, rotating its secret, deleting it, or its being
+  auto-disabled sends `security.alerts_silenced` to the site's admins (and to
+  every endpoint of the site subscribed to it). Subscribing to more events
+  does not.
 
 ### `affected`: the other pages this change touched
 

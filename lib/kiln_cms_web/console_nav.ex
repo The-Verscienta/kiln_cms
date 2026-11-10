@@ -826,6 +826,25 @@ defmodule KilnCMSWeb.ConsoleNav do
               "events"
             ]
           },
+          # Beside the log it is about: which of its events tell the site's
+          # admins at once (#2245).
+          %{
+            key: :security_alerts,
+            label: gettext("Security alerts"),
+            path: ~p"/editor/security-alerts",
+            icon: "hero-bell-alert",
+            description: gettext("Which security events alert this site's admins."),
+            keywords: [
+              "alert",
+              "notify",
+              "notification",
+              "new admin",
+              "lockout",
+              "failed sign-in",
+              "2fa",
+              "security"
+            ]
+          },
           %{
             key: :trash,
             label: gettext("Trash"),

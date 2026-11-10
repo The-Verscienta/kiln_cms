@@ -920,6 +920,15 @@ defmodule KilnCMS.CMS do
       define :reset_site_security_log, action: :destroy
     end
 
+    # Security alerts (#2245): which site kinds are on, the bell and email,
+    # and whether addresses show in full. Admin-only.
+    resource KilnCMS.CMS.SiteSecurityAlerts do
+      define :list_site_security_alerts, action: :read
+      define :save_site_security_alerts, action: :save
+      define :update_site_security_alerts, action: :update
+      define :reset_site_security_alerts, action: :destroy
+    end
+
     # Per-org `/.well-known/security.txt` (RFC 9116, #1873). Served through
     # `KilnCMS.SecurityTxt` (cached); this interface is for the settings page
     # and the resolver's own lookup.

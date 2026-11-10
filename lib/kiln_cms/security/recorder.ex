@@ -51,6 +51,26 @@ defmodule KilnCMS.Security.Recorder do
     * `:erasing_user_id` - the user an erasure is running for. An event whose
       acting user is that user (or is already anonymized) is `:skipped`, so
       erasure never writes the identity it just scrubbed.
+    * `:alert` - `{:threshold, window_index, count}`: this event is the one
+      that brought its site's failed sign-ins to the alert threshold (#2245).
+      Set by `record_sampled/2` itself; see "Security alerts" below.
+    * `:alert_required` - `true` when the event's security alert must be
+      claimed or the event not written at all
+      (`KilnCMS.Security.Changes.RaiseAlert`), for a caller with a fallback
+      of its own (`KilnCMS.Accounts.ApiKeyReuse`). Default `false`: a failed
+      claim never fails the event.
+
+  ## Security alerts
+
+  Recording an event is what raises its alerts (#2245):
+  `KilnCMS.Security.Changes.RaiseAlert` classifies it in the event's own
+  transaction. A failed sign-in raises one only on the site's tally
+  (`KilnCMS.Security.Alerts.charge_failed_sign_in/2`): `record_sampled/2`
+  charges every `:sign_in_failed` to its site, and the one attempt that brings
+  the window's count to the threshold is recorded **unsampled** and flagged,
+  so the alert has its event even when the address behind it has used up its
+  sample. The tally is keyed on the site alone, never on an address or
+  account an attacker chooses.
   """
 
   require Logger
@@ -59,6 +79,7 @@ defmodule KilnCMS.Security.Recorder do
   alias KilnCMS.Accounts.User
   alias KilnCMS.AfterCommit
   alias KilnCMS.Security
+  alias KilnCMS.Security.Alerts
   alias KilnCMSWeb.Plugs.ClientIp
 
   @context_key :security_request
@@ -174,8 +195,22 @@ defmodule KilnCMS.Security.Recorder do
         :skipped
 
       attrs ->
-        Security.record(attrs, actor: Security.system(), tenant: Keyword.fetch!(opts, :tenant))
+        Security.record(attrs,
+          actor: Security.system(),
+          tenant: Keyword.fetch!(opts, :tenant),
+          context: alert_context(opts)
+        )
     end
+  end
+
+  # What `Changes.RaiseAlert` reads from the recording changeset.
+  defp alert_context(opts) do
+    [
+      security_alert: opts[:alert],
+      security_alert_required: if(opts[:alert_required] == true, do: true)
+    ]
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
   end
 
   @doc """
@@ -219,7 +254,22 @@ defmodule KilnCMS.Security.Recorder do
     if is_function(Keyword.get(opts, :user), 0), do: Keyword.put(opts, :user, nil), else: opts
   end
 
-  defp record_if_admitted(type, opts) do
+  # A failed sign-in is charged to its site's alert tally first (#2245). The
+  # attempt that reaches the threshold is recorded whatever the sample says,
+  # flagged as the alert's event; every other one is sampled as before.
+  defp record_if_admitted(:sign_in_failed = type, opts) do
+    case Alerts.charge_failed_sign_in(Keyword.fetch!(opts, :tenant)) do
+      {:threshold, _window_index, _count} = alert ->
+        record(type, Keyword.put(opts, :alert, alert))
+
+      _counted_or_off ->
+        sample(type, opts)
+    end
+  end
+
+  defp record_if_admitted(type, opts), do: sample(type, opts)
+
+  defp sample(type, opts) do
     if admit?(type, opts) do
       record(type, opts)
     else

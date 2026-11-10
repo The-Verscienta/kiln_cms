@@ -2,7 +2,12 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
   @moduledoc """
   `POST /api/keys/rotate` (ADR 0012, "Rotation") over HTTP, and reuse
   detection: a rotated-away key presented again after the grace period burns
-  its whole lineage and mails the platform admins.
+  its whole lineage and alerts the platform admins (#2245: an
+  `api_key_abuse` security alert, or the plain mail when the alert cannot be
+  raised).
+
+  `async: false`: the reuse tests turn security alerts on
+  (`KilnCMS.Test.SecurityAlerts.enable/0`, an `Application.put_env`).
   """
   use KilnCMSWeb.ConnCase, async: false
 
@@ -11,6 +16,7 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.ApiKeyReuse
+  alias KilnCMS.Test.SecurityAlerts
 
   defp user(role) do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -71,6 +77,51 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
     end
   end
 
+  # A claim of the current platform window for `kind`, made on a real
+  # connection in a transaction left open; the returned function rolls it back.
+  defp hold_platform_claim(kind, window) do
+    test = self()
+
+    task =
+      Task.async(fn ->
+        Ecto.Adapters.SQL.Sandbox.unboxed_run(KilnCMS.Repo, fn ->
+          claim_and_wait(test, kind, window)
+        end)
+      end)
+
+    assert_receive :held, 5_000
+
+    fn ->
+      send(task.pid, :release)
+      Task.await(task)
+    end
+  end
+
+  defp claim_and_wait(test, kind, window) do
+    org_id = Accounts.default_org_id()
+
+    KilnCMS.Repo.transaction(fn ->
+      {:ok, _id} =
+        KilnCMS.Security.AlertGate.claim("platform", kind, :platform, org_id, nil,
+          window_ms: window
+        )
+
+      send(test, :held)
+
+      receive do
+        :release -> KilnCMS.Repo.rollback(:released)
+      end
+    end)
+  end
+
+  defp reuse_events do
+    KilnCMS.Security.list_events!(
+      %{type: :api_key_reuse_detected},
+      actor: user(:admin),
+      tenant: Accounts.default_org_id()
+    )
+  end
+
   defp live_in(lineage_id),
     do: Accounts.list_live_api_keys_in_lineage!(lineage_id, authorize?: false)
 
@@ -126,6 +177,7 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
 
   describe "reuse of a rotated-away key" do
     setup do
+      SecurityAlerts.enable()
       admin = user(:admin)
       {key, secret} = mint(user(:viewer))
 
@@ -144,7 +196,7 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
       assert {:ok, _} = Accounts.actor_from_api_key(ctx.new_secret)
     end
 
-    test "after the grace period revokes the live key and mails the admins", ctx do
+    test "after the grace period revokes the live key and alerts the admins", ctx do
       age(ctx.new_id)
 
       {conn, _} = rotate("Bearer #{ctx.secret}")
@@ -153,13 +205,22 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
       assert [] = live_in(ctx.key.id)
       assert :error = Accounts.actor_from_api_key(ctx.new_secret)
 
+      # The event, in the default org (the owner has no membership), and
+      # nothing about it is mailed until the alert is delivered.
+      assert [event] = reuse_events()
+      assert event.target_id == ctx.key.id
+      assert event.metadata == %{"name" => "svc", "revoked" => 1}
+      drain_oban()
+      assert sent_mail() == []
+
+      SecurityAlerts.deliver()
       drain_oban()
 
       # Every platform admin is mailed (`mint/1`'s actor is one too), in no set
       # order, so look through all of them rather than only the first.
       mails = sent_mail()
       assert mails != []
-      assert Enum.all?(mails, &(&1.subject =~ "was used after it was rotated"))
+      assert Enum.all?(mails, &(&1.subject =~ "A rotated API key was used again"))
 
       assert to_string(ctx.admin.email) in Enum.flat_map(
                mails,
@@ -167,12 +228,40 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
              )
     end
 
+    test "an alert that cannot be raised falls back to the plain mail", ctx do
+      age(ctx.new_id)
+      window = KilnCMS.Test.BudgetWindow.fresh_window_ms()
+      Application.put_env(:kiln_cms, :security_alert_window_ms, window)
+      on_exit(fn -> Application.delete_env(:kiln_cms, :security_alert_window_ms) end)
+
+      # Another transaction holds this window's platform claim and does not
+      # end: the reuse's claim times out on its row lock.
+      release = hold_platform_claim(:api_key_abuse, window)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :reuse_detected = ApiKeyReuse.check(ctx.secret)
+        end)
+
+      release.()
+
+      # The event did not commit without its alert, the lineage still burned,
+      # and the admins were mailed directly.
+      assert log =~ "mailing the platform admins directly"
+      assert reuse_events() == []
+      assert [] = live_in(ctx.key.id)
+      drain_oban()
+
+      assert_email_sent(fn mail -> mail.subject =~ "was used after it was rotated" end)
+    end
+
     test "a dead lineage alarms nobody: repeats send no more mail", ctx do
       age(ctx.new_id)
 
       assert :reuse_detected = ApiKeyReuse.check(ctx.secret)
+      SecurityAlerts.deliver()
       drain_oban()
-      assert_email_sent(fn mail -> mail.subject =~ "was used after it was rotated" end)
+      assert_email_sent(fn mail -> mail.subject =~ "A rotated API key was used again" end)
       # One mail per platform admin: every `mint/1` above seeded one.
       flush_mail()
 
@@ -182,8 +271,10 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
         assert conn.status == 401
       end
 
+      SecurityAlerts.deliver()
       drain_oban()
       refute_email_sent()
+      assert length(reuse_events()) == 1
     end
 
     test "burns the whole chain, however far it has moved on", ctx do

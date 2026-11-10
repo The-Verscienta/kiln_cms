@@ -1383,7 +1383,10 @@ carries `x-kilncms-webhook-signature: t=<unix>,v1=<hex>`, an **HMAC-SHA256** of
 that stays the same across retries. Verify the signature and reject a `t` more than
 five minutes from your clock before trusting the payload. The JS and Elixir
 clients ship a `verifyWebhook` / `KilnClient.Webhook.verify/4` helper. Selectable
-events are derived at runtime from every registered content type × verb.
+events are derived at runtime from every registered content type × verb, plus
+the built-in families (forms, memberships, tasks, releases, experiments,
+taxonomy) and the opt-in `security.*` events that carry a site's
+[security alerts](security-alerts.md) (#2245).
 
 **Reliability.** Every delivery is recorded on a ledger shown at
 `/editor/webhooks`: per-attempt status, last HTTP code, and last error. A

@@ -43,6 +43,14 @@ defmodule KilnCMS.Notifications.Link do
   `/editor/registrations`, and its URL opens on that site's own console host
   when the subject carries the site (`:org`), as the email's does.
 
+  ## A security alert links to the security log
+
+  `:security_alert` and `:security_notice` (#2245) are not about a document:
+  their `content_id` is the alert's dispatch row, which nobody can open. An
+  alert links to `/editor/security-log`, where its event is; a notice that the
+  site's alerts were turned down links to `/editor/security-alerts`, where the
+  change can be seen and undone.
+
   ## An unknown event links to the inbox
 
   An event this release does not know (one a newer release created, loaded as
@@ -91,6 +99,9 @@ defmodule KilnCMS.Notifications.Link do
   def editor_path(%{event: %UnknownAtom{}}), do: ~p"/editor/inbox"
   def editor_path(%{event: :registration_pending}), do: ~p"/editor/registrations"
 
+  def editor_path(%{event: :security_alert}), do: ~p"/editor/security-log"
+  def editor_path(%{event: :security_notice}), do: ~p"/editor/security-alerts"
+
   def editor_path(%{event: :retraction_lost, content_type: content_type, content_id: content_id}),
     do: ~p"/editor/governance/#{to_string(content_type)}/#{content_id}"
 
@@ -124,8 +135,9 @@ defmodule KilnCMS.Notifications.Link do
     end
   end
 
-  def editor_url(%{event: :retraction_lost} = subject),
-    do: KilnCMSWeb.Endpoint.url() <> editor_path(subject)
+  def editor_url(%{event: event} = subject)
+      when event in [:retraction_lost, :security_alert, :security_notice],
+      do: KilnCMSWeb.Endpoint.url() <> editor_path(subject)
 
   def editor_url(%{content_type: content_type, content_id: content_id} = subject),
     do: editor_url(content_type, content_id, Map.get(subject, :block_id))

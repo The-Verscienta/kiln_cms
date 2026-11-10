@@ -1,0 +1,323 @@
+defmodule KilnCMSWeb.SecurityAlertsLiveTest do
+  @moduledoc """
+  The console screen behind `/editor/security-alerts` (#2245): admin-only,
+  saving the whole settings row, a notice to the site's admins when alerts are
+  turned down (and none when nothing changed), and the warning for a site with
+  no member admins. Also the account's mute switch in `/editor/settings`, the
+  bell's sentences and links, and the security log's label for a reused key.
+
+  What the settings do to delivery is `KilnCMS.Security.DeliverAlertTest` and
+  `KilnCMS.Security.NoticesTest`. Notices are written whether or not alerts are
+  enabled for the suite, so this module needs no `Application.put_env`.
+  """
+  use KilnCMSWeb.ConnCase, async: true
+
+  import Phoenix.LiveViewTest
+
+  alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.User
+  alias KilnCMS.CMS
+  alias KilnCMS.Notifications.Link
+  alias KilnCMS.Test.SecurityAlerts
+  alias KilnCMSWeb.NotificationText
+
+  @moduletag :capture_log
+  @password "security-alerts-live-123"
+
+  setup do
+    org = seed_org()
+    admin = authed_user(:viewer)
+    %{org: org, admin: admin, membership: grant_tier(admin, org, :admin)}
+  end
+
+  # Every field, as the browser submits the whole form.
+  @all_on %{
+    "new_admin" => "true",
+    "role_elevation" => "true",
+    "failed_sign_ins" => "false",
+    "lockout" => "true",
+    "two_factor_disabled" => "true",
+    "sso_config_changed" => "true",
+    "notify_admins" => "true",
+    "include_full_ip" => "false"
+  }
+
+  describe "access" do
+    test "redirects an anonymous visitor to sign-in", %{conn: conn} do
+      assert {:error, {:redirect, %{to: "/sign-in"}}} = live(conn, ~p"/editor/security-alerts")
+    end
+
+    for role <- [:editor, :viewer] do
+      test "turns away a #{role} of this very site", %{conn: conn, org: org} do
+        user = authed_user(:viewer)
+        grant_tier(user, org, unquote(role))
+
+        assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+                 conn |> org_conn(org) |> log_in(user) |> live(~p"/editor/security-alerts")
+      end
+    end
+
+    test "turns away an admin of another site", %{conn: conn, org: org} do
+      outsider = authed_user(:viewer)
+      grant_tier(outsider, seed_org(), :admin)
+
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+               conn |> org_conn(org) |> log_in(outsider) |> live(~p"/editor/security-alerts")
+    end
+  end
+
+  describe "the page" do
+    test "shows every site kind with the defaults: all on but failed sign-ins", ctx do
+      {:ok, lv, html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
+
+      assert html =~ "10 failed sign-ins in 15 minutes"
+      assert html =~ "sends every admin of this site a notice"
+      assert has_element?(lv, "#security-alerts-platform-note", "new API keys")
+      assert has_element?(lv, ~s(#security-alerts-webhooks-link[href="/editor/webhooks"]))
+
+      for kind <- ~w(new_admin role_elevation lockout two_factor_disabled sso_config_changed) do
+        assert has_element?(lv, ~s(#security-alert-kind-#{kind} input[type=checkbox][checked]))
+      end
+
+      refute has_element?(
+               lv,
+               "#security-alert-kind-failed_sign_ins input[type=checkbox][checked]"
+             )
+
+      assert has_element?(lv, "#alerts_notify_admins[checked]")
+      refute has_element?(lv, "#alerts_include_full_ip[checked]")
+      refute has_element?(lv, "#security-alerts-full-ip-warning")
+    end
+
+    test "warns when the site has no member admins", %{conn: conn} do
+      # A platform admin with no membership: the only kind of admin the site has.
+      org = seed_org()
+      platform = authed_user(:admin)
+
+      {:ok, lv, _html} =
+        conn |> org_conn(org) |> log_in(platform) |> live(~p"/editor/security-alerts")
+
+      assert has_element?(lv, "#security-alerts-no-admins", "reach nobody by bell or email")
+    end
+
+    test "does not warn when the site has a member admin", ctx do
+      {:ok, lv, _html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
+
+      refute has_element?(lv, "#security-alerts-no-admins")
+    end
+
+    test "ticking full addresses shows the warning before the save", ctx do
+      {:ok, lv, _html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
+
+      lv
+      |> form("#security-alerts-form", alerts: %{@all_on | "include_full_ip" => "true"})
+      |> render_change()
+
+      assert has_element?(lv, "#security-alerts-full-ip-warning")
+    end
+  end
+
+  describe "saving" do
+    test "turning a kind off saves the whole row and sends the admins a notice", ctx do
+      {:ok, lv, _html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
+
+      lv
+      |> form("#security-alerts-form", alerts: %{@all_on | "lockout" => "false"})
+      |> render_submit()
+
+      assert render(lv) =~ "Every admin of this site has been sent a notice."
+
+      assert {:ok, [row]} = CMS.list_site_security_alerts(actor: ctx.admin, tenant: ctx.org)
+      assert Enum.sort(row.disabled_kinds) == ["failed_sign_ins", "lockout"]
+      assert row.notify_admins
+      refute row.include_full_ip
+
+      assert [%{"channel" => "notice", "notice" => notice, "org_id" => org_id}] =
+               SecurityAlerts.dispatches()
+
+      assert org_id == ctx.org.id
+      assert notice["change"] == "kind_disabled"
+      assert notice["kinds"] == ["lockout"]
+
+      refute has_element?(lv, "#security-alert-kind-lockout input[type=checkbox][checked]")
+    end
+
+    test "switching admin notifications off sends a notice", ctx do
+      {:ok, lv, _html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
+
+      lv
+      |> form("#security-alerts-form", alerts: %{@all_on | "notify_admins" => "false"})
+      |> render_submit()
+
+      assert [%{"notice" => %{"change" => "admin_notifications_off"}}] =
+               SecurityAlerts.dispatches()
+    end
+
+    test "saving unchanged settings sends no notice", ctx do
+      {:ok, lv, _html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
+
+      lv |> form("#security-alerts-form", alerts: @all_on) |> render_submit()
+
+      html = render(lv)
+      assert html =~ "Security alert settings saved."
+      refute html =~ "has been sent a notice"
+      assert SecurityAlerts.dispatches() == []
+    end
+
+    test "turning failed sign-ins on and full addresses on sends no notice", ctx do
+      {:ok, lv, _html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
+
+      lv
+      |> form("#security-alerts-form",
+        alerts: %{@all_on | "failed_sign_ins" => "true", "include_full_ip" => "true"}
+      )
+      |> render_submit()
+
+      assert {:ok, [row]} = CMS.list_site_security_alerts(actor: ctx.admin, tenant: ctx.org)
+      assert row.disabled_kinds == []
+      assert row.include_full_ip
+      assert SecurityAlerts.dispatches() == []
+    end
+
+    test "keeps a disabled kind this release does not show", ctx do
+      # A row as a newer release might leave it, with a kind this page has no
+      # checkbox for. Written below the policy and the kind validation.
+      Ash.Seed.seed!(KilnCMS.CMS.SiteSecurityAlerts, %{
+        org_id: ctx.org.id,
+        disabled_kinds: ["failed_sign_ins", "ip_auto_blocked"]
+      })
+
+      {:ok, lv, _html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
+
+      lv |> form("#security-alerts-form", alerts: @all_on) |> render_submit()
+
+      assert {:ok, [row]} = CMS.list_site_security_alerts(actor: ctx.admin, tenant: ctx.org)
+      assert Enum.sort(row.disabled_kinds) == ["failed_sign_ins", "ip_auto_blocked"]
+    end
+
+    test "an admin demoted while the page is open cannot save", ctx do
+      {:ok, lv, _html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
+
+      Ash.Seed.update!(ctx.membership, %{role: :editor})
+
+      html =
+        lv
+        |> form("#security-alerts-form", alerts: %{@all_on | "lockout" => "false"})
+        |> render_submit()
+
+      assert html =~ "permission to change this site&#39;s security alerts"
+      assert {:ok, []} = CMS.list_site_security_alerts(actor: ctx.admin, tenant: ctx.org)
+      assert SecurityAlerts.dispatches() == []
+    end
+  end
+
+  describe "the mute switch in your settings" do
+    test "a member admin sees it and can turn the email off", %{conn: conn, org: org} do
+      admin = authed_user(:viewer)
+      grant_tier(admin, org, :admin)
+
+      {:ok, lv, _html} = conn |> org_conn(org) |> log_in(admin) |> live(~p"/editor/settings")
+
+      assert has_element?(lv, "#notify-on-security-alert", "Platform alerts")
+
+      lv
+      |> form("#notification-prefs-form", user: %{"notify_on_security_alert" => "false"})
+      |> render_submit()
+
+      refute Accounts.get_user!(admin.id, authorize?: false).notify_on_security_alert
+    end
+
+    test "an editor and a platform admin do not see it", %{conn: conn, org: org} do
+      editor = authed_user(:viewer)
+      grant_tier(editor, org, :editor)
+      platform = authed_user(:admin)
+
+      for user <- [editor, platform] do
+        {:ok, lv, _html} = conn |> org_conn(org) |> log_in(user) |> live(~p"/editor/settings")
+        refute has_element?(lv, "#notify-on-security-alert")
+      end
+    end
+  end
+
+  describe "the bell" do
+    test "each security notification has its own sentence" do
+      assert NotificationText.headline(%{event: :security_alert, actor_name: nil}) ==
+               "Security alert"
+
+      assert NotificationText.headline(%{event: :security_notice, actor_name: "Ada"}) ==
+               "Security alerts were turned down"
+    end
+
+    test "an alert links to the security log, a notice to the alert settings" do
+      alert = %{event: :security_alert, content_type: "security_alert_dispatch", content_id: "d1"}
+      notice = %{alert | event: :security_notice}
+
+      assert Link.editor_path(alert) == "/editor/security-log"
+      assert Link.editor_url(alert) == KilnCMSWeb.Endpoint.url() <> "/editor/security-log"
+      assert Link.editor_path(notice) == "/editor/security-alerts"
+      assert Link.editor_url(notice) == KilnCMSWeb.Endpoint.url() <> "/editor/security-alerts"
+    end
+  end
+
+  test "the security log names a reused API key, as a warning", ctx do
+    assert KilnCMSWeb.SecurityLog.type_label(:api_key_reuse_detected) ==
+             "Rotated API key used again"
+
+    KilnCMS.Security.record!(
+      %{type: :api_key_reuse_detected, target_type: "api_key", metadata: %{"revoked" => 2}},
+      actor: KilnCMS.Security.system(),
+      tenant: ctx.org.id
+    )
+
+    {:ok, lv, _html} = admin_conn(ctx) |> live(~p"/editor/security-log")
+
+    assert has_element?(
+             lv,
+             "#security-log-events span.bg-warning\\/20",
+             "Rotated API key used again"
+           )
+  end
+
+  defp admin_conn(%{conn: conn, org: org} = ctx) do
+    conn |> org_conn(org) |> log_in(ctx.admin)
+  end
+
+  defp seed_org do
+    Ash.Seed.seed!(Accounts.Organization, %{
+      name: "Alerts Site",
+      slug: "secalerts-#{System.unique_integer([:positive])}",
+      status: :active
+    })
+  end
+
+  defp grant_tier(user, org, tier) do
+    Ash.Seed.seed!(Accounts.OrgMembership, %{
+      user_id: user.id,
+      organization_id: org.id,
+      role: tier
+    })
+  end
+
+  defp authed_user(role) do
+    Ash.Seed.seed!(User, %{
+      email: "secalerts-#{role}-#{System.unique_integer([:positive])}@example.com",
+      hashed_password: Bcrypt.hash_pwd_salt(@password),
+      confirmed_at: DateTime.utc_now(),
+      role: role
+    })
+  end
+
+  defp log_in(conn, user) do
+    {:ok, user} =
+      AshAuthentication.Strategy.action(
+        AshAuthentication.Info.strategy!(User, :password),
+        :sign_in,
+        %{"email" => to_string(user.email), "password" => @password},
+        []
+      )
+
+    conn
+    |> Phoenix.ConnTest.init_test_session(%{})
+    |> AshAuthentication.Plug.Helpers.store_in_session(user)
+  end
+end
