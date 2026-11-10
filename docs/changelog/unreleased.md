@@ -3652,6 +3652,38 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="field-lock-stale-timers"></a>
+
+- **A field lock's timeout that fires in the same instant it is reset no
+  longer acts on the field (#2351).** The issue was a flaky test in
+  `test/kiln_cms/collab/field_lock_test.exs`: it gave the idle timeout 120 ms
+  and slept 80 ms twice, so under host load the keystroke landed after the
+  timer had already fired. The flake came from the test's own sleeps, not
+  from the editor. The tests now drive the timeouts by sending the timer's
+  message to the lock process, and keep one real-clock test each for the
+  grace, idle and flush timeouts that only waits for the eventual result.
+  - **Two narrow races in `KilnCMS.Collab.FieldLock`, found while fixing
+    it.** A timer that had already fired could not be canceled: its message
+    was in the lock process's mailbox, and the old tag still matched.
+    - *Idle timeout.* The 15-minute idle timer was tagged with the holder's
+      generation, which only changes when the field changes hands. A
+      keystroke landing just as that timer fired restarted the clock, and
+      then the queued timeout freed the field anyway, from someone who had
+      just typed. Each idle timer now carries its own reference, and a
+      keystroke replaces it, so a timeout that lost the race is ignored.
+    - *Flush timeout.* A takeover's 3-second flush timeout carried no usable
+      tag. If the holder's flush answered just as the timeout fired, and a
+      second takeover of the same field arrived in between, the stale
+      timeout granted the second takeover at once, skipping the flush that
+      saves what the current holder had typed but not yet sent. Each pending
+      takeover's timeout now carries that takeover's own reference; a
+      timeout from one already settled is ignored. A second asker who joins
+      a takeover still in flight is granted by that takeover's timeout, as
+      before.
+  - Both need a timer and a message to arrive within the same moment, so
+    they were rare in practice. The grace timeout already tagged correctly
+    and is unchanged. No configuration, migration or API change.
+
 <a id="form-export-renamed-field-keys"></a>
 
 - **A form's CSV export keeps the values stored under a renamed or removed
