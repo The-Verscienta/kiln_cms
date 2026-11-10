@@ -167,6 +167,32 @@ defmodule KilnCMSWeb.ContentCacheTest do
     refute etag2 == etag
   end
 
+  # The page is rendered by this request's code, so a deploy that changes the
+  # markup must move the ETag even though no content changed. Pins the
+  # fingerprint as a new build would, so it restores it after (this module is
+  # already `async: false`, and the value is VM-global).
+  test "a new build moves the delivery ETag so a 304 cannot keep old markup (#2463)",
+       %{conn: conn} do
+    original = KilnCMSWeb.BuildFingerprint.fingerprint()
+    on_exit(fn -> KilnCMSWeb.BuildFingerprint.put(original) end)
+
+    page = published_page("Rebuilt")
+    assert [etag] = conn |> get(~p"/#{page.slug}") |> get_resp_header("etag")
+
+    # Same build: still a match.
+    assert conn
+           |> put_req_header("if-none-match", etag)
+           |> get(~p"/#{page.slug}")
+           |> response(304)
+
+    KilnCMSWeb.BuildFingerprint.put("another-build")
+
+    rebuilt = conn |> put_req_header("if-none-match", etag) |> get(~p"/#{page.slug}")
+    assert html_response(rebuilt, 200) =~ "Rebuilt"
+    assert [etag2] = get_resp_header(rebuilt, "etag")
+    refute etag2 == etag
+  end
+
   test "a 404 for an unknown slug is not cacheable", %{conn: conn} do
     conn = get(conn, ~p"/no-such-slug-#{System.unique_integer([:positive])}")
     assert response(conn, 404)

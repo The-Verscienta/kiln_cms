@@ -277,16 +277,30 @@ If you render either one, add `tabindex="0"`, `role="group"` and a translated
 
 The attributes arrived in a release without a `format_version` change, so an
 artifact fired before that release keeps its old markup until the document is
-next published or edited. A read does not re-fire it. An operator can rewrite
-every artifact at once with `mix kiln.refire_all`, but that sends no `updated`
-webhook and no CDN purge, and the artifact's `ETag` (built from the document,
-locale, surface and publish time, not from the body) stays the same. A CDN or
-client that revalidates with `If-None-Match` therefore gets `304` and keeps
-the old HTML; one that re-reads without a validator gets the new markup.
-[#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463) tracks
-closing that gap. Until then, if you need the new markup now, re-read
-without `If-None-Match`, or add the attributes on your side as you would
-for the `json` surface, skipping any `<pre>` that already has `tabindex`.
+next published, edited or re-fired. A read does not re-fire it. An operator
+re-fires every artifact at once after the upgrade
+([Re-render published content after an upgrade](releasing.md#re-render-published-content-after-an-upgrade)).
+What you see depends on how you cache:
+
+- **You revalidate with `If-None-Match`** (a CDN, a browser, `URLCache`,
+  OkHttp): you get the new markup on your next revalidation once the
+  re-fire has run. A fired artifact's `ETag` is a digest of the body it
+  serves, so it moves when the markup does
+  ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463)).
+- **You keep a copy until a webhook says otherwise** (a static build, ISR, a
+  mirror): you hear about it only if the operator ran the sweep with
+  `notify: true` (`mix kiln.refire_all --notify`). Each document then
+  arrives as `<type>.updated` with `"reason": "refire"` in `data` and an
+  unchanged `updated_at`, so refetch it rather than drop it as a duplicate
+  ([Webhooks](webhooks.md)). A silent sweep sends
+  nothing; ask the operator which they ran.
+- **You mirror with `/api/sync`**: a re-fire does not move a document's
+  `updated_at`, so a delta does not report it. Run a full resync
+  (`initial=true`) after an upgrade that re-renders.
+
+If you can't wait for the re-fire, add the attributes on your side as you
+would for the `json` surface, skipping any `<pre>` that already has
+`tabindex`.
 
 ## Images: sizes, crops and formats on request
 
@@ -569,13 +583,15 @@ What that means for a front end:
   which age out). Static builds and ISR should still
   rebuild from [webhooks](webhooks.md); the purge only covers the CDN in front of
   Kiln.
-* **Don't build your own ETag from fields.** On JSON:API, GraphQL and search,
-  Kiln's is a digest of the response body, so it already changes whenever
-  anything in the body does — keying on `updatedAt` or an id misses changes
-  that do not touch them. A fired artifact's names the document, locale,
-  surface and publish time instead (a `?fields=` response's is a body
-  digest), so a Kiln upgrade that changes rendered markup does not move it
-  ([After a Kiln upgrade](#after-a-kiln-upgrade)).
+* **Don't build your own ETag from fields.** On JSON:API, GraphQL, search
+  and fired artifacts, Kiln's is a digest of the response body, so it already
+  changes whenever anything in the body does, and only then: keying on
+  `updatedAt` or an id misses a re-render after a Kiln upgrade, which changes
+  the body without touching either ([After a Kiln upgrade](#after-a-kiln-upgrade)).
+  A page rendered by Kiln itself has an `ETag` that also names the build
+  serving it, so it moves on every deploy that changes Kiln's code, dependencies or
+  assets.
+
 ## Analytics: your fetches are what get counted
 
 A successful `GET /api/content/:type/:slug` records a view against that

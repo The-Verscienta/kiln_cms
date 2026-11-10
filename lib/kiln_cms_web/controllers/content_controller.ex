@@ -1567,13 +1567,19 @@ defmodule KilnCMSWeb.ContentController do
   #
   # `forms_digest` (#2249, `forms_digest/2`) is appended only when the page
   # renders a form, so every page without one keeps the ETag it had.
+  #
+  # The build is named last (#2463, `KilnCMSWeb.BuildFingerprint`): the page is
+  # rendered by this request's code, so a deploy that changes a template or a
+  # block renderer must move the ETag too, or a revalidating client keeps the
+  # old markup for as long as the content goes unedited.
   defp etag(record, org_id, forms_digest) do
     raw =
       "#{record.id}:#{record.locale}:#{record.updated_at}:#{record.published_version_id}" <>
         ":#{record.seo_title}:#{record.seo_description}" <>
         ":#{KilnCMSWeb.Robots.directive(record)}" <>
         ":#{KilnCMS.Cache.head_generation(org_id)}" <>
-        if(forms_digest == "", do: "", else: ":" <> forms_digest)
+        if(forms_digest == "", do: "", else: ":" <> forms_digest) <>
+        ":" <> KilnCMSWeb.BuildFingerprint.fingerprint()
 
     digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)
     ~s("#{digest}")
