@@ -3581,7 +3581,7 @@ carries the reasoning.
     key/value and link widgets in a real browser, including the blank-first
     "Opens in" select and a refused address that keeps the typed text; dialyzer
     is clean.
-  - **Left as is.** `Range.json_schema/1` still lets each bound be a number or
+  - **Left as is.** `KilnCMS.CMS.FieldTypes.Range.json_schema/1` still lets each bound be a number or
     a date: saying "both the same kind" needs a `oneOf` of inline objects,
     which the TypeScript, Swift and Kotlin generators only support for `$ref`
     members. The server (`cast/2`) enforces it on write. Noted in the
