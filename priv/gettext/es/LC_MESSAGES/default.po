@@ -1696,7 +1696,7 @@ msgstr "Una nota en tu bandeja cada vez que se publica contenido."
 #: lib/kiln_cms/cms/field_types/range.ex
 #, elixir-autogen, elixir-format
 msgid "A number or a date (YYYY-MM-DD)."
-msgstr ""
+msgstr "Un número o una fecha (AAAA-MM-DD)."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -18825,7 +18825,7 @@ msgstr "Afirmación respaldada con metadatos de la fuente"
 #: lib/kiln_cms/cms/field_types/link.ex
 #, elixir-autogen, elixir-format
 msgid "Space-separated: noopener, noreferrer, nofollow, sponsored, ugc, external."
-msgstr ""
+msgstr "Separados por espacios: noopener, noreferrer, nofollow, sponsored, ugc, external."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -20688,7 +20688,7 @@ msgstr "No se pudo guardar el plazo de retención."
 #: lib/kiln_cms/cms/field_types/range.ex
 #, elixir-autogen, elixir-format
 msgid "The same kind as From: two numbers or two dates."
-msgstr ""
+msgstr "Del mismo tipo que Desde: dos números o dos fechas."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format

@@ -1908,7 +1908,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     <p
       :if={Map.get(@part, :help)}
       id={cf_part_help_id(@definition, @part)}
-      class="mt-0.5 text-xs text-base-content/60"
+      class="mt-0.5 text-xs text-base-content/70"
     >
       {@part.help}
     </p>

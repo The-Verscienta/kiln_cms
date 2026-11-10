@@ -100,9 +100,7 @@ defmodule KilnCMS.CMS.FieldTypes.Link do
         type: "text",
         required?: false,
         help:
-          gettext(
-            "Space-separated: noopener, noreferrer, nofollow, sponsored, ugc, external."
-          ),
+          gettext("Space-separated: noopener, noreferrer, nofollow, sponsored, ugc, external."),
         attrs: %{placeholder: "nofollow sponsored"}
       }
     ]
