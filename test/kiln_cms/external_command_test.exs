@@ -11,6 +11,8 @@ defmodule KilnCMS.ExternalCommandTest do
   use ExUnit.Case, async: true
 
   alias KilnCMS.ExternalCommand
+  alias KilnCMS.Test.Eventually
+  alias KilnCMS.Test.OsProcess
 
   @sh System.find_executable("sh")
 
@@ -111,52 +113,57 @@ defmodule KilnCMS.ExternalCommandTest do
       # The child records its own pid, then `exec`s so that pid is the long
       # sleeper: killing the caller must take that exact process down.
       pid_file = Path.join(dir, "pid")
-      test = self()
 
       caller =
         spawn(fn ->
-          send(test, :started)
+          receive do
+            :go -> :ok
+          end
 
           ExternalCommand.run(@sh, ["-c", "echo $$ > #{pid_file}; exec sleep 30"], :infinity)
         end)
 
-      assert_receive :started
+      # `run/4`'s one spawned process is the watcher that kills the child when
+      # the caller dies. Waiting on its exit rather than a clock is what makes
+      # this hold on a loaded host (#2564): the watcher exits only once its
+      # `kill -9` has returned, after which only the kernel's signal delivery
+      # is left to poll for.
+      :erlang.trace(caller, true, [:procs])
+      send(caller, :go)
+      assert_receive {:trace, ^caller, :spawn, watcher, _mfa}, 10_000
+      :erlang.trace(caller, false, [:procs])
+
       os_pid = wait_for_pid(pid_file)
-      assert alive?(os_pid)
+      assert OsProcess.alive?(os_pid)
 
-      ref = Process.monitor(caller)
+      watcher_ref = Process.monitor(watcher)
+      caller_ref = Process.monitor(caller)
       Process.exit(caller, :kill)
-      assert_receive {:DOWN, ^ref, :process, ^caller, :killed}
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
+      assert_receive {:DOWN, ^watcher_ref, :process, ^watcher, :normal}, 10_000
 
-      assert eventually(fn -> not alive?(os_pid) end),
-             "the child outlived its killed caller"
+      # A killed child is a zombie until it is reaped; `gone?/1` counts that.
+      Eventually.eventually(fn -> OsProcess.gone?(os_pid) end,
+        message: fn ->
+          "the child (pid #{os_pid}) outlived its killed caller: " <>
+            "ps state #{inspect(OsProcess.state(os_pid))}"
+        end
+      )
     end
   end
 
-  defp wait_for_pid(file, tries \\ 100) do
-    case File.read(file) do
-      {:ok, text} when text != "" ->
-        text |> String.trim() |> String.to_integer()
-
-      _ when tries > 0 ->
-        Process.sleep(20)
-        wait_for_pid(file, tries - 1)
-    end
-  end
-
-  # `kill -0` probes without signalling. A killed child is a zombie until the
-  # VM's port reaper collects it, which `kill -0` still reports alive for a
-  # moment, hence the polling.
-  defp alive?(os_pid) do
-    {_out, status} = System.cmd("kill", ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true)
-    status == 0
-  end
-
-  defp eventually(fun, tries \\ 100) do
-    cond do
-      fun.() -> true
-      tries == 0 -> false
-      true -> Process.sleep(20) && eventually(fun, tries - 1)
-    end
+  defp wait_for_pid(file) do
+    Eventually.eventually(
+      fn ->
+        with {:ok, text} <- File.read(file),
+             {pid, ""} <- text |> String.trim() |> Integer.parse() do
+          pid
+        else
+          _not_yet -> nil
+        end
+      end,
+      timeout_ms: 10_000,
+      message: "the child never wrote its pid to #{file}"
+    )
   end
 end
