@@ -138,6 +138,21 @@ defmodule Kiln.Plugins.Health.NoticesTest do
              }
     end
 
+    test "keeps patched_versions as published; absent or blank is nil" do
+      [patched, unknown, blank, absent] =
+        Notices.parse_entries([
+          entry("1", %{"package" => "kiln_cms", "patched_versions" => " 1.3.2; 1.2.4 "}),
+          entry("2", %{"package" => "kiln_cms", "patched_versions" => "unknown"}),
+          entry("3", %{"package" => "kiln_cms", "patched_versions" => "  "}),
+          entry("4", %{"package" => "kiln_cms"})
+        ])
+
+      assert patched.patched == "1.3.2; 1.2.4"
+      assert unknown.patched == "unknown"
+      assert blank.patched == nil
+      assert absent.patched == nil
+    end
+
     test "skips entries without a package, and keeps only http(s) links" do
       notices =
         Notices.parse_entries([

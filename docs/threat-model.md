@@ -1894,6 +1894,11 @@ hex.pm, and the security notices feed; on the same platform-admin triggers,
 through `SafeFetch`, the feed's `links.next` followed only on its own origin
 and at most five pages; package names are checked against Hex's naming rule
 before they are put in a URL),
+`Kiln.SecurityNotices` (the same security notices feed, fetched once per
+node and shared by `Kiln.Plugins.Health` and the `core.security_notices`
+posture check; that check asks only while `KILN_UPDATE_CHECK` is on, on the
+same platform-admin triggers plus System's **Check now**, and logs only
+notice ids, never a notice's text or links),
 Meilisearch (the operator's instance — a site's own is below), S3/MinIO, the
 mailer, and the LLM providers behind `/api/ask` and
 SEO drafting, and the breached-password check (`api.pwnedpasswords.com`, a

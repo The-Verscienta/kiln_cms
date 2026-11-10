@@ -17,8 +17,9 @@ defmodule Kiln.Plugins.Health do
 
   Only the fetched data is cached, never the verdict: every read re-evaluates
   it against the current time, so staleness does not freeze at fetch time.
-  It is kept in `:persistent_term` for 24 hours when every request answered
-  and 15 minutes when any failed, and it dies with the VM. Nothing is
+  Hex's answers are kept in `:persistent_term` for 24 hours when every request
+  answered and 15 minutes when any failed, the notices in
+  `Kiln.SecurityNotices`'s cache on the same terms, and both die with the VM. Nothing is
   persisted: no table, no Oban job, no request at boot.
 
   ## What is asked, and when
@@ -32,8 +33,8 @@ defmodule Kiln.Plugins.Health do
       (`Kiln.Plugins.Health.Hex`), which tell hex.pm the plugin's package name
       and version;
     * one GET (more if it pages) to the security notices feed
-      (`Kiln.Plugins.Health.Notices`), which sends nothing about this
-      installation.
+      (`Kiln.SecurityNotices`, which caches it and shares it with the core's
+      own notices check), which sends nothing about this installation.
 
   Both go through `KilnCMS.SafeFetch` with a bare `KilnCMS` user-agent.
 
@@ -44,9 +45,11 @@ defmodule Kiln.Plugins.Health do
     * `:enabled` — unset follows `Kiln.Updates.enabled?/0`, so
       `KILN_UPDATE_CHECK=false` turns this off too; `KILN_PLUGIN_HEALTH_CHECK`
       overrides it either way;
-    * `:notices_url` — see `notices_url/0` (`KILN_SECURITY_NOTICES_URL`);
     * `:stale_after_months` — default 24 (`KILN_PLUGIN_STALE_MONTHS`);
-    * `:notices_type`, `:hex_api_url`, `:req_options` — for tests and mirrors.
+    * `:hex_api_url`, `:req_options` — for tests and mirrors.
+
+  The notices feed's own settings (`KILN_SECURITY_NOTICES_URL`) are
+  `Kiln.SecurityNotices`'s; see `Kiln.SecurityNotices.url/0`.
 
   Unknown is never reported as OK: an unreachable Hex or feed makes the
   affected plugins `:unknown`.
@@ -57,26 +60,27 @@ defmodule Kiln.Plugins.Health do
   alias Kiln.Plugins.Health.Evaluate
   alias Kiln.Plugins.Health.Hex
   alias Kiln.Plugins.Health.Installed
-  alias Kiln.Plugins.Health.Notices
   alias Kiln.Plugins.Health.PluginStatus
   alias Kiln.Plugins.Health.Report
+  alias Kiln.SecurityNotices
 
-  @cache_key {__MODULE__, :fetched}
+  @cache_key {__MODULE__, :hex}
   @force_key {__MODULE__, :last_forced_at}
   @ttl_ms :timer.hours(24)
   @error_ttl_ms :timer.minutes(15)
   @min_force_interval_ms :timer.seconds(60)
 
-  @default_notices_url "https://kilncms.dev/api/json/entries/published"
-  @default_notices_type "security_notice"
   @default_hex_api_url "https://hex.pm/api"
   @default_stale_after_months 24
 
   # Per-package budget: two requests of up to 10 s each, plus slack.
   @hex_timeout_ms 25_000
   @hex_concurrency 4
-  # Up to five feed pages.
-  @notices_timeout_ms 60_000
+  # `Kiln.SecurityNotices` bounds its own request at 60 s, but a caller that
+  # waited on another's request (one in flight per node) can return up to
+  # ~8 s after it, `:global`'s back-off between lock attempts; this leaves
+  # room for both.
+  @notices_timeout_ms 75_000
 
   @warmer Module.concat(__MODULE__, Warmer)
 
@@ -101,8 +105,8 @@ defmodule Kiln.Plugins.Health do
       not enabled?() -> local_report(installed, now, :disabled)
       not dependency_plugins?(installed) -> local_report(installed, now, :nothing_to_check)
       opts[:force] -> forced_check(installed, now)
-      entry = cached_entry(installed) -> report(installed, entry, now)
-      true -> fetch_and_report(installed, now)
+      entry = cached_entry(installed) -> report(installed, entry, cached_notices(), now)
+      true -> fetch_and_report(installed, now, false)
     end
   end
 
@@ -120,7 +124,7 @@ defmodule Kiln.Plugins.Health do
     cond do
       not enabled?() -> local_report(installed, now, :disabled)
       not dependency_plugins?(installed) -> local_report(installed, now, :nothing_to_check)
-      entry = cached_entry(installed) -> report(installed, entry, now)
+      entry = cached_entry(installed) -> report(installed, entry, cached_notices(), now)
       true -> nil
     end
   end
@@ -176,49 +180,6 @@ defmodule Kiln.Plugins.Health do
     end
   end
 
-  @doc """
-  The security notices feed, or `:disabled`.
-
-    * `KILN_SECURITY_NOTICES_URL=false` (any off-spelling) — `:disabled`;
-    * `KILN_SECURITY_NOTICES_URL=<url>` — that published-entries endpoint;
-    * unset — `#{@default_notices_url}`, but only while the update check's
-      release feed is kilncms.dev's own (`Kiln.Updates.feed_url/0`). A fork
-      (`KILN_UPDATE_REPO`), a mirror (`KILN_UPDATE_RELEASES_URL`) or
-      `KILN_UPDATE_FEED_URL=false` turns that feed off, and this follows it,
-      so an operator who kept kilncms.dev out does not find it reached from
-      here.
-
-  A configured value that isn't an absolute http(s) URL is
-  `{:error, :invalid_notices_url}`, and the notices then read as unknown.
-  """
-  @spec notices_url() :: {:ok, String.t()} | :disabled | {:error, :invalid_notices_url}
-  def notices_url do
-    case Keyword.get(config(), :notices_url) do
-      false -> :disabled
-      url when is_binary(url) -> configured_notices_url(String.trim(url))
-      _unset -> default_notices_url()
-    end
-  end
-
-  defp configured_notices_url(""), do: default_notices_url()
-
-  defp configured_notices_url(url) do
-    case URI.new(url) do
-      {:ok, %URI{scheme: scheme, host: host}}
-      when scheme in ~w(http https) and is_binary(host) and host != "" ->
-        {:ok, url}
-
-      _ ->
-        {:error, :invalid_notices_url}
-    end
-  end
-
-  defp default_notices_url do
-    if Kiln.Updates.feed_url() == {:ok, @default_notices_url},
-      do: {:ok, @default_notices_url},
-      else: :disabled
-  end
-
   @doc "Months without a release on Hex after which a plugin reads as stale (default 24)."
   @spec stale_after_months() :: pos_integer()
   def stale_after_months do
@@ -239,17 +200,20 @@ defmodule Kiln.Plugins.Health do
 
   @doc false
   # Test seam: start from a known cache state.
+  # The notices cache is cleared too: it is this check's other half.
   def clear_cache do
     :persistent_term.erase(@cache_key)
     :persistent_term.erase(@force_key)
-    :ok
+    SecurityNotices.clear_cache()
   end
 
   @doc false
-  # Test seam: cache `fetched` as if a check had just fetched it.
+  # Test seam: cache `fetched` as if a check had just fetched it — Hex's half
+  # here, the notices in `Kiln.SecurityNotices`.
   @spec put_cache(Evaluate.fetched()) :: :ok
-  def put_cache(fetched) do
-    _ = store(fetched)
+  def put_cache(%{hex: hex, notices: notices}) do
+    _ = store(hex)
+    if notices != :disabled, do: SecurityNotices.put_cache(notices)
     :ok
   end
 
@@ -282,30 +246,42 @@ defmodule Kiln.Plugins.Health do
 
     if last && mono - last < @min_force_interval_ms do
       case cached_entry(installed) do
-        nil -> fetch_and_report(installed, now)
-        entry -> report(installed, entry, now)
+        nil -> fetch_and_report(installed, now, false)
+        entry -> report(installed, entry, cached_notices(), now)
       end
     else
       :persistent_term.put(@force_key, mono)
-      fetch_and_report(installed, now)
+      fetch_and_report(installed, now, true)
     end
   end
 
-  defp fetch_and_report(installed, now) do
-    entry = installed |> fetch() |> store()
-    report = report(installed, entry, now)
+  # The notices this read uses are the ones just fetched, so a fetch that
+  # timed out on this side reads `{:error, :timeout}` for this read only.
+  defp fetch_and_report(installed, now, force?) do
+    %{hex: hex, notices: notices} = fetch(installed, force?)
+    entry = store(hex)
+    report = report(installed, entry, notices, now)
     warn_on_failures(report)
     report
   end
 
-  defp report(installed, entry, now) do
+  defp report(installed, entry, notices, now) do
+    fetched = %{hex: entry.hex, notices: notices}
+
     %Report{
-      plugins: Evaluate.evaluate(installed, entry.fetched, eval_opts(now)),
-      checked_at: entry.checked_at,
-      state: if(entry.ok?, do: :fresh, else: :partial),
-      notices: notices_state(entry.fetched.notices)
+      plugins: Evaluate.evaluate(installed, fetched, eval_opts(now)),
+      checked_at: older(entry.checked_at, SecurityNotices.checked_at()),
+      state: if(entry.ok? and notices_answered?(notices), do: :fresh, else: :partial),
+      notices: notices_state(notices)
     }
   end
+
+  defp cached_notices, do: SecurityNotices.cached() || {:error, :not_fetched}
+
+  defp older(hex_at, nil), do: hex_at
+  defp older(hex_at, notices_at), do: Enum.min([hex_at, notices_at], DateTime)
+
+  defp notices_answered?(notices), do: match?({:ok, _}, notices) or notices == :disabled
 
   defp notices_state({:ok, _notices}), do: :ok
   defp notices_state(:disabled), do: :disabled
@@ -315,11 +291,14 @@ defmodule Kiln.Plugins.Health do
     [now: now, stale_after_months: stale_after_months(), sdk_version: sdk_version()]
   end
 
-  # A cached fetch serves only if it covers every hex.pm plugin installed now.
+  # A cached fetch serves only if it covers every hex.pm plugin installed now,
+  # and the notices cache still answers (or there is no feed to ask): a hit
+  # here never reads notices as unfetched.
   defp cached_entry(installed) do
     with {stored_at, entry} <- :persistent_term.get(@cache_key, nil),
          true <- System.monotonic_time(:millisecond) - stored_at < ttl(entry),
-         true <- covers?(entry.fetched.hex, installed) do
+         true <- covers?(entry.hex, installed),
+         true <- SecurityNotices.cached() != nil do
       entry
     else
       _miss -> nil
@@ -334,19 +313,16 @@ defmodule Kiln.Plugins.Health do
   defp ttl(%{ok?: true}), do: @ttl_ms
   defp ttl(_entry), do: @error_ttl_ms
 
-  defp store(fetched) do
-    entry = %{fetched: fetched, checked_at: DateTime.utc_now(), ok?: all_answered?(fetched)}
+  defp store(hex) do
+    entry = %{hex: hex, checked_at: DateTime.utc_now(), ok?: all_answered?(hex)}
     :persistent_term.put(@cache_key, {System.monotonic_time(:millisecond), entry})
     entry
   end
 
   # A 404 is an answer; every other error is a failure and gets the short TTL.
-  defp all_answered?(%{hex: hex, notices: notices}) do
-    hex_ok? =
-      hex == :disabled or
-        Enum.all?(Map.values(hex), &(match?({:ok, _}, &1) or &1 == {:error, :not_found}))
-
-    hex_ok? and (match?({:ok, _}, notices) or notices == :disabled)
+  defp all_answered?(hex) do
+    hex == :disabled or
+      Enum.all?(Map.values(hex), &(match?({:ok, _}, &1) or &1 == {:error, :not_found}))
   end
 
   defp hex_targets(installed) do
@@ -367,8 +343,8 @@ defmodule Kiln.Plugins.Health do
     kind, _reason -> {:error, {:crashed, kind}}
   end
 
-  defp fetch(installed) do
-    notices = Task.async(fn -> guarded(&fetch_notices/0) end)
+  defp fetch(installed, force?) do
+    notices = Task.async(fn -> guarded(fn -> SecurityNotices.fetch(force: force?) end) end)
     hex = fetch_hex(hex_targets(installed))
 
     notices =
@@ -396,26 +372,6 @@ defmodule Kiln.Plugins.Health do
       {{:ok, result}, target} -> {target.package, result}
       {{:exit, _reason}, target} -> {target.package, {:error, :timeout}}
     end)
-  end
-
-  defp fetch_notices do
-    case notices_url() do
-      {:ok, url} ->
-        Notices.fetch(url,
-          type: Keyword.get(config(), :notices_type, @default_notices_type),
-          req_options: req_options()
-        )
-
-      :disabled ->
-        :disabled
-
-      {:error, :invalid_notices_url} = error ->
-        Logger.warning(
-          "KILN_SECURITY_NOTICES_URL is not an absolute http(s) URL; plugin security notices are unknown."
-        )
-
-        error
-    end
   end
 
   defp hex_api_url, do: Keyword.get(config(), :hex_api_url, @default_hex_api_url)

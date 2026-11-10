@@ -169,9 +169,13 @@ carries the reasoning.
     after a failure).
   - **Who is affected.** Only a deployment with a plugin from Hex, git or a
     path. One whose plugins are all built from `projects/`, or that has none,
-    sends nothing new. hex.pm is asked only about plugins locked from hex.pm.
-  - **Turning it off.** `KILN_PLUGIN_HEALTH_CHECK=false` turns the check off.
-    If you already set `KILN_UPDATE_CHECK=false` for "no outbound requests",
+    sends nothing new to hex.pm. hex.pm is asked only about plugins locked
+    from hex.pm. The notices feed is asked whatever plugins are installed,
+    by the core's own notices check, while `KILN_UPDATE_CHECK` is on
+    ([Security notices for Kiln](#core-security-notices)).
+  - **Turning it off.** `KILN_PLUGIN_HEALTH_CHECK=false` turns the check off
+    and stops the hex.pm requests; the notices feed is still asked for the
+    core while `KILN_UPDATE_CHECK` is on. If you already set `KILN_UPDATE_CHECK=false` for "no outbound requests",
     you need do nothing: the plugin check follows it while
     `KILN_PLUGIN_HEALTH_CHECK` is unset. To keep the Hex comparison but not
     ask kilncms.dev, set `KILN_SECURITY_NOTICES_URL=false`. A fork or a mirror
@@ -1187,6 +1191,77 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="core-security-notices"></a>
+
+- **Security posture says when a published security notice covers the Kiln
+  version you run, and System's Updates card shows the same answer (#2522,
+  part 3 of #2252).** A new line, **Security notices for Kiln**
+  (`core.security_notices`, **This installation**), reads kilncms.dev's
+  security notices feed (#1873). Before this, being behind a security release
+  showed only as **Review** on the Kiln version line. Guide:
+  [Security notices for Kiln](../security-posture.md#security-notices-for-kiln).
+  - **Fix now at any severity.** A notice that covers the running core is a
+    known way into the whole installation, so low and medium fail too.
+    Plugin notices keep their rule: low and medium are **Review**.
+  - **Only the affected range decides**, for the core and for plugins.
+    `patched_versions` is shown ("fixed in 1.8.1") and never consulted: the
+    publisher leaves out a line with no fix yet, so reading it would clear an
+    unfixed newer line or a regression range. A range that was never narrowed
+    to exclude the fixed releases flags them, which errs on the strict side;
+    [releasing](../releasing.md) now says to narrow it.
+  - **Unknown is never OK.** A notice naming `kiln_cms` reads **Unknown**
+    when its affected range can't be read, when it names several packages
+    and this version is inside their joined ranges, or when this build's
+    version can't be read. So does a feed that failed, timed out or has
+    an invalid `KILN_SECURITY_NOTICES_URL`.
+  - **Not applicable** with `KILN_UPDATE_CHECK=false`, which this check
+    follows like the Kiln version line, and when the notices feed is off
+    (`KILN_SECURITY_NOTICES_URL=false`, or a fork or mirror).
+  - **On System**, the **Updates** card has a **Security notices** line, with
+    a **Security notice** or **Unknown** badge, a line per notice with its
+    severity and fixed release, and an **Advisory *id*** link per notice.
+    **Check now** asks the feed again past the cache, at most once a minute,
+    and now re-checks that you are a platform admin ("You need admin access
+    to do that.").
+  - **When it asks.** One fetch and one cache (24 hours, 15 minutes after a
+    failure, per node) now serve both this line and the plugin health check
+    (#2244), so the feed is asked at most once between them. The core's
+    reader asks when a platform admin opens System or Security posture with
+    nothing cached, and on **Check now**, even with no plugin installed. It
+    carries nothing about the installation. A deployment that keeps
+    kilncms.dev out with `KILN_UPDATE_CHECK=false` or
+    `KILN_UPDATE_FEED_URL=false` sees no new request.
+  - **A log line** when a fresh answer covers the running Kiln, once per
+    request and only while the update check is on: "Kiln 1.8.0 is covered by
+    security notice(s) GHSA-…; update it (System, Updates)." Ids only.
+  - **Known gaps.** A build from `main` between releases still carries the
+    last release's version, so it can read as covered after the fix merged.
+    A notice that names `kiln_plugin` (the SDK built into Kiln) matches
+    neither line.
+  - **Changes to the plugin health check (#2244), not yet released.**
+    `KILN_PLUGIN_HEALTH_CHECK=false` no longer stops the notices request,
+    which the core's reader still makes; `KILN_SECURITY_NOTICES_URL=false`
+    stops both. The invalid-URL log line now reads
+    "KILN_SECURITY_NOTICES_URL is not an absolute http(s) URL; security
+    notices are unknown." The config keys moved from
+    `config :kiln_cms, Kiln.Plugins.Health, notices_url:, notices_type:` to
+    `config :kiln_cms, Kiln.SecurityNotices, url:, type:, req_options:`
+    ([the variables](../environment-variables.md#plugin-health-check-2244)).
+  - **The publishing script** (`scripts/publish/security.exs`) now names the
+    core `kiln_cms` for every advisory vulnerability without a package name,
+    also when another vulnerability names a plugin. Such a notice used to
+    name only the plugin and fail its check; it now names both, so the
+    plugin reads **Unknown** and the core is matched. Never a pass:
+    publishing ranges per package, so it can match, is #2566.
+  - **For developers.** `Kiln.SecurityNotices` (`url/0`, `fetch/1`,
+    `cached/0`, `checked_at/0`, `warm/0`) owns the feed, the cache and one
+    request in flight per node; it gates on no switch itself, so each caller
+    checks its own. The pure matcher is `Kiln.SecurityNotices.Core`
+    (`status/2`, `classify/2`), and `Kiln.Plugins.Health.Notice` gains
+    `patched`. `Kiln.Plugins.Health`'s `notices_url/0` is gone; use
+    `Kiln.SecurityNotices.url/0`. No migration, nothing stored; rolling the
+    pin back is safe.
 
 <a id="custom-field-range-index"></a>
 

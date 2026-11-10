@@ -65,6 +65,8 @@ defmodule KilnCMS.Security.PostureReportTest do
     # Which plugins are installed, and what is wrong with them, is about the
     # whole deployment (#2244).
     refute Enum.any?(report.entries, &(&1.id == "core.plugin_health"))
+    # So is whether a security notice covers the running core (#2522).
+    refute Enum.any?(report.entries, &(&1.id == "core.security_notices"))
 
     # The dependency fixture's site check runs beside the core's.
     assert %{status: :pass, source: {:plugin, "kiln_dep_fixture"}} =
@@ -86,6 +88,8 @@ defmodule KilnCMS.Security.PostureReportTest do
     assert %{status: :pass} = Enum.find(report.entries, &(&1.id == "core.release"))
     # Plugin checks are off in this suite (`config/test.exs`), so it asks nothing.
     assert %{status: :n_a} = Enum.find(report.entries, &(&1.id == "core.plugin_health"))
+    # The security notices feed is off in this suite too, so neither does this.
+    assert %{status: :n_a} = Enum.find(report.entries, &(&1.id == "core.security_notices"))
     # Every core check produced an answer: none crashed or overran.
     refute Enum.any?(report.entries, &(&1.status == :error))
   end

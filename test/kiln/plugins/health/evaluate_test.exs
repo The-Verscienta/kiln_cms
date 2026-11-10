@@ -299,6 +299,28 @@ defmodule Kiln.Plugins.Health.EvaluateTest do
     end
   end
 
+  # #2522: `affected_versions` alone decides; `patched_versions` is display
+  # text. The publisher lists only lines that have a fix, so reading it as a
+  # verdict would clear an unfixed newer line or a regression range.
+  describe "advisories — kilncms.dev patched versions are not a verdict" do
+    test "an unfixed newer line is matched although an older line lists a fix" do
+      # 1.2 fixed at 1.2.4; the 1.4 line jason sits on has no fix yet.
+      unfixed = notice(affected: ">= 1.2.0, < 1.2.4; >= 1.4.0", patched: "1.2.4")
+      status = evaluate_one(installed(), hex_ok(), {:ok, [unfixed]})
+
+      assert status.advisories == {:ok, [unfixed]}
+      assert status.overall == :fail
+    end
+
+    test "a regression range after an older fix is matched" do
+      regression = notice(affected: ">= 1.4.0", patched: "1.3.2")
+      status = evaluate_one(installed(), hex_ok(), {:ok, [regression]})
+
+      assert status.advisories == {:ok, [regression]}
+      assert status.overall == :fail
+    end
+  end
+
   describe "advisories — Hex release advisories" do
     defp hex_advisory(overrides) do
       Map.merge(

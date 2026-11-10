@@ -854,6 +854,26 @@ msgstr ""
 msgid "%{hours} h %{min} min"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#, elixir-autogen, elixir-format
+msgid "%{id} (%{severity}): fixed in %{patched}."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#, elixir-autogen, elixir-format
+msgid "%{id} (%{severity}): no fixed release is listed yet."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#, elixir-autogen, elixir-format
+msgid "%{id} names several packages; whether it covers Kiln can't be told."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#, elixir-autogen, elixir-format
+msgid "%{id}: its affected versions can't be read."
+msgstr ""
+
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{label}: %{message}"
@@ -1817,6 +1837,11 @@ msgstr ""
 msgid "A preview. Nothing is sent, posted or saved."
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#, elixir-autogen, elixir-format
+msgid "A published security notice for the running Kiln is a known way into the whole installation until it is updated."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "A publishing calendar"
@@ -1870,6 +1895,18 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A search box that finds the record by its title."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#, elixir-autogen, elixir-format
+msgid "A security notice covers Kiln %{version}."
+msgid_plural "%{count} security notices cover Kiln %{version}."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#, elixir-autogen, elixir-format
+msgid "A security notice names Kiln but can't be matched to this version."
 msgstr ""
 
 #: lib/kiln_cms_web/live/release_live.ex
@@ -4739,6 +4776,16 @@ msgstr ""
 msgid "Checking plugins; reopen this page in a minute."
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checking security notices..."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#, elixir-autogen, elixir-format
+msgid "Checking security notices; reopen this page in a minute."
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Checking the media parts"
@@ -5753,6 +5800,17 @@ msgstr ""
 msgid "Could not reach Hex or the security notices feed. Open System to check."
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#, elixir-autogen, elixir-format
+msgid "Could not reach the security notices feed. Open System to check."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Could not read this Kiln's version."
+msgstr ""
+
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
 msgid "Could not run"
@@ -6028,6 +6086,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/billing_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't reach the payment provider. Please try again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't reach the security notices feed. This says nothing about whether a notice covers this version."
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -10832,6 +10895,12 @@ msgstr ""
 msgid "KILN_CONSOLE_HOST is unset, so the editor console answers on each organization's own host. Code an organization's admin adds to their site's head or footer runs on the same origin as the console, and can act as any editor who opens that site while signed in — a platform admin included."
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "KILN_SECURITY_NOTICES_URL is not an absolute http(s) URL, so no notice was checked."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Keep all live versions"
@@ -13066,6 +13135,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "No published content on this site carries a review cadence or an unpublish date, so there is nothing to age. Set one on a record's Settings tab to start tracking freshness."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#, elixir-autogen, elixir-format
+msgid "No published security notice covers Kiln %{version}."
 msgstr ""
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
@@ -17807,6 +17881,21 @@ msgstr ""
 msgid "Security notice"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#, elixir-autogen, elixir-format
+msgid "Security notice checks are turned off (KILN_UPDATE_CHECK=false)."
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Security notices"
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#, elixir-autogen, elixir-format
+msgid "Security notices for Kiln"
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
@@ -20956,6 +21045,12 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "The section editors see it under"
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "The security notices feed is turned off (KILN_SECURITY_NOTICES_URL=false, or a fork or mirror of the update feed)."
 msgstr ""
 
 #: lib/kiln_cms/security/posture/checks/plugin_health.ex
@@ -25095,6 +25190,7 @@ msgstr ""
 msgid "create a task for the author"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
 #: lib/kiln_cms/security/posture/checks/plugin_health.ex
 #, elixir-autogen, elixir-format
 msgid "critical"
@@ -25358,6 +25454,7 @@ msgstr ""
 msgid "hidden"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
 #: lib/kiln_cms/security/posture/checks/plugin_health.ex
 #, elixir-autogen, elixir-format
 msgid "high"
@@ -25654,6 +25751,7 @@ msgstr ""
 msgid "locale discovery for building language switchers."
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
 #: lib/kiln_cms/security/posture/checks/plugin_health.ex
 #, elixir-autogen, elixir-format
 msgid "low"
@@ -25664,6 +25762,7 @@ msgstr ""
 msgid "media library"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
 #: lib/kiln_cms/security/posture/checks/plugin_health.ex
 #, elixir-autogen, elixir-format
 msgid "medium"
@@ -26177,6 +26276,7 @@ msgstr ""
 msgid "several"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/core_security_notices.ex
 #: lib/kiln_cms/security/posture/checks/plugin_health.ex
 #, elixir-autogen, elixir-format
 msgid "severity unknown"

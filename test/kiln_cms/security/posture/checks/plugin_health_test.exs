@@ -2,7 +2,8 @@ defmodule KilnCMS.Security.Posture.Checks.PluginHealthTest do
   @moduledoc """
   `core.plugin_health` (#2244), answered from `Kiln.Plugins.Health`'s cache
   only. Remote data comes from a `Req.Test` stub serving recorded hex.pm
-  documents, so nothing leaves the machine.
+  documents, so nothing leaves the machine; the notices feed is asked through
+  `Kiln.SecurityNotices`, so each stub is registered under both names.
 
   `async: false`: the cache is `:persistent_term` and the switch application
   env, both node-wide.
@@ -18,6 +19,7 @@ defmodule KilnCMS.Security.Posture.Checks.PluginHealthTest do
 
   alias Kiln.Plugins.Health
   alias Kiln.Plugins.Health.Installed
+  alias Kiln.SecurityNotices
   alias KilnCMS.Security.Posture.Checks.PluginHealth
 
   @fixtures Path.expand("../../../../support/fixtures/hex", __DIR__)
@@ -26,10 +28,12 @@ defmodule KilnCMS.Security.Posture.Checks.PluginHealthTest do
 
   setup do
     original = Application.get_env(:kiln_cms, Health, [])
+    notices = Application.get_env(:kiln_cms, SecurityNotices, [])
     Health.clear_cache()
 
     on_exit(fn ->
       Application.put_env(:kiln_cms, Health, original)
+      Application.put_env(:kiln_cms, SecurityNotices, notices)
       Health.clear_cache()
     end)
 
@@ -42,6 +46,21 @@ defmodule KilnCMS.Security.Posture.Checks.PluginHealthTest do
       Health,
       Keyword.put(Application.get_env(:kiln_cms, Health, []), :enabled, true)
     )
+
+    # The notices feed is off in the test config; unset, it follows the update
+    # feed (kilncms.dev's), as in production.
+    Application.put_env(
+      :kiln_cms,
+      SecurityNotices,
+      Keyword.put(Application.get_env(:kiln_cms, SecurityNotices, []), :url, nil)
+    )
+  end
+
+  # Both names: Hex is asked through `Kiln.Plugins.Health`'s options, the
+  # notices feed through `Kiln.SecurityNotices`'s.
+  defp stub_both(fun) do
+    Req.Test.stub(Health, fun)
+    Req.Test.stub(SecurityNotices, fun)
   end
 
   defp run, do: PluginHealth.run(context(nil))
@@ -95,7 +114,7 @@ defmodule KilnCMS.Security.Posture.Checks.PluginHealthTest do
     package = fixture("jason_package.json")
     notices = Keyword.get(opts, :notices, %{"data" => []})
 
-    Req.Test.stub(Health, fn conn ->
+    stub_both(fn conn ->
       send(test, {:request, conn.host, conn.request_path})
 
       case {conn.host, conn.request_path} do
@@ -198,7 +217,7 @@ defmodule KilnCMS.Security.Posture.Checks.PluginHealthTest do
   test "an unreachable feed is unknown, never a pass" do
     enable()
 
-    Req.Test.stub(Health, &Req.Test.transport_error(&1, :econnrefused))
+    stub_both(&Req.Test.transport_error(&1, :econnrefused))
 
     Health.check(installed: [git_plugin()], force: true)
     result = from_cache([git_plugin()])
@@ -209,14 +228,14 @@ defmodule KilnCMS.Security.Posture.Checks.PluginHealthTest do
 
   test "no plugin from Hex, git or a path is not applicable, and asks nothing" do
     enable()
-    Req.Test.stub(Health, fn conn -> flunk("a request was made: #{conn.request_path}") end)
+    stub_both(fn conn -> flunk("a request was made: #{conn.request_path}") end)
 
     assert %{status: :n_a} = PluginHealth.result(Health.check(installed: [overlay_plugin()]))
   end
 
   describe "checks turned off" do
     test "are not applicable, and run without a request" do
-      Req.Test.stub(Health, fn conn -> flunk("a request was made: #{conn.request_path}") end)
+      stub_both(fn conn -> flunk("a request was made: #{conn.request_path}") end)
 
       assert %{status: :n_a, summary: summary} = run()
       assert summary =~ "turned off"
