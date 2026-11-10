@@ -413,12 +413,21 @@ defmodule KilnCMS.Security.Alerts do
 
   @doc """
   Who a site alert or notice goes to: the site's member admins
-  (`KilnCMS.Accounts.Scoping.site_member_admins/1`). Literal — a site whose
-  only admins are platform admins has nobody here, and its settings page says
-  so.
+  (`KilnCMS.Accounts.Scoping.site_member_admins/1`), or, when the site has
+  none, the platform admins — the only admins it has (OC-1/OC-2 on #2245,
+  2026-11-10). A site with member admins never adds the platform admins.
   """
   @spec site_recipients(Ash.UUID.t() | struct() | nil) :: [struct()]
-  def site_recipients(org), do: Scoping.site_member_admins(org)
+  def site_recipients(org) do
+    case Scoping.site_member_admins(org) do
+      [] -> Scoping.platform_admins()
+      admins -> admins
+    end
+  end
+
+  @doc "Whether the site has any member admins of its own (`site_recipients/1` falls back when not)."
+  @spec member_admins?(Ash.UUID.t() | struct() | nil) :: boolean()
+  def member_admins?(org), do: Scoping.site_member_admins(org) != []
 
   @doc "Who a platform alert goes to: every platform admin."
   @spec platform_recipients() :: [struct()]

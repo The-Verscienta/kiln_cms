@@ -101,10 +101,11 @@ carries the reasoning.
     `platform_role_changed`, `new_api_key` and `api_key_abuse`, by bell (in
     the default site) and email, with no setting and no mute: expect one
     email per new API key.
-  - **A site with no member admins gets no bell or email for its site
-    alerts.** On a single-site install run by a platform admin with no
-    membership on the site, that is nobody; the Security alerts page warns
-    about it. Give someone an admin membership on the site if you want them.
+  - **A site with no member admins sends its site alerts and notices to the
+    platform admins** (owner decision OC-1/OC-2 on #2245, 2026-11-10). On a
+    single-site install run by a platform admin with no membership on the
+    site, that platform admin gets them. Once the site has a member admin,
+    alerts go to its member admins only.
   - **The stolen-key email is now an alert.** A rotated-away API key
     presented again was a plain email to the platform admins; it is now the
     `api_key_abuse` platform alert and a new security event,
@@ -1392,9 +1393,10 @@ carries the reasoning.
     `platform_role_changed`, `new_api_key` (not a rotation) and
     `api_key_abuse`. Alerts are raised from security log events, in the
     event's own transaction.
-  - **Who hears.** A site alert goes to the site's member admins only, not to
-    platform admins; a platform alert goes to every platform admin, in the
-    default site's bell. Editors, viewers and other sites' admins never do.
+  - **Who hears.** A site alert goes to the site's member admins, not to
+    platform admins, unless the site has no member admins, when it goes to
+    the platform admins; a platform alert goes to every platform admin, in
+    the default site's bell. Editors, viewers and other sites' admins never do.
   - **How often.** One alert per kind per 15-minute window (per site, or for
     the platform), then one summary with the window's count if more
     followed. Failed sign-ins are counted per site, never per address or
