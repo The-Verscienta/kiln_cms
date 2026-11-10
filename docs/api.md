@@ -100,6 +100,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Schema** | `GET /api/schema` | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
 | **Media upload** | `POST /api/media`, `POST /api/media/import-url`, `/api/media/uploads[/complete]` | Upload a file, import one from a public URL, or send a large one straight to object storage; metadata edits ride the JSON:API `PATCH`. `read_write` key on an editor account (a `draft_write` key is refused). | [§ Uploading media](#uploading-media) |
 | **Key rotation** | `POST /api/keys/rotate` | A drafts-only key with a self-rotation window swaps itself for a fresh one; the old key is revoked. | [headless-consumer-guide.md](headless-consumer-guide.md#keeping-the-key-alive-self-rotation) |
+| **Security posture** | `GET /api/security/posture` | The console's Security posture checks as JSON, for monitoring. A site administrator's JWT or API key (never a `draft_write` key), behind the site's admin allowlist; no check's details. | [§ Security posture (monitoring)](#security-posture-monitoring) |
 | **MCP** | `/mcp` | Model Context Protocol server for LLM authoring clients; **API key required**. | [mcp.md](mcp.md) |
 | **Forms** | `GET /api/forms/:slug`, `POST /api/forms/:slug`, `<script src="…/embed.js">` | A form's schema and JSON submission, or an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
 | **Visual editing** | `<script src="…/bridge.js">` | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
@@ -193,7 +194,9 @@ Notes:
   `retry-after: 30`) when the list cannot be read. This applies to every
   account, members included, so a single-page app or a mobile app that signs
   people in from their own devices only works from listed networks while a
-  list is on. Tokens already issued and API keys are not affected.
+  list is on. Tokens already issued and API keys are not affected, except
+  on [`GET /api/security/posture`](#security-posture-monitoring), which
+  answers only to listed networks whatever the credential.
 - The endpoint accepts an optional `challenge_token`, which is read only when
   the operator has turned on [human verification](#human-verification) for
   it. By default it is not, and the endpoint behaves exactly as above.
@@ -1771,6 +1774,142 @@ and the default payload has no `explain` key. An explained response is
 `private, no-store` and carries no `ETag`, so a CDN never stores it. The
 cached answer for a search URL is always the plain one.
 
+## Security posture (monitoring)
+
+`GET /api/security/posture` returns the checks of the console's
+[Security posture](security-posture.md) page as JSON (#2521), so an uptime
+monitor or a scheduled job can alert when a security setting is turned off.
+It is the same report as the page, in English, with one difference: a
+check's **Details** (the email addresses and key names the page lists) are
+never included.
+
+### Set up a posture monitor
+
+1. **Pick the account.** It must be an administrator of the site. An
+   administrator of the site gets the site's checks only (`scopes: ["site"]`);
+   a platform administrator also gets the installation's checks
+   (`scopes: ["site", "deployment"]`).
+2. **Mint a key for it.** At **`/editor/api-keys`**, mint a **Read-only**
+   (`read`) key owned by that account
+   ([API keys](#api-keys-third-party-access)). Use `read`, not `read_write`:
+   the posture's own `core.api_keys` check reports a read-write key owned by
+   an administrator as **Fix now**. A `draft_write` key is always refused
+   here, whoever owns it. A bearer JWT from `POST /api/auth/sign_in` works
+   too, but expires.
+3. **Allow the monitor's network.** When the site has an
+   [admin allowlist](admin-allowlist.md) on, this endpoint answers only to
+   listed networks, like the console. Add the monitor's outgoing address or
+   range to the list, or every request is a `403` `network_not_allowed`.
+4. **Call it on the site's host**, as for every other surface: the site is
+   the host's, never a parameter.
+
+```bash
+curl -s https://cms.example.com/api/security/posture \
+  -H "authorization: Bearer $KILN_API_KEY"
+```
+
+```jsonc
+// 200 OK, cache-control: private, no-store
+{
+  "version": 1,
+  "generated_at": "2026-11-10T09:00:00Z",
+  "org_id": "5b1f0c9e-…",
+  "scopes": ["site"],
+  "status": "warn",
+  "counts": {"fail": 0, "warn": 1, "error": 0, "unknown": 0, "pass": 2, "n_a": 1},
+  "checks": [
+    {"id": "core.admin_allowlist", "scope": "site", "source": "core", "plugin": null,
+     "status": "n_a", "title": "Admin allowlist",
+     "summary": "No admin allowlist (optional; useful when administrators sign in from fixed networks).",
+     "fix_path": "/editor/admin-allowlist",
+     "docs_url": "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/security-posture.md#admin-allowlist",
+     "facts": {"entries": 0, "operator_disabled": false}, "error": null},
+    {"id": "core.breached_passwords", "scope": "site", "source": "core", "plugin": null,
+     "status": "pass", "title": "Breached passwords",
+     "summary": "A breached password is refused for administrators.",
+     "fix_path": "/editor/password-policy",
+     "docs_url": "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/security-posture.md#breached-passwords",
+     "facts": {"admin_policy": "block", "deployment_enabled": true}, "error": null},
+    {"id": "core.idle_timeout", "scope": "site", "source": "core", "plugin": null,
+     "status": "pass", "title": "Idle sign-out", "summary": "Idle browsers are signed out.",
+     "fix_path": "/editor/sessions",
+     "docs_url": "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/security-posture.md#idle-sign-out",
+     "facts": {"admin_idle_minutes": 15, "idle_minutes": 30}, "error": null},
+    {"id": "core.second_factor", "scope": "site", "source": "core", "plugin": null,
+     "status": "warn", "title": "Two-step sign-in for administrators and editors",
+     "summary": "1 editor has no authenticator app.",
+     "fix_path": "/editor/settings",
+     "docs_url": "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/security-posture.md#two-step-sign-in",
+     "facts": {"admins": 2, "admins_without": 0, "editors": 3, "editors_without": 1}, "error": null}
+  ]
+}
+```
+
+### Posture fields
+
+| Field | What it holds |
+|-------|---------------|
+| `version` | `1`. Changes only for a change that breaks this shape, and only alongside a major release. |
+| `generated_at` | When the checks ran (ISO 8601, UTC, whole seconds). Up to 30 seconds ago for a cached answer. |
+| `org_id` | The site the report is about: the one the request's host resolved to. |
+| `scopes` | `["site"]`, or `["site", "deployment"]` for a platform administrator. |
+| `status` | The worst line: `fail` if any check is `fail`; otherwise `warn` if any is `warn`, `unknown` or `error`; otherwise `pass` (a report of only `n_a` lines is `pass`). The page's summary badge. |
+| `counts` | How many checks have each status. Every key is present, `0` included: `fail`, `warn`, `error`, `unknown`, `pass`, `n_a`. |
+| `checks[].id` | The check's stable id: `core.…` for Kiln's own ([the list](security-posture.md#the-checks)), the plugin's own id otherwise. |
+| `checks[].scope` | `site` or `deployment`. |
+| `checks[].source` | `core`; `plugin` (a plugin's `security_checks/0`, with its name in `plugin`); or `config` (a check listed in `config :kiln_cms, KilnCMS.Security.Posture, checks: [...]`). |
+| `checks[].plugin` | The contributing plugin's name for `source: "plugin"`, otherwise `null`. |
+| `checks[].status` | `pass`, `warn`, `fail`, `unknown`, `n_a`, or `error` when the check produced no result ([what each means](security-posture.md#reading-the-page)). |
+| `checks[].title`, `checks[].summary` | English sentences for a person. `summary` is `null` on an `error` line. |
+| `checks[].fix_path` | The console path of the screen that changes the setting (`/editor/…`), relative to the site's console host. `null` when the setting is an environment variable, and on an `error` line. |
+| `checks[].docs_url` | An `https://` page describing the check. `null` when the check names none, and on an `error` line. |
+| `checks[].facts` | The check's machine-readable values (at most 20): strings, numbers, booleans or `null`. `{}` on an `error` line. |
+| `checks[].error` | Why an `error` line has no result: `crashed`, `timeout`, `invalid_result` or `busy` ([How the checks are run](security-posture.md#how-the-checks-are-run)); `null` otherwise. |
+
+### What a posture consumer can rely on
+
+- **Additive only**, like the [reporting views](reporting.md): a field may be
+  added, never removed, renamed or retyped. `version` changes only for a
+  change that breaks that.
+- **Value sets are open.** `status`, `checks[].status`, `checks[].source`,
+  `checks[].scope` and `checks[].error` hold the values above today, and a
+  later release may add one; `counts` may gain a key. Tolerate a value or key
+  you don't know, and read an unknown status as a warning.
+- **Read a check by its `id`.** `checks` is sorted by `id` today, but the
+  order is not part of the contract. Core ids (`core.…`) and the keys of core
+  checks' `facts` are part of it; a plugin's ids and facts are the plugin's
+  own.
+- **`title` and `summary` are not stable.** They may be reworded in any
+  release; never match on them.
+- **`fix_path` is relative.** Prefix it with the site's console origin to
+  link to the fix.
+- **Answers are cached for up to 30 seconds on each server.** The checks run
+  at most once per site and per scope set every 30 seconds on a node, however
+  many monitors ask, so `generated_at` can be up to 30 seconds old, and a
+  fix made in the console shows after that. The cache is per node: behind a
+  load balancer, two requests a second apart can come from different runs.
+- **Never cached by anyone else.** Every answer, refusals included, carries
+  `cache-control: private, no-store` (the admin allowlist's refusals send
+  `no-store`).
+
+### Posture status codes
+
+A request meets these in order, and the first that applies answers:
+
+| Status | `code` | When |
+|--------|--------|------|
+| `403` | `network_not_allowed` | The site's admin allowlist is on and the request's address is not on it. Checked before the credential, so an off-list caller learns nothing about its key. Recorded in the security log as `admin_access_refused` (sampled). |
+| `503` | `temporarily_unavailable` | The site's admin allowlist could not be read (it fails closed), with `retry-after: 30`. |
+| `429` | `too_many_requests` | The `api` bucket for the client's address is spent ([Rate limits](#rate-limits)), with `retry-after`. |
+| `401` | `invalid_token` | A bearer was sent that is not a valid JWT or API key (unknown, revoked or expired). |
+| `401` | `unauthenticated` | No credential at all, with `www-authenticate: Bearer`. |
+| `403` | `forbidden` | The credential is not an administrator of this site (an editor, a viewer, an administrator of another site, an administrator whose membership is still waiting), or it is a `draft_write` key. |
+| `503` | `temporarily_unavailable` | Three reports of this site are already running on this server, with `retry-after: 5`. Retry after five seconds. |
+| `200` | | The report. |
+
+An unexpected failure answers `500` `internal_server_error`; the server log
+names the error's class and nothing a check said.
+
 ## Caching and CDNs
 
 Every headless read surface tells a shared cache what it may keep, so a CDN in
@@ -1964,7 +2103,7 @@ Over the limit returns **429** with a `retry-after` header.
 
 | Bucket | Endpoints       | Limit (per IP)        |
 |--------|-----------------|-----------------------|
-| `api`  | `/api/json/*`, `GET /api/content/:type/:slug` (fired artifacts), `GET /api/locales`, `GET /api/search` | 120 requests / minute |
+| `api`  | `/api/json/*`, `GET /api/content/:type/:slug` (fired artifacts), `GET /api/locales`, `GET /api/search`, `GET /api/security/posture` | 120 requests / minute |
 | `gql`  | `/gql`          | 60 requests / minute  |
 | `auth` | sign-in / auth  | 40 requests / minute  |
 | `docs` | `/api/json/swaggerui` | 60 requests / minute |
@@ -2068,7 +2207,9 @@ You get it from the headless sign-in, fired-artifact (`not_found` /
 `artifact_compiling`), related-content, provenance, form-schema and
 form-submission, visual-editing, media-upload ([§ Upload errors](#upload-errors)),
 version-history (`unauthenticated`, `invalid_id`, `invalid_cursor`,
-`forbidden`, `not_found`, `restore_failed`, `invalid_state_transition`) and preview-token (`invalid_preview`)
+`forbidden`, `not_found`, `restore_failed`, `invalid_state_transition`), security-posture
+(`network_not_allowed`, `temporarily_unavailable`, `invalid_token`,
+`unauthenticated`, `forbidden`; [§ Posture status codes](#posture-status-codes)) and preview-token (`invalid_preview`)
 endpoints — **and from the 429 when you exceed a rate-limit bucket**
 (`too_many_requests`, alongside `retry-after`). All of them render through one
 implementation, `KilnCMSWeb.ApiError.send/4`, and a test fails the build if a
@@ -2108,6 +2249,10 @@ release**, not the HTTP contract — don't pin behaviour to it.
 - The **published-content read contract**: resource types, their `public?`
   attribute names/types, the JSON:API filter/sort/page semantics, and the fired
   artifact surfaces (`json` / `json_ld` / `web`).
+- The [security posture](#security-posture-monitoring) body
+  (`GET /api/security/posture`): additive only, with its own `version`, open
+  value sets, and `title`/`summary` excluded. See
+  [What a posture consumer can rely on](#what-a-posture-consumer-can-rely-on).
 - Author PII is never exposed (only `authorId` + display `name`); `*BySlug`
   returns published content only. See the consumer guide.
 - A JSON:API GET of an **unpublished** record returns **404** (not 403) for

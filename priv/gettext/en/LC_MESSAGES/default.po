@@ -9507,7 +9507,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format
-msgid "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected."
+msgid "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected, except that the security posture endpoint for monitoring (GET /api/security/posture) also answers only to listed networks."
 msgstr ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex
@@ -13494,6 +13494,7 @@ msgid "Not available"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
+#: lib/kiln_cms_web/plugs/admin_allowlist.ex
 #, elixir-autogen, elixir-format
 msgid "Not available from this network"
 msgstr ""
@@ -18795,13 +18796,7 @@ msgstr ""
 msgid "Sign-in could not be completed right now. Try again in a moment."
 msgstr ""
 
-#: lib/kiln_cms_web/plugs/admin_allowlist.ex
-#, elixir-autogen, elixir-format
-msgid "Sign-in is not available from this network."
-msgstr ""
-
 #: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
-#: lib/kiln_cms_web/plugs/admin_allowlist.ex
 #, elixir-autogen, elixir-format
 msgid "Sign-in is temporarily unavailable. Try again in a minute."
 msgstr ""
@@ -19942,6 +19937,7 @@ msgid "Tells search engines not to list this page, or not to follow its links. I
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
+#: lib/kiln_cms_web/plugs/admin_allowlist.ex
 #, elixir-autogen, elixir-format
 msgid "Temporarily unavailable"
 msgstr ""

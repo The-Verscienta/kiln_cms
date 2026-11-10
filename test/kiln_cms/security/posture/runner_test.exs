@@ -58,6 +58,16 @@ defmodule KilnCMS.Security.Posture.RunnerTest do
     def run(_context), do: {:ok, :looks_fine}
   end
 
+  defmodule Unsanitizable do
+    use Kiln.Security.Check
+    def id, do: "test.unsanitizable"
+    def title, do: "Unsanitizable"
+    def scope, do: :site
+
+    # An improper list of details makes the sanitizer itself raise.
+    def run(_context), do: %Result{status: :pass, summary: "ok", details: ["a" | :b]}
+  end
+
   defmodule Hanging do
     use Kiln.Security.Check
     def id, do: "test.hanging"
@@ -123,6 +133,18 @@ defmodule KilnCMS.Security.Posture.RunnerTest do
 
   test "an answer that is not a result is an invalid-result row" do
     assert [%Entry{status: :error, error: :invalid_result, result: nil}] = run([Invalid])
+  end
+
+  test "a result the sanitizer raises on is an invalid-result row, and the others still run" do
+    log =
+      capture_log(fn ->
+        assert [
+                 %Entry{status: :error, error: :invalid_result, result: nil},
+                 %Entry{status: :pass}
+               ] = run([Unsanitizable, Passing])
+      end)
+
+    assert log =~ "test.unsanitizable"
   end
 
   test "a check past its deadline is killed and is a timeout row, without holding the rest" do

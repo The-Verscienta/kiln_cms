@@ -13,7 +13,23 @@ defmodule KilnCMS.Security.PostureReportTest do
   import KilnCMS.PostureFixtures
 
   alias KilnCMS.Security
+  alias KilnCMS.Security.Errors.PostureBusy
+  alias KilnCMS.Security.Posture
   alias KilnCMS.Security.Posture.Report
+
+  # A config check that tells the test each time it runs.
+  defmodule Counting do
+    use Kiln.Security.Check
+    def listener, do: :posture_report_test_runs
+    def id, do: "test.counting"
+    def title, do: "Counting"
+    def scope, do: :site
+
+    def run(context) do
+      if pid = Process.whereis(listener()), do: send(pid, {:ran, context.org_id})
+      pass("ok")
+    end
+  end
 
   setup do
     Kiln.Updates.put_cache({:ok, :current})
@@ -22,6 +38,33 @@ defmodule KilnCMS.Security.PostureReportTest do
   end
 
   defp run(actor, opts), do: Security.run_posture(%{}, Keyword.put(opts, :actor, actor))
+
+  defp snapshot(actor, opts),
+    do: Security.posture_snapshot(%{}, Keyword.put(opts, :actor, actor))
+
+  # An actor as `ApiKeyAuth` hands it over for a `:draft_write` key.
+  defp with_draft_write_key(user) do
+    user
+    |> Ash.Resource.put_metadata(:using_api_key?, true)
+    |> Ash.Resource.put_metadata(:api_key, %KilnCMS.Accounts.ApiKey{access: :draft_write})
+  end
+
+  defp hold_slots(site) do
+    test = self()
+
+    holders =
+      for _ <- 1..Posture.max_per_org() do
+        spawn(fn ->
+          Registry.register(Posture.slots(), site.id, nil)
+          send(test, :held)
+          Process.sleep(:infinity)
+        end)
+      end
+
+    for _ <- holders, do: assert_receive(:held)
+    on_exit(fn -> Enum.each(holders, &Process.exit(&1, :kill)) end)
+    holders
+  end
 
   defp scopes(%Report{entries: entries}), do: entries |> Enum.map(& &1.scope) |> Enum.uniq()
 
@@ -138,5 +181,172 @@ defmodule KilnCMS.Security.PostureReportTest do
     assert {:ok, report} = Security.run_posture(%{locale: "fr"}, actor: admin, tenant: site)
     check = Enum.find(report.entries, &(&1.id == "core.idle_timeout"))
     assert check.title == "Déconnexion après inactivité"
+  end
+
+  describe ":snapshot" do
+    test "is refused to everyone :run refuses", %{site: site} do
+      viewer = user(:viewer) |> member!(site, :viewer)
+      editor = user(:viewer) |> member!(site, :editor)
+      outsider = user(:viewer) |> member!(org("pfrep-snap-other"), :admin)
+      pending = user(:viewer) |> member!(site, :admin, status: :pending)
+
+      for actor <- [nil, viewer, editor, outsider, pending] do
+        assert {:error, %Ash.Error.Forbidden{}} = snapshot(actor, tenant: site)
+      end
+
+      admin = user(:viewer) |> member!(site, :admin)
+      assert {:error, %Ash.Error.Forbidden{}} = snapshot(admin, [])
+    end
+
+    test "a site admin gets the site's checks, a platform admin the deployment's too", %{
+      site: site
+    } do
+      admin = user(:viewer) |> member!(site, :admin)
+      assert {:ok, %Report{org_id: org_id} = report} = snapshot(admin, tenant: site)
+      assert org_id == site.id
+      assert report.scopes == [:site]
+      assert scopes(report) == [:site]
+
+      assert {:ok, %Report{} = full} = snapshot(user(:admin), tenant: site)
+      assert full.scopes == [:site, :deployment]
+      assert Enum.sort(scopes(full)) == [:deployment, :site]
+    end
+
+    test "carries no details where :run does", %{site: site} do
+      # Two admins without a second factor: `core.second_factor` lists them.
+      admin = user(:viewer) |> member!(site, :admin)
+      _other = user(:viewer) |> member!(site, :admin)
+
+      assert {:ok, ran} = run(admin, tenant: site)
+
+      assert %{result: %{details: [_ | _]}} =
+               Enum.find(ran.entries, &(&1.id == "core.second_factor"))
+
+      assert {:ok, snap} = snapshot(admin, tenant: site)
+      assert Enum.all?(snap.entries, &(is_nil(&1.result) or &1.result.details == []))
+      assert %{status: status} = Enum.find(snap.entries, &(&1.id == "core.second_factor"))
+      assert status == Enum.find(ran.entries, &(&1.id == "core.second_factor")).status
+    end
+
+    test "answers busy when the site's slots are full, and does not cache it", %{site: site} do
+      admin = user(:viewer) |> member!(site, :admin)
+      holders = hold_slots(site)
+
+      assert {:error, error} = snapshot(admin, tenant: site)
+      assert PostureBusy.in?(error)
+
+      Enum.each(holders, &Process.exit(&1, :kill))
+
+      KilnCMS.Test.Eventually.eventually(fn ->
+        Registry.lookup(Posture.slots(), site.id) == []
+      end)
+
+      assert {:ok, %Report{}} = snapshot(admin, tenant: site)
+    end
+  end
+
+  describe "a :draft_write key" do
+    test "is refused on both actions, even when its owner is a site admin", %{site: site} do
+      admin = user(:viewer) |> member!(site, :admin) |> with_draft_write_key()
+
+      assert {:error, %Ash.Error.Forbidden{}} = run(admin, tenant: site)
+      assert {:error, %Ash.Error.Forbidden{}} = snapshot(admin, tenant: site)
+    end
+
+    test "is refused even to a platform admin", %{site: site} do
+      operator = with_draft_write_key(user(:admin))
+
+      assert {:error, %Ash.Error.Forbidden{}} = run(operator, tenant: site)
+      assert {:error, %Ash.Error.Forbidden{}} = snapshot(operator, tenant: site)
+    end
+  end
+
+  test "the page's :run is never cached, the snapshot is", %{site: site} do
+    Process.register(self(), Counting.listener())
+    original = Application.get_env(:kiln_cms, KilnCMS.Security.Posture, [])
+    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Security.Posture, original) end)
+    Application.put_env(:kiln_cms, KilnCMS.Security.Posture, checks: [Counting])
+
+    admin = user(:viewer) |> member!(site, :admin)
+    site_id = site.id
+
+    assert {:ok, _} = run(admin, tenant: site)
+    assert {:ok, _} = run(admin, tenant: site)
+    assert_received {:ran, ^site_id}
+    assert_received {:ran, ^site_id}
+
+    assert {:ok, _} = snapshot(admin, tenant: site)
+    assert {:ok, _} = snapshot(admin, tenant: site)
+    assert_received {:ran, ^site_id}
+    refute_received {:ran, _}
+  end
+
+  describe "Posture.scopes_for/1" do
+    defp in_an_hour, do: DateTime.add(DateTime.utc_now(), 3600, :second)
+    defp an_hour_ago, do: DateTime.add(DateTime.utc_now(), -3600, :second)
+
+    test "a platform admin gets both scopes" do
+      assert Posture.scopes_for(user(:admin)) == [:site, :deployment]
+    end
+
+    test "a live elevation grant to admin counts, an expired one does not" do
+      live = %{role: :viewer, granted_role: :admin, granted_role_expires_at: in_an_hour()}
+      expired = %{role: :viewer, granted_role: :admin, granted_role_expires_at: an_hour_ago()}
+
+      assert Posture.scopes_for(live) == [:site, :deployment]
+      assert Posture.scopes_for(expired) == [:site]
+    end
+
+    test "a site admin by membership alone gets the site's only", %{site: site} do
+      assert Posture.scopes_for(user(:viewer) |> member!(site, :admin)) == [:site]
+      assert Posture.scopes_for(nil) == [:site]
+    end
+  end
+
+  describe "PostureBusy.in?/1" do
+    test "finds the busy error in a class, and nothing else" do
+      busy = PostureBusy.exception([])
+
+      assert PostureBusy.in?(busy)
+      assert PostureBusy.in?(Ash.Error.to_error_class(busy))
+      refute PostureBusy.in?(Ash.Error.Forbidden.exception([]))
+      refute PostureBusy.in?(Ash.Error.to_error_class(RuntimeError.exception("x")))
+    end
+  end
+
+  describe "the snapshot cache key" do
+    test "is the same in either scope order, and differs per site" do
+      a = Ecto.UUID.generate()
+      b = Ecto.UUID.generate()
+
+      assert KilnCMS.Cache.security_posture_key(a, [:site, :deployment]) ==
+               KilnCMS.Cache.security_posture_key(a, [:deployment, :site])
+
+      refute KilnCMS.Cache.security_posture_key(a, [:site]) ==
+               KilnCMS.Cache.security_posture_key(b, [:site])
+
+      refute KilnCMS.Cache.security_posture_key(a, [:site]) ==
+               KilnCMS.Cache.security_posture_key(a, [:site, :deployment])
+    end
+  end
+
+  test "neither action is on the JSON:API, GraphQL or MCP surface" do
+    content_domains = Application.fetch_env!(:kiln_cms, :content_domains)
+    refute KilnCMS.Security in content_domains
+
+    extensions = Spark.extensions(KilnCMS.Security) ++ Spark.extensions(Security.PostureReport)
+
+    for extension <- [
+          AshJsonApi.Domain,
+          AshGraphql.Domain,
+          AshJsonApi.Resource,
+          AshGraphql.Resource,
+          AshAi
+        ] do
+      refute extension in extensions, "#{inspect(extension)} exposes the posture"
+    end
+
+    tools = Application.fetch_env!(:kiln_cms, :mcp_tools)
+    refute Enum.any?(tools, &(&1 |> Atom.to_string() |> String.contains?("posture")))
   end
 end
