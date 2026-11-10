@@ -409,10 +409,8 @@ defmodule KilnCMS.Backups.OffsiteTest do
     assert calls(log) == []
   end
 
-  test "a remote with no rclone in the image is a loud warning, not a failure", %{
-    dir: dir,
-    bin: bin
-  } do
+  test "a remote with no rclone in the image fails the step, before any file is touched (#2482)",
+       %{dir: dir, bin: bin} do
     # PATH holds only the (empty) stub directory: no rclone anywhere.
     System.put_env("PATH", bin)
     entries = land(dir)
@@ -423,14 +421,38 @@ defmodule KilnCMS.Backups.OffsiteTest do
     {result, log_output} =
       ExUnit.CaptureLog.with_log(fn -> Worker.offsite_step(dir, entries, recorder(entries)) end)
 
-    assert {:ok, nil, rec} = result
+    # No remote in the reason: the chain logs `inspect(reason)` on failure.
+    assert {:error, {:offsite, :missing_rclone} = reason, rec} = result
+    assert log_output =~ "[error]"
     assert log_output =~ "rclone is not installed in this image"
     refute log_output =~ "SUPERSECRETVAL"
 
     assert Enum.any?(
              rec.log,
-             &(&1.level == :warn and &1.message =~ "nothing was copied off-site")
+             &(&1.level == :error and
+                 &1.message ==
+                   "BACKUP_RCLONE_REMOTE is set but rclone is not installed in this image; " <>
+                     "nothing was copied off-site")
            )
+
+    # No destination is recorded: nothing was tried, so nothing is "failed"
+    # per file, and nothing is unverified.
+    for artifact <- rec.artifacts do
+      assert artifact.verified
+      refute Map.has_key?(artifact.destinations, key())
+    end
+
+    # The run's error says what is wrong and both ways out.
+    text = Worker.describe_offsite(reason, true)
+    assert text =~ "Off-site copy FAILED: BACKUP_RCLONE_REMOTE is set but rclone is not installed"
+    assert text =~ "Install rclone in the image"
+    assert text =~ "unset BACKUP_RCLONE_REMOTE, then Resume this backup."
+    assert Worker.describe_offsite(reason, false) =~ "then run a new backup."
+
+    for haystack <- [inspect(rec), inspect(reason), text] do
+      refute haystack =~ "SUPERSECRETVAL"
+      refute haystack =~ "AKIAEXAMPLE1"
+    end
   end
 
   describe "Recorder.put_destination/4" do

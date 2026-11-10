@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **If the app's environment sets `BACKUP_RCLONE_REMOTE`, check it before deploying: the official image now ships `rclone` (pinned, checksum-verified), so in-app backups start copying there, and an unreachable or unconfigured remote fails them. On a custom image without `rclone`, the variable now fails every in-app backup: install `rclone` or unset it.**
+  No migration; rolling the pin back is safe. The image grows by about 82 MiB.
+  ([#2482](https://github.com/The-Verscienta/kiln_cms/issues/2482) · [long form](docs/changelog/unreleased.md#rclone-in-image-upgrade))
+
 - **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `access-denied` and path aliases under `/access-denied`, which the new access-denied page (#2143) shadows; give each a new slug or alias.** No migration; read-only.
   ([#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374) · [long form](docs/changelog/unreleased.md#reserved-paths-upgrade))
 
@@ -456,6 +460,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2256](https://github.com/The-Verscienta/kiln_cms/issues/2256) · [long form](docs/changelog/unreleased.md#robots-flags))
 
 ### Changed
+
+- **An in-app backup with `BACKUP_RCLONE_REMOTE` set and no `rclone` in the image now fails (Run log and run error say so) instead of skipping the off-site copy; the Backups page's “Where backups go” says so ahead of time.**
+  ([#2482](https://github.com/The-Verscienta/kiln_cms/issues/2482))
 
 - **Release images no longer ship `priv/static/images/logo-lockup.png` (234 KB), which nothing in Kiln referenced. An overlay that linked `/images/logo-lockup.png` must ship its own copy.**
   ([#2401](https://github.com/The-Verscienta/kiln_cms/issues/2401))

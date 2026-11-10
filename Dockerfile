@@ -63,6 +63,47 @@ ARG RUNNER_IMAGE="debian:${RUNNER_DEBIAN_VERSION}"
 
 FROM node:${NODE_VERSION}-bookworm-slim AS node
 
+# ---- rclone: the in-app backup's off-site copy (#2482) ----
+# With `BACKUP_RCLONE_REMOTE` set, an in-app backup copies each file with
+# `rclone copy`, and an image without rclone fails that backup (#2482), so
+# the official image ships it. Upstream's release zip, not Debian's package:
+# trixie's is years behind rclone's backend fixes, and this pins an exact
+# version for the same reason the toolchain above is pinned.
+#
+# Verified by its SHA-256, pinned here: the build fails if the download is
+# not byte-for-byte the file below. The digest was taken from upstream's
+# `SHA256SUMS`, whose PGP signature checks against rclone's release key
+# (FBF737ECE9F8AB18604BD2AC93935E02FF3B54FA, https://rclone.org/KEYS). To
+# bump: take the new version's `linux-amd64.zip` line from
+# https://downloads.rclone.org/v<version>/SHA256SUMS (the `linux-arm64.zip`
+# line too), after `gpg --verify SHA256SUMS` with that key. The published
+# image is amd64 only (release.yml `platforms:`), but an operator's own
+# build on an arm64 host gets the arm64 binary; any other architecture fails
+# the build here rather than shipping an rclone that cannot run.
+#
+# Cost: the binary is a static Go build of about 82 MiB, which the runner
+# copies in alone; the zip and unzip stay in this stage.
+FROM debian:${RUNNER_DEBIAN_VERSION} AS rclone
+ARG TARGETARCH
+ARG RCLONE_VERSION=1.75.2
+ARG RCLONE_SHA256_AMD64=349ac8fba6ff65d6247043f1750cdcb518ec5d500ef91463a10d37c0ccdf3702
+ARG RCLONE_SHA256_ARM64=7e1e8d69654941b7b7df84ee74c5f7fb09cce7d5496947fb7bf16b55ff427d10
+RUN set -eu; \
+  arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+  case "$arch" in \
+    amd64) sha="$RCLONE_SHA256_AMD64" ;; \
+    arm64) sha="$RCLONE_SHA256_ARM64" ;; \
+    *) echo "no pinned rclone for architecture $arch" >&2; exit 1 ;; \
+  esac; \
+  apt-get update -y \
+  && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+  && curl -fsSLo /tmp/rclone.zip \
+     "https://downloads.rclone.org/v${RCLONE_VERSION}/rclone-v${RCLONE_VERSION}-linux-${arch}.zip" \
+  && echo "${sha}  /tmp/rclone.zip" | sha256sum -c - \
+  && unzip -j /tmp/rclone.zip "rclone-v${RCLONE_VERSION}-linux-${arch}/rclone" -d /usr/local/bin \
+  && chmod 0755 /usr/local/bin/rclone \
+  && /usr/local/bin/rclone version
+
 # ---- Build stage ----
 FROM ${BUILDER_IMAGE} AS builder
 
@@ -309,6 +350,9 @@ RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
   && apt-get purge -y gnupg && apt-get autoremove -y \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
 SHELL ["/bin/sh", "-c"]
+
+# Pinned and checksum-verified in the `rclone` stage above (#2482).
+COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8

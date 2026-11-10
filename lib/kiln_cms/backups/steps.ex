@@ -944,14 +944,18 @@ defmodule KilnCMS.Backups.Steps do
 
   ## offsite
 
-  # A refused file is fatal (never retried, #2481); a failed copy is retried
-  # with the step, and fails the backup on the last attempt.
+  # A refused file is fatal (never retried, #2481); so is a missing rclone,
+  # which no retry installs (#2482). A failed copy is retried with the step,
+  # and fails the backup on the last attempt.
   defp offsite_chain_step(ctx, state, rec) do
     case offsite_step(ctx.dir, outputs(state), rec) do
       {:ok, remote, rec} ->
         {:next, "finish", nil, Map.put(state, "offsite", remote), rec}
 
       {:error, {:offsite, %{refused: [_ | _]}} = reason, rec} ->
+        {:fatal, reason, state, rec}
+
+      {:error, {:offsite, :missing_rclone} = reason, rec} ->
         {:fatal, reason, state, rec}
 
       {:error, reason, rec} ->
@@ -1044,10 +1048,13 @@ defmodule KilnCMS.Backups.Steps do
   # do), else `{:error, {:offsite, %{refused: [...], failed: [...]}}, rec}`
   # listing `{file_name, reason}` for each file that did not.
   #
-  # A remote set with no `rclone` in this image is NOT an error: the official
-  # image ships without rclone, and a host's cron may be copying these files
-  # off-site perfectly well. It is logged loudly instead, and the panel says so
-  # (`Backups.status/0`).
+  # A remote set with no `rclone` in this image is a failed copy like any
+  # other (#2482): `{:error, {:offsite, :missing_rclone}, rec}`, before any
+  # file is touched. The official image ships rclone, so only a custom image
+  # without it gets here. The reason carries no remote: `fail/5` logs
+  # `inspect(reason)`, and a connection-string remote holds credentials.
+  @missing_rclone "BACKUP_RCLONE_REMOTE is set but rclone is not installed in this image"
+
   @doc false
   @spec offsite_step(Path.t(), [map()], Recorder.t()) ::
           {:ok, String.t() | nil, Recorder.t()} | {:error, term(), Recorder.t()}
@@ -1057,12 +1064,9 @@ defmodule KilnCMS.Backups.Steps do
         {:ok, nil, rec}
 
       {:missing_rclone, remote} ->
-        message =
-          "BACKUP_RCLONE_REMOTE is set but rclone is not installed in this image; " <>
-            "nothing was copied off-site"
-
-        Logger.warning(message <> " (#{Redact.text(remote)})")
-        {:ok, nil, Recorder.log(rec, :warn, "offsite", message)}
+        message = @missing_rclone <> "; nothing was copied off-site"
+        Logger.error(message <> " (#{Redact.text(remote)})")
+        {:error, {:offsite, :missing_rclone}, Recorder.log(rec, :error, "offsite", message)}
 
       {remote, results} ->
         key = "rclone:" <> Redact.text(remote)
@@ -1168,6 +1172,13 @@ defmodule KilnCMS.Backups.Steps do
   # the per-file Run log line and destination error, redacted and capped.
   @doc false
   @spec describe_offsite(term(), boolean()) :: String.t()
+  def describe_offsite({:offsite, :missing_rclone}, resumable?) do
+    "Off-site copy FAILED: #{@missing_rclone}, so no file was copied. The local files are " <>
+      "kept. Install rclone in the image (the official image ships it) or unset " <>
+      "BACKUP_RCLONE_REMOTE, then " <>
+      if(resumable?, do: "Resume this backup.", else: "run a new backup.")
+  end
+
   def describe_offsite({:offsite, %{refused: refused, failed: failed}}, resumable?) do
     refused_text =
       if refused != [] do

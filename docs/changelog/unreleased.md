@@ -7,6 +7,53 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="rclone-in-image-upgrade"></a>
+
+- **The official image ships `rclone`, and a set `BACKUP_RCLONE_REMOTE`
+  with no `rclone` now fails the in-app backup (#2482).**
+  - **Why.** The official image installed no `rclone`, so on it a backup
+    taken from the app's **Back up now** page had never gone off-site, even
+    with `BACKUP_RCLONE_REMOTE` set, and v1.8.0 skipped the copy without a
+    word. Failing on a missing binary would have turned every in-app backup
+    red on the official image; with `rclone` in the image, a missing binary
+    is a broken custom image, and it fails the run like any other failed
+    off-site copy (decision 3 on #2218).
+  - **The image.** A new `rclone` build stage downloads upstream's
+    `rclone-v1.75.2-linux-amd64.zip`, checks it against a SHA-256 pinned in
+    the `Dockerfile` (taken from upstream's PGP-signed `SHA256SUMS`), and the
+    runner copies in only the binary; an arm64 build gets the arm64 zip,
+    pinned the same way. About 82 MiB (a static Go binary). Not
+    Debian's `rclone`: trixie's is several releases behind and cannot be held
+    to an exact version. The `Dockerfile` comment says how to bump the pin.
+  - **The failure.** The off-site step returns `{:offsite, :missing_rclone}`
+    before touching any file. It is fatal, not retried: no retry installs a
+    binary. The run's error reads "Off-site copy FAILED:
+    BACKUP_RCLONE_REMOTE is set but rclone is not installed in this image, so
+    no file was copied. The local files are kept. Install rclone in the image
+    (the official image ships it) or unset BACKUP_RCLONE_REMOTE, then Resume
+    this backup." The Run log line and the server log (remote redacted) are
+    errors now, not warnings. The local files stay verified and the run can
+    be resumed. The reason carries no remote, since the chain logs it with
+    `inspect/1` and a connection-string remote holds credentials.
+  - **Who must act.** Only a deployment running its own image without
+    `rclone` while `BACKUP_RCLONE_REMOTE` is set in the app's environment:
+    install `rclone`, or unset the variable if the host copies `BACKUP_DIR`
+    off-site by other means. **Where backups go** on `/editor/backups` says
+    so before the first failure. Cron backups (`backup.sh`) are unchanged.
+  - **On the official image** with a remote set, in-app backups start
+    copying off-site on this deploy. Name a remote (`r2:kiln-backups`) and
+    configure it with `RCLONE_CONFIG_<NAME>_*` variables in the app's
+    environment, or mount an `rclone.conf` and point `RCLONE_CONFIG` at it:
+    the app runs as `nobody`, whose home directory does not exist. Don't use
+    a connection-string remote (`:s3,secret_access_key=…:bucket`) here: the
+    app passes the remote to `rclone` as an argument, where other users on
+    the host can read it. Until the remote is configured, the copy fails and
+    so does the run.
+  - **Rolling the pin back** is safe: nothing is migrated. v1.8.0's image has
+    no `rclone`, and v1.8.0 skips the off-site copy silently.
+  Guide: [It needs the client tools in the image](../backups.md#it-needs-the-client-tools-in-the-image).
+  ([#2482](https://github.com/The-Verscienta/kiln_cms/issues/2482))
+
 <a id="reserved-paths-upgrade"></a>
 
 - **Run `mix kiln.reserved_paths` once after upgrading to list the records whose
@@ -713,12 +760,10 @@ carries the reasoning.
     Copy a suspect file aside first if you want it as evidence. Since
     [the step chain](#backup-step-chain) a database-only run (S3 media
     adapter, or no media directory) keeps a work directory and resumes too.
-  - **No `rclone` in the image is a warning, not a failure.** The official
-    image does not install it. With `BACKUP_RCLONE_REMOTE` set and no `rclone`,
-    an in-app backup succeeds locally, logs a warning, and **Where backups go**
-    on the Backups page says nothing is copied off-site. PaaS deployments that
-    relied on the variable alone were never getting an off-site copy from the
-    app; [deploy-platforms.md](../deploy-platforms.md#backups) now says so.
+  - **No `rclone` in the image is now visible.** Before, the official image
+    had no `rclone` and an in-app backup skipped the off-site copy without a
+    word. It is now an error that fails the run, and the official image ships
+    `rclone`: see [rclone in the image](#rclone-in-image-upgrade) (#2482).
   - **Cron failure manifests no longer name the remote.** `backup.sh` writes
     `"offsite": null` when a run fails, as the app does, and History no longer
     takes a failed manifest's remote as proof that its files went off-site. A
