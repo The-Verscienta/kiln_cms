@@ -143,11 +143,17 @@ Configure the sender and adapter in `config/runtime.exs`
 | **Stripe** (paid memberships) | The member's email address at checkout, and the tier's price id. Card details never touch Kiln — the member is redirected to a provider-hosted page. Kiln stores only the returned customer/subscription ids. | An admin storing API credentials in `/editor/billing` | **Off by default** — with no credentials `KilnCMS.Billing.configured?/0` is false, no tier is offered, the checkout and webhook routes 404, and no request is made. "Disconnect" in the console clears the keys. See [Paid memberships](memberships.md). |
 | **kilncms.dev release feed** | **Nothing about this instance.** An unauthenticated GET of kilncms.dev's published `release` entries, sent only when an admin opens `/editor/system` (#1877), or a platform admin opens `/editor/security-posture` while no answer is cached (one background request, which the page does not wait for, #2252). The request carries a bare `KilnCMS` user-agent and a fixed query — no version, no identifier, no content — and kilncms.dev keeps no client IP for that route. Not asked by a fork or mirror (`KILN_UPDATE_REPO` / `KILN_UPDATE_RELEASES_URL` set) unless `KILN_UPDATE_FEED_URL` says so. | **On by default**, with the GitHub check | `KILN_UPDATE_CHECK=false` (both), or `KILN_UPDATE_FEED_URL=false` (this one only) |
 | **GitHub (api.github.com)** | **Nothing about this instance.** An unauthenticated GET for the upstream repo's latest release, sent only when an admin opens `/editor/system` (or `/editor/security-posture` with nothing cached) and the kilncms.dev feed above failed or is off. The request carries a bare `KilnCMS` user-agent — no version, no identifier, no content — so GitHub sees only the originating IP. | **On by default** (it needs no credential, so there is no unset secret to imply consent) | `KILN_UPDATE_CHECK=false` |
+| **hex.pm** (plugin health check) | **The package name and version of each plugin locked from hex.pm**, in the URL path: two unauthenticated GETs per plugin (`/api/packages/<name>` and `/api/packages/<name>/releases/<version>`), with a bare `KilnCMS` user-agent and nothing else. hex.pm sees them together with the server's IP, so it can tell which plugins this installation runs. Sent only when a platform admin opens `/editor/system`, opens `/editor/security-posture` while no answer is cached (one background check), or selects **Check plugins now** (at most one round a minute); cached 24 h per node, 15 min after a failure (#2244). Not sent for git, path, private-repo or `projects/` plugins. | **On by default**, whenever some plugin comes from hex.pm | `KILN_PLUGIN_HEALTH_CHECK=false`, or `KILN_UPDATE_CHECK=false` with `KILN_PLUGIN_HEALTH_CHECK` unset |
+| **kilncms.dev security notices feed** (plugin health check) | **Nothing about this instance.** An unauthenticated GET of the published `security_notice` entries (up to five pages, same origin only), with a bare `KilnCMS` user-agent and a fixed query. Sent at the same moments as the hex.pm row, when some plugin comes from Hex, git or a path. Not asked by a fork or mirror, or with `KILN_UPDATE_FEED_URL=false`, unless `KILN_SECURITY_NOTICES_URL` names a feed. | **On by default**, with the hex.pm row | `KILN_SECURITY_NOTICES_URL=false` (this one only), or the hex.pm row's switches (both) |
 
 If you enable any of these, add it to your DPA's subprocessor list. Note the
-update check (both of its rows) is the one entry that is **on by default**: if your deployment must
-make no third-party requests at all, set `KILN_UPDATE_CHECK=false` explicitly
-rather than relying on leaving something unset.
+update check (kilncms.dev release feed and GitHub) and the plugin health check
+(hex.pm and the notices feed) are the entries that are **on by default**, and
+hex.pm is the one of them that learns something about the installation: which
+plugins it runs. If your deployment must make no third-party requests at all,
+set `KILN_UPDATE_CHECK=false` explicitly rather than relying on leaving
+something unset; it turns off both checks unless `KILN_PLUGIN_HEALTH_CHECK` is
+set.
 
 ## Retention & automated purge
 

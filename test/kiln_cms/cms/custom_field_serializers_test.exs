@@ -126,6 +126,7 @@ defmodule KilnCMS.CMS.CustomFieldSerializersTest do
       lib/kiln_cms/i18n/shared_fields.ex
     ),
     actorless: ~w(
+      lib/kiln/plugins/health/notices.ex
       lib/kiln/updates.ex
       lib/kiln_cms/events.ex
       lib/kiln_cms/events/index.ex
