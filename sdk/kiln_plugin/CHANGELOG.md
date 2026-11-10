@@ -56,6 +56,26 @@ Releases are tagged `kiln_plugin-vX.Y.Z` in the
   module without running it. `c:Kiln.Plugin.security_checks/0` defaults to
   `[]`. A plugin using it should require `{:kiln_plugin, "~> 1.4"}`.
 
+- **A security check's `facts` and `summary` are published to monitoring,
+  and `Kiln.Security.Check.Result` repairs invalid UTF-8 (kiln_cms#2521).**
+  The core now serves the posture report as JSON at
+  `GET /api/security/posture`, to the site's administrators (`:site` checks)
+  or platform administrators (`:deployment` checks) who hold an API key.
+  Each check's `id`, `title`, `summary`, `fix_path`, `docs_url` and `facts`
+  are in it; `details` and `description` are not. So `facts` must never
+  carry a secret, a token or a person's address: put names in `details`.
+  - `Kiln.Security.Check.Result.sanitize/1` replaces each invalid UTF-8
+    sequence with U+FFFD in the summary, every detail, every fact key and
+    every string fact value, before it trims them, so a result always
+    encodes as JSON.
+  - `Kiln.Security.Check.Result.fix_path/1` and
+    `Kiln.Security.Check.Result.docs_url/1` return `nil` for a value that is
+    not valid UTF-8: a link is dropped, not repaired.
+  - `Kiln.Security.Check.describe/1` is unchanged and still accepts a
+    non-UTF-8 title or description; the core replaces the bad bytes when it
+    lists the check, and lists a plugin whose `name/0` is not valid UTF-8
+    under its module name.
+
 - **`Kiln.Challenge.Provider` and `c:Kiln.Plugin.challenge_providers/0`
   (kiln_cms#2249).** A plugin can ship a human-verification provider that
   the operator picks with `CHALLENGE_PROVIDER`, beside the built-in

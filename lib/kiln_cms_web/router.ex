@@ -420,9 +420,17 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.AdminAllowlist, :html
   end
 
-  # The same gate on the headless password sign-in, answering in JSON.
+  # The same gate on the headless password sign-in and the security posture,
+  # answering in JSON.
   pipeline :admin_allowlist_api do
     plug KilnCMSWeb.Plugs.AdminAllowlist, :json
+  end
+
+  # Every answer of an admin JSON surface is per-caller, refusals from later
+  # plugs (ApiKeyAuth's 401, RateLimit's 429) included: `private, no-store`,
+  # set just before the response is sent, whatever the handler chose.
+  pipeline :no_store do
+    plug :put_no_store
   end
 
   # Per-IP ceiling for unauthenticated infra/SEO endpoints (`/up` runs a DB
@@ -853,6 +861,17 @@ defmodule KilnCMSWeb.Router do
 
     post "/sign_in", ApiAuthController, :sign_in
     post "/sign_in/verify", ApiAuthController, :verify
+  end
+
+  # Security posture for monitoring (#2521): an administrator's JWT or API
+  # key, behind the site's admin allowlist (first, as on the headless
+  # sign-in, so an off-list caller learns nothing about its credential), on
+  # `:api`'s bucket. The checks behind it run at most once per site and scope
+  # set every 30 s per node (`KilnCMS.Security.Posture.snapshot/2`).
+  scope "/api/security", KilnCMSWeb do
+    pipe_through [:admin_allowlist_api, :no_store, :api]
+
+    get "/posture", SecurityPostureController, :show
   end
 
   # A drafts-only key exchanging itself for a fresh one (ADR 0012). On the
@@ -1578,6 +1597,13 @@ defmodule KilnCMSWeb.Router do
   # to store the image — every CDN in front of Kiln would pass transforms
   # straight through.
   defp read_only_session(conn, _opts), do: configure_session(conn, ignore: true)
+
+  defp put_no_store(conn, _opts) do
+    Plug.Conn.register_before_send(
+      conn,
+      &Plug.Conn.put_resp_header(&1, "cache-control", "private, no-store")
+    )
+  end
 
   defp put_browser_csp(conn, _opts) do
     nonce = generate_csp_nonce()

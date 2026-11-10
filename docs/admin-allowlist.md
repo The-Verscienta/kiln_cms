@@ -20,7 +20,8 @@ address that is not on it. The second column is never affected.
 | The console's downloads: the content, fields, translations, forms entries, analytics, governance and security-log exports, and `/editor/account/export.json` | `/account` (a reader's own settings page) and `/sign-out` |
 | `/setup` (the first-run wizard) | Media downloads, transforms and streams (`/media/:id/...`), `/uploads/*` and static assets |
 | Every sign-in route, for **everyone**, members included: `/sign-in`, `/register`, password reset, magic links, passkeys, single sign-on (`/auth/*`), the two-factor prompt `/sign-in/verify`, sign-in unlock links (`/sign-in/unlock`, `/auth/unlock/...`), account confirmation and invitations (`/auth/invite/...`) | `/preview/...` links (token preview) |
-| Headless sign-in: `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` | JSON:API, GraphQL (`/gql`, `/ws/gql`), MCP, REST and `/ws/bridge`, with an API key or a token already issued |
+| Headless sign-in: `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` | JSON:API, GraphQL (`/gql`, `/ws/gql`), MCP, REST and `/ws/bridge`, with an API key or a token already issued (except the security posture endpoint, left) |
+| The security posture for monitoring, `GET /api/security/posture`, with any credential, API keys included (#2521) | |
 | Opening a console or sign-in page's live connection (LiveView), and pages already open when the list changes | `/up` and `/ready` health checks |
 | The collaborative-editing socket, `/ws/collab` | |
 
@@ -34,7 +35,11 @@ Two consequences to plan for before you turn it on:
   `POST /api/auth/sign_in` from the user's device only works from listed
   networks. A front end that signs in from its own server needs that server's
   address on the list. Tokens already issued and API keys keep working
-  anywhere.
+  anywhere, except on the security posture endpoint below.
+- **Posture monitors need a listed network.** `GET /api/security/posture`
+  ([monitoring](api.md#security-posture-monitoring)) is a map of what is off
+  on the site, so it is gated like the console, even for an API key. Add the
+  monitor's outgoing address to the list.
 
 The gate runs after the site's [block list](ip-blocking.md): an address that is
 both blocked and allowlisted is blocked.
@@ -162,11 +167,15 @@ default.
   link.
 - **A page that was already open:** it is sent to `/editor` by a full page
   load, which gets the page above.
-- **The headless sign-in:** `403` in the API's error format:
+- **The headless sign-in and the security posture endpoint:** `403` in the
+  API's error format, with `cache-control: no-store`:
 
   ```json
-  {"errors": [{"status": "403", "code": "network_not_allowed", "detail": "Sign-in is not available from this network."}]}
+  {"errors": [{"status": "403", "code": "network_not_allowed", "detail": "Not available from this network"}]}
   ```
+
+  Branch on `code`, not on `detail`: the detail is the browser page's
+  heading, and may be translated.
 
 ## How fast a change takes effect
 
@@ -183,8 +192,9 @@ default.
 The allowlist **fails closed**. If a node cannot read a site's list (the
 database is down or overloaded), the console and sign-in pages answer `503`
 "Temporarily unavailable" ("Sign-in is temporarily unavailable. Try again in a
-minute.", with `retry-after: 30`), the headless sign-in answers `503`
-`temporarily_unavailable`, and live connections are refused. A list that
+minute.", with `retry-after: 30`), the headless sign-in and the security
+posture endpoint answer `503` `temporarily_unavailable` (detail "Temporarily
+unavailable", also with `retry-after: 30`), and live connections are refused. A list that
 disappears under load would turn the control off exactly when it is needed;
 the console and sign-in cannot work without the database anyway. The public
 site does not read the list and keeps serving.
@@ -324,6 +334,7 @@ production build; in development set the same thing from IEx.
 | Collaborative editing will not connect while the list is on, on Fly.io or App Platform | Expected: that socket cannot see your address there. |
 | A member says they cannot sign in any more | Member sign-in is restricted too. Add their network, or turn the list off. |
 | A mobile app or a site front end gets `403` `network_not_allowed` from `/api/auth/sign_in` | Headless sign-in is restricted too. See "What it covers". |
+| A security monitor gets `403` `network_not_allowed` from `/api/security/posture` | The posture endpoint is restricted too, whatever the key. Add the monitor's network to the list. |
 | "This needs the running application ... Run it against the live node with `bin/kiln_cms rpc '...'`, not `bin/kiln_cms eval`." | You used `eval`. Use `rpc` against the running release. |
 | `rpc` says "No organization with slug ..." | The `org:` slug is wrong. Leave it out for the default site. |
 

@@ -7,7 +7,10 @@ links to the screen that changes the setting, or names the environment
 variable that does.
 
 Nothing is stored. The checks run each time the page opens, so the page
-shows the settings as they are at that moment.
+shows the settings as they are at that moment. The one copy kept is the
+[monitoring endpoint](#monitor-the-posture-from-a-script)'s: each server keeps
+its last answer for a site for 30 seconds, in memory, without any line's
+**Details**.
 
 ## Who sees what
 
@@ -22,6 +25,10 @@ shows the settings as they are at that moment.
   two-step sign-in. Most of
   these are set with environment variables, not in the console, so a site
   administrator could not fix them anyway.
+
+The [JSON endpoint](#monitor-the-posture-from-a-script) follows the same
+rule, by the account behind the credential: a site administrator's key gets
+the site's lines only, and a platform administrator's key gets both.
 
 Editors and viewers can't open the page, and an administrator of another
 site is turned away. The page is gated twice, like the security log: by the
@@ -340,7 +347,9 @@ This makes Security posture the second place, after **System**, that can
 send the update request: the same unauthenticated request to kilncms.dev,
 falling back to GitHub, carrying nothing that identifies the installation
 ([what is sent](data-flows.md)). It is sent only when a platform
-administrator opens the page, and at most one runs at a time on each server.
+administrator opens the page or calls the
+[JSON endpoint](#monitor-the-posture-from-a-script) with nothing cached, and
+at most one runs at a time on each server.
 `KILN_UPDATE_CHECK=false` turns it off on both pages.
 
 ### Security notices for Kiln
@@ -516,7 +525,8 @@ so the page waits at most as long as the slowest deadline.
   long."
 - **A broken check is one line, not a broken page.** A check that raises,
   throws or exits shows "This check could not run: it failed."; one that
-  answers something that isn't a result shows "...it gave an answer the page
+  answers something that isn't a result, or a result the core can't clean
+  up, shows "...it gave an answer the page
   can't show." The error is written to the server log ("Security posture
   check `<id>` (`<module>`) failed with ..."), never shown on the page.
 - **The deadline holds without the page.** Each check's process stops itself
@@ -543,8 +553,69 @@ starts one process per check:
   checks are already running.") and for five seconds after the last time you
   selected it ("The checks just ran. Try again in a few seconds.").
 - **For one site**, at most three reports run at once on each server, counting
-  every open page and every reload. A fourth shows "The checks are already
+  every open page, every reload and every run for the
+  [JSON endpoint](#monitor-the-posture-from-a-script). A fourth shows "The checks are already
   running for this site. Try again in a moment." Other sites are not affected.
+
+## Monitor the posture from a script
+
+`GET /api/security/posture` answers the same report as JSON (#2521), for an
+uptime monitor or a scheduled job. The request, the credential, every field
+and every status code are in the API guide:
+[Security posture (monitoring)](api.md#security-posture-monitoring). In
+short:
+
+1. Mint a **Read-only** API key under **Operations → API keys**
+   (`/editor/api-keys`), owned by an administrator of the site, or by a
+   platform administrator to get **This installation** too. Not a read-write
+   key: the **API keys** line reports a read-write key owned by an
+   administrator as **Fix now**. A drafts-only (`draft_write`) key is always
+   refused.
+2. If the site has an [admin allowlist](admin-allowlist.md), add the
+   monitor's network to it. The endpoint answers only to listed networks.
+3. Call it on the site's own host:
+
+   ```bash
+   curl -s https://cms.example.com/api/security/posture \
+     -H "authorization: Bearer $KILN_API_KEY"
+   ```
+
+   The answer's `status` is the page's summary badge (`pass`, `warn` or
+   `fail`), `counts` has the number of lines of each kind, and `checks` has
+   one entry per line, with its `id`, `status`, `summary` and `facts`.
+
+What to alert on:
+
+- **Alert at once on `"status": "fail"`**, or on `counts.fail` above zero:
+  some line is **Fix now**.
+- **Alert on a `warn` only when it lasts**, say across several checks over
+  an hour. `warn` covers **Review**, **Unknown** and **Could not run**, and
+  some of those clear by themselves. Right after a server starts or a deploy,
+  the **Kiln version**, **Security notices for Kiln** and **Installed
+  plugins** lines are **Unknown** with `"facts": {"pending": true}` while
+  their background check runs (they are installation lines, so only a
+  platform administrator's key sees them). The first answer after a deploy is
+  therefore often `warn`; a later one, a minute or so on, has the real
+  answer.
+- **Read `counts` for the totals and `checks` by `id`** for a particular
+  line. Don't match on `title` or `summary`: they are English sentences that
+  may change in any release.
+
+What the JSON leaves out, and why:
+
+- **No Details.** The email addresses and key names under **Details** are
+  never in the JSON. Open the page to see who a line is about.
+- **Up to 30 seconds old.** Each server runs the checks at most once every
+  30 seconds per site (and per kind of caller), whoever asks, and answers
+  from that run in the meantime; `generated_at` says when it ran. A fix you
+  just made shows within 30 seconds. **Run checks again** on the page is not
+  cached.
+- **In English**, whatever the site's language.
+
+Calling the endpoint runs the checks like opening the page does. With a
+platform administrator's key, it starts the same background update, security
+notices and plugin checks the page does when nothing is cached, and so sends
+the same requests ([what is sent](data-flows.md)).
 
 ## What it does not check yet
 
@@ -553,8 +624,9 @@ starts one process per check:
   neither notices line reads its version.
 - When an API key was last used.
 
-There is no machine-readable (JSON) output yet: the page is the only way to
-see the report.
+The report is also available as JSON for monitoring; see
+[Monitor the posture from a script](#monitor-the-posture-from-a-script).
+There is no alert built in: Kiln does not tell anyone when a line changes.
 
 ## When something goes wrong
 
@@ -684,13 +756,25 @@ A `title/0` of up to 120 characters and a `description/0` of up to 1000 are
 checked by `conformance/1`; longer ones make the check unusable.
 
 **Facts never carry a secret.** No token, key, password or person's address
-in `facts`. They are machine-readable values, and a later release may
-publish them to monitoring tools. Names and addresses belong in `details`,
-which only the page shows, and only when the reader needs them to act.
+in `facts`. They are machine-readable values, published as they are to
+monitoring tools at
+[`GET /api/security/posture`](api.md#security-posture-monitoring), to every
+administrator who can see the line. Names and addresses belong in `details`,
+which only the page shows, and only when the reader needs them to act. A
+check's `summary` is published there too; its `details` and `description`
+are not.
+
+**Text that is not valid UTF-8** in the summary, a detail, a fact key or a
+string fact value has each bad byte sequence replaced with U+FFFD before it
+is trimmed. A `fix_path` or `docs_url` that is not valid UTF-8 is dropped.
+A title or description that is not valid UTF-8 is repaired the same way by
+the core, so the line still shows; a plugin name that is not valid UTF-8 is
+replaced by the plugin's module name.
 
 **Locale.** The page shows the summary and details exactly as written. To
 translate them, use `context.locale` with the plugin's own Gettext backend.
-The core sets the locale only for its own backend:
+For the [JSON endpoint](#monitor-the-posture-from-a-script) the locale is
+always `"en"`. The core sets the locale only for its own backend:
 
 ```elixir
 def run(%Kiln.Security.Check.Context{locale: locale}) do

@@ -49,6 +49,19 @@ defmodule KilnCMS.Security.Posture.RegistryTest do
     def run(_context), do: pass("ok")
   end
 
+  defmodule BadTitle do
+    use Kiln.Security.Check
+    def id, do: "test.bad_title"
+    def title, do: "ok" <> <<0xFF>>
+    def description, do: "fine" <> <<0xFE>>
+    def scope, do: :site
+    def run(_context), do: pass("ok")
+  end
+
+  defmodule BadNamePlugin do
+    def name, do: "p" <> <<0xFF>>
+  end
+
   defmodule NotACheck do
     def id, do: "test.not_a_check"
   end
@@ -142,5 +155,18 @@ defmodule KilnCMS.Security.Posture.RegistryTest do
     assert Registry.of_plugin(NotLoadedAnywhere) == []
     assert Registry.of_plugin(RaisingPlugin) == []
     assert Registry.of_plugin(SloppyPlugin) == [Slow]
+  end
+
+  test "a title that is not valid UTF-8 is repaired, and the check kept" do
+    seam!([BadTitle])
+
+    assert %{title: "ok\uFFFD", description: "fine\uFFFD"} =
+             Enum.find(Registry.checks(), &(&1.id == "test.bad_title"))
+  end
+
+  test "a plugin name that is not valid UTF-8 is replaced by the module name" do
+    assert Registry.plugin_name(BadNamePlugin) == inspect(BadNamePlugin)
+    assert Registry.plugin_name(OldPlugin) == "old"
+    assert Registry.plugin_name(NotLoadedAnywhere) == "NotLoadedAnywhere"
   end
 end

@@ -10,7 +10,8 @@ defmodule KilnCMS.Security.Posture.Runner do
   (its own, so a page full of slow plugin checks cannot starve the tasks the
   rest of the app starts, and capped at #{50} at once). A check that raises,
   throws or exits is an `:error` entry with `error: :crashed`; one that answers
-  anything but a `Kiln.Security.Check.Result` is `:invalid_result`; one still
+  anything but a `Kiln.Security.Check.Result` (or one the sanitizer cannot
+  read) is `:invalid_result`; one still
   running at its deadline is killed and is `:timeout`; one for which no task
   could be started (the supervisor is full) is `:busy`. The exception is
   logged here, never put on the page.
@@ -108,7 +109,7 @@ defmodule KilnCMS.Security.Posture.Runner do
 
     case Task.yield(task, remaining) || Task.shutdown(task, :brutal_kill) do
       {:ok, {{:returned, result}, duration}} ->
-        case Result.sanitize(result) do
+        case sanitize(descriptor, result) do
           {:ok, clean} -> entry(descriptor, clean.status, nil, clean, duration)
           :error -> entry(descriptor, :error, :invalid_result, nil, duration)
         end
@@ -133,6 +134,22 @@ defmodule KilnCMS.Security.Posture.Runner do
       nil ->
         entry(descriptor, :error, :timeout, nil, ms_to_native(descriptor.timeout))
     end
+  end
+
+  # A boundary like `run_check/2`'s: the result is third-party data, and one
+  # that makes the sanitizer raise is an `:invalid_result` row, not a crash of
+  # the whole report. Logged, never shown.
+  defp sanitize(descriptor, result) do
+    Result.sanitize(result)
+  rescue
+    error ->
+      Logger.error(
+        "Security posture check #{descriptor.id} (#{inspect(descriptor.module)}) answered a " <>
+          "result that could not be sanitized:\n" <>
+          Exception.format(:error, error, __STACKTRACE__)
+      )
+
+      :error
   end
 
   defp entry(descriptor, status, error, result, duration) do
