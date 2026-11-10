@@ -38,7 +38,13 @@ metric "headless API p95 under 50 ms" (#1546).
   that changes markup is not `304`ed to a client holding the old page. Nodes
   of one image agree; during a rolling deploy the tag flips between old and
   new nodes until it finishes. A markup change made only by runtime
-  configuration does not move it. 404s send `Cache-Control: no-store`. The in-BEAM cache is
+  configuration does not move it. The tag also folds the site's head
+  generation, which a save of branding, code injection, feed settings or a
+  menu moves on every node. A site with no such save since a node started
+  carries a token that node drew at random, so without sticky sessions two
+  nodes can tag one page differently until the next save, and a restart moves
+  the tag: extra `200`s, never a stale `304` (#2502). 404s send
+  `Cache-Control: no-store`. The in-BEAM cache is
   single-node, so a CDN in front is what absorbs a viral spike.
 - **Flushing by hand.** Invalidation is automatic and precise on writes, so a
   manual purge is not part of publishing. For the states precise invalidation
@@ -46,8 +52,12 @@ metric "headless API p95 under 50 ms" (#1546).
   custom block — there is a **Flush delivery cache** button on `/editor/system`
   (admin-only) and `mix kiln.cache.flush` for local use (#483). Both clear the
   published-record cache *and* the fired-artifact cache: clearing one leaves the
-  site serving half-stale. Every request re-reads the database until the caches
-  warm again, and on a multi-node deployment the purge reaches **every** node
+  site serving half-stale. They leave each site's `<head>` and menus
+  generation tokens and its last-known admin allowlist in place, because those
+  live in a store no flush or eviction reaches (#2502): moving a token back
+  would answer `304` to a browser holding a page with the old `<head>`. Every
+  request re-reads the database until the caches warm again, and on a
+  multi-node deployment the purge reaches **every** node
   (#1138) — the count shown is from the node that served the request. On a
   release use
   `bin/kiln_cms rpc "KilnCMS.Cache.flush_delivery()"` — the `mix` task boots a

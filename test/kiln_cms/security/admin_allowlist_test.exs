@@ -119,7 +119,7 @@ defmodule KilnCMS.Security.AdminAllowlistTest do
       expire_cache(site)
       # Nothing known on this node yet.
       Cachex.del(
-        KilnCMS.Cache.cache_name(),
+        KilnCMS.Cache.generation_cache_name(),
         KilnCMS.Cache.admin_allowlist_last_known_key(site.id)
       )
 
@@ -155,6 +155,36 @@ defmodule KilnCMS.Security.AdminAllowlistTest do
       site = org("aal-turned-on")
       assert AdminAllowlist.policy(site.id) == :off
       save!(site, ["203.0.113.0/24"])
+
+      assert KilnCMS.OrgSettings.with_actor(nil, fn -> AdminAllowlist.policy(site.id) end) ==
+               :unavailable
+    end
+  end
+
+  # #2502: the last-known copy lives in the generation store, so neither a
+  # delivery-cache clear nor its size cap's eviction can erase it. Erased, a
+  # site last seen off would fail closed in an outage, and the version that
+  # stops a late read writing an old list back would be gone.
+  describe "the last-known value, after the delivery cache is emptied" do
+    test "keeps a site last read as off off through a failed read" do
+      site = org("aal-clear-off")
+      assert AdminAllowlist.policy(site.id) == :off
+
+      KilnCMS.Cache.bust_published()
+
+      assert KilnCMS.OrgSettings.with_actor(nil, fn -> AdminAllowlist.policy(site.id) end) == :off
+    end
+
+    # Eviction drops entries one by one, oldest-written first; a whole clear
+    # of the delivery instance stands in for it.
+    test "keeps the version that refuses a late read of the old list" do
+      site = org("aal-evicted")
+      assert AdminAllowlist.policy(site.id) == :off
+      save!(site, ["203.0.113.0/24"])
+
+      Cachex.clear(KilnCMS.Cache.cache_name())
+      AdminAllowlist.remember_read(site.id, nil)
+      expire_cache(site)
 
       assert KilnCMS.OrgSettings.with_actor(nil, fn -> AdminAllowlist.policy(site.id) end) ==
                :unavailable

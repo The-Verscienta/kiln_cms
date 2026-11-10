@@ -127,11 +127,14 @@ defmodule KilnCMS.DataCase do
   """
   @spec bust_default_org_aggregates() :: :ok
   def bust_default_org_aggregates do
-    cache = KilnCMS.Cache.cache_name()
     org_id = KilnCMS.Accounts.default_org_id()
 
+    # `store_for/1`, not the delivery cache alone: the generation tokens and the
+    # last-known admin allowlist live in a store of their own (#2502), and a
+    # delete aimed at the delivery cache would leave them to leak.
     Enum.each(@org_aggregate_keys, fn name ->
-      Cachex.del(cache, apply(KilnCMS.Cache, name, [org_id]))
+      key = apply(KilnCMS.Cache, name, [org_id])
+      Cachex.del(KilnCMS.Cache.store_for(key), key)
     end)
   end
 
