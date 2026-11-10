@@ -122,7 +122,7 @@ defmodule KilnCMSWeb.InviteLive do
     case result do
       {:ok, user} ->
         socket
-        |> put_flash(:info, password_accepted(user.__metadata__[:invitation_outcome], socket))
+        |> put_flash(:info, password_accepted(user, socket))
         |> redirect(to: ~p"/sign-in")
 
       {:error, error} ->
@@ -228,10 +228,25 @@ defmodule KilnCMSWeb.InviteLive do
   defp accepted(_joined, site),
     do: gettext("You've joined %{site} — sign in to continue.", site: site)
 
-  defp password_accepted(%{outcome: :raised, role: role}, socket),
+  # Accepting over an unconfirmed account forgets every credential it held
+  # (#2453); when one the invitee may have set up was among them, say so.
+  defp password_accepted(user, socket) do
+    accepted = password_outcome(user.__metadata__[:invitation_outcome], socket)
+
+    if user.__metadata__[:forgotten_credentials] == true,
+      do:
+        accepted <>
+          " " <>
+          gettext(
+            "Any two-step verification, passkeys or API keys set up on this address before were removed; set them up again."
+          ),
+      else: accepted
+  end
+
+  defp password_outcome(%{outcome: :raised, role: role}, socket),
     do: raised(role, socket.assigns.site_name)
 
-  defp password_accepted(%{outcome: :already_member, role: role}, socket),
+  defp password_outcome(%{outcome: :already_member, role: role}, socket),
     do:
       gettext(
         "Your account is ready. You were already a member of %{site} as %{tier}, and that is unchanged.",
@@ -239,7 +254,7 @@ defmodule KilnCMSWeb.InviteLive do
         tier: tier(role)
       )
 
-  defp password_accepted(_joined, socket),
+  defp password_outcome(_joined, socket),
     do: gettext("Your account is ready — sign in to %{site}.", site: socket.assigns.site_name)
 
   defp raised(role, site),

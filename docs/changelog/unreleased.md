@@ -4509,6 +4509,41 @@ carries the reasoning.
 
 ## Security
 
+<a id="invitation-takeover-credentials"></a>
+
+- **Accepting an invitation over an unconfirmed account now removes every credential the first registrant could have set up, not just their password and sessions (#2453).**
+  Anyone can register an unconfirmed account for any address, sign in with
+  the password they chose, and, once an admin raises the account's role or
+  mints it a key, enroll an authenticator app, add passkeys, subscribe a push
+  device or hold an API key. The invitee who then accepted with a password
+  took over the account but left all of that in place: the stranger could
+  still sign in with a passkey or a key, and the invitee was asked for a code
+  only the stranger had. `User` `:accept_invitation_with_password` now also
+  clears two-step verification (the secret, recovery codes and any pending
+  enrollment), deletes passkeys, identity-provider links and push devices,
+  and revokes every live API key, draft-write keys included, so they no
+  longer authenticate or rotate. It all happens in the accept's transaction
+  as `SystemActor.new(:invitations)`; if any removal fails, the whole accept
+  rolls back and the invitee can retry. The security log records
+  `second_factor_removed` and `passkey_removed` (new metadata key `via`,
+  `invitation`) and `api_key_revoked`, each with no person, and the
+  invitee's flash adds "Any two-step verification, passkeys or API keys set
+  up on this address before were removed; set them up again." when one of
+  those was removed. A confirmed account's one-click accept changes none of
+  this. A passkey registration, push subscription, two-step confirmation,
+  recovery-code regeneration or password change that the stranger's session
+  had in flight takes the account's row first
+  (`Changes.GuardAccountTakeover`): if it gets there before the takeover, it
+  commits first, and the takeover removes or overwrites what it wrote; if
+  after, it waits, finds the password changed (or the staged secret
+  cleared), and is refused. The
+  stranger's sessions are evicted once the takeover commits. The same guard
+  makes `:confirm_totp` refuse a secret a second tab's `:setup_totp` replaced
+  after the confirmation was built. The threat model records the same wipe on
+  confirmation, password reset and magic-link sign-in of an unconfirmed
+  account as a follow-up. No migration; rolling the pin back is safe.
+  See [What taking over an account removes](../account-administration.md#what-taking-over-an-account-removes).
+
 <a id="account-enumeration-audit"></a>
 
 - **Every surface that takes an email address now answers a known and an unknown address alike, and the threat model has the per-surface matrix (#2255).**

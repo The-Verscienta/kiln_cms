@@ -31,6 +31,13 @@ password and, without TOTP, needs nothing else.
      newer enrolment in the meantime, **the last `setup_totp` wins**: a code
      from the older tab's now-superseded secret is rejected as invalid rather
      than silently promoting a secret the database no longer holds (#787).
+     The write itself then checks again, under the account's row lock
+     (`Changes.GuardAccountTakeover`, #2453): if a second tab's `setup_totp`
+     replaced the staged secret, or an invitation took the account over and
+     cleared it, between the confirmation being built and being written, it is
+     refused with `KilnCMS.Accounts.Errors.AccountTakenOver` ("belongs to an
+     account that changed since this request began"). The settings page shows
+     its usual "That code isn't valid — try again."; start enrollment again.
   3. *Disable* (`disable_totp`) requires a current *live* code, so a walk-up
      attacker on an open session still can't remove the factor — and clears any
      abandoned pending secret along with it.
@@ -241,7 +248,20 @@ and it is what a code is checked against while an enrolment is in progress
   (`:consume_totp_recovery_code`), so it can never sign in twice.
   `/editor/settings` shows the unused count and can regenerate the set (needs a
   current authenticator code; regeneration invalidates unused codes). Disabling
-  2FA clears the set.
+  2FA clears the set. Regeneration checks the code against the account as the
+  request loaded it, so it also re-checks the account's row under lock
+  (`Changes.GuardAccountTakeover`, #2453): a regeneration from a session that
+  predates an invitation's takeover of the account is refused with
+  `KilnCMS.Accounts.Errors.AccountTakenOver` rather than writing codes the
+  stranger knows onto the invitee's account. The page shows "That code isn't
+  valid — try again."
+- **Invitation takeover.** Accepting a site invitation with a password over an
+  unconfirmed account clears the live secret, the recovery codes and any
+  pending enrollment, with no code asked for (#2453): whoever registered the
+  address first may have enrolled them, and the invitee proved the mailbox
+  instead. Recorded as `second_factor_removed` with `via` `invitation` when a
+  confirmed factor was removed. See
+  [What taking over an account removes](account-administration.md#what-taking-over-an-account-removes).
 - **QR-code image.** Enrolment renders the `otpauth://` URI as an inline SVG QR
   (`eqrcode`, pure Elixir) alongside the setup key.
 
