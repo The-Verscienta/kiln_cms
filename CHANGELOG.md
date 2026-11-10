@@ -435,7 +435,6 @@ Every summary line below that was shortened links to its own entry there.
   They compare as "no value", as `custom_sort` already read them; before, JSON ordering made an array greater than every number. Only rows whose field was retyped or written off-type are affected.
   ([#2359](https://github.com/The-Verscienta/kiln_cms/issues/2359) · [#2551](https://github.com/The-Verscienta/kiln_cms/pull/2551) · [long form](docs/changelog/unreleased.md#custom-field-range-index-changed))
 
-- **Every update action on a content resource, an overlay's own included, refuses a trashed row with `StaleRecord`; only `:restore` and `:clear_reference_target` are exempt.**
 - **The smart 404 guard no longer exempts link-preview fetchers or Slurp from its miss threshold, and exempts a search-engine claim only until DNS proves it false.**
   ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#scanner-guard-exemption-narrowed))
 
