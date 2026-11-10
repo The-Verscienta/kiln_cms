@@ -123,7 +123,7 @@ defmodule KilnCMSWeb.BuildFingerprint do
     covered = covered_apps()
 
     apps =
-      for app <- closure(covered, MapSet.new()),
+      for app <- closure(covered, %{}),
           vsn = Application.spec(app, :vsn),
           do: {app, vsn}
 
@@ -140,17 +140,19 @@ defmodule KilnCMSWeb.BuildFingerprint do
   # a set fixed by the release, not by what happens to be loaded when the
   # first page is served (a later `Application.load/1` of something unrelated
   # would otherwise make two nodes disagree).
-  defp closure([], seen), do: Enum.to_list(seen)
+  # `seen` is a plain map, not a MapSet: Dialyzer rejects an opaque MapSet
+  # threaded through a recursive private function.
+  defp closure([], seen), do: Map.keys(seen)
 
   defp closure([app | rest], seen) do
-    if MapSet.member?(seen, app) do
+    if Map.has_key?(seen, app) do
       closure(rest, seen)
     else
       deps =
         (Application.spec(app, :applications) || []) ++
           (Application.spec(app, :included_applications) || [])
 
-      closure(deps ++ rest, MapSet.put(seen, app))
+      closure(deps ++ rest, Map.put(seen, app, true))
     end
   end
 
