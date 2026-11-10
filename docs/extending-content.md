@@ -31,6 +31,13 @@ UI" workflow, scoped to fields.
   `:link` (see "Range and key-value and link fields") — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
+- **Required fields (`required: true`)**: every create or save that sends
+  `custom_fields` refuses a blank value. The one exception is the row the
+  content editor creates when a writer starts a new document. It is created
+  before the writer has seen the fields, so a required field with no `default`
+  starts out blank. The editor's first save asks for the value, and
+  `:publish` and `:publish_scheduled` refuse a document while a required
+  field is blank ("Role (role) is required before publishing").
 - **Private fields (`private: true`)**: a value for the site's editors and
   admins only. It is edited like any other field and stored with the rest,
   but it is left out of every fired artifact (so the delivery API,

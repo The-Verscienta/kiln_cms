@@ -81,6 +81,17 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   the next write as it always was, now with a warning naming it, so the scrub
   is at least visible once.
 
+  ## A new draft from the editor may start blank
+
+  The content editor creates a document's row from a scaffold title and slug
+  before the writer has seen a single field
+  (`KilnCMSWeb.ContentEditor.NewDraft.create/4`), so it passes
+  `context: %{custom_fields_required: :defer}` and that one create leaves a
+  blank required field blank. Every later save sends the whole map, so the
+  writer is asked for the value on the first save, and the editor saves the
+  form before Publish or Submit for review. The flag is ignored on anything but
+  a create.
+
   ## Link fields: data on each connection
 
   A `:reference` definition may declare link fields (`FieldDefinition`
@@ -404,7 +415,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
     # Conditional rules (#2277) read the merged view; they only adjust `required`.
     editable =
-      Conditions.apply_to(editable, Map.merge(existing, supplied), required_when: required_when?)
+      editable
+      |> Conditions.apply_to(Map.merge(existing, supplied), required_when: required_when?)
+      |> defer_required(changeset)
 
     {cleaned, errors} =
       Enum.reduce(
@@ -427,6 +440,23 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     |> then(fn cs -> Enum.reduce(errors, cs, &Ash.Changeset.add_error(&2, &1)) end)
     |> UniqueValues.register(defs)
   end
+
+  # The editor's scaffold create (`KilnCMSWeb.ContentEditor.NewDraft`) writes a
+  # row before the writer has seen a single field, so it cannot satisfy
+  # `required` — and refusing it left a type with a required, default-less
+  # field impossible to start from the editor at all. It passes
+  # `custom_fields_required: :defer`: on that create only, a blank required
+  # field is left blank. Every later write the editor makes sends the whole
+  # map, so the first save — and the flush that runs before Publish or Submit
+  # — asks for the value as usual. Ignored on any write but a create, so the
+  # flag cannot be used to clear a required field on an existing record.
+  defp defer_required(editable, %{
+         action_type: :create,
+         context: %{custom_fields_required: :defer}
+       }),
+       do: Enum.map(editable, &%{&1 | required: false})
+
+  defp defer_required(editable, _changeset), do: editable
 
   # Split the keys no definition declares into the ones this write refuses and
   # the ones it drops. Neither is ever stored — the cleaned map is folded out of
@@ -650,6 +680,34 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   """
   @spec defaulted_keys(Ash.Changeset.t()) :: [String.t()]
   def defaulted_keys(changeset), do: changeset.context[:kiln_custom_fields_defaulted] || []
+
+  @doc """
+  One error per required custom field that `changeset` would leave blank on
+  the record — read off the `custom_fields` it writes, after `required_when`
+  (#2277) has settled. Computed fields never count: they cannot be required.
+
+  The check `KilnCMS.CMS.Validations.RequiredCustomFields` runs at publish. A
+  write that never names `custom_fields` does not run the editable pass, and
+  the editor's scaffold create defers `required` (module doc, "A new draft
+  from the editor may start blank"), so a draft can reach Publish with a
+  required field still empty.
+  """
+  @spec missing_required(Ash.Changeset.t()) :: [Exception.t()]
+  def missing_required(changeset) do
+    defs = stashed_definitions(changeset) || definitions_for(changeset)
+
+    values =
+      changeset
+      |> Ash.Changeset.get_attribute(:custom_fields)
+      |> Kernel.||(%{})
+      |> stringify_keys()
+
+    defs
+    |> Enum.reject(&(&1.field_type == :computed))
+    |> Conditions.apply_to(values, required_when: true)
+    |> Enum.filter(&(&1.required and blank_for?(&1, Map.get(values, &1.name))))
+    |> Enum.map(&error(&1, "is required before publishing"))
+  end
 
   # Resolve one definition's value and fold it into the {cleaned, errors} acc.
   # Three-way per key: a field the caller *supplied* is coerced/cleared; a field
