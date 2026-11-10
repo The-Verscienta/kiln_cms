@@ -6,6 +6,7 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
   import ExUnit.CaptureLog
 
   alias KilnCMS.Backups.{Artifact, Checksum, MediaArchive}
+  alias KilnCMS.Test.{Eventually, OsProcess}
 
   @moduletag :tmp_dir
 
@@ -80,17 +81,6 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
     File.write!(path, "#!/bin/sh\n" <> body)
     File.chmod!(path, 0o755)
     path
-  end
-
-  defp os_alive?(os_pid),
-    do: match?({_, 0}, System.cmd("kill", ["-0", os_pid], stderr_to_stdout: true))
-
-  defp eventually(fun, tries \\ 100) do
-    cond do
-      fun.() -> true
-      tries == 0 -> false
-      true -> Process.sleep(50) && eventually(fun, tries - 1)
-    end
   end
 
   defp real_tar, do: System.find_executable("tar")
@@ -531,14 +521,28 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
 
       caller = spawn(fn -> MediaArchive.archive_part(plan, 1, ctx.out, tar: tar) end)
 
-      assert eventually(fn -> File.exists?(pidfile) and File.read!(pidfile) =~ ~r/\d+\n/ end)
+      Eventually.eventually(
+        fn -> File.exists?(pidfile) and File.read!(pidfile) =~ ~r/\d+\n/ end,
+        timeout_ms: 10_000,
+        message: "the stub tar never wrote its pid"
+      )
+
       os_pid = pidfile |> File.read!() |> String.trim()
-      assert os_alive?(os_pid)
+      assert OsProcess.alive?(os_pid)
 
       Process.exit(caller, :kill)
 
-      assert eventually(fn -> not os_alive?(os_pid) end),
-             "tar (pid #{os_pid}) outlived its killed caller"
+      # Killed, whether or not reaped yet, inside a wall-clock budget: the
+      # watcher's `kill -9` is a fork that a loaded host can delay for
+      # seconds (#2564), and the stub sleeps 30 s, so 10 s still fails a
+      # watcher that never fires.
+      Eventually.eventually(fn -> OsProcess.gone?(os_pid) end,
+        timeout_ms: 10_000,
+        message: fn ->
+          "tar (pid #{os_pid}) outlived its killed caller: " <>
+            "ps state #{inspect(OsProcess.state(os_pid))}"
+        end
+      )
     end
 
     test "a tar that cannot list its archive fails the part", ctx do
