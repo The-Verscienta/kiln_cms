@@ -29,6 +29,42 @@ carries the reasoning.
   - **Rolling back** is safe: the old release goes back to its own tags,
     which costs another one-time round of `200`s.
 
+<a id="twitter-card-upgrade"></a>
+
+- **Run `mix ash.migrate` for the new X (Twitter) username setting, and expect
+  fired `json` artifacts to move to `format_version` 4 (#2258). On a large
+  site, run `mix kiln.refire_all` after the deploy.**
+  - **The migration.** `20261110041039_add_site_branding_twitter_site` adds a
+    nullable `site_branding.twitter_site` (`text`). Additive and instant; no
+    existing row changes, and nothing is set until a site admin saves one.
+  - **Why the version moves.** The `json` artifact gains a `social` object
+    that belongs on every published document, not only on ones edited after
+    the deploy (the reason `robots` did not need a bump). Only a
+    `format_version` bump makes existing artifacts converge.
+  - **How existing artifacts converge.** An artifact older than v4 is re-fired
+    in the background after the first read that misses the firing cache. That
+    read, and cached reads for up to an hour, still serve the old body, and a
+    document nobody reads is never re-fired. `mix kiln.refire_all` (on a
+    release, `bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`) re-fires every
+    published document through the `firing` queue instead.
+  - **What a re-fire doesn't reach.** A re-fire is not an edit, so:
+    - an `/api/sync` mirror is not sent the document again; it keeps the body
+      without `social` until the document is next edited, or until it runs a
+      fresh `?initial=true` sync after the re-fire has finished;
+    - a CDN or client that revalidates with `If-None-Match` gets `304` for the
+      old artifact body, because the artifact `ETag` names the document's
+      last edit, not the body
+      ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463));
+      `?fields=` responses are unaffected (their `ETag` is a body digest);
+    - Kiln's own HTML pages render the new tags at once, but their `ETag` also
+      ignores the layout until the document is edited or a site setting that
+      reaches `<head>` (such as Branding) is saved, so a revalidating CDN may
+      hold the old `<head>` until then.
+  - **Rolling back.** Safe. The older release ignores the column. It serves
+    v4 artifacts as stored, `social` included, rather than downgrading them,
+    and logs at most once a minute that an artifact is newer than the build;
+    `mix kiln.refire_all` on the older release rewrites them in its own shape.
+
 <a id="invitation-raise-tier-upgrade"></a>
 
 - **After upgrading, check Team → Pending invitations on each site for
@@ -1040,6 +1076,59 @@ carries the reasoning.
     gets an `updated` marked `refire` after its own event.
   - `/api/sync` does not report a re-fire, because it reads `updated_at`;
     a mirror picks the new body up on its next full resync (`initial=true`).
+
+<a id="twitter-card-tags"></a>
+
+- **Site admins can set the site's X (Twitter) username, and link previews
+  are built from one resolution: no empty tags, absolute images on the site's
+  own host, and the same values for Open Graph and X (#2258).** For site
+  admins, front-end developers and anyone sharing links.
+  - **X (Twitter) username.** A new field in **Delivery → Branding**,
+    **Identity** section (site admins only). It accepts `kilncms`, `@kilncms`
+    or an `x.com` / `twitter.com` profile URL (with `www.` or `mobile.`, a
+    trailing slash, and a `?s=21`-style query or fragment), stores
+    `@kilncms`, and refuses anything else, including X's own pages (`home`,
+    `i`, `explore`, `search`, `settings` and the like), with "must be an X
+    (Twitter) username like @kilncms". Pages then carry
+    `<meta name="twitter:site">`. It is per site only: there is no
+    environment variable or instance-wide default. A site that added
+    `twitter:site` under **Code injection** should remove it, or the tag
+    appears twice.
+  - **One resolution for both sets of tags.**
+    `KilnCMSWeb.Layouts.social_meta/1` feeds `og:title`/`twitter:title`,
+    `og:description`/`twitter:description`, `og:image`/`twitter:image`,
+    `twitter:card` and `twitter:site`. A tag with no value is left out, never
+    sent as `content=""`. The title falls back to the site name, so the stock
+    home page now has `og:title` and `twitter:title`. A blank page image falls
+    through to Branding's Default social image instead of an empty tag. The
+    card is `summary_large_image` when there is an image (the page's or the
+    site's), else `summary`.
+  - **Absolute images.** `og:image`, `twitter:image` and the JSON-LD `image`
+    are now always absolute on the site's own address (custom domain, else
+    subdomain, else `PUBLIC_BASE_URL`), including a page's own site-relative
+    Social image, which used to go out relative. `KilnCMSWeb.Tenant.absolute_url/2`
+    is the one place that decides this; a relative image with no site to
+    resolve it against is dropped.
+  - **No separate social override fields.** The SEO title, SEO description and
+    Social image are the overrides, so a search result and a link preview
+    never disagree about a page.
+  - **`social` on the `json` artifact.** `{"title", "description", "image"}`:
+    the effective SEO title (else the title; `null` only with no title), the
+    effective SEO description and the SEO image made absolute, the last two
+    omitted when there is none. The image's host is fixed when the document
+    is fired, so re-fire after changing a site's domain. It is per document
+    only: no card type, no `twitter:site` and no Branding fallback image,
+    because those belong to the site, and Branding is not on any API yet, so a
+    front end supplies its own handle and default image. `?fields=social`
+    returns it alone, and under an experiment `social.title` stays canonical.
+    `GET /api/schema` adds `social` as an optional property, and the
+    generated TypeScript, Swift and Kotlin models gain it. JSON:API, GraphQL,
+    MCP and webhook payloads are unchanged.
+  - **Not yet:** `twitter:creator`, and `og:image:alt` / `twitter:image:alt`
+    (the Social image stores no alt text).
+  - Guides: [Link previews](../seo.md#link-previews-open-graph-and-x-twitter-cards)
+    (with the how-to) and, for front ends,
+    [the `social` object](../headless-consumer-guide.md#link-previews-the-social-object).
 
 <a id="plugin-health-checks"></a>
 

@@ -50,7 +50,13 @@ defmodule KilnCMS.Firing.Engine do
   # focal point and variants on `:media` custom fields, and a `"media"` key on
   # `image` blocks and gallery images — so a read of an older artifact re-fires
   # it (`migrate_if_stale/4`) and it converges without a backfill.
-  @format_version 3
+  # v4 added `social` to `:json` (#2258): the document's link-preview title,
+  # description and absolute image. Unlike `robots` (#2256),
+  # `custom_fields_portable` (#2103) or `inherited_fields` (#1327), which were
+  # added without a bump because they only matter on documents edited after the
+  # deploy, `social` belongs on every existing document — and only a bump makes
+  # those converge, through `migrate_if_stale/4`.
+  @format_version 4
 
   @enqueue_log_key {__MODULE__, :last_refire_enqueue_failure_ms}
   @future_log_key {__MODULE__, :last_future_artifact_ms}
@@ -276,8 +282,11 @@ defmodule KilnCMS.Firing.Engine do
   @doc """
   The serialized shape version this build writes (decision A2).
 
-  Bumped whenever a surface's shape changes. v2 added `custom_fields` to `:json`
-  and `contentLocation` to `:json_ld` (#428/#429).
+  Bumped whenever a surface's shape changes in a way every existing document
+  should pick up. v2 added `custom_fields` to `:json` and `contentLocation` to
+  `:json_ld` (#428/#429); v3 the media shape on `:json`; v4 the `social` object
+  on `:json` (#2258). A stored artifact older than this is re-fired when read
+  (`migrate_if_stale/4`).
   """
   @spec format_version() :: pos_integer()
   def format_version, do: @format_version
@@ -564,6 +573,40 @@ defmodule KilnCMS.Firing.Engine do
       else: body
   end
 
+  # The document's link-preview fields (#2258), so a consumer rendering its own
+  # pages can emit Open Graph and X (Twitter) card tags that agree with Kiln's
+  # own HTML: the same effective SEO title and description (the type's pattern
+  # when the author wrote none) and the SEO image made absolute on the
+  # document's own site. `title` is always present (nil only when the document
+  # has no title); `description` and `image` are absent when there is none.
+  #
+  # Document-level only. The card type, `twitter:site` and the brand's fallback
+  # image are SITE-level values (branding), so they stay out of a per-document
+  # artifact; a consumer supplies its own.
+  defp put_social(body, document) do
+    social =
+      %{
+        "title" =>
+          KilnCMS.Seo.Patterns.effective(document, :seo_title) || Map.get(document, :title)
+      }
+      |> put_present("description", KilnCMS.Seo.Patterns.effective(document, :seo_description))
+      |> put_present(
+        "image",
+        KilnCMSWeb.Tenant.absolute_url(document.org_id, Map.get(document, :seo_image))
+      )
+
+    Map.put(body, "social", social)
+  end
+
+  defp put_present(map, key, value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> map
+      _ -> Map.put(map, key, value)
+    end
+  end
+
+  defp put_present(map, _key, _value), do: map
+
   # ── per-surface composition (whole-doc artifact of per-block fragments, A1) ──
 
   # In the document's locale, not the worker's: the renderers write a few
@@ -603,6 +646,7 @@ defmodule KilnCMS.Firing.Engine do
     |> put_plain_fields(custom)
     |> put_portable_fields(custom)
     |> put_robots(document)
+    |> put_social(document)
   end
 
   # Clean chunked Markdown for LLM/answer-engine extraction (#357, GEO).

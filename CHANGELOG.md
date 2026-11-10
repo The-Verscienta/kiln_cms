@@ -58,7 +58,11 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Every `/api/content` `ETag` and every Kiln-rendered page's `ETag` changes once on this deploy, so revalidating clients and CDNs get one round of `200`s. Page tags now also change on every deploy whose code or assets differ.**
   No migration; rolling the pin back is safe (another one-time round of `200`s).
-  ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463) · [long form](docs/changelog/unreleased.md#render-etags-upgrade))
+  ([#2583](https://github.com/The-Verscienta/kiln_cms/pull/2583) · [long form](docs/changelog/unreleased.md#render-etags-upgrade))
+
+- **Run `mix ash.migrate` (new nullable `site_branding.twitter_site`). Fired `json` artifacts move to `format_version` 4 (new `social` key) and re-fire on their first uncached read; on a large site, run `mix kiln.refire_all` after the deploy.**
+  `/api/sync` mirrors and clients revalidating with `If-None-Match` keep the old body until a document is edited (#2463). Rolling the pin back is safe.
+  ([#2582](https://github.com/The-Verscienta/kiln_cms/pull/2582) · [long form](docs/changelog/unreleased.md#twitter-card-upgrade))
 
 - **Accepting an invitation now raises a member below the invited tier; before this, demoting or removing a member left their pending invitation live. For 7 days after upgrading, check Team → Pending invitations for such members and revoke those invitations.**
   No migration; rolling the pin back is safe.
@@ -190,7 +194,11 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`mix kiln.refire_all --notify` (`KilnCMS.Firing.Sweep.run(notify: true)`) announces each re-fired document to webhook endpoints and the change feed as `<type>.updated` with `"reason": "refire"`, which `Firing.refire/3`'s `updated` now carries too.**
   Not to automation, federation or the CDN purge. Guide: [docs/releasing.md](docs/releasing.md#re-render-published-content-after-an-upgrade).
-  ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463) · [long form](docs/changelog/unreleased.md#refire-notify))
+  ([#2583](https://github.com/The-Verscienta/kiln_cms/pull/2583) · [long form](docs/changelog/unreleased.md#refire-notify))
+
+- **Site admins can set the site's X (Twitter) username under Branding, sent as `twitter:site`. Link-preview tags never go out empty, images are absolute on the site's own host, and the `json` artifact gains `social`.**
+  Guide: [docs/seo.md](docs/seo.md#link-previews-open-graph-and-x-twitter-cards). Remove any `twitter:site` added under Code injection, or it appears twice.
+  ([#2582](https://github.com/The-Verscienta/kiln_cms/pull/2582) · [long form](docs/changelog/unreleased.md#twitter-card-tags))
 
 - **Operations → System → Plugins shows whether each plugin still checks out: changed on Hex since this build, a security notice, retired or unmaintained on Hex, or a `kiln_plugin` requirement this Kiln doesn't meet. Security posture gains an Installed plugins line.**
   Unknown is never OK; git and path plugins can't be verified against Hex. `mix kiln.plugins.list --health` runs it too. Guide: [docs/security-posture.md](docs/security-posture.md#check-your-installed-plugins).
@@ -465,7 +473,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **A re-fire or a deploy that changes rendered markup is no longer answered `304` to a client holding the old copy: a fired artifact's `ETag` is now a digest of the body served, and a Kiln-rendered page's names the running build.**
-  ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463) · [long form](docs/changelog/unreleased.md#render-etags))
+  ([#2583](https://github.com/The-Verscienta/kiln_cms/pull/2583) · [long form](docs/changelog/unreleased.md#render-etags))
 
 - **Accepting an invitation raises a lower membership on the site to the invited tier (never lowers one) and the page says which happened; changing a member's tier or removing them retires their pending invitation.**
   ([#2573](https://github.com/The-Verscienta/kiln_cms/pull/2573) · [long form](docs/changelog/unreleased.md#invitation-raises-lower-membership))

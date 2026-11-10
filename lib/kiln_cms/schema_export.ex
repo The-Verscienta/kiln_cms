@@ -520,6 +520,24 @@ defmodule KilnCMS.SchemaExport do
           },
           "required" => ["noindex", "nofollow"],
           "additionalProperties" => false
+        },
+        # Optional (#2258): an artifact fired before format_version 4 lacks it
+        # until it is re-fired, so a consumer must not count on it.
+        "social" => %{
+          "type" => "object",
+          "description" =>
+            "The document's link-preview fields, for Open Graph and X (Twitter) card " <>
+              "tags: the effective SEO title (else the title), the effective SEO " <>
+              "description and the SEO image as an absolute URL. `description` and " <>
+              "`image` are absent when there is none. Site-level values (card type, " <>
+              "the site's X account, the brand's fallback image) are not included.",
+          "properties" => %{
+            "title" => %{"type" => ["string", "null"]},
+            "description" => %{"type" => "string"},
+            "image" => %{"type" => "string"}
+          },
+          "required" => ["title"],
+          "additionalProperties" => false
         }
       },
       "required" => ["blocks", "custom_fields", "id", "locale", "slug", "title", "type"],

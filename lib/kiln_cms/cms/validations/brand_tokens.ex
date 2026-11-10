@@ -38,6 +38,15 @@ defmodule KilnCMS.CMS.Validations.BrandTokens do
   Accepting `oklch()` / `color-mix()` / `var()` would each need their own
   sub-grammar for no operator benefit. Alpha is rejected: a translucent brand
   colour silently breaks the contrast pairing with `--color-primary-content`.
+
+  ## X (Twitter) username
+
+  `twitter_site` lands in a `<meta content>` attribute on every page (#2258).
+  HEEx escapes it, so this is about a correct card rather than injection: X's
+  own username grammar (1-15 letters, digits or underscores), with or without
+  the leading `@`. A profile URL on `x.com` or `twitter.com` is what people
+  copy from the address bar, so it is accepted and reduced to its handle; any
+  other URL is refused.
   """
   use Ash.Resource.Validation
 
@@ -48,10 +57,21 @@ defmodule KilnCMS.CMS.Validations.BrandTokens do
 
   @hex ~r/\A#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\z/
 
+  @twitter_handle ~r/\A@?([A-Za-z0-9_]{1,15})\z/
+  # A profile link as X's share sheet and browsers copy it: `www.` or
+  # `mobile.`, an optional trailing slash, and an optional `?s=21`-style query
+  # or fragment (#2258 review).
+  @twitter_profile ~r"\Ahttps?://(?:www\.|mobile\.)?(?:x|twitter)\.com/@?([A-Za-z0-9_]{1,15})/?(?:[?#]\S*)?\z"i
+
+  # X's own first path segments: `x.com/home` is a page, not an account, and
+  # would publish a wrong `twitter:site` on every page.
+  @twitter_reserved ~w(home i explore settings search intent share notifications messages login signup tos privacy compose)
+
   @impl true
   def validate(changeset, _opts, _context) do
-    with :ok <- validate_urls(changeset) do
-      validate_color(Ash.Changeset.get_attribute(changeset, :brand_color))
+    with :ok <- validate_urls(changeset),
+         :ok <- validate_color(Ash.Changeset.get_attribute(changeset, :brand_color)) do
+      validate_twitter_site(Ash.Changeset.get_attribute(changeset, :twitter_site))
     end
   end
 
@@ -194,4 +214,49 @@ defmodule KilnCMS.CMS.Validations.BrandTokens do
   defp expand_shorthand("#" <> <<r::binary-1, g::binary-1, b::binary-1>>) do
     String.downcase("##{r}#{r}#{g}#{g}#{b}#{b}")
   end
+
+  defp validate_twitter_site(value) when value in [nil, ""], do: :ok
+
+  defp validate_twitter_site(value) do
+    if normalize_twitter_site(value) do
+      :ok
+    else
+      {:error,
+       InvalidAttribute.exception(
+         field: :twitter_site,
+         message: "must be an X (Twitter) username like @kilncms",
+         value: value
+       )}
+    end
+  end
+
+  @doc """
+  Canonical `@handle` for an accepted X (Twitter) username, or `nil` for a
+  blank or refused value.
+
+  Accepts `kilncms`, `@kilncms`, and a profile URL on `x.com` / `twitter.com`
+  (optionally `www.` or `mobile.`, a trailing slash, and a query or fragment
+  such as `?s=21`). X's own pages (`home`, `i`, `explore`, `settings`, …) are
+  refused, case-insensitively, as a bare handle as well as in a URL:
+
+      iex> KilnCMS.CMS.Validations.BrandTokens.normalize_twitter_site("https://x.com/kilncms?s=21")
+      "@kilncms"
+      iex> KilnCMS.CMS.Validations.BrandTokens.normalize_twitter_site("https://x.com/home")
+      nil
+
+  Shared with
+  `KilnCMS.Branding`, which normalizes again on read, so a cached or legacy
+  value that no longer passes renders no tag rather than a wrong one.
+  """
+  @spec normalize_twitter_site(term()) :: String.t() | nil
+  def normalize_twitter_site(value) when is_binary(value) do
+    trimmed = String.trim(value)
+
+    case Regex.run(@twitter_handle, trimmed) || Regex.run(@twitter_profile, trimmed) do
+      [_, handle] -> if String.downcase(handle) in @twitter_reserved, do: nil, else: "@" <> handle
+      nil -> nil
+    end
+  end
+
+  def normalize_twitter_site(_), do: nil
 end

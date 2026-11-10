@@ -355,6 +355,78 @@ must not hold your API key. Mint on the server, redeem in the page:
 See [api.md → Preview tokens](api.md#preview-tokens) for the response shape and
 who may mint.
 
+## Link previews: the `social` object
+
+A front end that renders its own pages needs Open Graph and X (Twitter) card
+tags that agree with Kiln's. The `json` surface carries the document's part of
+them in `social` (#2258):
+
+```bash
+curl -s 'https://cms.example.com/api/content/post/hello-world?fields=social'
+```
+
+```json
+{"id": "…", "type": "post",
+ "social": {"title": "Hello, world",
+            "description": "Our first post.",
+            "image": "https://cms.example.com/uploads/hello.png"}}
+```
+
+| Key | Value |
+|---|---|
+| `title` | The effective SEO title (the author's, else the type's pattern), else the document's title. Always present; `null` only when the document has no title. |
+| `description` | The effective SEO description. Absent when there is none. |
+| `image` | The SEO image as an absolute URL. A site-relative image is put on the document's own site: its custom domain, else its subdomain, else `PUBLIC_BASE_URL` for the default site. Absent when there is none. |
+
+These are the values Kiln's own pages use for `og:title` / `twitter:title`,
+`og:description` / `twitter:description` and the page's own `og:image` /
+`twitter:image` ([seo.md](seo.md#link-previews-open-graph-and-x-twitter-cards)).
+`?fields=social` returns just this object, as above. Under an experiment
+(`?variant_key=`), `title` at the top level is the variant's while
+`social.title` stays the canonical one: a link preview is read by a machine,
+and a variant never changes what a machine reads.
+
+**What you supply yourself.** `social` is per document, so it leaves out the
+three values that belong to the site rather than the document:
+
+- **The card type.** Use `summary_large_image` when you have an image
+  (`social.image`, or your own default) and `summary` when you don't. That is
+  Kiln's own rule.
+- **`twitter:site`.** The site's X username is set in Kiln's Branding settings,
+  but branding is not on any API yet, so put your handle in your front end's
+  config.
+- **A fallback image.** Kiln's pages fall back to Branding's Default social
+  image; the artifact does not, so `image` is absent on a document without one.
+  Use your own default.
+
+Not provided: `twitter:creator` and image alt text (`og:image:alt`).
+
+**`image` is fixed when the document is fired.** It names the host the site
+had at that moment. After a site's custom domain or slug, or the
+deployment's `PUBLIC_BASE_URL`, changes, artifacts keep the old host until they
+are re-fired (`mix kiln.refire_all`); Kiln's own pages resolve the host on
+every request and are not affected.
+
+**Older artifacts.** `social` arrived with `format_version` 4, so the schema
+from `GET /api/schema` marks it optional, and an artifact fired by an earlier
+release lacks it until it is re-fired. Kiln re-fires such an artifact in the
+background after the first read that misses its cache; that read, and cached
+reads for up to an hour after it, still get the old body. An operator can
+re-fire everything at once with `mix kiln.refire_all`. Even after the re-fire,
+two kinds of consumer keep the old body until the document is next edited:
+
+- **A `/api/sync` mirror** gets a document again only when it changes
+  editorially, and a re-fire is not an edit. To refresh a mirror, wait until
+  the operator's `mix kiln.refire_all` has finished, then run a fresh
+  `?initial=true` sync.
+- **A client or CDN that revalidates with `If-None-Match`.** The artifact's
+  `ETag` names the document's last edit, not the body, so it gets `304` for the
+  old body ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463)).
+  Re-read without the validator, or use `?fields=`, whose `ETag` is a digest
+  of the body.
+
+Read `social` as optional and fall back to `title` when it is missing.
+
 ## Author / PII
 
 No surface exposes author email or role. Content carries only the opaque
