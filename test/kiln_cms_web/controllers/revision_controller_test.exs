@@ -425,7 +425,102 @@ defmodule KilnCMSWeb.RevisionControllerTest do
 
       assert row.() == before
     end
+
+    # #2532: the restore carries the optimistic lock. The route reads the
+    # document and then the version, so a save landing between that read and
+    # the restore makes the read stale. The save is forced into that window by
+    # a telemetry handler on the version read, which runs in this process.
+    test "a save racing the restore is a 409 and the save stands",
+         %{admin: admin, page: page} do
+      [first | _] = versions(page, admin)
+      key = mint(admin, :read_write)
+
+      race_version_read(fn ->
+        CMS.update_page!(page, %{title: "Saved meanwhile"}, actor: admin)
+      end)
+
+      assert {409, %{"errors" => [error]}, conn} =
+               req(:post, "#{rev_path(:page, page.id)}/#{first.id}/restore", key: key)
+
+      assert Process.get(:revision_race_ran)
+      assert error["code"] == "invalid_state_transition"
+      assert error["detail"] =~ "nothing was restored"
+      assert get_resp_header(conn, "cache-control") == ["private, no-store"]
+      assert CMS.get_page!(page.id, actor: admin).title == "Saved meanwhile"
+      # The racing save cut a version; the refused restore did not.
+      assert length(versions(page, admin)) == 4
+    end
+
+    # The same stale refusal when the racing write is a trash (#2332): the
+    # document is gone, which the route answers as a 404 whenever it notices.
+    test "a trash racing the restore is a 404 and writes nothing",
+         %{admin: admin, page: page} do
+      [first | _] = versions(page, admin)
+      key = mint(admin, :read_write)
+
+      race_version_read(fn -> CMS.destroy_page!(page, actor: admin) end)
+
+      assert {404, %{"errors" => [%{"code" => "not_found"}]}, _conn} =
+               req(:post, "#{rev_path(:page, page.id)}/#{first.id}/restore", key: key)
+
+      assert Process.get(:revision_race_ran)
+
+      assert %{rows: [["Three", archived_at]]} =
+               KilnCMS.Repo.query!("SELECT title, archived_at FROM pages WHERE id = $1", [
+                 Ecto.UUID.dump!(page.id)
+               ])
+
+      assert archived_at
+    end
+
+    # A caller the content policies refuse is refused whatever raced it: the
+    # 403 is about the credential, and a 409 would invite a retry that can
+    # never succeed.
+    test "a read-only key racing a save is still a 403", %{admin: admin, page: page} do
+      [first | _] = versions(page, admin)
+      key = mint(user(:editor), :read)
+
+      race_version_read(fn ->
+        CMS.update_page!(page, %{title: "Saved meanwhile"}, actor: admin)
+      end)
+
+      assert {403, %{"errors" => [%{"code" => "forbidden"}]}, _conn} =
+               req(:post, "#{rev_path(:page, page.id)}/#{first.id}/restore", key: key)
+
+      assert Process.get(:revision_race_ran)
+      assert CMS.get_page!(page.id, actor: admin).title == "Saved meanwhile"
+      assert length(versions(page, admin)) == 4
+    end
   end
+
+  # Forces a write into the restore route's read-to-write window (#2532). The
+  # route reads the document and then the version, so a telemetry handler on
+  # this test process's first page-version read runs `race` after the
+  # document read and before the restore. Telemetry handlers run in the
+  # emitting process, which under `ConnTest` is this one.
+  defp race_version_read(race) do
+    handler = "revision-restore-race-#{System.unique_integer([:positive])}"
+
+    :ok =
+      :telemetry.attach(
+        handler,
+        [:ash, :cms, :read, :stop],
+        &__MODULE__.run_race/4,
+        %{test: self(), race: race}
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+  end
+
+  @doc false
+  def run_race(_event, _measurements, %{resource: KilnCMS.CMS.Page.Version}, config) do
+    if self() == config.test and not Process.get(:revision_race_ran, false) do
+      Process.put(:revision_race_ran, true)
+      config.race.()
+    end
+  end
+
+  def run_race(_event, _measurements, _metadata, _config), do: :ok
 
   describe "custom fields in a revision" do
     test "changes[\"custom_fields\"] is the whole new map, not the edited key",

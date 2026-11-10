@@ -70,6 +70,7 @@ defmodule KilnCMSWeb.RevisionController do
   alias KilnCMS.CMS.VersionFields
   alias KilnCMS.CMS.VersionSnapshot
   alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.InlineEditing
   alias KilnCMSWeb.Params
 
   @default_limit 20
@@ -257,8 +258,21 @@ defmodule KilnCMSWeb.RevisionController do
   defp run_restore(scope, version) do
     case ContentTypes.restore_version(scope.ct, scope.record, version.id, scope.opts) do
       {:ok, record} -> {:ok, record}
-      {:error, error} -> {:restore_failed, Ash.Error.to_error_class(error)}
+      {:error, error} -> restore_refused(scope, Ash.Error.to_error_class(error))
     end
+  end
+
+  # A stale refusal (#2532) is either a write that landed since this request
+  # read the document, or the document moved to the trash or purged meanwhile
+  # (#2332). Read it again to tell them apart: a gone document answers as the
+  # route does for one already gone before the request, a 404.
+  defp restore_refused(_scope, %Ash.Error.Forbidden{} = error), do: {:restore_failed, error}
+
+  defp restore_refused(scope, error) do
+    if InlineEditing.stale_conflict?(error) and
+         fetch_record(scope.ct, scope.record.id, scope.opts) == :not_found,
+       do: :not_found,
+       else: {:restore_failed, error}
   end
 
   # --- shapes ---------------------------------------------------------------
@@ -357,8 +371,22 @@ defmodule KilnCMSWeb.RevisionController do
     )
   end
 
+  # The restore carries the optimistic lock (#2532): a write that landed
+  # between this request's read and its restore lost the race. That is a 409
+  # with the code JSON:API gives every other `StaleRecord`
+  # (`KilnCMSWeb.AshStateMachineErrors`), which the clients already treat as
+  # "reload and decide", not a 422 the request could fix by changing.
   defp refuse(conn, {:restore_failed, error}) do
-    ApiError.send(conn, :unprocessable_entity, "restore_failed", restore_detail(error))
+    if InlineEditing.stale_conflict?(error) do
+      ApiError.send(
+        conn,
+        :conflict,
+        "invalid_state_transition",
+        "This document changed while the version was being restored, so nothing was restored. Read it again and retry."
+      )
+    else
+      ApiError.send(conn, :unprocessable_entity, "restore_failed", restore_detail(error))
+    end
   end
 
   defp refuse(conn, _not_found),
