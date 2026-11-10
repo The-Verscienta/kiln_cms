@@ -14,7 +14,7 @@ defmodule KilnCMSWeb.SearchApiBudgetTest do
 
     @impl true
     def embed(_text) do
-      Process.sleep(3_000)
+      KilnCMS.Test.SearchHold.hold(:search_api_budget_delay)
       {:ok, List.duplicate(0.1, 384)}
     end
   end
@@ -37,7 +37,13 @@ defmodule KilnCMSWeb.SearchApiBudgetTest do
 
   setup do
     original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
-    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, original) end)
+
+    on_exit(fn ->
+      Application.put_env(:kiln_cms, KilnCMS.Search, original)
+      Application.delete_env(:kiln_cms, :search_api_budget_delay)
+    end)
+
+    KilnCMS.Test.SearchHold.release_on_exit()
 
     admin =
       Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -56,17 +62,21 @@ defmodule KilnCMSWeb.SearchApiBudgetTest do
 
   test "a slow embedding is cut: keyword hits, flagged partial, not cached",
        %{conn: conn, word: word, page: page} do
-    # 1 s, not less: the embedding takes half, and the other half has to
-    # carry every section's lexical legs. `/api/search` sweeps every
+    # Seconds, not milliseconds: the embedding takes half, and the other half
+    # has to carry every section's lexical legs. `/api/search` sweeps every
     # registered content type and has no parameter to narrow that, so an
     # overlay with a dozen more types left 200 ms (at a 400 ms budget) too
-    # little on a 2-scheduler CI runner, and the pages section was cut.
-    put_search_env(semantic: true, embedder: SlowEmbedder, query_budget: 1_000)
+    # little on a 2-scheduler CI runner, and the pages section was cut. And a
+    # lexical leg still querying at the deadline is killed mid-query, which
+    # in the SQL sandbox takes the test's shared connection with it (#2553).
+    Application.put_env(:kiln_cms, :search_api_budget_delay, 30_000)
+    put_search_env(semantic: true, embedder: SlowEmbedder, query_budget: 3_000)
 
     {micros, conn} = :timer.tc(fn -> get(conn, "/api/search?q=#{word}") end)
     body = json_response(conn, 200)
 
-    assert micros < 1_500_000
+    # Nowhere near the embedder's thirty seconds.
+    assert micros < 6_000_000
     assert [%{"id" => id}] = body["results"]["pages"]
     assert id == page.id
 
@@ -80,7 +90,7 @@ defmodule KilnCMSWeb.SearchApiBudgetTest do
 
     timing = server_timing(conn)
     # The embedding gave up at half the budget.
-    assert timing["embed"] >= 150 and timing["embed"] < 1_000
+    assert timing["embed"] >= 1_400 and timing["embed"] < 3_000
   end
 
   test "a finished search is not partial, stays cacheable, and times every part",
