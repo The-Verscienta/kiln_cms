@@ -192,7 +192,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Overlay and plugin code: `restore_<type>_version` now refuses a record read before a later write (`StaleRecord`) and increments `lock_version`. Read the record again before restoring, and use the one it returns.**
   The revisions restore route answers a lost race with `409` `invalid_state_transition`, not `422`.
-  ([#2532](https://github.com/The-Verscienta/kiln_cms/issues/2532) · [long form](docs/changelog/unreleased.md#restore-version-stale-struct))
+  ([#2616](https://github.com/The-Verscienta/kiln_cms/pull/2616) · [long form](docs/changelog/unreleased.md#restore-version-stale-struct))
 
 - **Overlay and plugin code: `purge_<type>` and `purge_media_item` now refuse a record that isn't in the trash (`StaleRecord`). Trash it first (`destroy_<type>`).** The API never exposed `:purge`.
   ([#2609](https://github.com/The-Verscienta/kiln_cms/pull/2609) · [long form](docs/changelog/unreleased.md#purge-trashed-only))
@@ -502,10 +502,10 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **Restoring a version from a copy someone has since saved or published is now refused (editor: the conflict banner; API: `409`, or `404` if trashed), instead of reporting success and writing nothing or skipping the claim and alt-text gates.**
-  ([#2532](https://github.com/The-Verscienta/kiln_cms/issues/2532) · [long form](docs/changelog/unreleased.md#restore-refuses-stale-copy))
+  ([#2616](https://github.com/The-Verscienta/kiln_cms/pull/2616) · [long form](docs/changelog/unreleased.md#restore-refuses-stale-copy))
 
 - **A save from a tab opened before a version restore no longer silently writes the old text back over it; a restore now increments `lock_version`, so that tab gets the conflict banner.**
-  ([#2532](https://github.com/The-Verscienta/kiln_cms/issues/2532) · [long form](docs/changelog/unreleased.md#restore-bumps-lock-version))
+  ([#2616](https://github.com/The-Verscienta/kiln_cms/pull/2616) · [long form](docs/changelog/unreleased.md#restore-bumps-lock-version))
 
 - **Permanently deleting a trashed page, post, entry or media file that someone else had restored in the meantime no longer hard-deletes the live record, with no `deleted` webhook and no artifact cleanup. `:purge` now takes only a trashed row.**
   The Trash page now says when someone else restored or permanently deleted an item and reloads the list. Code that purges a live record must trash it first.
