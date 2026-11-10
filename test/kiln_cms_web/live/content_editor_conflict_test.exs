@@ -126,6 +126,47 @@ defmodule KilnCMSWeb.ContentEditorConflictTest do
     refute has_element?(lv, ~s(button[type="submit"][disabled]))
   end
 
+  # #2532: `:restore_version` carries the optimistic lock, so a restore
+  # confirmed from a session whose record someone has since saved over is
+  # refused. It must read as the same conflict as a stale save, not as a
+  # failed restore, and leave the typed text alone.
+  test "a restore confirmed after a concurrent save shows the conflict banner", %{conn: conn} do
+    editor = authed_user(:editor)
+    page = CMS.create_page!(%{title: "Original", slug: slug()}, actor: editor)
+    page = CMS.update_page!(page, %{title: "Revised"}, actor: editor)
+
+    [first | _] =
+      CMS.list_page_versions!(actor: editor)
+      |> Enum.filter(&(&1.version_source_id == page.id))
+      |> Enum.sort_by(& &1.version_inserted_at, DateTime)
+
+    {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+
+    lv
+    |> form("#page-editor")
+    |> render_change(%{
+      "form" => %{"title" => "My unsaved words"},
+      "_target" => ["form", "title"]
+    })
+
+    # Someone else saves first, bumping lock_version out from under this editor.
+    {:ok, _} = CMS.update_page(page, %{title: "Changed elsewhere"}, actor: editor)
+
+    render_click(lv, "restore", %{"version_id" => first.id})
+    assert has_element?(lv, "#restore-preview-dialog")
+    html = render_click(lv, "confirm_restore", %{"version_id" => first.id})
+
+    assert html =~ "This content changed elsewhere"
+    refute html =~ "Restored that version."
+    assert has_element?(lv, ~s(#edit-conflict[role="alert"]), "Someone else saved changes")
+    assert has_element?(lv, "#edit-conflict button", "Reload latest")
+    assert has_element?(lv, ~s(button[type="submit"][disabled]))
+    # The person's unsaved text is still in the form.
+    assert has_element?(lv, ~s(#page-editor input[name="form[title]"][value="My unsaved words"]))
+    # And the row keeps the other session's save.
+    assert CMS.get_page!(page.id, actor: editor).title == "Changed elsewhere"
+  end
+
   describe "the record is moved to the trash while open (#2332)" do
     @gone "This content was moved to the trash or deleted"
 

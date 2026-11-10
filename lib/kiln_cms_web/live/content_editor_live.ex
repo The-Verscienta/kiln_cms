@@ -3947,9 +3947,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> assign(:compare_pick, [])
         |> put_flash(:info, gettext("Restored that version."))
 
+      # `:restore_version` carries the optimistic lock (#2532): a page changed
+      # since this session loaded it is refused rather than restored onto a
+      # copy the row no longer matches. `flag_conflict/1` also tells a page
+      # moved to the trash meanwhile apart (#2332).
       {:error, error} ->
-        if gone_after_stale?(socket, error),
-          do: flag_gone(socket),
+        if stale_conflict?(error),
+          do: flag_conflict(socket),
           else: put_flash(socket, :error, restore_error_message(error))
 
       _ ->

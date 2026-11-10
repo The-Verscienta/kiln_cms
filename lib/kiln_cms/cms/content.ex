@@ -3394,6 +3394,23 @@ defmodule KilnCMS.CMS.Content do
           # `:notable`. Ignored when no safety field changed.
           argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           argument :version_id, :uuid, allow_nil?: false
+          # The row must still be the struct the caller holds (#2532), checked
+          # FIRST. `RestoreVersion` writes from a `before_action` and judges
+          # the struct: its state picks the claim and alt-text gates, its slug
+          # the redirect, and a force-change equal to it is dropped. So the
+          # write is filtered on the held `lock_version` (and bumps it, which
+          # makes every pre-restore struct stale in turn) and on the held
+          # `state`, because the workflow writes (`:publish`, `:unpublish` and
+          # their scheduled twins, which fold a working copy into the text,
+          # `:archive`, `:unarchive`) keep `lock_version`. A miss on either is
+          # `StaleRecord`, and the trash is `Changes.RefuseTrashed`'s filter.
+          # Known gap: a write that keeps both still lets a held struct pass,
+          # with that write's columns stale: the computed-field refresh and
+          # field conversion and `:resnapshot_media` (`custom_fields`),
+          # `:set_oembed_metadata` (fetched embed data inside blocks), `:move`
+          # and `:reassign_author`. None of them moves the state, slug or text.
+          change optimistic_lock(:lock_version)
+          change KilnCMS.CMS.Changes.StateUnchangedSinceRead
           change KilnCMS.CMS.Changes.RestoreVersion
 
           # A restore is a content write, so everything derived from content has
