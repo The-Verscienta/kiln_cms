@@ -2,7 +2,8 @@ defmodule KilnCMSWeb.BlockLocaleTest do
   @moduledoc """
   The strings Kiln writes into a page's article — a form's labels, a sign-up
   block's fields, an embed's fallback title, the byline — are in the page's
-  language, the one `<html lang>` declares, not the request's (#2465). And on a
+  language, the one `<article lang>` declares, not the request's (#2465). The
+  chrome around it, `<html lang>` included, is the request's (#2595). And on a
   multi-locale site (the test config: en, fr, es) a form or sign-up posts to a
   path pinned to that language, so the response to it is in it too.
   """
@@ -112,7 +113,8 @@ defmodule KilnCMSWeb.BlockLocaleTest do
         # The second request is a payload-cache hit.
         html = request |> get("/fr/#{page.slug}") |> html_response(200)
 
-        assert html =~ ~s(lang="en")
+        assert html |> one("html") |> LazyHTML.attribute("lang") == ["fr"]
+        assert html |> one("article.public-article") |> LazyHTML.attribute("lang") == ["en"]
         form = text(html, "form.kiln-newsletter-signup")
         assert form =~ "Email"
         assert form =~ "Name"
@@ -319,11 +321,21 @@ defmodule KilnCMSWeb.BlockLocaleTest do
       Gettext.put_locale(KilnCMSWeb.Gettext, "en")
     end
 
-    test "served unprefixed posts to the bare path", %{conn: conn} do
+    # The URL's locale is the default when there is no prefix (#2595), and it
+    # is pinned like any other: a bare action would answer in the session's.
+    test "served unprefixed posts under the default locale's prefix", %{conn: conn} do
       form = form!()
-      html = conn |> unique_ip() |> get("/forms/#{form.slug}/embed") |> html_response(200)
 
-      assert action(html, "form.kiln-form") == "/forms/#{form.slug}"
+      html =
+        conn
+        |> french_session()
+        |> unique_ip()
+        |> get("/forms/#{form.slug}/embed")
+        |> html_response(200)
+
+      assert action(html, "form.kiln-form") == "/en/forms/#{form.slug}"
+      assert html =~ "Submit"
+      refute html =~ "Soumettre"
     end
   end
 

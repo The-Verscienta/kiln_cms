@@ -35,6 +35,7 @@ defmodule KilnCMS.Staging.Scrub do
           billing_events_purged: non_neg_integer(),
           backup_runs_purged: non_neg_integer(),
           security_events_purged: non_neg_integer(),
+          security_alert_dispatches_purged: non_neg_integer(),
           invitations_purged: non_neg_integer(),
           memberships_scrubbed: non_neg_integer(),
           tiers_deactivated: non_neg_integer(),
@@ -98,6 +99,10 @@ defmodule KilnCMS.Staging.Scrub do
     # snapshots of the production sign-ins: personal data a clone must not carry.
     {security_events_purged, _} = Repo.delete_all(KilnCMS.Security.Event)
 
+    # Pending security alerts (#2245) would mail and notify the production
+    # admins' accounts from the clone, about production events.
+    {security_alert_dispatches_purged, _} = Repo.delete_all(KilnCMS.Security.AlertDispatch)
+
     # Pending site invitations (#2135) name production addresses, and each one's
     # link would set up an account on the clone for whoever holds the mail.
     {invitations_purged, _} = Repo.delete_all(KilnCMS.Accounts.Invitation)
@@ -147,6 +152,7 @@ defmodule KilnCMS.Staging.Scrub do
       billing_events_purged: billing_events_purged,
       backup_runs_purged: backup_runs_purged,
       security_events_purged: security_events_purged,
+      security_alert_dispatches_purged: security_alert_dispatches_purged,
       invitations_purged: invitations_purged,
       memberships_scrubbed: memberships_scrubbed,
       tiers_deactivated: tiers_deactivated,

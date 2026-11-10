@@ -148,7 +148,8 @@ defmodule KilnCMSWeb.ContentControllerChallengeTest do
       bare = page!([])
       with_plain = page!([form_block(plain)])
 
-      # The pre-#2249 formula, with no forms segment, and the build named last
+      # The pre-#2249 formula, with no forms segment, the chrome's locale
+      # (#2595, the default at an unprefixed URL) and the build named last
       # (#2463).
       expected = fn record ->
         raw =
@@ -156,6 +157,7 @@ defmodule KilnCMSWeb.ContentControllerChallengeTest do
             ":#{record.seo_title}:#{record.seo_description}" <>
             ":#{KilnCMSWeb.Robots.directive(record)}" <>
             ":#{KilnCMS.Cache.head_generation(record.org_id)}" <>
+            ":chrome=#{KilnCMS.I18n.default_locale()}" <>
             ":#{KilnCMSWeb.BuildFingerprint.fingerprint()}"
 
         digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)

@@ -51,7 +51,13 @@ defmodule KilnCMSWeb.FormController do
   alias KilnCMSWeb.Embed
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.Plugs.ChallengeCsp
+  alias KilnCMSWeb.Plugs.UrlLocale
   alias KilnCMSWeb.Tenant
+
+  # The embed document is `public` and shared-cacheable under its URL, so its
+  # language is the URL's, never the session's (#2595). Not the submissions:
+  # a POST is never cached, and its locale already comes from the pinned path.
+  plug UrlLocale when action in [:embed]
 
   # The embed page is public and changes only when an admin edits the form, so a
   # short shared-cache window is safe; a deactivated form disappears within it.
@@ -107,13 +113,14 @@ defmodule KilnCMSWeb.FormController do
       form ->
         conn
         |> put_resp_header("cache-control", "public, max-age=#{@embed_max_age_seconds}")
-        # The page is rendered through gettext, and the locale can come from
-        # `Accept-Language` rather than the path — without this a shared cache
-        # serves the first visitor's language to everyone for the window. Same
-        # rule published HTML already follows (docs/performance.md).
+        # The page is rendered through gettext in the URL's locale
+        # (`Plugs.UrlLocale`, #2595). It used to fall back to the session's on
+        # an unprefixed URL, which no `Vary` could key a shared cache on.
+        # `Vary` is kept as the rule published HTML follows
+        # (docs/performance.md).
         |> put_resp_header("vary", "accept-language")
         |> put_view(KilnCMSWeb.FormHTML)
-        |> render(:embed, form: form, action: pinned_action(conn, form))
+        |> render(:embed, form: form, action: pinned_action(UrlLocale.locale(conn), form))
     end
   end
 
@@ -264,7 +271,7 @@ defmodule KilnCMSWeb.FormController do
       values: submitted_values(form, params),
       rendered_at: submitted_rendered_at(params),
       variant: Params.string(params, Forms.variant_field()),
-      action: pinned_action(conn, form)
+      action: pinned_action(conn.assigns[:path_locale], form)
     ]
 
     conn = conn |> put_status(422) |> put_view(KilnCMSWeb.FormHTML)
@@ -292,8 +299,12 @@ defmodule KilnCMSWeb.FormController do
   # or from a content page whose form is pinned to its language (#2465), the
   # corrected re-submit keeps the prefix and so the visitor's language — the
   # default locale's too, since an unprefixed path would take the session's.
-  defp pinned_action(conn, form),
-    do: KilnCMS.I18n.pinned_path(conn.assigns[:path_locale], "/forms/" <> form.slug)
+  #
+  # The embed passes the URL's locale, default included (#2595), so even an
+  # unprefixed embed posts under a prefix. A submission's re-render passes the
+  # prefix it was posted under, as before.
+  defp pinned_action(locale, form),
+    do: KilnCMS.I18n.pinned_path(locale, "/forms/" <> form.slug)
 
   # The re-render draws a fresh widget when the form asks for one (#2249), so
   # its policy must allow the provider; any other refusal keeps the strict one.

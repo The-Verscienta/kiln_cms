@@ -17,6 +17,21 @@ defmodule KilnCMS.Security.Changes.RecordRoleChange do
   the event lands in that org's log whichever org the acting admin is viewing.
   Erasure writes none of these: it forces `role` through `:anonymize`, a
   different action, and clears grants through `:expire_role_grant`.
+
+  Metadata the security alerts read (#2245):
+
+    * `level` — `"site"` for a membership, `"platform"` for the account's own
+      role;
+    * `change` on `:role_revoked` — `"removed"` (membership deleted) or
+      `"demoted"` (role lowered);
+    * `via` on `:role_granted` — `"legacy_carry"` when the write is
+      `KilnCMS.Accounts.LegacyAffiliation` copying a legacy account's standing
+      role onto its first membership (Ash context `kiln_legacy_carry: true`),
+      which grants nothing the account did not already hold.
+
+  A removed membership records the role it **effectively** held (`role` is
+  `RoleGrant.effective_role/1`): removing a member whose admin power comes
+  from a live temporary grant takes admin away, and the event says so.
   """
   use Ash.Resource.Change
 
@@ -54,13 +69,28 @@ defmodule KilnCMS.Security.Changes.RecordRoleChange do
   defp with_role(%{role: role}, type) when not is_nil(role), do: type
   defp with_role(_record, _type), do: nil
 
-  defp metadata(record, %{action: %{type: :update}} = changeset) do
+  defp metadata(record, changeset),
+    do: record |> role_metadata(changeset) |> Map.put("level", level(record))
+
+  defp role_metadata(record, %{action: %{type: :update}} = changeset) do
     if RoleGrant.elevation?(record.role, changeset.data.role),
-      do: %{"role" => record.role, "previous_role" => changeset.data.role},
-      else: %{"role" => changeset.data.role}
+      do: via(%{"role" => record.role, "previous_role" => changeset.data.role}, changeset),
+      else: %{"role" => changeset.data.role, "change" => "demoted"}
   end
 
-  defp metadata(record, _changeset), do: %{"role" => record.role}
+  defp role_metadata(record, %{action: %{type: :destroy}}),
+    do: %{"role" => RoleGrant.effective_role(record), "change" => "removed"}
+
+  defp role_metadata(record, changeset), do: via(%{"role" => record.role}, changeset)
+
+  defp via(metadata, changeset) do
+    if changeset.context[:kiln_legacy_carry] == true,
+      do: Map.put(metadata, "via", "legacy_carry"),
+      else: metadata
+  end
+
+  defp level(%OrgMembership{}), do: "site"
+  defp level(_user), do: "platform"
 
   defp tenant(%OrgMembership{organization_id: org_id}, _changeset), do: org_id
   defp tenant(_user, _changeset), do: nil

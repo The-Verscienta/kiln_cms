@@ -41,6 +41,22 @@ defmodule KilnCMS.Security do
       define :events_older_than, action: :older_than, args: [:cutoff]
       define :sign_in_events_from_ip, action: :sign_in_from_ip, args: [:ip, :since]
       define :get_event, action: :read, get_by: [:id]
+      # Security alerts (#2245), read as `alerts_system/0`.
+      define :get_event_for_alert, action: :for_alert, get_by: [:id]
+
+      define :alert_window_events,
+        action: :alert_window,
+        args: [:types, :since, :until]
+    end
+
+    # Security alerts (#2245): claimed in raw SQL by `AlertGate`, delivered by
+    # its own AshOban triggers. Nothing here is a person's to call.
+    resource KilnCMS.Security.AlertDispatch do
+      define :list_alert_dispatches, action: :read
+      define :deliver_alert_dispatch, action: :deliver_alert
+      define :deliver_alert_summary, action: :deliver_summary
+      define :mark_alert_dispatch_failed, action: :mark_failed
+      define :prune_alert_dispatches, action: :prune
     end
 
     # The Security posture page (#2252), and its detail-free snapshot for
@@ -63,6 +79,22 @@ defmodule KilnCMS.Security do
   # the grant away and prove erasure and pruning fail CLOSED.
   @spec with_actor(term(), (-> result)) :: result when result: term()
   def with_actor(actor, fun), do: KilnCMS.SystemActor.with_override(:security, actor, fun)
+
+  @doc """
+  The actor security alerts (#2245) read and deliver as: a
+  `KilnCMS.SystemActor` labelled `:security_alerts`. Separate from `system/0`
+  so the alert path can read the event an alert names, but cannot record,
+  rewrite or prune the log. Honours `with_alerts_actor/2`.
+  """
+  @spec alerts_system() :: KilnCMS.SystemActor.t() | nil
+  def alerts_system, do: KilnCMS.SystemActor.resolve(:security_alerts)
+
+  @doc false
+  # Test seam: run `fun` with `alerts_system/0` answering `actor`, so a test can
+  # take the grant away and prove a delivery fails closed.
+  @spec with_alerts_actor(term(), (-> result)) :: result when result: term()
+  def with_alerts_actor(actor, fun),
+    do: KilnCMS.SystemActor.with_override(:security_alerts, actor, fun)
 
   @doc """
   Scrub every event a now-erased user is the actor or the target of, across all

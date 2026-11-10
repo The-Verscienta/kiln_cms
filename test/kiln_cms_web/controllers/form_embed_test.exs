@@ -21,8 +21,9 @@ defmodule KilnCMSWeb.FormEmbedTest do
       html = html_response(conn, 200)
       assert html =~ "<!DOCTYPE html>"
       assert html =~ "Contact us"
-      # Posts back to the normal submit endpoint, marked as an embedded submission.
-      assert html =~ ~s(action="/forms/#{form.slug}")
+      # Posts back to the normal submit endpoint, marked as an embedded
+      # submission, under the URL's locale (the default here, #2595).
+      assert html =~ ~s(action="/en/forms/#{form.slug}")
       assert html =~ ~s(name="_kiln_embed")
       # Height reporter is an external script (so CSP needs no nonce).
       assert html =~ "/embed-frame.js"

@@ -30,7 +30,7 @@ make **published content world-readable and everything else editor-only**. So an
 unauthenticated query can only ever see published content and world-readable
 taxonomy; there is nothing to leak. Anonymous means *no* `Authorization` header:
 a bearer token that does not verify (garbled, expired, another instance's) is a
-`401` `invalid_token`, not an anonymous read (#2161; see
+`401` (`code: "invalid_token"`, `extensions.code: "unauthenticated"`), not an anonymous read (#2161; see
 [`KILN_API_REJECT_INVALID_BEARER`](environment-variables.md)).
 
 ## Design: delivery reads, authenticated writes

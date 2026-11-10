@@ -304,7 +304,14 @@ defmodule KilnCMS.Notifications.Notification do
                     # (#2251), to the site's admins — one row per admin and
                     # site, about the queue rather than the applicant
                     # (`KilnCMS.Notifications.Registrations`).
-                    :registration_pending
+                    :registration_pending,
+                    # A security alert (#2245), to a site's member admins or the
+                    # platform admins: `content_type` "security_alert_dispatch",
+                    # `content_id` the `KilnCMS.Security.AlertDispatch` row.
+                    :security_alert,
+                    # An `alerts_silenced` notice (#2245): someone made the site's
+                    # alerts quieter. Same anchor as `:security_alert`.
+                    :security_notice
                   ]
     end
 

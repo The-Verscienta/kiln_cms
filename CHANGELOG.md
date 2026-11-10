@@ -59,8 +59,12 @@ Every summary line below that was shortened links to its own entry there.
 - **Update the host's copy of `scripts/backup.sh` so cron's prune honors the new `kiln-<stamp>.good` marker, which the app keeps on the newest verified backup of each component (part of #2219).** No migration; rolling back is safe.
   ([#2552](https://github.com/The-Verscienta/kiln_cms/pull/2552) · [long form](docs/changelog/unreleased.md#backup-last-good-marker-upgrade))
 
-- **Before rolling back to v1.8.0, run `DELETE FROM notifications WHERE event = 'registration_pending';` and `DELETE FROM api_keys WHERE access = 'draft_write';` (re-mint those keys after rolling forward; never `UPDATE` them). Check #2605 first if any site has `key_value` or `telephone` fields.**
+- **Before rolling back to v1.8.0, run `DELETE FROM notifications WHERE event IN ('registration_pending', 'security_alert', 'security_notice');` and `DELETE FROM api_keys WHERE access = 'draft_write';` (re-mint those keys after rolling forward; never `UPDATE` them). Check #2605 first if any site has `key_value` or `telephone` fields.**
   ([#2606](https://github.com/The-Verscienta/kiln_cms/pull/2606) · [long form](docs/changelog/unreleased.md#rollback-to-1-8-0-upgrade))
+
+- **Run `mix ash.migrate` (new tables `security_alert_dispatches`, `site_security_alerts`; `users.notify_on_security_alert`, `NOT NULL DEFAULT true`). Site member admins now get security alert emails for every kind but failed sign-ins; platform admins get platform alerts they can't mute. A site with no member admins sends them to the platform admins.**
+  The stolen-key email is now an alert, with the old email as fallback; alert email uses the instance relay. `security` is a reserved webhook namespace. Before rolling back past #2509, delete the new notifications and `api_key_reuse_detected` events.
+  ([#2638](https://github.com/The-Verscienta/kiln_cms/pull/2638) · [long form](docs/changelog/unreleased.md#security-alerts-upgrade))
 
 - **Every `/api/content` `ETag` and every Kiln-rendered page's `ETag` changes once on this deploy, so revalidating clients and CDNs get one round of `200`s. Page tags now also change on every deploy whose code or assets differ.**
   No migration; rolling the pin back is safe (another one-time round of `200`s).
@@ -193,6 +197,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Breaking
 
+- **Public pages take their language from the URL only. On a fallback page `<html lang>` and `Content-Language` now name the reader's (URL) language; the new `x-kiln-locale` header and `<article lang>` name the record's. Style articles with `.public-article:lang(xx)`, not `html[lang]`.**
+  Unprefixed URLs serve only the default locale (a French-only page is a 404 there), and a form page or embed posts under a prefix. Headless APIs unchanged.
+  ([#2646](https://github.com/The-Verscienta/kiln_cms/pull/2646) · [long form](docs/changelog/unreleased.md#public-chrome-follows-url-locale))
+
 - **Overlay and plugin code: `restore_<type>_version` now refuses a record read before a later write (`StaleRecord`) and increments `lock_version`. Read the record again before restoring, and use the one it returns.**
   The revisions restore route answers a lost race with `409` `invalid_state_transition`, not `422`.
   ([#2616](https://github.com/The-Verscienta/kiln_cms/pull/2616) · [long form](docs/changelog/unreleased.md#restore-version-stale-struct))
@@ -217,6 +225,10 @@ Every summary line below that was shortened links to its own entry there.
 - **`GET /api/security/posture` returns the Security posture checks as JSON for monitoring: an administrator's JWT or API key (never `draft_write`), behind the site's admin allowlist, no details, cached 30 s per node.**
   The allowlist's JSON refusals now read "Not available from this network" / "Temporarily unavailable" (codes unchanged). Guide: [docs/api.md](docs/api.md#security-posture-monitoring).
   ([#2521](https://github.com/The-Verscienta/kiln_cms/issues/2521) · [#2648](https://github.com/The-Verscienta/kiln_cms/pull/2648) · [long form](docs/changelog/unreleased.md#security-posture-json))
+
+- **Security alerts: site admins get a bell notice and an email when someone becomes an admin, a role is raised, an account is locked out, two-factor is turned off or single sign-on changes; platform admins when a platform admin or API key is created or a stolen key is reused. Organization → Security alerts picks the kinds.**
+  One alert per kind per 15 minutes plus a summary; opt-in `security.*` webhook events; turning alerts down sends the site's member admins a notice nobody can mute. Guide: [docs/security-alerts.md](docs/security-alerts.md).
+  ([#2638](https://github.com/The-Verscienta/kiln_cms/pull/2638) · [long form](docs/changelog/unreleased.md#security-alerts))
 
 - **Security posture gains a Security notices for Kiln line (`core.security_notices`): Fix now, at any severity, when a published notice's affected range covers the running Kiln. System's Updates card shows the same.**
   Off with `KILN_UPDATE_CHECK=false`; shares the plugin check's notices fetch, which `KILN_PLUGIN_HEALTH_CHECK=false` no longer stops. Guide: [docs/security-posture.md](docs/security-posture.md#security-notices-for-kiln).
@@ -520,6 +532,16 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The editor can start a new document of a type with a required custom field that has no default; it used to fail with "Couldn't create the draft" and log nothing. The field starts blank, the first save asks for it, and the refused-create path now logs its error.**
+  Publish and scheduled publish now refuse a document while a required custom field is blank, including drafts written before the field became required.
+  ([#2651](https://github.com/The-Verscienta/kiln_cms/pull/2651))
+
+- **The `401` for an unverifiable bearer token now matches the scheme case-insensitively and treats a bare `Bearer` as invalid, on every `Authorization` value; the response is `private, no-store` with `Vary: Authorization`, and `/gql` answers in GraphQL's error shape (`extensions.code: "unauthenticated"`, plus `code: "invalid_token"`) while `/api` keeps `invalid_token`. A lower-case `bearer <jwt>`, which used to be served as anonymous, is now a `401`.**
+  ([#2318](https://github.com/The-Verscienta/kiln_cms/issues/2318) · [long form](docs/changelog/unreleased.md#bearer-401-hardening))
+
+- **A visitor's session language no longer reaches shared caches: unprefixed public pages, the blog and event indexes, `index.json`, the stock home and form pages and embeds were cached `public` in whichever language the first visitor's session chose.**
+  ([#2646](https://github.com/The-Verscienta/kiln_cms/pull/2646) · [long form](docs/changelog/unreleased.md#public-delivery-session-locale-leak))
+
 - **`mix kiln.fields.convert` and `mix kiln.media.resnapshot` now also process trashed documents, without firing them, so a document restored after a contract release has the new shape. A trashed record that fails is reported as `(trashed)` and blocks nothing; re-run both right before the contract release.**
   ([#2622](https://github.com/The-Verscienta/kiln_cms/pull/2622) · [long form](docs/changelog/unreleased.md#contract-backfills-reach-trash))
 
@@ -550,7 +572,7 @@ Every summary line below that was shortened links to its own entry there.
 - **A refused workflow action now says why: "Only an admin …" only to an editor (publish, unpublish, archive: where only admins publish; return: any site), "You can't edit this content type." to an editor scoped away from the type (never for the trash), the plain sentence to everyone else.**
   ([#2600](https://github.com/The-Verscienta/kiln_cms/pull/2600) · [long form](docs/changelog/unreleased.md#refusal-wording-names-the-reason))
 
-- **Kiln's own text inside a content page's article (form and sign-up labels and messages, byline and date, the verification widget, an untitled embed's title) now follows the page's `<html lang>`, not the visitor's.**
+- **Kiln's own text inside a content page's article (form and sign-up labels and messages, byline and date, the verification widget, an untitled embed's title) now follows the article's `lang`, not the visitor's.**
   On a multilingual site form and sign-up blocks post to `/<locale>/forms/<slug>` and `/<locale>/newsletter/subscribe`, default locale included; select them by class, not `action`.
   ([#2598](https://github.com/The-Verscienta/kiln_cms/pull/2598) · [long form](docs/changelog/unreleased.md#block-strings-follow-page-locale))
 

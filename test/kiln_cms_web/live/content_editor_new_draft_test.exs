@@ -169,6 +169,87 @@ defmodule KilnCMSWeb.ContentEditorNewDraftTest do
     assert saved.slug == "saved-once"
   end
 
+  describe "a type with a required custom field and no default" do
+    # A `team_member` with a required `role` could not be started from the
+    # editor at all: the scaffold create carried no `role`, `required` refused
+    # it, and the writer saw "Couldn't create the draft" with nothing logged.
+    setup do
+      admin = authed_user(:admin)
+
+      KilnCMS.CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "role",
+          label: "Role",
+          field_type: :string,
+          required: true
+        },
+        actor: admin
+      )
+
+      %{admin: admin}
+    end
+
+    test "typing a title creates the draft, and the editor asks for the field",
+         %{conn: conn, editor: editor} do
+      {:ok, lv, _html} = live(conn, ~p"/editor/content/page/new")
+
+      html = type_title(lv, "Dr. Ada")
+
+      assert [page] = pages(editor)
+      assert_patch(lv, ~p"/editor/content/page/#{page.id}")
+      refute html =~ "Couldn&#39;t create the draft"
+      refute Map.has_key?(page.custom_fields || %{}, "role")
+
+      # Deferred on the create only: the first save asks for the value.
+      lv |> form("#page-editor", %{"form" => %{"title" => "Dr. Ada"}}) |> render_submit()
+      assert render(lv) =~ "is required"
+    end
+
+    test "the draft cannot be published while the field is blank",
+         %{admin: admin} do
+      conn = log_in(build_conn(), admin)
+      {:ok, lv, _html} = live(conn, ~p"/editor/content/page/new")
+      type_title(lv, "Dr. Grace")
+
+      assert [page] = pages(admin)
+      html = render_click(lv, "workflow", %{"action" => "publish"})
+
+      assert html =~ "is required before publishing"
+      page = ContentTypes.get_record!("page", page.id, actor: admin)
+      assert page.state == :draft
+
+      # Filled in, it publishes.
+      {:ok, page} =
+        ContentTypes.update("page", page, %{custom_fields: %{"role" => "Acupuncturist"}},
+          actor: admin
+        )
+
+      assert {:ok, %{state: :published}} =
+               ContentTypes.transition("page", "publish", page, actor: admin)
+    end
+
+    test "only the scaffold create defers it", %{editor: editor} do
+      assert_raise Ash.Error.Invalid, ~r/is required/, fn ->
+        ContentTypes.create!("page", %{title: "API"}, actor: editor)
+      end
+
+      page =
+        ContentTypes.create!("page", %{title: "Scaffold"},
+          actor: editor,
+          context: %{custom_fields_required: :defer}
+        )
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               ContentTypes.update("page", page, %{custom_fields: %{"role" => ""}},
+                 actor: editor,
+                 context: %{custom_fields_required: :defer}
+               )
+
+      assert Exception.message(error) =~ "is required"
+    end
+  end
+
   test "an editor who may not author the type is refused at the door, and nothing is written",
        %{conn: conn} do
     # Scoped to author posts only: pages are not offered on the content list,

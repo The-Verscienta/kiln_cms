@@ -81,7 +81,13 @@ defmodule KilnCMS.Security.AdministrationEventsTest do
       assert event.target_type == "user"
       assert event.target_id == subject.id
       assert event.org_id == default_org()
-      assert event.metadata == %{"role" => "admin", "previous_role" => "editor"}
+
+      assert event.metadata == %{
+               "role" => "admin",
+               "previous_role" => "editor",
+               "level" => "platform"
+             }
+
       assert_request(event)
     end
 
@@ -97,7 +103,7 @@ defmodule KilnCMS.Security.AdministrationEventsTest do
 
       assert [event] = events(nil, :role_revoked)
       assert event.target_id == subject.id
-      assert event.metadata == %{"role" => "admin"}
+      assert event.metadata == %{"role" => "admin", "level" => "platform", "change" => "demoted"}
       assert_request(event)
     end
 
@@ -176,7 +182,7 @@ defmodule KilnCMS.Security.AdministrationEventsTest do
 
       assert [event] = events(other.id, :role_granted)
       assert event.target_id == subject.id
-      assert event.metadata == %{"role" => "editor"}
+      assert event.metadata == %{"role" => "editor", "level" => "site"}
       assert event.org_id == other.id
       assert_request(event)
 
@@ -196,7 +202,12 @@ defmodule KilnCMS.Security.AdministrationEventsTest do
                )
 
       assert [granted] = events(nil, :role_granted)
-      assert granted.metadata == %{"role" => "editor", "previous_role" => "viewer"}
+
+      assert granted.metadata == %{
+               "role" => "editor",
+               "previous_role" => "viewer",
+               "level" => "site"
+             }
 
       assert {:ok, membership} =
                Accounts.update_org_membership(membership, %{audiences: []},
@@ -213,7 +224,7 @@ defmodule KilnCMS.Security.AdministrationEventsTest do
                )
 
       assert [revoked] = events(nil, :role_revoked)
-      assert revoked.metadata == %{"role" => "editor"}
+      assert revoked.metadata == %{"role" => "editor", "level" => "site", "change" => "demoted"}
       assert revoked.target_id == subject.id
     end
 
@@ -225,7 +236,7 @@ defmodule KilnCMS.Security.AdministrationEventsTest do
       assert :ok = Accounts.remove_org_membership(membership, actor: admin, context: ctx())
 
       assert [event] = events(nil, :role_revoked)
-      assert event.metadata == %{"role" => "editor"}
+      assert event.metadata == %{"role" => "editor", "level" => "site", "change" => "removed"}
       assert event.target_id == subject.id
       assert_request(event)
     end
@@ -320,7 +331,7 @@ defmodule KilnCMS.Security.AdministrationEventsTest do
       assert [granted] = events(other.id, :role_granted)
       assert granted.target_id == user.id
       assert granted.actor_id == nil
-      assert granted.metadata == %{"role" => "viewer"}
+      assert granted.metadata == %{"role" => "viewer", "level" => "site"}
     end
   end
 
@@ -368,7 +379,12 @@ defmodule KilnCMS.Security.AdministrationEventsTest do
                )
 
       assert [event] = events(nil, :role_revoked)
-      assert event.metadata == %{"role" => "admin"}
+
+      assert event.metadata == %{
+               "role" => "admin",
+               "level" => "platform",
+               "change" => "grant_revoked"
+             }
     end
 
     test "the membership twin records in its own org" do
@@ -511,7 +527,7 @@ defmodule KilnCMS.Security.AdministrationEventsTest do
 
       assert [_minted, rotated] = events(nil, :api_key_created)
       assert rotated.target_id == new.id
-      assert rotated.metadata == %{"name" => "svc", "scope" => "draft_write"}
+      assert rotated.metadata == %{"name" => "svc", "scope" => "draft_write", "via" => "rotate"}
       assert rotated.actor_id == owner.id
       assert_request(rotated)
 
@@ -725,6 +741,60 @@ defmodule KilnCMS.Security.AdministrationEventsTest do
 
       assert length(events(other.id)) == 1
       assert events(default_org()) == []
+    end
+  end
+
+  describe "the metadata security alerts read (#2245)" do
+    test "removing a member whose admin tier is a live grant records the admin tier taken" do
+      admin = user(:admin)
+      subject = user(:editor)
+      membership = member!(subject, default_org(), :editor)
+      expires = DateTime.add(DateTime.utc_now(), 2, :hour)
+
+      {:ok, membership} =
+        Accounts.grant_membership_temporary_role(
+          membership,
+          %{granted_role: :admin, granted_role_expires_at: expires},
+          actor: admin,
+          context: ctx()
+        )
+
+      [granted] = events(nil, :elevation_granted)
+      assert granted.metadata["level"] == "site"
+      refute Map.has_key?(granted.metadata, "via")
+
+      assert :ok = Accounts.remove_org_membership(membership, actor: admin, context: ctx())
+
+      assert [event] = events(nil, :role_revoked)
+      assert event.metadata == %{"role" => "admin", "level" => "site", "change" => "removed"}
+    end
+
+    test "carrying a legacy account onto the default org is marked, grant included" do
+      admin = user(:admin)
+      expires = DateTime.add(DateTime.utc_now(), 2, :hour)
+
+      legacy =
+        Ash.Seed.seed!(Accounts.User, %{
+          email: "legacy-#{uniq()}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :editor,
+          granted_role: :admin,
+          granted_role_expires_at: expires
+        })
+
+      assert {:ok, _membership} =
+               Accounts.LegacyAffiliation.ensure_default_membership(legacy,
+                 actor: admin,
+                 context: ctx()
+               )
+
+      assert [granted] = events(nil, :role_granted)
+      assert granted.metadata == %{"role" => "editor", "level" => "site", "via" => "legacy_carry"}
+
+      assert [elevation] = events(nil, :elevation_granted)
+      assert elevation.metadata["via"] == "legacy_carry"
+      assert elevation.metadata["role"] == "admin"
     end
   end
 end

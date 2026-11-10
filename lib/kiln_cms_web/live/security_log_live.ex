@@ -270,9 +270,14 @@ defmodule KilnCMSWeb.SecurityLogLive do
               </td>
               <td class="py-2 pr-3">
                 <.badge variant={
-                  if event.type in [:sign_in_failed, :sign_in_locked, :sign_in_unlock_refused],
-                    do: "warning",
-                    else: "neutral"
+                  if event.type in [
+                       :sign_in_failed,
+                       :sign_in_locked,
+                       :sign_in_unlock_refused,
+                       :api_key_reuse_detected
+                     ],
+                     do: "warning",
+                     else: "neutral"
                 }>
                   {SecurityLog.type_label(event.type)}
                 </.badge>

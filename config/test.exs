@@ -62,6 +62,12 @@ config :kiln_cms, KilnCMS.Federation,
 # to `no-store` under tests that assert cache headers.
 config :kiln_cms, KilnCMS.Experiments, enabled: false
 
+# Security alerts (#2245) off for the suite: recording an event claims a row
+# lock on its alert window, and two sandboxed tests minting an API key would
+# wait on each other's uncommitted claim of the same platform window. Tests
+# about alerts turn them on for themselves (async: false).
+config :kiln_cms, KilnCMS.Security.Alerts, enabled: false
+
 # Outbound link checking (#474). Every request goes to a Req.Test stub; nothing
 # in the suite may reach the real web. The per-host throttle is widened to
 # effectively off, because pacing is tested directly (`Links.Throttle`) and
@@ -268,7 +274,17 @@ config :kiln_cms, KilnCMS.Repo,
   # Measured on a full local run, a 5s ceiling changed nothing — the same 80
   # waiters (all degrade-by-design settings lookups) still timed out, having
   # held >5s — while adding ~4s of wall time to each, +290s on the suite.
-  pool_size: System.schedulers_online() * 2 + 8
+  pool_size: System.schedulers_online() * 2 + 8,
+  # The per-statement `:timeout`, 30 s instead of Ecto's 15 s (#2545). Under a
+  # loaded host any statement can exceed 15 s, not only the heavy ones: an
+  # ordinary single-row insert in a setup failed `CustomFieldIndexTest`, a
+  # `FieldDefinition` create was cancelled in `ReferenceLinksApiTest` (#2620),
+  # and a `MailSettingsLiveTest` insert held its connection past 15 s, all in
+  # full `mix precommit` runs. A slow statement is not a wrong one; the cost
+  # is only paid by a test that is about to fail anyway. It stays well under
+  # the sandbox's 120 s ownership timeout, so a statement that is really
+  # wedged still fails the test instead of hanging it.
+  timeout: :timer.seconds(30)
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.

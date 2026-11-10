@@ -303,4 +303,28 @@ defmodule KilnCMS.Security.CidrTest do
       end
     end
   end
+
+  describe "truncate/1 (#2245)" do
+    test "IPv4 to its /24, IPv6 to its /48" do
+      assert Cidr.truncate("203.0.113.77") == "203.0.113.0/24"
+      assert Cidr.truncate({198, 51, 100, 9}) == "198.51.100.0/24"
+      assert Cidr.truncate("2001:db8:abcd:12::1") == "2001:db8:abcd::/48"
+      assert Cidr.truncate({0x2001, 0xDB8, 1, 2, 3, 4, 5, 6}) == "2001:db8:1::/48"
+    end
+
+    test "an IPv4-mapped address is truncated as the IPv4 it carries" do
+      assert Cidr.truncate("::ffff:203.0.113.77") == "203.0.113.0/24"
+      assert Cidr.truncate({0, 0, 0, 0, 0, 0xFFFF, 0xCB00, 0x714D}) == "203.0.113.0/24"
+    end
+
+    test "anything that is not an address is nil" do
+      assert Cidr.truncate(nil) == nil
+      assert Cidr.truncate("") == nil
+      assert Cidr.truncate("203.0.113.0/24") == nil
+      assert Cidr.truncate("010.0.0.1") == nil
+      assert Cidr.truncate({300, 0, 0, 1}) == nil
+      assert Cidr.truncate({1, 2}) == nil
+      assert Cidr.truncate(42) == nil
+    end
+  end
 end

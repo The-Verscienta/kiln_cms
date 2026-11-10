@@ -90,7 +90,10 @@ variant. So:
 
 - **Always read back which locale you got.** `x-kiln-locale` /
   `Content-Language` on HTTP responses, `locale` on the JSON:API resource and
-  the GraphQL result, `locale` in `/api/resolve` and `/api/menus` bodies. A
+  the GraphQL result, `locale` in `/api/resolve` and `/api/menus` bodies. On
+  the built-in site's HTML pages read `x-kiln-locale` only: there
+  `Content-Language` names the URL's language, which the page's chrome is in,
+  not the served document's. A
   static build that generates `/fr-ca/…` pages should decide whether an
   English answer there is a page it wants (and whether it canonicalises to the
   English URL) — the API tells you, it does not decide for you.
@@ -540,8 +543,12 @@ every paying member's content as well — not just rate-limit headroom.
 
 A malformed, expired or foreign JWT in `Authorization: Bearer …` is answered
 `401` with an `invalid_token` error envelope and
-`WWW-Authenticate: Bearer error="invalid_token"`, on `/api/json`, `/gql` and the
-other `/api` routes. It used to be served as anonymous, so a client with a
+`WWW-Authenticate: Bearer error="invalid_token"`, on `/api/json` and the other
+`/api` routes. On `/gql` the body is GraphQL-shaped:
+`{"errors":[{"message":…,"code":"invalid_token","extensions":{"code":"unauthenticated"}}]}`.
+The response is `Cache-Control: private, no-store` with `Vary: Authorization`.
+Send the scheme exactly as `Bearer`: `bearer …` and a bare `Bearer` are refused
+too, because the token loader reads only that spelling. It used to be served as anonymous, so a client with a
 stale token read public content and took it for success; treat this `401` as
 "re-authenticate", not as "forbidden". A request with no `Authorization` header
 is still anonymous, and a bad `kiln_` key was always a `401`.
@@ -635,7 +642,7 @@ curl -X POST https://kiln.example.com/api/keys/rotate \
   are left), not from every worker on a 401.
 * **Never present a rotated-away key to this endpoint again.** Kiln reads that
   as a stolen key: more than 120 seconds after the rotation it revokes the
-  whole chain, including your current key, and alerts the admins. If you lose
+  whole chain, including your current key, and alerts the platform admins. If you lose
   the `201` (a network failure mid-request), do not retry with the old key;
   ask an admin to mint a new one.
 * `401` (`invalid_api_key`): no key, or it is revoked/expired. `403`

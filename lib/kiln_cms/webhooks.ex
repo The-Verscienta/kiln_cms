@@ -322,6 +322,25 @@ defmodule KilnCMS.Webhooks do
     do: delivery.retraction or not retraction?(delivery.event)
 
   @doc """
+  Record + enqueue one security alert delivery (#2245) to `endpoint`: the
+  ledger row and the job `dispatch/4` would write, signed and enveloped the
+  same way (`{"event", "data", "delivery_id"}`), but for this one endpoint,
+  and without `dispatch/4`'s other consumers — a security event is not an
+  edit for automation, federation, the CDN or the change feed, and opens no
+  propagation record.
+
+  Called by `KilnCMS.Security.AlertDispatch`'s delivery, inside its
+  transaction, which has already chosen the endpoints (active, subscribed to
+  `event`). Raises on a refused or failed write, so the delivery rolls back
+  and is retried rather than stamped as sent.
+  """
+  @spec enqueue_security!(struct(), String.t(), map(), Ash.UUID.t()) :: struct()
+  def enqueue_security!(endpoint, "security." <> _ = event, data, org_id)
+      when is_map(data) and is_binary(org_id) do
+    enqueue(endpoint, event, data, org_id, true)
+  end
+
+  @doc """
   Send a test `"ping"` event to one endpoint (delivers even when inactive, so
   a receiver can be verified before enabling). Admin-triggered.
   """

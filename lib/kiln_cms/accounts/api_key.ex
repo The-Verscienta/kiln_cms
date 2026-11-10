@@ -134,12 +134,13 @@ defmodule KilnCMS.Accounts.ApiKey do
               prefix: @prefix, hash: :api_key_hash}
 
       # Audit log (#2241), in the transaction. The name and scope only, never the
-      # key or its hash.
+      # key or its hash. `via: "rotate"` tells the security alerts (#2245) this
+      # replaced a key rather than minting a new credential.
       change {KilnCMS.Security.Changes.Record,
               type: :api_key_created,
               target: fn record, _changeset -> {"api_key", record.id} end,
               metadata: fn record, _changeset ->
-                %{"name" => record.name, "scope" => record.access}
+                %{"name" => record.name, "scope" => record.access, "via" => "rotate"}
               end}
     end
 

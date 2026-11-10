@@ -238,7 +238,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> put_flash(:error, gettext("You can't create this content."))
          |> push_navigate(to: ~p"/editor")}
 
-      {:error, _invalid} ->
+      {:error, invalid} ->
+        # The flash cannot say why, so the log must: without this line a
+        # refused create left nothing to diagnose it by.
+        Logger.error(
+          "Couldn't create a new #{kind} draft for #{inspect(actor && actor.id)}: " <>
+            Exception.message(invalid)
+        )
+
         {:noreply, put_flash(socket, :error, gettext("Couldn't create the draft. Try again."))}
     end
   end

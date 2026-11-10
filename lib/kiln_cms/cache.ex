@@ -451,6 +451,25 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for a site's security alert settings (#2245), read on every
+  failed sign-in to decide whether to count it
+  (`KilnCMS.Security.Alerts.charge_failed_sign_in/2`).
+  """
+  @spec security_alerts_key(Ash.UUID.t()) :: String.t()
+  def security_alerts_key(org_id), do: "security_alerts:#{org_id}"
+
+  @doc """
+  Drop a site's cached security alert settings after a `SiteSecurityAlerts`
+  write, on every node, so turning failed-sign-in alerts on or off takes
+  effect at once.
+  """
+  @spec bust_security_alerts(Ash.UUID.t()) :: :ok
+  def bust_security_alerts(org_id) do
+    if enabled?(), do: ClusterBust.broadcast([security_alerts_key(org_id)])
+    :ok
+  end
+
+  @doc """
   Cache key for a site's compiled admin allowlist (#2248) —
   `KilnCMS.Security.AdminAllowlist.policy/1`, read on every console and
   sign-in request.

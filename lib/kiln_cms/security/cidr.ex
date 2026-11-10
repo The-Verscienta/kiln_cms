@@ -216,6 +216,42 @@ defmodule KilnCMS.Security.Cidr do
 
   def client_range(_), do: nil
 
+  @doc """
+  The network an address belongs to, for showing it without naming one host
+  (#2245): its `/24` for IPv4 (an IPv4-mapped address folded to IPv4 first)
+  and its `/48` for IPv6. `nil` for anything that is not an address, so a
+  caller can pass an event's stored `ip` (a string, or `nil`) straight in.
+
+      iex> KilnCMS.Security.Cidr.truncate("203.0.113.7")
+      "203.0.113.0/24"
+
+      iex> KilnCMS.Security.Cidr.truncate("2001:db8:1:2::7")
+      "2001:db8:1::/48"
+
+      iex> KilnCMS.Security.Cidr.truncate("::ffff:203.0.113.7")
+      "203.0.113.0/24"
+
+      iex> KilnCMS.Security.Cidr.truncate("not an ip")
+      nil
+  """
+  @spec truncate(ip() | String.t() | nil) :: String.t() | nil
+  def truncate(ip) when is_binary(ip) do
+    case parse_address(String.trim(ip)) do
+      {:ok, tuple} -> truncate(tuple)
+      _ -> nil
+    end
+  end
+
+  def truncate(ip) when is_tuple(ip) do
+    case :inet.is_ip_address(ip) and address_forms(ip) do
+      [{:inet, int} | _] -> format(mask({:inet, int, 24}))
+      [{:inet6, int}] -> format(mask({:inet6, int, 48}))
+      _none -> nil
+    end
+  end
+
+  def truncate(_), do: nil
+
   # Private, shared and link-local space: an address here is usually a proxy's
   # or a NAT's as seen from the app, not one person's.
   @shared_ranges [
