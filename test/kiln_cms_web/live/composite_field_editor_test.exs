@@ -91,6 +91,15 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
     assert html =~ ~r/<option[^>]*value=""/
   end
 
+  test "range and link parts carry translatable help text wired by aria-describedby" do
+    {_lv, html, _page} = editor(Phoenix.ConnTest.build_conn(), authed_admin(), %{})
+
+    assert html =~ ~r/id="custom-field-band-max-help"[^>]*>\s*The same kind as From/
+    assert html =~ ~r/aria-describedby="custom-field-band-max-help"/
+    assert html =~ ~r/id="custom-field-source-rel-help"[^>]*>\s*Space-separated: noopener/
+    assert html =~ ~r/aria-describedby="custom-field-source-rel-help"/
+  end
+
   test "a failed save shows the message and keeps what was typed", %{conn: conn} do
     {lv, _html, _page} = editor(conn, authed_admin(), %{})
 

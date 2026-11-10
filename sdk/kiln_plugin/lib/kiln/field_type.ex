@@ -199,7 +199,10 @@ defmodule Kiln.FieldType do
           optional(:required?) => boolean(),
           optional(:attrs) => %{optional(atom()) => term()},
           # For `type: "select"`: the `{value, label}` choices, blank one first.
-          optional(:options) => [{String.t(), String.t()}]
+          optional(:options) => [{String.t(), String.t()}],
+          # A short, translatable help line under the control (a placeholder is
+          # not translatable); wired to it by `aria-describedby`.
+          optional(:help) => String.t()
         }
 
   @doc """
