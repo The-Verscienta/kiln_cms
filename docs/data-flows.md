@@ -38,11 +38,13 @@ your deployment.
 | Account email | `users` | Yes | Login identity; also the email recipient for workflow mail. |
 | Display name | `users.name` | Yes (optional) | Shown to other editors (presence) and as the JSON-LD author byline. Blank by default. |
 | RBAC role | `users.role` | No | `:admin` / `:editor` / `:viewer`. |
-| Notification preferences | `users.notify_on_*` | No | Per-user opt-out (issue #46): review requested, published, returned to draft, comments, and new registrations (`notify_on_registration`, #2251, offered to site admins). All are included in the self-export and reset to on by erasure. |
-| In-app notifications | `notifications` | Yes | One row per recipient (#1320): event, content title, a comment excerpt, and the acting user's display name (`actor_name`) plus `actor_id`. Readable only by the recipient — no admin bypass. Deleted when the recipient is erased (#2514); `actor_name`/`actor_id` nulled when the *actor* is erased. No retention purge yet. A "registrations waiting" row (#2251) is titled with the site's name and carries no applicant data: no address, name, excerpt or actor. |
+| Notification preferences | `users.notify_on_*` | No | Per-user opt-out (issue #46): review requested, published, returned to draft, comments, new registrations (`notify_on_registration`, #2251, offered to site admins), and site security alert email (`notify_on_security_alert`, #2245, offered to site member admins; only the account holder can change it). All are included in the self-export and reset to on by erasure. |
+| In-app notifications | `notifications` | Yes | One row per recipient (#1320): event, content title, a comment excerpt, and the acting user's display name (`actor_name`) plus `actor_id`. Readable only by the recipient — no admin bypass. Deleted when the recipient is erased (#2514); `actor_name`/`actor_id` nulled when the *actor* is erased. No retention purge yet. A "registrations waiting" row (#2251) is titled with the site's name and carries no applicant data: no address, name, excerpt or actor. A security alert or notice row (#2245) is titled with the site's name and has no actor; its excerpt names what happened and, for an alert, the client's network (`/24`, `/48`), or the full IP address when the site opted in. |
 | Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry; for a session, browser and OS family, last use and the site it signed in on; for a revoked one, why. See [Auth tokens](#auth-token-retention-218). |
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
 | Security log | `security_events` | Yes | Admin-only audit log (#2241): the acting user's id and an **email snapshot** (known accounts only), the target, the **raw IP address** and **user agent** of the request, and a short allowlisted metadata map with no secrets. Kept 365 days by default (per-site setting, `0` keeps forever; then raw IPs are kept indefinitely). Scrubbed on erasure, purged on retention and by the staging scrub. See [Security log](security-events.md). |
+| Security alert queue | `security_alert_dispatches` | Pseudonymous (transient) | One row per security alert window or silencing notice (#2245): the site, the alert kind, the window, the id of the security event that raised it, delivery stamps, and for a notice what changed, the kinds, the webhook endpoint's id and the acting user's id. Never an address, email, URL or token. Deleted by an hourly prune a day after its window ends, and by the staging scrub. Not touched by erasure: it holds ids only and is gone within a day. See [Security alerts](security-alerts.md). |
+| Security alert settings | `site_security_alerts` | No | Per site (#2245): the alert kinds turned off, whether admins get the bell and email, whether alerts show full IP addresses. |
 | Site invitations | `invitations` | Yes | One row per address a platform admin invited to a site (#2135): the **email address**, the site, the tier and custom role, who sent it, when it expires and how often it was sent, and the SHA-256 of the link's token (never the token). The person may have no account. Removed when the invitation is accepted or revoked; otherwise usable for 7 days and deleted by the daily prune 30 days after that, so an address is kept at most about 37 days. Not touched by erasure (see below); deleted by the staging scrub. |
 | Recorded search queries | `search_queries` | Possibly | Query text only — **no** actor/IP. See *Search query retention (#213) + disclosure (#220)* below. |
 | Web Push subscriptions | `push_subscriptions` | Yes | One row per browser a user turned push notifications on in: the push service endpoint and its keys, a coarse browser label, and which VAPID key it was made against. Deleted on erasure (#2514). |
@@ -87,7 +89,11 @@ fields: a document published openly and locked afterwards still reads
 **Personal data in non-content events.** `form.submitted` carries the
 submitted fields, and `membership.activated` / `membership.canceled` carry the
 member's **email** and user id — only to endpoints an admin subscribed to those
-events (they are opt-in). Each delivered payload is kept in the delivery log
+events (they are opt-in). The opt-in `security.*` events (#2245) carry the
+acting and target user ids of a security log event, its metadata, and its IP
+address cut to the network (`/24`, `/48`), or in full when the site turned on
+**Show the full IP address in alerts**; never an email address or user agent
+([Security alerts](security-alerts.md#payload)). Each delivered payload is kept in the delivery log
 for its retention window (30 days by default) so it can be redelivered; GDPR
 erasure does not rewrite that log. See
 [Paid memberships](memberships.md#webhook-events).
@@ -127,13 +133,22 @@ Three kinds of email leave the system via the configured Swoosh adapter:
 
   Both are sent for the site, so they go out through the site's own SMTP
   relay when it has one switched on (#1322).
+- **Security alert email** (#2245), to a site's member admins about that
+  site's alerts and silencing notices, and to every platform admin about the
+  platform's alerts ([Security alerts](security-alerts.md)). It names the
+  site and what happened, with the time and the client's network (or full
+  address, if the site opted in); never another person's email address. It
+  always goes through the **instance** relay (`KilnCMS.Mailer`), never a
+  site's own: a site admin can change that relay, and alerts about the site
+  must not depend on it.
 
 The recipient address is, necessarily, the user's email. The **display name** in
 the body is the user's chosen `name`, never the email local-part (#214); with no
 name set it renders a neutral "An editor" / "A reviewer". Each user can mute
 workflow email per-event in `/editor/settings`, and a site admin can mute the
-registration email there (**New registrations**); the in-app notice is still
-written.
+registration email there (**New registrations**) and the email of site
+security alerts (**Security alerts**); the in-app notice is still written.
+Platform security alerts and silencing notices cannot be muted.
 
 Configure the sender and adapter in `config/runtime.exs`
 (`config :kiln_cms, KilnCMS.Mailer, …` and `:email_from`).
@@ -203,6 +218,10 @@ The security log (`security_events`) is pruned daily by
 and user agents, so with `0` (or the cron off) they are kept until the person is
 erased. It is not one of the AshOban triggers in the table above. The staging
 scrub deletes the whole table from a clone. See [Security log](security-events.md).
+
+The security alert queue (`security_alert_dispatches`, #2245) is pruned every
+hour (`17 * * * *`, `AlertDispatch` `:prune`): a row is deleted a day after its
+alert window ends. No setting. The staging scrub deletes the whole table.
 
 ### Auth token retention (#218)
 

@@ -59,7 +59,10 @@ defmodule KilnCMS.Security.Event do
     :registration_queued,
     :registration_approved,
     :registration_rejected,
-    :backup_canceled
+    :backup_canceled,
+    # A drafts-only API key presented again after it was rotated (#2245):
+    # two parties held one secret, and the whole lineage was revoked.
+    :api_key_reuse_detected
   ]
 
   # The only metadata keys each type may carry. None names a person: who is in
@@ -73,12 +76,18 @@ defmodule KilnCMS.Security.Event do
     recovery_code_used: ~w(remaining),
     passkey_added: ~w(name),
     passkey_removed: ~w(name via),
-    role_granted: ~w(role previous_role),
-    role_revoked: ~w(role),
+    # `level` is "site" (a membership) or "platform" (the account's own role);
+    # `via` is "legacy_carry" when a legacy account's standing role was copied
+    # onto its first membership, which grants nothing new (#2245).
+    role_granted: ~w(role previous_role level via),
+    # `change`: "removed" (membership deleted), "demoted" (role lowered) or
+    # "grant_revoked" (a temporary role cleared early).
+    role_revoked: ~w(role level change),
     member_invited: ~w(role resent),
     invitation_revoked: ~w(role),
-    elevation_granted: ~w(role minutes),
-    api_key_created: ~w(name scope),
+    elevation_granted: ~w(role minutes level via),
+    # `via` is "rotate" for a key minted by rotating the previous one.
+    api_key_created: ~w(name scope via),
     api_key_revoked: ~w(name),
     sso_config_changed: ~w(provider change),
     org_setting_changed: ~w(setting),
@@ -94,7 +103,9 @@ defmodule KilnCMS.Security.Event do
     registration_queued: ~w(method),
     registration_approved: ~w(role via),
     registration_rejected: ~w(outcome),
-    backup_canceled: ~w(stamp step)
+    backup_canceled: ~w(stamp step),
+    # `revoked`: how many keys of the lineage the detection revoked.
+    api_key_reuse_detected: ~w(name revoked)
   }
 
   @max_metadata_keys 8
@@ -163,6 +174,28 @@ defmodule KilnCMS.Security.Event do
       filter expr(type == :sign_in and ip == ^arg(:ip) and inserted_at >= ^arg(:since))
     end
 
+    # One event by id, for the security alert that names it (#2245): the
+    # delivery reads it as the `:security_alerts` system actor, which is not
+    # admitted to the plain `read`.
+    # (Fetched by id through the domain's `get_event_for_alert`.)
+    read :for_alert
+
+    # The events of some types in `[since, until)`, oldest first: a security
+    # alert's summary re-classifies them to count a closed window (#2245).
+    # Capped, so a flood cannot make a summary unbounded.
+    read :alert_window do
+      argument :types, {:array, :atom}, allow_nil?: false, constraints: [items: [one_of: @types]]
+      argument :since, :utc_datetime_usec, allow_nil?: false
+      argument :until, :utc_datetime_usec, allow_nil?: false
+
+      filter expr(
+               type in ^arg(:types) and inserted_at >= ^arg(:since) and
+                 inserted_at < ^arg(:until)
+             )
+
+      prepare build(sort: [inserted_at: :asc, id: :asc], limit: 10_000)
+    end
+
     # The retention prune's read: events strictly older than the cutoff.
     read :older_than do
       argument :cutoff, :utc_datetime_usec, allow_nil?: false
@@ -184,6 +217,9 @@ defmodule KilnCMS.Security.Event do
       ]
 
       change KilnCMS.Security.Changes.SanitizeMetadata
+      # Last: classifies the sanitized event and claims its alerts (#2245) in
+      # the same transaction.
+      change KilnCMS.Security.Changes.RaiseAlert
     end
 
     update :anonymize_actor do
@@ -202,14 +238,19 @@ defmodule KilnCMS.Security.Event do
 
   policies do
     # Reading is an org-admin act (a platform admin is admin on every org via
-    # `Scoping.effective_tier/2`). The system actor is admitted to the two
-    # reads the maintenance sweeps need, never to the plain `read` / `list`.
+    # `Scoping.effective_tier/2`). System actors are admitted to the named
+    # reads their subsystem needs, never to the plain `read` / `list`.
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
-      forbid_unless action([:by_actor, :older_than, :sign_in_from_ip])
+      forbid_unless action([:by_actor, :older_than, :sign_in_from_ip, :for_alert, :alert_window])
 
       authorize_if {KilnCMS.Checks.SystemActor,
                     subsystem: :security, action: [:by_actor, :older_than]}
+
+      # Security alerts (#2245): the event an alert names, and a closed
+      # window's events for its summary.
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: :security_alerts, action: [:for_alert, :alert_window]}
 
       authorize_if {KilnCMS.Checks.SystemActor,
                     subsystem: :scanner_guard, action: :sign_in_from_ip}

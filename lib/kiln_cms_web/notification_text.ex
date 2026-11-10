@@ -84,6 +84,13 @@ defmodule KilnCMSWeb.NotificationText do
   def headline(%{event: :registration_pending}),
     do: gettext("Registrations waiting for approval")
 
+  # Actor-less by design (#2245): the row's excerpt names the alert, and the
+  # site is its title. Neither names who caused it.
+  def headline(%{event: :security_alert}), do: gettext("Security alert")
+
+  # The un-mutable notice that a site's alerts were made quieter (#2245).
+  def headline(%{event: :security_notice}), do: gettext("Security alerts were turned down")
+
   # An event this module has no sentence for — one a newer node wrote during a
   # rolling deploy, say. A neutral line rather than a crash of the whole bell;
   # the test holds every event this release knows to its own sentence.

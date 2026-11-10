@@ -453,7 +453,13 @@ defmodule KilnCMS.Accounts.RegisterWithInvitationTest do
 
       # One `role_granted`, in the invited site's own log, naming what it was.
       assert [event] = role_events(site.id, owner, :role_granted)
-      assert event.metadata == %{"role" => "editor", "previous_role" => "viewer"}
+
+      assert event.metadata == %{
+               "role" => "editor",
+               "previous_role" => "viewer",
+               "level" => "site"
+             }
+
       assert role_events(site.id, owner, :role_revoked) == []
 
       # The link is spent.

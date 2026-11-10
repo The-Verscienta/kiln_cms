@@ -74,6 +74,17 @@ defmodule KilnCMS.Accounts.LegacyAffiliation do
   def ensure_default_membership(%{id: user_id} = user, opts \\ []) do
     {audiences, write_opts} = Keyword.pop(opts, :audiences)
 
+    # Marks both writes as a carry, not a grant: the audit events say
+    # `via: "legacy_carry"`, and the security alerts (#2245) do not report an
+    # account keeping the tier it already held as a new admin.
+    write_opts =
+      Keyword.update(
+        write_opts,
+        :context,
+        %{kiln_legacy_carry: true},
+        &Map.put(&1, :kiln_legacy_carry, true)
+      )
+
     attrs = %{
       organization_id: Accounts.default_org_id(),
       user_id: user_id,

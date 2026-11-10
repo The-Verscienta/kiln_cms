@@ -104,30 +104,67 @@ only a signed-in audience may see.
 
 ## Which language the page text is in
 
-A content page can be served in a language other than the visitor's: a
-visitor reading French follows a link to a page that has no French
-translation and gets the English one. Kiln writes some text of its own into
-the page, and which language it uses depends on where on the page it is:
+A content page can be served in a language other than the reader's: a reader
+on `/fr/…` follows a link to a page that has no French translation and gets
+the English one. The page then holds two languages, and Kiln keeps them apart:
 
-* **Inside the article** (`.public-article`): the page's language, the one
-  `<html lang>` and the `Content-Language` header declare. That covers the
-  byline and its date, a form block's labels and messages, a newsletter
-  sign-up's fields, the human-verification widget and an untitled embed's
-  title.
-* **The chrome around it** (header links, search, the language switcher,
-  the footer): the language of the request, from the URL prefix or else the
-  visitor's session. Whether the chrome should follow the page instead is an
-  open decision, tracked with a caching problem it causes in
-  [#2595](https://github.com/The-Verscienta/kiln_cms/issues/2595).
+* **The chrome is the reader's**: the language in the URL, the path prefix,
+  or the site's default language when there is none. It is never the
+  visitor's session, because a public page is cached under its URL and handed
+  to every later visitor. `<html lang>` and the `Content-Language` header
+  declare it. It covers the header and footer menus, the stock **Blog** and
+  **Search** links (which keep the `/fr/` prefix), the language switcher,
+  the feed advertised in `<head>`, and every word Kiln writes outside the
+  article. On the locked-page and members-only screens it covers Kiln's own
+  text there (**Protected**, the passphrase form).
+* **The article is the document's**: `<article class="public-article">` always
+  carries its own `lang`, which differs from `<html lang>` on a fallback page.
+  The `x-kiln-locale` header names it. Kiln's text inside the article follows
+  it: the byline and its date, a form block's labels and messages, a
+  newsletter sign-up's fields, the human-verification widget and an untitled
+  embed's title. On a locked page or a members-only teaser, the document's
+  title and summary carry its `lang`.
+* **The page's description for machines is the document's too**:
+  `og:locale`, the canonical URL, the `hreflang` alternates and the JSON-LD
+  all name the record that was served, so `/fr/x` answered in English
+  canonicalizes to the English URL.
+
+So `/fr/about`, answered by the English page, starts like this:
+
+```html
+<html lang="fr">
+  …
+  <article class="public-article prose max-w-none" lang="en">
+```
+
+and is sent with `Content-Language: fr` and `x-kiln-locale: en`.
+
+A theme that styles article text by language (quotation marks, hyphenation,
+a typeface for one script) should select the article, not the document:
+`.public-article:lang(fr)`, not `html[lang="fr"]`. `:lang()` matches the
+nearest `lang` attribute up the tree, so it also matches the chrome by its
+own language.
 
 A plugin block that ships its own Gettext backend renders in the request's
-language, not the page's.
+language, so on a fallback page its words can differ from the `<article lang>`
+around it.
 
 On a multilingual site, form and newsletter sign-up blocks on a content page
-post under the page's language prefix (`/en/forms/<slug>`,
-`/fr/newsletter/subscribe`), so a stylesheet or script that selects them by
-`action` no longer matches. Select `.kiln-form` and
+post under the article's language prefix (`/en/forms/<slug>`,
+`/fr/newsletter/subscribe`). A form's own page and its embed post under the
+URL's language, the default's included: `/forms/<slug>` and
+`/forms/<slug>/embed` post to `/en/forms/<slug>` when English is the default.
+A locked page's passphrase form posts to `/fr/_unlock` under `/fr/`, so the
+page after unlocking stays French. A stylesheet or script that selects these
+forms by `action` no longer matches; select `.kiln-form` and
 `.kiln-newsletter-signup` instead.
+
+Two gaps remain: the header's brand link always points to `/`, so it drops
+the reader's prefix
+([#2636](https://github.com/The-Verscienta/kiln_cms/issues/2636)), and a
+locale that runs without a Gettext catalog shows English chrome under its
+own `<html lang>`
+([#2637](https://github.com/The-Verscienta/kiln_cms/issues/2637)).
 
 ## Custom CSS
 

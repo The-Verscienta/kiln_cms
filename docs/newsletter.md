@@ -129,8 +129,8 @@ section applies: double opt-in, and the same page for every outcome. A
 subscriber joins the site that served the page.
 
 The block's own labels (**Name**, **Email**, the honeypot's hint) are in the
-page's language, the one its `<html lang>` declares, even when that differs
-from the visitor's. On a multilingual site the form also posts under that
+article's language, the one its `<article lang>` declares, even when that
+differs from the reader's `<html lang>`. On a multilingual site the form also posts under that
 language's prefix, the default language's included: an English page posts to
 `/en/newsletter/subscribe`, a French one to `/fr/newsletter/subscribe`, so the
 "check your inbox" page answers in the language the visitor was reading. An

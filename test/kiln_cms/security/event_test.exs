@@ -109,7 +109,7 @@ defmodule KilnCMS.Security.EventTest do
 
     test "every type has an allowlist entry" do
       for type <- Event.types(), do: assert(is_list(Event.metadata_keys(type)))
-      assert length(Event.types()) == 30
+      assert length(Event.types()) == 31
     end
   end
 
@@ -426,5 +426,95 @@ defmodule KilnCMS.Security.EventTest do
     end
 
     defp days_ago(days), do: DateTime.add(DateTime.utc_now(), -days * 86_400, :second)
+  end
+
+  describe "the security alerts' reads (#2245)" do
+    test "the alerts actor reads the one event an alert names, and a window of types" do
+      old = seed_at(%{type: :sign_in_locked}, 2)
+      locked = record!(%{type: :sign_in_locked})
+      _other_type = record!(%{type: :sign_in})
+      other_org = record!(%{type: :sign_in_locked}, org("alerts-window").id)
+      system = Security.alerts_system()
+
+      assert {:ok, %{id: id}} =
+               Security.get_event_for_alert(locked.id,
+                 actor: system,
+                 tenant: org_id(),
+                 authorize_with: :error
+               )
+
+      assert id == locked.id
+
+      assert {:error, _} =
+               Security.get_event_for_alert(other_org.id, actor: system, tenant: org_id())
+
+      since = DateTime.add(DateTime.utc_now(), -3_600, :second)
+      until = DateTime.add(DateTime.utc_now(), 60, :second)
+
+      assert {:ok, events} =
+               Security.alert_window_events([:sign_in_locked], since, until,
+                 actor: system,
+                 tenant: org_id(),
+                 authorize_with: :error
+               )
+
+      ids = Enum.map(events, & &1.id)
+      assert locked.id in ids
+      refute old.id in ids
+      refute other_org.id in ids
+      assert Enum.all?(events, &(&1.type == :sign_in_locked))
+
+      # `until` is exclusive.
+      assert {:ok, []} =
+               Security.alert_window_events([:sign_in_locked], since, since,
+                 actor: system,
+                 tenant: org_id()
+               )
+    end
+
+    test "the alerts actor is admitted to those two reads and nothing else" do
+      record!(%{type: :sign_in_locked})
+      system = Security.alerts_system()
+
+      assert {:ok, []} = Security.list_events(actor: system, tenant: org_id())
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Security.record(%{type: :sign_in}, actor: system, tenant: org_id())
+
+      # The audit log's own actor is not admitted to the alerts' reads.
+      assert {:ok, []} =
+               Security.alert_window_events(
+                 [:sign_in_locked],
+                 DateTime.add(DateTime.utc_now(), -3_600, :second),
+                 DateTime.add(DateTime.utc_now(), 60, :second),
+                 actor: Security.system(),
+                 tenant: org_id()
+               )
+    end
+
+    test "an org admin may read them too; an editor may not" do
+      event = record!(%{type: :sign_in_locked})
+
+      assert {:ok, _} =
+               Security.get_event_for_alert(event.id, actor: user(:admin), tenant: org_id())
+
+      assert {:error, _} =
+               Security.get_event_for_alert(event.id, actor: user(:editor), tenant: org_id())
+    end
+
+    test "metadata the alerts read survives the allowlist" do
+      event =
+        record!(%{
+          type: :role_revoked,
+          metadata: %{"role" => "admin", "level" => "site", "change" => "removed", "x" => "y"}
+        })
+
+      assert event.metadata == %{"role" => "admin", "level" => "site", "change" => "removed"}
+
+      reuse =
+        record!(%{type: :api_key_reuse_detected, metadata: %{"name" => "ci", "revoked" => 2}})
+
+      assert reuse.metadata == %{"name" => "ci", "revoked" => 2}
+    end
   end
 end

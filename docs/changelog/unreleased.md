@@ -58,11 +58,13 @@ carries the reasoning.
   `String.to_existing_atom/1` and fails the whole read on a value it does not
   know, and two columns gained values since:
   ```sql
-  DELETE FROM notifications WHERE event = 'registration_pending';
+  DELETE FROM notifications
+  WHERE event IN ('registration_pending', 'security_alert', 'security_notice');
   DELETE FROM api_keys WHERE access = 'draft_write';
   ```
   Without the first, the bell, the inbox and "mark all read" fail on v1.8.0
-  for everyone holding a registration notice. Draft-write keys stop working on
+  for everyone holding a registration notice or a
+  [security alert](#security-alerts-upgrade). Draft-write keys stop working on
   v1.8.0 whatever you do (it has no such scope); left in place, the key's own
   lookup and the site's API keys page fail, so delete them and mint new ones
   after rolling forward. Never `UPDATE` them to `'read'`: that silently
@@ -73,6 +75,78 @@ carries the reasoning.
   [#2605](https://github.com/The-Verscienta/kiln_cms/issues/2605) before
   rolling back if any site uses them. Details in
   [New values in an atom column](../releasing.md#new-values-in-an-atom-column).
+
+<a id="security-alerts-upgrade"></a>
+
+- **Run `mix ash.migrate` for security alerts (#2245). From the deploy on,
+  each site's member admins get a bell notice and an email for every site
+  alert kind except failed sign-ins, and every platform admin gets the
+  platform's alerts, which can't be muted. Before rolling back past #2509,
+  delete the new notifications (and, on a build with the security log, the
+  new security event), or roll forward.**
+  - **The migration.** `20261110145904_add_security_alerts`, additive: new
+    tables `security_alert_dispatches` (the alert queue, pruned hourly) and
+    `site_security_alerts` (one settings row per site, created on the first
+    save), and `users.notify_on_security_alert` (`boolean NOT NULL DEFAULT
+    true`). Nothing is backfilled, and nothing is alerted about events from
+    before the deploy.
+  - **Who starts getting mail.** A site's **member admins**: accounts whose
+    active membership on the site is admin, standing or by a live temporary
+    grant, and that are not platform admins. They get `new_admin`,
+    `role_elevation`, `lockout`, `two_factor_disabled` and
+    `sso_config_changed`; `failed_sign_ins` starts off. A site admin can turn
+    any of them off on **Organization** → **Security alerts**, and each person
+    can mute the email for themselves under **Your settings** → **Email
+    notifications**. Platform admins get `new_admin` (platform level),
+    `platform_role_changed`, `new_api_key` and `api_key_abuse`, by bell (in
+    the default site) and email, with no setting and no mute: expect one
+    email per new API key.
+  - **A site with no member admins sends its site alerts and notices to the
+    platform admins** (owner decision OC-1/OC-2 on #2245, 2026-11-10). On a
+    single-site install run by a platform admin with no membership on the
+    site, that platform admin gets them. Once the site has a member admin,
+    alerts go to its member admins only.
+  - **The stolen-key email is now an alert.** A rotated-away API key
+    presented again was a plain email to the platform admins; it is now the
+    `api_key_abuse` platform alert and a new security event,
+    `api_key_reuse_detected`. When the event can't be recorded, the old email
+    is sent instead.
+  - **Alert email uses the instance relay** (`KilnCMS.Mailer`), never a
+    site's own SMTP relay, so check that the instance mailer delivers. It
+    goes through the `mail` queue as usual. No new queue: delivery runs on
+    `default`.
+  - **`security` is now a reserved webhook namespace.** A new content type
+    can't be named `security`. A dynamic content type already called
+    `security` keeps working and can still be edited, but its events
+    (`security.published`, …) now share the prefix with the alert events and
+    are listed in the same `security` group on **Webhooks**: tell them apart
+    by the full event name.
+  - **During a rolling deploy.** Events handled by an older node raise no
+    alert. An older node that has #2509 loads the new notifications as an
+    unknown event: the bell shows the generic "Notification" line and links to
+    `/editor/inbox`, and its security log shows `api_key_reuse_detected` as
+    "Unrecognized event (api_key_reuse_detected)". Both read normally once
+    every node runs this release.
+  - **Before rolling back** to a build without #2509 (v1.8.0, or an earlier
+    `main` pin), run in `psql` against the deployment's database:
+
+    ```sql
+    DELETE FROM notifications WHERE event IN ('security_alert', 'security_notice');
+    ```
+
+    For v1.8.0 this is part of the [one-time cleanup](#rollback-to-1-8-0-upgrade).
+    If the build has the security log (#2441) but not #2509, also export what
+    you need (**Download CSV** on `/editor/security-log`) and run:
+
+    ```sql
+    DELETE FROM security_events WHERE type = 'api_key_reuse_detected';
+    ```
+
+    A build that has #2509 needs neither. The new tables and column are
+    ignored by an older release. Alert jobs already queued fail there as
+    unknown workers until their attempts run out, which is harmless; alerts still queued
+    when you roll forward again are sent if they are less than a day old.
+  See also [the Added entry](#security-alerts).
 
 <a id="render-etags-upgrade"></a>
 
@@ -1049,6 +1123,79 @@ carries the reasoning.
 
 ## Breaking
 
+<a id="public-chrome-follows-url-locale"></a>
+
+- **Public pages take their language from the URL alone, and on a fallback
+  page the chrome is the reader's while the article stays the record's
+  (#2595).** A reader on `/fr/about`, answered by the English page because
+  there is no French one, now gets French chrome around an English article.
+  Before, the whole page claimed the record's language, and an unprefixed URL
+  took its language from the visitor's session (see
+  [Fixed](#public-delivery-session-locale-leak) for why that had to go).
+  - **What follows the reader** (the URL's prefix, or the site's default
+    language without one): `<html lang>`, the `Content-Language` header, the
+    header and footer menus, the stock **Blog** and **Search** links (which
+    keep the prefix), the language switcher, feed autodiscovery, and Kiln's
+    own text outside the article.
+  - **What follows the record:** `<article class="public-article">` now
+    always carries `lang`; a new `x-kiln-locale` response header names it, as
+    it does on the headless APIs; `og:locale`, the canonical URL, `hreflang`
+    and the JSON-LD; and, as since #2465, the text inside the article and the
+    `action` of its form and sign-up blocks. On the locked-page and
+    members-only teaser pages, the document's title and summary carry its
+    `lang` and the rest is chrome.
+  - **Why the reader's.** The words around the article are in the reader's
+    language, so `<html lang>` has to say so for screen readers and
+    hyphenation; the article says its own. The machine-facing description
+    stays with the record so a search engine is not told an English page is
+    French.
+  - **Why it is Breaking.** In v1.8.0 a fallback page sent
+    `<html lang="en">` and `Content-Language: en`, and both were documented.
+    `Content-Language` on the built-in site's HTML now names the URL's
+    language; read `x-kiln-locale` for the served document. A theme that
+    styles article text with `html[lang="fr"]` (quotation marks, hyphenation,
+    a typeface) stops matching fallback articles: use
+    `.public-article:lang(fr)`. Headless APIs (artifact, `/api/resolve`,
+    JSON:API, GraphQL, `/api/menus`) are unchanged: both headers there still
+    name the served locale.
+  - **Unprefixed URLs serve only the default locale.** A document that
+    exists only in French used to answer at `/<slug>` for a visitor whose
+    session said French; now it is a 404 there, and so is an unprefixed old
+    URL that only an `fr` redirect matched. Link to `/fr/<slug>`. A site with
+    one locale is unaffected.
+  - **Form actions.** A form's own page and its embed, on a multilingual
+    site, now post under a language prefix even when the page has none:
+    `/forms/<slug>` and `/forms/<slug>/embed` post to `/en/forms/<slug>`
+    (English being the default). A locked page's passphrase form posts to
+    `/<locale>/_unlock`, so unlocking under `/fr/` returns to `/fr/<slug>`.
+    Select forms by class (`.kiln-form`), not `action`.
+  - **For consistency, not caching:** search (`private, no-cache`), the 404
+    page, and the locked-page and members-only screens also use the URL's
+    language, so `/search` with a French session searches and answers in the
+    default language. Sign-in, the account pages and the console still
+    follow the session.
+  - **Plugin blocks** with their own Gettext backend render in the URL's
+    language, which on a fallback page can differ from `<article lang>`.
+  - **Every delivery `ETag` changes once**, since it now names the URL's
+    language; revalidating clients and CDNs get one round of `200`s. Rolling
+    the pin back is safe and costs another round.
+  - **Known gaps:** the header's brand link points to `/` and drops the
+    reader's prefix
+    ([#2636](https://github.com/The-Verscienta/kiln_cms/issues/2636)); a
+    locale without a Gettext catalog shows English chrome under its own
+    `<html lang>`
+    ([#2637](https://github.com/The-Verscienta/kiln_cms/issues/2637)); and
+    public pages still render a few session-derived bits, such as the CSRF
+    meta tag
+    ([#2630](https://github.com/The-Verscienta/kiln_cms/issues/2630)).
+  - **Developers.** `KilnCMSWeb.Plugs.UrlLocale` sets the locale, the
+    `:locale` assign and the Gettext locale from `path_locale` or the
+    default; `UrlLocale.locale/1` is the same rule as a function. It is
+    plugged on `ContentController`, `EventIndexController`, and
+    `FormController`'s embed. Templates rendered by `ContentController` get
+    `@content_locale` (the record's) next to `@locale` (the reader's).
+    `KilnCMS.I18n.pinned_path/2` is unchanged.
+
 <a id="purge-trashed-only"></a>
 
 - **Overlay and plugin code: `purge_<type>` (`purge_page`, `purge_post`,
@@ -1303,6 +1450,57 @@ carries the reasoning.
     previous release is safe, since it ignores the indexes. Until the
     migration finishes, queries on the field answer correctly from the table.
     Renaming a field is a drop and a create.
+
+<a id="security-alerts"></a>
+
+- **Security alerts: a site's admins hear about a new admin, a raised role,
+  a lockout, two-factor turned off or a single sign-on change as it happens,
+  by bell and email, and platform admins about new platform admins, new API
+  keys and a stolen API key used again (#2245, first of three parts).** The
+  security log (#2241) said what happened only to someone who went and read
+  it.
+  - **What alerts.** Site kinds `new_admin`, `role_elevation`,
+    `failed_sign_ins` (10 failed sign-ins on the site in 15 minutes; off by
+    default), `lockout`, `two_factor_disabled` and `sso_config_changed`.
+    Platform kinds `new_admin` (an account's own role made admin),
+    `platform_role_changed`, `new_api_key` (not a rotation) and
+    `api_key_abuse`. Alerts are raised from security log events, in the
+    event's own transaction.
+  - **Who hears.** A site alert goes to the site's member admins, not to
+    platform admins, unless the site has no member admins, when it goes to
+    the platform admins; a platform alert goes to every platform admin, in
+    the default site's bell. Editors, viewers and other sites' admins never do.
+  - **How often.** One alert per kind per 15-minute window (per site, or for
+    the platform), then one summary with the window's count if more
+    followed. Failed sign-ins are counted per site, never per address or
+    account an attacker picks.
+  - **Organization → Security alerts** (`/editor/security-alerts`, admins):
+    tick the site kinds, switch the admins' bell and email off (webhooks still
+    go), and choose whether alerts show the full IP address or only its
+    `/24` or `/48`, the default. Platform alerts always show the network only.
+  - **Your settings → Email notifications → Security alerts** mutes the
+    email of site alerts for yourself; the bell row is still written.
+    Platform alerts and notices ignore it, and only the account holder can
+    change it.
+  - **Turning alerts down is never silent.** Switching a kind or the admins'
+    notifications off, changing, deleting, re-keying or auto-disabling a
+    webhook subscribed to `security.*`, another person removing, demoting or
+    ending the temporary grant of a site admin, and changing the site's mail
+    relay each send the site's member admins an `alerts_silenced` notice that
+    no setting or mute stops. If the notice can't be written, the change is
+    refused.
+  - **Webhooks.** Opt-in `security.<site kind>` and `security.alerts_silenced`
+    events, signed like every other delivery, with `phase` `alert`, `summary`
+    or `notice`. Platform alerts are not webhook events yet.
+  - **Security log.** New event type `api_key_reuse_detected`. Role events
+    gain `level` (`site` or `platform`), `role_revoked` gains `change`
+    (`removed`, `demoted`, `grant_revoked`), `role_granted` and
+    `elevation_granted` gain `via` (`legacy_carry`), and `api_key_created`
+    gains `via: "rotate"`. Replacing a live temporary admin grant with a lower
+    one now also records a `role_revoked`.
+
+  Guide: [Security alerts](../security-alerts.md). Upgrade:
+  [the upgrade note](#security-alerts-upgrade).
 
 <a id="refire-notify"></a>
 
@@ -4186,6 +4384,29 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="public-delivery-session-locale-leak"></a>
+
+- **A visitor's session language no longer ends up in shared caches for
+  everyone else (#2595).** On an unprefixed URL Kiln took the language from
+  the visitor's session, then sent the page as `public, max-age=60` with only
+  `Vary: Accept-Language`. A CDN or shared proxy stored the first visitor's
+  French page under `/about` and served it to every visitor for the window.
+  And since the `ETag` named only the record, a validator from `/fr/x` could
+  `304` a request for `/x` answered by the same record in other chrome.
+  The same applied to the blog and event indexes, `/<plural>/index.json`,
+  the stock home, and a form's page and its embed.
+  - **What changed.** Those responses now take their language from the URL
+    alone: the prefix, or the site's default without one. The `ETag` names
+    that language as well as the record's. The visitor's session still sets
+    the language of the console, sign-in and account pages.
+  - **Why not `Vary: Cookie`.** Every browser carries a session cookie, so it
+    would split the cache per visitor, and many CDNs treat it as a bypass.
+    Serving French at `/about` also contradicted that page's canonical,
+    `hreflang` and sitemap entries.
+  - The visible consequences (an unprefixed French-only page is now a 404,
+    prefixed form actions) are under
+    [Breaking](#public-chrome-follows-url-locale).
+
 <a id="contract-backfills-reach-trash"></a>
 
 - **`mix kiln.fields.convert` and `mix kiln.media.resnapshot` now also
@@ -4517,8 +4738,10 @@ carries the reasoning.
   language, and a form or newsletter sign-up on the page answers in it
   (#2465).** A page can be served in a language other than the visitor's: a
   French reader sent to an English page with no French translation gets the
-  English one, with `<html lang="en">` and `Content-Language: en`. The
-  article's blocks were built in English, but Kiln's own strings in them were
+  English one, its `<article>` marked `lang="en"` (since #2595, `<html lang>`
+  and `Content-Language` name the reader's French; see
+  [Breaking](#public-chrome-follows-url-locale)). The article's blocks were
+  built in English, but Kiln's own strings in them were
   rendered in the request's language, so the page mixed the two: an English
   sign-up heading over French **Nom** and **E-mail** fields.
   - **Inside the article** now follows the page: the byline and its date, a
@@ -4527,9 +4750,8 @@ carries the reasoning.
     embed title is also translated in fired `web` artifacts, which render in
     the document's locale.
   - **The chrome around the article** (header, search, language switcher,
-    footer) still follows the request. Whether it should follow the page is
-    an open decision, tracked with a related caching problem in
-    [#2595](https://github.com/The-Verscienta/kiln_cms/issues/2595).
+    footer) follows the reader: the URL's language, never the session's
+    (#2595, see [Breaking](#public-chrome-follows-url-locale)).
   - **Submit paths change on multilingual sites only.** A form block on a
     content page posts to `/<locale>/forms/<slug>` and a sign-up block to
     `/<locale>/newsletter/subscribe`, in the page's language with the default
@@ -4545,9 +4767,11 @@ carries the reasoning.
     stylesheet, script or analytics rule that selects these forms by `action` should select
     `.kiln-form` or `.kiln-newsletter-signup` instead.
   - **Not covered yet:** a plugin block with its own Gettext backend still
-    renders in the request's language; the locked-page and members-only
-    teaser pages; a locale attribute on the `embed.js` snippet; and the
-    language of the newsletter confirmation email.
+    renders in the request's language; a locale attribute on the `embed.js`
+    snippet; and the language of the newsletter confirmation email. The
+    locked-page and members-only teaser pages are settled by #2595: Kiln's
+    text there is chrome, in the reader's language, and the document's title
+    and summary carry its own `lang`.
 
 <a id="render-etags"></a>
 

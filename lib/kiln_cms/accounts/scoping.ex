@@ -474,6 +474,55 @@ defmodule KilnCMS.Accounts.Scoping do
     )
   end
 
+  @doc """
+  Every **platform admin**: an account whose `User.role` is `:admin`, standing
+  or by a live temporary grant (`RoleGrant.expression/1`), that has not been
+  erased. Who is told about a deployment-wide security event (#2245) and a
+  reused API key: they are the people who can act on one.
+
+  A system read, as `users_with_tier/2` is: a roster is about other people.
+  """
+  @spec platform_admins() :: [struct()]
+  def platform_admins do
+    admin = RoleGrant.expression([:admin])
+    query = Ash.Query.filter(Accounts.User, ^admin and is_nil(anonymized_at))
+    # authorize?: false — a roster of who to alert, never returned to a caller;
+    # User's read policy is self-only, as for users_with_tier/2.
+    Accounts.list_users!(authorize?: false, query: query)
+  end
+
+  @doc """
+  The **member admins** of `org`: accounts holding an `:active` membership
+  there whose effective tier on it is `:admin` (standing or by a live grant on
+  the membership), and which are neither platform admins nor erased. The
+  site's own administrators, and who a site-level security alert (#2245) goes
+  to.
+
+  Literal on purpose: a platform admin is admin on every site but is not
+  listed here (they get the platform's alerts instead), and a site whose only
+  admin is a platform admin has no member admins — `[]`, with no fallback.
+  A legacy membership-less account is not listed either: it holds no
+  membership to be a member admin by.
+
+  `org` takes the shapes `KilnCMS.Accounts.org_id/1` does. A system read.
+  """
+  @spec site_member_admins(struct() | String.t() | nil) :: [struct()]
+  def site_member_admins(org) do
+    org_id = Accounts.org_id(org)
+    admin = RoleGrant.expression([:admin])
+
+    query =
+      Ash.Query.filter(
+        Accounts.User,
+        is_nil(anonymized_at) and not (^admin) and
+          exists(org_memberships, organization_id == ^org_id and status == :active and ^admin)
+      )
+
+    # authorize?: false — a roster of who to alert, never returned to a caller;
+    # User's and OrgMembership's read policies are self-only.
+    Accounts.list_users!(authorize?: false, query: query)
+  end
+
   # A membership-less account's global role applies only on the default org.
   defp legacy_tier(actor, org) do
     if org == Accounts.default_org_id(),

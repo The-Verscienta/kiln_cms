@@ -10,8 +10,13 @@
   <article class="kiln-paywalled space-y-6">
     <header class="space-y-3">
       <.badge variant="primary">{gettext("Members only")}</.badge>
-      <h1 class="public-title text-3xl font-semibold text-balance">{@teaser.title}</h1>
-      <p :if={@teaser.summary} class="text-lg text-base-content/70">{@teaser.summary}</p>
+      <%!-- The document's words, in its language; the chrome is the reader's (#2595). --%>
+      <h1 class="public-title text-3xl font-semibold text-balance" lang={@content_locale}>
+        {@teaser.title}
+      </h1>
+      <p :if={@teaser.summary} class="text-lg text-base-content/70" lang={@content_locale}>
+        {@teaser.summary}
+      </p>
     </header>
 
     <section class="card card-pad space-y-3 text-center">
