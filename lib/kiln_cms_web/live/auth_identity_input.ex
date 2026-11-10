@@ -12,10 +12,9 @@ defmodule KilnCMSWeb.AuthIdentityInput do
   Every setting is read under upstream's name through
   `KilnCMSWeb.AuthOverrides.override_for/4`, so the `override
   Components.Password.Input` block keeps styling it. `KilnCMSWeb.AuthOverridesTest`
-  renders the sign-in and register forms that use this against upstream's and
-  asserts they differ by nothing but this attribute, so an upstream change to
-  the field fails that test rather than going stale here. The `/reset` request
-  form (`KilnCMSWeb.AuthResetRequestForm`) is not in that comparison.
+  renders the sign-in, register and `/reset` request forms that use this
+  against upstream's and asserts they differ by nothing but this attribute, so
+  an upstream change to the field fails that test rather than going stale here.
 
   The sibling for the password boxes is `KilnCMSWeb.AuthPasswordInput`.
   """
