@@ -5188,6 +5188,22 @@ carries the reasoning.
     `ash_authentication_phoenix`; the `/reset` request form is not in that
     comparison, so re-read `AuthResetRequestForm` against upstream's
     `Password.ResetForm` by hand.
+
+<a id="setup-header-invite-only-landmarks"></a>
+
+- **The first-run setup page's logo row is now a header landmark, and the
+  invite-only sign-in page is tested for one `h1`, one header and one main
+  (#2390).** Follow-up to #2162.
+  - **`/setup`.** The environment banner and logo row moved out of `<main>`
+    into a `<header>`, as on the sign-in pages, so the page has a header
+    landmark beside its `h1` and `<main id="main">`. The spacing is unchanged.
+  - **Invite-only sign-in.** With `registration_enabled: false` the router
+    mounts sign-in without a register path, and it picks that branch at compile
+    time, so the test build never had it. A test router now mounts the same
+    route with the same arguments and asserts its `/sign-in` and `/reset`
+    pages for one `h1`, one header, one main and no link to `/register`. If the
+    invite-only `sign_in_route` in `KilnCMSWeb.Router` changes, change the
+    test router in `KilnCMSWeb.AuthLandmarksTest` with it.
     `AuthPasswordInput.password_field/1` and `password_confirmation_field/1`
     now require an `autocomplete` attribute; an overlay that calls them must
     pass one. No configuration, migration or upgrade step.
