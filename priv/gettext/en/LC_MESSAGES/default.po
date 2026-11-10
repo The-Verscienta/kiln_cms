@@ -1338,6 +1338,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -2207,6 +2208,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "About task anchoring"
+msgstr ""
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Above 100%, this applies only to addresses verified as the search engine they name. Any other claim gets at most %{browser} per address, like a browser."
 msgstr ""
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
@@ -10142,6 +10148,11 @@ msgstr ""
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "How URLs are built, and bulk regeneration."
+msgstr ""
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "How claims are checked"
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -21213,6 +21224,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
 msgid "The server allows at most %{percent}% here."
+msgstr ""
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "The server operator can turn checking on with %{variable}."
 msgstr ""
 
 #: lib/kiln_cms_web/live/password_policy_live.ex
