@@ -497,7 +497,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **Field locks (collaborative editing): a field its holder leaves while a takeover waits on their save now stays theirs until that save lands, then goes to the taker, so a third editor can no longer grab it and then lose it, unsaved, when the takeover went through.**
-  ([#2557](https://github.com/The-Verscienta/kiln_cms/issues/2557) · [long form](docs/changelog/unreleased.md#field-lock-release-mid-flush))
+  ([#2619](https://github.com/The-Verscienta/kiln_cms/pull/2619) · [long form](docs/changelog/unreleased.md#field-lock-release-mid-flush))
 
 - **Permanently deleting a trashed page, post, entry or media file that someone else had restored in the meantime no longer hard-deletes the live record, with no `deleted` webhook and no artifact cleanup. `:purge` now takes only a trashed row.**
   The Trash page now says when someone else restored or permanently deleted an item and reloads the list. Code that purges a live record must trash it first.
