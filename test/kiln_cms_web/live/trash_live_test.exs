@@ -88,6 +88,66 @@ defmodule KilnCMSWeb.TrashLiveTest do
     refute artifacts == [], "restored from the trash UI with no artifacts"
   end
 
+  # #2612: on main before #2609, Restore crashed for a type with a `unique`
+  # field — `UniqueValues` read `custom_fields`, which the narrow
+  # `@list_fields` projection leaves `%Ash.NotLoaded{}`. The conflict-free
+  # restore must succeed, and the value must count again once it is back.
+  test "restoring an item with a unique custom field brings its value back into use",
+       %{conn: conn} do
+    actor = authed_admin()
+
+    CMS.create_field_definition!(
+      %{
+        content_type: :post,
+        name: "sku",
+        label: "SKU",
+        field_type: :string,
+        validation: %{"unique" => true}
+      },
+      actor: actor
+    )
+
+    post =
+      CMS.create_post!(
+        %{
+          title: "Unique restore",
+          slug: "trash-#{System.unique_integer([:positive])}",
+          custom_fields: %{"sku" => "R-1"}
+        },
+        actor: actor
+      )
+
+    :ok = CMS.destroy_post!(post, actor: actor)
+
+    {:ok, lv, _html} = conn |> log_in(actor) |> live(~p"/editor/trash")
+
+    html =
+      lv
+      |> element(~s(button[phx-click="restore"][phx-value-id="#{post.id}"]))
+      |> render_click()
+
+    refute html =~ "Couldn&#39;t restore that item."
+    refute has_element?(lv, "#trash-post-#{post.id}")
+
+    restored = CMS.get_post!(post.id, actor: actor)
+    refute restored.archived_at
+    assert restored.custom_fields["sku"] == "R-1"
+
+    # Trashed rows are out of scope for the check, so this is what proves the
+    # restored row holds the value again.
+    assert {:error, error} =
+             CMS.create_post(
+               %{
+                 title: "Duplicate",
+                 slug: "trash-#{System.unique_integer([:positive])}",
+                 custom_fields: %{"sku" => "R-1"}
+               },
+               actor: actor
+             )
+
+    assert Exception.message(error) =~ "SKU (sku) is already in use"
+  end
+
   # R5: a field set to "Don't allow it" keeps a linked record from being
   # deleted for good, and the trash says why in plain words.
   test "a purge refused by a reference field's delete rule is explained", %{conn: conn} do
