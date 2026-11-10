@@ -178,7 +178,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A site can index custom fields for range filters and `custom_sort`: list the field names in `config :kiln_cms, :indexed_custom_fields`, run `mix ash.codegen`, and `gt`/`gte`/`lt`/`lte` and sort-with-a-limit on them read an index instead of scanning the table.**
   Two btrees per name per content table (ascending and descending), built concurrently; nothing is indexed by default, and `mix kiln.custom_fields.index --check` reports drift. Cost and limits: [docs/json-api.md](docs/json-api.md#which-custom-filters-use-an-index), [ADR 0025](docs/decisions/0025-a-site-declares-which-custom-fields-get-range-and-sort-indexes-in-config.md).
-  ([#2359](https://github.com/The-Verscienta/kiln_cms/issues/2359) · [PR_LINK](PR_URL) · [long form](docs/changelog/unreleased.md#custom-field-range-index))
+  ([#2359](https://github.com/The-Verscienta/kiln_cms/issues/2359) · [#2551](https://github.com/The-Verscienta/kiln_cms/pull/2551) · [long form](docs/changelog/unreleased.md#custom-field-range-index))
 
 - **In-app backups run as retried steps behind a cluster-wide lock: a second backup queues, a stopped node's step moves on, and platform admins can Cancel a running backup (audited, resumable).**
   Each step retries 4 times (1/5/15 min); database-only backups can now be resumed. Guide: [docs/backups.md](docs/backups.md#how-an-in-app-backup-runs-2218).
@@ -378,7 +378,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A custom-field range filter (`gt`, `gte`, `lt`, `lte`) no longer matches a record whose stored value is a JSON `null`, array or object.**
   They compare as "no value", as `custom_sort` already read them; before, JSON ordering made an array greater than every number. Only rows whose field was retyped or written off-type are affected.
-  ([#2359](https://github.com/The-Verscienta/kiln_cms/issues/2359) · [PR_LINK](PR_URL) · [long form](docs/changelog/unreleased.md#custom-field-range-index-changed))
+  ([#2359](https://github.com/The-Verscienta/kiln_cms/issues/2359) · [#2551](https://github.com/The-Verscienta/kiln_cms/pull/2551) · [long form](docs/changelog/unreleased.md#custom-field-range-index-changed))
 
 - **Every update action on a content resource, an overlay's own included, refuses a trashed row with `StaleRecord`; only `:restore` and `:clear_reference_target` are exempt.**
   ([#2528](https://github.com/The-Verscienta/kiln_cms/pull/2528) · [long form](docs/changelog/unreleased.md#trashed-row-update-actions-refuse))
