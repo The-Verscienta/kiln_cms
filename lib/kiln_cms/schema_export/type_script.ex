@@ -40,7 +40,7 @@ defmodule KilnCMS.SchemaExport.TypeScript do
   """
   @spec emit(map()) :: String.t()
   def emit(document) do
-    model = Walk.model(document)
+    model = Walk.model(document, variants: true)
 
     [
       header(model),
@@ -67,7 +67,7 @@ defmodule KilnCMS.SchemaExport.TypeScript do
   """
   @spec emit_graphql(map()) :: String.t()
   def emit_graphql(document) do
-    model = Walk.model(document)
+    model = Walk.model(document, variants: true)
 
     sections =
       model

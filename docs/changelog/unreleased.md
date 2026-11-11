@@ -1596,6 +1596,49 @@ carries the reasoning.
   - **No migration, no new environment variable.** Rolling the pin back
     removes the format and the flag; `?format=openapi` then answers `400`.
 
+<a id="schema-swift-kotlin-formats"></a>
+
+- **`GET /api/schema` serves the plain Swift and Kotlin models
+  (`?format=swift`, `?format=kotlin`) and takes `?package=` for the Kotlin
+  formats; `mix kiln.export.schema` writes the GraphQL formats
+  (`--format typescript-graphql|swift-graphql|kotlin-graphql`)
+  ([#2362](https://github.com/The-Verscienta/kiln_cms/issues/2362),
+  [#2363](https://github.com/The-Verscienta/kiln_cms/issues/2363)).** Before
+  this, an app that reads the `json` artifact (not GraphQL) could get its
+  Swift or Kotlin models only from a Kiln checkout, the Kotlin GraphQL file
+  always came in package `kiln` and had to be edited after download, and the
+  GraphQL files could not be written by the Mix task, so CI could not diff
+  them. Guides: *Typed models from GET /api/schema* in [native-apps.md](../native-apps.md),
+  [api.md → Schema discovery](../api.md#schema-discovery-typed-clients) and
+  [headless-graphql-api.md → Generate types and fragments for your site](../headless-graphql-api.md#generate-types-and-fragments-for-your-site).
+  - **`?format=swift` and `?format=kotlin`.** Byte for byte what
+    `mix kiln.export.schema --format swift|kotlin` writes for the same site,
+    served as `text/x-swift` and `text/x-kotlin`. Both join the closed format
+    list (an unknown value is still `400` `invalid_format`, and its message now
+    lists them), are cached under their own key for five minutes, and are
+    evicted with the other formats when a content type or field definition is
+    written. `?type=` and `?blocks=only` work as for `json`.
+  - **`?package=` (Kotlin only).** Sets the package of the `kotlin` and
+    `kotlin-graphql` files; absent, empty or `kiln` is the default. The name
+    must be dotted identifiers, none a Kotlin hard keyword or only
+    underscores, at most 255 bytes. An invalid name is a `400` with code
+    `invalid_package`, and so is a non-empty `package` with any other format,
+    including no `format` at all. The default package is served from the
+    cached body; another package is rendered per request from the cached JSON
+    document (for `kotlin-graphql`, a new cache entry holding the
+    GraphQL-annotated document, evicted with the rest), so a caller-chosen
+    name never becomes a cache key.
+  - **The Mix task.** `--format typescript-graphql`, `swift-graphql` and
+    `kotlin-graphql` write what the endpoint serves under the same names;
+    `--package` applies to `kotlin-graphql` as well as `kotlin` (any other
+    format still refuses it), `--check PATH` works with all three, and
+    `--all-orgs` names the files `<org id>.graphql.ts`, `.graphql.swift` and
+    `.graphql.kt`.
+  - **No migration, no new environment variable.** Rolling the pin back
+    removes the formats and the parameter: `?format=swift` and
+    `?format=kotlin` answer `400` `invalid_format` again, and the GraphQL
+    `--format` values are refused by the task.
+
 <a id="form-field-types"></a>
 
 - **Forms: `radio`, `checkboxes`, `phone`, `url`, `hidden`, `number` and `rating`
@@ -4329,6 +4372,49 @@ carries the reasoning.
   - Guide: [Constrain the values of a field](../extending-content.md#constrain-the-values-of-a-field).
 
 ## Changed
+
+<a id="range-schema-same-kind-bounds"></a>
+
+- **A `:range` custom field's JSON Schema now says what the server already
+  enforces, both bounds numbers or both dates and at least one of them, and
+  the generated TypeScript types it as two shapes instead of one merged one
+  ([#2548](https://github.com/The-Verscienta/kiln_cms/issues/2548)).** Until
+  now the schema let each bound be a number or a date independently, so a
+  validator accepted `{"min": 1, "max": "2026-12-31"}` and `{}`, both of which
+  a save refuses. Split from #2435.
+  - **The schema.** The range's merged object (`min`/`max`, each a number or a
+    `YYYY-MM-DD` string) is kept, for generators that read only `type` and
+    `properties`. Beside it, an `anyOf` lists three members: an object of
+    number bounds, an object of date bounds (each closed, with
+    `minProperties: 1`), and `null`. A value must satisfy both, so a JSON
+    Schema validator now refuses a mixed or an empty range. The `anyOf` sits
+    beside the merged object rather than replacing it with a `oneOf`, because
+    published generators read every `oneOf` member as a `$ref`. It is in
+    `?format=json`, `?format=openapi` and `mix kiln.export.schema` output
+    alike.
+  - **TypeScript output.** `?format=typescript`, `?format=typescript-graphql`,
+    `mix kiln.export.schema --format ts` and the `kiln-types` generator in
+    `@kiln-cms/client` now emit
+    `{ max?: number; min?: number } | { max?: string; min?: string } | null`
+    for a range field, where they emitted
+    `{ max?: number | string; min?: number | string } | null`. Code that reads
+    a range compiles as before. Code that **writes** a value of the generated
+    type with one number bound and one date bound (a fixture, a mock, a
+    `satisfies` check) stops compiling once the types are regenerated. That is
+    a narrowing to what the server has always required: such a value was
+    refused on save. Fix the value, or regenerate later; an older
+    `kiln-types` keeps emitting the merged type.
+  - **Swift and Kotlin output is unchanged.** A union of inline structs would
+    be their "any JSON" type, looser than the struct they declare now, so
+    they ignore the `anyOf`.
+  - **Contributors.** `KilnCMS.JsonSchemaValidator` now checks
+    `minProperties`. `KilnCMS.SchemaExport.Walk.model/2` and `type/2` take
+    `variants: true` (used by `KilnCMS.SchemaExport.TypeScript`) to read an
+    `anyOf` of closed inline objects, optionally with `{"type": "null"}`, as
+    a union; without it the `anyOf` is ignored. The schema-export goldens
+    under `test/support/fixtures/schema_export/` are regenerated.
+  - **No migration.** Stored values are unchanged; rolling the pin back
+    restores the looser schema and the merged type.
 
 <a id="backup-fold-like-into-like"></a>
 

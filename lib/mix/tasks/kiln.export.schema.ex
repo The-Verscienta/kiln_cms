@@ -7,7 +7,8 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
   `GET /api/content/:type/:slug?surface=json` returns — so a typed client has
   something to generate against. See `KilnCMS.SchemaExport`.
 
-      mix kiln.export.schema [--format json|ts|swift|kotlin|openapi] [--out PATH | --check PATH]
+      mix kiln.export.schema [--format json|ts|swift|kotlin|openapi|typescript-graphql|swift-graphql|kotlin-graphql]
+                             [--out PATH | --check PATH]
                              [--type NAME,NAME] [--package com.example.kiln]
                              [--org-id UUID | --all-orgs] [--blocks-only]
                              [--base-url URL] [--pretty]
@@ -20,6 +21,7 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
       mix kiln.export.schema --format swift --out Sources/Kiln/Kiln.swift
       mix kiln.export.schema --format kotlin --package com.example.kiln --out app/src/main/java/com/example/kiln/Kiln.kt
       mix kiln.export.schema --format openapi --out openapi/kiln.openapi.json --pretty
+      mix kiln.export.schema --format kotlin-graphql --package com.example.kiln --out app/src/main/java/com/example/kiln/Kiln.kt
       mix kiln.export.schema --format ts --check assets/js/kiln.d.ts
       mix kiln.export.schema --type post,page --org-id 018f…
       mix kiln.export.schema --all-orgs --out ./schemas --pretty
@@ -74,7 +76,19 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
   member, a `@JvmInline value class` per string enum that decodes any value,
   and a `KilnJson` instance (`ignoreUnknownKeys = true`) to decode with.
   `--package` sets the file's package (default `kiln`); it applies to
-  `--format kotlin` only. The same regenerate-per-site advice as Swift holds.
+  `--format kotlin` and `kotlin-graphql` only. The same regenerate-per-site
+  advice as Swift holds.
+
+  ## GraphQL custom fields
+
+  `--format typescript-graphql`, `swift-graphql` and `kotlin-graphql` (#2363)
+  write what `GET /api/schema` serves under the same `format` values: the
+  `ts` / `swift` / `kotlin` output plus, per content type, a result type and a
+  ready GraphQL fragment for the typed custom-field readers (`emit_graphql/1`
+  on `KilnCMS.SchemaExport.TypeScript`, `Swift` and `Kotlin`). The TypeScript
+  one is a `.ts` module, not a `.d.ts`: the fragments are values. `--check`
+  works with them, and `--all-orgs` names the files `<org_id>.graphql.ts`,
+  `.graphql.swift` and `.graphql.kt`.
   """
   use Mix.Task
 
@@ -100,6 +114,8 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
   ]
 
   @aliases [o: :out, f: :format]
+
+  @graphql_formats [:ts_graphql, :swift_graphql, :kotlin_graphql]
 
   @impl Mix.Task
   def run(args) do
@@ -191,6 +207,11 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
   end
 
   defp render(format, export_opts, opts) do
+    export_opts =
+      if format in @graphql_formats,
+        do: Keyword.put(export_opts, :graphql, true),
+        else: export_opts
+
     document = SchemaExport.json_schema(export_opts)
     kiln = Map.fetch!(document, "x-kiln")
 
@@ -211,9 +232,14 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
   def encode(document, :ts, _opts), do: TypeScript.emit(document)
   def encode(document, :openapi, opts), do: encode(OpenApi.emit(document), :json, opts)
   def encode(document, :swift, _opts), do: Swift.emit(document)
+  def encode(document, :ts_graphql, _opts), do: TypeScript.emit_graphql(document)
+  def encode(document, :swift_graphql, _opts), do: Swift.emit_graphql(document)
 
   def encode(document, :kotlin, opts),
     do: Kotlin.emit(document, package: opts[:package] || Kotlin.default_package())
+
+  def encode(document, :kotlin_graphql, opts),
+    do: Kotlin.emit_graphql(document, package: opts[:package] || Kotlin.default_package())
 
   def encode(document, :json, opts) do
     opts = if opts[:pretty], do: [pretty: true], else: []
@@ -262,25 +288,35 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
   defp parse_format(format) when format in ~w(swift), do: :swift
   defp parse_format(format) when format in ~w(kotlin kt), do: :kotlin
   defp parse_format(format) when format in ~w(openapi), do: :openapi
+  defp parse_format(format) when format in ~w(typescript-graphql), do: :ts_graphql
+  defp parse_format(format) when format in ~w(swift-graphql), do: :swift_graphql
+  defp parse_format(format) when format in ~w(kotlin-graphql), do: :kotlin_graphql
 
   defp parse_format(other),
-    do: Mix.raise("Unknown format #{inspect(other)} (expected json|ts|swift|kotlin|openapi).")
+    do:
+      Mix.raise(
+        "Unknown format #{inspect(other)} (expected json|ts|swift|kotlin|openapi|" <>
+          "typescript-graphql|swift-graphql|kotlin-graphql)."
+      )
 
   defp check_package!(_format, nil), do: :ok
 
-  defp check_package!(:kotlin, package) do
+  defp check_package!(format, package) when format in [:kotlin, :kotlin_graphql] do
     unless Kotlin.valid_package?(package),
       do: Mix.raise("--package #{inspect(package)} is not a Kotlin package name.")
   end
 
   defp check_package!(_format, _package),
-    do: Mix.raise("--package applies to --format kotlin only.")
+    do: Mix.raise("--package applies to --format kotlin and kotlin-graphql only.")
 
   defp extension(:ts), do: "d.ts"
   defp extension(:swift), do: "swift"
   defp extension(:kotlin), do: "kt"
   defp extension(:json), do: "json"
   defp extension(:openapi), do: "openapi.json"
+  defp extension(:ts_graphql), do: "graphql.ts"
+  defp extension(:swift_graphql), do: "graphql.swift"
+  defp extension(:kotlin_graphql), do: "graphql.kt"
 
   defp emit(body, nil), do: IO.write(body)
 

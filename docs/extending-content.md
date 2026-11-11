@@ -551,9 +551,13 @@ read from the values). At least one bound is needed, so a half-open range such
 as `{"min": 18}` is valid; with both, `min` may not exceed `max`. A numeric
 string becomes a number; `NaN`, `Infinity`, date-times and numbers beyond
 ±9,007,199,254,740,991 are refused. A range is never indexed for search, even
-if flagged `searchable`. The exported JSON schema only says each bound is a
-number or a string; a number paired with a date is rejected by the check when
-you save.
+if flagged `searchable`. The exported JSON schema (`GET /api/schema`) states
+the same rule: beside the merged `min`/`max` object, an `anyOf` allows two
+number bounds, two date bounds (each with at least one bound present) or
+`null`, so a validator refuses a mixed or empty range as a save does. The
+generated TypeScript types it as `{ max?: number; min?: number } | { max?:
+string; min?: string } | null`; the Swift and Kotlin models keep one struct
+whose bounds are any JSON value.
 
 **Key/value.** Order is kept, which is why the value is a list of pairs and not
 an object. Split at the first `=`, so a value may contain `=`; blank lines are

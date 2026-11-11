@@ -52,7 +52,7 @@ defmodule KilnCMS.SchemaExport do
 
   @typed_lists ScalarLists.typed()
 
-  @served_formats ~w(typescript typescript-graphql swift-graphql kotlin-graphql openapi)
+  @served_formats ~w(typescript typescript-graphql swift swift-graphql kotlin kotlin-graphql openapi)
 
   # See `with_actor/2`.
   @actor_override {__MODULE__, :actor_override}

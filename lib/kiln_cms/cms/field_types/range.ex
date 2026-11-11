@@ -16,12 +16,16 @@ defmodule KilnCMS.CMS.FieldTypes.Range do
   (±9,007,199,254,740,991), and `NaN`, `Infinity` and a date-time are refused.
   A mix of a number and a date is refused.
 
-  The JSON Schema (`json_schema/1`) is deliberately looser than `cast/2`: it
-  lets each bound be a number or a date, so a number with a date is valid by
-  the schema and refused on write. Expressing "both the same kind" needs a
-  `oneOf` of two inline object shapes, which the TypeScript, Swift and Kotlin
-  generators do not yet render (they only follow `$ref` members); a follow-up
-  from #2435.
+  The JSON Schema (`json_schema/1`) states the value twice (#2548). The merged
+  object lets each bound be a number or a date, which is what a generator that
+  only reads `type`/`properties` (Swift, Kotlin, an older `kiln-types`)
+  declares. A sibling `anyOf` narrows it to what `cast/2` accepts: two number
+  bounds or two date bounds, at least one present, or `null`. A validator
+  checks both, so a number with a date is refused by the schema as on write,
+  and the TypeScript emitters render the `anyOf` as a union of the two shapes.
+  The `anyOf` is added beside the merged object rather than replacing it with
+  a `oneOf`, because published generators read every `oneOf` member as a
+  `$ref`.
 
   Ranges are not filterable (other than for presence) or sortable, and are
   served through GraphQL as the generic JSON value. They are never indexed for
@@ -58,7 +62,23 @@ defmodule KilnCMS.CMS.FieldTypes.Range do
     %{
       "type" => ["object", "null"],
       "properties" => %{"min" => bound, "max" => bound},
-      "additionalProperties" => false
+      "additionalProperties" => false,
+      "anyOf" => [
+        bounds(%{"type" => "number"}),
+        bounds(%{"type" => "string", "format" => "date"}),
+        %{"type" => "null"}
+      ]
+    }
+  end
+
+  # One kind of range: both bounds of `bound`'s type, either optional but not
+  # both, since `cast/2` refuses an empty range.
+  defp bounds(bound) do
+    %{
+      "type" => "object",
+      "properties" => %{"min" => bound, "max" => bound},
+      "additionalProperties" => false,
+      "minProperties" => 1
     }
   end
 

@@ -242,6 +242,41 @@ defmodule KilnCMSWeb.SchemaControllerTest do
       refute body =~ "gql_secret_n"
     end
 
+    # #2362: what `mix kiln.export.schema --format swift|kotlin` writes for the
+    # same document, default package included.
+    test "swift and kotlin serve the task's output byte for byte", %{conn: conn} do
+      private_and_public_fields("s")
+      org_id = KilnCMS.Accounts.default_org_id()
+
+      document =
+        KilnCMS.SchemaExport.json_schema(
+          org_id: org_id,
+          base_url: KilnCMSWeb.Tenant.base_url(org_id)
+        )
+
+      swift = get(conn, ~p"/api/schema?format=swift")
+      assert ["text/x-swift" <> _] = get_resp_header(swift, "content-type")
+      assert response(swift, 200) == Mix.Tasks.Kiln.Export.Schema.encode(document, :swift, [])
+      assert swift.resp_body =~ "gqlPriceS"
+      refute swift.resp_body =~ "customFloat"
+
+      kotlin = build_conn() |> unique_ip() |> get(~p"/api/schema?format=kotlin")
+      assert ["text/x-kotlin" <> _] = get_resp_header(kotlin, "content-type")
+      assert response(kotlin, 200) == Mix.Tasks.Kiln.Export.Schema.encode(document, :kotlin, [])
+      assert kotlin.resp_body =~ "\npackage kiln\n"
+      refute kotlin.resp_body =~ "customFloat"
+    end
+
+    test "a cached kotlin document is evicted by a registry write", %{conn: conn} do
+      warm = conn |> get(~p"/api/schema?format=kotlin") |> response(200)
+      refute warm =~ "gql_price_k"
+
+      private_and_public_fields("k")
+
+      fresh = build_conn() |> unique_ip() |> get(~p"/api/schema?format=kotlin") |> response(200)
+      assert fresh =~ "gql_price_k"
+    end
+
     test "a cached swift-graphql document is evicted by a registry write", %{conn: conn} do
       warm = conn |> get(~p"/api/schema?format=swift-graphql") |> response(200)
       refute warm =~ "gql_price_m"
@@ -299,6 +334,8 @@ defmodule KilnCMSWeb.SchemaControllerTest do
       assert inspect(body) =~ "swift-graphql"
       assert inspect(body) =~ "kotlin-graphql"
       assert inspect(body) =~ "openapi"
+      assert inspect(body) =~ "swift, "
+      assert inspect(body) =~ "kotlin, "
     end
 
     # The site's request carries a base URL, so the JSON document has an `$id`;
@@ -369,6 +406,16 @@ defmodule KilnCMSWeb.SchemaControllerTest do
       for key <- keys, do: assert(Cache.peek(key) == nil, "#{key} survived the bust")
     end
 
+    test "a registry bust evicts the cached GraphQL document too" do
+      key = Cache.delivery_schema_graphql_key(KilnCMS.Accounts.default_org_id())
+      Cache.put(key, :warm, :timer.minutes(1))
+      assert Cache.peek(key) == :warm
+
+      Cache.bust_type_registry(KilnCMS.Accounts.default_org_id())
+
+      assert Cache.peek(key) == nil
+    end
+
     test "format combines with ?type= and 400s on an unknown type", %{conn: conn} do
       body = conn |> get(~p"/api/schema?format=typescript&type=post") |> response(200)
       assert body =~ "PostDocument"
@@ -378,6 +425,103 @@ defmodule KilnCMSWeb.SchemaControllerTest do
              |> unique_ip()
              |> get(~p"/api/schema?format=typescript&type=nope")
              |> json_response(400)
+    end
+  end
+
+  # #2363: the Kotlin package, for `kotlin` and `kotlin-graphql` only.
+  describe "package" do
+    # The per-format bodies (`Cache.delivery_schema_key/2`) are not among the
+    # default org's aggregate keys `DataCase` drops around each test, so one
+    # warmed by an earlier test's rolled-back fields can still be live. These
+    # tests compare a cached body with one re-emitted from the cached document,
+    # so both have to start cold, and must not leave a body behind either.
+    setup do
+      org_id = KilnCMS.Accounts.default_org_id()
+      Cache.bust_type_registry(org_id)
+      on_exit(fn -> Cache.bust_type_registry(org_id) end)
+    end
+
+    defp schema(query), do: build_conn() |> unique_ip() |> get("/api/schema?" <> query)
+
+    test "sets the package of kotlin and kotlin-graphql" do
+      for format <- ["kotlin", "kotlin-graphql"] do
+        body = "format=#{format}&package=com.example.kiln" |> schema() |> response(200)
+        assert body =~ "\npackage com.example.kiln\n"
+        refute body =~ "\npackage kiln\n"
+      end
+    end
+
+    test "the default package, explicit or empty, is the cached body" do
+      plain = "format=kotlin-graphql" |> schema() |> response(200)
+
+      assert "format=kotlin-graphql&package=kiln" |> schema() |> response(200) == plain
+      assert "format=kotlin-graphql&package=" |> schema() |> response(200) == plain
+    end
+
+    # Only the package line differs: the body is re-emitted from the same
+    # cached document, not built from a different one.
+    test "a custom package is the default body in another package" do
+      default = "format=kotlin-graphql" |> schema() |> response(200)
+      custom = "format=kotlin-graphql&package=com.example.kiln" |> schema() |> response(200)
+
+      assert String.replace(custom, "\npackage com.example.kiln\n", "\npackage kiln\n") ==
+               default
+    end
+
+    # A caller-chosen package must not become a cache key; it re-emits from
+    # the cached JSON document, which a registry write still busts.
+    test "is not cached per package, and follows a registry write" do
+      org_id = KilnCMS.Accounts.default_org_id()
+
+      warm = "format=kotlin-graphql&package=com.example.kiln" |> schema() |> response(200)
+      refute warm =~ "gql_price_q"
+      assert Cache.peek(Cache.delivery_schema_key(org_id, "kotlin-graphql")) == nil
+      assert Cache.peek(Cache.delivery_schema_graphql_key(org_id)) != nil
+
+      admin()
+      |> then(
+        &CMS.create_field_definition!(
+          %{content_type: :page, name: "gql_price_q", label: "Price", field_type: :float},
+          actor: &1
+        )
+      )
+
+      fresh = "format=kotlin-graphql&package=com.example.kiln" |> schema() |> response(200)
+      assert fresh =~ ~s|gqlPriceQ: customFloat(name: "gql_price_q")|
+
+      plain = "format=kotlin&package=com.example.kiln" |> schema() |> response(200)
+      assert plain =~ "gql_price_q"
+      refute plain =~ "customFloat"
+    end
+
+    test "an invalid package is a 400" do
+      for package <- [
+            "com.example-app",
+            "com.fun.kiln",
+            "1abc",
+            "a..b",
+            String.duplicate("a", 256)
+          ] do
+        body = "format=kotlin&package=#{package}" |> schema() |> json_response(400)
+        assert body["errors"] |> List.first() |> Map.get("code") == "invalid_package"
+      end
+    end
+
+    test "a package with any other format is a 400" do
+      for format <- ["json", "typescript", "swift", "swift-graphql", "openapi"] do
+        body = "format=#{format}&package=com.example.kiln" |> schema() |> json_response(400)
+        assert body["errors"] |> List.first() |> Map.get("code") == "invalid_package"
+        assert inspect(body) =~ "kotlin-graphql only"
+      end
+
+      assert "package=com.example.kiln" |> schema() |> json_response(400)
+    end
+
+    test "combines with ?type=" do
+      body = "format=kotlin&package=com.example.kiln&type=post" |> schema() |> response(200)
+      assert body =~ "\npackage com.example.kiln\n"
+      assert body =~ "PostDocument"
+      refute body =~ "PageDocument"
     end
   end
 end

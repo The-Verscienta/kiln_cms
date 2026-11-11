@@ -371,6 +371,8 @@ defmodule KilnCMS.Cache do
       for format <- KilnCMS.SchemaExport.served_formats(),
           do: Cachex.del(@cache, delivery_schema_key(org_id, format))
 
+      Cachex.del(@cache, delivery_schema_graphql_key(org_id))
+
       # `has_published_feed` is half of `KilnCMS.Feeds.syndicated?/2`, so a type
       # write changes which types syndicate as surely as a settings save does.
       Cachex.del(@cache, syndicated_types_key(org_id))
@@ -398,6 +400,15 @@ defmodule KilnCMS.Cache do
   """
   @spec delivery_schema_key(Ash.UUID.t(), String.t()) :: String.t()
   def delivery_schema_key(org_id, format), do: "delivery_schema:#{org_id}:#{format}"
+
+  @doc """
+  The JSON document built with `graphql: true` (#2363), which a
+  `GET /api/schema?format=kotlin-graphql&package=...` request re-emits in the
+  caller's package rather than caching one body per package. Not a served
+  format of its own; busted with the others by `bust_type_registry/1`.
+  """
+  @spec delivery_schema_graphql_key(Ash.UUID.t()) :: String.t()
+  def delivery_schema_graphql_key(org_id), do: "delivery_schema:#{org_id}:graphql-document"
 
   @doc """
   Cache key for which of a site's content types are event-shaped (#480).

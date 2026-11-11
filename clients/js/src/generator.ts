@@ -154,6 +154,16 @@ function tsType(schema: JsonSchema): string {
     return `${typeName(refTarget(target))} | null`;
   }
 
+  // Closed variants (#2548): an `anyOf` of closed inline objects, optionally
+  // plus `{"type": "null"}`, narrowing the merged shape beside it (a range is
+  // two numbers or two dates). A value satisfies both, so the narrower one is
+  // the type; ahead of the type list for that reason.
+  const variants = closedVariants(schema.anyOf);
+  if (variants !== undefined) {
+    const members = variants.objects.map(tsType);
+    return (variants.nullable ? [...members, "null"] : members).join(" | ");
+  }
+
   // Ahead of `const`/`enum`, not after. A nullable enum carries both keywords,
   // and matching the value clause first would emit `"free" | "pro"` for a
   // `["string", "null"]` field — telling a consumer that `?.` is redundant on
@@ -190,6 +200,28 @@ function tsType(schema: JsonSchema): string {
     default:
       return "unknown";
   }
+}
+
+// The objects and whether `null` is a member, or `undefined` for any other
+// `anyOf`, which is left to the clauses after it.
+function closedVariants(
+  members: JsonSchema[] | undefined,
+): { objects: JsonSchema[]; nullable: boolean } | undefined {
+  if (members === undefined) return undefined;
+  const isNull = (member: JsonSchema) =>
+    Object.keys(member).length === 1 && member.type === "null";
+  const objects = members.filter((member) => !isNull(member));
+  if (objects.length === 0 || !objects.every(isClosedObject)) return undefined;
+  return { objects, nullable: objects.length < members.length };
+}
+
+function isClosedObject(schema: JsonSchema): boolean {
+  return (
+    schema.type === "object" &&
+    typeof schema.properties === "object" &&
+    schema.properties !== null &&
+    schema.additionalProperties === false
+  );
 }
 
 function inlineObject(properties: Record<string, JsonSchema>, required: Set<string>): string {

@@ -338,9 +338,26 @@ code `invalid_format`):
 | `json` (default) | JSON Schema, as before ([api.md](api.md#schema-discovery-typed-clients)) |
 | `typescript` | The same types as a `.d.ts` declaration file |
 | `typescript-graphql` | A `.ts` **module** (the fragments are values): the declarations above plus, per content type, a `<Type>CustomFields` interface and a `<Type>CustomFieldsFragment` string |
+| `swift` | The Swift models of the `json` artifact alone, no GraphQL section ([native-apps.md](native-apps.md#swift-models)) |
 | `swift-graphql` | The Swift models of the `json` artifact plus, per content type, a `<Type>CustomFields` struct with a `fragment` string (*Typed models from GET /api/schema* in [native-apps.md](native-apps.md)) |
-| `kotlin-graphql` | The Kotlin models (package `kiln`) plus, per content type, a `<Type>CustomFields` data class with a `FRAGMENT` string |
+| `kotlin` | The Kotlin models alone, no GraphQL section ([native-apps.md](native-apps.md#kotlin-models)) |
+| `kotlin-graphql` | The Kotlin models plus, per content type, a `<Type>CustomFields` data class with a `FRAGMENT` string |
 | `openapi` | The `json` schemas as OpenAPI 3.1 `components.schemas`, for an OpenAPI generator; no GraphQL fragments ([api.md](api.md#the-same-schemas-as-openapi-components)) |
+
+Both Kotlin formats are in package `kiln` unless the request adds
+`&package=com.example.kiln`; `package` with any other format, or a name that
+is not a Kotlin package, is a `400` with code `invalid_package`.
+
+From a repository that runs Kiln, `mix kiln.export.schema` takes the same
+values (`--format typescript-graphql`, `swift-graphql` or `kotlin-graphql`,
+with `--package` for Kotlin) and writes the same file, so `--check` can fail a
+build whose committed fragments are stale
+([api.md → Generating types at build time](api.md#generating-types-at-build-time)):
+
+```bash
+mix kiln.export.schema --format typescript-graphql --type post \
+  --org-id <site uuid> --check src/generated/kiln.ts
+```
 
 Fetch it at build time and commit the file. A recipe for a front end that
 reads with GraphQL:
