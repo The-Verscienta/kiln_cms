@@ -44,10 +44,10 @@ carries the reasoning.
     copying off-site on this deploy. Name a remote (`r2:kiln-backups`) and
     configure it with `RCLONE_CONFIG_<NAME>_*` variables in the app's
     environment, or mount an `rclone.conf` and point `RCLONE_CONFIG` at it:
-    the app runs as `nobody`, whose home directory does not exist. Don't use
-    a connection-string remote (`:s3,secret_access_key=…:bucket`) here: the
-    app passes the remote to `rclone` as an argument, where other users on
-    the host can read it. Until the remote is configured, the copy fails and
+    the app runs as `nobody`, whose home directory does not exist. A
+    connection-string remote (`:s3,secret_access_key=…:bucket`) also works:
+    its parameters reach `rclone` as environment variables, not as an
+    argument (#2690). Until the remote is configured, the copy fails and
     so does the run.
   - **Rolling the pin back** is safe: nothing is migrated. v1.8.0's image has
     no `rclone`, and v1.8.0 skips the off-site copy silently.
@@ -5926,6 +5926,28 @@ carries the reasoning.
     plugin block's own `:web` output carry whatever the plugin renders.
 
 ## Security
+
+<a id="rclone-remote-argv-credentials"></a>
+
+- **A connection-string `BACKUP_RCLONE_REMOTE` (`:s3,access_key_id=…,secret_access_key=…:bucket`) no longer puts its credentials in `rclone`'s arguments; the app and `scripts/backup.sh` pass them as `RCLONE_CONFIG_*` variables of that `rclone` process only (#2690).**
+  Arguments are world-readable in `/proc/<pid>/cmdline`, shown by `ps` on the
+  host and scraped by monitoring agents, for the whole transfer. Now
+  `:backend,k=v,…:path` becomes the remote `kiln_offsite:path` with
+  `RCLONE_CONFIG_KILN_OFFSITE_TYPE=backend` and one
+  `RCLONE_CONFIG_KILN_OFFSITE_<KEY>` per parameter, and `name,k=v,…:path`
+  becomes `name:path` with `RCLONE_CONFIG_<NAME>_<KEY>`, mirroring how the
+  database password already moves into `PGPASSWORD`. Quoted values, doubled
+  quotes and bare `true` keys follow rclone's rules. A named remote
+  (`r2:kiln-backups`) is passed unchanged. Left as written: an overridden
+  named remote whose name is not letters, digits and `_` only (rclone cannot
+  look it up as a variable), and a string neither side can parse.
+  `backup.sh` now prints the translated remote in its progress line instead
+  of the string; its `manifest.json` still records the string, redacted when
+  the app imports it. The name `kiln_offsite` is reserved: a `[kiln_offsite]`
+  section in `rclone.conf` would fill in keys the string leaves unset. No
+  setting changes; update the host's copy of `scripts/backup.sh`.
+  See [backups.md](../backups.md#off-site-credentials-stay-out-of-the-rclone-command-line-2690).
+  ([#2690](https://github.com/The-Verscienta/kiln_cms/issues/2690))
 
 <a id="invitation-takeover-credentials"></a>
 

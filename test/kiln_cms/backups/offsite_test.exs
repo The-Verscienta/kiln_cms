@@ -134,13 +134,75 @@ defmodule KilnCMS.Backups.OffsiteTest do
 
     names = Artifact.set_names(@stamp, 3)
 
+    # The connection string's parameters went to rclone's environment, so
+    # its argv names the remote it defines there (#2690).
     assert calls(log) ==
-             ["copy #{dir}/db/kiln-db-#{@stamp}.dump #{@remote}/db"] ++
-               for(name <- names, do: "copy #{dir}/media/#{name} #{@remote}/media") ++
+             ["copy #{dir}/db/kiln-db-#{@stamp}.dump kiln_offsite:bucket/db"] ++
+               for(name <- names, do: "copy #{dir}/media/#{name} kiln_offsite:bucket/media") ++
                [
-                 "copy #{dir}/db/#{Artifact.sidecar_name(:db, @stamp)} #{@remote}/db",
-                 "copy #{media_sidecar(dir)} #{@remote}/media"
+                 "copy #{dir}/db/#{Artifact.sidecar_name(:db, @stamp)} kiln_offsite:bucket/db",
+                 "copy #{media_sidecar(dir)} kiln_offsite:bucket/media"
                ]
+  end
+
+  describe "a connection-string remote's credentials (#2690)" do
+    # An rclone that logs its argv to `log` and its RCLONE_CONFIG_* environment
+    # to `log.env`, one block per call.
+    defp stub_rclone_env(bin, log) do
+      stub_rclone(
+        bin,
+        log,
+        nil,
+        ~s(env | grep '^RCLONE_CONFIG_' | sort >> "#{log}.env"\necho -- >> "#{log}.env"\n)
+      )
+    end
+
+    test "reach rclone through its environment, never its argv",
+         %{dir: dir, bin: bin, log: log} do
+      stub_rclone_env(bin, log)
+      entries = land(dir)
+
+      assert {@remote, results} = Worker.offsite_results(dir, entries)
+      assert Enum.all?(results, &match?({_, :ok}, &1))
+
+      assert [_ | _] = calls = calls(log)
+
+      for call <- calls do
+        refute call =~ "SUPERSECRETVAL"
+        refute call =~ "AKIAEXAMPLE1"
+        refute call =~ "secret_access_key"
+      end
+
+      blocks = (log <> ".env") |> File.read!() |> String.split("--\n", trim: true)
+      assert length(blocks) == length(calls)
+
+      for block <- blocks do
+        assert String.split(block, "\n", trim: true) == [
+                 "RCLONE_CONFIG_KILN_OFFSITE_ACCESS_KEY_ID=AKIAEXAMPLE1",
+                 "RCLONE_CONFIG_KILN_OFFSITE_SECRET_ACCESS_KEY=SUPERSECRETVAL",
+                 "RCLONE_CONFIG_KILN_OFFSITE_TYPE=s3"
+               ]
+      end
+
+      # Only rclone's: the app's own environment is untouched.
+      refute System.get_env("RCLONE_CONFIG_KILN_OFFSITE_SECRET_ACCESS_KEY")
+    end
+
+    test "a named remote is passed as it is, with no environment",
+         %{dir: dir, bin: bin, log: log} do
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :rclone_remote, "r2:kiln")
+      )
+
+      stub_rclone_env(bin, log)
+      entries = land(dir)
+
+      assert {"r2:kiln", _results} = Worker.offsite_results(dir, entries)
+      assert hd(calls(log)) == "copy #{dir}/db/kiln-db-#{@stamp}.dump r2:kiln/db"
+      assert (log <> ".env") |> File.read!() |> String.replace("--\n", "") == ""
+    end
   end
 
   describe "re-hash before each copy (#2218)" do

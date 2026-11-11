@@ -33,7 +33,9 @@
 #   BACKUP_RCLONE_REMOTE optional rclone target (e.g. "r2:kiln-backups") —
 #                        each new backup is copied off-site after it verifies;
 #                        each file is re-hashed right before its copy and the
-#                        run stops, uploading nothing more, if one changed
+#                        run stops, uploading nothing more, if one changed.
+#                        A connection string's parameters go to rclone as
+#                        RCLONE_CONFIG_* variables, not argv (see offsite)
 #   BACKUP_PING_URL      optional URL curl'd on success (healthchecks.io-style
 #                        dead-man's switch; the check fires when pings STOP)
 #   BACKUP_TRIGGER       label recorded in the manifest (default: "cron")
@@ -112,8 +114,92 @@ offsite() {
   if [ -z "$expected" ] || [ "$found" != "$expected" ]; then
     refuse_offsite "$file" "$expected" "$found"
   fi
-  echo "==> Off-site copy → ${BACKUP_RCLONE_REMOTE}"
-  rclone copy "$file" "${BACKUP_RCLONE_REMOTE}/$(basename "$(dirname "$file")")"
+  rclone_split_remote "$BACKUP_RCLONE_REMOTE"
+  echo "==> Off-site copy → ${OFFSITE_REMOTE}"
+  # The parameters reach rclone through its environment only: `export` is a
+  # builtin, and the subshell keeps them from every other command (#2690).
+  (
+    if [ "${#OFFSITE_ENV[@]}" -gt 0 ]; then export "${OFFSITE_ENV[@]}"; fi
+    rclone copy "$file" "${OFFSITE_REMOTE}/$(basename "$(dirname "$file")")"
+  )
+}
+
+# Keep a connection-string remote's credentials out of rclone's argv (#2690),
+# as KilnCMS.Backups.RcloneRemote does for the app. argv is world-readable in
+# /proc/<pid>/cmdline and shown by `ps`; a copy runs for minutes.
+#
+# $1 = BACKUP_RCLONE_REMOTE. Sets OFFSITE_REMOTE (the remote to put in argv)
+# and OFFSITE_ENV (`RCLONE_CONFIG_<NAME>_<KEY>=value` entries):
+#   `:backend,k=v,…:path` → `kiln_offsite:path` + RCLONE_CONFIG_KILN_OFFSITE_TYPE=backend, …
+#   `name,k=v,…:path`     → `name:path` + RCLONE_CONFIG_<NAME>_<KEY>=v, …
+# A key without `=` is `true`; a value quoted with ' or " (a doubled quote
+# standing for itself) may hold `,` and `:`. Anything else — `r2:kiln`, a
+# local path, a name that cannot be a variable name, a string this does not
+# parse — is left unchanged with no environment.
+rclone_split_remote() {
+  local remote="$1" rest name prefix key value q c
+  local env_list=()
+  OFFSITE_REMOTE="$remote"
+  OFFSITE_ENV=()
+
+  rest="$remote"
+  [ "${rest:0:1}" = ":" ] && rest="${rest:1}"
+  name="${rest%%[,:]*}"
+  [ -n "$name" ] && [ "$name" != "$rest" ] || return 0
+  rest="${rest:${#name}}"
+  [ "${rest:0:1}" = "," ] || return 0
+  rest="${rest:1}"
+  [[ "$name" =~ ^[A-Za-z0-9_]+$ ]] || return 0
+
+  if [ "${remote:0:1}" = ":" ]; then
+    prefix="RCLONE_CONFIG_KILN_OFFSITE_"
+    env_list+=("${prefix}TYPE=$name")
+    name="kiln_offsite"
+  else
+    prefix="RCLONE_CONFIG_$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')_"
+  fi
+
+  while :; do
+    key="${rest%%[=,:]*}"
+    [ "$key" != "$rest" ] || return 0
+    [[ "$key" =~ ^[A-Za-z0-9_-]+$ ]] || return 0
+    rest="${rest:${#key}}"
+    if [ "${rest:0:1}" = "=" ]; then
+      rest="${rest:1}"
+      q="${rest:0:1}"
+      if [ "$q" = '"' ] || [ "$q" = "'" ]; then
+        rest="${rest:1}"
+        value=""
+        while :; do
+          [ -n "$rest" ] || return 0
+          c="${rest:0:1}"
+          rest="${rest:1}"
+          if [ "$c" != "$q" ]; then
+            value+="$c"
+          elif [ "${rest:0:1}" = "$q" ]; then
+            value+="$q"
+            rest="${rest:1}"
+          else
+            break
+          fi
+        done
+      else
+        value="${rest%%[,:]*}"
+        [ "$value" != "$rest" ] || return 0
+        rest="${rest:${#value}}"
+      fi
+    else
+      value="true"
+    fi
+    env_list+=("${prefix}$(printf '%s' "$key" | tr '[:lower:]-' '[:upper:]_')=$value")
+    c="${rest:0:1}"
+    rest="${rest:1}"
+    [ "$c" = ":" ] && break
+    [ "$c" = "," ] || return 0
+  done
+
+  OFFSITE_REMOTE="${name}:${rest}"
+  OFFSITE_ENV=("${env_list[@]}")
 }
 
 # $1 = file, $2 = recorded sha256, $3 = what it hashes to now (empty: missing

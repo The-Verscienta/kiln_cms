@@ -312,8 +312,8 @@ cover:
   platform's tools, or set `BACKUP_RCLONE_REMOTE`: the official image ships
   `rclone`, so each in-app backup is then copied off-site, and a copy that
   fails fails the backup. Configure the remote with `RCLONE_CONFIG_<NAME>_*`
-  variables (the platform's secrets), not a connection-string remote, whose
-  credentials would reach `rclone` as an argument. An image of your
+  variables (the platform's secrets) rather than a connection-string
+  remote, which would hold the credentials in a plain variable. An image of your
   own that leaves `rclone` out fails every in-app backup while the variable
   is set. See
   [backups.md](backups.md#it-needs-the-client-tools-in-the-image).
