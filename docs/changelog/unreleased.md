@@ -24,6 +24,18 @@ carries the reasoning.
   See [Confirming an address](../account-administration.md#confirming-an-address).
   ([#2594](https://github.com/The-Verscienta/kiln_cms/issues/2594))
 
+<a id="shared-cache-session-free-upgrade"></a>
+
+- **If a CDN caches the site's pages, purge it after deploying (#2630).**
+  Pages cached before the deploy were rendered with the CSRF token of
+  whichever visitor filled the cache, and a CDN keeps serving them until
+  `max-age=60, stale-while-revalidate=300` runs out, about six minutes. A
+  purge (`KilnCMS.CDN`, or the CDN's own console) clears them at once.
+  Nothing else to do: no migration, and the delivery ETag already moves on
+  every deploy (#2463), so a revalidating browser gets the new body. Rolling
+  back is safe.
+  ([#2630](https://github.com/The-Verscienta/kiln_cms/issues/2630))
+
 <a id="instance-security-log-upgrade"></a>
 
 - **Run `mix ash.migrate` for the instance security log (#2541).** The
@@ -1396,15 +1408,14 @@ carries the reasoning.
   - **Every delivery `ETag` changes once**, since it now names the URL's
     language; revalidating clients and CDNs get one round of `200`s. Rolling
     the pin back is safe and costs another round.
-  - **Known gaps:** the header's brand link points to `/` and drops the
-    reader's prefix
-    ([#2636](https://github.com/The-Verscienta/kiln_cms/issues/2636)); a
-    locale without a Gettext catalog shows English chrome under its own
-    `<html lang>`
-    ([#2637](https://github.com/The-Verscienta/kiln_cms/issues/2637)); and
-    public pages still render a few session-derived bits, such as the CSRF
-    meta tag
-    ([#2630](https://github.com/The-Verscienta/kiln_cms/issues/2630)).
+  - **Known gap:** public pages still render a few session-derived bits,
+    such as the CSRF meta tag
+    ([#2630](https://github.com/The-Verscienta/kiln_cms/issues/2630)). The
+    header's brand link
+    ([#2636](https://github.com/The-Verscienta/kiln_cms/issues/2636)) and a
+    regional locale's chrome
+    ([#2637](https://github.com/The-Verscienta/kiln_cms/issues/2637)) are
+    fixed in this release; see Fixed.
   - **Developers.** `KilnCMSWeb.Plugs.UrlLocale` sets the locale, the
     `:locale` assign and the Gettext locale from `path_locale` or the
     default; `UrlLocale.locale/1` is the same rule as a function. It is
@@ -5142,6 +5153,56 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="brand-link-keeps-locale"></a>
+
+- **The public header's brand link keeps the reader's language (#2636).**
+  On a page under `/fr/…` it pointed to `/`, which since #2646 is always the
+  default language's home: no unprefixed URL takes its language from the
+  session any more, and `/fr` alone is a page slug. It now points to
+  `/<locale>/home` on a prefixed page (and still to `/` on a default-language
+  one). That address used to 404 on a site with no published Home page; it
+  now serves the stock front page in the URL's language, as `/` serves it in
+  the default's. A published Home page, a path alias or a redirect at `/home`
+  still wins, and `/home` on its own now answers like `/` instead of 404ing.
+  The layout decides the link without a query, so a cached page render stays
+  query-free. `KilnCMSWeb.Layouts.public_home_path/1` returns the address for
+  a theme or overlay that draws its own header.
+
+<a id="regional-locale-chrome"></a>
+
+- **A regional locale with no catalog of its own shows its language's chrome
+  (#2637).** A site configured with `fr-CA`, while Kiln ships only an `fr`
+  catalog, rendered English buttons, labels and nav under
+  `<html lang="fr-CA">`, which #2646 made the URL's language. Gettext found
+  no `fr-CA` catalog and fell back to the English source text. A missing
+  message is now looked up along the tag's chain, `fr-CA`, then `fr_CA` (the
+  directory spelling Gettext uses), then `fr`, before it falls back to
+  English, so a regional catalog needs only the words that differ. The
+  Gettext locale itself stays `fr-CA`, so `<html lang>`, `Content-Language`,
+  menus and form submissions still name the reader's locale. A locale whose
+  language has no catalog at all (`de` on a stock install) still shows
+  English chrome; add a `priv/gettext/de` catalog for it.
+
+<a id="api-key-any-authorization-value"></a>
+
+- **A `kiln_` API key is found in any `Authorization` value, under any case
+  of `Bearer` (#2633).** `ApiKeyAuth` looked for a key only in the first
+  `authorization` value and only behind the exact prefix `Bearer kiln_`,
+  while the unverifiable-bearer check added for #2161 scans every value and
+  matches the scheme case-insensitively. A request carrying
+  `Basic …` then `Bearer kiln_<valid key>`, or `bearer kiln_<valid key>`,
+  therefore skipped the key and was refused `401 invalid_token`, the
+  stale-JWT answer. The key path now takes the first `kiln_…` token under a
+  `Bearer` scheme in any case, across every value, with surrounding
+  whitespace ignored. With several credentials in one request: the first
+  key decides, so an invalid first key is a `401` even beside a valid one
+  (no trying keys in turn), and a key wins over a JWT sent alongside it, as
+  it already did when the key came first. A bearer that is neither a key
+  nor a JWT that verified is still a `401` (#2161). The
+  `[:kiln_cms, :api, :invalid_bearer]` telemetry event no longer reports
+  `reason: :api_key_scheme`: a key under a non-canonical scheme now goes to
+  the key path, and an invalid one gets the key path's own `401`.
+
 <a id="backup-failure-manifest-stamp"></a>
 
 - **A failed backup is one run in History, not two (#2700).** An in-app backup takes
@@ -6294,6 +6355,28 @@ carries the reasoning.
     plugin block's own `:web` output carry whatever the plugin renders.
 
 ## Security
+
+<a id="shared-cache-session-free"></a>
+
+- **A public page a CDN or browser may cache (`cache-control: public`) no longer carries the visitor's CSRF token or anything from their session, and no longer sets a session cookie (#2630).**
+  The root layout rendered a per-session CSRF `<meta>` on every page,
+  including published pages, posts, the blog index, event indexes and the
+  standalone form page, which go out as `public, max-age=60,
+  stale-while-revalidate=300`. A CDN in front kept the first visitor's token
+  and served it to everyone after them, and minting a token for a visitor
+  with no session wrote one, so the cached response also tried to set a
+  cookie. Now a response marked `public` renders no CSRF `<meta>`, and every
+  public HTML response is marked through `KilnCMSWeb.SharedCache.put_public/2`,
+  which also clears `current_user` from what the templates see, so the
+  account and sign-out links `Layouts.public` draws for a signed-in reader
+  cannot reach a shared copy either. Signed in or signed out, these pages
+  now render the same body. Nothing on them needed the token: forms and the
+  newsletter signup post to routes that take none, and the pages mount no
+  LiveView (`app.js` no longer throws when the `<meta>` is absent). Pages
+  that do depend on the reader stay `private, no-store` and keep their
+  token: the passphrase lock page, paywall teasers, audience-gated and
+  experiment renders.
+  ([#2630](https://github.com/The-Verscienta/kiln_cms/issues/2630))
 
 <a id="rclone-remote-argv-credentials"></a>
 

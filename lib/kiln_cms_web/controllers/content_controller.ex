@@ -48,6 +48,7 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.Plugs.ChallengeCsp
   alias KilnCMSWeb.Plugs.UrlLocale
+  alias KilnCMSWeb.SharedCache
   alias KilnCMSWeb.StructuredData
   alias KilnCMSWeb.ViewTracking
 
@@ -65,6 +66,21 @@ defmodule KilnCMSWeb.ContentController do
     if StarterContent.published_home?(current_org_id(conn)) do
       show_page(conn, Map.put(params, "slug", StarterContent.home_slug()))
     else
+      conn
+      |> put_view(KilnCMSWeb.PageHTML)
+      |> KilnCMSWeb.PageController.home(params)
+    end
+  end
+
+  # `/home` with no published Home page — in practice `/<locale>/home`, where
+  # `Layouts.public`'s brand link points on a prefixed page (#2636) — answers
+  # with the stock template in the URL's locale, as `/` does. The prefix is the
+  # only way a reader reaches a non-default home (`/` is the default locale's,
+  # and `/fr` alone is a slug), and the layout cannot ask whether a Home page
+  # is published without a query on every cached render. So the address always
+  # answers, and a published Home page, an alias or a redirect still wins.
+  defp stock_home(conn, slug, params) do
+    if slug == StarterContent.home_slug() do
       conn
       |> put_view(KilnCMSWeb.PageHTML)
       |> KilnCMSWeb.PageController.home(params)
@@ -102,7 +118,9 @@ defmodule KilnCMSWeb.ContentController do
         # `path_alias` of `/gigs` on some record, say, which nothing forbids.
         # It also leaves an operator a way to replace the generated listing with
         # a hand-built page at the same address.
-        follow_redirect_or_404(conn, "/" <> slug, ct, fn -> event_index(conn, slug, params) end)
+        follow_redirect_or_404(conn, "/" <> slug, ct, fn ->
+          event_index(conn, slug, params) || stock_home(conn, slug, params)
+        end)
 
       payload ->
         serve(conn, :show_page, "page", payload, ct, audiences)
@@ -202,7 +220,7 @@ defmodule KilnCMSWeb.ContentController do
     |> widen_for_forms([form])
     # Same window as the event index's: the page changes only when an admin
     # edits the form, and a form deactivated inside it refuses the POST anyway.
-    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> SharedCache.put_public()
     |> put_resp_header("vary", "Accept-Language")
     # Matches the embed document's `<meta name="robots" content="noindex">`: a
     # form is a destination for a link, not a page with content of its own, and
@@ -621,7 +639,7 @@ defmodule KilnCMSWeb.ContentController do
       )
 
     conn
-    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> SharedCache.put_public()
     |> put_resp_header("vary", "Accept-Language")
     |> assign(:locale, locale)
     |> assign(:page_title, gettext("Blog"))
@@ -664,7 +682,7 @@ defmodule KilnCMSWeb.ContentController do
     base = EventIndex.index_path(descriptor)
 
     conn
-    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> SharedCache.put_public()
     |> put_resp_header("vary", "Accept-Language")
     |> assign(:locale, locale)
     |> assign(:page_title, descriptor.label)
@@ -1595,7 +1613,7 @@ defmodule KilnCMSWeb.ContentController do
 
   defp put_delivery_cache_headers(conn, record, forms_digest) do
     conn
-    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> SharedCache.put_public()
     |> put_resp_header("vary", "Accept-Language")
     |> put_resp_header("etag", etag(record, current_org_id(conn), forms_digest, locale(conn)))
   end

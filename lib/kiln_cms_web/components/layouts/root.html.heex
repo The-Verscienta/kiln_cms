@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <%!-- `Layouts.csrf_token/0`, not `get_csrf_token/0` directly: this layout now
           also wraps error pages, which can render from a conn outside the
-          normal pipeline; the helper fails safe there. Present as normal
-          everywhere else (#681). --%>
-    <meta :if={token = Layouts.csrf_token()} name="csrf-token" content={token} />
+          normal pipeline; the helper fails safe there. Absent from a response
+          marked for a shared cache (#2630, `KilnCMSWeb.SharedCache`). Present
+          as normal everywhere else (#681). --%>
+    <meta :if={token = Layouts.csrf_token(assigns)} name="csrf-token" content={token} />
     <%!-- White-label branding (#48), failing closed rather than defaulting (#701).
           Every path that reaches this layout resolves the org first — the
           `SetTenant` plug over HTTP, `:assign_current_org` on every

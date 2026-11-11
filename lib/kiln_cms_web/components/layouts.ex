@@ -26,10 +26,15 @@ defmodule KilnCMSWeb.Layouts do
   resolution fails safe rather than trusting that. An error page carries no
   form to protect, so `nil` is a fine answer; on every normal path a session is
   present and this returns the real token, unchanged.
+
+  `nil` too for a response marked for a shared cache (#2630,
+  `KilnCMSWeb.SharedCache`): the token belongs to one session, and a CDN would
+  hand it to every later visitor. Asking for one would also mint it into a
+  visitor's session, so the shared response would carry a `set-cookie`.
   """
-  @spec csrf_token() :: String.t() | nil
-  def csrf_token do
-    get_csrf_token()
+  @spec csrf_token(map()) :: String.t() | nil
+  def csrf_token(assigns \\ %{}) do
+    if KilnCMSWeb.SharedCache.shared?(assigns[:conn]), do: nil, else: get_csrf_token()
   rescue
     _ -> nil
   end
@@ -1284,6 +1289,26 @@ defmodule KilnCMSWeb.Layouts do
   defp display_name(_), do: nil
 
   @doc """
+  The site home for a reader in `locale`: `/` for the default locale (and a
+  `nil` or unsupported one), `/<locale>/home` otherwise (#2636).
+
+  Not `/<locale>`: a single segment is a slug to `KilnCMSWeb.Plugs.SetLocale`.
+  `/<locale>/home` serves the published Home page when the site has one, and
+  the stock home template in that locale when it does not
+  (`KilnCMSWeb.ContentController.show_page/2`).
+
+      iex> KilnCMSWeb.Layouts.public_home_path(nil)
+      "/"
+  """
+  @spec public_home_path(String.t() | nil) :: String.t()
+  def public_home_path(locale) do
+    case KilnCMS.I18n.localized_path(locale, "/home") do
+      "/home" -> "/"
+      prefixed -> prefixed
+    end
+  end
+
+  @doc """
   Minimal chrome for the public delivery frontend (published Pages/Posts and the
   blog index). Deliberately free of the authoring nav.
   """
@@ -1321,7 +1346,9 @@ defmodule KilnCMSWeb.Layouts do
   # Page or Post is the same document for every reader, and this layout has no
   # authoring nav to hang an account menu off. Passed only where a signed-in
   # reader is the point — the stock front page, which had these two links from
-  # `Layouts.app` before it moved here and must not lose them.
+  # `Layouts.app` before it moved here and must not lose them. A response
+  # marked for a shared cache has no user to pass: `KilnCMSWeb.SharedCache.put_public/2`
+  # clears `:current_user` from its assigns (#2630).
   attr :current_user, :any, default: nil, doc: "signed-in reader, for the account/sign-out pair"
 
   slot :inner_block, required: true
@@ -1347,7 +1374,9 @@ defmodule KilnCMSWeb.Layouts do
               own row under the site name instead of folding its links into a
               narrow column beside it. --%>
         <div class="public-measure flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
-          <a href="/" class="flex min-w-0 items-center gap-3">
+          <%!-- The reader's home (#2636): `/` is the default locale's, so a
+                prefixed page links `/<locale>/home`, which always answers. --%>
+          <a href={public_home_path(@locale)} class="flex min-w-0 items-center gap-3">
             <.brand_mark brand={@brand} class="h-7 w-auto" />
             <span class="public-site-name text-sm font-semibold tracking-tight">
               {@brand.site_name}
