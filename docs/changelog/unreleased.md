@@ -3912,6 +3912,33 @@ carries the reasoning.
 
 ## Changed
 
+<a id="verified-search-engine-default"></a>
+
+- **Verified search engines get twice the browser limit by default (#2587).**
+  `KilnCMS.BotBudgets`' built-in search-engine percentage is now 200, so an
+  address DNS has verified as Googlebot, Google-InspectionTool, bingbot,
+  Applebot, YandexBot or Baiduspider (#2254) may make 600 public requests a
+  minute instead of 300. A real crawler's bursts no longer queue behind the
+  browser limit, and nothing is gained by typing "Googlebot": a claim not yet
+  checked, or one DNS could not answer, DuckDuckBot, and any claim from behind
+  a proxy without `TRUSTED_PROXIES` are still held to the browser limit
+  (`KilnCMS.BotBudgets.unverified_search_limit/0`), and a claim proven false is
+  still charged as no user agent. With `KILN_CRAWLER_VERIFICATION=false` no
+  claim is proven, so the search-engine default stays 100% there; a value the
+  operator sets is believed for every claim, as before. The extra is per
+  verified address and per node, so it raises a node's worst case only by what
+  the engines' own addresses choose to crawl. **To keep 300 a minute, set
+  `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT=100`** and restart; a site admin can
+  also lower it for one site on **Sign-in & access → Bot budgets**. That page
+  now says, whenever the search-engine figure is above 100% and verification is
+  on, that the excess applies only to verified addresses; links the
+  search-engine hint to
+  [Verified search engines](../bot-budgets.md#verified-search-engines); and,
+  with verification off, adds "The server operator can turn checking on with
+  KILN_CRAWLER_VERIFICATION." Translated into en/es/fr. No migration; rolling
+  the pin back goes back to 300.
+  ([#2587](https://github.com/The-Verscienta/kiln_cms/issues/2587))
+
 <a id="custom-field-range-index-changed"></a>
 
 - **Custom-field range filters read a stored JSON `null`, array or object as
