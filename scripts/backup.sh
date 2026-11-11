@@ -92,9 +92,13 @@ BACKUP_DIR="${BACKUP_DIR:-/var/backups/kiln}"
 if [ -z "${MEDIA_DIR:-}" ] && [ -z "${S3_BUCKET+set}" ]; then
   MEDIA_DIR="${KILN_MEDIA_ROOT:-}"
 fi
-STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 BACKUP_KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
-STAMP="$(date -u +%Y%m%d-%H%M%S)"
+# The stamp and the start from ONE reading of the clock: two `date` calls can
+# straddle a second boundary, and the importer keys a failure manifest by its
+# stamp — a start one second later names a run that doesn't exist.
+NOW="$(date -u '+%Y%m%d-%H%M%S %Y-%m-%dT%H:%M:%SZ')"
+STAMP="${NOW%% *}"
+STARTED_AT="${NOW#* }"
 
 # Copy one file off-site — but only the file this run verified (#2218).
 # $1 = file, $2 = the sha256 recorded when it was written. The file is
@@ -355,6 +359,7 @@ write_manifest() {
   cat > "${out}.partial" <<JSON
 {
   "version": 1,
+  "stamp": "${STAMP}",
   "started_at": "${STARTED_AT}",
   "finished_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "trigger": "${trigger}",

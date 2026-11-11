@@ -28,7 +28,11 @@ defmodule KilnCMS.SystemActorScopeTest do
   even under `authorize_with: :error`; the positive half is what keeps "no
   artifact" from passing as "refused".)
   """
-  use KilnCMS.DataCase, async: true
+  # `async: false`: the matrix test is ~37,000 `Ash.can/3` decisions of pure
+  # CPU, and it grows as labels × actions. In the async phase of a CI shard
+  # (4 vCPUs shared with every other async module) it was starved past
+  # ExUnit's 60 s timeout; in the sync phase it has the scheduler to itself.
+  use KilnCMS.DataCase, async: false
 
   # Deciding a content action logs the state machine's refusal of a record
   # with no state; the decision itself is unaffected.

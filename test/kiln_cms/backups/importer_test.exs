@@ -164,6 +164,79 @@ defmodule KilnCMS.Backups.ImporterTest do
                run!("20260802-030005")
     end
 
+    test "a failed manifest is keyed by its stamp, not the second of its start", %{dir: dir} do
+      # The application's run: its stamp was taken at lease time, a second
+      # before the manifest's `started_at` (CI saw `…145226` vs `…145227`).
+      run =
+        Backups.start_run!(%{stamp: "20261111-145226", trigger: "manual"},
+          actor: Backups.system()
+        )
+
+      Backups.fail_run!(run, %{error: "pg_dump: connection refused"}, actor: Backups.system())
+
+      manifest!(dir,
+        stamp: "20261111-145226",
+        trigger: "manual",
+        ok: false,
+        started_at: ~U[2026-11-11 14:52:27.412000Z],
+        finished_at: ~U[2026-11-11 14:52:29Z],
+        error: "pg_dump: connection refused",
+        artifacts: []
+      )
+
+      assert {:ok, %{imported: 0}} = Importer.run()
+      assert [%{id: id}] = all_runs()
+      assert id == run.id
+    end
+
+    test "the application's failure manifest names its run's stamp, so no second run appears",
+         %{dir: dir} do
+      # The lease took the stamp at second X; the chain recorded its start at
+      # X+1. Written through the application's own failure path.
+      stamp = "20261111-145226"
+      chain = Ecto.UUID.generate()
+
+      Backups.start_run!(%{stamp: stamp, trigger: "manual", chain_id: chain},
+        actor: Backups.system()
+      )
+
+      {:ok, dir_id} = KilnCMS.Backups.DirId.local(dir)
+      work_dir = KilnCMS.Backups.WorkState.path(dir, stamp)
+      File.mkdir_p!(work_dir)
+
+      :ok =
+        KilnCMS.Backups.WorkState.write(
+          work_dir,
+          KilnCMS.Backups.WorkState.new(stamp, %{
+            "chain" => chain,
+            "trigger" => "manual",
+            "started_at" => "2026-11-11T14:52:27.412000Z"
+          })
+        )
+
+      assert :ok = KilnCMS.Backups.Steps.interrupt(stamp, chain, dir_id, "Interrupted")
+      assert %Manifest{ok: false, stamp: ^stamp} = Manifest.read(dir)
+
+      assert {:ok, %{imported: 0}} = Importer.run()
+      assert [%{stamp: ^stamp, status: :failed}] = all_runs()
+    end
+
+    test "a failed manifest with no files and no stamp is keyed by its start", %{dir: dir} do
+      File.write!(
+        Manifest.path(dir),
+        Jason.encode!(%{
+          "version" => 1,
+          "started_at" => "2026-08-02T03:00:05Z",
+          "ok" => false,
+          "error" => "boom",
+          "artifacts" => []
+        })
+      )
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert %{status: :failed} = run!("20260802-030005")
+    end
+
     test "a manifest for another stamp does not enrich this one", %{dir: dir} do
       put(dir, :db, "20260701-000000")
       put(dir, :db, "20260801-031700")

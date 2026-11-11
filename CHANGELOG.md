@@ -609,6 +609,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A failed in-app backup no longer appears twice in Backups History, the second copy a second later: both backup paths write the run's `"stamp"` into `manifest.json` (an additive key), and the importer keys a failure manifest by it.**
+  ([#2700](https://github.com/The-Verscienta/kiln_cms/pull/2700) · [long form](docs/changelog/unreleased.md#backup-failure-manifest-stamp))
+
 - **A category-scoped `/search?category=<slug>` now stays scoped: the search form, the "did you mean" link and the language links keep the category, and the page says what it searches with a "Search everything" link. kilncms.dev's /docs links to a docs-only search this way.**
   ([#2457](https://github.com/The-Verscienta/kiln_cms/issues/2457) · [long form](docs/changelog/unreleased.md#scoped-search-keeps-category))
 

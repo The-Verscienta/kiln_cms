@@ -532,7 +532,15 @@ defmodule KilnCMS.Backups.Steps do
 
       _ =
         Chain.while_holding(lease, fn ->
-          record_failure(ctx.dir, ctx.trigger, ctx.started_at, error, partial, components(state))
+          record_failure(
+            ctx.dir,
+            ctx.stamp,
+            ctx.trigger,
+            ctx.started_at,
+            error,
+            partial,
+            components(state)
+          )
         end)
     end
 
@@ -575,6 +583,7 @@ defmodule KilnCMS.Backups.Steps do
            {:ok, %{"chain" => ^chain} = state} <- WorkState.read(work_dir) do
         record_failure(
           dir,
+          stamp,
           state["trigger"] || "manual",
           parse_time(state["started_at"]),
           message,
@@ -1118,6 +1127,7 @@ defmodule KilnCMS.Backups.Steps do
     # consumers read it. The run is closed after. On a resume this
     # overwrites the failed run's manifest with `ok: true` (atomic rename).
     write_manifest(ctx.dir, %Manifest{
+      stamp: ctx.stamp,
       started_at: ctx.started_at,
       finished_at: DateTime.utc_now(),
       trigger: ctx.trigger,
@@ -1616,8 +1626,13 @@ defmodule KilnCMS.Backups.Steps do
   #
   # `partial` carries whatever genuinely landed and verified before the
   # failure, so a media error doesn't hide a perfectly good database dump.
-  defp record_failure(dir, trigger, started_at, error, partial, components) do
+  #
+  # `stamp` is the run's, written so the importer keys this manifest by it: the
+  # stamp is taken at lease time and `started_at` a moment later, so the
+  # second of `started_at` is not always the run's (a duplicate failed run).
+  defp record_failure(dir, stamp, trigger, started_at, error, partial, components) do
     write_manifest(dir, %Manifest{
+      stamp: stamp,
       started_at: started_at,
       finished_at: DateTime.utc_now(),
       trigger: trigger,

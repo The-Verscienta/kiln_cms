@@ -94,6 +94,13 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert m["sha256"] == archive_hex
       assert out =~ "ok:"
 
+      # The stamp its files carry, and a start in that same second: one
+      # reading of the clock, so the two can't straddle a second boundary.
+      stamp = dump |> Path.basename(".dump") |> String.replace_prefix("kiln-db-", "")
+      assert manifest["stamp"] == stamp
+      assert {:ok, started_at, 0} = DateTime.from_iso8601(manifest["started_at"])
+      assert KilnCMS.Backups.Artifact.stamp(started_at) == stamp
+
       # The same sidecar tool-chain the restore side uses accepts the archive.
       assert {_, 0} = System.cmd("bash", [@restore, "media", archive], env: restore_env(ctx))
     end

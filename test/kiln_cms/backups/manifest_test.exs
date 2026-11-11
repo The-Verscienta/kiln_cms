@@ -111,4 +111,24 @@ defmodule KilnCMS.Backups.ManifestTest do
     assert [entry] = Manifest.read(dir).artifacts
     assert Map.keys(entry) |> Enum.sort() == [:bytes, :kind, :path, :verified]
   end
+
+  describe "stamp" do
+    test "round-trips, and a manifest without it reads nil and writes no key", %{dir: dir} do
+      :ok = Manifest.write(dir, %Manifest{stamp: "20261111-145226"})
+      assert Manifest.read(dir).stamp == "20261111-145226"
+
+      :ok = Manifest.write(dir, %Manifest{})
+      refute dir |> Manifest.path() |> File.read!() |> Jason.decode!() |> Map.has_key?("stamp")
+
+      File.write!(Manifest.path(dir), @pre_change)
+      assert Manifest.read(dir).stamp == nil
+    end
+
+    test "one that is not a real instant reads as absent", %{dir: dir} do
+      for bad <- ["20261340-996199", "../../etc", 20_261_111, ""] do
+        File.write!(Manifest.path(dir), Jason.encode!(%{"stamp" => bad}))
+        assert Manifest.read(dir).stamp == nil
+      end
+    end
+  end
 end

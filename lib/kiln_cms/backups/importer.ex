@@ -12,7 +12,8 @@ defmodule KilnCMS.Backups.Importer do
   is consulted for a stamp only when its artifact paths carry that stamp: then
   its trigger, outcome, error, times, `verified` flags and off-site remote are
   used. A failed manifest with no stamped files at all becomes a `failed` run
-  keyed by the stamp of its `started_at`.
+  keyed by its `"stamp"` (`KilnCMS.Backups.Manifest`), or by the stamp of its
+  `started_at` in a manifest without one.
 
   ## What an imported run is
 
@@ -424,13 +425,17 @@ defmodule KilnCMS.Backups.Importer do
   end
 
   # A failed manifest naming no stamped file: the run has nothing on disk to be
-  # found by, so it is keyed by the stamp of its start.
+  # found by, so it is keyed by the manifest's own `stamp`, or, in a manifest
+  # without one, by the stamp of its start. Never the start when the stamp is
+  # there: Kiln's stamp is taken before `started_at` (and may be stepped past a
+  # used one), so the start's second can name a run that doesn't exist and
+  # this would insert a second, failed copy of the application's run.
   defp failed_manifest_attrs(
          %Manifest{ok: false, started_at: %DateTime{} = at} = m,
          existing,
          files
        ) do
-    stamp = Artifact.stamp(at)
+    stamp = m.stamp || Artifact.stamp(at)
 
     if Enum.any?(m.artifacts, &stamped?/1) or MapSet.member?(existing, stamp) or
          Map.has_key?(files, stamp) do

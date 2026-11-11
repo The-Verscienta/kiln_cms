@@ -5125,6 +5125,21 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="backup-failure-manifest-stamp"></a>
+
+- **A failed backup is one run in History, not two (#2700).** An in-app backup takes
+  its stamp (the name its files and its History row carry) when the chain is
+  queued, and records its start a moment later. Its failure manifest carried
+  only `started_at`, and the importer keyed a failure manifest that names no
+  files by the second of `started_at`. When a second boundary fell between
+  the two, or the stamp had been stepped past one already in use, that named
+  a run that didn't exist, and the importer added a second `failed` run beside
+  the real one. Both backup paths now write the run's stamp into
+  `manifest.json` as `"stamp"`, and the importer prefers it, falling back to
+  `started_at` for a manifest without it. The key is additive; the manifest
+  `version` stays 1. `scripts/backup.sh` also reads the clock once for its
+  stamp and its start, where two `date` calls could straddle a second.
+
 <a id="scoped-search-keeps-category"></a>
 
 - **A search scoped by `?category=<slug>` stays scoped (#2457).** The public
