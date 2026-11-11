@@ -8,6 +8,10 @@
 #                              so forks and unconfigured clones stay green
 #   secrets.KILN_DOCS_API_KEY  :read_write key on an admin account
 # The Doc type's id is looked up by name (/api/json/type-definitions/by-name).
+# The site also needs a category with slug `documentation` (#2457), created
+# once at /editor/taxonomy: every guide is filed under it, and the run fails
+# before writing anything without it. After creating it, re-run this workflow
+# by hand (workflow_dispatch) for a full sync, which files the existing guides.
 name: Publish docs
 
 on:

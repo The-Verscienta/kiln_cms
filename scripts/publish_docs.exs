@@ -17,6 +17,16 @@
 #                         looked up via /api/json/type-definitions/by-name/:name
 #     KILN_DOCS_TYPE_ID   optional: that id, skipping the lookup
 #
+# The site also needs a category with slug `documentation` (create it at
+# /editor/taxonomy; the run raises before publishing anything without it).
+# Every guide is filed under it, and the /docs index's search link is
+# /search?category=documentation, which scopes site search to the guides
+# (#2457). Publishing therefore OVERWRITES any category an editor set on a Doc
+# entry: change a guide's category on the site and the next run puts it back.
+# Don't rename or delete the category: the index's link would then find
+# nothing. The script writes default-locale guides only, so a translation made
+# in the editor must be given the category by hand.
+#
 # Which files are published, their titles and their sections all come from
 # `extras/0` and `groups_for_extras/0` in mix.exs — the curation ExDoc already
 # uses. scripts/publish/docs.exs classifies every group as public

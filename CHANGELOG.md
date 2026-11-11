@@ -546,6 +546,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A category-scoped `/search?category=<slug>` now stays scoped: the search form, the "did you mean" link and the language links keep the category, and the page says what it searches with a "Search everything" link. kilncms.dev's /docs links to a docs-only search this way.**
+  ([#2457](https://github.com/The-Verscienta/kiln_cms/issues/2457) · [long form](docs/changelog/unreleased.md#scoped-search-keeps-category))
+
 - **A custom field of a type this release doesn't know (a newer release's, after a rollback, or a removed plugin's) no longer breaks the Fields screen, the editor, saves and delivery: it is hidden, records keep its values, and Fields lists it under "Fields of an unknown type" with a Delete.**
   ([#2670](https://github.com/The-Verscienta/kiln_cms/pull/2670) · [long form](docs/changelog/unreleased.md#unknown-field-type-rollback))
 

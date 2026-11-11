@@ -4590,6 +4590,39 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="scoped-search-keeps-category"></a>
+
+- **A search scoped by `?category=<slug>` stays scoped (#2457).** The public
+  `/search` page has filtered every leg by `?category=` since its facets
+  shipped, but only a facet link set it: the search form had no field for it,
+  and the "did you mean" link and the language links rebuilt the URL from the
+  query alone. A link that landed on `/search?category=…` therefore searched
+  the whole site the moment the visitor typed a query. The form now carries
+  the category in a hidden field, both links keep it, and the page says
+  "Searching only in “<category>”" with a **Search everything** link, shown
+  even before a query, when there are no facets to show the scope. The
+  "did you mean" suggestion now comes from titles in that category only: a
+  scoped search has no fuzzy leg, so the suggestion is its one typo rescue,
+  and a title from outside the scope led to a search that found nothing. An
+  unknown slug still matches nothing; the page now says the category doesn't
+  exist (without repeating the slug, which is whatever a link carries),
+  offers **Search everything**, and does not carry the slug forward. No new search argument, no migration; overlays that replace
+  `search.html.heex` keep their own copy.
+  - **kilncms.dev.** `scripts/publish_docs.exs` now files every guide under
+    the site's `documentation` category, and the /docs index's search link is
+    `/search?category=documentation` ("Search the docs"). The owner chose a
+    category over a public `?type=` argument because kilncms.dev is frozen
+    (`docs/path-forward.md`). The publisher looks the category up but cannot
+    create it (the JSON:API has no write route for categories), so the site
+    needs it created once at `/editor/taxonomy`; without it, the run raises
+    before publishing anything. Publishing overwrites any category an editor
+    set on a Doc entry. **Before merging, create the category on
+    kilncms.dev**; if the merge's publish run failed for want of it, re-run
+    the Publish docs workflow by hand for a full sync. Like any filter on the search, it drops the block,
+    fuzzy and tag legs, so typo tolerance goes with it; the "did you mean"
+    suggestion remains.
+  ([#2457](https://github.com/The-Verscienta/kiln_cms/issues/2457))
+
 <a id="unknown-field-type-rollback"></a>
 
 - **A custom field of a type this release doesn't know no longer breaks the

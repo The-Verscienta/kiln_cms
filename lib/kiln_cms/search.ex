@@ -3420,12 +3420,18 @@ defmodule KilnCMS.Search do
   suggestion then names the corrected term, "showing results for…"-style).
   Read options pass through, so anonymous callers only ever see published
   titles.
+
+  `:category_id` limits the titles to that category's, for a search scoped
+  by `?category=` (#2457): a scoped search has no fuzzy leg, so the
+  suggestion is its only typo rescue, and one taken from a title outside the
+  scope would lead to a search that finds nothing.
   """
   @spec suggest(String.t(), keyword()) :: String.t() | nil
   def suggest(query, opts \\ []) when is_binary(query) do
     # `:tenant` scopes the multitenant content legs to the request's org (#336).
     read_opts = Keyword.take(opts, [:actor, :authorize?, :tenant])
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
+    category_id = Keyword.get(opts, :category_id)
     down = String.downcase(query)
 
     content_resources()
@@ -3435,6 +3441,7 @@ defmodule KilnCMS.Search do
       # block tree and an embedding (#1712).
       |> Ash.Query.select([:title])
       |> Ash.Query.for_read(:autocomplete, %{prefix: query, locale: locale})
+      |> then(&if(category_id, do: Ash.Query.filter(&1, category_id == ^category_id), else: &1))
       |> Ash.read!(read_opts)
     end)
     |> Enum.map(&{&1.title, best_word_similarity(down, &1.title)})
