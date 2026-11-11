@@ -5041,7 +5041,7 @@ carries the reasoning.
 
 <a id="backup-failure-manifest-stamp"></a>
 
-- **A failed backup is one run in History, not two.** An in-app backup takes
+- **A failed backup is one run in History, not two (#2700).** An in-app backup takes
   its stamp (the name its files and its History row carry) when the chain is
   queued, and records its start a moment later. Its failure manifest carried
   only `started_at`, and the importer keyed a failure manifest that names no
