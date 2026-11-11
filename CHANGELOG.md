@@ -241,6 +241,10 @@ Every summary line below that was shortened links to its own entry there.
   Clients: `kiln.schemaComponents()` (`@kiln-cms/client`), `KilnClient.schema(format: :openapi)`. Guide: [docs/native-apps.md](docs/native-apps.md#generate-from-openapi-components).
   ([#2274](https://github.com/The-Verscienta/kiln_cms/issues/2274) · [long form](docs/changelog/unreleased.md#schema-openapi-and-check))
 
+- **`GET /api/feed` streams the change feed as Server-Sent Events: `published`, `updated` and `withdrawn` with identifiers only, the anonymous view whatever the credential, resumable by `Last-Event-ID` (every id is a `/api/sync` cursor) for 24 hours or 1,000 events.**
+  Refusals are a `200` with `event: busy` that `EventSource` retries; caps are per node. A boot job records the documents already public, so `/api/sync` deletes may now name those too. Guide: [docs/headless-consumer-guide.md](docs/headless-consumer-guide.md#live-updates-follow-the-change-feed).
+  ([#2275](https://github.com/The-Verscienta/kiln_cms/issues/2275) · [long form](docs/changelog/unreleased.md#change-feed-sse))
+
 - **An instance security log, for platform admins only: events about the whole installation rather than one site, starting with canceled backups, which no longer appear in the default site's Security log. Security log → Instance log, or `/editor/instance-security-log`, with filters and CSV.**
   Guide: [docs/security-events.md](docs/security-events.md#the-instance-log).
   ([#2541](https://github.com/The-Verscienta/kiln_cms/issues/2541) · [long form](docs/changelog/unreleased.md#instance-security-log))

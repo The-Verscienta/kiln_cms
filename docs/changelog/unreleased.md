@@ -1586,6 +1586,99 @@ carries the reasoning.
   - **No migration, no new environment variable.** Rolling the pin back
     removes the format and the flag; `?format=openapi` then answers `400`.
 
+<a id="change-feed-sse"></a>
+
+- **`GET /api/feed`: the change feed as Server-Sent Events, with resume
+  through the sync cursor (#2275, the SSE half of path forward 2.2).** A
+  front end or a native app that wants to react to a publish no longer has
+  to poll `/api/sync` or run a webhook receiver: it opens one `EventSource`
+  and hears `published`, `updated` and `withdrawn` as they commit. Reference:
+  [api.md → Change feed (SSE)](../api.md#change-feed-sse); how-to:
+  [Live updates](../headless-consumer-guide.md#live-updates-follow-the-change-feed);
+  native apps: [While the app is open](../native-apps.md#while-the-app-is-open-the-change-feed).
+  - **What a stream carries.** Exactly what an anonymous `GET /api/sync` may
+    learn, whoever connects: an editor's or administrator's key gets the
+    same stream as no credential. `published` / `updated` carry `type`, `id`,
+    `slug`, `locale`, `published_at` and `affected`, which is always `[]`
+    because the publisher's list is not filtered by audience; `withdrawn`
+    carries `type` and `id` only. Members-only, locked and draft documents
+    are never sent; a public document that is locked, moved to members,
+    unpublished or deleted becomes `withdrawn`. `?type=` narrows the stream
+    to one content type. Control events: `ready` (`{"resumed": bool}`),
+    `reset`, `busy`, `shutdown`, and a `: ping` comment every 25 seconds.
+  - **Resume.** Every `id:` is a signed `/api/sync` delta cursor starting
+    10 seconds (the commit lag) before the event, so it resumes either
+    transport. On a reconnect with `Last-Event-ID` (or `?last_event_id=`),
+    the stream subscribes, replays the changes since the id from the version
+    history (replayed events carry no id; `ready` carries the new one), then
+    goes live. Events can repeat; every one is idempotent. Past 24 hours or
+    1,000 events the client gets `event: reset` with reason
+    `too_far_behind`, and an id that does not verify gets `invalid_cursor`:
+    the client re-syncs with `/api/sync?initial=true` and keeps the stream.
+    A resume inherits the sync API's 10-second commit-lag assumption, so a
+    transaction held open longer (a long release go-live) can write changes
+    a reconnecting client misses; live events are not affected.
+  - **Refusals an `EventSource` survives.** A native `EventSource` stops for
+    good on any non-`200`, so the stream's own refusals are a `200`, a
+    jittered `retry:` and `event: busy` with a reason: `rate_limited` (the
+    new `feed_join` bucket, 60 connects a minute per address, charged before
+    anything else), `too_many_streams` (50 open streams per API key, or per
+    address without one), `node_full` (20,000 per node), `replay_busy` (8
+    resumes replaying at once per node) and `shutting_down`. The caps are
+    per node, not per cluster. A connect is also charged to the `api` bucket,
+    whose refusal stays the usual `429`, as do a bad credential (`401`) and an
+    unknown type (`404`).
+  - **Deploys.** On shutdown, a node refuses new streams and ends each open
+    one with `event: shutdown` and a jittered `retry:`, so clients reconnect
+    to another node with their last id, spread over up to 10 seconds, rather
+    than all at once.
+  - **The publisher records what it shows.** A public `published` /
+    `updated` event discloses the document's id to anonymous streams, so
+    `KilnCMS.Delivery.Feed` now records it in `KilnCMS.Firing.SyncExposure`
+    (as the new `:feed` system actor) before showing it, the way `/api/sync`
+    records an upsert it serves; a later withdrawal may then be named, live
+    or on a resume. The event's anonymous view and its SSE frame are decided
+    and encoded once, in the publisher, not per stream. That work, and the
+    hand-off to subscribers, now runs after the outermost transaction
+    commits (`KilnCMS.AfterCommit`), so a release's go-live publishes its
+    feed events only once it has committed. `Feed.Event` gains `anonymous`
+    (`:show` / `:withdraw` / `:hide`) and `sse` (left out of its JSON
+    encoding), and the `[:kiln_cms, :delivery, :feed, :event]` telemetry
+    gains `anonymous` metadata. Each document event costs about two or three
+    extra queries after the commit.
+  - **A one-off backfill on boot.** Documents published before this release
+    and never served by `/api/sync` have no exposure, so their withdrawal
+    would be hidden from the stream. Booting enqueues
+    `KilnCMS.Firing.SyncExposureBackfill`, an Oban job deduplicated for a
+    day, which walks every site's sync snapshot without bodies and records
+    each public document. Nothing to run by hand; to run it again,
+    `bin/kiln_cms rpc "KilnCMS.Firing.SyncExposureBackfill.run()"`.
+    `config :kiln_cms, :sync_exposure_backfill_on_boot, false` turns the boot
+    enqueue off.
+  - **`/api/sync` deletes may name more ids.** A delete used to name only a
+    document `/api/sync` itself had served; it now names any document the
+    feed or the backfill recorded, which are all documents that were public.
+    A mirror already ignores a delete for an id it does not hold.
+  - **Operators.** No migration and no environment variable. The limits are
+    `config :kiln_cms, KilnCMSWeb.FeedStream` (`max_per_client`,
+    `max_per_node`, `max_replays`, `heartbeat_ms`, `retry_ms`,
+    `busy_retry_ms`, `shutdown_retry_ms`, `replay_limit`, `replay_page`,
+    `resume_window_seconds`, `max_queue`) and the `feed_join` bucket. A
+    stream holds one request process for as long as the client stays; the
+    Phoenix request-duration metrics skip `/api/feed`, which emits
+    `[:kiln_cms, :delivery, :feed, :sse, :connect | :disconnect | :replay | :refused]`
+    instead. Behind a proxy, turn response buffering off for `/api/feed`
+    (Kiln sends `x-accel-buffering: no` for nginx) and keep the idle timeout
+    above 25 seconds. During a rolling deploy, events published by a node
+    still on the older release reach no stream. Rolling the pin back is
+    safe: the exposure rows it wrote name only documents that were public.
+  - **Fan-out.** On one 18-core laptop, 10,000 open streams cost about
+    24 KB each, and a publish reached the last of them in p95 196 ms:
+    [benchmarks.md](../benchmarks.md#change-feed-over-sse-fan-out).
+  - **Not in this change.** The `/ws/feed` Phoenix Channel (the other half
+    of 2.2), `subscribe` in the official clients (2.3), an
+    audience-filtered `affected`, and cluster-wide caps.
+
 <a id="instance-security-log"></a>
 
 - **An instance security log, readable by platform admins only (#2541).**

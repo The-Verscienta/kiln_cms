@@ -38,11 +38,11 @@ defmodule KilnCMSWeb.SyncController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.Firing.Sync
+  alias KilnCMS.Firing.SyncCursor
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Params
 
   @surfaces KilnCMS.Firing.Surfaces.name_map()
-  @salt "kiln sync cursor"
   @retry_after_seconds 2
 
   def index(conn, params) do
@@ -50,7 +50,7 @@ defmodule KilnCMSWeb.SyncController do
     limit = Params.integer(params, "limit", 100, 1..500)
     conn = put_resp_header(conn, "cache-control", "no-store")
 
-    with {:ok, scope, position} <- request(conn, params, org_id),
+    with {:ok, scope, position} <- request(params, org_id),
          result <-
            Sync.page(org_id, scope.type, position, limit: limit, surface: scope.surface) do
       respond(conn, scope, result)
@@ -60,13 +60,13 @@ defmodule KilnCMSWeb.SyncController do
   end
 
   # Exactly one of `initial=true` and `cursor=`.
-  defp request(conn, params, org_id) do
+  defp request(params, org_id) do
     case {Params.string(params, "initial"), Params.string(params, "cursor")} do
       {"true", nil} ->
         start(params)
 
       {nil, cursor} when is_binary(cursor) ->
-        resume(conn, cursor, org_id)
+        resume(cursor, org_id)
 
       {nil, nil} ->
         error(:bad_request, "missing_cursor", "Pass `initial=true` or `cursor`.")
@@ -86,14 +86,12 @@ defmodule KilnCMSWeb.SyncController do
     end
   end
 
-  defp resume(conn, cursor, org_id) do
-    with {:ok, %{"o" => ^org_id, "t" => type, "s" => surface, "p" => position}} <-
-           Phoenix.Token.verify(conn, @salt, cursor, max_age: :infinity),
-         {:ok, surface} <- Map.fetch(@surfaces, surface),
-         {:ok, position} <- decode_position(position) do
-      {:ok, %{type: type, surface: surface}, position}
-    else
-      _invalid ->
+  defp resume(cursor, org_id) do
+    case SyncCursor.verify(cursor, org_id) do
+      {:ok, %{type: type, surface: surface, position: position}} ->
+        {:ok, %{type: type, surface: surface}, position}
+
+      :error ->
         error(
           :bad_request,
           "invalid_cursor",
@@ -131,48 +129,9 @@ defmodule KilnCMSWeb.SyncController do
 
   defp error(status, code, detail), do: {:error, status, code, detail}
 
-  # ── Cursor encoding ──────────────────────────────────────────────────────
-  #
-  # Signed, not encrypted: nothing in it is secret (instants, a type name and
-  # the last id already sent), but every part of it steers a query, so the
-  # client must not be able to edit it. Bound to the org it was issued for.
-
+  # The cursor is `KilnCMS.Firing.SyncCursor`'s, shared with the change feed's
+  # SSE ids (`GET /api/feed`).
   defp sign(conn, scope, position) do
-    Phoenix.Token.sign(conn, @salt, %{
-      "o" => KilnCMSWeb.Tenant.current_org_id(conn),
-      "t" => scope.type,
-      "s" => to_string(scope.surface),
-      "p" => encode_position(position)
-    })
+    SyncCursor.sign(KilnCMSWeb.Tenant.current_org_id(conn), scope.type, scope.surface, position)
   end
-
-  defp encode_position({:initial, started_at, after_key}),
-    do: ["i", usec(started_at), encode_after(after_key)]
-
-  defp encode_position({:delta, since, until, after_key}),
-    do: ["d", usec(since), usec(until), encode_after(after_key)]
-
-  defp encode_after(nil), do: nil
-  defp encode_after({name, id}), do: [name, id]
-
-  defp decode_position(["i", started_at, after_key]) when is_integer(started_at) do
-    with {:ok, after_key} <- decode_after(after_key),
-         do: {:ok, {:initial, from_usec(started_at), after_key}}
-  end
-
-  defp decode_position(["d", since, until, after_key]) when is_integer(since) do
-    with {:ok, after_key} <- decode_after(after_key),
-         do: {:ok, {:delta, from_usec(since), until && from_usec(until), after_key}}
-  end
-
-  defp decode_position(_other), do: :error
-
-  defp decode_after(nil), do: {:ok, nil}
-  defp decode_after([name, id]) when is_binary(name) and is_binary(id), do: {:ok, {name, id}}
-  defp decode_after(_other), do: :error
-
-  defp usec(nil), do: nil
-  defp usec(%DateTime{} = at), do: DateTime.to_unix(at, :microsecond)
-
-  defp from_usec(usec), do: DateTime.from_unix!(usec, :microsecond)
 end

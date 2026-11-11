@@ -13,6 +13,7 @@ config :kiln_cms, KilnCMS.Backups, heartbeat?: false
 # and train away a signal that exists to catch real leakage.
 config :kiln_cms, :occurrence_backfill_on_boot, false
 config :kiln_cms, :legacy_audiences_migration_on_boot, false
+config :kiln_cms, :sync_exposure_backfill_on_boot, false
 
 # Keep DNS checks and the port-25 preflight off the network in tests; explicit
 # `dns:`/`tcp:` opts in DnsCheck tests still override these.
@@ -221,6 +222,9 @@ config :kiln_cms, KilnCMSWeb.RateLimit,
     gql_join: {1_000_000, :timer.minutes(1)},
     bridge_join: {1_000_000, :timer.minutes(1)},
     collab_join: {1_000_000, :timer.minutes(1)},
+    # `GET /api/feed` connects (#2275); `ChangeFeedControllerTest` lowers it back for
+    # its own 429 test.
+    feed_join: {1_000_000, :timer.minutes(1)},
     # The export suite downloads many times as the same seeded actors
     # (#2293); `ContentExportControllerTest` lowers it back for its 429 test.
     export: {1_000_000, :timer.minutes(1)}

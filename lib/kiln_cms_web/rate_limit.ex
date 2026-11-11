@@ -152,6 +152,14 @@ defmodule KilnCMSWeb.RateLimit do
     gql_join: {300, :timer.minutes(1)},
     bridge_join: {300, :timer.minutes(1)},
     collab_join: {300, :timer.minutes(1)},
+    # `GET /api/feed` connects per client address (#2275, `KilnCMSWeb.FeedStream`),
+    # charged first, ahead of `:api`. A stream is long-lived and an
+    # `EventSource` reconnects on its own after a drop (every few seconds by
+    # the `retry:` the stream sends), so a client needs a handful a minute; a
+    # reconnect loop that never holds its stream is over it quickly. A refusal
+    # is the stream's `200` + `event: busy` (`KilnCMSWeb.FeedStream.JoinBudget`),
+    # not a 429, which a native `EventSource` would never retry.
+    feed_join: {60, :timer.minutes(1)},
     # Content-list downloads (#2293, `KilnCMSWeb.ContentExportController`), per
     # ACCOUNT (`"actor:" <> id`, like `:collab_event`): an export reads up to
     # 10,000 rows, so the cost bound is how many one editor may start, and an

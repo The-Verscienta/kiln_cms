@@ -89,6 +89,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **GraphQL** | `POST /gql`, `/ws/gql` | Delivery reads, search, menus and point-in-time (`contentAsOf`); the same **writes** as mutations; subscriptions over the WebSocket. | [headless-graphql-api.md](headless-graphql-api.md) |
 | **Fired artifacts** | `GET /api/content/:type/:slug` | Pre-rendered output per surface: `json` (default), `json_ld`, `web`, and `llm` (raw `text/markdown`). `?as_of=` reads a document as it stood on a date; `GET /api/content/:type?as_of=` lists what was published then; `?fields=` trims the `json` body ([§ Sparse fieldsets](#sparse-fieldsets-on-artifacts)). | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md), [point-in-time.md](point-in-time.md) |
 | **Sync (delta)** | `GET /api/sync` | Mirror public content: a snapshot, then upserts **and deletions** since an opaque cursor — the only surface that reports a document *leaving*. | [§ Sync](#sync-delta-api), [native-apps.md](native-apps.md) |
+| **Change feed (SSE)** | `GET /api/feed` | Server-Sent Events as public content is published, updated and withdrawn: identifiers only, the anonymous view whatever the credential, with `Last-Event-ID` resume through the sync cursor. | [§ Change feed (SSE)](#change-feed-sse), [headless-consumer-guide.md](headless-consumer-guide.md#live-updates-follow-the-change-feed) |
 | **Version history** | `GET /api/content/:type/:id/revisions` | A document's revisions, one revision's snapshot, and restore. Editor-tier credential required. | [§ Version history](#version-history-revisions) |
 | **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked, with the site's search synonyms applied (`also_searched` lists the alternate wordings searched); answers as an anonymous visitor whatever the credential. `503` with `Retry-After` (`temporarily_unavailable`) when the database pool cannot take the search. Answers within a time budget, flagged `partial` when it had to cut a leg; per-leg times in `Server-Timing` ([below](#search-budget-and-server-timing)). `?explain=1` reports why each hit ranked where it did ([§ Explaining a search ranking](#explaining-a-search-ranking)). | [search-roadmap.md](search-roadmap.md) |
 | **Path resolution** | `GET /api/resolve?path=` | "What lives at this URL?" — content, a redirect to follow, or nothing — for a front end's catch-all route. | [json-api.md](json-api.md) (URLs, pathauto & redirects) |
@@ -1047,9 +1048,11 @@ anonymous reader could fetch right now: published, `audience` `:public`, not
 passphrase-locked, not archived, of a live content type. A bearer token does
 not widen it (use JSON:API for drafts). A document that stops qualifying
 arrives as a `delete` carrying its id and type **only** — never its body, slug,
-or the reason. And a delete only ever names a document this endpoint has
-already served: a draft, a members-only post or a locked page that was never
-public never appears in a delta at all, not even as an id.
+or the reason. And a delete only ever names a document that was public: one
+this endpoint or the [change feed](#change-feed-sse) has served, or one that
+was public when the change feed's one-off backfill ran (#2275). A draft, a
+members-only post or a locked page that was never public never appears in a
+delta at all, not even as an id.
 
 **Semantics a client must allow for.**
 
@@ -1092,6 +1095,170 @@ Both official clients wrap the loop: `kiln.sync({ cursor })` in
 
 Syncing from a phone (where to keep the cursor, backoff, background-refresh
 limits) is covered in [native-apps.md](native-apps.md).
+
+An `id` from the [change feed](#change-feed-sse) is a cursor here too: pass it
+as `?cursor=` to fetch, with bodies, what changed since that event.
+
+## Change feed (SSE)
+
+`GET /api/feed` streams a site's change feed as
+[Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html):
+an event each time a public document is published, updated or withdrawn,
+sent once the change has committed. It is the push half of
+[Sync](#sync-delta-api) and shows exactly what an anonymous `GET /api/sync`
+may learn, but carries identifiers only. Fetch the body through
+`GET /api/content/:type/:slug`, or through `/api/sync` with the event's id.
+How to consume it from a front end, step by step:
+[headless-consumer-guide.md](headless-consumer-guide.md#live-updates-follow-the-change-feed).
+
+```bash
+curl -N -H 'Accept: text/event-stream' 'https://cms.example.com/api/feed?type=post'
+```
+
+```text
+retry: 3000
+
+event: ready
+id: SFMyNTY…
+data: {"resumed":false}
+
+event: published
+id: SFMyNTY…
+data: {"affected":[],"id":"6f1c…","locale":"en","published_at":"2026-11-10T09:30:00Z","slug":"hello","type":"post"}
+
+: ping
+
+event: withdrawn
+id: SFMyNTY…
+data: {"id":"6f1c…","type":"post"}
+```
+
+| Parameter / header | Meaning |
+|---|---|
+| `type` | One content type (singular, compiled or admin-defined). Default: every type. An unknown type is a `404`. |
+| `Last-Event-ID` header | Resume after that event (below). A browser `EventSource` sends it on its own when it reconnects. |
+| `last_event_id` | The same, as a query parameter, for a client that cannot set headers. The header wins when both are sent. |
+
+**Events.**
+
+| Event | `data` | `id:` |
+|---|---|---|
+| `published` | `type`, `id`, `slug`, `locale`, `published_at`, `affected` (always `[]`) | yes |
+| `updated` | the same as `published` | yes |
+| `withdrawn` | `type`, `id` only: the document was unpublished, archived, deleted, locked or moved to a members-only audience | yes |
+| `ready` | `{"resumed": true \| false}`: the stream is live. After a resume, everything replayed came before it | yes |
+| `reset` | `{"reason": "invalid_cursor" \| "too_far_behind"}`: the resume could not be honored. The stream stays live; re-sync with `/api/sync?initial=true` | yes |
+| `busy` | `{"reason": …}`: the stream was refused (below). The response ends | no |
+| `shutdown` | `{}`: the node is going away. The response ends | no |
+
+An admitted stream opens with `retry: 3000`; `busy`, `shutdown` and the other ways
+a stream can end send their own `retry:` first, so a client comes back after
+that many milliseconds. A `: ping` comment every 25 seconds keeps proxies from
+closing an idle stream. The response is `text/event-stream` with
+`cache-control: no-store, no-transform` and `x-accel-buffering: no` (so nginx
+does not buffer it). `HEAD` answers those headers and nothing else.
+
+**Visibility is always anonymous, whoever calls.** An editor's or an
+administrator's API key gets the same stream as no credential, as on
+`/api/sync`. A `published` or `updated` event is sent for a document an
+anonymous reader could fetch right now: published, `audience` `:public`, not
+passphrase-locked, of a live content type. A `withdrawn` event names only a
+document that was public: an ordinary unpublish of one, or any change to a
+document whose id Kiln has recorded as disclosed (the same record `/api/sync`
+uses for its deletes). A draft, a members-only post or a locked page that was
+never public is never named, not even by id. `affected` (on the webhook, the
+documents that re-fire with this one) is always empty here, because that list
+is not filtered by audience.
+
+**Ids and resume.** Every `id:` is a signed `/api/sync` delta cursor, scoped
+to the site, the stream's `type` and the `json` surface, starting 10 seconds
+(the sync API's commit lag) before the event. So the id a client holds
+resumes either transport. On a reconnect with an id, the stream subscribes
+first, then replays what changed since the id from the version history:
+`published` for a document first published inside the window, `updated` for
+any other change, `withdrawn` for one that left. Replayed events carry no
+`id:`, so the client keeps the one it sent; `ready` carries the new one, and
+live events that arrived during the replay follow it. A client must treat
+every event as idempotent: the 10-second overlap and the replay/live overlap
+can each send one twice.
+
+A cursor's own type wins over `?type=`, as on `/api/sync`. A cursor from the
+middle of a `/api/sync` delta resumes from the start of that delta. A resume
+ends in `reset` instead when:
+
+* the id does not verify (altered, another site's, or signed before a
+  `SECRET_KEY_BASE` rotation), or is a `/api/sync` cursor still paging an
+  initial snapshot: reason `invalid_cursor`;
+* the id is more than 24 hours old, or what changed since it is more than
+  1,000 events: reason `too_far_behind`. Nothing is replayed first.
+
+**Resume relies on the commit lag.** Like `/api/sync`, a replay assumes a
+write commits within 10 seconds of its version being written. A transaction
+held open longer (a long release go-live, say) can write versions a
+reconnecting client's window has already passed, and those changes are missed
+across the reconnect. Live events are not affected: they are sent after the
+commit.
+
+**Refusals.** Every refusal of the stream's own is a `200` an `EventSource`
+reads to the end: a jittered `retry:` (between 1 and 10 seconds by default,
+so a refused crowd does not come back together), then `event: busy` with a
+reason:
+
+| Reason | Meaning |
+|---|---|
+| `rate_limited` | Over the `feed_join` bucket: 60 connects a minute per client address ([Rate limits](#rate-limits)). The `retry:` is the bucket's own wait plus up to as much again |
+| `too_many_streams` | Over 50 open streams for one API key, or for one client address without a key. Clients behind one NAT share the address |
+| `node_full` | Over 20,000 open streams on this server node |
+| `replay_busy` | Over 8 resumes replaying at once on this node |
+| `shutting_down` | The node is being stopped, as in a deploy. Reconnect, and the load balancer sends you to another node |
+
+The caps are per node, not per cluster. Three other answers are not
+`200`s, and a native `EventSource` gives up for good on any of them:
+
+| Status | Meaning |
+|---|---|
+| `429` + `retry-after` | Over the `api` bucket, which a connect is charged to like any `/api` request |
+| `401` | A bearer token or API key that is not valid, as on every `/api` route |
+| `404` | An unknown `type`, including the type a resume cursor names, if that type has since been removed |
+
+A database outage during a replay, or a client too slow to keep up (more than
+1,000 events queued for it), ends the response after a `retry:` and no
+event. Reconnect with the same id; nothing is lost.
+
+**Cross-origin.** A browser front end on another origin needs that origin in
+`CORS_ORIGINS`, as for every `/api` read. `last-event-id` is an allowed
+request header, for a polyfill or a `fetch` stream that sets it by hand.
+
+**Operating it.** A stream holds one connection and one process on the node
+for as long as the client stays. On shutdown, the node stops accepting
+streams and tells each open one to finish with `event: shutdown` and a
+`retry:` of up to 10 seconds, waiting up to 2 seconds before the endpoint
+stops. A client that disconnects without closing frees its slot at the next
+write to it, at most 25 seconds later. The limits are config, not
+environment variables:
+
+```elixir
+config :kiln_cms, KilnCMSWeb.FeedStream,
+  max_per_client: 50,           # open streams per API key, or per address without one
+  max_per_node: 20_000,         # open streams on this node
+  max_replays: 8,               # resumes replaying at once on this node
+  heartbeat_ms: 25_000,         # the ": ping" interval
+  retry_ms: 3_000,              # the retry: every stream opens with
+  busy_retry_ms: 10_000,        # the upper bound of a refusal's jittered retry:
+  shutdown_retry_ms: 10_000,    # the same, for event: shutdown
+  replay_limit: 1_000,          # events a resume may replay before too_far_behind
+  replay_page: 100,             # events read per replay query
+  resume_window_seconds: 86_400,
+  max_queue: 1_000              # events queued for one slow stream before it is ended
+
+config :kiln_cms, KilnCMSWeb.RateLimit, limits: %{feed_join: {60, :timer.minutes(1)}}
+```
+
+A stream does not count toward the Phoenix request-duration metrics (it would
+swamp the latency histograms); it emits
+`[:kiln_cms, :delivery, :feed, :sse, :connect | :disconnect | :replay | :refused]`
+telemetry instead. Fan-out cost on one node:
+[benchmarks.md](benchmarks.md#change-feed-over-sse-fan-out).
 
 ## Locale discovery
 
@@ -2156,6 +2323,7 @@ Over the limit returns **429** with a `retry-after` header.
 | Bucket | Endpoints       | Limit (per IP)        |
 |--------|-----------------|-----------------------|
 | `api`  | `/api/json/*`, `GET /api/content/:type/:slug` (fired artifacts), `GET /api/locales`, `GET /api/search`, `GET /api/security/posture` | 120 requests / minute |
+| `feed_join` | `GET /api/feed` connects (and `HEAD`) — charged **first**, then `api` too. Over it, the answer is a `200` with `event: busy`, not a `429` ([§ Change feed](#change-feed-sse)) | 60 connects / minute |
 | `gql`  | `/gql`          | 60 requests / minute  |
 | `auth` | sign-in / auth  | 40 requests / minute  |
 | `docs` | `/api/json/swaggerui` | 60 requests / minute |

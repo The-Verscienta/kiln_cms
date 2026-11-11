@@ -215,8 +215,19 @@ defmodule KilnCMS.Application do
        max_children: KilnCMS.Collab.Crdt.max_documents()},
       # Start a worker by calling: KilnCMS.Worker.start_link(arg)
       # {KilnCMS.Worker, arg},
+      # The change feed's SSE streams (`GET /api/feed`, #2275): who is
+      # streaming, for the per-client and per-node caps and the shutdown
+      # drain, and which streams are replaying, for the replay gate. Before
+      # the Endpoint, so they outlive every stream.
+      {Registry, keys: :duplicate, name: KilnCMSWeb.FeedStream.Streams},
+      {Registry, keys: :duplicate, name: KilnCMSWeb.FeedStream.Replays},
       # Start to serve requests, typically the last entry
       KilnCMSWeb.Endpoint,
+      # AFTER the Endpoint, so it stops first: on shutdown it refuses new
+      # streams and tells every open one to finish (a jittered `retry:` and
+      # `event: shutdown`), so clients reconnect to another node with their
+      # last id while the Endpoint is still up to close their connections.
+      KilnCMSWeb.FeedStream.Drainer,
       # The build fingerprint the HTML ETag names (#2463), computed off the
       # boot path so the first pages find it ready. Temporary: a request
       # computes it itself if this has not finished, or did not.
@@ -260,6 +271,7 @@ defmodule KilnCMS.Application do
       warn_if_org_slugs_unreachable()
       enqueue_occurrence_backfill()
       enqueue_legacy_audiences_migration()
+      enqueue_sync_exposure_backfill()
       {:ok, pid}
     end
   end
@@ -299,6 +311,15 @@ defmodule KilnCMS.Application do
   defp enqueue_occurrence_backfill do
     if Application.get_env(:kiln_cms, :occurrence_backfill_on_boot, true) do
       KilnCMS.Events.BackfillWorker.enqueue()
+    end
+  end
+
+  # The documents that were public before the change feed recorded what it
+  # disclosed (#2275): see `KilnCMS.Firing.SyncExposureBackfill`. Off in `:test`
+  # and `:e2e` for the committed-`oban_jobs` reason above.
+  defp enqueue_sync_exposure_backfill do
+    if Application.get_env(:kiln_cms, :sync_exposure_backfill_on_boot, true) do
+      KilnCMS.Firing.SyncExposureBackfill.enqueue()
     end
   end
 

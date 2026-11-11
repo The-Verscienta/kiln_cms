@@ -57,6 +57,7 @@ the router so preflights are answered before route matching).
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
 | API landing | `GET /api` (302 to `/developers`) | none | none (`:browser` pipeline) |
 | Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug`, `/api/sync`, `/api/schema`, `/api/menus/**`, `/api/content/:type/:id/revisions/**` | optional JWT / API key | `:api` |
+| Change feed (SSE) | `GET /api/feed` | optional JWT / API key; the stream is the anonymous view whatever the credential, like `/api/sync` | `:feed_join` (connects, per address, charged first and refused as a `200` + `event: busy`), then `:api`; open streams capped per API key or address (50) and per node (20,000), resumes replaying at once per node (8) |
 | OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567); the document (never the explorer) also answers any valid API key | `:docs` |
 | GraphQL SDL | `GET /api/graphql/schema.graphql` | none where introspection is on; **API key required** in prod unless `GRAPHQL_INTROSPECTION_ENABLED` | `:docs` |
 | Headless sign-in | `POST /api/auth/sign_in` | credentials → JWT, or a pending token for a 2FA account | `:auth` + per-account (#478) |

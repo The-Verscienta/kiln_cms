@@ -11,13 +11,14 @@ SwiftUI app that does everything on this page: generated models, a sync
 mirror, `ETag` revalidation, `?fields=`, Portable Text rendered natively and
 focal-point cropping.
 
-Three reads cover almost every app:
+Four reads cover almost every app:
 
 | Need | Endpoint | Section |
 |---|---|---|
 | Keep a local copy of a type (or all public content) | `GET /api/sync` | [Mirroring with sync](#mirroring-with-sync) |
 | Refresh the one document on screen | `GET /api/content/:type/:slug` + `If-None-Match` | [Refreshing one document](#refreshing-one-document) |
 | A list row or widget, not the whole document | `GET /api/content/:type/:slug?fields=…` | [Smaller payloads](#smaller-payloads-fields) |
+| Update an open screen the moment content changes | `GET /api/feed` (Server-Sent Events) | [While the app is open](#while-the-app-is-open-the-change-feed) |
 
 Read anonymously. A delivery app needs no credential for published, public
 content, and a credential makes every response `private, no-store`
@@ -302,6 +303,31 @@ audience is large.
 
 An app without a backend relies on foreground sync plus best-effort background
 refresh. That is fine for most content apps.
+
+### While the app is open: the change feed
+
+A screen that should change while the user looks at it (a live blog, a price,
+a correction) can hold `GET /api/feed` open while the app is in the
+foreground. It is a Server-Sent Events stream of `published`, `updated` and
+`withdrawn` events, identifiers only and the anonymous view
+([api.md → Change feed (SSE)](api.md#change-feed-sse)). Neither platform has
+`EventSource` built in: read the response line by line with `URLSession`'s
+`bytes(for:)` on iOS or OkHttp's `okhttp-sse` on Android, and send the last
+`id:` you saw as the `Last-Event-ID` header when you reconnect.
+
+- **Close it when the app leaves the foreground.** iOS suspends the app and
+  the connection with it; holding it costs battery for nothing.
+- **The id is a sync cursor.** Store the last one beside your sync cursor. On
+  the next launch, `GET /api/sync?cursor=<that id>` fetches what changed in
+  between, with bodies, before you open the stream again.
+- **On `event: reset`, run your normal sync** from the stored sync cursor. If
+  that cursor is no longer good either, sync answers `400 invalid_cursor`
+  (see *When to restart* above). On `event: busy` or
+  `event: shutdown`, wait the `retry:` milliseconds the server sent before
+  them, then reconnect with the same id. Stop on a `401`, `404` or `429`.
+- **Streams count per address.** One address may hold 50 streams and open 60
+  a minute, so a large audience behind one carrier NAT can be told `busy`.
+  That is the case for a backend of your own in front, as above.
 
 ## Typed models from `GET /api/schema`
 

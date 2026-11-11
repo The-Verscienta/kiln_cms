@@ -69,8 +69,9 @@ defmodule KilnCMS.Delivery.FeedTest do
       assert event.affected == []
 
       # The struct is the whole message: no title, excerpt, blocks or SEO.
+      # `anonymous` and `sse` are the anonymous view (#2275).
       assert event |> Map.from_struct() |> Map.keys() |> Enum.sort() ==
-               ~w(affected at id kind locale public published_at slug type)a
+               ~w(affected anonymous at id kind locale public published_at slug sse type)a
 
       encoded = Jason.encode!(event)
       refute encoded =~ "Dose"
@@ -248,5 +249,181 @@ defmodule KilnCMS.Delivery.FeedTest do
       assert Feed.publish("page.published", %{id: Ecto.UUID.generate()}, nil) == :ok
       assert Feed.publish("page.published", :not_a_map, org()) == :ok
     end
+  end
+
+  # #2275: what an anonymous SSE stream is shown, decided once in the
+  # publisher on `/api/sync`'s tombstone rule.
+  describe "the anonymous view" do
+    defp exposed?(id) do
+      [id]
+      |> KilnCMS.Firing.sync_exposures_for!(
+        actor: KilnCMS.SystemActor.new(:feed),
+        tenant: org()
+      )
+      |> Enum.any?()
+    end
+
+    test "a public publish is shown, as identifiers only, and recorded as disclosed" do
+      admin = admin()
+      page = published!(admin)
+
+      assert [%Event{anonymous: :show, sse: sse}] = events_for(page.id)
+      assert exposed?(page.id)
+
+      assert sse.event == "published"
+      data = Jason.decode!(sse.data)
+
+      # Field by field: no `public`, no `at`, and `affected` always empty.
+      assert data |> Map.keys() |> Enum.sort() ==
+               ~w(affected id locale published_at slug type)
+
+      assert data["id"] == page.id
+      assert data["type"] == "page"
+      assert data["affected"] == []
+
+      # Both ids are sync delta cursors of this site; the typed one is scoped.
+      assert {:ok, %{type: nil, surface: :json, position: {:delta, %DateTime{}, nil, nil}}} =
+               KilnCMS.Firing.SyncCursor.verify(sse.ids.all, org())
+
+      assert {:ok, %{type: "page"}} = KilnCMS.Firing.SyncCursor.verify(sse.ids.type, org())
+    end
+
+    test "a members-only document is hidden and never recorded" do
+      admin = admin()
+      page = published!(admin, %{audience: :member})
+
+      assert [%Event{anonymous: :hide, sse: nil}] = events_for(page.id)
+      refute exposed?(page.id)
+
+      # Edited and deleted: still never named.
+      page = CMS.update_page!(page, %{title: "Members, revised"}, actor: admin)
+      CMS.destroy_page!(page, actor: admin)
+
+      assert [%Event{anonymous: :hide}, %Event{anonymous: :hide}] = events_for(page.id)
+    end
+
+    test "a document locked from the start is hidden" do
+      admin = admin()
+      page = published!(admin, %{access_password: "shared secret"})
+      CMS.update_page!(page, %{title: "Locked, revised"}, actor: admin)
+
+      assert [%Event{anonymous: :hide}, %Event{anonymous: :hide}] = events_for(page.id)
+      refute exposed?(page.id)
+    end
+
+    test "a disclosed document moved to members, or locked, is withdrawn by id" do
+      admin = admin()
+      moved = published!(admin)
+      locked = published!(admin)
+      _ = events_for(moved.id)
+      _ = events_for(locked.id)
+
+      CMS.update_page!(moved, %{audience: :member}, actor: admin)
+      CMS.update_page!(locked, %{access_password: "shared secret"}, actor: admin)
+
+      for page <- [moved, locked] do
+        assert [%Event{kind: :updated, public: false, anonymous: :withdraw, sse: sse}] =
+                 events_for(page.id)
+
+        assert sse.event == "withdrawn"
+        assert Jason.decode!(sse.data) == %{"type" => "page", "id" => page.id}
+      end
+    end
+
+    test "a delete is withdrawn only when the id was disclosed" do
+      admin = admin()
+      disclosed = published!(admin)
+      _ = events_for(disclosed.id)
+
+      CMS.destroy_page!(disclosed, actor: admin)
+      assert [%Event{public: nil, anonymous: :withdraw}] = events_for(disclosed.id)
+
+      # Published to members, so never disclosed: its delete names nothing.
+      gated = published!(admin, %{audience: :member})
+      _ = events_for(gated.id)
+      CMS.destroy_page!(gated, actor: admin)
+      assert [%Event{public: nil, anonymous: :hide, sse: nil}] = events_for(gated.id)
+    end
+
+    test "the unpublish of a public document is withdrawn even when it was never recorded" do
+      id = Ecto.UUID.generate()
+
+      Feed.publish(
+        "page.unpublished",
+        %{id: id, state: :draft, audience: :public, locked: false},
+        org(),
+        true
+      )
+
+      assert [%Event{kind: :withdrawn, public: true, anonymous: :withdraw}] = events_for(id)
+      refute exposed?(id)
+    end
+
+    test "an event of a type the site no longer serves is not shown" do
+      id = Ecto.UUID.generate()
+
+      Feed.publish(
+        "retired_type.published",
+        %{id: id, state: :published, audience: "public", locked: false},
+        org(),
+        false
+      )
+
+      assert [%Event{anonymous: :hide, sse: nil}] = events_for(id)
+      refute exposed?(id)
+    end
+
+    test "the unpublish of a public document of a type no longer served needs an exposure" do
+      id = Ecto.UUID.generate()
+
+      Feed.publish(
+        "retired_type.unpublished",
+        %{id: id, state: :draft, audience: :public, locked: false},
+        org(),
+        true
+      )
+
+      assert [%Event{kind: :withdrawn, public: true, anonymous: :hide, sse: nil}] =
+               events_for(id)
+    end
+
+    test "a recorded exposure is not written again" do
+      admin = admin()
+      page = published!(admin)
+      _ = events_for(page.id)
+
+      [before] = exposure_rows(page.id)
+      CMS.update_page!(page, %{title: "Revised"}, actor: admin)
+      assert [%Event{anonymous: :show}] = events_for(page.id)
+      assert exposure_rows(page.id) == [before]
+    end
+
+    test "an exposure that cannot be written hides the event, and never raises" do
+      # Another site's id that has no organization row: the write fails.
+      site = Ecto.UUID.generate()
+      :ok = Feed.subscribe(site)
+      id = Ecto.UUID.generate()
+
+      assert :ok =
+               Feed.publish(
+                 "page.published",
+                 %{id: id, state: :published, audience: :public, locked: false},
+                 site,
+                 false
+               )
+
+      assert [%Event{public: true, anonymous: :hide, sse: nil}] = events_for(id, site)
+    end
+  end
+
+  defp exposure_rows(document_id) do
+    import Ecto.Query, only: [from: 2]
+
+    KilnCMS.Repo.all(
+      from(e in "sync_exposures",
+        where: e.document_id == type(^document_id, Ecto.UUID),
+        select: %{id: e.id, type_name: e.type_name, tuple: fragment("ctid::text")}
+      )
+    )
   end
 end

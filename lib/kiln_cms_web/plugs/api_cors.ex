@@ -45,7 +45,11 @@ defmodule KilnCMSWeb.Plugs.ApiCORS do
                # A browser front end that cannot send `Idempotency-Key`, or read
                # back whether a response was a replay, cannot retry a write
                # safely at all.
-               "idempotency-key"
+               "idempotency-key",
+               # `GET /api/feed` (#2275): an `EventSource` sends the last
+               # event id back on a reconnect, and a polyfill or `fetch`
+               # stream sets it by hand — refused at the preflight otherwise.
+               "last-event-id"
              ],
              expose_headers: ["retry-after", "etag", "idempotency-replayed"],
              max_age: 600
