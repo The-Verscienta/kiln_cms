@@ -88,6 +88,24 @@ defmodule KilnCMS.Backups.LockPoliciesTest do
       end
     end
 
+    # #2219: naming components is the same request, under the same policy.
+    test "a request for some components is refused to editor, viewer, site admin and anonymous" do
+      for actor <- [user(:editor), user(:viewer), site_admin(), nil],
+          components <- [[:db], [:media], [:db, :media]] do
+        refute Backups.can_request_backup?(actor, %{components: components}),
+               "request #{inspect(components)} must refuse #{inspect(actor && actor.role)}"
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Backups.request_backup(%{trigger: "manual", components: components},
+                   actor: actor
+                 )
+
+        assert {:error, :forbidden} = Backups.request([components: components], actor)
+      end
+
+      assert Backups.in_flight() == nil
+    end
+
     test "another subsystem's system actor is refused" do
       refute Backups.can_request_backup?(SystemActor.new(:billing))
     end

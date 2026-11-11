@@ -30,6 +30,38 @@ carries the reasoning.
     can gate an upgrade script.
   ([#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374))
 
+<a id="backup-components-upgrade"></a>
+
+- **Run `mix ash.migrate` for per-component backups (part of #2219). While
+  nodes of the older release still run, a database-only or media-only backup
+  request may back up everything; rolling the pin back is safe.** For
+  operators.
+  - **What the migration does.**
+    `20261110213425_backup_request_components` adds five nullable columns to
+    `backup_locks` (`waiting_components`, `waiting_scheduled`,
+    `waiting_schedule_ids`, `waiting_scope_at`, `waiting_scope_folds`) and two
+    to `backup_runs` (`scheduled_components` and `schedule_ids`, `NOT NULL
+    DEFAULT '{}'`). Additive; no existing row changes. `scheduled_components`
+    and `schedule_ids` are written but have no schedules to name yet.
+  - **During a rolling deploy.** The columns exist before any node runs the
+    new code, and an older node never reads them. A start job an older node
+    picks up ignores `components` and backs up everything. A queued request
+    that an older node wrote or folded into covers everything: this release
+    counts the queued request's components only while `waiting_scope_at` and
+    `waiting_scope_folds` match `waiting_requested_at` and `waiting_folds`,
+    which an older node's writes break. A resume an older node queued covers
+    everything. Nothing is ever backed up less than asked for.
+  - **`manifest.json`** gains an additive `"components"` key; the `version`
+    stays 1, and a manifest without it reads as before. `scripts/backup.sh`
+    needs no update.
+  - **Rolling the pin back** is safe without the down migration: the older
+    release ignores the new columns and the manifest key, and promotes a
+    queued partial request as a full backup. Its status panel reads only the
+    manifest again, so after a database-only backup it says "Backed up …"
+    without looking at the media.
+  See also [the Added entry](#backup-components).
+  Guide: [Back up only the database or only the media](../backups.md#back-up-only-the-database-or-only-the-media).
+
 <a id="backup-last-good-marker-upgrade"></a>
 
 - **Update the host's copy of `scripts/backup.sh`: the app now marks the newest
@@ -1499,6 +1531,66 @@ carries the reasoning.
     removes the endpoint and restores the old detail text.
   - **API spec.** `docs/api/openapi.json` describes the route
     (`getSecurityPosture`, tag `Monitoring`), with no `enum` on any field.
+
+<a id="backup-components"></a>
+
+- **A backup can cover only the database or only the media, from a release
+  console, and the Backups page and the overview report each component's last
+  backup separately, alarming when either failed or went stale (part of
+  #2219).** For platform admins and operators.
+  - **Asking for it.** `KilnCMS.Backups.request([components: [:db]], KilnCMS.Backups.system())`
+    backs up the database alone; `[:media]` the media alone. Absent or `nil`
+    is everything, as before. The Backups page's buttons always ask for
+    everything. Refused as `:invalid_components` (empty, unknown or repeated),
+    `:components_with_resume` (a resume backs up what its run did) or
+    `:no_media_dir` (`:media` on a deployment without a media directory).
+    The `request_backup` action takes the same `components` argument, with
+    the same policy: only a platform admin or `KilnCMS.Backups.system/0`.
+  - **What runs.** The start step settles the components (what was asked for
+    that the deployment has) and writes them to `state.json`; `dump` is
+    skipped without the database, `plan`, `archive` and `checksum` without
+    the media. The Run records them in `components`, its log says "Backing up
+    only: db" when something is left out, and the manifest records them as
+    `"components"`. A resume keeps its run's components. A media-only backup
+    whose media directory is gone by the time it starts is a `Skipped` run
+    ("Refused: no_media_dir"), and the manifest is left alone.
+  - **Queued requests.** A request folding into a queued backup widens it to
+    the union of both (database-only plus media-only makes both); a resume
+    folding into a queued fresh backup makes it everything. A fresh request
+    that a queued resume doesn't cover is refused with the new
+    `{:error, :resume_queued}` and nothing is written; **Back up now** says
+    "A resume is queued that doesn't cover this backup. Try again once it
+    starts." The in-flight strip lists a queued backup's components
+    ("· Database + Media"), and `in_flight/0` gains `components` for the
+    running backup and for the queued request.
+  - **Status per component.** `KilnCMS.Backups.status/0` gains `expected`,
+    `components` (per component: `last_good`, `last_attempt`, `failed?`,
+    `stale?`, `never?`, `stale_after_hours`, `stale_source`), `failed?` and
+    `source` (`:runs` or `:manifest`); top-level `stale?` is now true when any
+    component is stale. Each component's last good backup is the newest
+    succeeded run with a verified file of that kind, or the manifest when it
+    is newer. A failed run that doesn't say what it covered (a failed
+    imported cron run, or one naming no component) and a failed manifest
+    without `"components"` count against every component. When History can't
+    be read, the status falls back to the manifest alone, emits
+    `[:kiln_cms, :backups, :status, :history_unreadable]` every time and logs
+    a warning at most once every 15 minutes.
+  - **On screen.** The Backups status panel has one line per component
+    ("Database: Backed up 3 hours ago", "Media: The last backup failed") and
+    alarms when any line is failed or stale; the file list and **Last run
+    failed** still show the last backup. The overview's red strip names each
+    component that needs attention ("The last media backup was 3 days ago.");
+    media never backed up while the database has been is that red strip, not
+    the neutral set-up notice. The overview reads the backup status only for
+    platform admins, the only ones shown the strips.
+  - **Telemetry.** `[:kiln_cms, :backups, :request, :folded]` gains
+    `components` in its metadata.
+  - **Not included.** No button for a partial backup, and no schedules yet:
+    `Run.scheduled_components` and `schedule_ids` are recorded but always
+    empty in this release.
+  Guide: [Back up only the database or only the media](../backups.md#back-up-only-the-database-or-only-the-media)
+  and [Check the last backup of each component](../backups.md#check-the-last-backup-of-each-component).
+  Upgrade: [the upgrade note](#backup-components-upgrade).
 
 <a id="core-security-notices"></a>
 

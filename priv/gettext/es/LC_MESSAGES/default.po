@@ -1902,6 +1902,11 @@ msgstr "Una petición cuya cabecera Host no coincide con ninguna organización r
 msgid "A restore puts the document back without a propagation record"
 msgstr "Una restauración vuelve a publicar el documento sin registro de propagación"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A resume is queued that doesn't cover this backup. Try again once it starts."
+msgstr "Hay una reanudación en cola que no cubre esta copia de seguridad. Vuelva a intentarlo cuando empiece."
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "A running experiment's variants are locked: changing a split or a patch mid-run would invalidate every result gathered so far. Conclude it first."
@@ -12681,6 +12686,11 @@ msgstr "Semana siguiente"
 msgid "No"
 msgstr "No"
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "No %{component} backup has been recorded."
+msgstr "No se ha registrado ninguna copia de seguridad (%{component})."
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -12774,11 +12784,6 @@ msgstr "Aún no hay reglas de automatización"
 #, elixir-autogen, elixir-format
 msgid "No backup has ever been recorded"
 msgstr "No se ha registrado ninguna copia de seguridad"
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "No backup has ever been recorded for this deployment."
-msgstr "No se ha registrado ninguna copia de seguridad en esta instalación."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -20629,11 +20634,6 @@ msgstr "El icono de la aplicación se guardó, pero todavía no es instalable: %
 msgid "The autoresponder now uses [field:%{new}] where it used [field:%{old}]."
 msgstr "La respuesta automática ahora usa [field:%{new}] donde usaba [field:%{old}]."
 
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "The backup status can't be determined."
-msgstr "No se puede determinar el estado de las copias de seguridad."
-
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "The block could not be saved."
@@ -20983,29 +20983,29 @@ msgstr "La clave con la que se firman las notificaciones de revisión de este si
 msgid "The largest of the numbers."
 msgstr "El mayor de los números."
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "The last %{component} backup failed."
+msgstr "La última copia de seguridad (%{component}) falló."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "The last %{component} backup was %{count} day ago."
+msgid_plural "The last %{component} backup was %{count} days ago."
+msgstr[0] "La última copia de seguridad (%{component}) fue hace %{count} día."
+msgstr[1] "La última copia de seguridad (%{component}) fue hace %{count} días."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "The last %{component} backup was %{count} hour ago."
+msgid_plural "The last %{component} backup was %{count} hours ago."
+msgstr[0] "La última copia de seguridad (%{component}) fue hace %{count} hora."
+msgstr[1] "La última copia de seguridad (%{component}) fue hace %{count} horas."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "The last backup failed"
 msgstr "La última copia de seguridad falló"
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "The last backup failed."
-msgstr "La última copia de seguridad falló."
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "The last backup was %{count} day ago."
-msgid_plural "The last backup was %{count} days ago."
-msgstr[0] "La última copia de seguridad fue hace %{count} día."
-msgstr[1] "La última copia de seguridad fue hace %{count} días."
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "The last backup was %{count} hour ago."
-msgid_plural "The last backup was %{count} hours ago."
-msgstr[0] "La última copia de seguridad fue hace %{count} hora."
-msgstr[1] "La última copia de seguridad fue hace %{count} horas."
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
@@ -25489,6 +25489,11 @@ msgstr "crítica"
 msgid "custom"
 msgstr "personalizado"
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "database"
+msgstr "base de datos"
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "days"
@@ -26044,6 +26049,11 @@ msgstr "descubrimiento de idiomas para construir selectores de idioma."
 #, elixir-autogen, elixir-format
 msgid "low"
 msgstr "baja"
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "media"
+msgstr "medios"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format

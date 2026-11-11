@@ -1902,6 +1902,11 @@ msgstr ""
 msgid "A restore puts the document back without a propagation record"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A resume is queued that doesn't cover this backup. Try again once it starts."
+msgstr ""
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "A running experiment's variants are locked: changing a split or a patch mid-run would invalidate every result gathered so far. Conclude it first."
@@ -12681,6 +12686,11 @@ msgstr "Next week"
 msgid "No"
 msgstr ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "No %{component} backup has been recorded."
+msgstr ""
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -12773,11 +12783,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "No backup has ever been recorded"
-msgstr ""
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "No backup has ever been recorded for this deployment."
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
@@ -20629,11 +20634,6 @@ msgstr ""
 msgid "The autoresponder now uses [field:%{new}] where it used [field:%{old}]."
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "The backup status can't be determined."
-msgstr ""
-
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "The block could not be saved."
@@ -20983,29 +20983,29 @@ msgstr ""
 msgid "The largest of the numbers."
 msgstr ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "The last %{component} backup failed."
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "The last %{component} backup was %{count} day ago."
+msgid_plural "The last %{component} backup was %{count} days ago."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "The last %{component} backup was %{count} hour ago."
+msgid_plural "The last %{component} backup was %{count} hours ago."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "The last backup failed"
 msgstr ""
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "The last backup failed."
-msgstr ""
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "The last backup was %{count} day ago."
-msgid_plural "The last backup was %{count} days ago."
-msgstr[0] ""
-msgstr[1] ""
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "The last backup was %{count} hour ago."
-msgid_plural "The last backup was %{count} hours ago."
-msgstr[0] ""
-msgstr[1] ""
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
@@ -25489,6 +25489,11 @@ msgstr ""
 msgid "custom"
 msgstr ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "database"
+msgstr ""
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "days"
@@ -26043,6 +26048,11 @@ msgstr ""
 #: lib/kiln_cms/security/posture/checks/plugin_health.ex
 #, elixir-autogen, elixir-format
 msgid "low"
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "media"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
