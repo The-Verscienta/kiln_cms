@@ -7,6 +7,14 @@ tagged `client-js-vX.Y.Z` in the
 
 ## Unreleased
 
+- **`kiln-types --check <file>` (kiln_cms#2274):** fetches the live schema (or
+  reads `--from`), renders the declarations `--out <file>` would write, and
+  compares them with the file, writing nothing. It exits `1` when the file is
+  missing or differs, naming the first differing line and what the export
+  has there, so a TypeScript frontend in its own repository can fail CI on
+  stale generated types without running Kiln.
+  Mirrors `mix kiln.export.schema --check`; refused together with `--out`.
+  Additive: every other flag behaves as before.
 - **OpenAPI components (kiln_cms#2274):** `kiln.schemaComponents(options)`
   fetches `GET /api/schema?format=openapi`, the delivery schema as an OpenAPI
   3.1 document, typed as the new exported `OpenApiComponentsDocument`. It

@@ -130,10 +130,29 @@ const post = await kiln.artifact<PostDocument>("post", "hello-world");
 
 Options: `--url <base>` (default `$KILN_API_URL` or `http://localhost:4000`),
 `--from <file>` (offline, from a saved `mix kiln.export.schema` document),
-`--out <file>` (default stdout), `--type post,page`, `--blocks-only`,
+`--out <file>` (default stdout), `--check <file>` (compare, don't write; see
+below), `--type post,page`, `--blocks-only`,
 `--api-key <key>` (default `$KILN_API_KEY`). The CLI fetches through the
 client's `schema()` method, so it shares the transport: 15s timeout, bearer
 auth, `KilnHttpError` bodies.
+
+### Fail CI when the types are stale
+
+Commit the generated file, then check it in CI. `--check <file>` renders
+exactly what `--out <file>` would write and compares it with the file,
+writing nothing. Pass the same flags the file was written with, with
+`--check` in place of `--out`:
+
+```bash
+npx kiln-types --url https://cms.example.com --type post,page --check src/kiln-types.d.ts
+```
+
+A match prints `… is up to date (…)` to stderr and exits `0`. A stale file
+exits `1` with `… is out of date: line N is "…", the export has "…"` and the
+`--out` to regenerate it. A missing file, an unreachable server and `--check`
+together with `--out` exit `1` too. The wording matches
+`mix kiln.export.schema --check`, so a repository that runs Kiln and one that
+only talks to it read the same CI log.
 
 The emitter is a faithful port of the server-side one
 (`KilnCMS.SchemaExport.TypeScript`), so `kiln-types` and

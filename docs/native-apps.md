@@ -451,10 +451,23 @@ The models describe one site at the moment of export, so check them in CI.
   exits non-zero with `Sources/Kiln/Kiln.swift is out of date: line N is
   "...", the export has "..."` and the command to regenerate it; a missing
   file fails too. `--check` can't be combined with `--out` or `--all-orgs`.
-- **From an app repository on its own**, which can't run the Mix task,
-  regenerate the file the way you first did (download it from
-  `GET /api/schema`, or run your generator over a fresh
-  `?format=openapi` download) and run `git diff --exit-code` on it.
+- **From a TypeScript frontend in its own repository**, which can't run the
+  Mix task, use the `kiln-types` CLI from `@kiln-cms/client`. Its `--check`
+  fetches `GET /api/schema`, renders what `--out` would write (the same
+  declarations as `--format ts`), and compares it with the committed file,
+  writing nothing:
+
+  ```bash
+  npx kiln-types --url https://cms.example.com --type post,recipe \
+    --check src/kiln-types.d.ts
+  ```
+
+  The messages and exit status match the Mix task's: `… is up to date (...)`
+  on a match, `… is out of date: line N is "...", the export has "..."` and
+  exit `1` on a stale or missing file. It can't be combined with `--out`.
+- **From any other app repository on its own** (Swift, Kotlin, or a generator
+  over `?format=openapi`), regenerate the file the way you first did and run
+  `git diff --exit-code` on it.
 
 ### Swift models
 
