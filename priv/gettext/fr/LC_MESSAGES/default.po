@@ -3031,6 +3031,7 @@ msgstr "Tous les types de contenu"
 msgid "All endpoints delivered by"
 msgstr "Tous les endpoints livrés à"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "All events"
@@ -3556,6 +3557,7 @@ msgstr "Ne s'applique que si ce site a sa propre authentification unique. Une pe
 msgid "Applies to people who sign up with a password on this site. Invitations and existing accounts are not affected, and this site's single sign-on has its own switch below. Turning it off doesn't approve anyone already waiting."
 msgstr "S'applique aux personnes qui s'inscrivent avec un mot de passe sur ce site. Les invitations et les comptes existants ne sont pas concernés, et l'authentification unique de ce site a son propre réglage ci-dessous. Le désactiver n'approuve personne parmi ceux qui attendent déjà."
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/organize_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
@@ -4361,6 +4363,7 @@ msgstr "Références rompues"
 msgid "Browse the blog"
 msgstr "Parcourir le blogue"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Browser"
@@ -4574,6 +4577,11 @@ msgstr "Annuler le téléversement"
 #, elixir-autogen, elixir-format
 msgid "Canceled"
 msgstr "Annulée"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Canceled backups are recorded in the instance security log."
+msgstr "Les sauvegardes annulées sont consignées dans le journal de sécurité de l’instance."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -5129,6 +5137,7 @@ msgid "Claim released; the release can be retried."
 msgstr "Réservation libérée ; le lancement peut être relancé."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
@@ -7574,6 +7583,7 @@ msgid "Done: %{changed} renamed, %{pinned} hand-picked skipped, %{scanned} scann
 msgstr "Terminé : %{changed} renommés, %{pinned} définis manuellement ignorés, %{scanned} analysés."
 
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Download CSV"
@@ -8540,6 +8550,7 @@ msgstr "L'essentiel : Accueil, Contenu, Médias, Calendrier, Tâches et Boîte d
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -8551,11 +8562,13 @@ msgstr "Événement"
 msgid "Events"
 msgstr "Événements"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Events are deleted %{days} days after they happen."
 msgstr "Les événements sont supprimés %{days} jours après leur survenue."
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Events are kept forever."
@@ -9524,6 +9537,7 @@ msgstr "De"
 msgid "From %{min} to %{max}."
 msgstr "De %{min} à %{max}."
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "From (UTC)"
@@ -10365,6 +10379,7 @@ msgstr "Je les ai enregistrés"
 msgid "ID"
 msgstr "ID"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "IP address"
@@ -10809,6 +10824,16 @@ msgstr "Installé, non sélectionné"
 #, elixir-autogen, elixir-format
 msgid "Instance URL"
 msgstr "URL de l'instance"
+
+#: lib/kiln_cms_web/live/security_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Instance log"
+msgstr "Journal de l’instance"
+
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Instance security log"
+msgstr "Journal de sécurité de l’instance"
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
@@ -11588,6 +11613,7 @@ msgstr "En ligne, aucune modification non publiée — rien à publier"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/registrations_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
@@ -11603,6 +11629,7 @@ msgstr "Chargement de la vérification humaine…"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
@@ -12973,6 +13000,7 @@ msgstr "Aucun compte %{network} activé — rien ne serait publié. Le texte ser
 msgid "No endpoints subscribed"
 msgstr "Aucun endpoint abonné"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "No events to show"
@@ -13150,6 +13178,11 @@ msgstr "Aucun menu pour l'instant"
 #, elixir-autogen, elixir-format
 msgid "No minimum"
 msgstr "Sans minimum"
+
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "No one with that email address is in this log."
+msgstr "Personne avec cette adresse e-mail ne figure dans ce journal."
 
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -13785,6 +13818,7 @@ msgstr "Rien ne pointe ici"
 msgid "Nothing matches the current filter."
 msgstr "Aucun résultat pour ce filtre."
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing matches these filters, or nothing has been recorded yet."
@@ -14317,6 +14351,11 @@ msgstr "Un seul enregistrement %{source}"
 #, elixir-autogen, elixir-format
 msgid "Only one locale is configured — add locales to config :kiln_cms, :i18n."
 msgstr "Une seule langue est configurée — ajoutez des langues dans config :kiln_cms, :i18n."
+
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only platform administrators can view the instance security log."
+msgstr "Seuls les administrateurs de la plateforme peuvent consulter le journal de sécurité de l’instance."
 
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
@@ -16996,6 +17035,7 @@ msgid "Resume"
 msgstr "Reprendre"
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Retention"
@@ -18084,6 +18124,11 @@ msgstr "Alertes de sécurité — m'envoyer un e-mail sur les événements de s�
 msgid "Security contact"
 msgstr "Contact sécurité"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Security events about this whole installation rather than one site, such as a canceled backup. Only platform administrators can see it; site administrators cannot."
+msgstr "Événements de sécurité concernant toute l’installation plutôt qu’un site, comme une sauvegarde annulée. Seuls les administrateurs de la plateforme peuvent le voir ; les administrateurs de site, non."
+
 #: lib/kiln_cms/security/posture/checks/release.ex
 #, elixir-autogen, elixir-format
 msgid "Security fixes reach an installation only when it is updated."
@@ -18457,6 +18502,11 @@ msgstr "Défini pour ce site"
 #, elixir-autogen, elixir-format
 msgid "Set it up"
 msgstr "Configurez-la"
+
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set it with KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS in the environment."
+msgstr "Se règle avec KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS dans l’environnement."
 
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
@@ -19930,6 +19980,7 @@ msgstr "Reprendre"
 msgid "Take over “%{field}” from %{name}?"
 msgstr "Reprendre « %{field} » à %{name} ?"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Target"
@@ -21076,6 +21127,7 @@ msgstr "La limite est atteinte. Retirez-en un pour en connecter un autre."
 msgid "The list can hold at most %{max} entries."
 msgstr "La liste peut contenir au plus %{max} entrées."
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "The log could not be loaded."
@@ -22525,6 +22577,7 @@ msgstr "Niveau supprimé."
 msgid "Tier saved."
 msgstr "Niveau enregistré."
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Time"
@@ -22573,6 +22626,7 @@ msgstr "Le titre contient « %{text} »"
 msgid "To"
 msgstr "À"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "To (UTC)"
@@ -24230,11 +24284,13 @@ msgid "White-label this site: its name, logo and brand colour appear on the publ
 msgstr "Personnalisez la marque de ce site : son nom, son logo et sa couleur apparaissent sur les pages publiques, l'éditeur et l'écran de connexion. Laissez un champ vide pour hériter de la valeur par défaut du serveur."
 
 #: lib/kiln_cms_web/live/governance_live.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Who"
 msgstr "Qui"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Who (email)"

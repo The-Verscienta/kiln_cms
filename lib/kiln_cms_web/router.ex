@@ -646,6 +646,10 @@ defmodule KilnCMSWeb.Router do
       # roles, API keys. Admin-only by the tier gate AND the `Security.Event` policy;
       # the CSV download is the controller route below.
       live "/editor/security-log", SecurityLogLive, :index
+      # The instance security log (#2541): events about the installation, not a
+      # site (a canceled backup). Platform admins only: the page refuses anyone
+      # else at mount, and `Security.InstanceEvent`'s policy decides every row.
+      live "/editor/instance-security-log", InstanceSecurityLogLive, :index
       # Which security events alert the site's admins, and how (#2245).
       # Admin-only by the tier gate AND the `CMS.SiteSecurityAlerts` policy.
       live "/editor/security-alerts", SecurityAlertsLive, :index
@@ -735,6 +739,10 @@ defmodule KilnCMSWeb.Router do
     # Security log download (#2241) - the page's filters as CSV; admin-gated in the
     # controller, which also charges the `:export` budget and caps the rows.
     get "/editor/security-log/export.csv", SecurityLogExportController, :export_csv
+    # The instance log's download (#2541): platform-admin-gated in the controller.
+    get "/editor/instance-security-log/export.csv",
+        SecurityLogExportController,
+        :export_instance_csv
 
     # Form entries export (#477) — file download, admin-gated in the
     # controller (submissions are visitor-provided data, frequently PII;

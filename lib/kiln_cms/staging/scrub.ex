@@ -35,6 +35,7 @@ defmodule KilnCMS.Staging.Scrub do
           billing_events_purged: non_neg_integer(),
           backup_runs_purged: non_neg_integer(),
           security_events_purged: non_neg_integer(),
+          instance_security_events_purged: non_neg_integer(),
           security_alert_dispatches_purged: non_neg_integer(),
           invitations_purged: non_neg_integer(),
           memberships_scrubbed: non_neg_integer(),
@@ -98,6 +99,8 @@ defmodule KilnCMS.Staging.Scrub do
     # The security audit log (#2241) holds raw IPs, user agents and email
     # snapshots of the production sign-ins: personal data a clone must not carry.
     {security_events_purged, _} = Repo.delete_all(KilnCMS.Security.Event)
+    # And the instance log's (#2541): platform admins' addresses and IPs.
+    {instance_security_events_purged, _} = Repo.delete_all(KilnCMS.Security.InstanceEvent)
 
     # Pending security alerts (#2245) would mail and notify the production
     # admins' accounts from the clone, about production events.
@@ -152,6 +155,7 @@ defmodule KilnCMS.Staging.Scrub do
       billing_events_purged: billing_events_purged,
       backup_runs_purged: backup_runs_purged,
       security_events_purged: security_events_purged,
+      instance_security_events_purged: instance_security_events_purged,
       security_alert_dispatches_purged: security_alert_dispatches_purged,
       invitations_purged: invitations_purged,
       memberships_scrubbed: memberships_scrubbed,

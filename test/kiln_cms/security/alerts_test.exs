@@ -202,8 +202,7 @@ defmodule KilnCMS.Security.AlertsTest do
             :recovery_code_used,
             :api_key_revoked,
             :admin_access_refused,
-            :ip_auto_blocked,
-            :backup_canceled
+            :ip_auto_blocked
           ] do
         assert Alerts.classify(event(type, %{})) == [], "#{type} raised an alert"
       end

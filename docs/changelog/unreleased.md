@@ -7,6 +7,29 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="instance-security-log-upgrade"></a>
+
+- **Run `mix ash.migrate` for the instance security log (#2541).** The
+  migration `20261110235044_add_instance_security_events` creates
+  `instance_security_events` and **moves** every `backup_canceled` row out of
+  `security_events` (the default site's log) into it, keeping its id, time,
+  person and details. Platform admins read it on
+  `/editor/instance-security-log`; the default site's admins no longer see
+  those rows.
+  - **Retention.** `KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS` (default 365,
+    `0` keeps forever) sets the instance log's window; no site's setting does.
+    The daily prune (`KILN_SECURITY_LOG_PRUNE_CRON`) runs it first.
+  - **During a rolling deploy.** A node on the older build still writes a
+    canceled backup to the default site's log; a new node reads such a row as
+    "Unrecognized event (backup_canceled)" there. Cancel nothing until every
+    node runs this release, or move a stray row afterwards with the same SQL as
+    the migration.
+  - **Rolling back.** The down migration moves the `backup_canceled` rows back
+    into the default site's log, then drops the table. Export the instance log
+    (**Download CSV**) first if you want a copy.
+  See also [the Added entry](#instance-security-log).
+  ([#2541](https://github.com/The-Verscienta/kiln_cms/issues/2541))
+
 <a id="rclone-in-image-upgrade"></a>
 
 - **The official image ships `rclone`, and a set `BACKUP_RCLONE_REMOTE`
@@ -481,12 +504,9 @@ carries the reasoning.
       to load while that run is on the page (it cannot read a `canceled`
       run), and its retention deletes nothing (it fails closed on a status it
       doesn't know).
-    - The new `backup_canceled` security event cannot be loaded by an older
-      build that has the security log: that site's **Security log** page and
-      CSV fail there, and erasing the admin named in one fails and retries
-      ([#2509](https://github.com/The-Verscienta/kiln_cms/issues/2509)). The
-      event always goes to the default site's log.
-    All three last only until every node runs this release.
+    Both last only until every node runs this release. (A canceled backup
+    is recorded in the instance security log, #2541, which an older build
+    ignores.)
   - **Before rolling back**, on the new release:
     1. Cancel the running backup, if any (**Backups** → **Cancel**). If one
        was queued, it starts next; cancel that one too. The in-flight strip
@@ -495,14 +515,12 @@ carries the reasoning.
 
        ```sql
        UPDATE backup_runs SET status = 'failed' WHERE status = 'canceled';
-       DELETE FROM security_events WHERE type = 'backup_canceled';
        ```
 
-       The first keeps the canceled runs, as `Failed`; the second removes
-       audit history, so export the log first if you need it. The `UPDATE` is also what lets the down migration
+       This keeps the canceled runs, as `Failed`. It is also what lets the down migration
        restore the narrower status check, which fails while a `canceled` row
        exists.
-    Rolling back to v1.8.0 needs neither statement: it has no backup history
+    Rolling back to v1.8.0 does not need it: it has no backup history
     and no security log. Otherwise rolling the pin back is safe: the older
     release ignores the two new tables and the new column. Or roll forward.
   See also [the Added entry](#backup-step-chain) and
@@ -1511,6 +1529,38 @@ carries the reasoning.
 
 ## Added
 
+<a id="instance-security-log"></a>
+
+- **An instance security log, readable by platform admins only (#2541).**
+  Events about the whole installation rather than one site, starting with
+  `backup_canceled`, which until now went to the default site's log, where that
+  site's admins (who need not be platform admins) saw the platform admin's
+  email address and the backup's stamp.
+  - **Where.** **Security log** → **Instance log** (shown to platform admins),
+    the link on **Backups**, or `/editor/instance-security-log`. Same filters,
+    **Load more** and **Download CSV**
+    (`/editor/instance-security-log/export.csv`) as a site's log.
+  - **Who.** The effective platform role: a standing platform admin, or a
+    temporary platform admin grant until it expires. Every site admin,
+    the default site's included, is refused the page, the CSV and the read.
+  - **Design.** A separate resource and table
+    (`KilnCMS.Security.InstanceEvent`, `instance_security_events`) with no
+    tenant, gated on `PlatformAdmin` like the backup history, rather than a
+    nullable or sentinel `org_id` on `security_events`, which no site read
+    could then be proven never to reach. `backup_canceled` leaves
+    `KilnCMS.Security.Event.types/0`. The `kiln_reporting_v1` views are
+    unaffected.
+  - **For developers.** `Changes.Record` and `Recorder.record/2` take
+    `scope: :instance`; a mistyped scope raises rather than skipping the event. Erasure
+    (`Security.anonymize_actor/1`), retention (`Security.prune_instance/1`,
+    `instance_retention_days/0`) and the staging scrub
+    (`instance_security_events_purged`) cover it.
+  - **Not moved yet.** Platform-level role changes and
+    `api_key_reuse_detected` still go to a site's log, and no instance event
+    raises a security alert.
+  Guide: [security-events.md](../security-events.md#the-instance-log).
+  ([#2541](https://github.com/The-Verscienta/kiln_cms/issues/2541))
+
 <a id="security-posture-json"></a>
 
 - **The Security posture report is available as JSON for monitoring, at
@@ -1974,7 +2024,8 @@ carries the reasoning.
     not only the page). It stops the step jobs and the `pg_dump`, `tar` or
     `rclone` they started, releases the lock (a queued backup starts next),
     marks the run `Canceled`, and records a **Backup canceled** event in the
-    default site's security log. It writes no `manifest.json` and keeps every
+    default site's security log (in the instance security log since #2541).
+    It writes no `manifest.json` and keeps every
     file, so **Resume** continues a canceled backup. A backup that has reached
     `finish` can't be canceled.
   - **Nodes that stop.** Every node beats every 30 seconds (database clock).

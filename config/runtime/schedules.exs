@@ -62,6 +62,14 @@ if cron = System.get_env("KILN_SECURITY_LOG_PRUNE_CRON") do
   config :kiln_cms, :security_log_prune_cron, cron
 end
 
+# How long the instance security log keeps an event (#2541), in days; `0` keeps
+# forever. The instance log is about the installation (a canceled backup), so
+# no site's own retention setting may decide it. 365 when unset; a value
+# outside 0..36500 warns and keeps the default.
+with {:ok, days} <- Env.integer_in("KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS", 0, 36_500) do
+  config :kiln_cms, :instance_security_log_retention_days, days
+end
+
 # And whether booting queues the one-off backfill that gives pre-existing
 # content its first value. On by default because the alternative is an upgrade
 # step someone has to remember, and the index is simply empty until they do.
