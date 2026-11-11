@@ -16,6 +16,12 @@ defmodule KilnCMSWeb.SecurityLogExportController do
   narrow it with a date range. Rows are read in keyset pages and written as
   they arrive.
 
+  The instance log (#2541) downloads the same way from
+  `GET /editor/instance-security-log/export.csv` (`export_instance_csv/2`),
+  gated on `LiveUserAuth.platform_admin?/1` instead, and read as the signed-in
+  platform admin with no tenant, so `KilnCMS.Security.InstanceEvent`'s policy
+  decides every row. A site admin who is not a platform admin gets 403.
+
   Cells go through `KilnCMSWeb.CSV`, which prefixes a leading `= + - @`, tab or
   carriage return with `'`: the actor label and the user agent are chosen by
   whoever made the request.
@@ -36,12 +42,19 @@ defmodule KilnCMSWeb.SecurityLogExportController do
 
   # The body is a text/csv attachment, never a document.
   # sobelow_skip ["XSS.SendResp"]
-  def export_csv(conn, params) do
-    with :ok <- require_admin(conn),
+  def export_csv(conn, params), do: export(conn, params, :site)
+
+  @doc "The instance log's download (#2541): platform admins only."
+  # sobelow_skip ["XSS.SendResp"]
+  def export_instance_csv(conn, params), do: export(conn, params, :instance)
+
+  # sobelow_skip ["XSS.SendResp"]
+  defp export(conn, params, scope) do
+    with :ok <- require_admin(conn, scope),
          :ok <- charge(conn),
-         {:ok, args} <- arguments(conn, params),
-         :ok <- within_cap(conn, args) do
-      stream(conn, args)
+         {:ok, args} <- arguments(conn, params, scope),
+         :ok <- within_cap(conn, args, scope) do
+      stream(conn, args, scope)
     else
       {:error, :forbidden} ->
         conn |> put_status(:forbidden) |> json(%{error: "admin_required"})
@@ -51,7 +64,7 @@ defmodule KilnCMSWeb.SecurityLogExportController do
 
       :no_such_actor ->
         # No such member: an empty file, the same as the page's empty list.
-        stream(conn, :none)
+        stream(conn, :none, scope)
 
       :over_cap ->
         conn
@@ -67,8 +80,15 @@ defmodule KilnCMSWeb.SecurityLogExportController do
     end
   end
 
-  defp require_admin(conn) do
+  defp require_admin(conn, :site) do
     if KilnCMSWeb.LiveUserAuth.effective_tier(conn) == :admin,
+      do: :ok,
+      else: {:error, :forbidden}
+  end
+
+  # Not the site tier: the default site's admin is no platform admin.
+  defp require_admin(conn, :instance) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(conn),
       do: :ok,
       else: {:error, :forbidden}
   end
@@ -80,59 +100,79 @@ defmodule KilnCMSWeb.SecurityLogExportController do
     end
   end
 
-  defp arguments(conn, params) do
-    filters = SecurityLog.parse(params)
-    SecurityLog.arguments(filters, conn.assigns.current_user, KilnCMSWeb.Tenant.current_org(conn))
+  defp arguments(conn, params, scope) do
+    log = log(conn, scope)
+    SecurityLog.arguments(SecurityLog.parse(params, log), conn.assigns.current_user, log)
   end
 
-  defp opts(conn),
+  # The `SecurityLog` scope: the request's site, or `:instance`.
+  defp log(conn, :site), do: KilnCMSWeb.Tenant.current_org(conn)
+  defp log(_conn, :instance), do: :instance
+
+  defp opts(conn, :site),
     do: [actor: conn.assigns.current_user, tenant: KilnCMSWeb.Tenant.current_org(conn)]
 
+  defp opts(conn, :instance), do: [actor: conn.assigns.current_user]
+
+  defp resource(:site), do: Security.Event
+  defp resource(:instance), do: Security.InstanceEvent
+
   # An exact count bounded at cap + 1: never the whole table.
-  defp within_cap(conn, args) do
+  defp within_cap(conn, args, scope) do
     cap = ListScope.export_cap()
 
     count =
-      Security.Event
-      |> Ash.Query.for_read(:list, args, opts(conn))
+      resource(scope)
+      |> Ash.Query.for_read(:list, args, opts(conn, scope))
       |> Ash.Query.limit(cap + 1)
-      |> Ash.count!(opts(conn))
+      |> Ash.count!(opts(conn, scope))
 
     if count > cap, do: :over_cap, else: :ok
   end
 
-  defp stream(conn, args) do
+  defp stream(conn, args, scope) do
     conn =
       conn
       |> put_resp_content_type("text/csv")
       |> put_resp_header(
         "content-disposition",
-        ~s(attachment; filename="security-log-#{Date.utc_today()}.csv")
+        ~s(attachment; filename="#{filename(scope)}-#{Date.utc_today()}.csv")
       )
       |> put_resp_header("cache-control", "no-store")
       |> send_chunked(200)
 
     {conn, rows} =
       case chunk(conn, CSV.bom() <> CSV.line(@header)) do
-        {:ok, conn} when args != :none -> write_pages(conn, args)
+        {:ok, conn} when args != :none -> write_pages(conn, args, scope)
         {:ok, conn} -> {conn, 0}
         {:error, _closed} -> {conn, 0}
       end
 
     user_id = conn.assigns.current_user.id
-    org_id = KilnCMS.Accounts.org_id(KilnCMSWeb.Tenant.current_org(conn))
 
-    Logger.info("security log export user_id=#{user_id} org_id=#{org_id} rows=#{rows}")
+    case scope do
+      :site ->
+        org_id = KilnCMS.Accounts.org_id(KilnCMSWeb.Tenant.current_org(conn))
+        Logger.info("security log export user_id=#{user_id} org_id=#{org_id} rows=#{rows}")
+
+      :instance ->
+        Logger.info("instance security log export user_id=#{user_id} rows=#{rows}")
+    end
 
     conn
   end
 
-  defp write_pages(conn, args) do
+  defp filename(:site), do: "security-log"
+  defp filename(:instance), do: "instance-security-log"
+
+  defp write_pages(conn, args, scope) do
+    opts = opts(conn, scope) ++ [page: [limit: @page_size, count: false], authorize_with: :error]
+
     first =
-      Security.list_events!(
-        args,
-        opts(conn) ++ [page: [limit: @page_size, count: false], authorize_with: :error]
-      )
+      case scope do
+        :site -> Security.list_events!(args, opts)
+        :instance -> Security.list_instance_events!(args, opts)
+      end
 
     write_page(conn, first, 0)
   end

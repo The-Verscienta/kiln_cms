@@ -43,6 +43,7 @@ your deployment.
 | Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry; for a session, browser and OS family, last use and the site it signed in on; for a revoked one, why. See [Auth tokens](#auth-token-retention-218). |
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
 | Security log | `security_events` | Yes | Admin-only audit log (#2241): the acting user's id and an **email snapshot** (known accounts only), the target, the **raw IP address** and **user agent** of the request, and a short allowlisted metadata map with no secrets. Kept 365 days by default (per-site setting, `0` keeps forever; then raw IPs are kept indefinitely). Scrubbed on erasure, purged on retention and by the staging scrub. See [Security log](security-events.md). |
+| Instance security log | `instance_security_events` | Yes | Platform-admin-only audit log of events about the installation rather than a site (#2541; today `backup_canceled`): the same columns as the site log (acting user's id and **email snapshot**, target, **raw IP address**, **user agent**, allowlisted metadata), with no site. Kept 365 days by default (`KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS`, `0` keeps forever). Scrubbed on erasure, purged on retention and by the staging scrub. See [The instance log](security-events.md#the-instance-log). |
 | Security alert queue | `security_alert_dispatches` | Pseudonymous (transient) | One row per security alert window or silencing notice (#2245): the site, the alert kind, the window, the id of the security event that raised it, delivery stamps, and for a notice what changed, the kinds, the webhook endpoint's id and the acting user's id. Never an address, email, URL or token. Deleted by an hourly prune a day after its window ends, and by the staging scrub. Not touched by erasure: it holds ids only and is gone within a day. See [Security alerts](security-alerts.md). |
 | Security alert settings | `site_security_alerts` | No | Per site (#2245): the alert kinds turned off, whether admins get the bell and email, whether alerts show full IP addresses. |
 | Site invitations | `invitations` | Yes | One row per address a platform admin invited to a site (#2135): the **email address**, the site, the tier and custom role, who sent it, when it expires and how often it was sent, and the SHA-256 of the link's token (never the token). The person may have no account. Removed when the invitation is accepted or revoked; otherwise usable for 7 days and deleted by the daily prune 30 days after that, so an address is kept at most about 37 days. Not touched by erasure (see below); deleted by the staging scrub. |
@@ -219,6 +220,12 @@ and user agents, so with `0` (or the cron off) they are kept until the person is
 erased. It is not one of the AshOban triggers in the table above. The staging
 scrub deletes the whole table from a clone. See [Security log](security-events.md).
 
+The instance security log (`instance_security_events`, #2541: events about the
+installation rather than a site, such as a canceled backup) is pruned by the
+same job, first, on `KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS` (365 by default,
+`0` keeps forever) rather than a site's setting. The staging scrub deletes it
+too. See [The instance log](security-events.md#the-instance-log).
+
 The security alert queue (`security_alert_dispatches`, #2245) is pruned every
 hour (`17 * * * *`, `AlertDispatch` `:prune`): a row is deleted a day after its
 alert window ends. No setting. The staging scrub deletes the whole table.
@@ -387,7 +394,9 @@ Either way, it:
     each event the user acted in it nulls `actor_id`, `actor_label` (the email
     snapshot), `ip` and `user_agent`; on each event that names them as its target
     it nulls `target_id`; and it empties `metadata` on every event it touches. The
-    event itself (type and time) stays. If any site's sweep fails, the erasure
+    event itself (type and time) stays. The instance security log
+    (`instance_security_events`, #2541) is scrubbed the same way in the same
+    sweep. If any site's sweep, or the instance log's, fails, the erasure
     raises so it can be retried. See [Security log](security-events.md#privacy-ip-addresses-erasure-and-staging).
 11. **Deletes its Web Push subscriptions** (#2514): each is a way to reach the
     person's device, and nothing needs it once they are gone.

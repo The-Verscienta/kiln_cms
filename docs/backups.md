@@ -567,9 +567,10 @@ What Cancel does:
 - It keeps every file and `.work/<stamp>/`. **Resume** on the `Canceled` row
   continues from them. Retention does not delete a backup whose work directory
   still exists; the work directory is swept after three days, like any other.
-- It records a **Backup canceled** event in the security log of the default
-  site, with the backup's stamp and the step it was on
-  ([security-events.md](security-events.md)).
+- It records a **Backup canceled** event in the instance security log, which
+  only platform admins can read (not in any site's log, #2541), with the
+  backup's stamp and the step it was on
+  ([security-events.md](security-events.md#the-instance-log)).
 
 What can go wrong:
 
