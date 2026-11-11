@@ -1,7 +1,7 @@
 # Minimum system requirements
 
 What a machine needs to run Kiln, to build the release image, and to develop
-on it. Written against v1.1.0. The versions here restate
+on it. Written against v1.9.0. The versions here restate
 [`.tool-versions`](https://github.com/The-Verscienta/kiln_cms/blob/main/.tool-versions)
 and the [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile);
 when they disagree, those files win and this page needs editing
@@ -21,7 +21,7 @@ Postgres, a reverse proxy, and somewhere for media to live.
 | Postgres | 17 with the `vector` extension | 17, `pgvector/pgvector:pg17` | The only required service. Older majors are not tested. Extensions created on migrate: `citext`, `pg_trgm`, `unaccent`, `vector`; a server without `vector` available fails at `mix ash.setup` with "extension vector is not available" |
 | Postgres pool | `POOL_SIZE=10` | Sized per [performance.md](performance.md) | The pool is shared by web requests and Oban workers, so a busy instance wants more |
 | Reverse proxy | TLS termination, WebSocket pass-through | | LiveView and the API sockets need WebSockets forwarded; the proxy must set `x-forwarded-for` and `x-forwarded-proto`. See [deploy.md](deploy.md) |
-| Outbound network | 443 | | Webhooks, oEmbed, the update feed, image imports and the CDN purge all go out over HTTPS through `KilnCMS.SafeFetch`. Port 25 outbound only for `MAIL_MODE=direct` (the built-in MTA); most clouds block it, see [direct-email-delivery.md](direct-email-delivery.md) |
+| Outbound network | 443, and DNS | | Webhooks, oEmbed, the update feed, image imports and the CDN purge all go out over HTTPS through `KilnCMS.SafeFetch`. Some calls are on by default; see [Outbound calls made by default](#outbound-calls-made-by-default) below for each, and the switch that stops it. Port 25 outbound only for `MAIL_MODE=direct` (the built-in MTA); most clouds block it, see [direct-email-delivery.md](direct-email-delivery.md) |
 | Database TLS | On by default | | `ssl: true`; set `DATABASE_CACERTFILE` to verify the server certificate |
 
 **Native libraries in the runner.** These are installed in the image and are
@@ -32,6 +32,7 @@ what a from-source deployment has to provide itself:
 | libvips 8.x (`libvips42t64` on Debian trixie) | Every image derivative and transform | Uploads fail to derive; nothing else runs |
 | `qpdf` | PDF metadata stripping on upload | A PDF that cannot be stripped is **refused** (a privacy control that silently does not apply is worse than none), see [media-pipeline.md](media-pipeline.md) |
 | `postgresql-client-17` (`pg_dump`) | In-app backups | Backups unavailable. **Must match the server's major version**; see [backups.md](backups.md) |
+| `rclone` (a pinned upstream release, checksum-verified at build time) | The off-site copy of in-app backups, when `BACKUP_RCLONE_REMOTE` is set | With the variable set, every in-app backup fails at its off-site step, and the Backups page says so beforehand. Unset, it is never called. See [backups.md](backups.md#it-needs-the-client-tools-in-the-image) |
 | `ffmpeg` | A/V duration, poster frames, A/V metadata stripping | Optional and not in the image. Without it audio and video upload without enrichment, and `REQUIRE_AV_METADATA_STRIP` turns a missing strip into a refusal |
 | `openssl`, `ca-certificates`, `locales` (`en_US.UTF-8`) | TLS, outbound HTTPS, the BEAM's string handling | Boot failures |
 
@@ -55,6 +56,26 @@ larger; the plan does not yet size it, so budget RAM for the model separately.
 A default build runs keyword search and reports `KilnCMS.Search.ML.available?/0`
 as false.
 
+### Outbound calls made by default
+
+A fresh deployment that sets no optional variable still makes these requests.
+A firewall that allows only listed hosts must allow them, or each feature
+degrades as described; each has a switch for a deployment that must make no
+such call.
+
+| Call | Destination | When | Switch it off with |
+|---|---|---|---|
+| Breached-password check | `api.pwnedpasswords.com:443` (the first five characters of the password's SHA-1 only) | When someone sets a password | `BREACHED_PASSWORD_CHECK=false`. Blocked, the check gives up and the password is accepted ([environment-variables.md](environment-variables.md#breached-password-check-2240)) |
+| Search-engine crawler verification | The node's DNS resolvers (`/etc/resolv.conf`): PTR, A and AAAA lookups | When a request claims to be Googlebot, bingbot or another search engine | `KILN_CRAWLER_VERIFICATION=false`. Without DNS, claims stay unverified and are held to the browser rate ([bot-budgets.md](bot-budgets.md#verified-search-engines)) |
+| Update check and core security notices | `kilncms.dev:443`, and the GitHub releases API only when kilncms.dev fails | When an admin opens System (`/editor/system`), or a platform admin opens Security posture with no answer cached; never on a schedule ([environment-variables.md](environment-variables.md#upstream-update-check)) | `KILN_UPDATE_CHECK=false` |
+| Plugin health check | `hex.pm:443` (each Hex plugin's name and version) and the security notices feed | When a platform admin opens System, or Security posture with nothing cached, or selects **Check plugins now**; only for plugins from Hex, git or a path | `KILN_PLUGIN_HEALTH_CHECK=false`, or `KILN_UPDATE_CHECK=false` ([environment-variables.md](environment-variables.md#plugin-health-check-2244)) |
+
+Opt-in calls, made only once you configure the feature: human verification
+(`challenges.cloudflare.com` for Turnstile, `www.recaptcha.net` for reCAPTCHA,
+from the server and from visitors' browsers), the `BACKUP_RCLONE_REMOTE`
+remote, `KILN_CDN_PURGE_URL`, webhooks, mail, S3, Meilisearch, Sentry,
+OpenTelemetry, and the AI providers.
+
 ## Presets
 
 Three environment files under
@@ -64,7 +85,7 @@ which keeps the required variables and the secrets; a preset holds neither.
 
 | Preset | Image | What is on | Needs from the host |
 |---|---|---|---|
-| `minimal.env` | `kiln_cms:1.x` | Console, delivery, backups, media on a volume. Nothing calls out and no mail leaves | 512 MB, Postgres, a volume at `/app/media` |
+| `minimal.env` | `kiln_cms:1.x` | Console, delivery, backups, media on a volume. No optional integration calls out and no mail leaves; the [default calls](#outbound-calls-made-by-default) still run unless you add their switches | 512 MB, Postgres, a volume at `/app/media` |
 | `publishing.env` | `kiln_cms:1.x` | Mail over SMTP, oEmbed cards, provenance signing, CDN purge hooks, error tracking | 1 GB, Postgres, an SMTP relay, outbound 443; optionally S3 and a CDN |
 | `everything.env` | `kiln_cms:1.x-ml` | `publishing` plus Meilisearch, federation, experiments, the metrics listener, the LLM assistants and reranking | 2 GB, Postgres, SMTP, S3, Meilisearch, an LLM provider key |
 
@@ -89,7 +110,26 @@ Dockerfile (Coolify, Render) all do the same thing.
 | RAM | 2 GB (marginal) | 4 GB | Peak is `mix deps.compile`, not the app: the Ash ecosystem compiles in one BEAM. The Dockerfile caps the build BEAM to two schedulers so a small host is not OOM-killed |
 | Disk | 3 GB free | 6 GB | The builder stage pulls the dep tree and `node_modules`; the final image is a slim Debian trixie with the release only |
 | Toolchain | Pulled by the Dockerfile | | `hexpm/elixir:1.20.4-erlang-29.1.1` on Debian bookworm as the builder, Node 22.23.3 installed into it; nothing to install on the host but Docker |
-| Network | Hex, npm, GitHub, Debian and PostgreSQL apt mirrors | | A build behind a proxy needs `HEX_MIRROR` and npm config as usual |
+| Network | Hex, npm, GitHub, Debian and PostgreSQL apt mirrors, `downloads.rclone.org` | | A build behind a proxy needs `HEX_MIRROR` and npm config as usual. The `rclone` stage downloads one pinned release and fails the build if its SHA-256 does not match the one in the `Dockerfile` |
+
+## Running the backup scripts on the host
+
+The cron path ([backups.md](backups.md)) runs `scripts/backup.sh` and
+`scripts/restore.sh` on whatever machine reaches the database, outside the
+image. That machine needs:
+
+| Tool | Used for | Notes |
+|---|---|---|
+| bash 3.2 or later | Both scripts | |
+| `pg_dump`, `pg_restore`, `psql`, `createdb`, `dropdb` (the Postgres client package) | `db`, `all`, `restore.sh db` and `drill` | **Same major version as the server**, as in the image |
+| GNU tar or bsdtar | Media parts | busybox tar is refused before anything is written: it cannot read the NUL-separated file list each part is built from |
+| `gzip`, `stat` (GNU or BSD), `xargs`, `mktemp`, `head` | Media parts | Standard on Debian, Ubuntu and macOS |
+| `sha256sum`, or `shasum` on macOS | Checksum sidecars, `verify`, `restore.sh media` | |
+| `rclone` | Off-site copy | Only with `BACKUP_RCLONE_REMOTE` set |
+| `curl` | `BACKUP_PING_URL` | Only with that set |
+
+Disk: room in `BACKUP_DIR` for the retained backups, plus the file lists the
+media phase builds in `TMPDIR` (default `/tmp`).
 
 ## Developing on it
 

@@ -6,18 +6,26 @@ ID, Windows Hello, a phone, a security key) and signs in without a password.
 
 ## Using it
 
-- **Enrol** at `/editor/settings` → *Passkeys* → "Add a passkey". The browser
-  prompts for the device screen lock; the credential is stored and listed
-  (rename by re-adding, remove any time). Multiple passkeys per account.
-- **Sign in** at `/sign-in` → "Sign in with a passkey" (the button appears
-  only in WebAuthn-capable browsers). The browser offers your saved passkeys —
-  no email or password typed.
+- **Enroll** at `/editor/settings` → *Passkeys*: optionally fill in "Name this
+  passkey" (for example "MacBook Touch ID"), then click "Add a passkey". The
+  browser prompts for the device screen lock while the page reads "Waiting for
+  your device…". The credential is then listed with its name, the date it was
+  added and the date it was last used. A passkey can't be renamed: remove it
+  with the trash button and add it again. Multiple passkeys per account.
+- **Sign in** at `/sign-in` → "Use a passkey" (the button appears only in
+  WebAuthn-capable browsers). The browser offers your saved passkeys, with no
+  email or password typed. If the ceremony fails, the page says "Passkey
+  sign-in failed. Use another method."
 
 Passkey sign-in **does not** divert to the TOTP prompt: every Kiln passkey is
 registered and asserted with *user verification required* (screen lock /
 biometric), so the single ceremony already proves possession **and**
 knowledge/biometric — the same bar the password+TOTP flow reaches in two
 steps.
+
+Adding or removing a passkey is recorded in the site's
+[security log](security-events.md) as `passkey_added` / `passkey_removed`,
+with the passkey's name.
 
 ## How it's built
 
@@ -35,9 +43,10 @@ steps.
   event for server-side verification.
 - **Sign-in** is a two-step JSON ceremony (`POST /auth/passkey/options` →
   `POST /auth/passkey/verify`, `KilnCMSWeb.PasskeyController`) driven by
-  progressive-enhancement JS on `/sign-in` (the page itself is rendered by
-  ash_authentication_phoenix, so the "Use a passkey" affordance is attached
-  outside the LiveView root). Challenges park **server-side** and are
+  progressive-enhancement JS on `/sign-in`: `KilnCMSWeb.SignInLive` renders
+  the "Use a passkey" block hidden, and the `PasskeySignIn` hook
+  (`assets/js/passkeys.js`) reveals it only where `PublicKeyCredential`
+  exists. Challenges park **server-side** and are
   consumed atomically — the session carries only an opaque nonce, so a
   captured request/cookie pair cannot be replayed. Both endpoints sit behind
   the same per-IP `:auth` rate limit and CSRF protection as every credential

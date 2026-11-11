@@ -430,6 +430,12 @@ build if a resource is ever registered without that authorizer.
 - **Write surface** — `/api/json` accepts POST/PATCH/DELETE including
   publish/unpublish (#330). Gated by resource policies *and* the API-key access
   scope, not by the router. `destroy` is a soft delete; `purge` is never routed.
+  Taking content down is held to the same bar as putting it up: `unpublish`,
+  `archive` and their scheduled twins sit in the publish policy (#2134), so an
+  editor's `:read_write` key on a site where only admins publish gets `403` for
+  them, as for `publish`. Before that, an editor who could not publish could
+  still unpublish or archive live content
+  ([policy matrix](policy-matrix.md)).
 - **Mass assignment** — Ash actions accept only declared inputs (`accept`).
 - **Query cost** — each document is capped at complexity 200, depth 15 and
   2,000 tokens on both transports, and a batch at 10 operations. Complexity is

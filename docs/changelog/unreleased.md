@@ -3211,7 +3211,7 @@ carries the reasoning.
 <a id="session-idle-timeout"></a>
 
 - **Site admins can sign idle browsers out, and sign everyone out of the site
-  at once (#2246).** A new page, **Configure → Integrations → Sessions**
+  at once (#2246).** A new page, **Configure → Sign-in & access → Sessions**
   (`/editor/sessions`, admins only).
   - **Sign out when idle.** Pick a time for **Everyone** (15 minutes to 24
     hours, or **Never**, the default) and, optionally, a shorter one for
@@ -3272,7 +3272,7 @@ carries the reasoning.
 
 - **Public delivery throttles requests by what their user agent says they are:
   scripts and clients with no user agent are refused sooner than browsers, and a
-  site admin can lower each class at Organization → Bot budgets (#2243).**
+  site admin can lower each class at Configure → Sign-in & access → Bot budgets (#2243).**
   The single per-address `:delivery` rate limit (300 a minute) used to treat a
   browser, Googlebot, a `curl` loop and a request with no user agent alike.
   - **Five classes.** `KilnCMS.BotClass` puts each `:delivery` request in one
@@ -3814,7 +3814,7 @@ carries the reasoning.
 <a id="breached-password-check"></a>
 
 - **Admins choose what happens when a new password is in a known breach (#2240).**
-  A new page, **Organization → Password policy** (`/editor/password-policy`, admins
+  A new page, **Configure → Sign-in & access → Password policy** (`/editor/password-policy`, admins
   only), sets one of three stances for the site: **Off** (no warning),
   **Warn** (the default: accept the password and say so) or **Block** (refuse
   it for administrators; editors and viewers are still only warned).

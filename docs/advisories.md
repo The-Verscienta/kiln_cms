@@ -219,6 +219,16 @@ whose links were never checked is not a document whose links are fine.
 The content editor recomputes `:link_targets` only when the *set of linked
 paths* changes, not on every body change and certainly not on every keystroke.
 
+The editor passes one more fact, `:nav_linked?`: whether a visible content item in any of
+the site's menus links to the document (#2256; `KilnCMS.CMS.Menus.linked_content_ids/1`). It is read once per record and state,
+and only for a published record, so a keystroke never costs a query; a menu
+edited while the editor is open is picked up on the next mount or publish.
+`KilnCMS.Seo.Checks.Indexability` (SEO panel only) reads it: a published page
+with **Hide from search engines** on that a menu links to gets a `:warning`,
+`noindex_nav_linked`, because hiding a page the menu advertises is usually a
+flag left on by mistake. A draft, or a caller that passed no `:nav_linked?`,
+is `:n_a`, and `nofollow` alone never fires.
+
 ## Broken internal links (#474)
 
 `Kiln.Advisory.Checks.InternalLinks` reports two things, deliberately not one:

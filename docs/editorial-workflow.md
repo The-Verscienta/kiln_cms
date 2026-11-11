@@ -156,6 +156,9 @@ it from there ([Trash and restore](trash.md)).
    rights in the table above. **Require admin approval** takes them away
    again. Editors can still submit for review either way.
 
+Team is platform-admin only; site admins choose once, in **Home**'s **How do
+you publish?**
+
 Roles are given on the same page; see
 [Account administration](account-administration.md).
 

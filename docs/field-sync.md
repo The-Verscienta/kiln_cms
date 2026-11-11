@@ -22,8 +22,10 @@ mix kiln.fields.export --out fields.json            # or: > fields.json
 mix kiln.fields.export --org other-site --actor admin@example.com
 ```
 
-In the console, admins can also download the same file from
-`/editor/fields/export.json`. On a release:
+A signed-in admin can also download the same file from the browser by opening
+`/editor/fields/export.json` (the Fields screen has no button for it yet). It
+saves as `field-definitions.json`; anyone below admin gets a `403` with
+`{"error": "admin_required"}`. On a release:
 
 ```bash
 bin/kiln_cms rpc 'KilnCMS.Release.export_field_definitions("/data/fields.json")'

@@ -10,7 +10,7 @@ genuinely large — but almost none of it is something you have to decide.
    production release refuses to start. There are three.
 2. **[Common (10)](#common-10)** — not required, but what a real deployment
    usually sets. A short list, with a one-line reason for each.
-3. **[Everything else](#everything-else)** — the other 160, grouped by the
+3. **[Everything else](#everything-else)** — the other 193, grouped by the
    feature they configure. Every one is optional and has a default, so you can
    skip a whole section by not using the feature it configures.
 
@@ -27,13 +27,17 @@ into whichever one holds the read.
 > sit outside the `config_env() == :prod` fragments — are:
 >
 > `PHX_SERVER`, `PORT`, `CSP_IMG_SRC`, `UNSPLASH_ACCESS_KEY`, `BREACHED_PASSWORD_CHECK`, `CORS_ORIGINS`,
-> `KILN_READING_TIME_WPM`, `VISUAL_EDITING_ENABLED`, the `KILN_API_CACHE*` and
-> `KILN_CDN_PURGE_*` and `KILN_SCANNER_BLOCKING*` groups, `KILN_LINK_CHECK_CRON` /
+> `KILN_READING_TIME_WPM`, `VISUAL_EDITING_ENABLED`, `KILN_CONSOLE_HOST`, the `KILN_API_CACHE*` and
+> `KILN_CDN_PURGE_*` and `KILN_SCANNER_BLOCKING*` groups, `KILN_API_REJECT_INVALID_BEARER`,
+> `KILN_LINK_CHECK_CRON` /
 > `KILN_LINK_CHECK_USER_AGENT`, `KILN_TASK_DIGEST_CRON`,
 > `KILN_OBAN_RESCUE_AFTER_MINUTES`,
 > `KILN_OCCURRENCE_SWEEP_CRON` / `KILN_OCCURRENCE_BACKFILL_ON_BOOT`,
+> `KILN_FEDERATION_NONCE_SWEEP_CRON`, `KILN_HEALTH_SWEEP_CRON`,
+> `KILN_SECURITY_LOG_PRUNE_CRON` / `KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS`,
 > `PRESENTATION_PREVIEW_URL`, the `KILN_UPDATE_*`
-> group (plus `KILN_PIN_PATH`), `KILN_ANALYTICS_REFERRERS`,
+> group (plus `KILN_PIN_PATH`), `KILN_PLUGIN_HEALTH_CHECK` /
+> `KILN_SECURITY_NOTICES_URL` / `KILN_PLUGIN_STALE_MONTHS`, `KILN_ANALYTICS_REFERRERS`,
 > `KILN_ANALYTICS_LOW_COUNT_THRESHOLD`, `SENTRY_DSN` / `SENTRY_ENV` /
 > `RELEASE_VSN`, and the `OTEL_*` group.
 >
@@ -367,9 +371,34 @@ already reads, **by the same name** — the cron path and the in-app path are tw
 front doors to one backup directory, and an operator who configured the script
 does not configure this separately. See [backups.md](backups.md#in-app-backups-484).
 
-The console's Backups page (`/editor/backups`, admin only) reads
-`$BACKUP_DIR/manifest.json`, which `backup.sh all` writes — so it reports on
-cron's backups, not only ones taken from the app.
+The console's Backups page (`/editor/backups`, platform admins only) reads
+`$BACKUP_DIR/manifest.json`, which `backup.sh all` writes, together with the
+app's own backup history, so it reports on cron's backups, not only ones taken
+from the app.
+
+`BACKUP_DATABASE_URL` is read here too, with no row because no deployment
+normally needs it: it is the connection string the in-app backup dumps, for a
+connection Kiln cannot derive from `DATABASE_URL` or the Repo's own config (a
+unix-socket repo, say). Unset, the app uses `DATABASE_URL` when it names the
+database the app is connected to, else a URL rebuilt from the Repo
+([`config/runtime/prod/backups.exs:95`](../config/runtime/prod/backups.exs#L95),
+`KilnCMS.Backups.database_url/0`). `scripts/backup.sh` does not read it.
+
+**Read only by the scripts.** `scripts/backup.sh` also reads `BACKUP_PING_URL`
+(a URL it `curl`s after a successful run), `BACKUP_TRIGGER` (the label in the
+manifest, default `cron`) and `TMPDIR` (where it builds the media file lists,
+default `/tmp`). `scripts/restore.sh` reads `RESTORE_DATABASE_URL`,
+`RESTORE_MEDIA_DIR`, `RESTORE_CONFIRM`, `RESTORE_REQUIRE_CHECKSUM` and
+`RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM`. None of them is read by the app; see
+[backups.md](backups.md#environment-reference) for each one.
+
+**Read by `rclone`, not by Kiln.** With `BACKUP_RCLONE_REMOTE` set, the
+`rclone` the backup starts inherits the app's environment, so a named remote is
+configured with `RCLONE_CONFIG_<NAME>_*` variables or an `rclone.conf` named by
+`RCLONE_CONFIG`, and `RCLONE_RETRIES` changes rclone's retry count. These are
+rclone's own variables ([rclone's documentation](https://rclone.org/docs/#environment-variables));
+Kiln neither reads nor checks them. The name `kiln_offsite` is reserved
+([backups.md](backups.md#off-site-credentials-stay-out-of-the-rclone-command-line-2690)).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
@@ -1005,6 +1034,13 @@ task, so they matter only for the command that reads them.
 
 See [staging-environments.md](staging-environments.md) for the full clone →
 scrub → serve procedure.
+
+`mix kiln.beta.round` (and `KilnCMS.Beta.provision!/1` in a release) reads two
+more the same way: `KILN_BETA_ROUND`, a sentinel that confirms the run only
+when it is `confirm` (trimmed, any case; the task's `--yes` does the same), and
+`KILN_BETA_FORCE`, an on/off flag that skips the check that the database name
+looks like a beta or staging one (the task's `--force`). See
+[`KilnCMS.Beta`](../lib/kiln_cms/beta.ex#L79).
 
 ### Test / CI only
 

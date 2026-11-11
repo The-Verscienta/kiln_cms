@@ -90,7 +90,9 @@ Workers are split by workload so a bulk publish or embedding backfill can't star
 the cron triggers (`config/config.exs`):
 
 ```elixir
-queues: [firing: 5, search: 5, mail: 3, media: 3, webhooks: 3, scheduling: 5, default: 10]
+queues: [firing: 5, search: 5, mail: 3, newsletter: 3, billing: 3, media: 3, webhooks: 3,
+         scheduling: 5, link_check: 3, federation: 3, push: 3, backups: 1, backup_steps: 1,
+         default: 10]
 ```
 
 | Queue        | Workers                                                |
@@ -102,6 +104,9 @@ queues: [firing: 5, search: 5, mail: 3, media: 3, webhooks: 3, scheduling: 5, de
 | `webhooks`   | `DeliveryWorker`                                       |
 | `newsletter` | `SendWorker`, `MailWorker` (newsletter fan-out)        |
 | `billing`    | `WebhookWorker` (inbound payment webhooks)             |
+| `link_check` | `Links.CheckWorker` (outbound link checking, paced per domain) |
+| `federation` | `Federation.DeliveryWorker`, `AnnounceWorker`, `ActorUpdateWorker` |
+| `push`       | `Push.Worker` (Web Push)                               |
 | `backup_steps` | `Backups.StepWorker`: one step of an in-app backup, concurrency 1 per node ([backups.md](backups.md#how-an-in-app-backup-runs-2218)) |
 | `backups`    | `Backups.Worker`: only jobs enqueued before #2218, which it hands to `backup_steps`; removed in the next minor |
 | `scheduling` | Every-minute AshOban triggers (scheduled publish, scheduled unpublish/embargo) |
@@ -117,7 +122,7 @@ the other direction: a large newsletter blast must not starve transactional `mai
 inbound payment webhook must not queue behind one — a delayed entitlement event is a paying
 member locked out of what they just bought.
 
-**Pool sizing.** Total worker concurrency above is ~40, all sharing the Ecto pool with web
+**Pool sizing.** Total worker concurrency above is about 50, all sharing the Ecto pool with web
 requests. Size `POOL_SIZE` (in `config/runtime.exs`) so jobs and web requests don't starve
 each other:
 
@@ -129,6 +134,15 @@ A reasonable production starting point is **`POOL_SIZE=25`** for the default que
 small node, then tune from the `kiln_cms.repo.query.queue_time` metric (rising queue time =
 pool too small). Tune individual queue limits per deployment; cap the most bursty (`search`)
 lower if embeddings dominate.
+
+**Change-feed streams.** Each open `GET /api/feed` stream holds one request
+process on its node for as long as the client stays connected, but no database
+connection while it waits for events. A resume replays from the database, and
+at most 8 resumes replay at once per node. Streams are capped per API key or client
+address (50) and per node (20,000), and they are left out of the Phoenix
+request-duration metrics, which they would swamp; watch
+`[:kiln_cms, :delivery, :feed, :sse, …]` instead. The limits and the proxy
+settings are in [api.md → Change feed (SSE)](api.md#change-feed-sse).
 
 ## Search and the pool
 

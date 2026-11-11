@@ -55,6 +55,11 @@ admin:
 Authorization: Bearer <token>
 ```
 
+Anonymous means no `Authorization` header at all. A token that does not
+verify (malformed, expired, another instance's) is a `401` `invalid_token`,
+not an anonymous read; see
+[api.md → Authentication](api.md#authentication).
+
 ## Routes
 
 | Resource  | Collection                  | Single record               | Extra reads |
@@ -213,10 +218,13 @@ ordering unless you pass `sort` (except `/posts/published`, which defaults to
 Two recency fields, two meanings: `inserted_at`/`updated_at` are the record's
 row timestamps (public read-only), while `published_at` is set by the publish
 transition — for published feeds, `-published_at` is what "newest" means
-editorially. Note a non-public or unknown field in `sort` fails the request
-with `invalid_sort` (it is not silently ignored), so a naive client renders an
-empty page — check the error body. The same is true of a public field that
-exists but isn't sortable — see [Calculated fields](#calculated-fields).
+editorially. Note a bad name in `sort` fails the request (it is not silently
+ignored), so a naive client renders an empty page — check the error body. A
+public field that exists but isn't sortable is `400 invalid_sort` — see
+[Calculated fields](#calculated-fields). Any other name is looked up as a
+custom field, so an unknown or non-public one is `400 invalid_argument` with
+detail `unknown custom field "<name>"` (see
+[Naming a custom field like a column](#naming-a-custom-field-like-a-column)).
 
 ### Sorting search results
 
@@ -549,14 +557,14 @@ What differs between a custom field and a column, in one table:
 
 | | Custom field | Column |
 |---|---|---|
-| Operators | `eq`, `not_eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ilike` (text only), `null` / `is_nil` | the derived ash_json_api set |
+| Operators | `eq`, `not_eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ilike`, `contains`, `starts_with` (the last three text only), `null` / `is_nil` | the derived ash_json_api set |
 | Value typing | cast to the field's declared type, compared as jsonb | the attribute's type |
 | Records without the field | excluded by every comparison | per the column's nulls |
 | Unknown name | `400` `invalid_argument`, `unknown custom field "x"` | native `400` |
-| Sort | nulls last in both directions; after built-in keys | plain `asc` / `desc` |
+| Sort | nulls last in both directions; in the order written, with built-in keys mixed in | plain `asc` / `desc` |
 | Sort on `media` / `reference` | not supported | n/a |
 | Relationship operators (`has`, `has_all`, `has_none`, `count`) | on `reference` fields and on `tags` / `related_<type>s`; the same names on [lists of values](#lists-of-values) | not available |
-| Index | none (unindexed jsonb) | per column |
+| Index | the GIN index for equality and membership; ranges and sort only for a name in `indexed_custom_fields` ([Which custom filters use an index](#which-custom-filters-use-an-index)) | per column |
 
 ### Entries and search facets
 
@@ -577,10 +585,13 @@ recency. On semantic search a leading custom sort replaces the distance order
 matches the query comes first no longer holds. `/autocomplete` does not take
 `custom_sort`.
 
-> **Performance.** These predicates run on unindexed JSONB extractions. They're
-> built for the long tail of editor-owned fields; a field you filter or sort by
-> on every request belongs as a real attribute (promote the type / add the
-> column, D4). GraphQL exposes the same capability as `customFilter` /
+> **Performance.** These predicates run on JSONB extractions. Equality and
+> membership use one GIN index; ranges and sorts are unindexed unless the
+> field is listed in `indexed_custom_fields` (see
+> [Which custom filters use an index](#which-custom-filters-use-an-index)).
+> They're built for the long tail of editor-owned fields; a field you filter
+> or sort by on every request belongs as a real attribute (promote the type /
+> add the column, D4). GraphQL exposes the same capability as `customFilter` /
 > `customSort` arguments — see
 > [headless-graphql-api.md](headless-graphql-api.md).
 

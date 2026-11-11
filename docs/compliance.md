@@ -11,7 +11,8 @@ Everything here is **off by default**.
 
 ## Turning it on
 
-Go to **Claim checking** in the console (`/editor/compliance`, admin only). A
+Go to **Claim checking** under **Configure → Capture** in the console sidebar
+(`/editor/compliance`, site admins only). A
 site that has not opted in gets an explanation and a button rather than an empty
 form — which is the page's other job, since the editor renders no Compliance
 panel at all while the feature is off, and before this page existed nothing in

@@ -52,7 +52,9 @@ UI" workflow, scoped to fields.
   and a private field cannot also be `searchable`, `names_record`,
   `deliver_plain`, `deliver_portable` or `:fallback`-localized: each of those copies the value
   somewhere public, so the combination is refused. Flipping it re-fires the
-  type's published documents.
+  type's published documents. A role or member's `field_read_grants` can hide
+  a private field from some editors too (admins always see it); see
+  [Per-custom-field grants and read restrictions](granular-rbac.md#per-custom-field-grants-and-read-restrictions).
 - **A person on the site (`:user`)**: a console account — an admin, or a
   member with any role — stored as the user's id and picked in the editor
   from the site's people. It is always private, as Kiln never delivers a
@@ -406,8 +408,9 @@ UI" workflow, scoped to fields.
   with its label, a typed value (`KilnCMS.CMS.FieldDisplay`) and an
   added / removed / changed pill, and a restore previews itself first, listing
   stored keys whose definition is gone as discarded. The stored history is
-  unchanged: a version's `changes` still carry `custom_fields` as one whole map
-  (the revisions API deliberately has no per-key `changed_custom_fields` yet).
+  unchanged: a version's `changes` still carry `custom_fields` as one whole map.
+  The single-revision API read adds `changed_custom_fields`, the sorted keys
+  that write added, removed or edited (see [api.md](api.md)).
   See [Comparing and restoring versions](working-copy.md#comparing-and-restoring-versions).
 - **Deliver**: `custom_fields` is public, so headless clients get the values.
 - **Read typed over GraphQL**: `customFloat(name: "price")`,
@@ -464,8 +467,9 @@ shown.
 Fields offered: string, text, integer, float, boolean, date, datetime, url,
 select, reference, user, media, email, telephone, color, slug and time, if
 they hold one value. Groups, geolocation, JSON, date ranges, recurrence,
-computed fields and multi-valued fields are not offered. Private fields are offered, as editors already see them in
-the content editor.
+computed fields and multi-valued fields are not offered. Private fields are
+offered, as editors already see them in the content editor, except one a read
+grant hides from you.
 
 What a cell shows:
 
@@ -504,7 +508,7 @@ import all run the same check, and the stored value is the tidied one.
 | `:email` | email input | `Ada@example.com` (domain lowercased, local part keeps its case) | Shape check only: one `@`, a dotted domain, at most 254 characters. It cannot tell whether the mailbox exists. |
 | `:telephone` | telephone input | E.164, `+442079460958` | A format check only: spaces, dashes, dots and brackets are stripped and a leading `00` becomes `+`; what is left must be `+`, a non-zero digit and 6 to 14 more digits. Kiln has no numbering-plan data, so a real number cannot be told from a plausible one. A domestic number (`020 7946 0958`) or one with an extension is refused: include the country code. |
 | `:color` | text input with a pattern | lowercase `#rrggbb` (`#F80` becomes `#ff8800`) | Named colours, `rgb()` and alpha are refused. It is a text input, not `type="color"`, because a colour picker cannot be empty and would fill every optional colour field with `#000000` on save. |
-| `:slug` | text input with a pattern | `cafe-menu` | Typed text is slugified (`Café Menu!` becomes `cafe-menu`), at most 128 characters; input with nothing left is refused. Not unique, and not filled from another field: to derive a slug, use a `:computed` field. Uniqueness is waiting on [#2276](https://github.com/The-Verscienta/kiln_cms/issues/2276). |
+| `:slug` | text input with a pattern | `cafe-menu` | Typed text is slugified (`Café Menu!` becomes `cafe-menu`), at most 128 characters; input with nothing left is refused. Not filled from another field: to derive a slug, use a `:computed` field. Can be made unique (see [Constrain the values of a field](#constrain-the-values-of-a-field)); values are compared once tidied, so `Hello World` and `hello-world` collide. |
 | `:time` | time input | `"09:30"` (24-hour, zero-padded, no date or zone) | Accepts `H:MM`, `HH:MM`, `HH:MM:SS`; seconds are dropped. |
 | `:json` | monospace textarea, pretty-printed | the object or array itself | See below. |
 
@@ -529,9 +533,8 @@ it (`mix kiln.plugins.doctor` fails otherwise). A stored field definition
 that already used one of these names as its `field_type` is now cast by the
 built-in type: values that do not pass its check are refused on the next save.
 
-**Not yet:** number options (step, prefix, suffix, slider), a slug
-uniqueness rule, a colour palette, and JSON Schema validation of a `:json`
-value.
+**Not yet:** number options (step, prefix, suffix, slider), a colour
+palette, and JSON Schema validation of a `:json` value.
 
 ### Range and key-value and link fields
 
@@ -1022,10 +1025,11 @@ editor sees the failure as an error under the field, naming it.
 | `min_length`, `max_length` | `:string`, `:url`, plain `:text` (`format: :plain`) | Length in characters (graphemes) |
 | `pattern` | the same text types | A regular expression the **whole** value must match |
 | `pattern_message` | with `pattern` | The sentence an editor reads when it does not match |
-| `unique` | `:string`, `:url`, `:integer`, `:float`, `:date`, `:datetime` | No other document may hold the same value |
+| `unique` | `:string`, `:url`, `:integer`, `:float`, `:date`, `:datetime`, `:slug` | No other document may hold the same value |
 
-A rich `:text` field takes no constraints (its value is HTML, so its length
-means nothing), nor do the other types. Constraints a type does not take are
+A plain `:text` field takes the text rules but not `unique`. A rich `:text`
+field takes no constraints (its value is HTML, so its length means nothing),
+nor do the other types. Constraints a type does not take are
 refused when the definition is saved, as are unknown keys, `min` above `max`,
 a default value that breaks the field's own rules, and a pattern that is not a
 valid regular expression.
@@ -1277,8 +1281,13 @@ is never rewritten by a recipe.
 **When to use a real attribute instead.** Custom fields cover the long tail of
 editor-owned fields. A field that is core, needs a DB constraint/index, or is
 filtered/sorted on every request still belongs as a hand-declared Ash attribute
-on the resource (with a `mix ash.codegen` migration). Custom fields are jsonb —
-queryable via `custom_filter`/`custom_sort`, but never index-backed.
+on the resource (with a `mix ash.codegen` migration). Custom fields are jsonb,
+queryable via `custom_filter`/`custom_sort`. Equality, `in` and list
+membership use one GIN index over the whole `custom_fields` column; range
+filters and sorting read an index only for a field named in
+`config :kiln_cms, :indexed_custom_fields`, and scan the type's rows
+otherwise. See
+[Which custom filters use an index](json-api.md#which-custom-filters-use-an-index).
 
 ### Make a field conditional
 

@@ -41,9 +41,11 @@ The tooling shells out to standard Postgres client utilities and needs network
 reach to both databases. Before the first `scripts/staging.sh up`:
 
 - [ ] `pg_dump`, `psql`, `createdb`, `dropdb` are on `PATH` wherever you run the
-      script (the VPS host, or a container with `postgresql-client`). The release
-      **runtime image ships libvips but not the Postgres client tools** — run the
-      script from the host or a `postgres:17` / `pgvector/pgvector:pg17` container.
+      script (the VPS host, or a container with `postgresql-client`), at the
+      **same major version as the servers**. The release runtime image ships
+      `postgresql-client-17` (for in-app backups), but `scripts/staging.sh` is
+      not in the image: run it from a checkout on the host, or from a
+      `postgres:17` / `pgvector/pgvector:pg17` container.
 - [ ] The box running the script can reach **both** `PROD_DATABASE_URL` (read) and
       `STAGING_DATABASE_URL` (write).
 - [ ] The staging database's role can `CREATE`/`DROP` its own database, **or** you
@@ -69,12 +71,20 @@ Full flow, recipe, and the serve step live in
       only by: `DATABASE_URL` → the clone, a **fresh** `SECRET_KEY_BASE`, a staging
       hostname, and outbound integrations left **off** (no `MAIL_MODE`; Meilisearch
       `enabled: false`; `KilnCMS.Storage.Local`). Optionally noindex at the proxy.
+- [ ] **Don't copy production's backup settings.** Leave `BACKUP_RCLONE_REMOTE`
+      and any `RCLONE_CONFIG*` variables unset, or point them at a staging
+      remote, and give the clone its own `BACKUP_DIR`: otherwise a backup taken
+      from the clone's **Backups** page lands in production's off-site store,
+      beside production's own backups under the same file names, where a
+      restore can pick it up by mistake. Set
+      `BACKUP_ENABLED=false` if the clone needs no backups at all.
 
 ## 4. Safety callouts
 
 - [ ] **Never run the scrub against production.** It anonymizes every account,
-      purges API keys/tokens/search queries, de-activates webhooks, and drops the
-      mail settings (incl. the DKIM private key). The confirmation flag +
+      purges API keys/tokens/search queries, de-activates webhooks, drops the
+      mail settings (incl. the DKIM private key), and deletes the backup history
+      and both security logs (the sites' and the instance's). The confirmation flag +
       ephemeral-name guard exist to prevent a mistyped `DATABASE_URL` — respect them.
 - [ ] **Scrub before exposing** the staging box. `scripts/staging.sh up` and the
       `bin/kiln_cms eval 'KilnCMS.Release.scrub_staging()'` path both scrub *before*

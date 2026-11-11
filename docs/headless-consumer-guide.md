@@ -29,7 +29,8 @@ end to end.
 
 **Building a native app?** [native-apps.md](native-apps.md) covers keeping a
 phone's copy current: storing the sync cursor, backoff, iOS/Android background
-refresh, ETags, `?fields=` for smaller payloads, and webhooks as the push path.
+refresh, ETags, `?fields=` for smaller payloads, webhooks as the push path,
+and the change feed while the app is open.
 
 ## Try it live
 
@@ -479,18 +480,20 @@ from `GET /api/schema` marks it optional, and an artifact fired by an earlier
 release lacks it until it is re-fired. Kiln re-fires such an artifact in the
 background after the first read that misses its cache; that read, and cached
 reads for up to an hour after it, still get the old body. An operator can
-re-fire everything at once with `mix kiln.refire_all`. Even after the re-fire,
-two kinds of consumer keep the old body until the document is next edited:
+re-fire everything at once with `mix kiln.refire_all`. After the re-fire, a
+client or CDN that revalidates with `If-None-Match` gets the new body: the
+artifact's `ETag` is a digest of the body served, so it moves with the re-fire
+([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463)). Two kinds of
+consumer can still keep the old body:
 
 - **A `/api/sync` mirror** gets a document again only when it changes
   editorially, and a re-fire is not an edit. To refresh a mirror, wait until
   the operator's `mix kiln.refire_all` has finished, then run a fresh
   `?initial=true` sync.
-- **A client or CDN that revalidates with `If-None-Match`.** The artifact's
-  `ETag` names the document's last edit, not the body, so it gets `304` for the
-  old body ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463)).
-  Re-read without the validator, or use `?fields=`, whose `ETag` is a digest
-  of the body.
+- **A cache that revalidates with `If-Modified-Since` alone.** `Last-Modified`
+  is the document's last edit, which a re-fire does not move, so such a cache
+  can keep the old body until it expires. Kiln itself answers `304` only on
+  `If-None-Match`.
 
 Read `social` as optional and fall back to `title` when it is missing.
 

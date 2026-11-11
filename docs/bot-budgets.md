@@ -441,9 +441,9 @@ a search engine.
   user agent names a search engine. Allow that egress, set `TRUSTED_PROXIES`
   behind a proxy, and confirm with
   [Check that a node can verify crawlers](#check-that-a-node-can-verify-crawlers).
-  A claim proven false drops to 60 requests a minute; real crawlers and
-  unchecked claims keep 300. No migration; rolling the pin back is safe and
-  goes back to believing every claim.
+  A claim proven false drops to 60 requests a minute; unchecked claims keep
+  300, and verified ones get more (next item). No migration; rolling the pin
+  back is safe and goes back to believing every claim.
 - **Verified search engines get twice the browser limit by default (#2587).**
   An address DNS has verified as Googlebot, Google-InspectionTool, bingbot,
   Applebot, YandexBot or Baiduspider may make 600 requests a minute instead of 300; nothing else

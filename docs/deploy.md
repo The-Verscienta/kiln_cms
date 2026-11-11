@@ -112,7 +112,9 @@ builder compiles the release (with `mix assets.deploy` — there is no separate
 front-end build to deploy; the app *is* the site), and a slim Debian runner
 carries only the release plus the native libraries it shells out to — libvips
 for image processing, `qpdf` for PDF metadata stripping, `postgresql-client-17`
-so in-app backups can run `pg_dump`. Nothing in the runner is optional to the
+so in-app backups can run `pg_dump`, and a pinned `rclone` for their off-site
+copy (downloaded in its own build stage and checked against a SHA-256 in the
+`Dockerfile`; `rclone version` in the container names it). Nothing in the runner is optional to the
 build, and the versions of Elixir/OTP restate `.tool-versions` (the source of
 truth; `mix kiln.toolchain.check` fails when they drift).
 
@@ -140,10 +142,11 @@ its commit. The build date has no equivalent; leave it unset or set
 Two things about the build worth knowing before you size a build host:
 
 - **Peak RAM is `mix deps.compile`**, not the app compile. The Ash ecosystem
-  plus the Nx/Axon/Bumblebee ML stack compiles in one BEAM; the Dockerfile
-  splits the ML deps into their own `RUN` and caps the build BEAM to two
-  schedulers so a small host isn't OOM-killed. A 2 GB build host is
-  marginal; 4 GB is comfortable.
+  compiles in one BEAM, and the Dockerfile caps the build BEAM to two
+  schedulers so a small host isn't OOM-killed. The ML stack
+  (Nx/Axon/Bumblebee/EXLA) is only in a `--build-arg KILN_ML=1` build, which
+  compiles it in its own `RUN` first. A 2 GB build host is marginal for the
+  default build; 4 GB is comfortable.
 - **The runner is deliberately a newer Debian than the builder** (trixie vs
   bookworm) because bookworm's `qpdf` predates the options PDF stripping
   needs. Building on the older suite and running on the newer is the safe
@@ -174,9 +177,10 @@ The image's `CMD` is:
    the migrated schema; the expand/contract policy that keeps that safe, and
    what zero-downtime does and does not cover, are in
    [`releasing.md`](releasing.md#migrations-expand-migrate-contract).
-2. **`bin/server`** sets `PHX_SERVER=true` and starts the release. The Ash +
-   Nx/Axon/Bumblebee stack is not fast to cold-boot; the image's healthcheck
-   allows a generous start period for it (below).
+2. **`bin/server`** sets `PHX_SERVER=true` and starts the release. The Ash
+   stack (plus Nx/Axon/Bumblebee in a `KILN_ML=1` image) is not fast to
+   cold-boot; the image's healthcheck allows a generous start period for it
+   (below).
 
 A boot failure is loud. The three required variables raise with a message
 naming the variable; a `:prod` release with `dev_routes` enabled refuses to
@@ -208,8 +212,8 @@ every boot re-runs `bin/migrate`, the order matters:
    not the one you want to return to.
 3. **Then** switch the image tag back and start.
 
-Read the release's `### Upgrading` notes in [`CHANGELOG.md`](../CHANGELOG.md)
-before an upgrade — that section says whether a migration rewrites or drops
+Read the release's `### Upgrade notes` and `### Breaking` sections in
+[`CHANGELOG.md`](../CHANGELOG.md) before an upgrade — those sections say whether a migration rewrites or drops
 data, which is what decides whether rolling the image back is enough.
 
 ## Health endpoints — `/live` vs `/up`
@@ -395,6 +399,28 @@ On any other platform, give `BACKUP_DIR` a persistent mount writable by
 `nobody` (the image already owns the default path, so a fresh named volume
 mounted there works) or the in-app page will report available and every job
 will fail at run time.
+
+Three more things the two paths need from a deployment:
+
+- **Keep the host's `scripts/backup.sh` at the release you run.** Cron runs a
+  copy outside the image, so an upgrade does not update it. Since v1.9.0 the
+  app marks the newest verified backup of each component with a
+  `kiln-<stamp>.good` file that `backup.sh prune` must honor, and the script
+  splits media into parts as the app does; an older copy ignores both
+  ([The last-good marker](backups.md#the-last-good-marker)). The script needs
+  GNU tar or bsdtar on the host, not busybox tar
+  ([system-requirements.md](system-requirements.md#running-the-backup-scripts-on-the-host)).
+- **The `backup_steps` Oban queue.** In-app backups run as a chain of jobs on
+  it, one at a time per node, behind a cluster-wide lock. If you size
+  `POOL_SIZE` as the sum of queue limits plus web traffic, add one. A
+  deployment that builds Oban's `queues:` list itself must add
+  `backup_steps: 1`, or a backup request is accepted and never starts
+  ([How an in-app backup runs](backups.md#how-an-in-app-backup-runs-2218)).
+- **Off-site credentials for `rclone`.** The app runs as `nobody`, which has
+  no home directory, so a named remote in `BACKUP_RCLONE_REMOTE` needs
+  `RCLONE_CONFIG_<NAME>_*` variables or a mounted `rclone.conf` named by
+  `RCLONE_CONFIG` in the app's environment
+  ([It needs the client tools in the image](backups.md#it-needs-the-client-tools-in-the-image)).
 
 ## Optional infrastructure
 
@@ -634,13 +660,13 @@ of work:
 
 ## Upgrading a deployment
 
-For a running instance an upgrade is: read the release's `### Upgrading`
-section in [`CHANGELOG.md`](../CHANGELOG.md), rebuild or pull the new image,
+For a running instance an upgrade is: read the release's `### Upgrade notes`,
+`### Breaking` and `### Known issues` sections in [`CHANGELOG.md`](../CHANGELOG.md), rebuild or pull the new image,
 restart (on the reference stack, `docker compose -f docker-compose.prod.yml
 --env-file .env.prod up -d`). Migrations run on boot; nothing else is automatic, and the changelog
-section is where a release says if it needs more (a new required variable, a
+sections are where a release says if it needs more (a new required variable, a
 reindex, a backfill). Downstream projects that pin Kiln as a submodule move
-the pin with `mix kiln.update`, which prints that section before it does —
+the pin with `mix kiln.update`, which prints those sections before it does —
 [`releasing.md`](releasing.md#updating-a-project-to-a-release).
 
 **Reporting access.** BI tools read published content through the

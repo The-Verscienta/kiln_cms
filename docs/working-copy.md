@@ -64,6 +64,62 @@ once — so a release found nothing left to publish.
   the version that was live before (tags and related content are not in
   version history, so a rollback leaves them as the release set them).
 
+## Say how much a published change matters
+
+Some fields matter more than others: a dosage, a contraindication, a price. A
+site can list those fields, and Kiln then records a **severity** with every
+published edit that changes one: *Critical*, *Notable* or *Routine*. Sites
+that mirror the content read it back to decide how loudly to surface the
+change. It is stored on the version the edit wrote, so the next edit starts
+with none.
+
+**List the fields (admin).**
+
+1. Open **Content model → Safety fields** (`/editor/safety-fields`). The page
+   lists every content type of the site, built-in and custom, and says
+   *Nothing is listed until you choose.*
+2. For a type, tick **Every field**, or tick only some fields under **Or only
+   these fields** (the type's editorial fields and its custom fields, marked
+   *custom*). Computed custom fields are not offered: the daily refresh
+   rewrites them, and each new value would be recorded as an edit.
+3. Click **Save**. The flash reads *Safety fields saved.* Unticking every box
+   of a type clears it.
+
+**Publish a change to one (whoever may publish).**
+
+1. Edit a published document and change a listed field, then click
+   **Publish changes**. (A first **Publish** asks too, when a listed field
+   is not empty.)
+2. Instead of publishing, the editor shows *How much does this change
+   matter?* with three cards: **Critical** (*Sites should surface this
+   prominently, like a safety or legal correction.*), **Notable** and
+   **Routine**. Nothing is preselected, and **Publish** stays disabled until
+   you pick one.
+3. Pick one and click **Publish**. The change goes live and its version
+   carries the severity. **Cancel** closes the question and publishes nothing.
+
+Saving the working copy and autosave never ask: they put nothing live. An
+edit that changes no listed field is never asked about and records no
+severity.
+
+Everywhere else, nobody is asked:
+
+- The content list's **Publish** button, row or bulk, refuses such a document
+  rather than guess. A single row says *This change touches a safety field.
+  Open it in the editor to publish and say how much it matters.*; a bulk
+  publish adds *N of them touch a safety field — open each in the editor to
+  publish and say how much the change matters.* to its count.
+- The API, MCP, GraphQL, a release, a restore and every other automated writer
+  record **notable** when they don't say, never *routine* and never nothing.
+  `PATCH` and `publish` take an optional `change_severity`; see
+  [Change severity](json-api.md#change-severity-how-much-an-edit-matters) for
+  the request, and the `latest_edit_severity` / `latest_edit_at` fields that
+  read the latest one back.
+
+In code, the rule is `KilnCMS.CMS.Severity`, the list is
+`KilnCMS.CMS.SiteSafetyFields`, and the write is
+`KilnCMS.CMS.Changes.RecordChangeSeverity`.
+
 ## When the live page changes under a draft
 
 An API `PATCH` or in-context editing still edits a live entry directly. If it
@@ -233,7 +289,7 @@ published text back over it.
   what the copy holds.
 - *Publish changes* flushes first too, so what goes live is what is on screen.
 - *Publish changes* is also where the **change severity** is asked
-  ([json-api.md](json-api.md#change-severity-how-much-an-edit-matters)): saving
+  ([Say how much a published change matters](#say-how-much-a-published-change-matters)): saving
   a working copy and autosave write no live text and never prompt, but if the
   promotion would change a field the site lists as safety-relevant, the editor
   asks how much the change matters (critical / notable / routine) before it goes
@@ -241,8 +297,9 @@ published text back over it.
 
 ## Comparing and restoring versions
 
-Custom fields are first-class in the version panel (#2294). No API, migration
-or setting changed; this is the editor only.
+Custom fields are first-class in the version panel (#2294): the editor shows
+each key on its own. For an API client, the single-revision read names the
+keys a version changed in `changed_custom_fields` (see [api.md](api.md)).
 
 1. Open a document, open the history panel, tick two versions (or one against
    the current document) and choose *Compare selected*.

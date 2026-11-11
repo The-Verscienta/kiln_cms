@@ -56,7 +56,10 @@ history (#338) together per content item. Admin-only.
     (`create` / `update` / `submit_for_review` / `publish` / …), when, **who**
     (the acting user on the write — versions from before attribution landed
     show as unattributed), and which fields changed (from `:changes_only`
-    tracking — a lightweight diff).
+    tracking — a lightweight diff). The change severity a safety-field edit
+    records ([working-copy.md](working-copy.md#say-how-much-a-published-change-matters))
+    is stored on the same version row, but the timeline and the exports do
+    not show it yet; read it over the API as `latest_edit_severity`.
   - **Point in time** (#338) — every publish row links to
     `/api/content/:type/:slug?as_of=<that instant>` ("View as of then"), serving
     exactly what was published at that moment.

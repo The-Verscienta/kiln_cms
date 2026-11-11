@@ -25,7 +25,7 @@ on its custom role, and on the user; the effective value resolves
 membership → role → user, first non-empty wins (for `field_grants`, per type:
 the first level that has the type's key wins, even with `[]`). Admins bypass
 the scope axes.
-Everything is managed per org at **`/editor/team`** (admin-only); the user-level
+Everything is managed per org at **`/editor/team`** (platform admins only); the user-level
 columns are the single-org fallback, set through `:manage_access`.
 
 ## Phase 1: `editable_types`
@@ -287,7 +287,8 @@ on the user — a custom role refines an editor's scope, it does not replace the
 tier, and the built-ins therefore need no seeded rows: a membership without a
 custom role simply has no extra restriction bundle.
 
-**Team UI.** `/editor/team` (admin-only) manages the current org's members —
+**Team UI.** `/editor/team` (platform admins only; an admin of one site is sent
+to the access-denied page) manages the current org's members —
 add by email (an address with a confirmed account is added, any other is
 [invited](account-administration.md#invite-someone-to-a-site)), set tier / custom role / per-member scope
 overrides, grant a temporary tier, remove — and its custom roles. The three

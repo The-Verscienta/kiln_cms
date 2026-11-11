@@ -388,8 +388,11 @@ The flags are part of the document's working copy: while a published document
 has a pending working copy, changing them takes effect on the live page when
 the working copy is published, like any other field.
 
-In the editor, both flags are checkboxes in the SEO section beside the canonical
-URL. They follow the same field grants and soft locks as the canonical URL: an
+In the editor, open the inspector's **Settings** tab: both flags are
+checkboxes in the **SEO & scheduling** section beside the canonical URL,
+**Hide from search engines** (`noindex`) and **Do not follow links**
+(`nofollow`). Tick one and save; the next fetch of the published page carries
+the tag (`curl -sI <url> | grep -i x-robots-tag`). They follow the same field grants and soft locks as the canonical URL: an
 editor whose grant leaves them out cannot change them.
 
 The SEO panel also carries an advisory warning, `noindex_nav_linked`, when a
@@ -405,7 +408,9 @@ and is skipped for drafts.
 A content type can start its new documents with either flag on: the
 `noindex_default` / `nofollow_default` options of `use KilnCMS.CMS.Content` for a
 compiled type, or the two checkboxes on the type's page under **Content types**
-for an admin-defined one. A flag takes the default only when the create does not
+for an admin-defined one (*New entries are hidden from search engines
+(noindex)* and *New entries tell search engines not to follow links
+(nofollow)*). A flag takes the default only when the create does not
 name it, so an explicit `false` (or `true`) from an editor, the API or an import
 always wins. Duplicates and translations copy the source document's flags and
 ignore the default; an editor whose field grant leaves the flags out still gets

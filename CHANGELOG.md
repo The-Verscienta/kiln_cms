@@ -56,6 +56,8 @@ else.
 
 ## [Unreleased]
 
+What's new, with examples and migration steps: [docs/whats-new/v1.9.md](docs/whats-new/v1.9.md).
+
 Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
@@ -246,6 +248,33 @@ Every summary line below that was shortened links to its own entry there.
 - **Registering no longer signs the user in: everyone is told to check their email and sent to `/sign-in`, and an address that already has an account gets no new row.**
   ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
 
+### Known issues
+
+- **Resume on a failed backup says it is queued but never runs.** Affects a Resume asked for while a backup runs and a Resume of another
+  run is already queued. Click Resume again once the queued one has finished. ([#2671](https://github.com/The-Verscienta/kiln_cms/issues/2671))
+- **"Backup resumed", then nothing happens.** Affects clusters where each node has its own `BACKUP_DIR`: the resume can land on a node
+  without the run's files. Resume again until it runs on the node that took the backup. ([#2539](https://github.com/The-Verscienta/kiln_cms/issues/2539))
+- **Backups History shows an "ok" off-site copy for a cron backup that failed.** Affects cron failures imported before upgrading.
+  Treat those rows as never copied off-site. ([#2485](https://github.com/The-Verscienta/kiln_cms/issues/2485))
+- **A cron backup stays "pending" in History forever.** Affects hosts where only cron takes backups, after a killed `backup.sh` run.
+  Delete its `kiln-media-<stamp>.*.partial` file by hand. ([#2478](https://github.com/The-Verscienta/kiln_cms/issues/2478))
+- **A custom filter on an email, color, telephone or time field misses values written another way (`#FFF` vs `#ffffff`).** Affects
+  `eq`/`not_eq`/`in` on single fields. Write the operand the way it is stored. ([#2677](https://github.com/The-Verscienta/kiln_cms/issues/2677))
+- **GraphQL `customWhere` with `dateTime` can miss date-time list items saved with fractional seconds.** Not reproduced yet.
+  Filter with `custom_filter` on the REST API instead. ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678))
+- **Renaming a field's section can move or leave its layout wrongly when another admin changed the same type meanwhile.** Reload
+  Fields before renaming a section, and check Sections of afterwards. ([#2652](https://github.com/The-Verscienta/kiln_cms/issues/2652))
+- **On a site other than the default one, New draft and Translations can be offered or hidden by the default site's type scope.**
+  Saving is still checked against the right site. No workaround. ([#2599](https://github.com/The-Verscienta/kiln_cms/issues/2599))
+- **Lock and teaser pages, embedded forms and newsletter confirmation mail can be in the wrong language on a multilingual site.**
+  No workaround yet. ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597))
+- **A gallery carousel can't be scrolled with the keyboard.** Affects keyboard and switch users. Use the grid layout where that
+  matters. ([#2590](https://github.com/The-Verscienta/kiln_cms/issues/2590))
+- **A media item trashed while quarantined, then restored, can still be permanently deleted from a media trash page loaded earlier.**
+  Reload the media trash before deleting. ([#2610](https://github.com/The-Verscienta/kiln_cms/issues/2610))
+- **A restored event can show a stale next occurrence.** Affects events trashed before `mix kiln.occurrences.backfill` ran and
+  restored after. Save the event once to recompute it. ([#2621](https://github.com/The-Verscienta/kiln_cms/issues/2621))
+
 ### Added
 
 - **`GET /api/schema?format=openapi` and `mix kiln.export.schema --format openapi` serve the delivery schema as OpenAPI 3.1 components, with explicit discriminator mappings; `mix kiln.export.schema --check PATH` fails CI when committed types are stale.**
@@ -372,7 +401,7 @@ Every summary line below that was shortened links to its own entry there.
   Off by default; fails closed; API keys and issued tokens are not affected. Guide: [docs/admin-allowlist.md](docs/admin-allowlist.md).
   ([long form](docs/changelog/unreleased.md#admin-allowlist))
 
-- **Site admins can sign idle browsers out after 15 minutes to 24 hours (shorter for admins) and sign everyone out of the site at once, at Configure → Integrations → Sessions.**
+- **Site admins can sign idle browsers out after 15 minutes to 24 hours (shorter for admins) and sign everyone out of the site at once, at Configure → Sign-in & access → Sessions.**
   Off by default; idle wins over "remember me"; API keys and headless tokens are not affected. Guide: [docs/account-administration.md](docs/account-administration.md#sign-people-out-when-idle).
   ([long form](docs/changelog/unreleased.md#session-idle-timeout))
 
@@ -380,7 +409,7 @@ Every summary line below that was shortened links to its own entry there.
   Off by default; turn on with `KILN_SCANNER_BLOCKING=1`. Guide: [docs/ip-blocking.md](docs/ip-blocking.md#block-scanners-automatically).
   ([#2471](https://github.com/The-Verscienta/kiln_cms/pull/2471) · [long form](docs/changelog/unreleased.md#scanner-404-blocking))
 
-- **Public delivery throttles by user-agent class: scripts and clients with no user agent are refused sooner than browsers; admins can lower each class at Organization → Bot budgets.**
+- **Public delivery throttles by user-agent class: scripts and clients with no user agent are refused sooner than browsers; admins can lower each class at Configure → Sign-in & access → Bot budgets.**
   Operators set the ceilings with `KILN_BOT_BUDGET_*_PERCENT`; a site may only lower them. Cost control, not security. Guide: [docs/bot-budgets.md](docs/bot-budgets.md).
   ([#2470](https://github.com/The-Verscienta/kiln_cms/pull/2470) · [long form](docs/changelog/unreleased.md#bot-budgets))
 
@@ -426,7 +455,7 @@ Every summary line below that was shortened links to its own entry there.
 - **A custom field can default to today, now, the creating user, the site locale or another field (Default comes from in `/editor/fields`).**
   Create-only, a supplied value wins; new `default_source` / `default_field` attributes; additive migration, nothing else to run.
   ([#2286](https://github.com/The-Verscienta/kiln_cms/issues/2286) · [long form](docs/changelog/unreleased.md#dynamic-field-defaults))
-- **Admins choose what happens to a breached password at Organization → Password policy: off, warn (default) or block for administrators.**
+- **Admins choose what happens to a breached password at Configure → Sign-in & access → Password policy: off, warn (default) or block for administrators.**
   Checked on register, change, reset and first-run setup, by k-anonymity.
   ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-check))
 - **Admins can constrain a custom field: `min`/`max`, length, a whole-value `pattern`, or `unique`, enforced on every write path.**

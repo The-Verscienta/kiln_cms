@@ -127,12 +127,21 @@ policies or web layer is an overlay.
 4. **Discover what's installed** — `mix kiln.plugins.list` prints every
    installed plugin with its catalog metadata and contribution surface.
 5. **Keep checking it after it ships** — **Operations → System → Plugins**
-   compares each plugin from Hex with hex.pm (has the package changed there
-   since this build, is the release retired or long unreleased) and with the
-   security notices feed, and the Security posture page summarizes it (#2244).
-   `mix kiln.plugins.list --health` does the same from the command line.
-   There is no registry behind it: hex.pm and kilncms.dev's notices are the
-   sources. See [Check your installed plugins](security-posture.md#check-your-installed-plugins)
+   (platform admins) compares each plugin from Hex with hex.pm (has the
+   package changed there since this build, is the release retired, has the
+   package had no release for 24 months, `KILN_PLUGIN_STALE_MONTHS`), with
+   the security notices feed, and with the `kiln_plugin` this core bundles
+   (does the plugin's requirement accept it). The Security posture page summarizes it
+   as an Installed plugins line (#2244). **Check plugins now** re-asks
+   instead of waiting for the cache. `mix kiln.plugins.list --health` does
+   the same from the command line. There is no registry behind it: hex.pm
+   and kilncms.dev's notices are the sources. An unreachable source makes a
+   plugin unknown, never OK, and git and path plugins can't be checked
+   against Hex. Asking hex.pm tells it the plugin's package name and
+   version; `KILN_PLUGIN_HEALTH_CHECK=false` stops those requests
+   (`KILN_UPDATE_CHECK=false` does too, unless the first is set), while the
+   local `kiln_plugin` requirement check still runs. See
+   [Check your installed plugins](security-posture.md#check-your-installed-plugins)
    and [Plugin system §7](plugin-system-plan.md#7-plugin-health-checks-2244).
 
 The `mix kiln.gen.plugin <Name>` scaffold produces a distribution-shaped
@@ -490,8 +499,9 @@ central service required for v1. Each plugin optionally declares:
 | Homepage | `homepage/0` | Repo / docs URL — **where screenshots, changelog and docs live** |
 
 `Kiln.Plugins.manifests/0` collects these plus each plugin's *contribution
-counts* (domains, blocks, field types, nav items, admin, editor, public and plug
-routes, queues, children) into plain maps — the data a catalog UI or `mix kiln.plugins.list`
+counts* (domains, blocks, field types, advisories, spam checks, image backends,
+human-verification providers, security checks, nav items, admin, editor, public
+and plug routes, queues, children) into plain maps — the data a catalog UI or `mix kiln.plugins.list`
 renders. Screenshots and long-form docs deliberately live in the plugin's own
 repository / README, **not** in the running node: the node carries a pointer
 (`homepage/0`), not a media library.
@@ -538,6 +548,9 @@ agility of a live marketplace while staying compile-time-safe:
   of editor input" under Plugins in
   [extending-content.md](extending-content.md), and
   [Choose how editors fill in a field](extending-content.md#choose-how-editors-fill-in-a-field)).
+  The optional `graphql_kind/1` (`kiln_plugin` 1.4) names how the GraphQL API
+  types the stored value (`:string`, `:int`, `:float`, `:boolean`, `:date`,
+  `:datetime` or `:json`); a type without it is served as `:json`.
 
   A type that needs behaviour in the browser (an address type-ahead, a map
   picker) declares `input_hook/1` (#1918): the editor wraps its widget in an
@@ -555,9 +568,15 @@ agility of a live marketplace while staying compile-time-safe:
   Two implementations ship in-tree and are written against exactly this
   contract rather than special-cased in the host, so they double as reference
   examples: `KilnCMS.CMS.FieldTypes.Geolocation` (#428, composite) and
-  `KilnCMS.CMS.FieldTypes.Computed` (#429, derived). Their names are reserved —
-  `mix kiln.plugins.doctor` rejects a plugin that claims either, the same way
-  it rejects one claiming a core type.
+  `KilnCMS.CMS.FieldTypes.Computed` (#429, derived). Every in-tree type's name
+  is reserved, and since 1.9 that includes `email`, `telephone`, `color`,
+  `slug`, `time`, `json`, `range`, `key_value` and `link` as well as
+  `geolocation`, `computed`, `datetime_range` and `recurrence`
+  (`KilnCMS.CMS.FieldTypes.reserved/0` lists them with the core types).
+  `mix kiln.plugins.doctor` rejects a plugin that claims one ("collides with
+  a built-in field type"), the same way it rejects one claiming a core type,
+  so a plugin or overlay type with one of the new names must be renamed
+  before upgrading.
 - **Declarative editorial automation (#342).** "When X, do Y" rules are Oban-
   backed **data**, authored in the admin UI — the safe substitute for the
   "run this script on publish" hooks that other marketplaces sell.

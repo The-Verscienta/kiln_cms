@@ -81,6 +81,23 @@ no-op, so it's safe to schedule a cron entry before picking a destination.
   `surfaces`, plus the run's `generated_at`/`base_url`), so an edge deploy can
   diff and prune deterministically.
 
+## After an upgrade that changes markup
+
+An export copies the stored artifacts, so it carries whatever markup they
+were fired with. When a release changes rendered output without an edit (its
+upgrade notes then suggest `mix kiln.refire_all`), the artifacts change only
+when they are re-fired, and an exported tree changes only when you export
+again:
+
+1. Re-fire every published document
+   ([Re-render published content after an upgrade](releasing.md#re-render-published-content-after-an-upgrade)).
+2. Wait until the sweep has finished: `KilnCMS.Firing.Sweep.pending/0`
+   returns `0`.
+3. Run the export again (`mix kiln.export.static <out_dir>`, or enqueue
+   `KilnCMS.Firing.StaticExportWorker`). Files are overwritten in place.
+
+An export taken while the sweep is still running mixes old and new markup.
+
 ## Scope & follow-ons
 
 Phase-1 slice:

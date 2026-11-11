@@ -56,6 +56,13 @@ refused as "is not valid".
 | `url` | an `http` or `https` URL with a host, no credentials (`http://a@b` is refused), at most 2048 bytes. `javascript:` and `data:` are refused | string |
 | `hidden` | free text, trimmed | string |
 
+In the builder's **Add a field** palette the types are labeled **Single line
+text** (`string`), **Paragraph text** (`text`), **Email**, **Number**
+(`integer`), **Checkbox** (`boolean`), **Date**, **Dropdown** (`select`),
+**Radio buttons** (`radio`), **Checkbox group** (`checkboxes`), **Phone**,
+**Web address** (`url`), **Number (range)** (`number`), **Rating** and
+**Hidden field** (`hidden`).
+
 Things to know:
 
 - **`hidden` is submitter-controlled.** It is a plain input the visitor (or a
@@ -105,8 +112,13 @@ The `:form` content block references a form by slug:
   labels, types, options, honeypot field name, submit URL, and the
   human-verification widget's details in `challenge` when the form asks for
   a check) and POST JSON to `/api/forms/<slug>` (`{ok: true}` or
-  `{ok: false, errors: {...}}`). The placeholder is the same whatever the
-  form's human-verification setting.
+  `{ok: false, errors: {...}}`). Each field in the schema carries `min`,
+  `max` and `step`: a number's own settings, `1` and the star count (5 when
+  unset) for a rating, and `null` for every other type. When the form asks
+  for a check, the POST carries the widget's token as `_kiln_challenge` and
+  the answer adds `challenge` (`"verified"` or `"held"`); see
+  [Headless sites](human-verification.md#headless-sites). The placeholder is
+  the same whatever the form's human-verification setting.
 - **The form's own page**, `GET /forms/<slug>` (#2138), renders an active
   form with no content around it: its name, description and fields inside the
   site's layout. See [below](#share-a-form-at-its-own-address).
@@ -130,8 +142,11 @@ You need the **admin** role: the Forms pages are admin-only.
    it.
 2. Click a field on the preview. **Field settings** shows its **Label**,
    **Machine name**, **Type**, **Width**, **Required**, **Default value** and
-   **Help text**, plus **Placeholder** for every type but a checkbox or
-   dropdown, and **Options — one per line** for a dropdown.
+   **Help text**, plus the settings its type takes: **Options — one per
+   line** for a dropdown, radio buttons or a checkbox group; **Min**,
+   **Max** and **Step** for a **Number (range)**; **Stars** for a rating; and
+   **Placeholder** for every type but a checkbox, a dropdown, radio buttons,
+   a checkbox group, a rating and a hidden field.
 3. Edit a value. Most inputs save as you type or choose; **Machine name**
    saves when you leave the input. To save straight away, press Enter in any
    input or click **Save** at the bottom of the panel. After a save that
@@ -264,7 +279,15 @@ uses the field's token, with an error on `form_id`.
 | --- | --- |
 | must be lowercase letters, digits and underscores, starting with a letter | The machine name has a capital, a space, a hyphen or another character outside `a-z`, `0-9` and `_`, or starts with a digit or underscore. |
 | has already been taken | Another field on this form already has that machine name. Machine names are unique per form. |
-| a select field must list at least one option | A dropdown's **Options** box is empty. Enter at least one option, one per line. |
+| a select field must list at least one option | A dropdown's **Options** box is empty. Enter at least one option, one per line. A radio or checkbox group says "a radio field …" or "a checkboxes field …" instead. |
+| options can't be blank | An **Options** line is empty. |
+| options must be unique | Two **Options** lines are the same. |
+| a checkboxes field can have at most 50 options | A checkbox group lists more than 50 options. |
+| can't be more than the maximum (…) | A **Number (range)** field's **Min** is above its **Max**. |
+| must be greater than zero | A **Number (range)** field's **Step** is zero or negative. |
+| must be a whole number from 1 to 10 | A rating's **Stars** is not a whole number from 1 to 10. |
+| a hidden field can't be required | Hidden fields are filled by the page or a script, never by the visitor, so **Required** is refused on them. |
+| is reserved for spam protection | The machine name `website` is the honeypot input's. A field of one of the types added in 1.9 (radio buttons, checkbox group, phone, web address, hidden, number (range), rating) can't use it. |
 | The autoresponder uses [field:email]: remove it from the Confirmations template first. | Shown when you delete a field: the autoresponder is on and its subject or body uses this field's token. See [Delete a field the autoresponder uses](#delete-a-field-the-autoresponder-uses). |
 
 An error that belongs to no input in the panel, such as a permission error,

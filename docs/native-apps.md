@@ -279,7 +279,9 @@ push path:
 
 1. Register an endpoint on your backend at `/editor/webhooks`, subscribed to
    `<type>.published`, `<type>.updated`, `<type>.unpublished` and, if you
-   mirror, `<type>.archived`/`<type>.deleted`.
+   mirror, `<type>.archived`/`<type>.deleted`/`<type>.restored`. An `updated`
+   with `"reason": "refire"` in `data` is a re-render after a Kiln upgrade:
+   the body changed though `updated_at` did not, so treat it like an edit.
 2. Verify `x-kilncms-webhook-signature` (HMAC-SHA256 of `"<t>.<raw body>"`)
    and reject a `t` more than five minutes off. Use `delivery_id` to dedupe
    retries ([webhooks.md → Verifying the signature](webhooks.md#verifying-the-signature)).

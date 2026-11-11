@@ -143,7 +143,7 @@ reads):
 
 | Kind key | For fields of kind | Operators |
 |---|---|---|
-| `string` | `string`, `text`, `url`, `select` | `eq`, `notEq`, `in`, `contains`, `startsWith`, `isNull` |
+| `string` | `string`, `text`, `url`, `select`, `user`, `email`, `telephone`, `color`, `slug`, `time` | `eq`, `notEq`, `in`, `contains`, `startsWith`, `isNull` |
 | `int` | `integer` | `eq`, `notEq`, `in`, `gt`, `gte`, `lt`, `lte`, `isNull` |
 | `float` | `float` | same as `int` |
 | `boolean` | `boolean` | `eq`, `isNull` |
@@ -251,7 +251,7 @@ project type, `Entry`) and the `ContentRecord` interface has these readers:
 
 | Field | Returns |
 |-------|---------|
-| `customString(name:)` | `String`: a `string`, `text`, `url`, `select` or `user` field |
+| `customString(name:)` | `String`: a `string`, `text`, `url`, `select`, `user`, `email`, `telephone`, `color`, `slug` or `time` field |
 | `customInt(name:)` | `Int`: an `integer` field |
 | `customFloat(name:)` | `Float`: a `float` field |
 | `customBoolean(name:)` | `Boolean`: a `boolean` field |
@@ -307,7 +307,9 @@ generated types [below](#generate-types-and-fragments-for-your-site).
 - A `geolocation` field is a `GeolocationValue`: `lat` and `lng` are floats,
   `label` (place name) and `zoom` are `null` when not set. A stored value that
   is not a coordinate (a legacy shape) is left out, as for any other kind.
-- `computed`, `datetime_range` and `recurrence` fields, and a plugin type that does not name a GraphQL kind, are `JsonValue`.
+- `json`, `range`, `key_value`, `link`, `computed`, `datetime_range` and
+  `recurrence` fields, and a plugin type that does not name a GraphQL kind,
+  are `JsonValue`.
 - **A reference field returns ids only** (`ReferenceValue { ids }`; a
   `multiple` one is a `ListValue` of `ReferenceValue`s, one id each). For the
   records, use [`references(field:)`](#relationships-references-and-referencedby).
@@ -319,8 +321,8 @@ generated types [below](#generate-types-and-fragments-for-your-site).
   here: read the record in the locale whose value you want.
 - A page of records reads the site's field definitions once per content type,
   not once per record.
-- Filtering and sorting are unchanged: `customFilter` and `customSort` take the
-  same names as before. Only reads are typed.
+- Filtering by kind is [`customWhere`](#typed-filters-customwhere); sorting
+  stays `customSort`. Writes are not typed.
 - A dynamic content type is an `Entry`; read it with
   `publishedEntries(filter: {typeName: {eq: "recipe"}})`.
 
@@ -409,8 +411,8 @@ Why the schema types the accessor and the export types the names, and the
 alternatives that were rejected, is in
 [ADR 0016](decisions/0016-the-graphql-schema-types-the-custom-field-accessor-and-a-per-org-export-types-the-names.md).
 
-Not available yet: typed
-filter operators, a per-site schema with a regenerate step, and typed writes.
+Not available yet: a per-site schema with a regenerate step, and typed
+writes. Typed filter operators are [`customWhere`](#typed-filters-customwhere).
 
 ### Taxonomy — categories, tags & tag groups
 

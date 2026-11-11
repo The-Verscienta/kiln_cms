@@ -45,7 +45,8 @@ that it isn't on screen, or in the page, for anyone looking over your shoulder
 or watching a screen share. You need the admin role; `/editor/webhooks` is
 admin-only.
 
-1. Open **Webhooks** in the console navigation (`/editor/webhooks`). Each
+1. Open **Webhooks** (`/editor/webhooks`): in the sidebar under **Outbound**,
+   or under **Configure** when the sidebar shows only the essentials. Each
    endpoint's row says **Signing secret:** followed by `••••` and the
    secret's last four characters, and a **Reveal** button. A secret shorter
    than 16 characters shows the dots alone, since its last four would give

@@ -17,11 +17,12 @@ at runtime.** Two acquisition channels feed one esbuild bundle:
 
 ## Build pipeline
 
-Two Mix-managed runners produce three artifacts:
+Two Mix-managed runners, esbuild with two profiles and tailwind, produce
+three artifacts:
 
 - **esbuild** (`0.25.4`, via the `:esbuild` hex package) bundles
-  `assets/js/app.js` → `priv/static/assets/js/app.js`. Config:
-  [`config/config.exs:858`](../config/config.exs). The `--alias:@=.` flag lets
+  `assets/js/app.js` → `priv/static/assets/js/app.js`. Config: the
+  `config :esbuild, kiln_cms:` block in [`config/config.exs`](../config/config.exs). The `--alias:@=.` flag lets
   app.js import npm packages (e.g. `@tiptap/core`) resolved through
   `NODE_PATH`/`assets/node_modules`.
 - **esbuild**, a second profile, `kiln_challenge_embed` (#2249), bundles
@@ -31,19 +32,23 @@ Two Mix-managed runners produce three artifacts:
   `app.js`. Config: the `config :esbuild, kiln_challenge_embed:` block in
   [`config/config.exs`](../config/config.exs).
 - **tailwind** (`4.3.3`, via the `:tailwind` hex package) compiles
-  `assets/css/app.css` → `priv/static/assets/css/app.css`. Config:
-  [`config/config.exs:871`](../config/config.exs).
+  `assets/css/app.css` → `priv/static/assets/css/app.css`. Config: the
+  `config :tailwind, kiln_cms:` block in [`config/config.exs`](../config/config.exs).
 
-Mix aliases tie it together ([`mix.exs:152`](../mix.exs)):
+Mix aliases tie it together (the `aliases/0` list in [`mix.exs`](../mix.exs)):
 
 - `mix assets.setup` — installs the tailwind/esbuild binaries (`--if-missing`)
   and runs `npm install` in `assets/`.
 - `mix assets.build` — `tailwind kiln_cms` + `esbuild kiln_cms` +
   `esbuild kiln_challenge_embed`. A custom build or overlay `Dockerfile` that
   runs the esbuild profiles itself must run both.
-- `mix assets.deploy` — the same with `--minify`, then `phx.digest` for
-  cache-busting fingerprints. This is what the [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile)
-  release build runs.
+- `mix assets.deploy` — the same three with `--minify`, then `phx.digest`
+  for cache-busting fingerprints. This is what the [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile)
+  release build runs. A custom asset build or overlay `Dockerfile` that does
+  not run `mix assets.deploy` must also run `esbuild kiln_challenge_embed
+  --minify` before `phx.digest`: without `challenge_static.js`, an embedded
+  form that asks for a human-verification check has no widget, so every
+  submission from it is held in Spam.
 
 `node_modules` is gitignored; `assets/package-lock.json` is committed. After
 pulling JS dep changes, run `npm install` in `assets/` (or `mix setup`). Node.js
@@ -53,7 +58,10 @@ is therefore a build-time requirement — see [`AGENTS.md`](https://github.com/T
 
 The root layout links only the two digested bundles, both with
 `phx-track-static` so LiveView reloads the page when a fingerprint changes:
-[`lib/kiln_cms_web/components/layouts/root.html.heex:22`](../lib/kiln_cms_web/components/layouts/root.html.heex).
+[`lib/kiln_cms_web/components/layouts/root.html.heex`](../lib/kiln_cms_web/components/layouts/root.html.heex).
+The one other script, `challenge_static.js`, is loaded only by the embedded
+form iframe, which does not use the root layout, and only when the form asks
+for a human-verification check.
 
 CDN delivery was considered and **rejected**:
 
@@ -100,7 +108,7 @@ complete; **`:image` (libvips/Vix) is used, not Mogrify (ImageMagick)**:
   adapter behaviour: `Storage.Local` (default) and `Storage.S3`. The S3 adapter
   uses `ex_aws` + `ex_aws_s3` + `sweet_xml`, routing HTTP through `Req` rather
   than hackney ([`KilnCMS.Storage.S3.ReqClient`](../lib/kiln_cms/storage/s3/req_client.ex)).
-  Opt in at runtime by setting `S3_BUCKET` ([`config/runtime.exs:81`](../config/runtime.exs));
+  Opt in at runtime by setting `S3_BUCKET` ([`config/runtime/prod/storage.exs`](../config/runtime/prod/storage.exs));
   works with AWS S3, Cloudflare R2, Backblaze B2, Wasabi, and MinIO via
   `S3_ENDPOINT_HOST`.
 

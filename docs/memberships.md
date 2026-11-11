@@ -20,7 +20,8 @@ the consumer read axis that already exists (`KilnCMS.CMS.Audiences`, see
 - A reader carries a set of `audiences`, and may read a published record whose
   audience is `:public` or is in their set.
 - Self-registration lands a user as `:viewer` with **no** audiences — i.e. exactly
-  a not-yet-paying member.
+  a not-yet-paying member. (On a site that holds sign-ups for approval, the
+  account holds nothing there until an admin approves it.)
 
 So a membership tier is a product that grants an audience, and billing is the
 loop that grants and revokes it. Nothing about the access model changes.
@@ -305,10 +306,18 @@ going through a transition.
 | `/membership` | anyone | The tiers on sale. Where the paywall CTA points. |
 | `/account` | any signed-in user | Current membership, status, renewal date, "Manage billing", data export. |
 
-A reader who isn't signed in is sent to register with their chosen tier
-remembered, so the intent survives account creation — registration is the
-identity step and shouldn't be entangled with payment. After signing in, readers
-land on `/account` rather than the site root.
+A reader who isn't signed in and chooses a tier is sent to `/register` with
+"Create an account to continue." Registration is the identity step and is kept
+apart from payment. Registering does not sign anyone in: the page says "Check
+your email - we have sent instructions for what to do next." and sends the
+reader to `/sign-in`, whether or not the address already had an account. The
+reader confirms their address from the email, signs in, and lands on `/account`
+rather than the site root (an editor or admin lands on the console). From
+there they open `/membership` and choose the tier again: the tier picked before
+registering is kept in the session (`:join_tier`), but nothing reads it back
+yet, so checkout does not resume on its own. On a site that
+[holds sign-ups for approval](account-administration.md#approving-registrations),
+checkout is refused until an admin approves the account.
 
 Both money-handling controls are ordinary form posts to
 `KilnCMSWeb.BillingController`, not LiveView events: each ends on a
