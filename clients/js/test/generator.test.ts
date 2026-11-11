@@ -129,6 +129,43 @@ describe("emitTypes", () => {
     expect(output).toContain("// -- Document union ");
   });
 
+  it("renders an anyOf of closed inline objects as their union (#2548)", () => {
+    const bounds = (bound: Record<string, unknown>) => ({
+      type: "object",
+      properties: { min: bound, max: bound },
+      additionalProperties: false,
+      minProperties: 1,
+    });
+    const merged = {
+      type: ["object", "null"],
+      properties: { min: { type: ["number", "string"] }, max: { type: ["number", "string"] } },
+      additionalProperties: false,
+    };
+    const variants = [bounds({ type: "number" }), bounds({ type: "string", format: "date" })];
+
+    const out = emitTypes({
+      $defs: {
+        block_thing: {
+          type: "object",
+          properties: {
+            band: { ...merged, anyOf: [...variants, { type: "null" }] },
+            strict: { ...merged, anyOf: variants },
+            other: { ...merged, anyOf: [{ type: "string" }, { type: "null" }] },
+          },
+          additionalProperties: false,
+        },
+      },
+    });
+
+    expect(out).toContain(
+      "band?: { max?: number; min?: number } | { max?: string; min?: string } | null;",
+    );
+    expect(out).toContain(
+      "strict?: { max?: number; min?: number } | { max?: string; min?: string };",
+    );
+    expect(out).toContain("other?: { max?: number | string; min?: number | string } | null;");
+  });
+
   it("emits nothing but the header for an empty document", () => {
     const empty = emitTypes({});
     expect(empty).toContain("Artifact format version: unknown");

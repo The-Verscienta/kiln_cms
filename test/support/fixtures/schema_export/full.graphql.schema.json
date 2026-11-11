@@ -1454,6 +1454,39 @@
             },
             "price_band": {
               "additionalProperties": false,
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "minProperties": 1,
+                  "properties": {
+                    "max": {
+                      "type": "number"
+                    },
+                    "min": {
+                      "type": "number"
+                    }
+                  },
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "minProperties": 1,
+                  "properties": {
+                    "max": {
+                      "format": "date",
+                      "type": "string"
+                    },
+                    "min": {
+                      "format": "date",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "properties": {
                 "max": {
                   "description": "A number, or an ISO-8601 date (YYYY-MM-DD); both bounds are the same kind.",

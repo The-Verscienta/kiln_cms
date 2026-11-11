@@ -1358,7 +1358,8 @@ curl -s http://localhost:4000/api/schema | jq '.["$defs"] | keys'
 |-----------|--------|
 | `?type=post,page` | Only these content types. An unknown name is a `400`, not a silent full export. |
 | `?blocks=only` | The block union alone — no content types, no database read. |
-| `?format=json\|typescript\|typescript-graphql\|swift-graphql\|kotlin-graphql\|openapi` | `json` (default) is this document. `typescript` is the same types as a `.d.ts`; `typescript-graphql` is a `.ts` module that adds a GraphQL fragment per type for the typed custom-field readers ([headless-graphql-api.md](headless-graphql-api.md#generate-types-and-fragments-for-your-site)); `swift-graphql` and `kotlin-graphql` are the Swift and Kotlin models of the `json` artifact plus the same fragments (*Typed models from GET /api/schema* in [native-apps.md](native-apps.md)); `openapi` is the same schemas as an OpenAPI 3.1 document ([below](#the-same-schemas-as-openapi-components)). Any other value is a `400` with code `invalid_format`, whose message lists the known formats. |
+| `?format=json\|typescript\|typescript-graphql\|swift\|swift-graphql\|kotlin\|kotlin-graphql\|openapi` | `json` (default) is this document. `typescript` is the same types as a `.d.ts`; `typescript-graphql` is a `.ts` module that adds a GraphQL fragment per type for the typed custom-field readers ([headless-graphql-api.md](headless-graphql-api.md#generate-types-and-fragments-for-your-site)); `swift` and `kotlin` are the Swift and Kotlin models of the `json` artifact, byte for byte what `mix kiln.export.schema --format swift\|kotlin` writes (served as `text/x-swift` and `text/x-kotlin`); `swift-graphql` and `kotlin-graphql` are those models plus the same fragments (*Typed models from GET /api/schema* in [native-apps.md](native-apps.md)); `openapi` is the same schemas as an OpenAPI 3.1 document ([below](#the-same-schemas-as-openapi-components)). Any other value is a `400` with code `invalid_format`, whose message lists the known formats. |
+| `?package=com.example.kiln` | The Kotlin file's `package`, for `format=kotlin` and `format=kotlin-graphql` only (default `kiln`; empty means the default). Dotted identifiers, none a Kotlin hard keyword, at most 255 bytes. An invalid name, or a `package` with any other format (including the default `json`), is a `400` with code `invalid_package`. |
 
 It is **per site**: dynamic content types and custom fields are
 organization-scoped, so the document is built for the org the request host
@@ -1440,7 +1441,12 @@ curl -s 'http://localhost:4000/api/schema?format=openapi&blocks=only' \
 mix kiln.export.schema --out priv/static/schema.json --pretty
 mix kiln.export.schema --format ts --out assets/js/kiln.d.ts
 mix kiln.export.schema --format openapi --out openapi/kiln.openapi.json --pretty
+mix kiln.export.schema --format typescript-graphql --out src/generated/kiln.ts
 ```
+
+Every `?format=` value is also a `--format` value (`ts` is `typescript`), so
+the task writes exactly what the endpoint serves; `--package` applies to
+`kotlin` and `kotlin-graphql`, as `?package=` does.
 
 The `.d.ts` emitter is built in, so no Node toolchain is needed:
 
@@ -1458,8 +1464,9 @@ export type KilnDocument = PageDocument | PostDocument;
 
 `--blocks-only` skips content types entirely (and the database with them), which
 is what a CI job that only wants block types should use. `--all-orgs --out <dir>`
-writes one document per site (`<org id>.json`, `.d.ts`, `.swift`, `.kt` or
-`.openapi.json`); `mix help kiln.export.schema` has the rest.
+writes one document per site (`<org id>.json`, `.d.ts`, `.swift`, `.kt`,
+`.openapi.json`, or `.graphql.ts`, `.graphql.swift` and `.graphql.kt` for the
+GraphQL formats); `mix help kiln.export.schema` has the rest.
 
 To fail a build when committed types have fallen behind the schema, swap
 `--out PATH` for `--check PATH` and keep every other flag the file was written

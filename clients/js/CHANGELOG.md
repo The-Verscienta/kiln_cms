@@ -21,6 +21,17 @@ tagged `client-js-vX.Y.Z` in the
   takes the same `types` and `blocksOnly` options as `schema()`. Needs a
   server with #2274; an older one answers `400` (`invalid_format`), thrown as
   `KilnHttpError`. `schema()` is unchanged.
+- **Range fields typed by kind (kiln_cms#2548):** `kiln-types` reads an
+  `anyOf` of closed inline objects (optionally with `{"type": "null"}`) beside
+  an object schema as a union of those objects. Against a server with #2548,
+  a range custom field is now
+  `{ max?: number; min?: number } | { max?: string; min?: string } | null`
+  instead of `{ max?: number | string; min?: number | string } | null`:
+  both bounds numbers or both `YYYY-MM-DD` dates, which is what the server
+  has always required on save. Reading code compiles as before; code that
+  builds a value of the type with one number and one date bound (fixtures,
+  mocks, `satisfies`) stops compiling after regenerating. Any other `anyOf`
+  types as before.
 - **Human verification on forms (kiln_cms#2249):** `FormSchema` gains an
   optional `challenge` (`FormChallenge | null`, new exported type), what a
   front end needs to draw the form's Turnstile widget: `provider`,

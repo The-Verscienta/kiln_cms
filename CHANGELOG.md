@@ -252,6 +252,9 @@ Every summary line below that was shortened links to its own entry there.
   Clients: `kiln.schemaComponents()` (`@kiln-cms/client`), `KilnClient.schema(format: :openapi)`. Guide: [docs/native-apps.md](docs/native-apps.md#generate-from-openapi-components).
   ([#2274](https://github.com/The-Verscienta/kiln_cms/issues/2274) · [long form](docs/changelog/unreleased.md#schema-openapi-and-check))
 
+- **`GET /api/schema?format=swift|kotlin` serves the native-app models the Mix task writes, `?package=` sets the Kotlin package (invalid: `400` `invalid_package`), and `mix kiln.export.schema` writes and `--check`s the `typescript-graphql`, `swift-graphql` and `kotlin-graphql` formats.**
+  ([#2362](https://github.com/The-Verscienta/kiln_cms/issues/2362) · [#2363](https://github.com/The-Verscienta/kiln_cms/issues/2363) · [long form](docs/changelog/unreleased.md#schema-swift-kotlin-formats))
+
 - **Forms: new field types `radio`, `checkboxes`, `phone`, `url`, `hidden`, `number`
   (min/max/step) and `rating`, validated server-side, in the builder, the public form, `GET /api/forms/<slug>`
   (new `min`/`max`/`step` keys), mail, entries, CSV and the `form.submitted` payload.**
@@ -508,6 +511,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2256](https://github.com/The-Verscienta/kiln_cms/issues/2256) · [long form](docs/changelog/unreleased.md#robots-flags))
 
 ### Changed
+
+- **A `:range` field's JSON Schema now refuses mixed and empty ranges, as saves already did, and generated TypeScript (`kiln-types` too) types it `{ max?: number; min?: number } | { max?: string; min?: string } | null`.** Code that writes a mixed-bound value of the regenerated type stops compiling; Swift and Kotlin output is unchanged.
+  ([#2548](https://github.com/The-Verscienta/kiln_cms/issues/2548) · [long form](docs/changelog/unreleased.md#range-schema-same-kind-bounds))
 
 - **While a backup runs, a request folds into the queued one only when it is the same kind: Back up now into a queued fresh backup, Resume into a queued resume of the same backup. Any other request is refused with "Try again once the queue clears", and the queue is left as it was.**
   ([#2540](https://github.com/The-Verscienta/kiln_cms/issues/2540) · [long form](docs/changelog/unreleased.md#backup-fold-like-into-like))

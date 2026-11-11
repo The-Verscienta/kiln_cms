@@ -16,7 +16,7 @@ defmodule KilnCMS.SchemaExport.Walk do
 
   ## The model
 
-  `model/1` returns:
+  `model/2` returns:
 
     * `:format_version` — `x-kiln.artifact_format_version`, or `nil`.
     * `:shared`, `:blocks`, `:documents` — `t:decl/0`s, sorted by `$defs`
@@ -37,6 +37,17 @@ defmodule KilnCMS.SchemaExport.Walk do
   `minimum`, `default`, `contentMediaType`, …) is dropped here, once, for
   every emitter: a generated type that lies about a constraint is worse than
   one that is merely loose about it.
+
+  ## Closed variants
+
+  A schema can narrow its own shape with a sibling `anyOf` of closed inline
+  objects, optionally plus `{"type": "null"}` — `KilnCMS.CMS.FieldTypes.Range`
+  says "two numbers or two dates" that way, beside a looser merged object
+  (#2548). With `variants: true` (`KilnCMS.SchemaExport.TypeScript`) such a
+  schema walks as `{:union, objects}`, nullable when the `anyOf` has a null
+  member. Without it, the default for Swift and Kotlin, the `anyOf` is ignored
+  and the merged object is what they declare: a union of inline structs would
+  be their "any JSON" type, which is looser than the merged one.
   """
 
   @typedoc "A property of an object: its JSON key, whether it must be present, and its type."
@@ -96,20 +107,25 @@ defmodule KilnCMS.SchemaExport.Walk do
 
   @block_union "block"
 
-  @doc "Walk a schema document from `KilnCMS.SchemaExport.json_schema/1`."
-  @spec model(map()) :: model()
-  def model(document) do
+  @doc """
+  Walk a schema document from `KilnCMS.SchemaExport.json_schema/1`.
+
+  `variants: true` reads a closed-object `anyOf` as a union (see "Closed
+  variants" above); the default ignores it.
+  """
+  @spec model(map(), keyword()) :: model()
+  def model(document, opts \\ []) do
     defs = Map.get(document, "$defs", %{})
 
     {block_defs, rest} = Enum.split_with(defs, fn {name, _} -> block_def?(name) end)
     {content_defs, shared_defs} = Enum.split_with(rest, fn {name, _} -> content_def?(name) end)
 
-    documents = declarations(content_defs)
+    documents = declarations(content_defs, opts)
 
     %{
       format_version: document |> Map.get("x-kiln", %{}) |> Map.get("artifact_format_version"),
-      shared: shared_defs |> Enum.reject(&union?/1) |> declarations(),
-      blocks: block_defs |> Enum.reject(&union?/1) |> declarations(),
+      shared: shared_defs |> Enum.reject(&union?/1) |> declarations(opts),
+      blocks: block_defs |> Enum.reject(&union?/1) |> declarations(opts),
       documents: documents,
       block_union: block_union(defs),
       document_union: %{
@@ -133,23 +149,40 @@ defmodule KilnCMS.SchemaExport.Walk do
   is read **ahead of** `const`/`enum`: a nullable enum carries both keywords,
   and matching the value clause first would drop the `null` a delivery really
   does send.
-  """
-  @spec type(map()) :: type()
-  def type(%{"$ref" => ref}), do: {:ref, ref_target(ref)}
 
-  def type(%{"oneOf" => members}), do: {:union, Enum.map(members, &type/1)}
+  `opts` as for `model/2`.
+  """
+  @spec type(map(), keyword()) :: type()
+  def type(schema, opts \\ [])
+
+  def type(%{"$ref" => ref}, _opts), do: {:ref, ref_target(ref)}
+
+  def type(%{"oneOf" => members}, opts), do: {:union, Enum.map(members, &type(&1, opts))}
 
   # A nullable `$ref` — 2020-12 has no other way to say it. The sibling `type`
   # list is there for generators that don't read `anyOf`; the pair is what
   # names the target.
-  def type(%{"anyOf" => [%{"$ref" => _} = ref, %{"type" => "null"}]}),
-    do: {:nullable, type(ref)}
+  def type(%{"anyOf" => [%{"$ref" => _} = ref, %{"type" => "null"}]}, opts),
+    do: {:nullable, type(ref, opts)}
 
-  def type(%{"type" => types} = schema) when is_list(types) do
+  # Ahead of the type list: the `anyOf` narrows the merged shape beside it, and
+  # a value must satisfy both, so the narrower one is the honest type.
+  def type(%{"anyOf" => members} = schema, opts) do
+    case opts[:variants] && closed_variants(members) do
+      {objects, nullable?} ->
+        union = {:union, Enum.map(objects, &type(&1, opts))}
+        if nullable?, do: {:nullable, union}, else: union
+
+      _ ->
+        schema |> Map.delete("anyOf") |> type(opts)
+    end
+  end
+
+  def type(%{"type" => types} = schema, opts) when is_list(types) do
     {nulls, rest} = Enum.split_with(types, &(&1 == "null"))
 
     inner =
-      case Enum.map(rest, &type(Map.put(schema, "type", &1))) do
+      case Enum.map(rest, &type(Map.put(schema, "type", &1), opts)) do
         [] -> :null
         [one] -> one
         many -> {:union, many}
@@ -158,42 +191,65 @@ defmodule KilnCMS.SchemaExport.Walk do
     if nulls != [] and inner != :null, do: {:nullable, inner}, else: inner
   end
 
-  def type(%{"const" => value}), do: {:const, value}
-  def type(%{"enum" => values}), do: {:enum, values}
+  def type(%{"const" => value}, _opts), do: {:const, value}
+  def type(%{"enum" => values}, _opts), do: {:enum, values}
 
-  def type(%{"type" => "array"} = schema), do: {:array, type(Map.get(schema, "items", %{}))}
+  def type(%{"type" => "array"} = schema, opts),
+    do: {:array, type(Map.get(schema, "items", %{}), opts)}
 
-  def type(%{"type" => "object"} = schema) do
+  def type(%{"type" => "object"} = schema, opts) do
     case Map.get(schema, "properties") do
       nil -> :map
-      properties -> {:object, fields(properties, schema), open?(schema)}
+      properties -> {:object, fields(properties, schema, opts), open?(schema)}
     end
   end
 
-  def type(%{"type" => "integer"}), do: :integer
-  def type(%{"type" => "number"}), do: :number
-  def type(%{"type" => "boolean"}), do: :boolean
-  def type(%{"type" => "string"}), do: :string
-  def type(%{"type" => "null"}), do: :null
-  def type(_schema), do: :unknown
+  def type(%{"type" => "integer"}, _opts), do: :integer
+  def type(%{"type" => "number"}, _opts), do: :number
+  def type(%{"type" => "boolean"}, _opts), do: :boolean
+  def type(%{"type" => "string"}, _opts), do: :string
+  def type(%{"type" => "null"}, _opts), do: :null
+  def type(_schema, _opts), do: :unknown
+
+  # `{objects, nullable?}` when every member is a closed inline object or
+  # `{"type": "null"}` and at least one is an object; `nil` for any other
+  # `anyOf`, which is left to the clauses below it.
+  defp closed_variants(members) when is_list(members) do
+    {nulls, objects} = Enum.split_with(members, &(&1 == %{"type" => "null"}))
+
+    if objects != [] and Enum.all?(objects, &closed_object?/1),
+      do: {objects, nulls != []},
+      else: nil
+  end
+
+  defp closed_variants(_members), do: nil
+
+  defp closed_object?(%{
+         "type" => "object",
+         "properties" => %{},
+         "additionalProperties" => false
+       }),
+       do: true
+
+  defp closed_object?(_schema), do: false
 
   # ── declarations ────────────────────────────────────────────────────────────
 
-  defp declarations(defs) do
+  defp declarations(defs, opts) do
     defs
     |> Enum.sort_by(fn {name, _} -> name end)
-    |> Enum.map(fn {name, schema} -> declaration(name, schema) end)
+    |> Enum.map(fn {name, schema} -> declaration(name, schema, opts) end)
   end
 
-  defp declaration(name, %{"properties" => properties} = schema),
+  defp declaration(name, %{"properties" => properties} = schema, opts),
     do: %{
       name: name,
       description: Map.get(schema, "description"),
       graphql: Map.get(schema, "x-kiln-graphql"),
-      shape: {:object, fields(properties, schema), open?(schema)}
+      shape: {:object, fields(properties, schema, opts), open?(schema)}
     }
 
-  defp declaration(name, schema),
+  defp declaration(name, schema, _opts),
     do: %{
       name: name,
       description: Map.get(schema, "description"),
@@ -203,7 +259,7 @@ defmodule KilnCMS.SchemaExport.Walk do
 
   # Sorted by key: a schema written to disk is diffed, and map order past 32
   # keys is a hash order.
-  defp fields(properties, schema) do
+  defp fields(properties, schema, opts) do
     required = MapSet.new(Map.get(schema, "required", []))
 
     properties
@@ -215,7 +271,7 @@ defmodule KilnCMS.SchemaExport.Walk do
         description: Map.get(value, "description"),
         target_types: target_types(value),
         graphql_kind: Map.get(value, "x-kiln-graphql-kind"),
-        type: type(value)
+        type: type(value, opts)
       }
     end)
   end

@@ -10,6 +10,7 @@ defmodule KilnCMS.CMS.BuiltinCompositeFieldsTest do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.{FieldKind, FieldTypes, SearchableFields}
   alias KilnCMS.CMS.FieldTypes.{KeyValue, Link, Range}
+  alias KilnCMS.JsonSchemaValidator
 
   @types [:range, :key_value, :link]
 
@@ -135,13 +136,64 @@ defmodule KilnCMS.CMS.BuiltinCompositeFieldsTest do
       end
     end
 
-    test "the schema allows null, numbers or dates" do
+    # The merged object is what Swift, Kotlin and older generators read, so it
+    # stays exactly as it was; the `anyOf` beside it narrows it (#2548).
+    test "the merged schema still allows null, numbers or dates" do
       assert %{
                "type" => ["object", "null"],
-               "properties" => %{"min" => %{"type" => ["number", "string"]}, "max" => max}
+               "properties" => %{"min" => %{"type" => ["number", "string"]}, "max" => max},
+               "additionalProperties" => false
              } = Range.json_schema(nil)
 
       assert max["type"] == ["number", "string"]
+    end
+
+    test "the schema accepts what cast/2 delivers: two numbers, two dates, a half range, null" do
+      schema = Range.json_schema(nil)
+
+      for value <- [
+            %{"min" => 1, "max" => 2.5},
+            %{"min" => -3, "max" => 0},
+            %{"max" => 9},
+            %{"min" => "2026-01-31", "max" => "2026-12-31"},
+            %{"min" => "2026-02-01"},
+            nil
+          ] do
+        assert JsonSchemaValidator.validate(value, schema) == :ok, inspect(value)
+      end
+    end
+
+    # A number with a date and an empty range are both refused by cast/2, and
+    # now by the schema too; the merged object alone accepted them.
+    test "the schema refuses a mixed range, an empty one, and an undeclared key" do
+      schema = Range.json_schema(nil)
+
+      for value <- [
+            %{"min" => 1, "max" => "2026-01-01"},
+            %{"min" => "2026-01-01", "max" => 5},
+            %{},
+            %{"min" => 1, "other" => 2},
+            %{"min" => true},
+            "1..5"
+          ] do
+        assert {:error, _} = JsonSchemaValidator.validate(value, schema), inspect(value)
+      end
+
+      assert {:error, [message | _]} = JsonSchemaValidator.validate(%{}, schema)
+      assert message =~ "anyOf"
+    end
+
+    test "what cast/2 accepts, the schema accepts" do
+      schema = Range.json_schema(nil)
+
+      for raw <- [
+            %{"min" => " 5 ", "max" => "7.5"},
+            %{"min" => ~D[2026-02-01], "max" => ""},
+            %{"min" => "", "max" => 9}
+          ] do
+        assert {:ok, value} = Range.cast(raw, nil)
+        assert JsonSchemaValidator.validate(value, schema) == :ok, inspect(value)
+      end
     end
   end
 

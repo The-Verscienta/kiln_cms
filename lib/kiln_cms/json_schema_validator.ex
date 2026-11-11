@@ -6,7 +6,8 @@ defmodule KilnCMS.JsonSchemaValidator do
   Not a general-purpose implementation: it covers exactly the keywords
   `KilnCMS.SchemaExport` emits — `$ref`, `oneOf`, `anyOf`, `const`, `enum`, `type`
   (including type arrays), `properties`, `required`, `items`,
-  `additionalProperties: false`. Anything else is treated as satisfied.
+  `additionalProperties: false`, `minProperties`. Anything else is treated as
+  satisfied.
 
   Pulling in a real validator would be the honest choice for validating
   *arbitrary* schemas; for validating one schema we generate ourselves, a
@@ -107,6 +108,11 @@ defmodule KilnCMS.JsonSchemaValidator do
         for key <- Map.keys(value),
             not MapSet.member?(declared, key),
             do: "#{path}: undeclared property #{key}"
+
+      {"minProperties", min} when is_map(value) and not is_struct(value) ->
+        if map_size(value) >= min,
+          do: [],
+          else: ["#{path}: #{map_size(value)} properties, expected at least #{min}"]
 
       {"items", item_schema} when is_list(value) ->
         value

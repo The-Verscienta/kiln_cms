@@ -9,6 +9,21 @@ defmodule Mix.Tasks.Kiln.Export.SchemaTest do
 
   alias Mix.Tasks.Kiln.Export.Schema
 
+  defp float_field!(name) do
+    actor =
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "export-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :admin
+      })
+
+    KilnCMS.CMS.create_field_definition!(
+      %{content_type: :page, name: name, label: name, field_type: :float},
+      actor: actor
+    )
+  end
+
   setup do
     dir = Path.join(System.tmp_dir!(), "kiln-schema-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf!(dir) end)
@@ -95,9 +110,89 @@ defmodule Mix.Tasks.Kiln.Export.SchemaTest do
       Schema.run(["--blocks-only", "--format", "kotlin", "--package", "com.example-app"])
     end
 
-    assert_raise Mix.Error, ~r/--format kotlin only/, fn ->
+    assert_raise Mix.Error, ~r/--format kotlin and kotlin-graphql only/, fn ->
       Schema.run(["--blocks-only", "--format", "swift", "--package", "kiln"])
     end
+
+    assert_raise Mix.Error, ~r/--format kotlin and kotlin-graphql only/, fn ->
+      Schema.run(["--blocks-only", "--format", "swift-graphql", "--package", "kiln"])
+    end
+
+    assert_raise Mix.Error, ~r/not a Kotlin package name/, fn ->
+      Schema.run(["--blocks-only", "--format", "kotlin-graphql", "--package", "com.example-app"])
+    end
+  end
+
+  describe "the native and GraphQL formats match the goldens" do
+    alias KilnCMS.SchemaExport.GoldenFixture
+
+    setup do
+      GoldenFixture.setup!()
+    end
+
+    # The goldens are the emitters' output for the fixture document
+    # (`RegenerateGoldensTest`), so a task run over the same state must write
+    # them byte for byte: `--format swift|kotlin` is `Swift.emit/1` /
+    # `Kotlin.emit/1` with no options, and each `*-graphql` format is
+    # `emit_graphql/1` over the `graphql: true` export (#2363).
+    for {format, golden} <- [
+          {"swift", "full.swift"},
+          {"kotlin", "full.kt"},
+          {"typescript-graphql", "full.graphql.ts"},
+          {"swift-graphql", "full.graphql.swift"},
+          {"kotlin-graphql", "full.graphql.kt"}
+        ] do
+      test "--format #{format} writes #{golden}", %{dir: dir} do
+        path = Path.join(dir, unquote(golden))
+
+        capture_io(fn -> Schema.run(golden_args(unquote(format)) ++ ["--out", path]) end)
+
+        assert File.read!(path) == File.read!(Path.join(GoldenFixture.dir(), unquote(golden)))
+      end
+    end
+
+    test "--check passes on a GraphQL golden" do
+      golden = Path.join(GoldenFixture.dir(), "full.graphql.kt")
+
+      output =
+        capture_io(fn -> Schema.run(golden_args("kotlin-graphql") ++ ["--check", golden]) end)
+
+      assert output =~ "is up to date"
+    end
+
+    defp golden_args(format) do
+      ["--format", format, "--type", "post,page,#{GoldenFixture.dynamic_type()}"] ++
+        ["--org-id", KilnCMS.Accounts.default_org_id()]
+    end
+  end
+
+  test "--format kotlin-graphql writes the fragments in --package" do
+    output =
+      capture_io(fn ->
+        Schema.run([
+          "--format",
+          "kotlin-graphql",
+          "--package",
+          "com.example.kiln",
+          "--type",
+          "page"
+        ])
+      end)
+
+    assert output =~ "\npackage com.example.kiln\n"
+    assert output =~ "public data class PageDocument("
+  end
+
+  test "--format typescript-graphql is a .ts module of fragments, unlike ts" do
+    float_field!("gql_task_price")
+
+    gql = capture_io(fn -> Schema.run(["--format", "typescript-graphql", "--type", "page"]) end)
+    ts = capture_io(fn -> Schema.run(["--format", "ts", "--type", "page"]) end)
+
+    assert gql =~ ~s|gqlTaskPrice: customFloat(name: "gql_task_price")|
+    assert gql =~ "export const PageCustomFieldsFragment"
+    refute ts =~ "customFloat"
+    assert String.starts_with?(gql, ts)
   end
 
   test "--base-url becomes the document $id" do
@@ -123,8 +218,26 @@ defmodule Mix.Tasks.Kiln.Export.SchemaTest do
   end
 
   test "an unknown format is rejected" do
-    assert_raise Mix.Error, ~r/expected json\|ts\|swift\|kotlin\|openapi/, fn ->
-      Schema.run(["--format", "yaml"])
+    error = assert_raise Mix.Error, fn -> Schema.run(["--format", "yaml"]) end
+
+    assert error.message =~ "json|ts|swift|kotlin|openapi"
+    assert error.message =~ "typescript-graphql|swift-graphql|kotlin-graphql"
+  end
+
+  test "--all-orgs names a GraphQL file by its language", %{dir: dir} do
+    for {format, ext} <- [
+          {"typescript-graphql", ".graphql.ts"},
+          {"swift-graphql", ".graphql.swift"},
+          {"kotlin-graphql", ".graphql.kt"}
+        ] do
+      out = Path.join(dir, format)
+
+      capture_io(fn ->
+        Schema.run(["--all-orgs", "--blocks-only", "--format", format, "--out", out])
+      end)
+
+      written = out |> File.ls!() |> Enum.sort()
+      assert written == KilnCMS.Accounts.list_org_ids() |> Enum.map(&"#{&1}#{ext}") |> Enum.sort()
     end
   end
 

@@ -26,6 +26,16 @@ defmodule KilnCMS.SchemaExport.KotlinTest do
   defp thing(properties, required \\ []),
     do: emit(%{"block_thing" => object(properties, required)})
 
+  # #2548: the range's narrowing `anyOf` is for the TypeScript emitters. A
+  # union of inline structs would be Kotlin's "any JSON" type, looser than
+  # the merged struct it declares now, so the output must not move.
+  test "a closed-variant anyOf beside a merged object changes nothing" do
+    merged = KilnCMS.CMS.FieldTypes.Range.json_schema(nil) |> Map.delete("anyOf")
+
+    assert thing(%{"band" => KilnCMS.CMS.FieldTypes.Range.json_schema(nil)}) ==
+             thing(%{"band" => merged})
+  end
+
   describe "file" do
     test "the package defaults to kiln and follows :package" do
       assert emit(%{}) =~ "\npackage kiln\n"

@@ -100,6 +100,52 @@ defmodule KilnCMS.SchemaExport.TypeScriptTest do
       assert ts =~ "at: GeoPoint | null;"
     end
 
+    # #2548: an `anyOf` of closed inline objects narrows the merged shape
+    # beside it (a range is two numbers or two dates), so it is the type.
+    test "an anyOf of closed inline objects is their union, nullable with a null member" do
+      bounds = fn bound ->
+        %{
+          "type" => "object",
+          "properties" => %{"min" => bound, "max" => bound},
+          "additionalProperties" => false,
+          "minProperties" => 1
+        }
+      end
+
+      merged = %{
+        "type" => ["object", "null"],
+        "properties" => %{
+          "min" => %{"type" => ["number", "string"]},
+          "max" => %{"type" => ["number", "string"]}
+        },
+        "additionalProperties" => false
+      }
+
+      variants = [bounds.(%{"type" => "number"}), bounds.(%{"type" => "string"})]
+
+      ts =
+        emit(%{
+          "block_thing" => %{
+            "type" => "object",
+            "properties" => %{
+              "band" => Map.put(merged, "anyOf", variants ++ [%{"type" => "null"}]),
+              "strict" => Map.put(merged, "anyOf", variants),
+              "loose" => merged,
+              "other" => Map.put(merged, "anyOf", [%{"type" => "string"}, %{"type" => "null"}])
+            },
+            "additionalProperties" => false
+          }
+        })
+
+      assert ts =~
+               "band?: { max?: number; min?: number } | { max?: string; min?: string } | null;"
+
+      assert ts =~ "strict?: { max?: number; min?: number } | { max?: string; min?: string };"
+      assert ts =~ "loose?: { max?: number | string; min?: number | string } | null;"
+      # Not every member a closed object: the anyOf is left alone.
+      assert ts =~ "other?: { max?: number | string; min?: number | string } | null;"
+    end
+
     test "a property name that is not an identifier is quoted" do
       ts =
         emit(%{

@@ -360,9 +360,22 @@ for web and React Native clients. They include a ready fragment per content type
 that reads the site's custom fields through typed accessors; see
 [headless-graphql-api.md → Generate types and fragments for your site](headless-graphql-api.md#generate-types-and-fragments-for-your-site).
 
+A Swift or Kotlin app that reads the `json` artifact can download its models
+from the site, without a Kiln checkout: `?format=swift` and `?format=kotlin`
+are byte for byte what `mix kiln.export.schema --format swift|kotlin` writes
+([Swift models](#swift-models), [Kotlin models](#kotlin-models)). `?package=`
+sets the Kotlin file's package (default `kiln`):
+
+```bash
+curl -s 'https://cms.example.com/api/schema?format=swift&type=post' \
+  -o Sources/Kiln/Kiln.swift
+curl -s 'https://cms.example.com/api/schema?format=kotlin&type=post&package=com.example.kiln' \
+  -o app/src/main/java/com/example/kiln/Kiln.kt
+```
+
 A Swift or Kotlin app that reads with GraphQL asks for `?format=swift-graphql`
-or `?format=kotlin-graphql`. Each is the same file `mix kiln.export.schema`
-writes for that language (the `json` artifact models) plus a GraphQL section:
+or `?format=kotlin-graphql` instead. Each is the same file as `?format=swift`
+or `?format=kotlin` plus a GraphQL section:
 per content type a `<Type>CustomFields` result type and the fragment that
 selects it. The fragment, the aliases and the collision rules are identical to
 the TypeScript module, so the three languages read the same response.
@@ -370,8 +383,18 @@ the TypeScript module, so the three languages read the same response.
 ```bash
 curl -s 'https://cms.example.com/api/schema?format=swift-graphql&type=post' \
   -o Sources/Kiln/Kiln.swift
-curl -s 'https://cms.example.com/api/schema?format=kotlin-graphql&type=post' \
-  -o app/src/main/java/kiln/Kiln.kt
+curl -s 'https://cms.example.com/api/schema?format=kotlin-graphql&type=post&package=com.example.kiln' \
+  -o app/src/main/java/com/example/kiln/Kiln.kt
+```
+
+From a repository that runs Kiln, `mix kiln.export.schema --format
+swift-graphql` or `--format kotlin-graphql` (and `typescript-graphql`) writes
+the same file, so CI can check it like the plain models
+([Fail CI when the models are stale](#fail-ci-when-the-models-are-stale)):
+
+```bash
+mix kiln.export.schema --format kotlin-graphql --package com.example.kiln \
+  --type post --org-id <site uuid> --out app/src/main/java/com/example/kiln/Kiln.kt
 ```
 
 - **Swift.** `PostCustomFields` is a `Codable` struct and
@@ -387,12 +410,25 @@ curl -s 'https://cms.example.com/api/schema?format=kotlin-graphql&type=post' \
   properties with a `null` default; `fields` is `List<KilnCustomFieldValue>`,
   a sealed interface (`KilnCustomFieldValue.GeolocationValue`, `.MediaValue`,
   `.Unknown`, ...) read by a bundled serializer that works with any `Json`
-  instance. The endpoint's package is `kiln`; change the `package` line after
-  downloading, or call `KilnCMS.SchemaExport.Kotlin.emit_graphql/2` with
-  `package:` from a release `rpc`.
+  instance. The package is `kiln` unless you pass `?package=` (or
+  `--package` to the Mix task).
 
 Dates and datetimes are strings, as in the rest of the file. Regenerate after
 an admin changes fields; the names are the site's definitions *now*.
+
+What can go wrong with the download:
+
+- **`400` `invalid_format`.** The server predates the format you asked for
+  (`swift` and `kotlin` are newer than `swift-graphql` and `kotlin-graphql`),
+  or the value is misspelled. The message lists the formats the server knows.
+- **`400` `invalid_package` "package is not a Kotlin package name (e.g.
+  com.example.kiln)."** Each dot-separated segment must start with a letter
+  or `_`, hold only letters, digits and `_`, and not be a Kotlin hard keyword
+  (`fun`, `object`, `package`, ...) or only underscores; the whole name is at
+  most 255 bytes.
+- **`400` `invalid_package` "package applies to format=kotlin and
+  kotlin-graphql only."** You sent `package` with another format, or with no
+  `format` at all. Drop it, or leave it empty.
 
 The schema is cacheable (`public, max-age=300`). An app can fetch it at runtime
 to detect drift, but it can't change its compiled types. Use it in CI
@@ -472,7 +508,8 @@ The models describe one site at the moment of export, so check them in CI.
 ### Swift models
 
 `mix kiln.export.schema --format swift` writes one self-contained Swift file
-from the same document `GET /api/schema` serves:
+from the same document `GET /api/schema` serves (`?format=swift` downloads the
+same file):
 
 ```bash
 mix kiln.export.schema --format swift --org-id <site uuid> --out Sources/Kiln/Kiln.swift
@@ -541,14 +578,15 @@ staying compatible. To catch drift in CI, see
 
 `mix kiln.export.schema --format kotlin` writes one Kotlin file of
 [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization)
-models from the same document:
+models from the same document (`?format=kotlin` downloads the same file):
 
 ```bash
 mix kiln.export.schema --format kotlin --package com.example.kiln \
   --org-id <site uuid> --out app/src/main/java/com/example/kiln/Kiln.kt
 ```
 
-`--package` sets the file's `package` and defaults to `kiln`. `--type
+`--package` (`?package=` on `GET /api/schema?format=kotlin`) sets the
+file's `package` and defaults to `kiln`. `--type
 post,recipe` works as it does for Swift. The file needs the serialization
 compiler plugin and the JSON runtime, nothing else. In `build.gradle.kts`:
 
