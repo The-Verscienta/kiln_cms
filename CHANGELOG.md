@@ -248,6 +248,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **`GET /api/schema?format=openapi` and `mix kiln.export.schema --format openapi` serve the delivery schema as OpenAPI 3.1 components, with explicit discriminator mappings; `mix kiln.export.schema --check PATH` fails CI when committed types are stale.**
+  Clients: `kiln.schemaComponents()` (`@kiln-cms/client`), `KilnClient.schema(format: :openapi)`. Guide: [docs/native-apps.md](docs/native-apps.md#generate-from-openapi-components).
+  ([#2274](https://github.com/The-Verscienta/kiln_cms/issues/2274) · [long form](docs/changelog/unreleased.md#schema-openapi-and-check))
+
 - **Forms: new field types `radio`, `checkboxes`, `phone`, `url`, `hidden`, `number`
   (min/max/step) and `rating`, validated server-side, in the builder, the public form, `GET /api/forms/<slug>`
   (new `min`/`max`/`step` keys), mail, entries, CSV and the `form.submitted` payload.**

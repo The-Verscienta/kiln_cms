@@ -366,10 +366,11 @@ defmodule KilnCMS.Cache do
       Cachex.del(@cache, private_fields_key(org_id))
       Cachex.del(@cache, calendar_types_key(org_id))
       Cachex.del(@cache, delivery_schema_key(org_id))
-      Cachex.del(@cache, delivery_schema_key(org_id, "typescript"))
-      Cachex.del(@cache, delivery_schema_key(org_id, "typescript-graphql"))
-      Cachex.del(@cache, delivery_schema_key(org_id, "swift-graphql"))
-      Cachex.del(@cache, delivery_schema_key(org_id, "kotlin-graphql"))
+
+      # The list the controller accepts, so a new format cannot miss its bust.
+      for format <- KilnCMS.SchemaExport.served_formats(),
+          do: Cachex.del(@cache, delivery_schema_key(org_id, format))
+
       # `has_published_feed` is half of `KilnCMS.Feeds.syndicated?/2`, so a type
       # write changes which types syndicate as surely as a settings save does.
       Cachex.del(@cache, syndicated_types_key(org_id))
@@ -391,9 +392,9 @@ defmodule KilnCMS.Cache do
   def delivery_schema_key(org_id), do: "delivery_schema:#{org_id}"
 
   @doc """
-  The same document rendered in another `GET /api/schema` format (`typescript`,
-  `typescript-graphql`, `swift-graphql`, `kotlin-graphql`). Its own key per format, busted with the JSON one by
-  `bust_type_registry/1`; the JSON key is unchanged.
+  The same document rendered in another `GET /api/schema` format (one of
+  `KilnCMS.SchemaExport.served_formats/0`). Its own key per format, busted with
+  the JSON one by `bust_type_registry/1`; the JSON key is unchanged.
   """
   @spec delivery_schema_key(Ash.UUID.t(), String.t()) :: String.t()
   def delivery_schema_key(org_id, format), do: "delivery_schema:#{org_id}:#{format}"

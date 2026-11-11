@@ -303,12 +303,27 @@ export interface PostDocument {
   type: "post";
 }
 
+/** A published `Review` as fired to the `:json` surface. */
+export interface ReviewDocument {
+  blocks: Array<KilnBlock>;
+  custom_fields: { score?: number | null; verdict?: string | null };
+  id: string;
+  inherited_fields?: Record<string, unknown>;
+  locale: string | null;
+  robots?: { nofollow: boolean; noindex: boolean };
+  slug: string | null;
+  social?: { description?: string; image?: string; title: string | null };
+  title: string | null;
+  type: "review";
+}
+
 
 // -- Document union ----------------------------------------------
 
 export type KilnDocument =
   | PageDocument
-  | PostDocument;
+  | PostDocument
+  | ReviewDocument;
 
 // -- GraphQL custom fields ----------------------------------------
 //
@@ -414,6 +429,65 @@ fragment PostCustomFields on Post {
   summary: customString(name: "summary")
   tier: customString(name: "tier")
   fields(names: ["contacts", "dosages", "event_dates", "extra", "gallery", "parent", "price_band", "properties", "related", "scores", "seo", "source", "specs", "synonyms", "where"]) {
+    __typename
+    name
+    ... on StringValue { asString: value }
+    ... on IntValue { asInt: value }
+    ... on FloatValue { asFloat: value }
+    ... on BooleanValue { asBoolean: value }
+    ... on DateValue { asDate: value }
+    ... on DateTimeValue { asDateTime: value }
+    ... on GeolocationValue { lat lng label zoom }
+    ... on JsonValue { asJson: value }
+    ... on ReferenceValue { ids }
+    ... on MediaValue { id url alt width height mimeType focal { x y } variants { label width height format url bytes cropped } }
+    ... on ListValue {
+      items {
+        __typename
+        name
+        ... on StringValue { asString: value }
+        ... on IntValue { asInt: value }
+        ... on FloatValue { asFloat: value }
+        ... on BooleanValue { asBoolean: value }
+        ... on DateValue { asDate: value }
+        ... on DateTimeValue { asDateTime: value }
+        ... on GeolocationValue { lat lng label zoom }
+        ... on JsonValue { asJson: value }
+        ... on ReferenceValue { ids }
+        ... on MediaValue { id url alt width height mimeType focal { x y } variants { label width height format url bytes cropped } }
+        ... on GroupValue { fields { __typename name ... on StringValue { asString: value } ... on IntValue { asInt: value } ... on FloatValue { asFloat: value } ... on BooleanValue { asBoolean: value } ... on DateValue { asDate: value } ... on DateTimeValue { asDateTime: value } ... on GeolocationValue { lat lng label zoom } ... on JsonValue { asJson: value } } }
+      }
+    }
+    ... on GroupValue {
+      fields {
+        __typename
+        name
+        ... on StringValue { asString: value }
+        ... on IntValue { asInt: value }
+        ... on FloatValue { asFloat: value }
+        ... on BooleanValue { asBoolean: value }
+        ... on DateValue { asDate: value }
+        ... on DateTimeValue { asDateTime: value }
+        ... on GeolocationValue { lat lng label zoom }
+        ... on JsonValue { asJson: value }
+        ... on ReferenceValue { ids }
+        ... on MediaValue { id url alt width height mimeType focal { x y } variants { label width height format url bytes cropped } }
+      }
+    }
+  }
+}
+`;
+
+/** On `Entry` with `typeName: "review"`. */
+export interface ReviewCustomFields {
+  verdict: string | null;
+  fields: KilnCustomFieldValue[];
+}
+
+export const ReviewCustomFieldsFragment = `
+fragment ReviewCustomFields on Entry {
+  verdict: customString(name: "verdict")
+  fields(names: ["score"]) {
     __typename
     name
     ... on StringValue { asString: value }

@@ -682,6 +682,44 @@ public data class PostDocument(
     )
 }
 
+/** A published `Review` as fired to the `:json` surface. */
+@Serializable
+public data class ReviewDocument(
+    public val blocks: List<Block>,
+    /** Admin-defined custom fields (`KilnCMS.CMS.FieldDefinition`). Open: a point-in-time read (`?as_of=`) serves the values stored at that instant, which may include fields since removed from the registry. */
+    @SerialName("custom_fields") public val customFields: CustomFields,
+    public val id: String,
+    /** Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited. */
+    @SerialName("inherited_fields") public val inheritedFields: JsonObject? = null,
+    public val locale: String? = null,
+    /** The document's robots flags. Absent when neither is set; absent means both false. */
+    public val robots: Robots? = null,
+    public val slug: String? = null,
+    /** The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included. */
+    public val social: Social? = null,
+    public val title: String? = null,
+    public val type: String,
+) : Document {
+    @Serializable
+    public data class CustomFields(
+        public val score: Long? = null,
+        public val verdict: String? = null,
+    )
+
+    @Serializable
+    public data class Robots(
+        public val nofollow: Boolean,
+        public val noindex: Boolean,
+    )
+
+    @Serializable
+    public data class Social(
+        public val description: String? = null,
+        public val image: String? = null,
+        public val title: String? = null,
+    )
+}
+
 // endregion
 
 // region Document union
@@ -703,6 +741,7 @@ public object DocumentSerializer : KSerializer<Document> {
         return when (val type = (raw["type"] as? JsonPrimitive)?.contentOrNull) {
             "page" -> input.json.decodeFromJsonElement(PageDocument.serializer(), raw)
             "post" -> input.json.decodeFromJsonElement(PostDocument.serializer(), raw)
+            "review" -> input.json.decodeFromJsonElement(ReviewDocument.serializer(), raw)
             else -> Document.Unknown(type.orEmpty(), raw)
         }
     }
@@ -712,6 +751,7 @@ public object DocumentSerializer : KSerializer<Document> {
         val raw = when (value) {
             is PageDocument -> output.json.encodeToJsonElement(PageDocument.serializer(), value).tagged("type", "page")
             is PostDocument -> output.json.encodeToJsonElement(PostDocument.serializer(), value).tagged("type", "post")
+            is ReviewDocument -> output.json.encodeToJsonElement(ReviewDocument.serializer(), value).tagged("type", "review")
             is Document.Unknown -> value.raw
         }
         output.encodeJsonElement(raw)

@@ -7,6 +7,12 @@ tagged `client-js-vX.Y.Z` in the
 
 ## Unreleased
 
+- **OpenAPI components (kiln_cms#2274):** `kiln.schemaComponents(options)`
+  fetches `GET /api/schema?format=openapi`, the delivery schema as an OpenAPI
+  3.1 document, typed as the new exported `OpenApiComponentsDocument`. It
+  takes the same `types` and `blocksOnly` options as `schema()`. Needs a
+  server with #2274; an older one answers `400` (`invalid_format`), thrown as
+  `KilnHttpError`. `schema()` is unchanged.
 - **Human verification on forms (kiln_cms#2249):** `FormSchema` gains an
   optional `challenge` (`FormChallenge | null`, new exported type), what a
   front end needs to draw the form's Turnstile widget: `provider`,

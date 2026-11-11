@@ -134,7 +134,41 @@ defmodule KilnClientDeliveryTest do
       refute Map.has_key?(params, "blocks")
 
       assert {:ok, _} = KilnClient.schema(blocks_only: true)
-      assert_received {:request, "GET", "/api/schema", %{"blocks" => "only"}, _, _}
+      assert_received {:request, "GET", "/api/schema", %{"blocks" => "only"} = params, _, _}
+      refute Map.has_key?(params, "format")
+    end
+
+    test "format: :openapi asks for the OpenAPI components, with the same filters" do
+      stub(200, %{"openapi" => "3.1.0", "components" => %{"schemas" => %{}}})
+
+      assert {:ok, %{"openapi" => "3.1.0"}} =
+               KilnClient.schema(format: :openapi, types: ["post"])
+
+      assert_received {:request, "GET", "/api/schema", %{"format" => "openapi", "type" => "post"},
+                       _, _}
+
+      assert {:ok, _} = KilnClient.schema(format: :json)
+      assert_received {:request, "GET", "/api/schema", params, _, _}
+      refute Map.has_key?(params, "format")
+    end
+
+    test "format also takes the strings \"json\" and \"openapi\"" do
+      stub(200, %{"openapi" => "3.1.0"})
+
+      assert {:ok, _} = KilnClient.schema(format: "openapi")
+      assert_received {:request, "GET", "/api/schema", %{"format" => "openapi"}, _, _}
+
+      assert {:ok, _} = KilnClient.schema(format: "json")
+      assert_received {:request, "GET", "/api/schema", params, _, _}
+      refute Map.has_key?(params, "format")
+    end
+
+    test "a format that is not a map is refused before sending" do
+      assert_raise ArgumentError, ~r/:json or :openapi/, fn ->
+        KilnClient.schema(format: :typescript)
+      end
+
+      refute_received {:request, _, _, _, _, _}
     end
   end
 

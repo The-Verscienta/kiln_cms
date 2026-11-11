@@ -1358,7 +1358,7 @@ curl -s http://localhost:4000/api/schema | jq '.["$defs"] | keys'
 |-----------|--------|
 | `?type=post,page` | Only these content types. An unknown name is a `400`, not a silent full export. |
 | `?blocks=only` | The block union alone — no content types, no database read. |
-| `?format=json\|typescript\|typescript-graphql\|swift-graphql\|kotlin-graphql` | `json` (default) is this document. `typescript` is the same types as a `.d.ts`; `typescript-graphql` is a `.ts` module that adds a GraphQL fragment per type for the typed custom-field readers ([headless-graphql-api.md](headless-graphql-api.md#generate-types-and-fragments-for-your-site)); `swift-graphql` and `kotlin-graphql` are the Swift and Kotlin models of the `json` artifact plus the same fragments (*Typed models from GET /api/schema* in [native-apps.md](native-apps.md)). Any other value is a `400` with code `invalid_format`. |
+| `?format=json\|typescript\|typescript-graphql\|swift-graphql\|kotlin-graphql\|openapi` | `json` (default) is this document. `typescript` is the same types as a `.d.ts`; `typescript-graphql` is a `.ts` module that adds a GraphQL fragment per type for the typed custom-field readers ([headless-graphql-api.md](headless-graphql-api.md#generate-types-and-fragments-for-your-site)); `swift-graphql` and `kotlin-graphql` are the Swift and Kotlin models of the `json` artifact plus the same fragments (*Typed models from GET /api/schema* in [native-apps.md](native-apps.md)); `openapi` is the same schemas as an OpenAPI 3.1 document ([below](#the-same-schemas-as-openapi-components)). Any other value is a `400` with code `invalid_format`, whose message lists the known formats. |
 
 It is **per site**: dynamic content types and custom fields are
 organization-scoped, so the document is built for the org the request host
@@ -1399,11 +1399,47 @@ This describes the **read** surface. The write API's authoring shape (which
 differs — a `video`'s stored `media_id`/`url` pair is delivered as one resolved
 `src`) is described by the OpenAPI document at `/api/json/open_api`.
 
+### The same schemas as OpenAPI components
+
+`?format=openapi` (and `mix kiln.export.schema --format openapi`) answers with
+the same schemas wrapped as an OpenAPI 3.1 document, for a client generator
+that reads OpenAPI `components.schemas` rather than bare JSON Schema. It takes
+the same `?type=` and `?blocks=only` filters and is cached the same way. An
+OpenAPI 3.1 schema object *is* JSON Schema 2020-12, so no keyword is
+translated; what moves is where things live:
+
+- every `$defs` entry is a `components.schemas` entry under the same name
+  (`block`, `block_heading`, `content_post`, ...), and every `$ref` points at
+  `#/components/schemas/...`;
+- the root `oneOf` over the content types is a `document` component,
+  discriminated by `type`. It is absent with `?blocks=only`, which has no
+  documents;
+- the block union's discriminator (`_type`) and the `document` union's
+  (`type`) carry an explicit `mapping`. Without it, an OpenAPI generator
+  derives the tag from the component name (`block_heading`), which is not
+  the `_type` a fired artifact carries (`heading`);
+- `$schema` becomes `jsonSchemaDialect`, and the root `$id` is dropped: it
+  names the JSON Schema document, which this is not;
+- `info.version` is the fired-artifact format version
+  (`x-kiln.artifact_format_version`), not the Kiln version, so it changes
+  only when the delivered shape does. `x-kiln` is kept as it is.
+
+There are no `paths`: the document describes the payloads of
+`GET /api/content/:type/:slug?surface=json`, not routes. The JSON:API's own
+routes are in `/api/json/open_api`.
+
+```bash
+curl -s 'http://localhost:4000/api/schema?format=openapi&blocks=only' \
+  | jq '.components.schemas.block.discriminator.mapping.heading'
+# "#/components/schemas/block_heading"
+```
+
 ### Generating types at build time
 
 ```bash
 mix kiln.export.schema --out priv/static/schema.json --pretty
 mix kiln.export.schema --format ts --out assets/js/kiln.d.ts
+mix kiln.export.schema --format openapi --out openapi/kiln.openapi.json --pretty
 ```
 
 The `.d.ts` emitter is built in, so no Node toolchain is needed:
@@ -1422,7 +1458,23 @@ export type KilnDocument = PageDocument | PostDocument;
 
 `--blocks-only` skips content types entirely (and the database with them), which
 is what a CI job that only wants block types should use. `--all-orgs --out <dir>`
-writes one document per site; `mix help kiln.export.schema` has the rest.
+writes one document per site (`<org id>.json`, `.d.ts`, `.swift`, `.kt` or
+`.openapi.json`); `mix help kiln.export.schema` has the rest.
+
+To fail a build when committed types have fallen behind the schema, swap
+`--out PATH` for `--check PATH` and keep every other flag the file was written
+with, `--pretty` included:
+
+```bash
+mix kiln.export.schema --format ts --check assets/js/kiln.d.ts
+```
+
+It renders what the same flags would write, compares it with the file, and
+writes nothing. When they match it prints `assets/js/kiln.d.ts is up to date
+(...)`. When they don't, it exits non-zero with `... is out of date: line N is
+"...", the export has "..."` and the command to re-export; a missing file
+fails too. `--check` is refused with `--out` (it writes nothing) and with
+`--all-orgs` (it compares one site's export).
 
 ## Feeds
 

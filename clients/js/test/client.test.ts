@@ -537,6 +537,48 @@ describe("schema", () => {
   });
 });
 
+describe("schemaComponents", () => {
+  it("fetches /api/schema?format=openapi with the same filters", async () => {
+    const body = {
+      openapi: "3.1.0",
+      info: { title: "KilnCMS delivery schema", version: "4" },
+      components: { schemas: { block: { discriminator: { propertyName: "_type" } } } },
+    };
+    const stub = stubFetch({ body });
+
+    const doc = await client(stub, "secret-key").schemaComponents({
+      types: ["post"],
+      blocksOnly: true,
+    });
+
+    const call = stub.calls[0]!;
+    expect(call.url.pathname).toBe("/api/schema");
+    expect(call.url.searchParams.get("format")).toBe("openapi");
+    expect(call.url.searchParams.get("type")).toBe("post");
+    expect(call.url.searchParams.get("blocks")).toBe("only");
+    expect(call.headers.accept).toBe("application/json");
+    expect(call.headers.authorization).toBe("Bearer secret-key");
+    expect(doc.openapi).toBe("3.1.0");
+    expect(Object.keys(doc.components.schemas)).toEqual(["block"]);
+  });
+
+  it("sends only the format by default", async () => {
+    const stub = stubFetch({
+      body: { openapi: "3.1.0", info: {}, components: { schemas: {} } },
+    });
+    await client(stub).schemaComponents();
+    expect(stub.calls[0]!.url.search).toBe("?format=openapi");
+  });
+
+  it("throws KilnHttpError on a refusal", async () => {
+    const stub = stubFetch({ status: 400, body: { errors: [{ code: "invalid_type" }] } });
+
+    await expect(client(stub).schemaComponents({ types: ["nope"] })).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+});
+
 describe("flattenDocument", () => {
   it("flattens data: null (empty to-one primary data) to no items", () => {
     // Valid JSON:API for a to-one read with nothing there — must not throw.

@@ -340,6 +340,7 @@ code `invalid_format`):
 | `typescript-graphql` | A `.ts` **module** (the fragments are values): the declarations above plus, per content type, a `<Type>CustomFields` interface and a `<Type>CustomFieldsFragment` string |
 | `swift-graphql` | The Swift models of the `json` artifact plus, per content type, a `<Type>CustomFields` struct with a `fragment` string (*Typed models from GET /api/schema* in [native-apps.md](native-apps.md)) |
 | `kotlin-graphql` | The Kotlin models (package `kiln`) plus, per content type, a `<Type>CustomFields` data class with a `FRAGMENT` string |
+| `openapi` | The `json` schemas as OpenAPI 3.1 `components.schemas`, for an OpenAPI generator; no GraphQL fragments ([api.md](api.md#the-same-schemas-as-openapi-components)) |
 
 Fetch it at build time and commit the file. A recipe for a front end that
 reads with GraphQL:

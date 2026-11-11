@@ -428,17 +428,35 @@ defmodule KilnClient do
 
   Options: `:types` (a list of content type names, to restrict the
   document), `:blocks_only` (`true` returns the block union alone and reads
-  no database), `:req`.
+  no database), `:format`, `:req`.
+
+  `:format` is `:json` (the default, the JSON Schema document) or `:openapi`:
+  the same schemas as an OpenAPI 3.1 document (`?format=openapi`), with
+  `$defs` under `"components" => %{"schemas" => ...}`, the document union as
+  the `"document"` component and an explicit `_type` mapping on the block
+  union's discriminator — for a generator that reads OpenAPI. Either way the
+  result is a map. The strings `"json"` and `"openapi"` are accepted as well;
+  any other value raises `ArgumentError`.
   """
   @spec schema(keyword()) :: {:ok, map()} | {:error, Error.t()}
   def schema(opts \\ []) do
     params =
       []
+      |> put_param(:format, schema_format(Keyword.get(opts, :format, :json)))
       |> put_param(:type, join_list(opts[:types]))
       |> put_param(:blocks, if(opts[:blocks_only], do: "only"))
 
     json_get("/api/schema", params, opts)
   end
+
+  # Only the formats that answer with JSON: the text renderings
+  # (`typescript`, `swift-graphql`, ...) are not a map.
+  defp schema_format(format) when format in [:json, "json"], do: nil
+  defp schema_format(format) when format in [:openapi, "openapi"], do: "openapi"
+
+  defp schema_format(other),
+    do:
+      raise(ArgumentError, "unknown schema format #{inspect(other)} (expected :json or :openapi)")
 
   # --- headless routing and site structure ---
 
