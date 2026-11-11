@@ -118,6 +118,41 @@ defmodule Mix.Tasks.Kiln.UpdateTest do
       assert breaking =~ "answers 200 where it answered 201"
     end
 
+    # A release's known issues are true of that release. By the target, an
+    # intermediate release's are either fixed (the target's Fixed says so) or
+    # listed again in the target's own section, so only the target's print.
+    test "prints Known issues for the target release only" do
+      changelog = """
+      ## [0.3.0]
+
+      ### Known issues
+
+      - **Search drops accents.** ([#9](https://example.com/9))
+
+      ## [0.2.0]
+
+      ### Upgrade notes
+
+      Run the backfill.
+
+      ### Known issues
+
+      - **Export times out.** ([#8](https://example.com/8))
+      """
+
+      assert [{v2, [{"Upgrade notes", _}]}, {v3, [{"Known issues", known}]}] =
+               Update.upgrade_notes(changelog, version("0.1.0"), version("0.3.0"))
+
+      assert Version.compare(v2, version("0.2.0")) == :eq
+      assert Version.compare(v3, version("0.3.0")) == :eq
+      assert known =~ "Search drops accents"
+
+      assert [{_, [{"Upgrade notes", _}, {"Known issues", known}]}] =
+               Update.upgrade_notes(changelog, version("0.1.0"), version("0.2.0"))
+
+      assert known =~ "Export times out"
+    end
+
     # Everything else a release changed is deliberately not printed: an
     # operator moving a pin is asking what breaks, and #1325 was filed because
     # the answer was buried in the whole entry.

@@ -319,6 +319,19 @@ defmodule KilnClientDeliveryTest do
       assert_received {:request, "GET", "/api/forms/contact", _, _, _}
     end
 
+    test "form passes the new field types and min/max/step through" do
+      body = %{
+        "slug" => "contact",
+        "fields" => [
+          %{"name" => "tags", "type" => "checkboxes", "options" => ["a"], "min" => nil},
+          %{"name" => "qty", "type" => "number", "min" => 0, "max" => 10, "step" => 0.5}
+        ]
+      }
+
+      stub(200, body)
+      assert {:ok, ^body} = KilnClient.form("contact")
+    end
+
     test "an inactive form is :not_found" do
       stub(404, %{"errors" => [%{"status" => "404", "code" => "not_found"}]})
 

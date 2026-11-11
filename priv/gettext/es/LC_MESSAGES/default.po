@@ -1046,6 +1046,11 @@ msgstr "%{n} sin traducir"
 msgid "%{n} matched by position, not identity — check them"
 msgstr "%{n} coincidieron por posición, no por identidad — revísalas"
 
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{n} of %{max}"
+msgstr "%{n} de %{max}"
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{n} unchanged"
@@ -4804,6 +4809,11 @@ msgstr "Revisa tu bandeja de entrada para encontrar el enlace de confirmación. 
 msgid "Checkbox"
 msgstr "Casilla de verificación"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checkbox group"
+msgstr "Grupo de casillas"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Checkboxes"
@@ -8371,15 +8381,30 @@ msgstr "Introduzca un código actual para desactivarla"
 msgid "Enter a date in the format YYYY-MM-DD."
 msgstr "Introduce una fecha con el formato AAAA-MM-DD."
 
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Enter a number."
+msgstr "Introduce un número."
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Enter a path starting with /."
 msgstr "Introduzca una ruta que empiece por /."
 
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Enter a phone number, like +1 555 010 0199."
+msgstr "Introduce un número de teléfono, como +1 555 010 0199."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Enter a valid go-live date and time."
 msgstr "Introduce una fecha y hora de publicación válidas."
+
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Enter a web address starting with http:// or https://."
+msgstr "Introduce una dirección web que empiece por http:// o https://."
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
@@ -10118,6 +10143,16 @@ msgstr "No se pudo contactar con Hex o con el canal de avisos; estos resultados 
 #, elixir-autogen, elixir-format
 msgid "Hidden"
 msgstr "Oculto"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hidden field"
+msgstr "Campo oculto"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hidden field — %{label}"
+msgstr "Campo oculto — %{label}"
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -11902,6 +11937,11 @@ msgstr "Se busca como subcadena, sin distinguir mayúsculas ni saltos de línea,
 msgid "Matching records"
 msgstr "Registros coincidentes"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Max"
+msgstr "Máx."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Maximum"
@@ -12023,6 +12063,11 @@ msgstr "Mensaje"
 #, elixir-autogen, elixir-format
 msgid "Message when it doesn't match"
 msgstr "Mensaje cuando no coincide"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Min"
+msgstr "Mín."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -13953,6 +13998,11 @@ msgstr "noviembre"
 msgid "Number"
 msgstr "Número"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Number (range)"
+msgstr "Número (rango)"
+
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #, elixir-autogen, elixir-format
 msgid "Numbers"
@@ -15090,6 +15140,11 @@ msgstr "%{name} se eliminó permanentemente."
 msgid "Permanently deleted."
 msgstr "Eliminado permanentemente."
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "Teléfono"
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "Photos from Unsplash — importing adds a copy to your library and inserts it here."
@@ -15869,6 +15924,7 @@ msgid "RFC 9116 recommends an expiry less than a year ahead, so a forgotten file
 msgstr "La RFC 9116 recomienda una caducidad a menos de un año, para que un archivo olvidado quede obsoleto."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Radio buttons"
 msgstr "Botones de opción"
@@ -15884,6 +15940,11 @@ msgstr[1] "Clasificadas solo entre etiquetas indexadas; %{count} etiquetas aún 
 #, elixir-autogen, elixir-format
 msgid "Rate"
 msgstr "Tasa"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rating"
+msgstr "Valoración"
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -19464,6 +19525,11 @@ msgstr "Estándar — el aspecto de serie"
 msgid "Standing role"
 msgstr "Rol permanente"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Stars"
+msgstr "Estrellas"
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Start"
@@ -19558,6 +19624,7 @@ msgid "Stays open when this publishes"
 msgstr "Sigue abierta al publicarse"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Step"
 msgstr "Paso"
@@ -23905,6 +23972,11 @@ msgstr "No pudimos encontrar la página que buscaba — puede que se haya movido
 msgid "We couldn't sign you up just now. Please try again shortly."
 msgstr "No hemos podido suscribirte ahora mismo. Inténtalo de nuevo en unos momentos."
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Web address"
+msgstr "Dirección web"
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Webhook added. Copy its signing secret into your receiver."
@@ -25159,6 +25231,16 @@ msgstr "Opción predeterminada sin mantenimiento: genere una clave aquí mismo. 
 msgid "Zero-ops default: paste the secret here. Encrypted with a key derived from SECRET_KEY_BASE — rotate that secret only as the secrets rotation guide describes, or it is lost."
 msgstr "Opción predeterminada sin configuración: pegue el secreto aquí. Cifrado con una clave derivada de SECRET_KEY_BASE: rote ese secreto solo como describe la guía de rotación de secretos, o se pierde."
 
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "a checkboxes field can have at most %{max} options"
+msgstr "un campo de casillas puede tener como máximo %{max} opciones"
+
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "a checkboxes field must list at least one option"
+msgstr "un campo de casillas debe tener al menos una opción"
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "a date an editor suggested. Nothing is published until an admin confirms it and it becomes a scheduled publish."
@@ -25174,6 +25256,11 @@ msgstr "a dividido entre b. Vacío cuando b es cero."
 msgid "a field that is gone"
 msgstr "un campo que ya no existe"
 
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "a hidden field can't be required"
+msgstr "un campo oculto no puede ser obligatorio"
+
 #: lib/kiln_cms/cms/computed.ex
 #, elixir-autogen, elixir-format
 msgid "a minus b."
@@ -25183,6 +25270,16 @@ msgstr "a menos b."
 #, elixir-autogen, elixir-format
 msgid "a minute"
 msgstr "un minuto"
+
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "a radio field must list at least one option"
+msgstr "un campo de botones de opción debe tener al menos una opción"
+
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "a rating only has a star count"
+msgstr "una valoración solo tiene un número de estrellas"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -25203,6 +25300,11 @@ msgstr "un lanzamiento que se publicó."
 #, elixir-autogen, elixir-format
 msgid "a segment that no longer exists"
 msgstr "un segmento que ya no existe"
+
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "a select field must list at least one option"
+msgstr "un campo de lista desplegable debe tener al menos una opción"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
@@ -25377,6 +25479,11 @@ msgstr "por"
 #, elixir-autogen, elixir-format
 msgid "can read: %{grants}"
 msgstr "puede leer: %{grants}"
+
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "can't be more than the maximum (%{max})"
+msgstr "no puede superar el máximo (%{max})"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -25708,6 +25815,11 @@ msgid_plural "each %{type} can be linked from at most %{count} %{source} records
 msgstr[0] "cada %{type} se puede enlazar desde un solo registro de %{source}"
 msgstr[1] "cada %{type} se puede enlazar desde %{count} registros de %{source} como máximo"
 
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "each option must be at most %{max} characters"
+msgstr "cada opción debe tener como máximo %{max} caracteres"
+
 #: lib/kiln_cms_web/live/content_editor/inspector_history_component.ex
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
@@ -25999,6 +26111,11 @@ msgstr "supera su fecha de revisión"
 msgid "is published"
 msgstr "se publica"
 
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "is reserved for spam protection"
+msgstr "está reservado para la protección antispam"
+
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "is sent back to draft"
@@ -26186,6 +26303,16 @@ msgstr "ausente"
 #, elixir-autogen, elixir-format
 msgid "more conversions than impressions — these counters are not trustworthy"
 msgstr "más conversiones que impresiones: estos contadores no son fiables"
+
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "must be a whole number from 1 to %{max}"
+msgstr "debe ser un número entero de 1 a %{max}"
+
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "must be greater than zero"
+msgstr "debe ser mayor que cero"
 
 #: lib/kiln_cms/cms/validations/field_condition.ex
 #, elixir-autogen, elixir-format
@@ -26375,6 +26502,21 @@ msgstr "uno, dos, tres"
 #, elixir-autogen, elixir-format
 msgid "one-way"
 msgstr "en un sentido"
+
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "only a number or rating field takes a range"
+msgstr "solo un campo de número o valoración admite un rango"
+
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "options can't be blank"
+msgstr "las opciones no pueden estar en blanco"
+
+#: lib/kiln_cms/cms/validations/form_field_config.ex
+#, elixir-autogen, elixir-format
+msgid "options must be unique"
+msgstr "las opciones deben ser únicas"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format

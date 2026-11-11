@@ -1311,6 +1311,16 @@ carries the reasoning.
   Rolling the pin back is safe: the previous release ignores the extra
   attributes and the wrapper.
 
+<a id="form-field-types-upgrade"></a>
+
+- **Forms: the new field types need every node on this release.** `field_type`
+  is stored as text, so adding values needs no enum migration, but Ash casts a
+  stored atom with `String.to_existing_atom`: a node still running the previous
+  release cannot load a row naming `radio`, `rating` and the rest, and the public
+  form page fails to load. Rolling back the image therefore breaks any form that
+  uses a new type. Don't add one until the rollout has finished. The migration
+  itself is expand-only (three nullable float columns on `form_fields`).
+
 ## Breaking
 
 <a id="public-chrome-follows-url-locale"></a>
@@ -1586,6 +1596,19 @@ carries the reasoning.
   - **No migration, no new environment variable.** Rolling the pin back
     removes the format and the flag; `?format=openapi` then answers `400`.
 
+<a id="form-field-types"></a>
+
+- **Forms: `radio`, `checkboxes`, `phone`, `url`, `hidden`, `number` and `rating`
+  fields (#2261).** `select` and `boolean` are unchanged. Every value is
+  validated server-side: checkboxes store a list in option order (post
+  `name[]`), `number` takes optional min/max/step (whole values store as
+  integers), `rating` is an integer 1 to N stars (N up to 10, default 5), `url`
+  is http(s) with a host and no credentials, `phone` is 6 to 15 digits, and
+  `hidden` is submitter-controlled free text. `GET /api/forms/<slug>` gains
+  additive `min`, `max` and `step` keys. List values are joined with `", "` in
+  mail, autoresponder tokens, the Entries tab and the CSV export. See
+  [docs/forms.md](../forms.md).
+
 <a id="change-feed-sse"></a>
 
 - **`GET /api/feed`: the change feed as Server-Sent Events, with resume
@@ -1710,6 +1733,32 @@ carries the reasoning.
     raises a security alert.
   Guide: [security-events.md](../security-events.md#the-instance-log).
   ([#2541](https://github.com/The-Verscienta/kiln_cms/issues/2541))
+
+<a id="release-documentation"></a>
+
+- **Every minor release now gets a documentation pass, and the changelog can
+  say what is still broken.** Each pull request documented its own change, but
+  nothing at release time checked that guides written for an earlier change
+  were still true, nobody wrote an overview of the release with examples, and
+  a bug the release shipped with lived only in its issue.
+  - **`### Known issues`** is a changelog section, between Breaking and
+    Added. Each entry is a note: the symptom in bold, who is affected, the
+    workaround, and the tracking issue. `mix kiln.changelog --check` accepts
+    it and `--condense` treats it like Upgrade notes.
+  - **`mix kiln.update` prints the target release's Known issues** after its
+    Upgrade notes and Breaking sections. An intermediate release's known
+    issues are not printed: by the target, each has been fixed or is listed
+    again.
+  - **What's new guides.** `docs/whats-new/vX.Y.md`, written from
+    `docs/whats-new/TEMPLATE.md`, covers the headline features with working
+    examples, the breaking changes with code before and after, deprecations
+    and known issues. `mix.exs` lists every `docs/whats-new/v*.md` under a
+    new *What's new* group, newest first, and the docs publisher puts that
+    group on kilncms.dev/docs.
+  - **The process** is `docs/releasing.md` → "Documenting a release", which
+    step 1 of "Cutting a release" now requires. The `/release-docs` command
+    runs it with the `documenter` agent, one batch of areas per agent, and
+    asks the maintainer which known issues to publish.
 
 <a id="security-posture-json"></a>
 

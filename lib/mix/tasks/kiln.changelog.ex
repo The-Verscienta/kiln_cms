@@ -13,8 +13,8 @@ defmodule Mix.Tasks.Kiln.Changelog do
   So the file is split by audience:
 
     * `CHANGELOG.md` — one line per change, under
-      **Upgrade notes / Breaking / Added / Changed / Fixed / Security /
-      Removed**. Skimmable in a minute.
+      **Upgrade notes / Breaking / Known issues / Added / Changed / Fixed /
+      Security / Removed / Deprecated**. Skimmable in a minute.
     * `docs/changelog/vX.Y.Z.md` — the long-form entries for that release,
       verbatim, one anchor per entry. Linked from every summary line that was
       shortened.
@@ -40,7 +40,7 @@ defmodule Mix.Tasks.Kiln.Changelog do
       the reasoning in the pull request;
     * an entry carries no link at all (no issue/PR reference and no long-form
       link), so a reader has nowhere to go for the detail;
-    * a release uses a section name outside the seven above;
+    * a release uses a section name outside the nine above;
     * a long-form link points at a file or anchor that does not exist;
     * two summaries in one release link the *same* long form — the archive has
       one block under that anchor, and `--condense` would write it out once per
@@ -100,12 +100,15 @@ defmodule Mix.Tasks.Kiln.Changelog do
   @unreleased_max_lines 3
 
   # The order sections are emitted in. "Upgrade notes" and "Breaking" lead
-  # because they are the two an operator moving a pin has to read; the rest
-  # follow Keep a Changelog. `Upgrading` is the old spelling, still present in
+  # because they are the two an operator moving a pin has to read; "Known
+  # issues" follows them, because a bug the release ships with is the next
+  # thing that decides whether to upgrade today; the rest follow Keep a
+  # Changelog. `Upgrading` is the old spelling, still present in
   # released tags, and is normalized on the way in.
   @section_order [
     "Upgrade notes",
     "Breaking",
+    "Known issues",
     "Added",
     "Changed",
     "Fixed",
@@ -117,8 +120,9 @@ defmodule Mix.Tasks.Kiln.Changelog do
   @legacy_sections %{"Upgrading" => "Upgrade notes"}
 
   # Sections written as prose an operator acts on, rather than as one bullet
-  # per change.
-  @note_sections ["Upgrade notes", "Breaking"]
+  # per change. All three are written at the release cut, not in the pull
+  # request behind them, so they take only the references their text carries.
+  @note_sections ["Upgrade notes", "Breaking", "Known issues"]
 
   # What this task — and only this task — writes onto a summary it shortened.
   # An issue link is not enough: `--check` itself tells contributors to write
@@ -558,11 +562,12 @@ defmodule Mix.Tasks.Kiln.Changelog do
     {text, text, []}
   end
 
-  # `Upgrade notes` and `Breaking` are prose an operator acts on — paragraphs
-  # with a bold lead, not bullets — and they are written in the release-cut
-  # commit rather than in the pull request that caused them, so unlike an entry
-  # they take only the references their own text carries. The git fallback here
-  # would name the release commit, which tells nobody anything.
+  # `Upgrade notes`, `Breaking` and `Known issues` are prose an operator acts
+  # on — paragraphs with a bold lead, not bullets — and they are written in the
+  # release-cut commit rather than in the pull request that caused them, so
+  # unlike an entry they take only the references their own text carries. The
+  # git fallback here would name the release commit, which tells nobody
+  # anything.
   defp condense_section(_release, name, section, {_prs, kept, anchors}, archive_path)
        when name in @note_sections do
     {summaries, archived} =

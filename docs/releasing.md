@@ -53,6 +53,116 @@ needs nothing from Hex. Two things tie the two together:
 SemVer for the package mirrors the core's contract: a minor adds (a callback
 with a default, a DSL option), a major only alongside a core major.
 
+## Documenting a release
+
+Each pull request documents its own change: its changelog entry and its
+guide, written by its author (or the `documenter` agent) when it merges. That
+is not enough by release time, for three reasons:
+
+- **Guides drift.** A guide is accurate the day its feature merges. A later
+  pull request that changes a default, a label or a response shape updates the
+  guide it is thinking about, and can miss the other three that mention it.
+- **Nobody writes the overview.** The changelog lists every change, one line
+  each, and the long form explains why each was made. Neither one shows a
+  reader what is new in the release or how to use it.
+- **Known bugs go unrecorded.** A bug found during the canary that does not
+  block the release, or a fix deferred to the next one, is in an issue that no
+  upgrading operator will read.
+
+So every minor and major release gets a documentation pass. Start it once the
+release's scope is frozen, before the first candidate, so the candidate's
+canary publishes the new docs to kilncms.dev and they get read. Finish it
+before the final release. A patch release that only fixes things needs only
+step 4. `/release-docs` (in `.claude/commands/`) runs steps 1 to 4 with
+agents and stops before committing. The steps:
+
+1. **List what shipped.** Everything merged since the last release:
+
+   ```bash
+   git log --first-parent --format='%h %s' vA.B.C..origin/main
+   ```
+
+   and the `## [Unreleased]` summary lines in `CHANGELOG.md`. Each line under
+   Added, Changed, Breaking, Removed and Deprecated is a feature whose
+   documentation the next step checks.
+
+2. **Check every affected guide against the release.** For each change,
+   find every guide that describes the area, not only the one its pull
+   request edited (`git grep -l` the feature's names, labels and env vars
+   across `docs/` and `README.md`). Read each one against the code at
+   `origin/main` and fix whatever is no longer true:
+
+   - UI labels, menu paths and the role each action needs;
+   - defaults, limits and env vars. [`environment-variables.md`](environment-variables.md)
+     lists every env var, and [`system-requirements.md`](system-requirements.md)
+     lists what a host needs;
+   - request and response examples, and the regenerated API specs
+     (`mix kiln.api.specs`);
+   - anything removed or deprecated: delete it from the guides, or mark it
+     deprecated with its replacement;
+   - the entry points, [`getting-started.md`](getting-started.md),
+     [`reading-paths.md`](reading-paths.md) and the README's feature list,
+     for any headline feature that should be on them.
+
+   A guide whose area changed in the range but whose file did not is the
+   likeliest one to be stale. Compare the two lists:
+
+   ```bash
+   git diff --stat vA.B.C..origin/main -- lib/ | sort -k3 -nr | head -40
+   git diff --stat vA.B.C..origin/main -- docs/ README.md
+   ```
+
+3. **Write the release's What's new guide**, `docs/whats-new/vX.Y.md`, from
+   [`docs/whats-new/TEMPLATE.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/whats-new/TEMPLATE.md).
+   It is the page a reader opens first. It covers each headline feature with
+   a working example and a link to its guide, what works differently, every
+   breaking change with the code before and after, deprecations, known
+   issues, and which guides changed. `mix.exs` picks the file up by its name,
+   so ExDoc and kilncms.dev/docs list it under *What's new* with no other
+   change. Run every example, or copy its shape from a test.
+
+   Then link it from the release's changelog entry, as the release's
+   preamble, so CHANGELOG.md, the GitHub release and kilncms.dev/releases all
+   lead with it:
+
+   ```markdown
+   ## [X.Y.0] - YYYY-MM-DD
+
+   What's new, with examples and migration steps: [docs/whats-new/vX.Y.md](docs/whats-new/vX.Y.md).
+   ```
+
+   `mix kiln.changelog --condense` keeps a release's preamble as written.
+
+4. **Record the known issues.** Every bug the release ships with that a
+   user or operator could hit goes under `### Known issues` in the release's
+   changelog entry (under `## [Unreleased]` while it is a candidate). Sources:
+   open `bug` issues that reproduce on the release
+   (`gh issue list --label bug --state open`), canary and rehearsal findings
+   that did not block it, and fixes deferred out of it. Write each one as a
+   note: the symptom in bold, as a user would describe it, then who is
+   affected, the workaround, and the tracking issue. An invented example:
+
+   ```markdown
+   ### Known issues
+
+   - **Exporting a site with more than 10,000 entries times out.** Affects
+     `mix kiln.export.content` without `--type`. Until it is fixed, export
+     one content type at a time with `--type`. ([#1234](https://github.com/The-Verscienta/kiln_cms/issues/1234))
+   ```
+
+   `mix kiln.update` prints the target release's Known issues next to its
+   Upgrade notes and Breaking sections, so this list is what an operator sees
+   before deciding to upgrade. An earlier release's known issues are not
+   printed: by the target, each one was either fixed (and its Fixed section
+   says so) or is still open, and then belongs on the target's own list too.
+   Copy the list into the What's new guide. When a patch fixes one, the patch
+   says so under Fixed, and the guide marks it **Fixed in X.Y.Z** without
+   removing it. A released changelog section is never edited.
+
+5. **Check the docs build.** `mix docs` must finish without warnings, and
+   `mix test test/kiln_cms/docs test/scripts/publish_docs_test.exs` checks
+   the links between guides and what the publisher will put on /docs.
+
 ## Cutting a release
 
 1. **Confirm CI is green on `main`.** The `overlay_drift` job is the one that
@@ -85,6 +195,10 @@ with a default, a DSL option), a major only alongside a core major.
    version and the deploy templates, the change was never canaried: cut
    another candidate, or say in the release commit why it needs none.
 
+   The [documentation pass](#documenting-a-release) must be finished too: the
+   guides checked, the What's new guide written, and the known issues
+   recorded.
+
 2. **Write the changelog entry.** Move `## [Unreleased]` items into a new
    `## [X.Y.Z]` section, and rename `docs/changelog/unreleased.md` to
    `docs/changelog/vX.Y.Z.md` — it already holds the long form of everything
@@ -105,7 +219,13 @@ with a default, a DSL option), a major only alongside a core major.
    - a response shape, status code or route that changed;
    - anything a subproject must change to keep compiling.
 
-   Write both as imperative steps. Those two sections are the **only** thing
+   Keep the `### Known issues` subsection from the
+   [documentation pass](#documenting-a-release), and check that every issue on
+   it is still open. Start the release's entry with the one-line link to its
+   What's new guide.
+
+   Write all three as imperative steps or plain symptoms. Upgrade notes,
+   Breaking and the target's Known issues are the **only** thing
    `mix kiln.update` prints before it moves anyone's pin (#1325), so they are
    the last chance to warn an operator — and everything else you want to say
    belongs in the entry itself, which the next step files away.
@@ -212,7 +332,8 @@ with a default, a DSL option), a major only alongside a core major.
    itself published from the GitHub release, so the release is still the
    step that makes a version visible.)
 
-   Paste the changelog section in as the release body.
+   Paste the changelog section in as the release body. Its first line links
+   the What's new guide, so the release page leads with it.
 
    Publishing it also runs `.github/workflows/publish-releases.yml`, which
    posts the release's notes (`docs/changelog/vX.Y.Z.md`) to kilncms.dev at

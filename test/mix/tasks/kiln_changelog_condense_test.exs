@@ -110,6 +110,46 @@ defmodule Mix.Tasks.Kiln.ChangelogCondenseTest do
     assert printed =~ "`POST /api/b` now requires"
   end
 
+  # Known issues are written at the release cut, like Upgrade notes: one note
+  # per issue, each carrying the issue it links. They lead the release's
+  # change sections, and the operator moving a pin to this release sees them.
+  test "a Known issues section condenses, passes --check and is printed", %{tmp_dir: dir} do
+    write_changelog!(dir, """
+    ## [0.9.0] - 2026-09-20
+
+    ### Added
+
+    - **A feature.** ([#7](https://github.com/The-Verscienta/kiln_cms/pull/7))
+
+    ### Known issues
+
+    - **Exporting a site with more than 10,000 entries times out.** Export in
+      batches with `--since` until the fix ships; the workaround keeps every
+      entry. ([#41](https://github.com/The-Verscienta/kiln_cms/issues/41))
+
+    - **The media grid flickers in Safari 18.**
+      ([#42](https://github.com/The-Verscienta/kiln_cms/issues/42))
+    """)
+
+    condense!(dir)
+    first = snapshot(dir)
+    condense!(dir)
+    assert snapshot(dir) == first
+    check!(dir)
+
+    changelog = read!(dir, "CHANGELOG.md")
+    [_, after_known] = String.split(changelog, "### Known issues")
+    assert after_known =~ "### Added"
+    assert changelog =~ "**Exporting a site with more than 10,000 entries times out.**"
+    assert read!(dir, "docs/changelog/v0.9.0.md") =~ "Export in"
+
+    [{_, [{"Known issues", printed}]}] =
+      Update.upgrade_notes(changelog, Version.parse!("0.8.0"), Version.parse!("0.9.0"))
+
+    assert printed =~ "10,000 entries times out"
+    assert printed =~ "flickers in Safari 18"
+  end
+
   test "a list inside a bold-lead note stays with that note", %{tmp_dir: dir} do
     write_changelog!(dir, """
     ## [0.9.0] - 2026-09-20

@@ -118,6 +118,42 @@ describe("form and submitForm", () => {
     expect(stub.calls[0]!.url.pathname).toBe("/api/forms/contact");
   });
 
+  it("form passes the new field types and min/max/step through untouched", async () => {
+    const field = (type: string, extra = {}) => ({
+      name: type,
+      label: type,
+      type,
+      required: false,
+      options: [],
+      help_text: null,
+      placeholder: null,
+      default_value: null,
+      width: "full",
+      min: null,
+      max: null,
+      step: null,
+      ...extra,
+    });
+    const body = {
+      slug: "contact",
+      honeypot_field: "website",
+      fields: [
+        field("checkboxes", { options: ["a", "b"] }),
+        field("number", { min: 0, max: 10, step: 0.5 }),
+        field("rating", { min: 1, max: 5 }),
+      ],
+    };
+    const got = await client(stubFetch({ body })).form("contact");
+    expect(got.fields.map((f) => f.type)).toEqual(["checkboxes", "number", "rating"]);
+    expect(got.fields[1]).toMatchObject({ min: 0, max: 10, step: 0.5 });
+  });
+
+  it("submitForm sends a checkboxes answer as a JSON array", async () => {
+    const stub = stubFetch({ body: { ok: true, message: "Thanks!" } });
+    await client(stub).submitForm("contact", { tags: ["a", "b"], stars: 4 });
+    expect(stub.calls[0]!.body).toEqual({ tags: ["a", "b"], stars: 4 });
+  });
+
   it("submitForm posts the values as JSON and never sends the client's key", async () => {
     const stub = stubFetch({ body: { ok: true, message: "Thanks!" } });
 

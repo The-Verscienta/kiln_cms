@@ -58,6 +58,6 @@ defmodule KilnCMS.Forms.NotificationWorker do
   end
 
   defp h(value) do
-    value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+    value |> Forms.display_value() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
   end
 end

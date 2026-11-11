@@ -41,7 +41,10 @@ defmodule KilnCMSWeb.FormBuilderLive do
     "options" => :options,
     "placeholder" => :placeholder,
     "default_value" => :default_value,
-    "help_text" => :help_text
+    "help_text" => :help_text,
+    "min_value" => :min_value,
+    "max_value" => :max_value,
+    "step" => :step
   }
 
   @impl true
@@ -91,9 +94,25 @@ defmodule KilnCMSWeb.FormBuilderLive do
       %{type: :integer, label: gettext("Number"), icon: "hero-hashtag"},
       %{type: :boolean, label: gettext("Checkbox"), icon: "hero-check-circle"},
       %{type: :date, label: gettext("Date"), icon: "hero-calendar"},
-      %{type: :select, label: gettext("Dropdown"), icon: "hero-chevron-up-down"}
+      %{type: :select, label: gettext("Dropdown"), icon: "hero-chevron-up-down"},
+      %{type: :radio, label: gettext("Radio buttons"), icon: "hero-stop-circle"},
+      %{type: :checkboxes, label: gettext("Checkbox group"), icon: "hero-list-bullet"},
+      %{type: :phone, label: gettext("Phone"), icon: "hero-phone"},
+      %{type: :url, label: gettext("Web address"), icon: "hero-link"},
+      %{type: :number, label: gettext("Number (range)"), icon: "hero-calculator"},
+      %{type: :rating, label: gettext("Rating"), icon: "hero-star"},
+      %{type: :hidden, label: gettext("Hidden field"), icon: "hero-eye-slash"}
     ]
   end
+
+  # Types whose value is picked from `options`.
+  @choice_types [:select, :radio, :checkboxes]
+
+  # Types with no free-text input to put a placeholder in.
+  defp no_placeholder?(type),
+    do: type in [:boolean, :select, :radio, :checkboxes, :rating, :hidden]
+
+  defp starter_options, do: [gettext("Option 1"), gettext("Option 2")]
 
   # --- tabs --------------------------------------------------------------------
 
@@ -117,8 +136,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
         name: unique_name(Atom.to_string(entry.type), fields),
         label: entry.label,
         field_type: entry.type,
-        options:
-          if(entry.type == :select, do: [gettext("Option 1"), gettext("Option 2")], else: []),
+        options: if(entry.type in @choice_types, do: starter_options(), else: []),
         position: next_position(fields)
       }
 
@@ -435,19 +453,14 @@ defmodule KilnCMSWeb.FormBuilderLive do
   # --- data --------------------------------------------------------------------
 
   defp copy_field(socket, field, fields) do
-    attrs = %{
-      form_id: field.form_id,
-      name: unique_name(field.name, fields),
-      label: field.label,
-      field_type: field.field_type,
-      required: field.required,
-      options: field.options,
-      help_text: field.help_text,
-      placeholder: field.placeholder,
-      default_value: field.default_value,
-      width: field.width,
-      position: field.position
-    }
+    attrs =
+      field
+      |> KilnCMS.Forms.copyable_field_attrs()
+      |> Map.merge(%{
+        form_id: field.form_id,
+        name: unique_name(field.name, fields),
+        position: field.position
+      })
 
     case CMS.create_form_field(attrs, actor_opts(socket)) do
       {:ok, copy} ->
@@ -514,8 +527,12 @@ defmodule KilnCMSWeb.FormBuilderLive do
   end
 
   # Options-panel params → update attrs. Options arrive newline-separated (only
-  # while the textarea is rendered, i.e. the field is a select); switching a
-  # field *to* select seeds a starter option so it stays valid.
+  # while the textarea is rendered, i.e. the field is a select/radio/checkboxes).
+  # The panel posts the inputs of the field's OLD type along with the new
+  # `field_type`, so a type change drops what the new type can't carry
+  # (range, default, options, placeholder) and seeds starter options when it
+  # becomes a choice type — otherwise e.g. number -> rating would save a
+  # `step` a rating rejects.
   defp field_params(params, field) do
     params = Map.drop(params, ["id", "_target"])
 
@@ -532,13 +549,40 @@ defmodule KilnCMSWeb.FormBuilderLive do
           params
       end
 
-    if params["field_type"] == "select" and field.options == [] and
-         params["options"] in [nil, []] do
-      Map.put(params, "options", [gettext("Option 1"), gettext("Option 2")])
-    else
-      params
-    end
+    new_type = params["field_type"]
+
+    if new_type in [nil, Atom.to_string(field.field_type)],
+      do: params,
+      else: retype_params(params, field, new_type)
   end
+
+  defp retype_params(params, field, new_type) do
+    entry = Enum.find(palette(), &(Atom.to_string(&1.type) == new_type))
+    type = entry && entry.type
+
+    params
+    |> Map.merge(%{
+      "min_value" => nil,
+      "max_value" => nil,
+      "step" => nil,
+      "default_value" => nil,
+      "options" => retyped_options(type, params["options"] || field.options)
+    })
+    |> then(fn params ->
+      if no_placeholder?(type), do: Map.put(params, "placeholder", nil), else: params
+    end)
+    |> then(fn params ->
+      if type == :hidden, do: Map.put(params, "required", "false"), else: params
+    end)
+  end
+
+  defp retyped_options(type, options) when type in @choice_types,
+    do: if(options in [nil, []], do: starter_options(), else: options)
+
+  # A non-choice type keeps the stored options (the renderer and validation
+  # ignore them), so switching back to a choice type restores the list instead
+  # of reseeding it.
+  defp retyped_options(_type, options), do: options || []
 
   # Opening, switching or closing the options panel starts it clean: a
   # refused value, its error and the last save's status belong to the field
@@ -558,7 +602,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
   end
 
   # The inputs that render their own errors (`<.setting_errors>` below).
-  @error_slots ~w(label name field_type options placeholder default_value help_text)
+  @error_slots ~w(label name field_type options placeholder default_value help_text min_value max_value step)
 
   defp edited_params(params, ["field", key]) when is_map_key(@field_keys, key),
     do: Map.take(params, [key])
@@ -962,6 +1006,11 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   <fieldset disabled class="pointer-events-none select-none">
                     <.public_form_field field={field} />
                   </fieldset>
+                  <%!-- A hidden input draws nothing, so the card would be blank. --%>
+                  <p :if={field.field_type == :hidden} class="text-sm text-base-content/70">
+                    <.icon name="hero-eye-slash" class="size-4 align-text-bottom" />
+                    {gettext("Hidden field — %{label}", label: field.label)}
+                  </p>
                   <%!-- The key entries are stored under — so a rename shows here. --%>
                   <p
                     id={"canvas-field-name-#{field.id}"}
@@ -1097,7 +1146,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     {gettext("Required")}
                   </label>
 
-                  <div :if={selected.field_type == :select}>
+                  <div :if={selected.field_type in [:select, :radio, :checkboxes]}>
                     <label for="fs-options" class="font-medium">
                       {gettext("Options — one per line")}
                     </label>
@@ -1113,7 +1162,63 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     <.setting_errors key="options" errors={@field_errors} />
                   </div>
 
-                  <div :if={selected.field_type not in [:boolean, :select]}>
+                  <div :if={selected.field_type == :number} class="grid grid-cols-3 gap-2">
+                    <div>
+                      <label for="fs-min" class="font-medium">{gettext("Min")}</label>
+                      <input
+                        id="fs-min"
+                        type="number"
+                        step="any"
+                        name="field[min_value]"
+                        value={selected.min_value}
+                        phx-debounce="300"
+                        class="field-input mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label for="fs-max" class="font-medium">{gettext("Max")}</label>
+                      <input
+                        id="fs-max"
+                        type="number"
+                        step="any"
+                        name="field[max_value]"
+                        value={selected.max_value}
+                        phx-debounce="300"
+                        class="field-input mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label for="fs-step" class="font-medium">{gettext("Step")}</label>
+                      <input
+                        id="fs-step"
+                        type="number"
+                        step="any"
+                        min="0"
+                        name="field[step]"
+                        value={selected.step}
+                        phx-debounce="300"
+                        class="field-input mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  <div :if={selected.field_type == :rating}>
+                    <label for="fs-stars" class="font-medium">{gettext("Stars")}</label>
+                    <input
+                      id="fs-stars"
+                      type="number"
+                      min="1"
+                      max="10"
+                      step="1"
+                      name="field[max_value]"
+                      value={selected.max_value && trunc(selected.max_value)}
+                      placeholder="5"
+                      phx-debounce="300"
+                      class="field-input mt-1"
+                    />
+                  </div>
+
+                  <div :if={!no_placeholder?(selected.field_type)}>
                     <label for="fs-placeholder" class="font-medium">{gettext("Placeholder")}</label>
                     <input
                       id="fs-placeholder"
@@ -1611,7 +1716,9 @@ defmodule KilnCMSWeb.FormBuilderLive do
                         {field.name}
                       </span>
                     </dt>
-                    <dd class="min-w-0 break-words text-base-content/80">{to_string(value)}</dd>
+                    <dd class="min-w-0 break-words text-base-content/80">
+                      {KilnCMS.Forms.display_value(value)}
+                    </dd>
                   </div>
                 </dl>
                 <div
@@ -1625,7 +1732,9 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   <dl class="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
                     <div :for={{key, value} <- orphaned} class="flex gap-2">
                       <dt class="font-mono text-xs">{key}</dt>
-                      <dd class="min-w-0 break-words text-base-content/80">{to_string(value)}</dd>
+                      <dd class="min-w-0 break-words text-base-content/80">
+                        {KilnCMS.Forms.display_value(value)}
+                      </dd>
                     </div>
                   </dl>
                 </div>

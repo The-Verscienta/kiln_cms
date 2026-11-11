@@ -1792,6 +1792,23 @@ and keeps its height in sync with the content, so there's no inner scrollbar.
 Optional attributes: `data-kiln-origin` (CMS base URL, defaults to the script's
 own origin), `data-kiln-title`, `data-kiln-height` (initial px).
 
+**Schema.** `GET /api/forms/:slug` returns each field as `name`, `label`,
+`type`, `required`, `options`, `help_text`, `placeholder`, `default_value`,
+`width`, and `min`, `max`, `step`. `type` is one of `string`, `text`, `email`,
+`integer`, `boolean`, `date`, `select`, `radio`, `checkboxes`, `phone`, `url`,
+`hidden`, `number`, `rating`; treat a type you do not know as `text`, since the
+list only grows. `options` is filled for `select`, `radio` and `checkboxes`
+(`[]` otherwise). `min`/`max`/`step` are `null` except on `number` (the bounds
+and step the admin set, each possibly `null`) and `rating` (`min` is `1`,
+`max` the star count, `5` when unset). The keys are additive: older clients
+ignore them. Each type's accepted input is in [forms.md](forms.md#field-types).
+
+**Submitting.** `POST /api/forms/:slug` takes JSON values by field name.
+`checkboxes` is a JSON array of option strings (`"tags": ["a", "b"]`);
+`number` and `rating` may be JSON numbers or numeric strings. The
+form-encoded `POST /forms/:slug` sends a checkboxes group as repeated
+`tags[]=a&tags[]=b`. Refusals are `{"ok": false, "errors": {"<field>": "…"}}`.
+
 Submissions post to the normal `POST /forms/:slug` endpoint and render the
 form's success message inside the iframe. No CORS is involved: the iframe is
 served *from* the CMS origin, so its form post is same-origin.
