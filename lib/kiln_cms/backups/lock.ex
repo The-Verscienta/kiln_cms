@@ -34,9 +34,27 @@ defmodule KilnCMS.Backups.Lock do
   ## The queued request
 
   `waiting_*` hold at most one request behind the holder. A further request
-  folds into it (`:fold`: `waiting_folds` + 1); `:hold` clears the waiting
+  of the same kind folds into it (`:fold`: `waiting_folds` + 1; any other is
+  refused, `KilnCMS.Backups.Chain.request/1`); `:hold` clears the waiting
   fields because it is either a free lock (nothing waits) or the waiting request
   being promoted.
+
+  ## What the queued request covers (#2219)
+
+  `waiting_components` (nil: everything), `waiting_scheduled` and
+  `waiting_schedule_ids` say what the queued request backs up. They count only
+  while their **scope** is the current request's: `:queue_waiting` sets
+  `waiting_scope_at` to the same instant as `waiting_requested_at` and
+  `waiting_scope_folds` to 0, and `:fold` sets them to the request's
+  `waiting_requested_at` and the new `waiting_folds`, each in the same
+  statement. A node from before #2219 writes the queued request without them
+  (its `:queue_waiting` and `:fold` don't know these columns, and its `:hold`
+  doesn't clear them), so the two no longer agree and the queued request
+  covers everything (`KilnCMS.Backups.Chain.waiting_scope/1`).
+
+  The holder's own components are not on the row: an older node's `:hold` and
+  `:clear` would leave them stale. They travel in the start job's args and the
+  chain's `state.json`.
 
   ## Who writes
 
@@ -51,6 +69,7 @@ defmodule KilnCMS.Backups.Lock do
     authorizers: [Ash.Policy.Authorizer]
 
   @steps [:start, :dump, :plan, :archive, :checksum, :prune, :offsite, :finish]
+  @components [:db, :media]
   @stamp ~r/\A\d{8}-\d{6}\z/
 
   postgres do
@@ -86,6 +105,11 @@ defmodule KilnCMS.Backups.Lock do
       change set_attribute(:waiting_requested_by, nil)
       change set_attribute(:waiting_folds, 0)
       change set_attribute(:last_folded_at, nil)
+      change set_attribute(:waiting_components, nil)
+      change set_attribute(:waiting_scheduled, nil)
+      change set_attribute(:waiting_schedule_ids, nil)
+      change set_attribute(:waiting_scope_at, nil)
+      change set_attribute(:waiting_scope_folds, nil)
     end
 
     # The chain's next step (or a reclaimed step's replacement job).
@@ -131,16 +155,31 @@ defmodule KilnCMS.Backups.Lock do
       change set_attribute(:acquired_at, nil)
     end
 
+    # One timestamp for both columns: that is what makes the scope this
+    # request's (see "What the queued request covers").
     update :queue_waiting do
-      accept [:waiting_trigger, :waiting_resume_stamp, :waiting_requested_by]
-      change atomic_update(:waiting_requested_at, expr(now()))
+      accept [
+        :waiting_trigger,
+        :waiting_resume_stamp,
+        :waiting_requested_by,
+        :waiting_components,
+        :waiting_scheduled,
+        :waiting_schedule_ids
+      ]
+
+      change KilnCMS.Backups.Lock.Changes.StampWaiting
       change set_attribute(:waiting_folds, 0)
+      change set_attribute(:waiting_scope_folds, 0)
       change set_attribute(:last_folded_at, nil)
     end
 
+    # The caller (`Chain`) works out what the queued request covers once this
+    # one folds into it; the scope is re-stamped in the same statement.
     update :fold do
-      accept []
+      accept [:waiting_components, :waiting_scheduled, :waiting_schedule_ids]
       change atomic_update(:waiting_folds, expr(waiting_folds + 1))
+      change atomic_update(:waiting_scope_folds, expr(waiting_folds + 1))
+      change atomic_update(:waiting_scope_at, expr(waiting_requested_at))
       change atomic_update(:last_folded_at, expr(now()))
     end
 
@@ -151,6 +190,12 @@ defmodule KilnCMS.Backups.Lock do
 
       argument :resume, :string do
         constraints match: @stamp
+      end
+
+      # What to back up (#2219); nil is everything. Refused together with
+      # `resume` (a resume backs up what the run did).
+      argument :components, {:array, :atom} do
+        constraints items: [one_of: @components], min_length: 1
       end
 
       # `KilnCMS.Backups.Chain` opens its own lock transaction, and must be able
@@ -277,9 +322,30 @@ defmodule KilnCMS.Backups.Lock do
 
     attribute :last_folded_at, :utc_datetime_usec, public?: true
 
+    # What the queued request backs up (#2219); see "What the queued request
+    # covers". Nil components: everything.
+    attribute :waiting_components, {:array, :atom} do
+      constraints items: [one_of: @components]
+      public? true
+    end
+
+    # The components a schedule asked for, and which schedules (#2219).
+    attribute :waiting_scheduled, {:array, :atom} do
+      constraints items: [one_of: @components]
+      public? true
+    end
+
+    attribute :waiting_schedule_ids, {:array, :uuid}, public?: true
+
+    attribute :waiting_scope_at, :utc_datetime_usec, public?: true
+    attribute :waiting_scope_folds, :integer, public?: true
+
     timestamps()
   end
 
   @doc "The steps of a chain, in order."
   def steps, do: @steps
+
+  @doc "What a backup can cover (#2219), in the order a chain backs them up."
+  def components, do: @components
 end

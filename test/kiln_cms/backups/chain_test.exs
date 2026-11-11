@@ -249,6 +249,133 @@ defmodule KilnCMS.Backups.ChainTest do
     end
   end
 
+  describe "like folds only into like (#2540)" do
+    # A failed in-app run that kept its state: one `request(resume: stamp)` takes.
+    defp resumable!(dir, stamp) do
+      run =
+        Backups.start_run!(%{stamp: stamp, trigger: "manual", components: [:db, :media]},
+          actor: Backups.system()
+        )
+
+      Backups.fail_run!(run, %{error: "tar exited 2"}, actor: Backups.system())
+      work = WorkState.path(dir, stamp)
+      File.mkdir_p!(work)
+      :ok = WorkState.write(work, WorkState.new(stamp))
+      stamp
+    end
+
+    # What a refused request must leave alone: the lock row's queue, the Runs
+    # and the step jobs.
+    defp snapshot do
+      row = lock()
+
+      {Map.take(row, [
+         :chain_id,
+         :step_job_id,
+         :waiting_trigger,
+         :waiting_resume_stamp,
+         :waiting_requested_at,
+         :waiting_requested_by,
+         :waiting_folds,
+         :last_folded_at
+       ]), Enum.map(runs(), & &1.id) |> Enum.sort(), Repo.aggregate(Oban.Job, :count)}
+    end
+
+    test "a fresh backup folds into a queued fresh backup" do
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(trigger: "schedule")
+
+      assert {:ok, %{status: :folded}} = request(trigger: "manual")
+      assert %{waiting: %{resume: nil, folds: 1}} = Backups.in_flight()
+    end
+
+    test "a resume folds into a queued resume of the same stamp", %{dir: dir} do
+      stamp = resumable!(dir, "20261101-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(resume: stamp)
+
+      assert {:ok, %{status: :folded}} = request(resume: stamp)
+      assert %{waiting: %{resume: ^stamp, folds: 1}} = Backups.in_flight()
+    end
+
+    test "a fresh backup is refused while a resume is queued; nothing changes", %{dir: dir} do
+      stamp = resumable!(dir, "20261101-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(resume: stamp)
+      before = snapshot()
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [[:kiln_cms, :backups, :request, :folded]])
+
+      assert {:error, {:queue_busy, {:resume, ^stamp}}} = request(trigger: "manual")
+      assert {:error, {:queue_busy, {:resume, ^stamp}}} = request(trigger: "schedule")
+
+      assert snapshot() == before
+      assert %{waiting: %{resume: ^stamp, folds: 0}} = Backups.in_flight()
+      refute_received {[:kiln_cms, :backups, :request, :folded], ^ref, _, _}
+    end
+
+    test "a resume is refused while a fresh backup is queued; nothing changes", %{dir: dir} do
+      stamp = resumable!(dir, "20261101-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(trigger: "schedule")
+      before = snapshot()
+
+      assert {:error, {:queue_busy, :backup}} = request(resume: stamp)
+
+      assert snapshot() == before
+      assert %{waiting: %{resume: nil, trigger: "schedule", folds: 0}} = Backups.in_flight()
+    end
+
+    test "a resume is refused while a resume of another stamp is queued", %{dir: dir} do
+      queued = resumable!(dir, "20261101-101010")
+      other = resumable!(dir, "20261102-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(resume: queued)
+      before = snapshot()
+
+      assert {:error, {:queue_busy, {:resume, ^queued}}} = request(resume: other)
+      assert snapshot() == before
+    end
+
+    test "once the queue clears, the refused request is accepted", %{dir: dir} do
+      stamp = resumable!(dir, "20261101-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(resume: stamp)
+      {:error, {:queue_busy, _}} = request()
+
+      # The running chain ends: the queued resume is promoted, and the queue
+      # is free again, so the fresh backup now queues behind the resume.
+      assert {:ok, promoted} = Chain.with_lock(&Chain.release_in_txn/1)
+      assert %{chain: ^promoted, stamp: ^stamp, waiting: nil} = Backups.in_flight()
+
+      assert {:ok, %{status: :queued, chain: ^promoted}} = request()
+      assert %{waiting: %{resume: nil}} = Backups.in_flight()
+    end
+
+    test "a legacy Worker job waits and asks again while a resume is queued", %{dir: dir} do
+      stamp = resumable!(dir, "20261101-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(resume: stamp)
+
+      assert {:snooze, 60} = Worker.perform(%Oban.Job{id: 7, args: %{"trigger" => "manual"}})
+      assert %{waiting: %{resume: ^stamp, folds: 0}} = Backups.in_flight()
+    end
+
+    test "a legacy resume job waits while a fresh backup is queued; Worker.run/3 says why",
+         %{dir: dir} do
+      stamp = resumable!(dir, "20261101-101010")
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(trigger: "schedule")
+
+      assert {:snooze, 60} =
+               Worker.perform(%Oban.Job{id: 7, args: %{"trigger" => "manual", "resume" => stamp}})
+
+      assert {:error, {:queue_busy, :backup}} = Worker.run("console", nil, resume: stamp)
+      assert %{waiting: %{resume: nil, folds: 0}} = Backups.in_flight()
+    end
+  end
+
   describe "fencing" do
     test "a step of another chain, or an old job of this one, does not begin" do
       {:ok, %{status: :started, chain: chain}} = request()
@@ -618,6 +745,345 @@ defmodule KilnCMS.Backups.ChainTest do
 
       assert Backups.in_flight() == nil
       assert [%{status: :failed}] = runs()
+    end
+  end
+
+  describe "components (#2219)" do
+    defp media_files(dir) do
+      case File.ls(Path.join(dir, "media")) do
+        {:ok, names} -> Enum.filter(names, &String.starts_with?(&1, "kiln-media-"))
+        {:error, _} -> []
+      end
+    end
+
+    # A database the dump can't reach, and back.
+    defp break_database! do
+      url = Keyword.get(Application.get_env(:kiln_cms, KilnCMS.Backups), :database_url)
+      set_config(database_url: "postgres://nobody:nope@127.0.0.1:1/nope")
+      fn -> set_config(database_url: url) end
+    end
+
+    defp dump_path(dir, stamp), do: Path.join([dir, "db", "kiln-db-#{stamp}.dump"])
+
+    defp steps_run(chain), do: chain |> step_jobs() |> Enum.map(& &1.args["step"])
+
+    # The queued request as an older node would leave it: `fun` bends the row
+    # behind the new actions' back.
+    defp bend_waiting!(set) do
+      {1, _} = Repo.update_all(from(l in "backup_locks", where: l.name == "backups"), set: set)
+    end
+
+    test "a database-only backup dumps, never plans or archives, and says what it covered", %{
+      dir: dir
+    } do
+      assert :ok = BackupChain.run("manual", components: [:db])
+
+      assert [%{status: :succeeded, components: [:db], stamp: stamp, chain_id: chain} = run] =
+               runs()
+
+      steps = steps_run(chain)
+      assert "dump" in steps
+      refute Enum.any?(steps, &(&1 in ["plan", "archive", "checksum"]))
+
+      assert Enum.map(run.artifacts, & &1.kind) == [:db]
+      assert File.regular?(dump_path(dir, stamp))
+      assert media_files(dir) == []
+      assert Enum.any?(run.log, &(&1.message == "Backing up only: db"))
+
+      manifest = Manifest.read(dir)
+      assert manifest.ok
+      assert manifest.components == ["db"]
+    end
+
+    test "a media-only backup skips the dump", %{dir: dir} do
+      assert :ok = BackupChain.run("manual", components: [:media])
+
+      assert [%{status: :succeeded, components: [:media], stamp: stamp} = run] = runs()
+      assert Enum.map(run.artifacts, & &1.kind) == [:media]
+      refute File.exists?(dump_path(dir, stamp))
+      assert media_files(dir) != []
+
+      assert %Manifest{ok: true, components: ["media"]} = Manifest.read(dir)
+    end
+
+    test "a database-only request folding into a queued media-only one widens it to both; " <>
+           "a repeat leaves it as it is" do
+      {:ok, %{status: :started, chain: first}} = request()
+      {:ok, %{status: :queued}} = request(components: [:media])
+      assert %{waiting: %{components: [:media], folds: 0}} = Backups.in_flight()
+
+      {:ok, %{status: :folded}} = request(components: [:media])
+      assert %{waiting: %{components: [:media], folds: 1}} = Backups.in_flight()
+
+      {:ok, %{status: :folded}} = request(components: [:db])
+      assert %{waiting: %{components: [:db, :media], folds: 2}} = Backups.in_flight()
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(first)
+        assert_received {:chain_settled, second, :ok} when second != first
+      end)
+
+      assert [_first, %{components: [:db, :media], status: :succeeded}] =
+               Enum.sort_by(runs(), & &1.stamp)
+    end
+
+    test "a promoted database-only request backs up the database only" do
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(components: [:db])
+
+      BackupChain.drain()
+
+      assert [%{components: [:db, :media]}, %{components: [:db], status: :succeeded}] =
+               Enum.sort_by(runs(), & &1.stamp)
+    end
+
+    test "anything folding into a queued request for everything leaves it everything" do
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request()
+      {:ok, %{status: :folded}} = request(components: [:db])
+
+      assert %{waiting: %{components: nil, folds: 1}} = Backups.in_flight()
+      assert Chain.waiting_scope(lock()).valid?
+    end
+
+    test "a queued request whose scope is an older node's is promoted as everything" do
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(components: [:db])
+
+      # An older node's `:queue_waiting` sets `waiting_requested_at` and nothing
+      # of the scope; the db-only list left over is not this request's.
+      bend_waiting!(waiting_requested_at: DateTime.add(DateTime.utc_now(), 1, :second))
+      refute Chain.waiting_scope(lock()).valid?
+      assert %{waiting: %{components: nil}} = Backups.in_flight()
+
+      BackupChain.drain()
+
+      assert [_first, %{components: [:db, :media], status: :succeeded}] =
+               Enum.sort_by(runs(), & &1.stamp)
+    end
+
+    # Critic amendment B-3: an older node's `:fold` bumps `waiting_folds` alone.
+    test "a fold by an older node (only waiting_folds moved) makes the queued request everything" do
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(components: [:db])
+
+      bend_waiting!(waiting_folds: 1)
+      refute Chain.waiting_scope(lock()).valid?
+
+      BackupChain.drain()
+
+      assert [_first, %{components: [:db, :media], status: :succeeded}] =
+               Enum.sort_by(runs(), & &1.stamp)
+    end
+
+    test "folding onto a scope that is not valid adopts everything, and the scope is valid again" do
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(components: [:db])
+      bend_waiting!(waiting_folds: 1)
+
+      {:ok, %{status: :folded}} = request(components: [:db])
+
+      row = lock()
+      assert row.waiting_folds == 2
+      assert %{valid?: true, components: nil} = Chain.waiting_scope(row)
+    end
+
+    test "a resume is refused by a queued database-only request, which keeps its scope (#2540)",
+         %{dir: dir} do
+      restore = break_database!()
+      assert {:error, _} = BackupChain.run()
+      assert [%{status: :failed, stamp: failed}] = runs()
+      assert WorkState.exists?(WorkState.path(dir, failed))
+      restore.()
+
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(components: [:db])
+      assert {:error, {:queue_busy, :backup}} = request(resume: failed)
+
+      assert %{waiting: %{components: [:db], resume: nil, folds: 0}} = Backups.in_flight()
+    end
+
+    # A failed database-only backup whose files are kept, ready to resume.
+    defp failed_db_only! do
+      restore = break_database!()
+      assert {:error, _} = BackupChain.run("manual", components: [:db])
+      restore.()
+      [%{status: :failed, stamp: stamp, components: [:db]}] = runs()
+      stamp
+    end
+
+    test "a queued resume of a database-only run refuses every fresh request, even one it " <>
+           "covers, and writes nothing (#2540)" do
+      stamp = failed_db_only!()
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(resume: stamp)
+      assert %{waiting: %{resume: ^stamp, components: [:db]}} = Backups.in_flight()
+
+      before = lock()
+      busy = {:queue_busy, {:resume, stamp}}
+      assert {:error, ^busy} = request()
+      assert {:error, ^busy} = request(components: [:media])
+      assert {:error, ^busy} = request(components: [:db, :media])
+      assert {:error, ^busy} = request(components: [:db])
+
+      after_ = lock()
+
+      for field <- [
+            :waiting_folds,
+            :waiting_components,
+            :waiting_scope_at,
+            :waiting_scope_folds,
+            :last_folded_at,
+            :epoch
+          ] do
+        assert Map.get(after_, field) == Map.get(before, field), "#{field} changed"
+      end
+
+      # A resume of the same stamp folds, and keeps the run's components.
+      assert {:ok, %{status: :folded}} = request(resume: stamp)
+      assert %{waiting: %{resume: ^stamp, components: [:db], folds: 1}} = Backups.in_flight()
+    end
+
+    test "a promoted resume backs up its run's components", %{dir: dir} do
+      stamp = failed_db_only!()
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(resume: stamp)
+
+      BackupChain.drain()
+
+      assert %{status: :succeeded, components: [:db]} =
+               run =
+               Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+
+      assert Enum.map(run.artifacts, & &1.kind) == [:db]
+      refute Enum.any?(media_files(dir), &String.contains?(&1, stamp))
+    end
+
+    test "a resume an older node queued covers everything; still only its own resume folds " <>
+           "into it" do
+      stamp = failed_db_only!()
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(resume: stamp)
+      bend_waiting!(waiting_folds: 1)
+
+      assert {:error, {:queue_busy, {:resume, ^stamp}}} = request(components: [:media])
+      assert {:error, {:queue_busy, {:resume, ^stamp}}} = request()
+      assert {:ok, %{status: :folded}} = request(resume: stamp)
+      assert %{waiting: %{resume: ^stamp, components: nil}} = Backups.in_flight()
+    end
+
+    test "media asked for on a node with no media directory is a skipped run; the manifest " <>
+           "is left alone",
+         %{dir: dir} do
+      :ok =
+        Manifest.write(dir, %Manifest{
+          finished_at: DateTime.utc_now(),
+          trigger: "cron",
+          ok: true,
+          artifacts: [%{kind: "db", path: "db/x.dump", bytes: 1, verified: true}]
+        })
+
+      before = File.read!(Manifest.path(dir))
+
+      {:ok, %{status: :started, chain: chain}} = request(components: [:media])
+      # The start step runs on a node configured without one.
+      set_config(media_dir: nil)
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+        assert {:error, :no_media_dir} = BackupChain.settled(chain)
+      end)
+
+      assert [%{status: :skipped, components: [:media], error: "Refused: no_media_dir"}] = runs()
+      assert File.read!(Manifest.path(dir)) == before
+      assert Backups.in_flight() == nil
+    end
+
+    test "a resume of a failed database-only backup backs up the database only", %{dir: dir} do
+      restore = break_database!()
+      assert {:error, _} = BackupChain.run("manual", components: [:db])
+      assert [%{status: :failed, stamp: stamp, components: [:db]}] = runs()
+      restore.()
+
+      assert :ok = BackupChain.resume(stamp)
+
+      assert [%{status: :succeeded, components: [:db]} = run] = runs()
+      assert Enum.map(run.artifacts, & &1.kind) == [:db]
+      assert media_files(dir) == []
+      assert %Manifest{ok: true, components: ["db"]} = Manifest.read(dir)
+    end
+
+    # Critic amendment B-2: the routing is the steps', so a resume follows it.
+    test "a resume of a failed media-only backup never dumps the database", %{
+      base: base,
+      dir: dir,
+      media: media
+    } do
+      set_config(media_dir: Path.join(base, "gone"))
+      assert {:error, _} = BackupChain.run("manual", components: [:media])
+      assert [%{status: :failed, stamp: stamp, components: [:media]}] = runs()
+      refute File.exists?(dump_path(dir, stamp))
+      set_config(media_dir: media)
+
+      assert :ok = BackupChain.resume(stamp)
+
+      assert [%{status: :succeeded, components: [:media]} = run] = runs()
+      assert Enum.map(run.artifacts, & &1.kind) == [:media]
+      refute File.exists?(dump_path(dir, stamp))
+    end
+
+    # Critic amendment B-2: a start retried after its state landed carries on
+    # from the state, and the dump step routes past itself.
+    test "a retried start of a media-only chain still skips the dump", %{dir: dir} do
+      {:ok, %{status: :started, chain: chain}} = request(components: [:media])
+
+      # The start step's hand-over to `dump` conflicts, after its state landed.
+      {:ok, blocker} =
+        Oban.insert(
+          StepWorker.new(%{"chain" => chain, "step" => "dump", "part" => nil}, schedule_in: 3600)
+        )
+
+      assert %{failure: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+      %{stamp: stamp, step: :start} = lock()
+
+      assert {:ok, %{"components" => ["media"]}} =
+               WorkState.read(WorkState.path(dir, stamp))
+
+      Repo.delete!(blocker)
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(chain)
+      end)
+
+      assert [%{status: :succeeded, components: [:media], stamp: ^stamp}] = runs()
+      refute File.exists?(dump_path(dir, stamp))
+    end
+
+    test "a request names its components or is refused before it touches the lock" do
+      for bad <- [[], [:db, :db], [:files], ["nope"], :db, "db", %{}] do
+        assert {:error, :invalid_components} = request(components: bad), inspect(bad)
+      end
+
+      assert {:error, :components_with_resume} =
+               request(components: [:db], resume: "20260101-000000")
+
+      set_config(media_dir: nil)
+      assert {:error, :no_media_dir} = request(components: [:media])
+      assert {:error, :no_media_dir} = request(components: [:db, :media])
+      assert Backups.in_flight() == nil
+
+      # Names do too, and nil is everything.
+      assert {:ok, %{status: :started}} = request(components: ["db"])
+      assert {:ok, %{status: :queued}} = request(components: nil)
+    end
+
+    test "the action refuses a repeated component on its own" do
+      assert {:error, error} =
+               Backups.request_backup(%{components: [:db, :db]}, actor: Backups.system())
+
+      assert Enum.any?(error.errors, &match?(%Backups.Refused{reason: :invalid_components}, &1))
     end
   end
 

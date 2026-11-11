@@ -421,10 +421,13 @@ log for these: no ping or exit code reports them.
 ## In-app backups (#484)
 
 The console has a **Backups** page (`/editor/backups`, admin only) showing when
-the last backup ran, how big it was, which files it produced and whether each
-verified — plus a **Back up now** button. The overview grid grows a red strip
-when the newest backup is older than `BACKUP_STALE_AFTER_HOURS` (default 36),
-or when there has never been one.
+the database and the media were last backed up, how big the last backup was,
+which files it produced and whether each verified — plus a **Back up now**
+button. For platform admins, the overview grid grows a red strip when either
+component's last good backup is older than `BACKUP_STALE_AFTER_HOURS`
+(default 36), when its last attempt failed, or when one has been backed up and
+the other never has; a neutral "Backups aren't set up yet" strip when neither
+ever has ([Check the last backup of each component](#check-the-last-backup-of-each-component)).
 
 ### It reports on cron's backups too
 
@@ -437,6 +440,68 @@ A failed run overwrites the manifest with `"ok": false` and the error, rather
 than leaving the last successful one on screen — "is my data safe right now"
 is the question the page is being asked, and the previous backup does not
 answer it.
+
+### Check the last backup of each component
+
+A backup can cover only the database or only the media
+([Back up only the database or only the media](#back-up-only-the-database-or-only-the-media)),
+so the manifest, which describes the last backup, can't say how each is doing
+on its own: a database-only backup would hide the media's state. The status is
+therefore worked out per component, from History and the manifest together.
+Platform admins only, like the rest of the page.
+
+1. Open **Backups** (`/editor/backups`). The status panel has one line per
+   component this deployment backs up: **Database**, and **Media** when there
+   is a media directory (`MEDIA_DIR`).
+2. Each line names the component and reads one of (for example "Database:
+   Backed up 3 hours ago"):
+   - "Backed up 3 hours ago": its last good backup is newer than
+     `BACKUP_STALE_AFTER_HOURS`.
+   - "Last backup was 2 days ago": its last good backup is older than that.
+   - "The last backup failed": the newest attempt that covered it failed.
+   - "No backup has ever been recorded": neither History nor the manifest has
+     one.
+3. The panel's border and icon turn to the alarm when any line is failed or
+   stale: a fresh database backup does not make stale media fine. The file
+   list and the **Last run failed** box below still describe the manifest,
+   the last backup, whatever it covered.
+
+The **Overview** page says the same for platform admins: a red strip with one
+line per component that needs attention ("The last media backup was 3 days
+ago.", "The last database backup failed.", "No media backup has been
+recorded."). Media that has never been backed up while the database has is the
+red strip, not the neutral set-up notice, which shows only when neither
+component has ever been backed up or tried.
+
+**Where each answer comes from.** For each component:
+
+- **Last good** is the newest `Succeeded` run that covered it and still has a
+  verified file of that kind (not pruned), or the manifest when it is newer and
+  was a successful backup with a verified file of that kind. A backup imported
+  from cron counts only when the manifest it came with marks its files
+  verified.
+- **Last attempt** is the newest `Succeeded` or `Failed` run that covered it,
+  or the manifest, whichever is newer. `Skipped` and `Canceled` runs don't
+  count.
+- **Failing closed.** A failed run that doesn't say what it covered counts
+  against every component: a failed imported (cron) run, whose components are
+  only the kinds of the files it left, and a failed run that names none. So
+  does a failed manifest without a `"components"` key.
+
+**When History can't be read** (a database error, a revoked grant), the status
+comes from the manifest alone, as it did before #2219, rather than failing the
+page or calling anything healthy. Each time, Kiln emits
+`[:kiln_cms, :backups, :status, :history_unreadable]` (measurements
+`%{count: 1}`, metadata `error`, the error's module); the warning "Backup
+status from the manifest alone: the run history could not be read" is logged
+at most once every 15 minutes, since the page asks every few seconds while a
+backup runs.
+
+**The manifest's `"components"`.** An in-app backup writes what it covered as
+an additive `"components"` key in `manifest.json` (`["db"]`, `["media"]` or
+`["db", "media"]`), on success and on failure; the manifest `version` stays 1.
+`scripts/backup.sh` does not write it, and a manifest without it (cron's, or
+one from an earlier release) covers the kinds of the files it lists.
 
 ### The app path and the shell path share one format
 
@@ -475,8 +540,11 @@ queue:
 **start** → **dump** → **plan** → **archive** (one job per media part) →
 **checksum** → **prune** → **offsite** → **finish**
 
-`plan`, `archive` and `checksum` run only when there is a media directory. Each
-step reads what the previous ones did from `.work/<stamp>/state.json`, does its
+`dump` runs only when the backup covers the database, and `plan`, `archive` and
+`checksum` only when it covers the media and there is a media directory; a step
+with nothing to do hands straight over to the next one that has
+([Back up only the database or only the media](#back-up-only-the-database-or-only-the-media)).
+Each step reads what the previous ones did from `.work/<stamp>/state.json`, does its
 own work and hands over to the next. A failure therefore costs one step, not the
 whole backup: a database dump that verified is not taken again because the
 fourth media part failed.
@@ -510,8 +578,9 @@ as before.
 | Event | Metadata | When |
 |---|---|---|
 | `[:kiln_cms, :backups, :chain, :settled]` | `chain`, `stamp`, `outcome` (`:ok` or `{:error, reason}`) | A chain ended: succeeded, failed, canceled or refused at its start. |
-| `[:kiln_cms, :backups, :request, :folded]` | `trigger`, `resume` | A request folded into the queued one. |
+| `[:kiln_cms, :backups, :request, :folded]` | `trigger`, `resume`, `components` (the folding request's; `nil` for everything or a resume) | A request folded into the queued one. |
 | `[:kiln_cms, :backups, :lock, :reclaimed]` | `chain`, `stamp`, `step`, `node`, `outcome` (`:requeued` or `:interrupted`) | A step was taken back from a node that stopped responding ([below](#several-nodes-and-the-backup-lock)). |
+| `[:kiln_cms, :backups, :status, :history_unreadable]` | `error` (the error's module) | The status could not read History and fell back to the manifest ([above](#check-the-last-backup-of-each-component)). |
 
 ### Back up while another backup runs
 
@@ -527,20 +596,54 @@ the rest of the page.
    while a backup runs, for up to an hour.
 2. Click **Back up now**. The page says "A backup is running; this one starts
    when it finishes." and the strip adds "1 queued (requested 2026-11-09 03:17
-   UTC)".
+   UTC) · Database + Media", ending with what the queued backup covers (a
+   queued resume doesn't say).
 3. Click it again. The page says "A backup is running and another is already
    queued; that queued backup covers this request." The strip adds "1 later
-   request folded into it". At most one backup waits; every later request
-   folds into it and is logged at `info`: "Backup request folded: a backup
-   (manual) was asked for while one runs and another is queued; the queued
-   backup covers it".
+   request folded into it". At most one backup waits; every later request of
+   the same kind folds into it and is logged at `info`: "Backup request
+   folded: a backup (manual) was asked for while one runs and another is
+   queued; the queued backup covers it".
 4. When the running backup ends (succeeded, failed or canceled), the queued
    one starts with a new stamp. Its log in History starts with "Started from
    the queue (requested at …); 1 later request(s) folded into it".
 
-A **Resume** click queues and folds the same way. Resuming the backup that is
-running right now is refused: "That backup is running right now." A queued
-request cannot be removed; cancel it once it has started.
+A **Resume** click queues the same way. Resuming the backup that is running
+right now is refused: "That backup is running right now." A queued request
+cannot be removed; cancel it once it has started.
+
+**Only like folds into like (#2540).** A request folds into the queued one
+only when the queued one does the same work:
+
+| You click | A fresh backup is queued | A resume of the same backup is queued | A resume of another backup is queued |
+|---|---|---|---|
+| **Back up now** | Folds | Refused | Refused |
+| **Resume** | Refused | Folds: "A backup is running and a resume of this backup is already queued; that queued resume covers this request." | Refused |
+
+A refused request changes nothing: no backup is queued, no run appears in
+History and the fold count stays the same. The page says what is queued, for
+example "A backup is running and a resume of 20261101-101010 is queued after
+it, so this backup was not queued. Try again once the queue clears." Click
+again once the queued backup has started (the strip no longer shows "1
+queued").
+
+Folding them would lose work: a resume finishes the old backup's stamp, so a
+fresh backup folded into it would never be taken, and a resume folded into a
+fresh backup would never resume. In-app schedules (#2219, not yet released)
+get the same answer: a scheduled tick is never folded into a queued Resume,
+and is retried on a later tick once the queue clears.
+
+**What the queued backup covers after a fold.** A request that folds into a
+queued backup never leaves it covering less than either asked for:
+
+| Queued | Folding in | The queued backup then covers |
+|---|---|---|
+| A fresh backup of some components | A fresh backup | Both requests' components (database-only and media-only make both) |
+| A resume | A resume of the same backup | The queued resume's run's components (unchanged) |
+
+Every other pairing is refused ([above](#back-up-while-another-backup-runs)),
+so a resume never widens a queued fresh backup and a fresh backup never folds
+into a resume, even one whose run covers the components it asks for.
 
 ### Cancel a running backup
 
@@ -667,17 +770,23 @@ is one of:
 |---|---|
 | `{:ok, %{status: :started, chain: chain}}` | It is running. |
 | `{:ok, %{status: :queued, chain: running}}` | Another backup is running; this one starts after it. `chain` is the running one. |
-| `{:ok, %{status: :folded, chain: running}}` | One is already queued, and it covers this request. |
-| `{:error, reason}` | `:disabled`, `:no_database_url`, `:no_pg_dump` or `:no_pg_restore`; for a resume, `:invalid_stamp`, `:in_flight`, `:no_such_run`, `{:not_resumable, status}` or `:no_state`; or `:forbidden` for an actor who may not ask. |
+| `{:ok, %{status: :folded, chain: running}}` | One of the same kind is already queued (a fresh backup, or a resume of the same stamp), and it covers this request. |
+| `{:error, {:queue_busy, queued}}` | One of another kind is queued (`queued` is `:backup` or `{:resume, stamp}`). Nothing changed; ask again once it has started ([above](#back-up-while-another-backup-runs)). |
+| `{:error, reason}` | `:disabled`, `:no_database_url`, `:no_pg_dump` or `:no_pg_restore`; for a resume, `:invalid_stamp`, `:in_flight`, `:no_such_run`, `{:not_resumable, status}` or `:no_state`; for `:components`, `:invalid_components`, `:components_with_resume` or `:no_media_dir` ([below](#back-up-only-the-database-or-only-the-media)); or `:forbidden` for an actor who may not ask. |
 
 The trigger is cut to 64 characters, with credentials redacted, before it is
 stored. Other calls:
 
 - **Resume**: `KilnCMS.Backups.request([trigger: "console", resume: "20260805-031700"], KilnCMS.Backups.system())`.
+- **Only some components**: `KilnCMS.Backups.request([trigger: "console", components: [:db]], KilnCMS.Backups.system())`
+  ([below](#back-up-only-the-database-or-only-the-media)).
 - **What is running**: `KilnCMS.Backups.in_flight()` returns `nil`, or the
-  chain, its stamp, trigger, step, part, `parts_total`, phase (`:running` or
-  `:finishing`), `acquired_at` and the queued request
-  (`%{trigger, resume, requested_at, folds}` or `nil`).
+  chain, its stamp, trigger, step, part, `parts_total`, `components` (what the
+  running backup covers, as `[:db]`, `[:media]` or `[:db, :media]`; `nil` on a
+  node without the backup's directory, and until its start step has run),
+  phase (`:running` or `:finishing`), `acquired_at` and the queued request
+  (`%{trigger, resume, components, requested_at, folds}`, where `components`
+  `nil` means everything, or `nil`).
 - **Wait for it**: `KilnCMS.Backups.await(chain)` returns `:ok` once that
   chain's backup succeeded, else `{:error, reason}`: the run's error,
   `:canceled`, `{:skipped, error}`, `:no_run` or `:timeout`. It polls the
@@ -690,9 +799,80 @@ and returns the same map (it returned the `Oban.Job` before #2218).
 `KilnCMS.Backups.Worker.run/3` no longer runs a backup inline in the console:
 it requests one and waits for it, returning `:ok` or `{:error, reason}`, and
 `{:error, :queued}` or `{:error, :folded}` without waiting when another backup
-is running. For an off-site failure the reason is the run's error text. Both,
+is running (`{:error, {:queue_busy, queued}}` when one of another kind is
+queued). For an off-site failure the reason is the run's error text. Both,
 the `backups` queue and `KilnCMS.Backups.Worker` are removed in the next minor
 release.
+
+### Back up only the database or only the media
+
+A backup can cover just the database or just the media: a database dump before
+a risky migration, say, without archiving a large media library again. From a
+release console only; **Back up now** on the Backups page always backs up
+everything the deployment has (**Resume** continues a run with the components
+it had). You need a running node and the backup
+system actor (or a platform admin as the actor).
+
+1. Ask for the components on a running node:
+
+   ```bash
+   bin/kiln_cms rpc '{:ok, result} = KilnCMS.Backups.request([trigger: "console", components: [:db]], KilnCMS.Backups.system()); IO.inspect(result)'
+   # %{status: :started, chain: "5f0c7c1e-…"}
+   ```
+
+   `components:` takes `[:db]`, `[:media]` or `[:db, :media]` (the names as
+   strings work too). Leaving it out, or `nil`, backs up everything, as before.
+2. Open **Backups** (`/editor/backups`). The in-flight strip shows the backup
+   as usual. Its log in **History** starts with "Backup started (console)"
+   and then "Backing up only: db" (the line is there only when the backup
+   leaves something out), and the row shows only the **Database** badge.
+3. When it has finished, the **Database** line of the status panel says
+   "Backed up less than a minute ago"; the **Media** line still reports the
+   last backup that covered the media
+   ([Check the last backup of each component](#check-the-last-backup-of-each-component)).
+
+What a partial backup does differently:
+
+- `dump` is skipped when the backup leaves out the database, and `plan`,
+  `archive` and `checksum` when it leaves out the media; the rest of the chain
+  (prune, off-site copy, finish) runs as usual.
+- The run records its components (`Backups.Run.components`), and the manifest
+  records them as `"components"`. Retention and the
+  [last-good marker](#the-last-good-marker) treat the database and the media
+  of each backup separately already, so a database-only backup never stands in
+  for the media.
+- **Resume** continues a run with the components it had: a resumed
+  database-only run backs up only the database. A resume of a media-only run
+  whose start step lands on a node without a media directory is refused there
+  (server log: "Backup resume refused: :no_media_dir").
+- A request queued behind a running backup keeps its components, and a fresh
+  request folding into it widens them
+  ([What the queued backup covers after a fold](#back-up-while-another-backup-runs)).
+
+What can go wrong:
+
+| Result | Meaning |
+|---|---|
+| `{:error, :invalid_components}` | `components:` is empty, not a list, names something other than `:db` or `:media`, or names one twice. |
+| `{:error, :components_with_resume}` | `components:` together with `resume:`. A resume backs up what its run did; leave `components:` out. |
+| `{:error, :no_media_dir}` | `components:` names `:media`, and this deployment has no media directory (S3 media, or no `MEDIA_DIR`). |
+| `{:error, {:queue_busy, {:resume, stamp}}}` | A resume is queued behind the running backup. A fresh backup never folds into it; nothing was queued. Ask again once it starts. |
+| A `Skipped` row, "Refused: no_media_dir" | The media directory was gone by the time a media-only backup started. The manifest is left alone. |
+
+**During a rolling deploy.** The migration adds the columns before any node
+runs this release, and an older node never reads them, so mixing releases is
+safe, but a partial request can turn into a full one:
+
+- a start job that a node from an older release picks up ignores
+  `components` and backs up everything;
+- a request that an older node queued, or folded into the queued one, covers
+  everything, whatever was asked before; this release detects such a request
+  by the scope fields that older nodes don't write;
+- a resume an older node queued covers everything, so any fresh request folds
+  into it.
+
+Nothing is backed up less than asked for. Once every node runs this release,
+partial requests are kept as asked.
 
 ### Media backups in parts (#2218)
 
@@ -1096,25 +1276,52 @@ Where they are absent, the page says so and the button is disabled rather than
 failing at the point of use. Cron backups on the host are unaffected either
 way.
 
-**The official image does not install `rclone`.** With `BACKUP_RCLONE_REMOTE`
-set in the app's environment and no `rclone` on its `PATH`, an in-app backup
-still runs and succeeds, but copies nothing off-site. That is deliberate: on a
-host that copies the same `BACKUP_DIR` off-site by other means, failing every
-in-app run would be wrong. It is not silent:
+**The official image ships `rclone`** (since #2482), a pinned release whose
+SHA-256 the `Dockerfile` checks at build time; `rclone version` in the
+container names it. The app runs as `nobody`, whose home directory does
+not exist, so give it the remote's configuration explicitly: either
+`RCLONE_CONFIG_<NAME>_*` variables in the app's environment (for
+`BACKUP_RCLONE_REMOTE=r2:kiln-backups`: `RCLONE_CONFIG_R2_TYPE=s3`,
+`RCLONE_CONFIG_R2_PROVIDER=Cloudflare`, `RCLONE_CONFIG_R2_ACCESS_KEY_ID`,
+`RCLONE_CONFIG_R2_SECRET_ACCESS_KEY`, `RCLONE_CONFIG_R2_ENDPOINT`), or an
+`rclone.conf` mounted read-only with `RCLONE_CONFIG` pointing at it. Avoid
+a connection-string remote (`:s3,secret_access_key=…:bucket`) for the app:
+it reaches `rclone` as a command-line argument, which other users and
+process monitors on the host can read.
+Bumping the pin is a `Dockerfile` change: the comment above the `rclone`
+stage says how to take the new version's digest and check its signature.
 
-- **Where backups go** on `/editor/backups` shows an **Off-site** line with the
-  remote (credentials masked) and "rclone is not installed in this image, so
-  backups taken from this page are not copied off-site."
-- Each run logs a warning, in the server log and in the run's log:
-  "BACKUP_RCLONE_REMOTE is set but rclone is not installed in this image;
-  nothing was copied off-site".
-- The manifest's `offsite` stays `null`.
+**A remote with no `rclone` fails the run.** On a custom image that leaves
+`rclone` out, with `BACKUP_RCLONE_REMOTE` set in the app's environment, an
+in-app backup takes and verifies its local files, then fails at the
+off-site step, like any other failed copy. Nothing is tried again within
+the run, since no retry installs a binary. It is visible ahead of time and
+afterward:
 
-To copy in-app backups off-site, build your own image on top of Kiln's with
-`rclone` installed and configured for the user the app runs as (`nobody`), or
-copy the directory from the host (`rclone sync` of `BACKUP_DIR`, excluding
-`.work/**`), or snapshot the volume. `backup.sh` copies only the files its own
-run wrote, so a cron entry alone does not carry the app's backups off-site.
+- **Where backups go** on `/editor/backups` shows an **Off-site** line with
+  the remote (credentials masked) and "rclone is not installed in this
+  image, so backups taken from this page fail at the off-site copy. Install
+  rclone in the image or unset BACKUP_RCLONE_REMOTE."
+- The run fails with:
+
+  ```text
+  Off-site copy FAILED: BACKUP_RCLONE_REMOTE is set but rclone is not
+  installed in this image, so no file was copied. The local files are kept.
+  Install rclone in the image (the official image ships it) or unset
+  BACKUP_RCLONE_REMOTE, then Resume this backup.
+  ```
+
+  Its Run log has the error line "BACKUP_RCLONE_REMOTE is set but rclone is
+  not installed in this image; nothing was copied off-site", and the server
+  log has the same line with the remote, redacted.
+- The failure manifest's `offsite` is `null`, and its files stay verified.
+
+Fix it either way: install `rclone` in your image, or, when the host copies
+`BACKUP_DIR` off-site by other means (`rclone sync` of `BACKUP_DIR`,
+excluding `.work/**`, or a volume snapshot), unset `BACKUP_RCLONE_REMOTE` in
+the app's environment. `backup.sh` copies only the files its own run wrote,
+so a cron entry alone does not carry the app's backups off-site. A run that
+failed this way can be resumed once the image has `rclone`.
 
 ### What it deliberately does not do
 
@@ -1152,7 +1359,10 @@ env snapshot. Order matters.
    uploads root. The other parts are found automatically; see
    [the multi-part runbook](#restore-a-media-set-that-has-several-parts). S3
    adapter: nothing to do (or promote the replica bucket) — just set the `S3_*`
-   env.
+   env. The newest media set need not share the dump's stamp: a database-only
+   or media-only backup
+   ([above](#back-up-only-the-database-or-only-the-media)) has files of one
+   kind only, so pick the newest verified set of each kind.
 5. **Recreate the app in Coolify** from the env snapshot — **the same
    `SECRET_KEY_BASE`** (see above), `DATABASE_URL`, storage/OIDC/SMTP vars —
    and deploy. Boot runs `bin/migrate`, which also catches the dump up to a
@@ -1285,7 +1495,7 @@ configured for cron needs nothing extra for the console.
 | `BACKUP_MEDIA_EXCLUDE` | backup + app | comma-separated globs the media archive leaves out (default none) |
 | `TMPDIR` | backup | where `backup.sh` builds the media file lists (default `/tmp`); removed when it exits |
 | `BACKUP_TRIGGER` | backup | label recorded in the manifest (default `cron`) |
-| `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused or failed copy fails the run. The app needs `rclone` in its image ([above](#it-needs-the-client-tools-in-the-image)) |
+| `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused or failed copy fails the run. The official image ships `rclone`; set without it, an in-app run fails ([above](#it-needs-the-client-tools-in-the-image)) |
 | `BACKUP_PING_URL` | backup | dead-man's-switch ping on success |
 | `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill` |
 | `RESTORE_MEDIA_DIR` | restore | target uploads root for `media` |

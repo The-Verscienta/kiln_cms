@@ -46,7 +46,8 @@ defmodule KilnCMS.Backups.Recorder do
   attempt proceeds without a row.
 
   With a `chain_id`, a run this chain already opened under `stamp` (the start
-  step retried) is taken up again instead of colliding with itself.
+  step retried) is taken up again instead of colliding with itself. `extra`
+  may carry `scheduled_components` and `schedule_ids` (#2219).
   """
   @spec open(
           String.t(),
@@ -54,18 +55,20 @@ defmodule KilnCMS.Backups.Recorder do
           DateTime.t(),
           [:db | :media],
           integer() | nil,
-          String.t() | nil
+          String.t() | nil,
+          map()
         ) ::
           t()
-  def open(stamp, trigger, started_at, components, job_id, chain_id \\ nil) do
-    attrs = %{
-      stamp: stamp,
-      trigger: trigger,
-      components: components,
-      started_at: started_at,
-      oban_job_id: job_id,
-      chain_id: chain_id
-    }
+  def open(stamp, trigger, started_at, components, job_id, chain_id \\ nil, extra \\ %{}) do
+    attrs =
+      Map.merge(Map.take(extra, [:scheduled_components, :schedule_ids]), %{
+        stamp: stamp,
+        trigger: trigger,
+        components: components,
+        started_at: started_at,
+        oban_job_id: job_id,
+        chain_id: chain_id
+      })
 
     rec = %__MODULE__{components: components, chain_id: chain_id}
 
@@ -244,17 +247,18 @@ defmodule KilnCMS.Backups.Recorder do
 
   @doc """
   Record a refused attempt (no `pg_dump`, backups disabled) as a `skipped` run.
-  The manifest is not touched by the caller.
+  The manifest is not touched by the caller. `extra` as `open/7`.
   """
-  @spec skip(String.t(), String.t(), DateTime.t(), [:db | :media], String.t()) :: :ok
-  def skip(stamp, trigger, started_at, components, reason) do
-    attrs = %{
-      stamp: stamp,
-      trigger: trigger,
-      components: components,
-      started_at: started_at,
-      error: reason
-    }
+  @spec skip(String.t(), String.t(), DateTime.t(), [:db | :media], String.t(), map()) :: :ok
+  def skip(stamp, trigger, started_at, components, reason, extra \\ %{}) do
+    attrs =
+      Map.merge(Map.take(extra, [:scheduled_components, :schedule_ids]), %{
+        stamp: stamp,
+        trigger: trigger,
+        components: components,
+        started_at: started_at,
+        error: reason
+      })
 
     safely("skip", fn -> Backups.skip_run(attrs, actor: Backups.system()) end)
     :ok

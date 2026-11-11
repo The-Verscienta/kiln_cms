@@ -159,14 +159,16 @@ defmodule KilnCMS.Scripts.PublishDocsTest do
             "<h3>Editor</h3>",
             "<h3>Developer</h3>",
             "<h3>Operator</h3>",
-            ~s(<a href="/search">Search kilncms.dev</a>),
+            ~s(<a href="/search?category=documentation">Search the docs</a>),
             "<h2>Getting started</h2>"
           ],
           &position(index, &1)
         )
 
       assert order == Enum.sort(order)
-      refute index =~ "/search?"
+      # Scoped to the guides by the category every guide is filed under
+      # (#2457), and the only search link: no unscoped `/search` beside it.
+      refute index =~ ~s(href="/search")
     end
 
     test "lists the reading paths only once, inlined, not as a Getting started link", %{
@@ -223,7 +225,7 @@ defmodule KilnCMS.Scripts.PublishDocsTest do
       end
 
       for href <- [
-            "/search",
+            "/search?category=documentation",
             "/docs/editor-shortcuts",
             "/docs/releasing#updating-a-project-to-a-release",
             "/docs/contributing"
@@ -355,6 +357,60 @@ defmodule KilnCMS.Scripts.PublishDocsTest do
     end
   end
 
+  # #2457: the index's search link is `/search?category=documentation`, so
+  # every guide has to carry that category for the link to find it.
+  describe "the Documentation category" do
+    @tag :tmp_dir
+    test "is looked up once and written on every guide, on create and update", %{
+      tmp_dir: dir
+    } do
+      docs = [fixture_doc(dir, [{:html, "<p>A</p>"}]), fixture_doc(dir, [{:html, "<p>B</p>"}])]
+
+      ExUnit.CaptureIO.capture_io(fn ->
+        assert PublishDocs.publish_all(docs, docs, fake_site(:guides_exist)) == :ok
+      end)
+
+      assert_received {:request, "GET", "/api/json/categories/by-slug/documentation", nil}
+      refute_received {:request, "GET", "/api/json/categories/by-slug/documentation", _}
+
+      # Both guides already exist: an update still sends the category, which is
+      # what overwrites one an editor set on the site.
+      for _doc <- docs do
+        assert_received {:request, "PATCH", "/api/json/entries/e1",
+                         %{"data" => %{"attributes" => %{"category_id" => "c1"}}}}
+      end
+
+      # The index page is not a guide, and is not filed under it.
+      assert_received {:request, "POST", "/api/json/pages", %{"data" => %{"attributes" => page}}}
+      refute Map.has_key?(page, "category_id")
+    end
+
+    @tag :tmp_dir
+    test "a new guide is created with it", %{tmp_dir: dir} do
+      doc = fixture_doc(dir, [{:html, "<p>A</p>"}])
+
+      ExUnit.CaptureIO.capture_io(fn ->
+        assert PublishDocs.publish_all([doc], [doc], fake_site(:accepts_upload)) == :ok
+      end)
+
+      assert_received {:request, "POST", "/api/json/entries",
+                       %{"data" => %{"attributes" => %{"category_id" => "c1"}}}}
+    end
+
+    @tag :tmp_dir
+    test "a site without it publishes nothing, and says how to create it", %{tmp_dir: dir} do
+      doc = fixture_doc(dir, [{:html, "<p>A</p>"}])
+
+      assert_raise RuntimeError, ~r{"documentation" category.*/editor/taxonomy}s, fn ->
+        PublishDocs.publish_all([doc], [doc], fake_site(:no_category))
+      end
+
+      refute_received {:request, _, "/api/json/entries", _}
+      refute_received {:request, _, "/api/json/pages", _}
+      refute_received {:request, "POST", "/api/media", _}
+    end
+  end
+
   defp fixture_doc(dir, blocks) do
     %{
       path: Path.join(dir, "guide.md"),
@@ -385,6 +441,19 @@ defmodule KilnCMS.Scripts.PublishDocsTest do
 
   defp respond("GET", "/api/json/type-definitions/by-name/doc", _mode),
     do: {200, %{"data" => %{"id" => "t1"}}}
+
+  defp respond("GET", "/api/json/categories/by-slug/documentation", :no_category),
+    do: {404, %{"errors" => [%{"code" => "not_found"}]}}
+
+  defp respond("GET", "/api/json/categories/by-slug/documentation", _mode),
+    do: {200, %{"data" => %{"id" => "c1"}}}
+
+  # Every guide already exists (the index page does not).
+  defp respond("GET", "/api/json/entries", :guides_exist),
+    do: {200, %{"data" => [%{"id" => "e1", "attributes" => %{"state" => "published"}}]}}
+
+  defp respond("PATCH", "/api/json/entries/e1", :guides_exist),
+    do: {200, %{"data" => %{"id" => "e1", "attributes" => %{"state" => "published"}}}}
 
   defp respond("POST", "/api/media", :refuses_upload),
     do: {422, %{"errors" => [%{"code" => "strip_failed"}]}}

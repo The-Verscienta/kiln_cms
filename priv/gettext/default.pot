@@ -1540,6 +1540,26 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "A backup is running and a new backup is queued after it, so this resume was not queued. Try again once the queue clears."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running and a resume of %{stamp} is queued after it, so this backup was not queued. Try again once the queue clears."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running and a resume of %{stamp} is queued after it, so this resume was not queued. Try again once the queue clears."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running and a resume of this backup is already queued; that queued resume covers this request."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "A backup is running and another is already queued; that queued backup covers this request."
 msgstr ""
 
@@ -12708,6 +12728,11 @@ msgstr ""
 msgid "No"
 msgstr ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "No %{component} backup has been recorded."
+msgstr ""
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -12800,11 +12825,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "No backup has ever been recorded"
-msgstr ""
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "No backup has ever been recorded for this deployment."
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
@@ -17920,6 +17940,11 @@ msgstr ""
 msgid "Search engines will be refused sooner than browsers. That can slow how quickly new pages are indexed."
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/content_html/search.html.heex
+#, elixir-autogen, elixir-format
+msgid "Search everything"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "Search for a WebVTT (.vtt) track you've uploaded to the"
@@ -17970,6 +17995,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Searches that found nothing, read as organization: a term that exists but has no page behind it, or a term the site doesn't have."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/content_html/search.html.heex
+#, elixir-autogen, elixir-format
+msgid "Searching only in “%{category}”."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
@@ -20272,6 +20302,11 @@ msgstr ""
 msgid "That block no longer exists."
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/content_html/search.html.heex
+#, elixir-autogen, elixir-format
+msgid "That category doesn't exist, so nothing was searched."
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid — 2FA is still on."
@@ -20665,11 +20700,6 @@ msgstr ""
 msgid "The autoresponder now uses [field:%{new}] where it used [field:%{old}]."
 msgstr ""
 
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "The backup status can't be determined."
-msgstr ""
-
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "The block could not be saved."
@@ -21019,29 +21049,29 @@ msgstr ""
 msgid "The largest of the numbers."
 msgstr ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "The last %{component} backup failed."
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "The last %{component} backup was %{count} day ago."
+msgid_plural "The last %{component} backup was %{count} days ago."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "The last %{component} backup was %{count} hour ago."
+msgid_plural "The last %{component} backup was %{count} hours ago."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "The last backup failed"
 msgstr ""
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "The last backup failed."
-msgstr ""
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "The last backup was %{count} day ago."
-msgid_plural "The last backup was %{count} days ago."
-msgstr[0] ""
-msgstr[1] ""
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "The last backup was %{count} hour ago."
-msgid_plural "The last backup was %{count} hours ago."
-msgstr[0] ""
-msgstr[1] ""
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
@@ -25530,6 +25560,11 @@ msgstr ""
 msgid "custom"
 msgstr ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "database"
+msgstr ""
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "days"
@@ -26086,6 +26121,11 @@ msgstr ""
 msgid "low"
 msgstr ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "media"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "media library"
@@ -26412,7 +26452,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "rclone is not installed in this image, so backups taken from this page are not copied off-site."
+msgid "rclone is not installed in this image, so backups taken from this page fail at the off-site copy. Install rclone in the image or unset BACKUP_RCLONE_REMOTE."
 msgstr ""
 
 #: lib/kiln_cms_web/live/team_live.ex

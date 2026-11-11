@@ -30,6 +30,53 @@ carries the reasoning.
   See also [the Added entry](#instance-security-log).
   ([#2541](https://github.com/The-Verscienta/kiln_cms/issues/2541))
 
+<a id="rclone-in-image-upgrade"></a>
+
+- **The official image ships `rclone`, and a set `BACKUP_RCLONE_REMOTE`
+  with no `rclone` now fails the in-app backup (#2482).**
+  - **Why.** The official image installed no `rclone`, so on it a backup
+    taken from the app's **Back up now** page had never gone off-site, even
+    with `BACKUP_RCLONE_REMOTE` set, and v1.8.0 skipped the copy without a
+    word. Failing on a missing binary would have turned every in-app backup
+    red on the official image; with `rclone` in the image, a missing binary
+    is a broken custom image, and it fails the run like any other failed
+    off-site copy (decision 3 on #2218).
+  - **The image.** A new `rclone` build stage downloads upstream's
+    `rclone-v1.75.2-linux-amd64.zip`, checks it against a SHA-256 pinned in
+    the `Dockerfile` (taken from upstream's PGP-signed `SHA256SUMS`), and the
+    runner copies in only the binary; an arm64 build gets the arm64 zip,
+    pinned the same way. About 82 MiB (a static Go binary). Not
+    Debian's `rclone`: trixie's is several releases behind and cannot be held
+    to an exact version. The `Dockerfile` comment says how to bump the pin.
+  - **The failure.** The off-site step returns `{:offsite, :missing_rclone}`
+    before touching any file. It is fatal, not retried: no retry installs a
+    binary. The run's error reads "Off-site copy FAILED:
+    BACKUP_RCLONE_REMOTE is set but rclone is not installed in this image, so
+    no file was copied. The local files are kept. Install rclone in the image
+    (the official image ships it) or unset BACKUP_RCLONE_REMOTE, then Resume
+    this backup." The Run log line and the server log (remote redacted) are
+    errors now, not warnings. The local files stay verified and the run can
+    be resumed. The reason carries no remote, since the chain logs it with
+    `inspect/1` and a connection-string remote holds credentials.
+  - **Who must act.** Only a deployment running its own image without
+    `rclone` while `BACKUP_RCLONE_REMOTE` is set in the app's environment:
+    install `rclone`, or unset the variable if the host copies `BACKUP_DIR`
+    off-site by other means. **Where backups go** on `/editor/backups` says
+    so before the first failure. Cron backups (`backup.sh`) are unchanged.
+  - **On the official image** with a remote set, in-app backups start
+    copying off-site on this deploy. Name a remote (`r2:kiln-backups`) and
+    configure it with `RCLONE_CONFIG_<NAME>_*` variables in the app's
+    environment, or mount an `rclone.conf` and point `RCLONE_CONFIG` at it:
+    the app runs as `nobody`, whose home directory does not exist. Don't use
+    a connection-string remote (`:s3,secret_access_key=…:bucket`) here: the
+    app passes the remote to `rclone` as an argument, where other users on
+    the host can read it. Until the remote is configured, the copy fails and
+    so does the run.
+  - **Rolling the pin back** is safe: nothing is migrated. v1.8.0's image has
+    no `rclone`, and v1.8.0 skips the off-site copy silently.
+  Guide: [It needs the client tools in the image](../backups.md#it-needs-the-client-tools-in-the-image).
+  ([#2482](https://github.com/The-Verscienta/kiln_cms/issues/2482))
+
 <a id="reserved-paths-upgrade"></a>
 
 - **Run `mix kiln.reserved_paths` once after upgrading to list the records whose
@@ -52,6 +99,38 @@ carries the reasoning.
     renamed for you. The task exits non-zero while anything is listed, so it
     can gate an upgrade script.
   ([#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374))
+
+<a id="backup-components-upgrade"></a>
+
+- **Run `mix ash.migrate` for per-component backups (part of #2219). While
+  nodes of the older release still run, a database-only or media-only backup
+  request may back up everything; rolling the pin back is safe.** For
+  operators.
+  - **What the migration does.**
+    `20261110213425_backup_request_components` adds five nullable columns to
+    `backup_locks` (`waiting_components`, `waiting_scheduled`,
+    `waiting_schedule_ids`, `waiting_scope_at`, `waiting_scope_folds`) and two
+    to `backup_runs` (`scheduled_components` and `schedule_ids`, `NOT NULL
+    DEFAULT '{}'`). Additive; no existing row changes. `scheduled_components`
+    and `schedule_ids` are written but have no schedules to name yet.
+  - **During a rolling deploy.** The columns exist before any node runs the
+    new code, and an older node never reads them. A start job an older node
+    picks up ignores `components` and backs up everything. A queued request
+    that an older node wrote or folded into covers everything: this release
+    counts the queued request's components only while `waiting_scope_at` and
+    `waiting_scope_folds` match `waiting_requested_at` and `waiting_folds`,
+    which an older node's writes break. A resume an older node queued covers
+    everything. Nothing is ever backed up less than asked for.
+  - **`manifest.json`** gains an additive `"components"` key; the `version`
+    stays 1, and a manifest without it reads as before. `scripts/backup.sh`
+    needs no update.
+  - **Rolling the pin back** is safe without the down migration: the older
+    release ignores the new columns and the manifest key, and promotes a
+    queued partial request as a full backup. Its status panel reads only the
+    manifest again, so after a database-only backup it says "Backed up …"
+    without looking at the media.
+  See also [the Added entry](#backup-components).
+  Guide: [Back up only the database or only the media](../backups.md#back-up-only-the-database-or-only-the-media).
 
 <a id="backup-last-good-marker-upgrade"></a>
 
@@ -799,12 +878,10 @@ carries the reasoning.
     Copy a suspect file aside first if you want it as evidence. Since
     [the step chain](#backup-step-chain) a database-only run (S3 media
     adapter, or no media directory) keeps a work directory and resumes too.
-  - **No `rclone` in the image is a warning, not a failure.** The official
-    image does not install it. With `BACKUP_RCLONE_REMOTE` set and no `rclone`,
-    an in-app backup succeeds locally, logs a warning, and **Where backups go**
-    on the Backups page says nothing is copied off-site. PaaS deployments that
-    relied on the variable alone were never getting an off-site copy from the
-    app; [deploy-platforms.md](../deploy-platforms.md#backups) now says so.
+  - **No `rclone` in the image is now visible.** Before, the official image
+    had no `rclone` and an in-app backup skipped the off-site copy without a
+    word. It is now an error that fails the run, and the official image ships
+    `rclone`: see [rclone in the image](#rclone-in-image-upgrade) (#2482).
   - **Cron failure manifests no longer name the remote.** `backup.sh` writes
     `"offsite": null` when a run fails, as the app does, and History no longer
     takes a failed manifest's remote as proof that its files went off-site. A
@@ -1549,6 +1626,63 @@ carries the reasoning.
     removes the endpoint and restores the old detail text.
   - **API spec.** `docs/api/openapi.json` describes the route
     (`getSecurityPosture`, tag `Monitoring`), with no `enum` on any field.
+
+<a id="backup-components"></a>
+
+- **A backup can cover only the database or only the media, from a release
+  console, and the Backups page and the overview report each component's last
+  backup separately, alarming when either failed or went stale (part of
+  #2219).** For platform admins and operators.
+  - **Asking for it.** `KilnCMS.Backups.request([components: [:db]], KilnCMS.Backups.system())`
+    backs up the database alone; `[:media]` the media alone. Absent or `nil`
+    is everything, as before. The Backups page's buttons always ask for
+    everything. Refused as `:invalid_components` (empty, unknown or repeated),
+    `:components_with_resume` (a resume backs up what its run did) or
+    `:no_media_dir` (`:media` on a deployment without a media directory).
+    The `request_backup` action takes the same `components` argument, with
+    the same policy: only a platform admin or `KilnCMS.Backups.system/0`.
+  - **What runs.** The start step settles the components (what was asked for
+    that the deployment has) and writes them to `state.json`; `dump` is
+    skipped without the database, `plan`, `archive` and `checksum` without
+    the media. The Run records them in `components`, its log says "Backing up
+    only: db" when something is left out, and the manifest records them as
+    `"components"`. A resume keeps its run's components. A media-only backup
+    whose media directory is gone by the time it starts is a `Skipped` run
+    ("Refused: no_media_dir"), and the manifest is left alone.
+  - **Queued requests.** A fresh request folding into a queued fresh backup
+    widens it to the union of both (database-only plus media-only makes
+    both). A fresh request and a resume never fold into each other
+    ([#2540](#backup-fold-like-into-like)). The in-flight strip lists a queued backup's components
+    ("· Database + Media"), and `in_flight/0` gains `components` for the
+    running backup and for the queued request.
+  - **Status per component.** `KilnCMS.Backups.status/0` gains `expected`,
+    `components` (per component: `last_good`, `last_attempt`, `failed?`,
+    `stale?`, `never?`, `stale_after_hours`, `stale_source`), `failed?` and
+    `source` (`:runs` or `:manifest`); top-level `stale?` is now true when any
+    component is stale. Each component's last good backup is the newest
+    succeeded run with a verified file of that kind, or the manifest when it
+    is newer. A failed run that doesn't say what it covered (a failed
+    imported cron run, or one naming no component) and a failed manifest
+    without `"components"` count against every component. When History can't
+    be read, the status falls back to the manifest alone, emits
+    `[:kiln_cms, :backups, :status, :history_unreadable]` every time and logs
+    a warning at most once every 15 minutes.
+  - **On screen.** The Backups status panel has one line per component
+    ("Database: Backed up 3 hours ago", "Media: The last backup failed") and
+    alarms when any line is failed or stale; the file list and **Last run
+    failed** still show the last backup. The overview's red strip names each
+    component that needs attention ("The last media backup was 3 days ago.");
+    media never backed up while the database has been is that red strip, not
+    the neutral set-up notice. The overview reads the backup status only for
+    platform admins, the only ones shown the strips.
+  - **Telemetry.** `[:kiln_cms, :backups, :request, :folded]` gains
+    `components` in its metadata.
+  - **Not included.** No button for a partial backup, and no schedules yet:
+    `Run.scheduled_components` and `schedule_ids` are recorded but always
+    empty in this release.
+  Guide: [Back up only the database or only the media](../backups.md#back-up-only-the-database-or-only-the-media)
+  and [Check the last backup of each component](../backups.md#check-the-last-backup-of-each-component).
+  Upgrade: [the upgrade note](#backup-components-upgrade).
 
 <a id="core-security-notices"></a>
 
@@ -3963,6 +4097,37 @@ carries the reasoning.
 
 ## Changed
 
+<a id="backup-fold-like-into-like"></a>
+
+- **A backup request folds into the queued one only when it is the same kind
+  (#2540).** Since #2218 every request made while one backup ran and another
+  was queued folded into the queued one. That dropped work when the two
+  differed: a **Back up now** folded into a queued **Resume** never took its
+  own backup (the resume finishes the old backup), and a Resume folded into a
+  queued fresh backup (or a resume of another backup) never resumed anything.
+  Now:
+  - **Back up now** folds into a queued fresh backup, and **Resume** into a
+    queued resume of the same backup, as before. The page says "A backup is
+    running and a resume of this backup is already queued; that queued resume
+    covers this request." for the second.
+  - **Any other combination is refused.** The page says, for example, "A backup
+    is running and a resume of 20261101-101010 is queued after it, so this
+    backup was not queued. Try again once the queue clears." Nothing is queued,
+    no run is created and the fold count is unchanged.
+  - **From the console**, `KilnCMS.Backups.request/2` returns
+    `{:error, {:queue_busy, :backup | {:resume, stamp}}}`, naming what is
+    queued. A legacy `KilnCMS.Backups.Worker` job that gets it waits a minute
+    and asks again instead of being canceled.
+  - **This replaces the coverage rule from per-component backups (#2219)**,
+    under which a fresh request folded into a queued resume whose run covered
+    its components and was otherwise refused with `{:error, :resume_queued}`.
+    That error is gone; neither was released.
+  - **Scheduled backups** (#2219, not yet released) get the same answer when a
+    resume is queued, so a scheduled tick never folds into a Resume; the
+    scheduler must retry on a later tick.
+
+  See [backups.md](../backups.md#back-up-while-another-backup-runs).
+
 <a id="verified-search-engine-default"></a>
 
 - **Verified search engines get twice the browser limit by default (#2587).**
@@ -4640,6 +4805,39 @@ carries the reasoning.
     has a new name; delete superseded items in the media library.
 
 ## Fixed
+
+<a id="scoped-search-keeps-category"></a>
+
+- **A search scoped by `?category=<slug>` stays scoped (#2457).** The public
+  `/search` page has filtered every leg by `?category=` since its facets
+  shipped, but only a facet link set it: the search form had no field for it,
+  and the "did you mean" link and the language links rebuilt the URL from the
+  query alone. A link that landed on `/search?category=…` therefore searched
+  the whole site the moment the visitor typed a query. The form now carries
+  the category in a hidden field, both links keep it, and the page says
+  "Searching only in “<category>”" with a **Search everything** link, shown
+  even before a query, when there are no facets to show the scope. The
+  "did you mean" suggestion now comes from titles in that category only: a
+  scoped search has no fuzzy leg, so the suggestion is its one typo rescue,
+  and a title from outside the scope led to a search that found nothing. An
+  unknown slug still matches nothing; the page now says the category doesn't
+  exist (without repeating the slug, which is whatever a link carries),
+  offers **Search everything**, and does not carry the slug forward. No new search argument, no migration; overlays that replace
+  `search.html.heex` keep their own copy.
+  - **kilncms.dev.** `scripts/publish_docs.exs` now files every guide under
+    the site's `documentation` category, and the /docs index's search link is
+    `/search?category=documentation` ("Search the docs"). The owner chose a
+    category over a public `?type=` argument because kilncms.dev is frozen
+    (`docs/path-forward.md`). The publisher looks the category up but cannot
+    create it (the JSON:API has no write route for categories), so the site
+    needs it created once at `/editor/taxonomy`; without it, the run raises
+    before publishing anything. Publishing overwrites any category an editor
+    set on a Doc entry. **Before merging, create the category on
+    kilncms.dev**; if the merge's publish run failed for want of it, re-run
+    the Publish docs workflow by hand for a full sync. Like any filter on the search, it drops the block,
+    fuzzy and tag legs, so typo tolerance goes with it; the "did you mean"
+    suggestion remains.
+  ([#2457](https://github.com/The-Verscienta/kiln_cms/issues/2457))
 
 <a id="unknown-field-type-rollback"></a>
 
