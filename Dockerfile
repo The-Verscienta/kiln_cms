@@ -83,24 +83,29 @@ FROM node:${NODE_VERSION}-bookworm-slim AS node
 #
 # Cost: the binary is a static Go build of about 82 MiB, which the runner
 # copies in alone; the zip and unzip stay in this stage.
+#
+# The ARGs are KILN_-prefixed on purpose: rclone reads every `RCLONE_*`
+# environment variable as a flag, and a build ARG is in the environment of
+# the RUN below, so `RCLONE_VERSION=1.75.2` became `--version=1.75.2` and
+# `rclone version` refused it.
 FROM debian:${RUNNER_DEBIAN_VERSION} AS rclone
 ARG TARGETARCH
-ARG RCLONE_VERSION=1.75.2
-ARG RCLONE_SHA256_AMD64=349ac8fba6ff65d6247043f1750cdcb518ec5d500ef91463a10d37c0ccdf3702
-ARG RCLONE_SHA256_ARM64=7e1e8d69654941b7b7df84ee74c5f7fb09cce7d5496947fb7bf16b55ff427d10
+ARG KILN_RCLONE_VERSION=1.75.2
+ARG KILN_RCLONE_SHA256_AMD64=349ac8fba6ff65d6247043f1750cdcb518ec5d500ef91463a10d37c0ccdf3702
+ARG KILN_RCLONE_SHA256_ARM64=7e1e8d69654941b7b7df84ee74c5f7fb09cce7d5496947fb7bf16b55ff427d10
 RUN set -eu; \
   arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
   case "$arch" in \
-    amd64) sha="$RCLONE_SHA256_AMD64" ;; \
-    arm64) sha="$RCLONE_SHA256_ARM64" ;; \
+    amd64) sha="$KILN_RCLONE_SHA256_AMD64" ;; \
+    arm64) sha="$KILN_RCLONE_SHA256_ARM64" ;; \
     *) echo "no pinned rclone for architecture $arch" >&2; exit 1 ;; \
   esac; \
   apt-get update -y \
   && apt-get install -y --no-install-recommends ca-certificates curl unzip \
   && curl -fsSLo /tmp/rclone.zip \
-     "https://downloads.rclone.org/v${RCLONE_VERSION}/rclone-v${RCLONE_VERSION}-linux-${arch}.zip" \
+     "https://downloads.rclone.org/v${KILN_RCLONE_VERSION}/rclone-v${KILN_RCLONE_VERSION}-linux-${arch}.zip" \
   && echo "${sha}  /tmp/rclone.zip" | sha256sum -c - \
-  && unzip -j /tmp/rclone.zip "rclone-v${RCLONE_VERSION}-linux-${arch}/rclone" -d /usr/local/bin \
+  && unzip -j /tmp/rclone.zip "rclone-v${KILN_RCLONE_VERSION}-linux-${arch}/rclone" -d /usr/local/bin \
   && chmod 0755 /usr/local/bin/rclone \
   && /usr/local/bin/rclone version
 
