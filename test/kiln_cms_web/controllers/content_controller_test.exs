@@ -775,6 +775,77 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ "How the studio fires its glazes."
     end
 
+    # #2457: kilncms.dev's /docs index links to `/search?category=documentation`.
+    # The scope has to survive the visitor's first search, and every link on
+    # the page that re-runs one, or the docs search becomes a site search.
+    test "a category-scoped landing says so, and its form keeps the scope", %{conn: conn} do
+      category =
+        Ash.Seed.seed!(KilnCMS.CMS.Category, %{name: "Documentation", slug: "docs-#{uniq()}"})
+
+      html = conn |> get(~p"/search?category=#{category.slug}") |> html_response(200)
+
+      assert html =~ "Searching only in “Documentation”."
+      assert html =~ ~s(<a href="/search" class="text-primary-ink hover:underline">)
+      assert html =~ "Search everything"
+
+      assert html =~
+               ~r{<input[^>]*type="hidden"[^>]*name="category"[^>]*value="#{category.slug}"}
+
+      plain = conn |> get(~p"/search") |> html_response(200)
+      refute plain =~ ~s(name="category")
+      refute plain =~ "Searching only in"
+    end
+
+    test "a scoped search keeps its category in the suggestion and locale links", %{conn: conn} do
+      category =
+        Ash.Seed.seed!(KilnCMS.CMS.Category, %{name: "Documentation", slug: "docs-#{uniq()}"})
+
+      page(%{title: "Fermentation Handbook #{uniq()}", category_id: category.id})
+
+      html =
+        conn |> get(~p"/search?q=fermentaton&category=#{category.slug}") |> html_response(200)
+
+      [suggestion] =
+        Regex.run(~r{<a\s+href="([^"]+)"[^>]*>\s*Did you mean}, html, capture: :all_but_first)
+
+      assert suggestion =~ ~r{^/search\?q=[^&]+&amp;category=#{category.slug}$}
+
+      assert html =~ "/fr/search?q=fermentaton&amp;category=#{category.slug}"
+      # "Search everything" keeps the query and drops the scope.
+      assert html =~ ~s(<a href="/search?q=fermentaton" class="text-primary-ink hover:underline">)
+    end
+
+    test "an unknown category matches nothing and is not carried forward", %{conn: conn} do
+      term = "unscoped#{uniq()}"
+      page(%{title: "#{term} page"})
+
+      html = conn |> get(~p"/search?q=#{term}&category=no-such-#{uniq()}") |> html_response(200)
+
+      refute html =~ "#{term} page"
+      refute html =~ ~s(name="category")
+      refute html =~ "category=no-such"
+      assert html =~ "That category doesn&#39;t exist"
+      # Not echoed: the slug is whatever text a link put there.
+      refute html =~ "no-such-"
+      assert html =~ "Search everything"
+    end
+
+    test "a scoped search suggests only from titles in its category", %{conn: conn} do
+      category =
+        Ash.Seed.seed!(KilnCMS.CMS.Category, %{name: "Documentation", slug: "docs-#{uniq()}"})
+
+      # The only near title is outside the category: no suggestion in scope.
+      page(%{title: "Glazeology Primer #{uniq()}"})
+
+      unscoped = conn |> get(~p"/search?q=glazeolgy") |> html_response(200)
+      assert unscoped =~ "Did you mean"
+
+      scoped =
+        conn |> get(~p"/search?q=glazeolgy&category=#{category.slug}") |> html_response(200)
+
+      refute scoped =~ "Did you mean"
+    end
+
     test "a typo gets fuzzy-rescued results plus a did-you-mean link", %{conn: conn} do
       page = page(%{title: "Fermentation Handbook #{uniq()}"})
 

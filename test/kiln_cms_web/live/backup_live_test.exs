@@ -893,6 +893,28 @@ defmodule KilnCMSWeb.BackupLiveTest do
              )
     end
 
+    # #2219: what the queued backup covers.
+    @tag :pg_tools
+    test "the queued request says which components it covers", %{dir: dir} do
+      media = Path.join(dir, "uploads")
+      File.mkdir_p!(media)
+      config = Application.get_env(:kiln_cms, KilnCMS.Backups)
+      Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(config, :media_dir, media))
+
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([components: [:db]], Backups.system())
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      components = ~s|#backup-in-flight [data-role="queued-components"]|
+      assert has_element?(lv, components, "Database")
+      refute has_element?(lv, components, "Media")
+
+      {:ok, %{status: :folded}} = Backups.request([components: [:media]], Backups.system())
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      assert has_element?(lv, components, "Database + Media")
+    end
+
     @tag :pg_tools
     test "Back up now while one runs queues it and says so" do
       started!()
@@ -1090,6 +1112,140 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
   end
 
+  describe "one headline line per component (#2219)" do
+    setup %{dir: dir} do
+      media = Path.join(dir, "uploads")
+      File.mkdir_p!(media)
+      config = Application.get_env(:kiln_cms, KilnCMS.Backups)
+      Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(config, :media_dir, media))
+      :ok
+    end
+
+    # A finished run covering `components`, `hours` ago.
+    defp component_run!(components, hours, status \\ :succeeded) do
+      at = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+      stamp = KilnCMS.Backups.Artifact.stamp(at)
+
+      artifacts =
+        for component <- components do
+          %{kind: component, name: "kiln-#{component}-#{stamp}", bytes: 10, verified: true}
+        end
+
+      Backups.import_run!(
+        %{
+          stamp: stamp,
+          trigger: "cron",
+          status: status,
+          components: components,
+          started_at: at,
+          finished_at: at,
+          artifacts: if(status == :succeeded, do: artifacts, else: []),
+          error: if(status == :failed, do: "boom")
+        },
+        actor: Backups.system()
+      )
+    end
+
+    test "a fresh database and stale media: each says its own, and the tone is the alarm", %{
+      conn: conn
+    } do
+      component_run!([:db, :media], 5 * 24)
+      component_run!([:db], 1)
+
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+
+      assert has_element?(lv, "#backup-headline-db", "Database")
+      assert has_element?(lv, "#backup-headline-db", "Backed up")
+      assert has_element?(lv, "#backup-headline-media", "Media")
+      assert has_element?(lv, "#backup-headline-media", "Last backup was")
+      assert has_element?(lv, "#backup-headline-media", "5 days")
+      assert html =~ "border-error/30"
+    end
+
+    test "a database-only backup after a full one leaves media's line on the full one", %{
+      conn: conn,
+      dir: dir
+    } do
+      component_run!([:db, :media], 3)
+      component_run!([:db], 1)
+
+      :ok =
+        Manifest.write(dir, %Manifest{
+          finished_at: DateTime.utc_now(),
+          trigger: "manual",
+          ok: true,
+          components: ["db"],
+          artifacts: [%{kind: "db", path: "db/kiln-db-x.dump", bytes: 1, verified: true}]
+        })
+
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+
+      assert has_element?(lv, "#backup-headline-db", "Backed up")
+      assert has_element?(lv, "#backup-headline-media", "Backed up 3 hours ago")
+      assert html =~ "border-success/30"
+    end
+
+    # An in-app run, which says what it covered (an imported failed run counts
+    # against every component).
+    test "a failed media backup fails media's line only", %{conn: conn} do
+      component_run!([:db, :media], 3)
+      at = DateTime.add(DateTime.utc_now(), -3600, :second)
+
+      run =
+        Backups.start_run!(
+          %{
+            stamp: KilnCMS.Backups.Artifact.stamp(at),
+            trigger: "manual",
+            components: [:media],
+            started_at: at
+          },
+          actor: Backups.system()
+        )
+
+      Backups.fail_run!(run, %{error: "boom"}, actor: Backups.system())
+
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+
+      assert has_element?(lv, "#backup-headline-db", "Backed up")
+      assert has_element?(lv, "#backup-headline-media", "The last backup failed")
+      assert html =~ "border-error/30"
+    end
+
+    test "the overview names the component that needs attention", %{conn: conn} do
+      component_run!([:db, :media], 3 * 24)
+      component_run!([:db], 1)
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(
+               lv,
+               ~s|#overview-backup-warning [data-role="backup-headline"]|,
+               "The last media backup was 3 days ago."
+             )
+
+      refute has_element?(lv, "#overview-backup-warning", "database")
+      refute has_element?(lv, "#overview-backup-setup")
+    end
+
+    test "media never backed up while the database is: the alarm, not the set-up notice", %{
+      conn: conn
+    } do
+      component_run!([:db], 1)
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(lv, "#overview-backup-warning", "No media backup has been recorded.")
+      refute has_element?(lv, "#overview-backup-setup")
+    end
+
+    test "nothing ever backed up is still the set-up notice", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(lv, "#overview-backup-setup")
+      refute has_element?(lv, "#overview-backup-warning")
+    end
+  end
+
   describe "an off-site remote with no rclone in the image (#2218)" do
     setup do
       original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
@@ -1192,7 +1348,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
 
-      assert has_element?(lv, "#overview-backup-warning", "The last backup failed.")
+      assert has_element?(lv, "#overview-backup-warning", "The last database backup failed.")
       refute has_element?(lv, "#overview-backup-setup")
     end
 
@@ -1202,7 +1358,12 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
 
-      assert has_element?(lv, "#overview-backup-warning", "The last backup was 30 days ago.")
+      assert has_element?(
+               lv,
+               "#overview-backup-warning",
+               "The last database backup was 30 days ago."
+             )
+
       refute has_element?(lv, "#overview-backup-setup")
     end
 

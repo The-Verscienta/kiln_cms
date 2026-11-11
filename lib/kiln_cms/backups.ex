@@ -13,7 +13,8 @@ defmodule KilnCMS.Backups do
     * `status/0` reads a **manifest** written by whichever path last ran, so
       the console can say when the last backup was, how big it was, and
       whether it verified — including for a cron run this application never
-      saw.
+      saw. Since #2219 it says so per component (database, media), from the
+      run history and the manifest together.
     * `request/2` asks for one, from the app: a chain of Oban jobs, one per
       step, behind a cluster-wide lock (#2218; `KilnCMS.Backups.Chain`).
 
@@ -27,6 +28,10 @@ defmodule KilnCMS.Backups do
   queues behind it; at most one waits, and later requests of the same kind fold
   into that one (a different kind is refused: `KilnCMS.Backups.Chain.request/1`).
   `scripts/backup.sh` runs outside the application and does not take the lock.
+
+  A request may cover only some components (#2219):
+  `request([components: [:db]], actor)` backs up the database alone. A
+  request folding into a queued one widens it to both requests' components.
 
   ## The shell scripts stay canonical
 
@@ -57,7 +62,10 @@ defmodule KilnCMS.Backups do
 
   use Ash.Domain
 
-  alias KilnCMS.Backups.{Chain, Manifest, Refused, Run, StepWorker, WorkState}
+  alias KilnCMS.Backups.{Chain, Lock, Manifest, Refused, Run, StepWorker, WorkState}
+
+  require Ash.Query
+  require Logger
 
   resources do
     resource KilnCMS.Backups.Run do
@@ -311,11 +319,29 @@ defmodule KilnCMS.Backups do
   @spec work_dir(String.t()) :: Path.t()
   def work_dir(stamp), do: WorkState.path(dir(), stamp)
 
+  @type component :: :db | :media
+
+  @type component_status :: %{
+          last_good: %{at: DateTime.t(), stamp: String.t() | nil, source: :run | :manifest} | nil,
+          last_attempt:
+            %{at: DateTime.t(), ok?: boolean(), stamp: String.t() | nil, source: :run | :manifest}
+            | nil,
+          failed?: boolean(),
+          stale?: boolean(),
+          never?: boolean(),
+          stale_after_hours: pos_integer(),
+          stale_source: {:env, String.t()}
+        }
+
   @type status :: %{
           configured?: boolean(),
           available?: boolean(),
           manifest: Manifest.t() | nil,
           stale?: boolean(),
+          failed?: boolean(),
+          expected: [component()],
+          components: %{optional(component()) => component_status()},
+          source: :runs | :manifest,
           reason: atom() | nil,
           rclone_missing?: boolean()
         }
@@ -338,6 +364,13 @@ defmodule KilnCMS.Backups do
   """
   @spec media_dir() :: Path.t() | nil
   def media_dir, do: config(:media_dir, nil)
+
+  @doc """
+  What a backup here covers (#2219): the database, and the media when there is
+  a `media_dir/0` to archive.
+  """
+  @spec expected_components() :: [component()]
+  def expected_components, do: if(media_dir(), do: [:db, :media], else: [:db])
 
   @doc """
   The rclone remote to copy each backup to, or `nil` — the script's
@@ -412,11 +445,37 @@ defmodule KilnCMS.Backups do
   Never raises and never returns `nil` for the whole thing: an unreadable or
   absent manifest is a *state* worth showing ("no backup has ever run here"),
   not an error page.
+
+  ## Per component (#2219)
+
+  A backup may cover only the database or only the media, so the manifest (the
+  LAST backup) can't say how each is doing: a database-only run would hide the
+  media's state. `components` has one entry per `expected_components/0`:
+
+    * `last_good`: the newest succeeded run that covered it and has a verified
+      artifact of that kind, or the manifest when it is newer (or the only
+      source); `nil` when there is none.
+    * `last_attempt`: the newest run that covered it and succeeded or failed,
+      or the manifest, whichever is newer. A failed manifest that doesn't say
+      what it covered counts against every component, and so does a failed
+      imported (cron) run or one that names no component: those list only
+      the kinds of the files they left.
+    * `failed?` (the last attempt failed), `stale?` (no last good, or older
+      than `stale_after_hours`), `never?` (no attempt at all),
+      `stale_after_hours` and where that came from (`stale_source`).
+
+  `stale?` and `failed?` at the top are any component's. The runs are read as
+  `system/0`, a few rows per component; when that read fails, the status comes
+  from the manifest alone (`source: :manifest`) rather than raising or
+  calling anything healthy.
   """
   @spec status() :: status()
   def status do
     availability = availability()
     manifest = Manifest.read(dir())
+    expected = expected_components()
+    {source, runs} = status_runs(expected)
+    components = Map.new(expected, &{&1, component_status(&1, Map.get(runs, &1), manifest)})
 
     %{
       configured?: not match?({:error, :disabled}, availability),
@@ -426,9 +485,177 @@ defmodule KilnCMS.Backups do
       # `:ok` and the panel would render "ok" as though it were a fault.
       reason: reason(availability),
       manifest: manifest,
-      stale?: stale?(manifest),
+      expected: expected,
+      components: components,
+      source: source,
+      stale?: Enum.any?(components, fn {_c, cs} -> cs.stale? end),
+      failed?: Enum.any?(components, fn {_c, cs} -> cs.failed? end),
       rclone_missing?: rclone_missing?()
     }
+  end
+
+  # The run history's say on each component: `{:runs, %{c => %{good, attempt}}}`,
+  # or `{:manifest, %{}}` when it can't be read.
+  defp status_runs(expected) do
+    Enum.reduce_while(expected, {:runs, %{}}, fn component, {:runs, acc} ->
+      with {:ok, good} <- newest_good_run(component),
+           {:ok, attempt} <- newest_attempt(component) do
+        {:cont, {:runs, Map.put(acc, component, %{good: good, attempt: attempt})}}
+      else
+        {:error, error} ->
+          history_unreadable(error)
+          {:halt, {:manifest, %{}}}
+      end
+    end)
+  end
+
+  @history_warned {__MODULE__, :history_warned_at}
+  @history_warn_every_ms :timer.minutes(15)
+
+  # Every occurrence is a telemetry event; the warning is logged at most once
+  # per 15 minutes, since the Backups page asks every few seconds while a
+  # backup runs.
+  defp history_unreadable(error) do
+    :telemetry.execute([:kiln_cms, :backups, :status, :history_unreadable], %{count: 1}, %{
+      error: error.__struct__
+    })
+
+    now = System.monotonic_time(:millisecond)
+    last = :persistent_term.get(@history_warned, nil)
+
+    if is_nil(last) or now - last >= @history_warn_every_ms do
+      :persistent_term.put(@history_warned, now)
+
+      Logger.warning(
+        "Backup status from the manifest alone: the run history could not be read " <>
+          "(#{inspect(error.__struct__)})"
+      )
+    end
+
+    :ok
+  end
+
+  # A succeeded run's artifact can be missing for a component it named (a
+  # media directory gone mid-way), so a few rows are read, not one.
+  defp newest_good_run(component) do
+    with {:ok, runs} <- read_status_runs(component, [:succeeded], 5) do
+      {:ok, Enum.find(runs, &good_artifact?(&1, component))}
+    end
+  end
+
+  # A failed run that doesn't say what it covered counts against every
+  # component, as a failed manifest does: an imported (cron) run lists only
+  # the kinds of the files it left, or none at all.
+  defp newest_attempt(component) do
+    name = Atom.to_string(component)
+
+    query =
+      Ash.Query.filter(
+        Run,
+        (status in [:succeeded, :failed] and fragment("? = ANY(?)", ^name, components)) or
+          (status == :failed and
+             (origin == :imported or fragment("cardinality(?) = 0", components)))
+      )
+
+    with {:ok, runs} <- read_status_runs(query, 1), do: {:ok, List.first(runs)}
+  end
+
+  defp read_status_runs(component, statuses, limit) do
+    name = Atom.to_string(component)
+
+    Run
+    |> Ash.Query.filter(status in ^statuses and fragment("? = ANY(?)", ^name, components))
+    |> read_status_runs(limit)
+  end
+
+  defp read_status_runs(query, limit) do
+    query =
+      query
+      |> Ash.Query.sort(started_at: :desc)
+      |> Ash.Query.limit(limit)
+      |> Ash.Query.select([
+        :stamp,
+        :status,
+        :origin,
+        :components,
+        :artifacts,
+        :started_at,
+        :finished_at
+      ])
+
+    list_runs(query: query, actor: system(), authorize_with: :error)
+  end
+
+  defp good_artifact?(run, component) do
+    Enum.any?(run.artifacts, fn artifact ->
+      artifact.kind == component and artifact.verified and
+        get_in(artifact.destinations, ["local", "status"]) != "pruned"
+    end)
+  end
+
+  defp component_status(component, runs, manifest) do
+    name = Atom.to_string(component)
+    runs = runs || %{good: nil, attempt: nil}
+
+    last_good = newer(run_point(runs.good), manifest_good(manifest, name))
+    last_attempt = newer(run_point(runs.attempt), manifest_attempt(manifest, name))
+    hours = stale_after_hours()
+
+    %{
+      last_good: last_good && Map.delete(last_good, :ok?),
+      last_attempt: last_attempt,
+      failed?: last_attempt != nil and not last_attempt.ok?,
+      stale?: last_good == nil or DateTime.diff(DateTime.utc_now(), last_good.at, :hour) >= hours,
+      never?: last_good == nil and last_attempt == nil,
+      stale_after_hours: hours,
+      stale_source: {:env, "BACKUP_STALE_AFTER_HOURS"}
+    }
+  end
+
+  defp run_point(nil), do: nil
+
+  defp run_point(run) do
+    %{
+      at: run.finished_at || run.started_at,
+      ok?: run.status == :succeeded,
+      stamp: run.stamp,
+      source: :run
+    }
+  end
+
+  # An ok manifest vouches for a component it covered with a verified file of
+  # that kind.
+  defp manifest_good(%Manifest{ok: true, finished_at: %DateTime{} = at} = manifest, name) do
+    covered? =
+      name in Manifest.components(manifest) and
+        Enum.any?(manifest.artifacts, &(&1.kind == name and &1.verified))
+
+    if covered?, do: %{at: at, ok?: true, stamp: nil, source: :manifest}
+  end
+
+  defp manifest_good(_manifest, _name), do: nil
+
+  # A failed manifest that doesn't say what it covered (cron's, or one with no
+  # artifacts) counts against every component: failing closed.
+  defp manifest_attempt(%Manifest{finished_at: %DateTime{} = at} = manifest, name) do
+    covered =
+      case {manifest.ok, manifest.components} do
+        {false, nil} -> [name]
+        _ -> Manifest.components(manifest)
+      end
+
+    if name in covered, do: %{at: at, ok?: manifest.ok, stamp: nil, source: :manifest}
+  end
+
+  defp manifest_attempt(_manifest, _name), do: nil
+
+  # The later of two points; on a tie (the manifest of the run itself) the
+  # run's, which carries its stamp.
+  defp newer(nil, other), do: other
+  defp newer(one, nil), do: one
+
+  defp newer(run, manifest) do
+    if DateTime.compare(manifest.at, run.at) == :gt, do: manifest, else: run
   end
 
   @doc """
@@ -472,10 +699,15 @@ defmodule KilnCMS.Backups do
       KilnCMS.Backups.await(chain)
       #=> :ok
 
-  Options: `:trigger` (default `"manual"`) and `:resume`, a stamp whose failed,
-  interrupted or canceled backup to continue. A `:resume` that is present is
-  always a resume: a malformed one is refused (`:invalid_stamp`), never a fresh
-  backup.
+  Options: `:trigger` (default `"manual"`), `:resume`, a stamp whose failed,
+  interrupted or canceled backup to continue, and `:components` (#2219), what a
+  fresh backup covers: `[:db]`, `[:media]` or both (absent or nil:
+  everything). A `:resume` that is present is always a resume: a malformed one
+  is refused (`:invalid_stamp`), never a fresh backup. `:components` is refused
+  as `:invalid_components` unless it is a non-empty list of distinct
+  components, as `:components_with_resume` beside a `:resume` (a resume backs
+  up what its run did), and as `:no_media_dir` when it names `:media` on a
+  deployment with no media directory.
 
     * `{:ok, %{status: :started, chain: chain}}`: it is running.
     * `{:ok, %{status: :queued, chain: running}}`: it starts when the running
@@ -488,14 +720,16 @@ defmodule KilnCMS.Backups do
       once the queue clears (#2540).
     * `{:error, reason}`: `availability/0`'s reason, a resume refusal
       (`resumable_run/2`: `:invalid_stamp`, `:in_flight`, `:no_such_run`,
-      `{:not_resumable, status}`, `:no_state`), or `:forbidden` for an actor the
-      policy refuses (only a platform admin and `system/0` may ask).
+      `{:not_resumable, status}`, `:no_state`), a `:components` refusal, or
+      `:forbidden` for an actor the policy refuses (only a platform admin and
+      `system/0` may ask).
   """
   @spec request(keyword(), term()) :: {:ok, map()} | {:error, term()}
   def request(opts \\ [], actor) do
     input = %{trigger: to_string(Keyword.get(opts, :trigger, "manual"))}
 
-    with {:ok, input} <- put_resume(input, opts) do
+    with {:ok, input} <- put_resume(input, opts),
+         {:ok, input} <- put_components(input, opts) do
       case request_backup(input, actor: actor) do
         {:ok, result} -> {:ok, result}
         {:error, error} -> {:error, refusal(error)}
@@ -514,6 +748,33 @@ defmodule KilnCMS.Backups do
       {:ok, input}
     end
   end
+
+  # nil (or absent) is everything. Atoms or their names; the action refuses a
+  # repeat, and the rest (`Lock.Actions.Request`).
+  defp put_components(input, opts) do
+    case Keyword.get(opts, :components) do
+      nil ->
+        {:ok, input}
+
+      list when is_list(list) and list != [] ->
+        components = Enum.map(list, &component/1)
+
+        if Enum.all?(components, &(&1 in Lock.components())) and
+             Enum.uniq(components) == components,
+           do: {:ok, Map.put(input, :components, components)},
+           else: {:error, :invalid_components}
+
+      _other ->
+        {:error, :invalid_components}
+    end
+  end
+
+  defp component(name) when is_atom(name), do: name
+
+  defp component(name) when is_binary(name),
+    do: Enum.find(Lock.components(), :unknown, &(Atom.to_string(&1) == name))
+
+  defp component(_other), do: :unknown
 
   defp refusal(%Ash.Error.Forbidden{}), do: :forbidden
 
@@ -537,10 +798,12 @@ defmodule KilnCMS.Backups do
   @doc """
   What the backup lock holds right now, or `nil` when no backup runs: the chain,
   its stamp, trigger, step and part, `parts_total` (the archive step's part
-  count, when this node has the chain's backup directory; else nil), phase
-  (`:running`, or `:finishing` once Cancel is refused), when it took the lock,
-  and the queued request
-  (`%{trigger, resume, requested_at, folds}`) or `nil`.
+  count, when this node has the chain's backup directory; else nil),
+  `components` (#2219; what the backup covers, from its `state.json` when this
+  node has the chain's backup directory; else nil), phase (`:running`, or
+  `:finishing` once Cancel is refused), when it took the lock, and the queued
+  request (`%{trigger, resume, components, requested_at, folds}`, where nil
+  `components` is everything) or `nil`.
   """
   @spec in_flight() :: map() | nil
   def in_flight, do: Chain.in_flight()

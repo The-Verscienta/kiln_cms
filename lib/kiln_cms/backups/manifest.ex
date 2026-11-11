@@ -49,6 +49,13 @@ defmodule KilnCMS.Backups.Manifest do
    "part": 1, "parts_total": 2}
   ```
 
+  ## Components (#2219)
+
+  A backup may cover only the database or only the media. Kiln writes what it
+  covered as `"components"` (`["db"]`, `["media"]` or `["db", "media"]`); a
+  manifest without the key (`scripts/backup.sh`, or Kiln before #2219) covers
+  the kinds of its artifacts (`components/1`).
+
   The keys are additive and the version stays 1: a manifest without them reads
   exactly as before (the keys are absent from the parsed entry, not `nil`), and
   a reader that doesn't know them ignores them. `total_bytes/1` and
@@ -78,6 +85,7 @@ defmodule KilnCMS.Backups.Manifest do
           finished_at: DateTime.t() | nil,
           trigger: String.t(),
           ok: boolean(),
+          components: [String.t()] | nil,
           artifacts: [artifact()],
           offsite: String.t() | nil,
           keep_days: pos_integer() | nil,
@@ -89,6 +97,7 @@ defmodule KilnCMS.Backups.Manifest do
             finished_at: nil,
             trigger: "unknown",
             ok: false,
+            components: nil,
             artifacts: [],
             offsite: nil,
             keep_days: nil,
@@ -171,6 +180,17 @@ defmodule KilnCMS.Backups.Manifest do
   def verified?(%__MODULE__{artifacts: []}), do: false
   def verified?(%__MODULE__{artifacts: artifacts}), do: Enum.all?(artifacts, & &1.verified)
 
+  @doc """
+  What the backup covered: its `"components"`, or, in a manifest without the
+  key, the kinds of its artifacts. `[]` for neither.
+  """
+  @spec components(t() | nil) :: [String.t()]
+  def components(nil), do: []
+  def components(%__MODULE__{components: components}) when is_list(components), do: components
+
+  def components(%__MODULE__{artifacts: artifacts}),
+    do: artifacts |> Enum.map(& &1.kind) |> Enum.uniq()
+
   defp to_map(%__MODULE__{} = m) do
     %{
       "version" => m.version,
@@ -189,6 +209,7 @@ defmodule KilnCMS.Backups.Manifest do
       "keep_days" => m.keep_days,
       "error" => m.error
     }
+    |> put_present("components", m.components)
   end
 
   defp from_map(map) do
@@ -198,6 +219,7 @@ defmodule KilnCMS.Backups.Manifest do
       finished_at: datetime(map["finished_at"]),
       trigger: string(map["trigger"]) || "unknown",
       ok: map["ok"] == true,
+      components: components_list(map["components"]),
       artifacts: artifacts(map["artifacts"]),
       offsite: string(map["offsite"]),
       keep_days: integer(map["keep_days"]),
@@ -223,6 +245,16 @@ defmodule KilnCMS.Backups.Manifest do
   end
 
   defp artifacts(_other), do: []
+
+  # Known names only, each once; anything else reads as absent.
+  defp components_list(list) when is_list(list) do
+    case for(name <- ["db", "media"], name in list, do: name) do
+      [] -> nil
+      names -> names
+    end
+  end
+
+  defp components_list(_other), do: nil
 
   defp put_present(map, _key, nil), do: map
   defp put_present(map, key, value), do: Map.put(map, key, value)

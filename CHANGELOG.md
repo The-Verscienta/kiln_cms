@@ -59,6 +59,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `access-denied` and path aliases under `/access-denied`, which the new access-denied page (#2143) shadows; give each a new slug or alias.** No migration; read-only.
   ([#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374) · [long form](docs/changelog/unreleased.md#reserved-paths-upgrade))
 
+- **Run `mix ash.migrate` (new nullable `backup_locks.waiting_*` columns; `backup_runs.scheduled_components` and `schedule_ids`, default empty). While older nodes still run, a database-only or media-only backup request may back up everything (part of #2219). Rolling back is safe.**
+  ([#2685](https://github.com/The-Verscienta/kiln_cms/pull/2685) · [long form](docs/changelog/unreleased.md#backup-components-upgrade))
+
 - **Update the host's copy of `scripts/backup.sh` so cron's prune honors the new `kiln-<stamp>.good` marker, which the app keeps on the newest verified backup of each component (part of #2219).** No migration; rolling back is safe.
   ([#2552](https://github.com/The-Verscienta/kiln_cms/pull/2552) · [long form](docs/changelog/unreleased.md#backup-last-good-marker-upgrade))
 
@@ -229,6 +232,10 @@ Every summary line below that was shortened links to its own entry there.
 - **`GET /api/security/posture` returns the Security posture checks as JSON for monitoring: an administrator's JWT or API key (never `draft_write`), behind the site's admin allowlist, no details, cached 30 s per node.**
   The allowlist's JSON refusals now read "Not available from this network" / "Temporarily unavailable" (codes unchanged). Guide: [docs/api.md](docs/api.md#security-posture-monitoring).
   ([#2521](https://github.com/The-Verscienta/kiln_cms/issues/2521) · [#2648](https://github.com/The-Verscienta/kiln_cms/pull/2648) · [long form](docs/changelog/unreleased.md#security-posture-json))
+
+- **Back up only the database or only the media from a release console (`KilnCMS.Backups.request([components: [:db]], actor)`); the Backups page and the overview report each component's last backup and alarm when either failed or went stale (part of #2219).**
+  Guide: [docs/backups.md](docs/backups.md#back-up-only-the-database-or-only-the-media).
+  ([#2685](https://github.com/The-Verscienta/kiln_cms/pull/2685) · [long form](docs/changelog/unreleased.md#backup-components))
 
 - **Security alerts: site admins get a bell notice and an email when someone becomes an admin, a role is raised, an account is locked out, two-factor is turned off or single sign-on changes; platform admins when a platform admin or API key is created or a stolen key is reused. Organization → Security alerts picks the kinds.**
   One alert per kind per 15 minutes plus a summary; opt-in `security.*` webhook events; turning alerts down sends the site's member admins a notice nobody can mute. Guide: [docs/security-alerts.md](docs/security-alerts.md).
@@ -548,6 +555,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
 
 ### Fixed
+
+- **A category-scoped `/search?category=<slug>` now stays scoped: the search form, the "did you mean" link and the language links keep the category, and the page says what it searches with a "Search everything" link. kilncms.dev's /docs links to a docs-only search this way.**
+  ([#2457](https://github.com/The-Verscienta/kiln_cms/issues/2457) · [long form](docs/changelog/unreleased.md#scoped-search-keeps-category))
 
 - **A custom field of a type this release doesn't know (a newer release's, after a rollback, or a removed plugin's) no longer breaks the Fields screen, the editor, saves and delivery: it is hidden, records keep its values, and Fields lists it under "Fields of an unknown type" with a Delete.**
   ([#2670](https://github.com/The-Verscienta/kiln_cms/pull/2670) · [long form](docs/changelog/unreleased.md#unknown-field-type-rollback))

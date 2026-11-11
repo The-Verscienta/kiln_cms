@@ -183,6 +183,16 @@ are curated; the index inlines them. Each track holds four to eight guides,
 each a published guide linked once, and the same test enforces that, so a
 full track means swapping a guide out rather than adding one.
 
+Every published guide is filed under the site's **Documentation** category
+(slug `documentation`), and the index's **Search the docs** link is
+`/search?category=documentation`, which searches the guides and nothing else
+(#2457). The category is a site setup step: create it once at
+`/editor/taxonomy`, or the publisher raises before publishing anything. The
+publisher writes it on every guide it publishes, so it **overwrites any
+category an editor sets on a Doc entry on the site**; to change how the guides
+are scoped, change `@category_slug` in `scripts/publish/docs.exs`, not the
+entries.
+
 "View Source" links resolve against the release tag matching `mix.exs`'s
 version, so in a local build they point at the last release rather than at your
 branch. That only matters if you are checking the links themselves; pin them to
