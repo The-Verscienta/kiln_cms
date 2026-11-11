@@ -28,6 +28,14 @@ defmodule KilnCMSWeb.BackupLive do
   runs would show "never" on precisely the deployments that are backing up
   correctly — the most dangerous wrong answer this screen could give.
 
+  ## One line per component (#2219)
+
+  A backup may cover only the database or only the media, so the headline has
+  a line for each component this deployment backs up (`Backups.status/0`'s
+  `components`), and the tone is alarming when any of them failed or went
+  stale. The artifacts and the "Last run failed" box below still show the
+  manifest: the last backup, whatever it covered.
+
   ## History
 
   Below the panels, `Backups.Run` rows (#2217) list every attempt: the app's own
@@ -45,7 +53,9 @@ defmodule KilnCMSWeb.BackupLive do
   it, a strip says which step it is on (and which media part of how many), and
   whether another backup is queued behind it; the page polls while that is so.
   "Back up now" stays enabled: a request while one runs queues, and later ones
-  fold into the queued one.
+  fold into the queued one when it is of the same kind (a fresh backup into a
+  fresh one, a resume into a resume of the same stamp); a request of another
+  kind is refused with a flash to try again once the queue clears (#2540).
 
   A running in-app backup has a **Cancel** button (on its row and on the strip)
   for a platform admin: `Backups.cancel_run/2`, as that admin, whose policy and
@@ -175,14 +185,18 @@ defmodule KilnCMSWeb.BackupLive do
   def handle_event("cancel_run", _params, socket), do: {:noreply, socket}
 
   # Through the lock (#2218), as the admin, so the policy decides too: a
-  # backup while one runs queues behind it, or folds into the queued one.
+  # backup while one runs queues behind it, or folds into a queued fresh one;
+  # a queued resume refuses it (#2540).
   defp start_backup(socket) do
     case Backups.request([trigger: "manual"], socket.assigns.current_user) do
       {:ok, %{status: :started}} ->
         {:noreply, watch(socket, gettext("Backup started — this page updates when it finishes."))}
 
       {:ok, %{status: status}} ->
-        {:noreply, watch(socket, queued_message(status))}
+        {:noreply, watch(socket, queued_message(status, :backup))}
+
+      {:error, {:queue_busy, queued}} ->
+        {:noreply, socket |> put_flash(:error, queue_busy_message(:backup, queued)) |> refresh()}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, unavailable_message(reason))}
@@ -237,9 +251,12 @@ defmodule KilnCMSWeb.BackupLive do
            watch(socket, gettext("Backup resumed — this page updates when it finishes."))}
 
         %{status: status} ->
-          {:noreply, watch(socket, queued_message(status))}
+          {:noreply, watch(socket, queued_message(status, :resume))}
       end
     else
+      {:error, {:queue_busy, queued}} ->
+        {:noreply, socket |> put_flash(:error, queue_busy_message(:resume, queued)) |> refresh()}
+
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, resume_message(reason))}
     end
@@ -262,13 +279,42 @@ defmodule KilnCMSWeb.BackupLive do
     |> poll()
   end
 
-  defp queued_message(:queued),
+  defp queued_message(:queued, _asked),
     do: gettext("A backup is running; this one starts when it finishes.")
 
-  defp queued_message(_folded),
+  # A request folds only into a queued one of its own kind (#2540).
+  defp queued_message(:folded, :backup),
     do:
       gettext(
         "A backup is running and another is already queued; that queued backup covers this request."
+      )
+
+  defp queued_message(:folded, :resume),
+    do:
+      gettext(
+        "A backup is running and a resume of this backup is already queued; that queued resume covers this request."
+      )
+
+  # A request of another kind than the queued one is refused, not folded: the
+  # queued one would not do its work (#2540). Nothing was queued.
+  defp queue_busy_message(:backup, {:resume, stamp}),
+    do:
+      gettext(
+        "A backup is running and a resume of %{stamp} is queued after it, so this backup was not queued. Try again once the queue clears.",
+        stamp: stamp
+      )
+
+  defp queue_busy_message(:resume, {:resume, stamp}),
+    do:
+      gettext(
+        "A backup is running and a resume of %{stamp} is queued after it, so this resume was not queued. Try again once the queue clears.",
+        stamp: stamp
+      )
+
+  defp queue_busy_message(:resume, :backup),
+    do:
+      gettext(
+        "A backup is running and a new backup is queued after it, so this resume was not queued. Try again once the queue clears."
       )
 
   defp resume_message(:in_flight),
@@ -483,7 +529,14 @@ defmodule KilnCMSWeb.BackupLive do
               ]}
             />
             <div class="min-w-0 flex-1">
-              <p class="font-medium">{headline(@status)}</p>
+              <p
+                :for={component <- @status.expected}
+                id={"backup-headline-#{component}"}
+                class="font-medium"
+              >
+                <span class="text-base-content/70">{component_label(component)}:</span>
+                {headline(@status.components[component])}
+              </p>
               <p
                 :if={@status.manifest && @status.manifest.artifacts != []}
                 class="mt-1 text-sm text-base-content/70"
@@ -577,7 +630,7 @@ defmodule KilnCMSWeb.BackupLive do
             >
               <span class="font-mono">{KilnCMS.Backups.Redact.text(rclone_remote())}</span>
               — {gettext(
-                "rclone is not installed in this image, so backups taken from this page are not copied off-site."
+                "rclone is not installed in this image, so backups taken from this page fail at the off-site copy. Install rclone in the image or unset BACKUP_RCLONE_REMOTE."
               )}
             </dd>
           </dl>
@@ -613,6 +666,9 @@ defmodule KilnCMSWeb.BackupLive do
         </p>
         <p :if={@in_flight.waiting} data-role="queued" class="text-xs text-base-content/70">
           {queued_label(@in_flight.waiting)}
+          <span :if={is_nil(@in_flight.waiting.resume)} data-role="queued-components">
+            · {components_label(@in_flight.waiting.components)}
+          </span>
         </p>
       </div>
       <button
@@ -669,6 +725,12 @@ defmodule KilnCMSWeb.BackupLive do
       _ ->
         queued
     end
+  end
+
+  # A queued fresh backup's components (#2219); nil is everything this
+  # deployment backs up.
+  defp components_label(components) do
+    Enum.map_join(components || Backups.expected_components(), " + ", &component_label/1)
   end
 
   defp cancel_confirm(%{waiting: nil}),
@@ -873,20 +935,19 @@ defmodule KilnCMSWeb.BackupLive do
 
   # NOT just `stale?`. A backup that failed a minute ago is not stale — it is
   # recent and it is worthless — and tone driven by age alone rendered "The
-  # last backup failed" with a green tick and a success border.
-  defp alarming?(%{stale?: true}), do: true
-  defp alarming?(%{manifest: %Manifest{ok: false}}), do: true
-  defp alarming?(_status), do: false
+  # last backup failed" with a green tick and a success border. Any component
+  # (#2219): a fresh database backup doesn't make stale media fine.
+  defp alarming?(status), do: status.stale? or status.failed?
 
-  defp headline(%{manifest: nil}), do: gettext("No backup has ever been recorded")
+  # One component's line (#2219).
+  defp headline(%{failed?: true}), do: gettext("The last backup failed")
 
-  defp headline(%{manifest: %Manifest{ok: false}}), do: gettext("The last backup failed")
-
-  defp headline(%{stale?: true, manifest: %Manifest{finished_at: at}}),
+  defp headline(%{last_good: %{at: at}, stale?: true}),
     do: gettext("Last backup was %{ago} ago", ago: ago(at))
 
-  defp headline(%{manifest: %Manifest{finished_at: at}}),
-    do: gettext("Backed up %{ago} ago", ago: ago(at))
+  defp headline(%{last_good: %{at: at}}), do: gettext("Backed up %{ago} ago", ago: ago(at))
+
+  defp headline(_never), do: gettext("No backup has ever been recorded")
 
   defp summary(%Manifest{} = manifest) do
     gettext("%{size} · %{count} file(s) · %{trigger}",

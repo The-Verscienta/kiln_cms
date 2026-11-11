@@ -123,8 +123,8 @@ end
 #
 # Each is a percentage of the `:delivery` limit (the browser ceiling), 1-1000,
 # for search engines, AI crawlers, declared bots and clients with no user
-# agent. Unset keeps the built-in default (100, 100, 50, 20); a value out of
-# range or not an integer keeps it too, and warns. A site may lower a class
+# agent. Unset keeps the built-in default (200 for verified search engines,
+# 100, 50, 20); a bad value keeps it too, and warns. A site may lower a class
 # below these from /editor/bot-budgets, never raise it above. See
 # docs/bot-budgets.md.
 #

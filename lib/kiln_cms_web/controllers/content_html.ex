@@ -106,6 +106,27 @@ defmodule KilnCMSWeb.ContentHTML do
   def search_snippet(_record), do: nil
 
   @doc """
+  A `/search` link in `locale`, keeping the query and the `?category=` scope
+  (#2457), each only when set. A link that dropped the category would widen a
+  scoped search, such as kilncms.dev's docs search, to the whole site.
+  """
+  def search_href(locale, query, category_slug \\ nil) do
+    KilnCMS.I18n.localized_path(locale, "/search") <> search_params(query, category_slug)
+  end
+
+  @doc "`search_href/3`'s query string: `\"\"`, or `?` and the set parameters."
+  def search_params(query, category_slug) do
+    case for(
+           {key, value} <- [q: query, category: category_slug],
+           value not in [nil, ""],
+           do: {key, value}
+         ) do
+      [] -> ""
+      params -> "?" <> URI.encode_query(params)
+    end
+  end
+
+  @doc """
   Long-form published date, localized: the format string and month names both
   flow through gettext (`Calendar.strftime`'s `%B` is English-only), so
   `/fr/blog/…` can render "2 juillet 2026" instead of "July 2, 2026".

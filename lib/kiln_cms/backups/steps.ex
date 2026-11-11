@@ -4,6 +4,20 @@ defmodule KilnCMS.Backups.Steps do
   job: `start`, `dump`, then with a media directory `plan`, `archive` (one job
   per part) and `checksum`, then `prune`, `offsite` and `finish`.
 
+  ## Which components (#2219)
+
+  The start step settles what the backup covers: the components its job's
+  args ask for (`"components"`; absent or nil is everything) that this
+  deployment has (`KilnCMS.Backups.expected_components/0`: media only with a
+  media directory), or, for a resume, the run's own. It writes them into
+  `state.json` as `"components"`, and **every later step reads them there and
+  nowhere else**: `dump` does nothing for a backup without `"db"`, and `plan`,
+  `archive` and `checksum` do nothing for one without `"media"`, each moving
+  the chain on to the next step that applies. So a retried start, a resume and
+  a step reclaimed onto another node all route the same way. A fresh request
+  for media on a deployment that has no media directory is refused as a
+  `skipped` run, with the manifest left alone.
+
   Produces what `scripts/backup.sh` produces: same directory layout, same
   database dump name, `pg_dump` flags and verification, same manifest, and the
   same media parts: a library larger than `Backups.media_part_bytes/0` becomes
@@ -66,6 +80,7 @@ defmodule KilnCMS.Backups.Steps do
     Checksum,
     DirId,
     Importer,
+    Lock,
     Manifest,
     MediaArchive,
     RcloneRemote,
@@ -164,7 +179,7 @@ defmodule KilnCMS.Backups.Steps do
 
       match?({:error, _}, Backups.availability()) ->
         {:error, reason} = Backups.availability()
-        unavailable(lease, reason)
+        unavailable(lease, reason, job.args)
 
       lease.resume != nil ->
         start_resume(lease, job)
@@ -187,21 +202,46 @@ defmodule KilnCMS.Backups.Steps do
   # deployment up perfectly from the host. Writing `ok: false` here would
   # overwrite cron's record of a SUCCESSFUL backup and turn the overview red.
   # The ATTEMPT is history (a `skipped` run); the manifest is not touched.
-  defp unavailable(lease, reason) do
+  #
+  # The skipped run records what was asked for (#2219), not what this
+  # deployment could have backed up.
+  defp unavailable(lease, reason, args) do
     Logger.warning("Backup refused (#{reason}) — leaving the existing manifest untouched")
 
     if lease.resume == nil do
+      requested = requested_components(args) || Backups.expected_components()
+
       Recorder.skip(
         lease.stamp,
         lease.trigger || "manual",
         DateTime.utc_now(),
-        planned_components(),
-        "Refused: #{reason}"
+        requested,
+        "Refused: #{reason}",
+        schedule_fields(args, requested)
       )
     end
 
     refuse(lease, reason)
   end
+
+  # The start job's `"components"`, or nil (everything). Unknown names are
+  # dropped; the request was validated before it was queued.
+  defp requested_components(%{"components" => names}) when is_list(names),
+    do: Enum.filter(Lock.components(), &(Atom.to_string(&1) in names))
+
+  defp requested_components(_args), do: nil
+
+  # A schedule's share of `components`, and which schedules asked (#2219).
+  defp schedule_fields(args, components) do
+    scheduled = for name <- List.wrap(args["scheduled"]), is_binary(name), do: name
+
+    %{
+      scheduled_components: Enum.filter(components, &(Atom.to_string(&1) in scheduled)),
+      schedule_ids: for(id <- List.wrap(args["schedule_ids"]), is_binary(id), do: id)
+    }
+  end
+
+  defp component_names(components), do: Enum.map(components, &Atom.to_string/1)
 
   # Nothing was started: no manifest, no Run write beyond what the caller did.
   defp refuse(lease, reason) do
@@ -214,7 +254,6 @@ defmodule KilnCMS.Backups.Steps do
   defp start_fresh(lease, job) do
     dir = Backups.dir()
     work_dir = WorkState.path(dir, lease.stamp)
-    trigger = lease.trigger || "manual"
 
     reconcile_stale_runs()
     sweep_stale_partials(dir)
@@ -231,41 +270,72 @@ defmodule KilnCMS.Backups.Steps do
         # lend its frozen plan or recorded hashes to a backup that has nothing
         # to do with them.
         File.rm_rf(work_dir)
-        started_at = DateTime.utc_now()
-        components = planned_components()
 
-        rec =
-          lease.stamp
-          |> Recorder.open(trigger, started_at, components, job.id, lease.chain)
-          |> Recorder.log(:info, "start", "Backup started (#{trigger})")
-          |> log_queue(job.args)
-
-        state =
-          WorkState.new(lease.stamp, %{
-            "chain" => lease.chain,
-            "trigger" => trigger,
-            "started_at" => DateTime.to_iso8601(started_at),
-            "resume" => false,
-            "dir_id" => lease.dir_id,
-            "components" => Enum.map(components, &Atom.to_string/1),
-            "outputs" => [],
-            "reused" => [],
-            "offsite" => nil
-          })
-
-        ctx = context(lease, state)
-
-        result =
-          with :ok <- mkdir_private(Path.dirname(work_dir)),
-               :ok <- mkdir_private(work_dir) do
-            {:next, "dump", nil, state, rec}
-          else
-            {:error, reason} ->
-              {:retry, reason, nil, Recorder.log(rec, :error, "start", describe(reason))}
-          end
-
-        conclude(ctx, lease, job, result)
+        case effective_components(job.args) do
+          [] -> unavailable(lease, :no_media_dir, job.args)
+          components -> open_fresh(lease, job, work_dir, components)
+        end
     end
+  end
+
+  # What was asked for (everything when the args don't say) that this
+  # deployment has: media only with a media directory.
+  defp effective_components(args) do
+    expected = Backups.expected_components()
+
+    case requested_components(args) do
+      nil -> expected
+      requested -> Enum.filter(expected, &(&1 in requested))
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp open_fresh(lease, job, work_dir, components) do
+    trigger = lease.trigger || "manual"
+    started_at = DateTime.utc_now()
+    scheduled = schedule_fields(job.args, components)
+
+    rec =
+      lease.stamp
+      |> Recorder.open(trigger, started_at, components, job.id, lease.chain, scheduled)
+      |> Recorder.log(:info, "start", "Backup started (#{trigger})")
+      |> log_components(components)
+      |> log_queue(job.args)
+
+    state =
+      WorkState.new(lease.stamp, %{
+        "chain" => lease.chain,
+        "trigger" => trigger,
+        "started_at" => DateTime.to_iso8601(started_at),
+        "resume" => false,
+        "dir_id" => lease.dir_id,
+        "components" => component_names(components),
+        "scheduled" => component_names(scheduled.scheduled_components),
+        "schedule_ids" => scheduled.schedule_ids,
+        "outputs" => [],
+        "reused" => [],
+        "offsite" => nil
+      })
+
+    ctx = context(lease, state)
+
+    result =
+      with :ok <- mkdir_private(Path.dirname(work_dir)),
+           :ok <- mkdir_private(work_dir) do
+        {:next, "dump", nil, state, rec}
+      else
+        {:error, reason} ->
+          {:retry, reason, nil, Recorder.log(rec, :error, "start", describe(reason))}
+      end
+
+    conclude(ctx, lease, job, result)
+  end
+
+  # Said only when the backup leaves something out.
+  defp log_components(rec, components) do
+    if components == Backups.expected_components(),
+      do: rec,
+      else: Recorder.log(rec, :info, "start", "Backing up only: #{Enum.join(components, ", ")}")
   end
 
   # The stamp and `started_at` are the ORIGINAL run's; the trigger too (the
@@ -282,7 +352,8 @@ defmodule KilnCMS.Backups.Steps do
         # Re-opened FIRST: the sweep below fails `running` runs that went
         # quiet, and this one was exactly that until `Recorder.reopen/2`
         # flipped it back.
-        with {:ok, %{run: run} = rec} <- reopen(lease),
+        with :ok <- resumable_here(lease.stamp),
+             {:ok, %{run: run} = rec} <- reopen(lease),
              {:ok, state} <- WorkState.read(work_dir) do
           dir = Backups.dir()
           reconcile_stale_runs()
@@ -302,7 +373,9 @@ defmodule KilnCMS.Backups.Steps do
               "started_at" => DateTime.to_iso8601(run.started_at),
               "resume" => true,
               "dir_id" => lease.dir_id,
-              "components" => Enum.map(run.components, &Atom.to_string/1),
+              "components" => component_names(run.components),
+              "scheduled" => component_names(run.scheduled_components),
+              "schedule_ids" => run.schedule_ids,
               "outputs" => [],
               "reused" => [],
               "offsite" => nil
@@ -314,6 +387,21 @@ defmodule KilnCMS.Backups.Steps do
             Logger.warning("Backup resume refused: #{inspect(reason)}")
             refuse(lease, reason)
         end
+    end
+  end
+
+  # A resume backs up what its run did (#2219). A run of nothing but media,
+  # resumed on a node with no media directory, would have nothing to do:
+  # refused before the run is re-opened.
+  defp resumable_here(stamp) do
+    case Backups.get_run_by_stamp(stamp, actor: Backups.system()) do
+      {:ok, %{components: components}} when components != [] ->
+        if Enum.any?(components, &(&1 in Backups.expected_components())),
+          do: :ok,
+          else: {:error, :no_media_dir}
+
+      _other ->
+        :ok
     end
   end
 
@@ -444,7 +532,7 @@ defmodule KilnCMS.Backups.Steps do
 
       _ =
         Chain.while_holding(lease, fn ->
-          record_failure(ctx.dir, ctx.trigger, ctx.started_at, error, partial)
+          record_failure(ctx.dir, ctx.trigger, ctx.started_at, error, partial, components(state))
         end)
     end
 
@@ -490,7 +578,8 @@ defmodule KilnCMS.Backups.Steps do
           state["trigger"] || "manual",
           parse_time(state["started_at"]),
           message,
-          outputs(state)
+          outputs(state),
+          components(state)
         )
 
         Recorder.load(stamp, chain, state["rec"])
@@ -526,9 +615,25 @@ defmodule KilnCMS.Backups.Steps do
 
   defp stringify(map), do: Map.new(map, fn {k, v} -> {to_string(k), v} end)
 
-  defp planned_components do
-    if Backups.media_dir(), do: [:db, :media], else: [:db]
+  # The components `state.json` names (#2219); a state without the key, from
+  # before components existed, covers everything.
+  defp components(state) do
+    case state["components"] do
+      names when is_list(names) -> names
+      _ -> ["db", "media"]
+    end
   end
+
+  defp db?(state), do: "db" in components(state)
+  defp media?(ctx, state), do: ctx.media_dir != nil and "media" in components(state)
+
+  # What a finished backup covered: media only where there was a media
+  # directory to archive (a resume on a node without one backs up the rest).
+  defp covered(ctx, state),
+    do: Enum.filter(components(state), &(&1 == "db" or media?(ctx, state)))
+
+  # Where the chain goes after the database dump: the media steps, or prune.
+  defp after_dump(ctx, state), do: if(media?(ctx, state), do: "plan", else: "prune")
 
   # A revoked grant raises there; this is a job tail, so it is a warning.
   defp reconcile_stale_runs do
@@ -541,9 +646,14 @@ defmodule KilnCMS.Backups.Steps do
 
   ## dump
 
+  # A backup without the database skips the dump (#2219).
   defp dump_step(ctx, state, rec) do
-    next = if ctx.media_dir, do: "plan", else: "prune"
+    if db?(state),
+      do: dump_db(ctx, state, rec, after_dump(ctx, state)),
+      else: {:next, after_dump(ctx, state), nil, state, rec}
+  end
 
+  defp dump_db(ctx, state, rec, next) do
     case reuse_dump(ctx, state) do
       {:ok, db, at} ->
         rec =
@@ -610,12 +720,20 @@ defmodule KilnCMS.Backups.Steps do
 
   ## plan
 
+  # A backup without media (or a node without the media directory) skips the
+  # media steps (#2219).
+  defp plan_step(ctx, state, rec) do
+    if media?(ctx, state),
+      do: plan_media(ctx, state, rec),
+      else: {:next, "prune", nil, state, rec}
+  end
+
   # The plan is frozen at first creation. A later step or a resume loads it;
   # only if it is gone (planning never finished) is it made afresh, and then
   # nothing recorded for the old partition means anything: the recorded parts
   # are forgotten and the files of an earlier set under this stamp removed, so
   # a leftover `part04` cannot sit beside a new three-part set.
-  defp plan_step(ctx, state, rec) do
+  defp plan_media(ctx, state, rec) do
     target_dir = Path.join(ctx.dir, "media")
 
     result =
@@ -715,6 +833,12 @@ defmodule KilnCMS.Backups.Steps do
   # makes a resume skip the finished ones, and what keeps a long archive from
   # looking stale.
   defp archive_step(ctx, index, state, rec) do
+    if media?(ctx, state),
+      do: archive_media(ctx, index, state, rec),
+      else: {:next, "prune", nil, state, rec}
+  end
+
+  defp archive_media(ctx, index, state, rec) do
     target_dir = Path.join(ctx.dir, "media")
 
     with {:ok, plan} <- load_plan(ctx),
@@ -821,6 +945,12 @@ defmodule KilnCMS.Backups.Steps do
   # retried, and not rebuilt in this run. Resume rebuilds it (its recorded
   # hash no longer matches).
   defp checksum_step(ctx, state, rec) do
+    if media?(ctx, state),
+      do: checksum_media(ctx, state, rec),
+      else: {:next, "prune", nil, state, rec}
+  end
+
+  defp checksum_media(ctx, state, rec) do
     target_dir = Path.join(ctx.dir, "media")
 
     with {:ok, plan} <- load_plan(ctx),
@@ -945,14 +1075,18 @@ defmodule KilnCMS.Backups.Steps do
 
   ## offsite
 
-  # A refused file is fatal (never retried, #2481); a failed copy is retried
-  # with the step, and fails the backup on the last attempt.
+  # A refused file is fatal (never retried, #2481); so is a missing rclone,
+  # which no retry installs (#2482). A failed copy is retried with the step,
+  # and fails the backup on the last attempt.
   defp offsite_chain_step(ctx, state, rec) do
     case offsite_step(ctx.dir, outputs(state), rec) do
       {:ok, remote, rec} ->
         {:next, "finish", nil, Map.put(state, "offsite", remote), rec}
 
       {:error, {:offsite, %{refused: [_ | _]}} = reason, rec} ->
+        {:fatal, reason, state, rec}
+
+      {:error, {:offsite, :missing_rclone} = reason, rec} ->
         {:fatal, reason, state, rec}
 
       {:error, reason, rec} ->
@@ -988,6 +1122,7 @@ defmodule KilnCMS.Backups.Steps do
       finished_at: DateTime.utc_now(),
       trigger: ctx.trigger,
       ok: true,
+      components: covered(ctx, state),
       artifacts: artifacts,
       offsite: offsite && Redact.text(offsite),
       keep_days: Backups.keep_days()
@@ -1045,10 +1180,13 @@ defmodule KilnCMS.Backups.Steps do
   # do), else `{:error, {:offsite, %{refused: [...], failed: [...]}}, rec}`
   # listing `{file_name, reason}` for each file that did not.
   #
-  # A remote set with no `rclone` in this image is NOT an error: the official
-  # image ships without rclone, and a host's cron may be copying these files
-  # off-site perfectly well. It is logged loudly instead, and the panel says so
-  # (`Backups.status/0`).
+  # A remote set with no `rclone` in this image is a failed copy like any
+  # other (#2482): `{:error, {:offsite, :missing_rclone}, rec}`, before any
+  # file is touched. The official image ships rclone, so only a custom image
+  # without it gets here. The reason carries no remote: `fail/5` logs
+  # `inspect(reason)`, and a connection-string remote holds credentials.
+  @missing_rclone "BACKUP_RCLONE_REMOTE is set but rclone is not installed in this image"
+
   @doc false
   @spec offsite_step(Path.t(), [map()], Recorder.t()) ::
           {:ok, String.t() | nil, Recorder.t()} | {:error, term(), Recorder.t()}
@@ -1058,12 +1196,9 @@ defmodule KilnCMS.Backups.Steps do
         {:ok, nil, rec}
 
       {:missing_rclone, remote} ->
-        message =
-          "BACKUP_RCLONE_REMOTE is set but rclone is not installed in this image; " <>
-            "nothing was copied off-site"
-
-        Logger.warning(message <> " (#{Redact.text(remote)})")
-        {:ok, nil, Recorder.log(rec, :warn, "offsite", message)}
+        message = @missing_rclone <> "; nothing was copied off-site"
+        Logger.error(message <> " (#{Redact.text(remote)})")
+        {:error, {:offsite, :missing_rclone}, Recorder.log(rec, :error, "offsite", message)}
 
       {remote, results} ->
         key = "rclone:" <> Redact.text(remote)
@@ -1169,6 +1304,13 @@ defmodule KilnCMS.Backups.Steps do
   # the per-file Run log line and destination error, redacted and capped.
   @doc false
   @spec describe_offsite(term(), boolean()) :: String.t()
+  def describe_offsite({:offsite, :missing_rclone}, resumable?) do
+    "Off-site copy FAILED: #{@missing_rclone}, so no file was copied. The local files are " <>
+      "kept. Install rclone in the image (the official image ships it) or unset " <>
+      "BACKUP_RCLONE_REMOTE, then " <>
+      if(resumable?, do: "Resume this backup.", else: "run a new backup.")
+  end
+
   def describe_offsite({:offsite, %{refused: refused, failed: failed}}, resumable?) do
     refused_text =
       if refused != [] do
@@ -1474,12 +1616,13 @@ defmodule KilnCMS.Backups.Steps do
   #
   # `partial` carries whatever genuinely landed and verified before the
   # failure, so a media error doesn't hide a perfectly good database dump.
-  defp record_failure(dir, trigger, started_at, error, partial) do
+  defp record_failure(dir, trigger, started_at, error, partial, components) do
     write_manifest(dir, %Manifest{
       started_at: started_at,
       finished_at: DateTime.utc_now(),
       trigger: trigger,
       ok: false,
+      components: components,
       artifacts: partial,
       keep_days: Backups.keep_days(),
       error: error

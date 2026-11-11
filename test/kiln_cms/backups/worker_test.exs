@@ -387,6 +387,40 @@ defmodule KilnCMS.Backups.WorkerTest do
       bin
     end
 
+    # Hides `rclone` on a host or CI runner that has one installed. Each PATH
+    # directory holding an `rclone` is swapped for a directory of symlinks to
+    # everything else in it, so `pg_dump`, `tar` and the rest living beside
+    # it (Homebrew's bin, Debian's /usr/bin) stay reachable.
+    defp no_rclone_on_path do
+      path = System.get_env("PATH")
+      shims = Path.join(System.tmp_dir!(), "kiln_norclone_#{System.unique_integer([:positive])}")
+
+      kept =
+        path
+        |> String.split(":")
+        |> Enum.with_index()
+        |> Enum.map_join(":", fn {dir, i} -> without_rclone(dir, Path.join(shims, "#{i}")) end)
+
+      System.put_env("PATH", kept)
+
+      on_exit(fn ->
+        System.put_env("PATH", path)
+        File.rm_rf!(shims)
+      end)
+    end
+
+    defp without_rclone(dir, shim) do
+      if File.exists?(Path.join(dir, "rclone")) do
+        File.mkdir_p!(shim)
+        for name <- File.ls!(dir), name != "rclone", do: link!(dir, name, shim)
+        shim
+      else
+        dir
+      end
+    end
+
+    defp link!(dir, name, shim), do: File.ln_s!(Path.join(dir, name), Path.join(shim, name))
+
     @tag :pg_tools
     test "a successful run is recorded with its artifacts and local destinations", %{dir: dir} do
       assert :ok = BackupChain.run()
@@ -417,8 +451,11 @@ defmodule KilnCMS.Backups.WorkerTest do
       raw = File.read!(Manifest.path(dir))
       decoded = Jason.decode!(raw)
 
+      # `components` is #2219's, additive like #2218's keys.
       assert decoded |> Map.keys() |> Enum.sort() ==
-               ~w(artifacts error finished_at keep_days offsite ok started_at trigger version)
+               ~w(artifacts components error finished_at keep_days offsite ok started_at trigger version)
+
+      assert decoded["components"] == ["db", "media"]
 
       # The original four keys are still there, unchanged (#2218 only adds).
       assert [db, media] = decoded["artifacts"]
@@ -659,6 +696,48 @@ defmodule KilnCMS.Backups.WorkerTest do
       assert Backups.work_state?(run.stamp)
 
       for haystack <- [inspect(run), File.read!(Path.join(dir, "manifest.json"))] do
+        refute haystack =~ "SUPERSECRETVAL"
+        refute haystack =~ "AKIAEXAMPLE1"
+      end
+    end
+
+    @tag :pg_tools
+    test "a remote set with no rclone in the image fails the run, keeping it resumable (#2482)",
+         %{dir: dir} do
+      remote = ":s3,access_key_id=AKIAEXAMPLE1,secret_access_key=SUPERSECRETVAL:bucket"
+      set_config(rclone_remote: remote)
+      no_rclone_on_path()
+      assert Backups.rclone_missing?()
+
+      {result, output} = ExUnit.CaptureLog.with_log(fn -> BackupChain.run() end)
+      assert {:error, {:offsite, :missing_rclone}} = result
+      assert output =~ "rclone is not installed in this image"
+
+      assert [run] = runs()
+      assert run.status == :failed
+
+      assert run.error ==
+               "Off-site copy FAILED: BACKUP_RCLONE_REMOTE is set but rclone is not installed " <>
+                 "in this image, so no file was copied. The local files are kept. Install " <>
+                 "rclone in the image (the official image ships it) or unset " <>
+                 "BACKUP_RCLONE_REMOTE, then Resume this backup."
+
+      assert Enum.any?(
+               run.log,
+               &(&1.level == :error and &1.step == "offsite" and
+                   &1.message =~ "rclone is not installed in this image")
+             )
+
+      assert [db, media] = run.artifacts
+      assert db.verified and media.verified
+
+      manifest = Manifest.read(dir)
+      refute manifest.ok
+      assert manifest.offsite == nil
+      assert manifest.error == run.error
+      assert Backups.work_state?(run.stamp)
+
+      for haystack <- [inspect(run), output, File.read!(Path.join(dir, "manifest.json"))] do
         refute haystack =~ "SUPERSECRETVAL"
         refute haystack =~ "AKIAEXAMPLE1"
       end

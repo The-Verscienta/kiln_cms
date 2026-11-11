@@ -595,7 +595,16 @@ defmodule KilnCMS.Backups.Retention do
     case Backups.list_runs(
            query: [
              filter: [stamp: [in: stamps]],
-             select: [:stamp, :status, :origin, :trigger, :artifacts]
+             select: [
+               :stamp,
+               :status,
+               :origin,
+               :trigger,
+               :artifacts,
+               :components,
+               :scheduled_components,
+               :schedule_ids
+             ]
            ],
            actor: Backups.system(),
            authorize_with: :error

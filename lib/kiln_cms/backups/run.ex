@@ -83,7 +83,17 @@ defmodule KilnCMS.Backups.Run do
 
     # The worker opens a run before any file lands.
     create :start do
-      accept [:stamp, :trigger, :components, :started_at, :oban_job_id, :chain_id]
+      accept [
+        :stamp,
+        :trigger,
+        :components,
+        :scheduled_components,
+        :schedule_ids,
+        :started_at,
+        :oban_job_id,
+        :chain_id
+      ]
+
       change set_attribute(:origin, :app)
       change set_attribute(:status, :running)
       change Normalize
@@ -92,7 +102,16 @@ defmodule KilnCMS.Backups.Run do
     # A refused attempt (no pg_dump, backups disabled): recorded, but the
     # manifest is NOT written, so cron's record of a good backup survives.
     create :skip do
-      accept [:stamp, :trigger, :components, :started_at, :error]
+      accept [
+        :stamp,
+        :trigger,
+        :components,
+        :scheduled_components,
+        :schedule_ids,
+        :started_at,
+        :error
+      ]
+
       change set_attribute(:origin, :app)
       change set_attribute(:status, :skipped)
       change set_attribute(:finished_at, &DateTime.utc_now/0)
@@ -277,6 +296,22 @@ defmodule KilnCMS.Backups.Run do
       allow_nil? false
       default []
       constraints items: [one_of: [:db, :media]]
+      public? true
+    end
+
+    # Of `components`, the ones a schedule asked for, and which schedules
+    # (#2219). Empty for a manual, cron or imported run; a resume keeps the
+    # run's own.
+    attribute :scheduled_components, {:array, :atom} do
+      allow_nil? false
+      default []
+      constraints items: [one_of: [:db, :media]]
+      public? true
+    end
+
+    attribute :schedule_ids, {:array, :uuid} do
+      allow_nil? false
+      default []
       public? true
     end
 

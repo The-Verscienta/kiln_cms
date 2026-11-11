@@ -309,10 +309,11 @@ cover:
 - **Media on a volume.** The in-app backup (Backups in the console) archives
   `KILN_MEDIA_ROOT`, but it writes the archive to `BACKUP_DIR` on the
   container's own disk, which the platform wipes. Snapshot the volume with the
-  platform's tools. `BACKUP_RCLONE_REMOTE` alone is not enough here: the
-  official image does not install `rclone`, so with only the variable set the
-  backup succeeds, nothing leaves the container, and the Backups page says so
-  under **Where backups go**. To copy in-app backups off-site, deploy your own
-  image built on Kiln's with `rclone` installed and configured, then set
-  `BACKUP_RCLONE_REMOTE`. See
+  platform's tools, or set `BACKUP_RCLONE_REMOTE`: the official image ships
+  `rclone`, so each in-app backup is then copied off-site, and a copy that
+  fails fails the backup. Configure the remote with `RCLONE_CONFIG_<NAME>_*`
+  variables (the platform's secrets) rather than a connection-string
+  remote, which would hold the credentials in a plain variable. An image of your
+  own that leaves `rclone` out fails every in-app backup while the variable
+  is set. See
   [backups.md](backups.md#it-needs-the-client-tools-in-the-image).

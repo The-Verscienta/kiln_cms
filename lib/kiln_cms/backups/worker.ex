@@ -37,9 +37,11 @@ defmodule KilnCMS.Backups.Worker do
   def timeout(_job), do: :timer.hours(2)
 
   # A refusal is final (`{:cancel, reason}`): retrying a request the lock or
-  # `resumable_run/2` refused would only refuse again.
+  # `resumable_run/2` refused would only refuse again. Except a queue holding a
+  # request of another kind (#2540): that clears, so the job waits a minute and
+  # asks again (logged on the first wait only).
   @impl Oban.Worker
-  def perform(%Oban.Job{args: args}) do
+  def perform(%Oban.Job{args: args} = job) do
     opts = [trigger: Map.get(args, "trigger", "manual")]
     # `Map.has_key?`, not a nil check: a job whose `resume` is present but
     # mangled must be refused, never quietly become a fresh backup.
@@ -49,6 +51,12 @@ defmodule KilnCMS.Backups.Worker do
       {:ok, %{status: status}} ->
         Logger.info("Legacy backup job handed to the step chain: #{status}")
         :ok
+
+      {:error, {:queue_busy, queued}} ->
+        if is_nil((job.meta || %{})["snoozed"]),
+          do: Logger.info("Legacy backup job waits: #{inspect(queued)} is queued; asking again")
+
+        {:snooze, 60}
 
       {:error, reason} ->
         Logger.warning("Legacy backup job refused: #{inspect(reason)}")
@@ -62,7 +70,9 @@ defmodule KilnCMS.Backups.Worker do
   Returns `:ok` when the chain succeeds, `{:error, reason}` when it fails or is
   refused (see `KilnCMS.Backups.await/2`), and `{:error, :queued}` or
   `{:error, :folded}` when another backup is running: the request waits behind
-  it and this call does not. `job_id` is ignored. `resume: stamp` resumes that
+  it and this call does not; `{:error, {:queue_busy, queued}}` when a request
+  of another kind is queued (nothing waits; ask again once it clears).
+  `job_id` is ignored. `resume: stamp` resumes that
   failed, interrupted or canceled backup, as `Backups.request/2` does.
 
   `:timeout` (default 3 hours) bounds the wait, not the backup; `:interval` is

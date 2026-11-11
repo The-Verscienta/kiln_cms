@@ -56,8 +56,15 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **If the app's environment sets `BACKUP_RCLONE_REMOTE`, check it before deploying: the official image now ships `rclone` (pinned, checksum-verified), so in-app backups start copying there, and an unreachable or unconfigured remote fails them. On a custom image without `rclone`, the variable now fails every in-app backup: install `rclone` or unset it.**
+  No migration; rolling the pin back is safe. The image grows by about 82 MiB.
+  ([#2482](https://github.com/The-Verscienta/kiln_cms/issues/2482) · [long form](docs/changelog/unreleased.md#rclone-in-image-upgrade))
+
 - **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `access-denied` and path aliases under `/access-denied`, which the new access-denied page (#2143) shadows; give each a new slug or alias.** No migration; read-only.
   ([#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374) · [long form](docs/changelog/unreleased.md#reserved-paths-upgrade))
+
+- **Run `mix ash.migrate` (new nullable `backup_locks.waiting_*` columns; `backup_runs.scheduled_components` and `schedule_ids`, default empty). While older nodes still run, a database-only or media-only backup request may back up everything (part of #2219). Rolling back is safe.**
+  ([#2685](https://github.com/The-Verscienta/kiln_cms/pull/2685) · [long form](docs/changelog/unreleased.md#backup-components-upgrade))
 
 - **Update the host's copy of `scripts/backup.sh` so cron's prune honors the new `kiln-<stamp>.good` marker, which the app keeps on the newest verified backup of each component (part of #2219).** No migration; rolling back is safe.
   ([#2552](https://github.com/The-Verscienta/kiln_cms/pull/2552) · [long form](docs/changelog/unreleased.md#backup-last-good-marker-upgrade))
@@ -229,6 +236,10 @@ Every summary line below that was shortened links to its own entry there.
 - **`GET /api/security/posture` returns the Security posture checks as JSON for monitoring: an administrator's JWT or API key (never `draft_write`), behind the site's admin allowlist, no details, cached 30 s per node.**
   The allowlist's JSON refusals now read "Not available from this network" / "Temporarily unavailable" (codes unchanged). Guide: [docs/api.md](docs/api.md#security-posture-monitoring).
   ([#2521](https://github.com/The-Verscienta/kiln_cms/issues/2521) · [#2648](https://github.com/The-Verscienta/kiln_cms/pull/2648) · [long form](docs/changelog/unreleased.md#security-posture-json))
+
+- **Back up only the database or only the media from a release console (`KilnCMS.Backups.request([components: [:db]], actor)`); the Backups page and the overview report each component's last backup and alarm when either failed or went stale (part of #2219).**
+  Guide: [docs/backups.md](docs/backups.md#back-up-only-the-database-or-only-the-media).
+  ([#2685](https://github.com/The-Verscienta/kiln_cms/pull/2685) · [long form](docs/changelog/unreleased.md#backup-components))
 
 - **Security alerts: site admins get a bell notice and an email when someone becomes an admin, a role is raised, an account is locked out, two-factor is turned off or single sign-on changes; platform admins when a platform admin or API key is created or a stolen key is reused. Organization → Security alerts picks the kinds.**
   One alert per kind per 15 minutes plus a summary; opt-in `security.*` webhook events; turning alerts down sends the site's member admins a notice nobody can mute. Guide: [docs/security-alerts.md](docs/security-alerts.md).
@@ -458,6 +469,15 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **While a backup runs, a request folds into the queued one only when it is the same kind: Back up now into a queued fresh backup, Resume into a queued resume of the same backup. Any other request is refused with "Try again once the queue clears", and the queue is left as it was.**
+  ([#2540](https://github.com/The-Verscienta/kiln_cms/issues/2540) · [long form](docs/changelog/unreleased.md#backup-fold-like-into-like))
+
+- **An in-app backup with `BACKUP_RCLONE_REMOTE` set and no `rclone` in the image now fails (Run log and run error say so) instead of skipping the off-site copy; the Backups page's “Where backups go” says so ahead of time.**
+  ([#2482](https://github.com/The-Verscienta/kiln_cms/issues/2482))
+
+- **Search engines whose address DNS has verified now get 200% of the `:delivery` limit by default (600 requests a minute per address instead of 300); unverified claims stay at the browser limit, and with `KILN_CRAWLER_VERIFICATION=false` the default stays 100%. Set `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT=100` to go back.**
+  ([#2587](https://github.com/The-Verscienta/kiln_cms/issues/2587) · [long form](docs/changelog/unreleased.md#verified-search-engine-default))
+
 - **Release images no longer ship `priv/static/images/logo-lockup.png` (234 KB), which nothing in Kiln referenced. An overlay that linked `/images/logo-lockup.png` must ship its own copy.**
   ([#2401](https://github.com/The-Verscienta/kiln_cms/issues/2401))
 
@@ -542,6 +562,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
 
 ### Fixed
+
+- **A category-scoped `/search?category=<slug>` now stays scoped: the search form, the "did you mean" link and the language links keep the category, and the page says what it searches with a "Search everything" link. kilncms.dev's /docs links to a docs-only search this way.**
+  ([#2457](https://github.com/The-Verscienta/kiln_cms/issues/2457) · [long form](docs/changelog/unreleased.md#scoped-search-keeps-category))
 
 - **A custom field of a type this release doesn't know (a newer release's, after a rollback, or a removed plugin's) no longer breaks the Fields screen, the editor, saves and delivery: it is hidden, records keep its values, and Fields lists it under "Fields of an unknown type" with a Delete.**
   ([#2670](https://github.com/The-Verscienta/kiln_cms/pull/2670) · [long form](docs/changelog/unreleased.md#unknown-field-type-rollback))
