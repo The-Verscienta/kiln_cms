@@ -609,6 +609,12 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The public header's brand link keeps the reader's language: `/fr/home` under `/fr/`, which now serves the stock front page in French when the site has no published Home page, instead of `/`, the default language's home.**
+  ([#2636](https://github.com/The-Verscienta/kiln_cms/issues/2636) · [long form](docs/changelog/unreleased.md#brand-link-keeps-locale))
+
+- **A regional locale with no catalog of its own (`fr-CA` when only `fr` ships) now shows its language's chrome instead of English under `<html lang="fr-CA">`; a missing message falls back `fr-CA` → `fr_CA` → `fr` → English.**
+  ([#2637](https://github.com/The-Verscienta/kiln_cms/issues/2637) · [long form](docs/changelog/unreleased.md#regional-locale-chrome))
+
 - **A failed in-app backup no longer appears twice in Backups History, the second copy a second later: both backup paths write the run's `"stamp"` into `manifest.json` (an additive key), and the importer keys a failure manifest by it.**
   ([#2700](https://github.com/The-Verscienta/kiln_cms/pull/2700) · [long form](docs/changelog/unreleased.md#backup-failure-manifest-stamp))
 

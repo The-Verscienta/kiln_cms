@@ -209,6 +209,94 @@ defmodule KilnCMSWeb.ChromeLocaleTest do
     end
   end
 
+  describe "the header's brand link (#2636)" do
+    defp brand_href(html), do: html |> attr("header.public-header .public-measure > a", "href")
+
+    test "keeps the reader's prefix and lands on a French stock home", ctx do
+      p = page(ctx.org, %{title: "Only in English"})
+
+      html = ctx |> fresh() |> get("/fr/#{p.slug}") |> html_response(200)
+      assert brand_href(html) == ["/fr/home"]
+
+      # No published Home page: the stock template, in the URL's locale.
+      home = ctx |> fresh() |> get("/fr/home") |> html_response(200)
+      assert html_lang(home) == "fr"
+      assert home =~ ~s(id="home-features")
+      assert home =~ "Blogue"
+      assert brand_href(home) == ["/fr/home"]
+    end
+
+    test "lands on the published Home page when the site has one", ctx do
+      page(ctx.org, %{title: "Accueil du site", slug: "home", locale: "fr"})
+
+      home = ctx |> fresh() |> get("/fr/home") |> html_response(200)
+      assert html_lang(home) == "fr"
+      assert home =~ "Accueil du site"
+      refute home =~ ~s(id="home-features")
+    end
+
+    test "the path is / for the default locale and /<locale>/home otherwise" do
+      assert KilnCMSWeb.Layouts.public_home_path(nil) == "/"
+      assert KilnCMSWeb.Layouts.public_home_path("en") == "/"
+      assert KilnCMSWeb.Layouts.public_home_path("xx") == "/"
+      assert KilnCMSWeb.Layouts.public_home_path("fr") == "/fr/home"
+    end
+
+    test "is the site root on a default-locale page", ctx do
+      p = page(ctx.org, %{})
+
+      for path <- ["/#{p.slug}", "/", "/en/#{p.slug}"] do
+        html = ctx |> fresh() |> get(path) |> html_response(200)
+        assert brand_href(html) == ["/"], path
+      end
+    end
+  end
+
+  describe "a regional locale with no catalog of its own (#2637)" do
+    setup do
+      original = Application.get_env(:kiln_cms, :i18n)
+      locales = Keyword.fetch!(original, :locales) ++ ["fr-CA"]
+      Application.put_env(:kiln_cms, :i18n, Keyword.put(original, :locales, locales))
+      on_exit(fn -> Application.put_env(:kiln_cms, :i18n, original) end)
+    end
+
+    test "translates through its language's catalog" do
+      refute "fr-CA" in Gettext.known_locales(KilnCMSWeb.Gettext)
+
+      Gettext.with_locale(KilnCMSWeb.Gettext, "fr-CA", fn ->
+        assert Gettext.gettext(KilnCMSWeb.Gettext, "Blog") == "Blogue"
+
+        assert Gettext.ngettext(
+                 KilnCMSWeb.Gettext,
+                 "%{count} a11y issue",
+                 "%{count} a11y issues",
+                 2
+               ) == "2 problèmes d'accessibilité"
+
+        # A message no catalog has is still its English msgid.
+        assert Gettext.gettext(KilnCMSWeb.Gettext, "No such message #2637") ==
+                 "No such message #2637"
+      end)
+    end
+
+    test "wears French chrome under <html lang=\"fr-CA\">", ctx do
+      p = page(ctx.org, %{title: "Only in English"})
+
+      for path <- ["/fr-CA/#{p.slug}", "/fr-CA/blog", "/fr-CA/home"] do
+        conn = ctx |> fresh() |> get(path)
+        html = html_response(conn, 200)
+
+        assert html_lang(html) == "fr-CA", path
+        assert html =~ "Blogue", path
+        refute html =~ ~r/>\s*Blog\s*</, path
+      end
+
+      # The record page names the reader's language on the response too.
+      conn = ctx |> fresh() |> get("/fr-CA/#{p.slug}")
+      assert header(conn, "content-language") == ["fr-CA"]
+    end
+  end
+
   describe "a fallback page (/fr/x answered by an English record)" do
     setup ctx do
       header_menu!(ctx, [{"en", "Pricing"}, {"fr", "Tarifs"}])

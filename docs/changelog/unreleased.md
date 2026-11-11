@@ -1379,15 +1379,14 @@ carries the reasoning.
   - **Every delivery `ETag` changes once**, since it now names the URL's
     language; revalidating clients and CDNs get one round of `200`s. Rolling
     the pin back is safe and costs another round.
-  - **Known gaps:** the header's brand link points to `/` and drops the
-    reader's prefix
-    ([#2636](https://github.com/The-Verscienta/kiln_cms/issues/2636)); a
-    locale without a Gettext catalog shows English chrome under its own
-    `<html lang>`
-    ([#2637](https://github.com/The-Verscienta/kiln_cms/issues/2637)); and
-    public pages still render a few session-derived bits, such as the CSRF
-    meta tag
-    ([#2630](https://github.com/The-Verscienta/kiln_cms/issues/2630)).
+  - **Known gap:** public pages still render a few session-derived bits,
+    such as the CSRF meta tag
+    ([#2630](https://github.com/The-Verscienta/kiln_cms/issues/2630)). The
+    header's brand link
+    ([#2636](https://github.com/The-Verscienta/kiln_cms/issues/2636)) and a
+    regional locale's chrome
+    ([#2637](https://github.com/The-Verscienta/kiln_cms/issues/2637)) are
+    fixed in this release; see Fixed.
   - **Developers.** `KilnCMSWeb.Plugs.UrlLocale` sets the locale, the
     `:locale` assign and the Gettext locale from `path_locale` or the
     default; `UrlLocale.locale/1` is the same rule as a function. It is
@@ -5124,6 +5123,36 @@ carries the reasoning.
     has a new name; delete superseded items in the media library.
 
 ## Fixed
+
+<a id="brand-link-keeps-locale"></a>
+
+- **The public header's brand link keeps the reader's language (#2636).**
+  On a page under `/fr/…` it pointed to `/`, which since #2646 is always the
+  default language's home: no unprefixed URL takes its language from the
+  session any more, and `/fr` alone is a page slug. It now points to
+  `/<locale>/home` on a prefixed page (and still to `/` on a default-language
+  one). That address used to 404 on a site with no published Home page; it
+  now serves the stock front page in the URL's language, as `/` serves it in
+  the default's. A published Home page, a path alias or a redirect at `/home`
+  still wins, and `/home` on its own now answers like `/` instead of 404ing.
+  The layout decides the link without a query, so a cached page render stays
+  query-free. `KilnCMSWeb.Layouts.public_home_path/1` returns the address for
+  a theme or overlay that draws its own header.
+
+<a id="regional-locale-chrome"></a>
+
+- **A regional locale with no catalog of its own shows its language's chrome
+  (#2637).** A site configured with `fr-CA`, while Kiln ships only an `fr`
+  catalog, rendered English buttons, labels and nav under
+  `<html lang="fr-CA">`, which #2646 made the URL's language. Gettext found
+  no `fr-CA` catalog and fell back to the English source text. A missing
+  message is now looked up along the tag's chain, `fr-CA`, then `fr_CA` (the
+  directory spelling Gettext uses), then `fr`, before it falls back to
+  English, so a regional catalog needs only the words that differ. The
+  Gettext locale itself stays `fr-CA`, so `<html lang>`, `Content-Language`,
+  menus and form submissions still name the reader's locale. A locale whose
+  language has no catalog at all (`de` on a stock install) still shows
+  English chrome; add a `priv/gettext/de` catalog for it.
 
 <a id="backup-failure-manifest-stamp"></a>
 
