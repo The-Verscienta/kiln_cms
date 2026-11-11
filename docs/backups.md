@@ -825,6 +825,41 @@ The re-hash costs one extra sequential read of every file, and only when a
 remote is set. It is far quicker than the upload that follows, and it leaves
 the file in the page cache for rclone's own read.
 
+### Off-site credentials stay out of the rclone command line (#2690)
+
+A command's arguments are not private: `/proc/<pid>/cmdline` is
+world-readable, `ps` on the host shows a container's processes, and monitoring
+agents record them, for the minutes a copy takes. So when `BACKUP_RCLONE_REMOTE` is a connection
+string, the app and `backup.sh` both hand its parameters to rclone as
+`RCLONE_CONFIG_<NAME>_<KEY>` environment variables of that one `rclone`
+process, and give rclone only the remote's name and path:
+
+| `BACKUP_RCLONE_REMOTE` | rclone's argument | rclone's environment |
+|---|---|---|
+| `r2:kiln-backups` | `r2:kiln-backups/db` | nothing added |
+| `:s3,provider=Cloudflare,access_key_id=…,secret_access_key=…:kiln-backups` | `kiln_offsite:kiln-backups/db` | `RCLONE_CONFIG_KILN_OFFSITE_TYPE=s3`, `…_PROVIDER=Cloudflare`, `…_ACCESS_KEY_ID=…`, `…_SECRET_ACCESS_KEY=…` |
+| `r2,secret_access_key=…:kiln-backups` | `r2:kiln-backups/db` | `RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=…` (overrides that key of `r2` in `rclone.conf`) |
+
+A key without a value means `true`; a value in `'…'` or `"…"` may contain `,`
+and `:`, and a doubled quote stands for one, as in rclone. Two forms are left
+as written, credentials included, so prefer a named remote:
+
+- an overridden named remote whose name is not letters, digits and `_` only
+  (`my-r2,secret_access_key=…:bucket`): rclone cannot look such a name up as a
+  variable;
+- a string neither the app nor rclone can parse; rclone then fails, and its
+  error is redacted before it is recorded.
+
+The name `kiln_offsite` is reserved for this: a `[kiln_offsite]` section in
+your `rclone.conf` would supply the keys the connection string does not set.
+
+The same holds for what is written down. The run's log, its error and the
+off-site destination key go through `KilnCMS.Backups.Redact`, which removes
+`key=value` credentials and every value it passed to rclone. `backup.sh` prints
+`Off-site copy → kiln_offsite:kiln-backups`, not the string, but still writes
+the string as given to `manifest.json`'s `offsite` (redacted when the app
+imports it): one more reason to prefer a named remote.
+
 ### When an off-site copy is refused
 
 A refusal means a file changed on disk between the moment this backup verified

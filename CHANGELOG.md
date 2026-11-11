@@ -688,6 +688,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Security
 
+- **A connection-string `BACKUP_RCLONE_REMOTE` no longer puts its credentials in `rclone`'s arguments; they go to that `rclone` process as `RCLONE_CONFIG_*` variables (#2690).**
+  ([#2690](https://github.com/The-Verscienta/kiln_cms/issues/2690) · [long form](docs/changelog/unreleased.md#rclone-remote-argv-credentials))
+
 - **Accepting an invitation over an unconfirmed account now also removes its two-step verification, passkeys, identity-provider links and push devices, and revokes its API keys (#2453).**
   ([#2593](https://github.com/The-Verscienta/kiln_cms/pull/2593) · [long form](docs/changelog/unreleased.md#invitation-takeover-credentials))
 
