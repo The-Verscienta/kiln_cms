@@ -230,6 +230,85 @@ defmodule KilnCMSWeb.AdminAllowlistLiveTest do
     end
   end
 
+  describe "Also restrict sign-in (#2493)" do
+    defp stored_row(site) do
+      {:ok, [row]} =
+        CMS.list_site_admin_allowlist(
+          actor: KilnCMS.SystemActor.new(:operator),
+          tenant: site.id,
+          authorize_with: :error
+        )
+
+      row
+    end
+
+    defp submit(lv, text, restrict),
+      do:
+        lv
+        |> form("#admin-allowlist-form",
+          allowlist: %{"cidrs" => text, "restrict_sign_in" => to_string(restrict)}
+        )
+        |> render_submit()
+
+    test "is checked by default, and the page says sign-in is restricted", %{
+      conn: conn,
+      site: site
+    } do
+      {:ok, lv, _html} = open(conn, site)
+
+      assert has_element?(lv, "#admin-allowlist-restrict-sign-in[checked]")
+      submit(lv, "203.0.113.0/24")
+
+      assert stored_row(site).restrict_sign_in == true
+      assert has_element?(lv, "#admin-allowlist-status", "can open the console and sign in")
+      assert has_element?(lv, "#admin-allowlist-members")
+    end
+
+    test "unchecked, it saves with the list and the page says anyone can sign in", %{
+      conn: conn,
+      site: site
+    } do
+      {:ok, lv, _html} = open(conn, site)
+
+      assert submit(lv, "203.0.113.0/24", false) =~ "Admin allowlist saved."
+
+      row = stored_row(site)
+      assert row.cidrs == ["203.0.113.0/24"]
+      refute row.restrict_sign_in
+      assert has_element?(lv, "#admin-allowlist-status", "Anyone can sign in from any network")
+      assert has_element?(lv, "#admin-allowlist-members-open")
+      refute has_element?(lv, "#admin-allowlist-members")
+      refute has_element?(lv, "#admin-allowlist-restrict-sign-in[checked]")
+    end
+
+    test "Add my address and Turn off keep the stored choice", %{conn: conn, site: site} do
+      {:ok, lv, _html} = open(conn, site)
+      submit(lv, "203.0.113.0/24", false)
+
+      lv |> element("#admin-allowlist-add-mine") |> render_click()
+      refute has_element?(lv, "#admin-allowlist-restrict-sign-in[checked]")
+
+      lv |> element("#admin-allowlist-turn-off") |> render_click()
+
+      row = stored_row(site)
+      assert row.cidrs == []
+      refute row.restrict_sign_in
+    end
+
+    test "an admin demoted while the page is open cannot change it", %{conn: conn, site: site} do
+      {admin, membership} = member_of(site, :admin)
+
+      {:ok, lv, _html} =
+        conn |> from(site, @me) |> log_in(admin) |> live(~p"/editor/admin-allowlist")
+
+      submit(lv, "203.0.113.0/24")
+      Ash.Seed.update!(membership, %{role: :viewer})
+
+      assert submit(lv, "203.0.113.0/24", false) =~ "permission"
+      assert stored_row(site).restrict_sign_in == true
+    end
+  end
+
   describe "where the page is coming from" do
     test "an address in shared space is warned about", %{conn: conn, site: site} do
       {:ok, lv, _html} = open(conn, site, {10, 1, 2, 3})

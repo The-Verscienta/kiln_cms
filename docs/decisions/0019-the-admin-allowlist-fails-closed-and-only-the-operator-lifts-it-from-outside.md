@@ -1,6 +1,8 @@
 # 0019. The admin allowlist fails closed, and only the operator lifts it from outside
 
-- **Status** — accepted (2026-11-08).
+- **Status** — accepted (2026-11-08); amended 2026-11-10 by
+  [#2493](https://github.com/The-Verscienta/kiln_cms/issues/2493) (a per-site
+  "Also restrict sign-in" setting, see "Amendment").
 - **References** — [#2248](https://github.com/The-Verscienta/kiln_cms/issues/2248),
   following [#2242](https://github.com/The-Verscienta/kiln_cms/issues/2242)
   (the block list) and
@@ -39,10 +41,12 @@ saved with no way back in is a site nobody can administer.
   every node to the saved list, and a read that began before a save cannot
   write the older list back after it. Last known "on", or nothing known, stays
   closed.
-- **Gating is structural.** The HTTP gate is two router pipelines,
-  `:admin_allowlist` and `:admin_allowlist_api`, first in each gated
-  `pipe_through`; the socket gate acts for exactly the `live_session`s whose
-  routes sit behind that pipeline, and is also declared on every LiveView
+- **Gating is structural.** The HTTP gate is router pipelines, first in each
+  gated `pipe_through`: `:admin_allowlist` and `:admin_allowlist_api` for the
+  console's surface, `:sign_in_allowlist` and `:sign_in_allowlist_api` for
+  sign-in's (since #2493); the socket gate acts for exactly the
+  `live_session`s whose routes sit behind those pipelines, on the same
+  surface, and is also declared on every LiveView
   module so a url-less join cannot skip it. Whether a route is gated is a fact
   on the route, and `admin_allowlist_routes_test.exs` pins the whole gated set,
   so a new console or sign-in route lands in or out deliberately. A path-prefix
@@ -66,10 +70,46 @@ saved with no way back in is a site nobody can administer.
   outsider both that the password was right and that the account is
   privileged. The headless `POST /api/auth/sign_in` is gated for the same
   reason: it exchanges a password for a token with the account's full role.
+  Since #2493 a site may turn this off; see "Amendment".
 - **Rolling back turns the control off.** An older release does not know the
   table. This is said in the upgrade notes rather than prevented: preventing it
   would mean a contract migration that refuses to run backwards, for a setting
   that is off on most sites.
+
+## Amendment (2026-11-10, #2493): "Also restrict sign-in"
+
+Gating members' sign-in was a default chosen without an owner decision, and it
+locks every member, and every SPA or mobile app that signs members in, out of
+unlisted networks. The owner chose a per-site setting:
+
+- **`restrict_sign_in` on `SiteAdminAllowlist`, on by default.** The migration
+  adds the column with `DEFAULT true`, so every existing list keeps gating
+  sign-in after an upgrade, and a rollback restricts sign-in again.
+- **Turned off, sign-in opens and the console does not.** The gates ask for a
+  surface, `:console` or `:sign_in`; the cached and broadcast value carries the
+  whole setting (`{:console_only, cidrs}` when sign-in is open), and
+  `KilnCMS.Security.AdminAllowlist.for_surface/2` projects it per gate. A value
+  that reaches `verdict/2` unprojected is judged as the console would judge
+  it, so a mistake fails closed.
+- **The headless door follows the same setting.** `POST /api/auth/sign_in*`
+  sits behind `:sign_in_allowlist_api`. A separate setting for it was rejected:
+  a site that lets members sign in on its pages but not through its own app
+  is not a real need, and a second checkbox is one more way to leave a door
+  open by mistake.
+- **What it gives up, said where it is chosen.** With sign-in open, the
+  password check is no longer behind the list: an outsider learns whether a
+  password is right, and an admin's password yields a full-role token that
+  JSON:API, GraphQL and MCP accept from anywhere (they were never gated). The
+  console page says so and recommends two-factor sign-in; the console itself,
+  `/setup`, `/ws/collab` and the security posture stay behind the list.
+- **Only those who manage the list change it.** It is an attribute of the same
+  resource, written by the same `:save`, under the same org-admin policy, and
+  audited in the same `admin_allowlist_changed` event (`sign_in`: `restricted`
+  or `open`).
+
+Option 2 of #2493, gating sign-in only on the console host when
+`KILN_CONSOLE_HOST` is set, was not chosen: it helps only deployments that
+split the hosts, and decides by deployment shape what is a site's choice.
 
 ## Considered and rejected
 
@@ -91,8 +131,6 @@ saved with no way back in is a site nobody can administer.
 
 ## Follow-ups
 
-- Gate the sign-in family only on the console host when `KILN_CONSOLE_HOST` is
-  set, so members can sign in anywhere on deployments that separate the hosts.
 - A per-API-key address allowlist, for keys that should only be used from a
   known server.
 - Two-step activation: save the list, then confirm from inside it within a

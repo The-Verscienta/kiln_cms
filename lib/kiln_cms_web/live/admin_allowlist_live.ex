@@ -18,6 +18,14 @@ defmodule KilnCMSWeb.AdminAllowlistLive do
   (`KilnCMS.CMS.Changes.RefuseAdminLockout`). "Add my address" adds each: the
   address itself for IPv4, its `/64` for IPv6.
 
+  ## Also restrict sign-in
+
+  A checkbox in the same form (#2493), on by default: whether the list gates
+  the sign-in pages and the headless `POST /api/auth/sign_in` too. Turned off,
+  members sign in from anywhere and the console stays behind the list. The
+  form always sends it, and every save (Turn off included) writes it: `:save`
+  is an upsert that resets an omitted `restrict_sign_in` to its default.
+
   An address in private or carrier-grade NAT space is usually a proxy's, so the
   page warns that listing it admits everyone behind it; and when a forwarding
   header arrived that nothing trusts, it says so and refuses to save a list.
@@ -49,14 +57,16 @@ defmodule KilnCMSWeb.AdminAllowlistLive do
   end
 
   @impl true
-  def handle_event("validate", %{"allowlist" => %{"cidrs" => text}}, socket)
+  def handle_event("validate", %{"allowlist" => %{"cidrs" => text} = params}, socket)
       when is_binary(text) do
-    {:noreply, assign(socket, :form, list_form(text))}
+    {:noreply, assign(socket, :form, list_form(text, restrict_param(params)))}
   end
 
-  def handle_event("save", %{"allowlist" => %{"cidrs" => text}}, socket) when is_binary(text) do
-    socket = assign(socket, :form, list_form(text))
-    save(socket, entries(text), gettext("Admin allowlist saved."))
+  def handle_event("save", %{"allowlist" => %{"cidrs" => text} = params}, socket)
+      when is_binary(text) do
+    restrict? = restrict_param(params)
+    socket = assign(socket, :form, list_form(text, restrict?))
+    save(socket, entries(text), restrict?, gettext("Admin allowlist saved."))
   end
 
   def handle_event("add_mine", _params, socket) do
@@ -69,17 +79,24 @@ defmodule KilnCMSWeb.AdminAllowlistLive do
         |> Enum.map(&Cidr.client_range/1)
         |> Enum.reject(&(is_nil(&1) or &1 in entries(text)))
 
-      {:noreply, assign(socket, :form, list_form(Enum.join(entries(text) ++ missing, "\n")))}
+      {:noreply,
+       assign(
+         socket,
+         :form,
+         list_form(Enum.join(entries(text) ++ missing, "\n"), form_restrict(socket))
+       )}
     else
       {:noreply, put_flash(socket, :error, forbidden_message())}
     end
   end
 
+  # Keeps "Also restrict sign-in" as the form shows it: the next list turned
+  # on starts from the site's last choice.
   def handle_event("turn_off", _params, socket) do
-    save(socket, [], gettext("Admin allowlist turned off."))
+    save(socket, [], form_restrict(socket), gettext("Admin allowlist turned off."))
   end
 
-  defp save(socket, entries, success) do
+  defp save(socket, entries, restrict?, success) do
     if can_save?(socket) do
       context =
         Map.merge(socket.assigns.security_context, %{
@@ -88,7 +105,8 @@ defmodule KilnCMSWeb.AdminAllowlistLive do
           untrusted_forwarding?: socket.assigns.untrusted_forwarding?
         })
 
-      case CMS.save_site_admin_allowlist(%{cidrs: entries},
+      # Both columns, always: see "Also restrict sign-in".
+      case CMS.save_site_admin_allowlist(%{cidrs: entries, restrict_sign_in: restrict?},
              actor: socket.assigns.current_user,
              tenant: socket.assigns.current_org,
              context: context
@@ -111,21 +129,30 @@ defmodule KilnCMSWeb.AdminAllowlistLive do
   end
 
   defp load_list(socket) do
-    cidrs =
+    {cidrs, restrict?} =
       case CMS.list_site_admin_allowlist(
              actor: socket.assigns.current_user,
              tenant: socket.assigns.current_org
            ) do
-        {:ok, [row | _]} -> row.cidrs
-        _none_or_refused -> []
+        {:ok, [row | _]} -> {row.cidrs, row.restrict_sign_in != false}
+        _none_or_refused -> {[], true}
       end
 
     socket
     |> assign(:cidrs, cidrs)
-    |> assign(:form, list_form(Enum.join(cidrs, "\n")))
+    |> assign(:restrict_sign_in?, restrict?)
+    |> assign(:form, list_form(Enum.join(cidrs, "\n"), restrict?))
   end
 
-  defp list_form(text), do: to_form(%{"cidrs" => text}, as: :allowlist)
+  defp list_form(text, restrict?),
+    do: to_form(%{"cidrs" => text, "restrict_sign_in" => restrict?}, as: :allowlist)
+
+  # Only an explicit "false" opens sign-in; a missing or unexpected value keeps
+  # the stricter default.
+  defp restrict_param(params), do: Map.get(params, "restrict_sign_in") not in ["false", false]
+
+  defp form_restrict(socket),
+    do: socket.assigns.form[:restrict_sign_in].value not in ["false", false]
 
   defp entries(text) do
     text
@@ -261,14 +288,21 @@ defmodule KilnCMSWeb.AdminAllowlistLive do
       </.header>
 
       <p id="admin-allowlist-status" class="mt-6 text-sm font-medium">
-        <%= if @cidrs == [] do %>
-          {gettext("Off: people can sign in from any network.")}
-        <% else %>
-          {ngettext(
-            "On: %{count} network can open the console and sign in.",
-            "On: %{count} networks can open the console and sign in.",
-            length(@cidrs)
-          )}
+        <%= cond do %>
+          <% @cidrs == [] -> %>
+            {gettext("Off: people can sign in from any network.")}
+          <% @restrict_sign_in? -> %>
+            {ngettext(
+              "On: %{count} network can open the console and sign in.",
+              "On: %{count} networks can open the console and sign in.",
+              length(@cidrs)
+            )}
+          <% true -> %>
+            {ngettext(
+              "On: %{count} network can open the console. Anyone can sign in from any network.",
+              "On: %{count} networks can open the console. Anyone can sign in from any network.",
+              length(@cidrs)
+            )}
         <% end %>
       </p>
 
@@ -331,6 +365,17 @@ defmodule KilnCMSWeb.AdminAllowlistLive do
             )
           }
         />
+        <.input
+          field={@form[:restrict_sign_in]}
+          type="checkbox"
+          id="admin-allowlist-restrict-sign-in"
+          label={gettext("Also restrict sign-in")}
+        />
+        <p id="admin-allowlist-restrict-sign-in-hint" class="-mt-2 text-sm text-base-content/70">
+          {gettext(
+            "On: signing in, on this site's sign-in pages and through the API, works only from the networks above. Off: members can sign in from anywhere, and the console still opens only from the networks above."
+          )}
+        </p>
         <div class="flex flex-wrap items-center gap-3">
           <.button
             id="admin-allowlist-save"
@@ -366,14 +411,24 @@ defmodule KilnCMSWeb.AdminAllowlistLive do
       </.form>
 
       <div class="mt-10 max-w-2xl space-y-3 rounded-lg bg-base-200 p-4 text-sm text-base-content/70">
-        <p id="admin-allowlist-scope">
+        <p :if={not @restrict_sign_in?} id="admin-allowlist-scope">
+          {gettext(
+            "From any other network, the console answers \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, sign-in, API keys, existing app tokens, previews and media are not affected, except that the security posture endpoint for monitoring (GET /api/security/posture) also answers only to listed networks."
+          )}
+        </p>
+        <p :if={@restrict_sign_in?} id="admin-allowlist-scope">
           {gettext(
             "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected, except that the security posture endpoint for monitoring (GET /api/security/posture) also answers only to listed networks."
           )}
         </p>
-        <p id="admin-allowlist-members">
+        <p :if={@restrict_sign_in?} id="admin-allowlist-members">
           {gettext(
-            "This also applies to members and readers who sign in to this site, and to sign-in through the API: a website's own sign-in form or a mobile app that signs people in only works from listed networks too."
+            "This also applies to members and readers who sign in to this site, and to sign-in through the API: a website's own sign-in form or a mobile app that signs people in only works from listed networks too. Turn off \"Also restrict sign-in\" to let them sign in from anywhere."
+          )}
+        </p>
+        <p :if={not @restrict_sign_in?} id="admin-allowlist-members-open">
+          {gettext(
+            "Sign-in is not restricted: members, readers, and apps that sign people in through the API can sign in from any network. Signing in from elsewhere still doesn't open the console. Anyone with an admin's password can get an API token from anywhere, so use two-factor sign-in."
           )}
         </p>
         <p id="admin-allowlist-recovery-hint">

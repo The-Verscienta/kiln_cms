@@ -97,13 +97,40 @@ defmodule KilnCMSWeb.AdminAllowlistTest do
     |> AshAuthentication.Plug.Helpers.store_in_session(user)
   end
 
-  # Save `cidrs` as an admin of `site` working from `saving_from`.
-  defp allow!(site, cidrs, saving_from) do
-    CMS.save_site_admin_allowlist!(%{cidrs: cidrs},
+  # Save `cidrs` as an admin of `site` working from `saving_from`, with
+  # "Also restrict sign-in" as given (on unless said otherwise, #2493).
+  defp allow!(site, cidrs, saving_from, restrict_sign_in \\ true) do
+    CMS.save_site_admin_allowlist!(%{cidrs: cidrs, restrict_sign_in: restrict_sign_in},
       actor: admin_of(site),
       tenant: site.id,
       context: %{client_ip: saving_from}
     )
+  end
+
+  @sign_in_routes [
+    {:get, "/sign-in"},
+    {:get, "/register"},
+    {:get, "/reset"},
+    {:get, "/password-reset/some-token"},
+    {:get, "/confirm_new_user/some-token"},
+    {:get, "/magic_link/some-token"},
+    {:get, "/sign-in/verify"},
+    {:post, "/sign-in/verify"},
+    {:get, "/sign-in/unlock"},
+    {:post, "/auth/passkey/options"},
+    {:post, "/auth/passkey/verify"},
+    {:get, "/auth/site-sso"},
+    {:get, "/auth/site-sso/callback"},
+    {:get, "/auth/invite/some-token"},
+    {:post, "/auth/user/password/sign_in"},
+    {:get, "/auth/user/password/sign_in_with_token"},
+    {:post, "/auth/user/magic_link/request"}
+  ]
+
+  defp api_sign_in(conn, user) do
+    conn
+    |> put_req_header("content-type", "application/json")
+    |> post("/api/auth/sign_in", %{"email" => to_string(user.email), "password" => @password})
   end
 
   defp an_outside_address, do: {198, 51, 100, 200}
@@ -161,25 +188,7 @@ defmodule KilnCMSWeb.AdminAllowlistTest do
     end
 
     test "/setup and every sign-in route answer 403", %{conn: conn} do
-      for {method, path} <- [
-            {:get, "/setup"},
-            {:get, "/sign-in"},
-            {:get, "/register"},
-            {:get, "/reset"},
-            {:get, "/password-reset/some-token"},
-            {:get, "/confirm_new_user/some-token"},
-            {:get, "/magic_link/some-token"},
-            {:get, "/sign-in/verify"},
-            {:post, "/sign-in/verify"},
-            {:post, "/auth/passkey/options"},
-            {:post, "/auth/passkey/verify"},
-            {:get, "/auth/site-sso"},
-            {:get, "/auth/site-sso/callback"},
-            {:get, "/auth/invite/some-token"},
-            {:post, "/auth/user/password/sign_in"},
-            {:get, "/auth/user/password/sign_in_with_token"},
-            {:post, "/auth/user/magic_link/request"}
-          ] do
+      for {method, path} <- [{:get, "/setup"} | @sign_in_routes] do
         conn = dispatch(conn, @endpoint, method, path, %{})
         assert conn.status == 403, "#{method} #{path} answered #{conn.status}"
         assert gated?(conn), "#{method} #{path}"
@@ -252,6 +261,115 @@ defmodule KilnCMSWeb.AdminAllowlistTest do
       conn = from(conn, site, {0, 0, 0, 0, 0, 0xFFFF, 0xCB00, 0x7109})
 
       assert html_response(get(conn, "/sign-in"), 200)
+    end
+  end
+
+  # --- "Also restrict sign-in" (#2493) ------------------------------------------
+
+  describe "with \"Also restrict sign-in\" on (the default)" do
+    test "a list saved without the setting restricts sign-in", %{conn: conn, site: site} do
+      CMS.save_site_admin_allowlist!(%{cidrs: ["203.0.113.0/24"]},
+        actor: admin_of(site),
+        tenant: site.id,
+        context: %{client_ip: {203, 0, 113, 7}}
+      )
+
+      user = admin_of(site)
+      {conn, _ip} = from_somewhere(conn, site)
+
+      assert gated?(get(conn, "/sign-in"))
+
+      assert %{"errors" => [%{"code" => "network_not_allowed"}]} =
+               conn |> api_sign_in(user) |> json_response(403)
+    end
+  end
+
+  describe "with \"Also restrict sign-in\" off, from outside the list" do
+    setup %{conn: conn, site: site} do
+      allow!(site, ["203.0.113.0/24"], {203, 0, 113, 7}, false)
+      {conn, ip} = from_somewhere(conn, site)
+      %{conn: conn, ip: ip}
+    end
+
+    test "every sign-in route is served", %{conn: conn} do
+      for {method, path} <- @sign_in_routes do
+        conn = dispatch(conn, @endpoint, method, path, %{})
+        refute gated?(conn), "#{method} #{path} answered #{conn.status}"
+      end
+
+      refute_received {:refused, _, _}
+    end
+
+    test "a member signs in through the API", %{conn: conn, site: site} do
+      user = admin_of(site)
+
+      assert %{"token" => token} = conn |> api_sign_in(user) |> json_response(201)
+      assert is_binary(token)
+    end
+
+    test "the sign-in page joins", %{conn: conn} do
+      assert {:ok, _lv, _html} = live(conn, "/sign-in")
+    end
+
+    test "the console, /setup and the security posture are still refused", %{
+      conn: conn,
+      site: site
+    } do
+      for path <- ["/editor", "/editor/admin-allowlist", "/setup"] do
+        assert conn |> get(path) |> html_response(403), path
+      end
+
+      assert conn |> log_in(admin_of(site)) |> get("/editor/sessions") |> html_response(403)
+
+      assert %{"errors" => [%{"code" => "network_not_allowed"}]} =
+               conn |> get("/api/security/posture") |> json_response(403)
+    end
+
+    test "a console page's socket from outside is refused, though the page was served inside",
+         %{conn: conn, site: site} do
+      inside = from(conn, site, {203, 0, 113, 50})
+      inside = inside |> log_in(admin_of(site)) |> get("/editor/sessions")
+      assert html_response(inside, 200)
+
+      %Plug.Conn{} =
+        outside =
+        Plug.Test.put_peer_data(inside, %{address: an_outside_address(), port: 1, ssl_cert: nil})
+
+      assert {%{reason: "reload", status: 403}, _} = catch_exit(live(outside))
+      assert_received {:refused, %{count: 1}, %{surface: :live, reason: :not_listed}}
+    end
+
+    test "an open console page still leaves when a save excludes it", %{site: site} do
+      conn = from(build_conn(), site, {203, 0, 113, 50})
+      {:ok, lv, _html} = conn |> log_in(admin_of(site)) |> live("/editor/sessions")
+
+      allow!(site, ["198.18.0.0/16"], {198, 18, 0, 1}, false)
+
+      assert_redirect(lv, "/editor")
+    end
+
+    test "an open sign-in page stays through a save that leaves sign-in open", %{
+      conn: conn,
+      site: site
+    } do
+      {:ok, lv, _html} = live(conn, "/sign-in")
+
+      allow!(site, ["198.18.0.0/16"], {198, 18, 0, 1}, false)
+
+      assert is_binary(render(lv))
+      refute_received {:refused, _, _}
+    end
+
+    test "an open sign-in page leaves when sign-in is restricted again", %{
+      conn: conn,
+      site: site
+    } do
+      {:ok, lv, _html} = live(conn, "/sign-in")
+
+      allow!(site, ["203.0.113.0/24"], {203, 0, 113, 7}, true)
+
+      assert_redirect(lv, "/editor")
+      assert gated?(get(conn, "/sign-in"))
     end
   end
 
@@ -707,6 +825,13 @@ defmodule KilnCMSWeb.AdminAllowlistTest do
                )
 
       assert socket.assigns.client_ip == {203, 0, 113, 50}
+    end
+
+    test "a connect from outside is refused with sign-in open too (#2493)", %{site: site} do
+      allow!(site, ["203.0.113.0/24"], {203, 0, 113, 7}, false)
+
+      assert Gate.check_connect(:collab, collab_info(site, an_outside_address())) == :error
+      assert {:ok, _ip} = Gate.check_connect(:collab, collab_info(site, {203, 0, 113, 50}))
     end
 
     test "where the socket cannot see the client, a connect is refused while a list is on", %{

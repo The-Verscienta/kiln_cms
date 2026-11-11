@@ -95,7 +95,7 @@ defmodule KilnCMS.Security.Event do
     session_idle_expired: ~w(timeout_minutes tier surface),
     all_sessions_revoked: ~w(count except_self),
     admin_access_refused: ~w(surface),
-    admin_allowlist_changed: ~w(state count added removed),
+    admin_allowlist_changed: ~w(state count added removed sign_in),
     admin_allowlist_overridden: ~w(change count),
     sign_in_unlock_requested: ~w(surface),
     sign_in_unlocked: ~w(was_locked),

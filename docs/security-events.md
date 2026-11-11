@@ -134,7 +134,7 @@ a type may carry only the keys below; anything else is dropped.
 | `session_idle_expired` | Signed out after inactivity | A browser session (with its remember-me cookie) was signed out by the site's [idle timeout](account-administration.md#sign-people-out-when-idle). The person is the account signed out | `timeout_minutes`, `tier`, `surface` |
 | `all_sessions_revoked` | Everyone signed out | An admin used [Sign out everyone](account-administration.md#sign-everyone-out); the target is the site (target type `organization`) | `count`, `except_self` |
 | `admin_access_refused` | Refused outside the admin allowlist | A request, page connection or collaboration connect from an address the site's [admin allowlist](admin-allowlist.md) does not list was refused. No person (the gate runs before anyone is known); the address is the event's IP. Sampled: see below | `surface` |
-| `admin_allowlist_changed` | Admin allowlist changed | An admin saved the site's [admin allowlist](admin-allowlist.md), including turning it off. The target is the list (target type `site_admin_allowlist`) | `state`, `count`, `added`, `removed` |
+| `admin_allowlist_changed` | Admin allowlist changed | An admin saved the site's [admin allowlist](admin-allowlist.md), including turning it off. The target is the list (target type `site_admin_allowlist`) | `state`, `count`, `added`, `removed`, `sign_in` |
 | `admin_allowlist_overridden` | Admin allowlist changed from the server | An operator widened or cleared the list with [`KilnCMS.Release.admin_allowlist/1`](admin-allowlist.md#recovering-from-a-lock-out). No person and no IP address; the target is the site (target type `organization`) | `change`, `count` |
 | `sign_in_unlock_requested` | Sign-in unlock link sent | An [unlock link](account-administration.md#lift-a-sign-in-pause-by-email) was mailed to a paused account. Only once the mail is queued: a request that sends nothing records nothing. The person is the account mailed | `surface` |
 | `sign_in_unlocked` | Sign-in pause lifted by email | An unlock link was redeemed and the account's sign-in pause cleared. The person is the account | `was_locked` |
@@ -198,8 +198,10 @@ is not an event; it is only counted (see
 [admin-allowlist.md](admin-allowlist.md#when-the-list-cannot-be-read)).
 
 For `admin_allowlist_changed`, `state` is `on` or `off` after the save, `count`
-the number of entries after it, and `added` and `removed` how many entries the
-save added and removed. The entries themselves are never recorded: an allowlist
+the number of entries after it, `added` and `removed` how many entries the
+save added and removed, and `sign_in` whether the list also gates sign-in
+after it (`restricted` or `open`, "Also restrict sign-in", #2493; absent on
+events from before that setting). The entries themselves are never recorded: an allowlist
 is often the admins' own home and office addresses, and the log keeps what it
 records for its whole retention. The page shows the current entries. This
 event replaces `org_setting_changed` for this setting, so a save is still
