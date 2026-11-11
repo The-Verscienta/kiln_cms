@@ -425,7 +425,38 @@ defmodule KilnCMS.MixProject do
         title: "Elixir client",
         filename: "elixir-client-readme"
       ]
-    ] ++ release_history() ++ decisions()
+    ] ++ whats_new() ++ release_history() ++ decisions()
+  end
+
+  # One guide per minor or major release: what it adds and changes, with
+  # examples, how to migrate across its breaking changes, and its known issues
+  # (`docs/releasing.md` → "Documenting a release"). Globbed like the release
+  # history, newest first, so a release cut adds its guide by adding the file.
+  # `v*.md` leaves out `TEMPLATE.md`. Unlike the long-form archive these are
+  # public: the publisher puts them on kilncms.dev/docs.
+  #
+  # Sorted by version, not by name: `v1.10.md` belongs above `v1.9.md`. The
+  # sort is inline because scripts/publish/docs.exs evaluates this body and
+  # resolves only zero-arity helpers.
+  defp whats_new do
+    "docs/whats-new/v*.md"
+    |> Path.wildcard()
+    |> Enum.sort_by(
+      fn path ->
+        path
+        |> Path.basename(".md")
+        |> String.trim_leading("v")
+        |> String.split(".")
+        |> Enum.map(&String.to_integer/1)
+      end,
+      :desc
+    )
+    |> Enum.map(fn path ->
+      # A page slug on the site is lowercase letters, digits and single
+      # hyphens, so `v1.9` publishes as `whats-new-v1-9`.
+      {String.to_atom(path),
+       [filename: "whats-new-" <> String.replace(Path.basename(path, ".md"), ".", "-")]}
+    end)
   end
 
   # The long-form release entries and the decision records behind CHANGELOG.md
@@ -455,6 +486,7 @@ defmodule KilnCMS.MixProject do
         "docs/right-everywhere-provably.md",
         "docs/reading-paths.md"
       ],
+      "What's new": Enum.map(whats_new(), fn {path, _} -> to_string(path) end),
       "Compare & migrate": [
         "docs/compare/how-kiln-compares.md",
         "docs/compare/kiln-vs-wordpress.md",

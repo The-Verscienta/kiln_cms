@@ -52,10 +52,12 @@ defmodule Mix.Tasks.Kiln.Update do
   ## What it prints from the changelog
 
   Only the **Breaking** and **Upgrade notes** sections of each release between
-  the two pins, read from `CHANGELOG.md` at the *target* tag. Those two answer
-  "what breaks if I upgrade?"; the rest of a release entry — Added, Changed,
-  Fixed, Security — does not, and printing it verbatim ahead of a production
-  pin move buried the part that does (#1325). Each summary line links to its
+  the two pins, read from `CHANGELOG.md` at the *target* tag, plus the
+  target's own **Known issues**. Those answer "what breaks if I upgrade?";
+  the rest of a release entry — Added, Changed, Fixed, Security — does not,
+  and printing it verbatim ahead of a production pin move buried the part that
+  does (#1325). An earlier release's known issues are left out: the target
+  either fixed them (its Fixed section says so) or lists them again. Each summary line links to its
   own long-form entry under `docs/changelog/`, rewritten here to an absolute
   URL at the tag being installed so it is reachable from a terminal.
 
@@ -487,8 +489,9 @@ defmodule Mix.Tasks.Kiln.Update do
 
     Mix.shell().info("""
 
-    That is the Breaking and Upgrade-notes sections only. Everything else the
-    release changed is in CHANGELOG.md at #{target.tag}.
+    That is the Upgrade-notes and Breaking sections, and #{target.tag}'s Known
+    issues, only. Everything else the release changed is in CHANGELOG.md at
+    #{target.tag}.
     """)
   end
 
@@ -518,8 +521,10 @@ defmodule Mix.Tasks.Kiln.Update do
   defp absolutize(body, _target), do: body
 
   @doc false
-  # The operator-facing sections of each release in (from, to]: `Breaking`
-  # first, then `Upgrade notes`. Everything else a release changed — Added,
+  # The operator-facing sections of each release in (from, to]: `Upgrade notes`
+  # first, then `Breaking`, then — for the target release only — `Known
+  # issues`. An intermediate release's known issues are stale by the time the
+  # target ships: fixed since, or carried forward into the target's own list. Everything else a release changed — Added,
   # Fixed, Security — is deliberately not printed: an operator moving a pin is
   # asking "what breaks if I upgrade?", and burying that in a full release
   # entry is what #1325 was filed about.
@@ -536,7 +541,7 @@ defmodule Mix.Tasks.Kiln.Update do
       with [heading | _] <- String.split(section, "\n", parts: 2),
            %Version{} = version <- section_version(heading, to),
            true <- in_range?(version, from, to),
-           [_ | _] = blocks <- operator_blocks(section) do
+           [_ | _] = blocks <- operator_blocks(section, Version.compare(version, to) == :eq) do
         [{version, blocks}]
       else
         _ -> []
@@ -550,10 +555,11 @@ defmodule Mix.Tasks.Kiln.Update do
   @operator_sections %{
     "Upgrade notes" => {0, "Upgrade notes"},
     "Upgrading" => {0, "Upgrade notes"},
-    "Breaking" => {1, "Breaking"}
+    "Breaking" => {1, "Breaking"},
+    "Known issues" => {2, "Known issues"}
   }
 
-  defp operator_blocks(section) do
+  defp operator_blocks(section, target?) do
     section
     |> String.split(~r/^### /m)
     # Everything before the first h3 is the release heading and any preamble.
@@ -568,6 +574,7 @@ defmodule Mix.Tasks.Kiln.Update do
       case {Map.fetch(@operator_sections, name), strip_link_definitions(body)} do
         {_, ""} -> []
         {:error, _} -> []
+        {{:ok, {_rank, "Known issues"}}, _body} when not target? -> []
         {{:ok, {rank, label}}, body} -> [{rank, label, body}]
       end
     end)
