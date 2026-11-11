@@ -1275,25 +1275,52 @@ Where they are absent, the page says so and the button is disabled rather than
 failing at the point of use. Cron backups on the host are unaffected either
 way.
 
-**The official image does not install `rclone`.** With `BACKUP_RCLONE_REMOTE`
-set in the app's environment and no `rclone` on its `PATH`, an in-app backup
-still runs and succeeds, but copies nothing off-site. That is deliberate: on a
-host that copies the same `BACKUP_DIR` off-site by other means, failing every
-in-app run would be wrong. It is not silent:
+**The official image ships `rclone`** (since #2482), a pinned release whose
+SHA-256 the `Dockerfile` checks at build time; `rclone version` in the
+container names it. The app runs as `nobody`, whose home directory does
+not exist, so give it the remote's configuration explicitly: either
+`RCLONE_CONFIG_<NAME>_*` variables in the app's environment (for
+`BACKUP_RCLONE_REMOTE=r2:kiln-backups`: `RCLONE_CONFIG_R2_TYPE=s3`,
+`RCLONE_CONFIG_R2_PROVIDER=Cloudflare`, `RCLONE_CONFIG_R2_ACCESS_KEY_ID`,
+`RCLONE_CONFIG_R2_SECRET_ACCESS_KEY`, `RCLONE_CONFIG_R2_ENDPOINT`), or an
+`rclone.conf` mounted read-only with `RCLONE_CONFIG` pointing at it. Avoid
+a connection-string remote (`:s3,secret_access_key=…:bucket`) for the app:
+it reaches `rclone` as a command-line argument, which other users and
+process monitors on the host can read.
+Bumping the pin is a `Dockerfile` change: the comment above the `rclone`
+stage says how to take the new version's digest and check its signature.
 
-- **Where backups go** on `/editor/backups` shows an **Off-site** line with the
-  remote (credentials masked) and "rclone is not installed in this image, so
-  backups taken from this page are not copied off-site."
-- Each run logs a warning, in the server log and in the run's log:
-  "BACKUP_RCLONE_REMOTE is set but rclone is not installed in this image;
-  nothing was copied off-site".
-- The manifest's `offsite` stays `null`.
+**A remote with no `rclone` fails the run.** On a custom image that leaves
+`rclone` out, with `BACKUP_RCLONE_REMOTE` set in the app's environment, an
+in-app backup takes and verifies its local files, then fails at the
+off-site step, like any other failed copy. Nothing is tried again within
+the run, since no retry installs a binary. It is visible ahead of time and
+afterward:
 
-To copy in-app backups off-site, build your own image on top of Kiln's with
-`rclone` installed and configured for the user the app runs as (`nobody`), or
-copy the directory from the host (`rclone sync` of `BACKUP_DIR`, excluding
-`.work/**`), or snapshot the volume. `backup.sh` copies only the files its own
-run wrote, so a cron entry alone does not carry the app's backups off-site.
+- **Where backups go** on `/editor/backups` shows an **Off-site** line with
+  the remote (credentials masked) and "rclone is not installed in this
+  image, so backups taken from this page fail at the off-site copy. Install
+  rclone in the image or unset BACKUP_RCLONE_REMOTE."
+- The run fails with:
+
+  ```text
+  Off-site copy FAILED: BACKUP_RCLONE_REMOTE is set but rclone is not
+  installed in this image, so no file was copied. The local files are kept.
+  Install rclone in the image (the official image ships it) or unset
+  BACKUP_RCLONE_REMOTE, then Resume this backup.
+  ```
+
+  Its Run log has the error line "BACKUP_RCLONE_REMOTE is set but rclone is
+  not installed in this image; nothing was copied off-site", and the server
+  log has the same line with the remote, redacted.
+- The failure manifest's `offsite` is `null`, and its files stay verified.
+
+Fix it either way: install `rclone` in your image, or, when the host copies
+`BACKUP_DIR` off-site by other means (`rclone sync` of `BACKUP_DIR`,
+excluding `.work/**`, or a volume snapshot), unset `BACKUP_RCLONE_REMOTE` in
+the app's environment. `backup.sh` copies only the files its own run wrote,
+so a cron entry alone does not carry the app's backups off-site. A run that
+failed this way can be resumed once the image has `rclone`.
 
 ### What it deliberately does not do
 
@@ -1467,7 +1494,7 @@ configured for cron needs nothing extra for the console.
 | `BACKUP_MEDIA_EXCLUDE` | backup + app | comma-separated globs the media archive leaves out (default none) |
 | `TMPDIR` | backup | where `backup.sh` builds the media file lists (default `/tmp`); removed when it exits |
 | `BACKUP_TRIGGER` | backup | label recorded in the manifest (default `cron`) |
-| `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused or failed copy fails the run. The app needs `rclone` in its image ([above](#it-needs-the-client-tools-in-the-image)) |
+| `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused or failed copy fails the run. The official image ships `rclone`; set without it, an in-app run fails ([above](#it-needs-the-client-tools-in-the-image)) |
 | `BACKUP_PING_URL` | backup | dead-man's-switch ping on success |
 | `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill` |
 | `RESTORE_MEDIA_DIR` | restore | target uploads root for `media` |

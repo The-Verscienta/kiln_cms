@@ -26396,8 +26396,8 @@ msgstr "est publié"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "rclone is not installed in this image, so backups taken from this page are not copied off-site."
-msgstr "rclone n’est pas installé dans cette image : les sauvegardes lancées depuis cette page ne sont donc pas copiées hors du serveur."
+msgid "rclone is not installed in this image, so backups taken from this page fail at the off-site copy. Install rclone in the image or unset BACKUP_RCLONE_REMOTE."
+msgstr "rclone n’est pas installé dans cette image : les sauvegardes lancées depuis cette page échouent donc à la copie hors du serveur. Installez rclone dans l’image ou retirez BACKUP_RCLONE_REMOTE."
 
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format

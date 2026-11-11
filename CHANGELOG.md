@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **If the app's environment sets `BACKUP_RCLONE_REMOTE`, check it before deploying: the official image now ships `rclone` (pinned, checksum-verified), so in-app backups start copying there, and an unreachable or unconfigured remote fails them. On a custom image without `rclone`, the variable now fails every in-app backup: install `rclone` or unset it.**
+  No migration; rolling the pin back is safe. The image grows by about 82 MiB.
+  ([#2482](https://github.com/The-Verscienta/kiln_cms/issues/2482) · [long form](docs/changelog/unreleased.md#rclone-in-image-upgrade))
+
 - **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `access-denied` and path aliases under `/access-denied`, which the new access-denied page (#2143) shadows; give each a new slug or alias.** No migration; read-only.
   ([#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374) · [long form](docs/changelog/unreleased.md#reserved-paths-upgrade))
 
@@ -467,6 +471,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **While a backup runs, a request folds into the queued one only when it is the same kind: Back up now into a queued fresh backup, Resume into a queued resume of the same backup. Any other request is refused with "Try again once the queue clears", and the queue is left as it was.**
   ([#2540](https://github.com/The-Verscienta/kiln_cms/issues/2540) · [long form](docs/changelog/unreleased.md#backup-fold-like-into-like))
+
+- **An in-app backup with `BACKUP_RCLONE_REMOTE` set and no `rclone` in the image now fails (Run log and run error say so) instead of skipping the off-site copy; the Backups page's “Where backups go” says so ahead of time.**
+  ([#2482](https://github.com/The-Verscienta/kiln_cms/issues/2482))
 
 - **Search engines whose address DNS has verified now get 200% of the `:delivery` limit by default (600 requests a minute per address instead of 300); unverified claims stay at the browser limit, and with `KILN_CRAWLER_VERIFICATION=false` the default stays 100%. Set `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT=100` to go back.**
   ([#2587](https://github.com/The-Verscienta/kiln_cms/issues/2587) · [long form](docs/changelog/unreleased.md#verified-search-engine-default))

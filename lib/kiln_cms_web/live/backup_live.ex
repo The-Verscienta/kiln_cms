@@ -630,7 +630,7 @@ defmodule KilnCMSWeb.BackupLive do
             >
               <span class="font-mono">{KilnCMS.Backups.Redact.text(rclone_remote())}</span>
               — {gettext(
-                "rclone is not installed in this image, so backups taken from this page are not copied off-site."
+                "rclone is not installed in this image, so backups taken from this page fail at the off-site copy. Install rclone in the image or unset BACKUP_RCLONE_REMOTE."
               )}
             </dd>
           </dl>

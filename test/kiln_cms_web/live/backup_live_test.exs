@@ -1246,7 +1246,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
   end
 
-  describe "an off-site remote with no rclone in the image (#2218)" do
+  describe "an off-site remote with no rclone in the image (#2218, #2482)" do
     setup do
       original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
 
@@ -1268,7 +1268,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       %{bin: bin}
     end
 
-    test "the panel says backups from this page are not copied off-site", %{
+    test "the panel says backups from this page fail at the off-site copy (#2482)", %{
       conn: conn,
       bin: bin
     } do
@@ -1278,7 +1278,13 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
 
-      assert has_element?(lv, "#backup-rclone-missing", "rclone is not installed in this image")
+      assert has_element?(
+               lv,
+               "#backup-rclone-missing",
+               "rclone is not installed in this image, so backups taken from this page fail " <>
+                 "at the off-site copy. Install rclone in the image or unset BACKUP_RCLONE_REMOTE."
+             )
+
       refute render(lv) =~ "hunter2hunter2"
     end
 
