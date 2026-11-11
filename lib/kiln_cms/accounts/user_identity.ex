@@ -29,7 +29,7 @@ defmodule KilnCMS.Accounts.UserIdentity do
     # must not survive the invitee setting the account up. No shipped path
     # links one to an unconfirmed account today; the takeover forgets any it
     # finds all the same, so a later path cannot reopen the hole. Both are the
-    # invitations system actor's alone (`Changes.ForgetPriorCredentials`).
+    # account-takeover system actor's alone (`Changes.ForgetPriorCredentials`).
     #
     # No audit event: there is no event type for an identity link, and none is
     # recorded when one is made either.
@@ -53,7 +53,7 @@ defmodule KilnCMS.Accounts.UserIdentity do
 
     policy always() do
       authorize_if {KilnCMS.Checks.SystemActor,
-                    subsystem: :invitations, action: [:for_user, :forget_on_takeover]}
+                    subsystem: :account_takeover, action: [:for_user, :forget_on_takeover]}
 
       forbid_if always()
     end

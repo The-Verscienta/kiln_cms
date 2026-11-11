@@ -39,6 +39,10 @@ defmodule KilnCMS.Accounts.User do
       end
 
       confirmation :confirm_new_user do
+        # The action is declared below (#2594): it asks for the sign-up
+        # password as well as the token. Named here, or the add-on would
+        # generate its own `:confirm` and use that instead.
+        confirm_action_name :confirm_new_user
         monitor_fields [:email]
         confirm_on_create? true
         confirm_on_update? false
@@ -50,12 +54,11 @@ defmodule KilnCMS.Accounts.User do
         #
         # `:sign_in_with_magic_link` is not here: magic-link registration is
         # off, so it is a read, and the add-on confirms only on a create or an
-        # update. A magic-link sign-in leaves an unconfirmed account
-        # unconfirmed (#2516). Confirming there is #2594's: proof of the
-        # mailbox has to settle what happens to the credentials the earlier
-        # registrant set, and forgetting them would also delete a genuine
-        # registrant's own password. It would be a write inside a read flow
-        # as well.
+        # update (#2516). A magic-link sign-in to an unconfirmed account
+        # confirms it through `:take_over_by_magic_link` instead (#2594),
+        # which also forgets every credential the earlier registrant set,
+        # their password included: the link proves the mailbox, not the
+        # password.
         auto_confirm_actions [
           :reset_password_with_token,
           :register_with_sso,
@@ -980,6 +983,108 @@ defmodule KilnCMS.Accounts.User do
       end
     end
 
+    # The confirmation add-on's action, declared here rather than generated
+    # (#2594) so that it asks for the password chosen at sign-up as well as the
+    # emailed token. Anyone can register an unconfirmed account for any
+    # address, and the link reaches the address's owner whoever registered it:
+    # confirming on the click alone would hand the owner an account whose
+    # password, and whatever factors it set up, a stranger chose. With the
+    # password too, the confirmer read the mail and chose the password, so the
+    # account is theirs and keeps everything. Whoever cannot give it resets the
+    # password instead, which confirms the address and forgets the earlier
+    # registrant's credentials (`:reset_password_with_token` below).
+    #
+    # Every account that can reach this was registered with a password: the
+    # SSO, site-SSO, invitation and bootstrap creates confirm on create.
+    update :confirm_new_user do
+      description "Confirm a new account's address: the emailed token and the sign-up password."
+      # The add-on's verifier requires the monitored field to be accepted. An
+      # `email` in the input is refused below; the address the token carries
+      # is what the add-on writes.
+      accept [:email]
+      require_atomic? false
+
+      argument :confirm, :string, allow_nil?: false, public?: true
+
+      argument :password, :string do
+        description "The password chosen when the account was registered."
+        allow_nil? false
+        sensitive? true
+      end
+
+      validate {AshAuthentication.Strategy.Password.PasswordValidation,
+                strategy_name: :password, password_argument: :password}
+
+      # The address is the token's to set, never the form's.
+      validate attribute_equals(:email, nil) do
+        where changing(:email)
+        message "cannot be changed by a confirmation"
+      end
+
+      change AshAuthentication.AddOn.Confirmation.ConfirmChange
+
+      # `PasswordValidation` reads the struct the link loaded; a reset that took
+      # the account over since then changed the password under it. The row,
+      # locked, must still hold the password that was checked (#2453's guard).
+      # After the token's own check, so a revoked token is refused as one.
+      change {KilnCMS.Accounts.Changes.GuardAccountTakeover, user_id: :id, lock: :no_key_update}
+      change AshAuthentication.GenerateTokenChange
+
+      metadata :token, :string, allow_nil?: false
+    end
+
+    # The magic-link sign-in, declared here rather than generated (#2594) so
+    # that `Preparations.ClaimUnconfirmedAccount` runs ahead of the library's
+    # `SignInPreparation`: a link followed to an UNCONFIRMED account takes it
+    # over for the address's owner before the session is minted. Otherwise as
+    # generated: registration through a magic link is off, so this is a read.
+    read :sign_in_with_magic_link do
+      description "Sign in with a magic link."
+      get? true
+
+      argument :token, :string do
+        description "The token from the magic link that was sent to the user."
+        allow_nil? false
+      end
+
+      prepare KilnCMS.Accounts.Preparations.ClaimUnconfirmedAccount
+      prepare AshAuthentication.Strategy.MagicLink.SignInPreparation
+
+      metadata :token, :string do
+        description "A JWT that can be used to authenticate the user."
+        allow_nil? false
+      end
+    end
+
+    # A magic link followed to an UNCONFIRMED account (#2594): the link proves
+    # the mailbox, not the password, so the address's owner takes the account
+    # over as a reset or an invitation would. It is confirmed, its password
+    # replaced with one nobody knows (the owner sets theirs with a reset), its
+    # display name cleared, every token but the link itself revoked, and every
+    # other credential the first registrant set up forgotten. System-only:
+    # only the magic-link sign-in calls it (`authorize?: false`), and the
+    # change refuses an actor-carrying call. See
+    # `Changes.ClaimUnconfirmedAccount`.
+    update :take_over_by_magic_link do
+      description "Take over an unconfirmed account its address's owner signed in to by magic link (system-only)."
+      accept []
+      require_atomic? false
+
+      argument :token, :string, allow_nil?: false, sensitive?: true
+
+      change KilnCMS.Accounts.Changes.ClaimUnconfirmedAccount
+
+      # Every session and remember-me cookie the first registrant held. The
+      # magic link is spared: the sign-in revokes it single-use after this.
+      change {KilnCMS.Accounts.Changes.RevokeAllTokens, spare: :token}
+
+      change {KilnCMS.Accounts.Changes.ForgetPriorCredentials,
+              via: :magic_link, unconfirmed_only?: true}
+
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :password_reset, after_commit?: true}
+    end
+
     update :reset_password_with_token do
       # `ForgiveSignInThrottle` runs an `after_action` hook (it needs the saved
       # record's email), which an atomic update has no place to put.
@@ -1025,6 +1130,20 @@ defmodule KilnCMS.Accounts.User do
       # token itself to the strategy, which revokes it single-use after these
       # hooks (AshAuthentication 5.0; see the change's moduledoc).
       change {KilnCMS.Accounts.Changes.RevokeAllTokens, spare: :reset_token}
+
+      # A reset finished on an UNCONFIRMED account is its address's owner
+      # taking it over (#2594): whoever registered the address first may have
+      # enrolled two-step verification, a passkey or a push device, or been
+      # minted an API key, and each would outlive the new password. They are
+      # all removed here, in this transaction, as an invitation's takeover
+      # removes them (#2453). `unconfirmed_only?` decides on the row locked in
+      # the transaction: a confirmed account's reset keeps every factor, or a
+      # reset would be a way past two-step verification. Above
+      # `GenerateTokenChange`, so the sign-in this reset completes sees the
+      # cleared factor and is not sent to a code prompt only the stranger can
+      # answer.
+      change {KilnCMS.Accounts.Changes.ForgetPriorCredentials,
+              via: :password_reset, unconfirmed_only?: true}
 
       # Generates an authentication token for the user
       change AshAuthentication.GenerateTokenChange
@@ -1339,6 +1458,13 @@ defmodule KilnCMS.Accounts.User do
       forbid_if always()
     end
 
+    # A magic link's takeover of an unconfirmed account (#2594): the same shape.
+    # `Changes.ClaimUnconfirmedAccount` refuses an actor-carrying call, since
+    # the admin bypass above would pass this.
+    policy action(:take_over_by_magic_link) do
+      forbid_if always()
+    end
+
     # The sign-in unlock link (#2250): the same shape again. Forbidden to every
     # authorized caller; `SignInUnlockAction` refuses an actor-carrying call,
     # since the admin bypass above would pass this. The link is the credential.
@@ -1394,7 +1520,8 @@ defmodule KilnCMS.Accounts.User do
         action_is([
           :confirm_new_user,
           :reset_password_with_token,
-          :accept_invitation_with_password
+          :accept_invitation_with_password,
+          :take_over_by_magic_link
         ])
       ]
   end

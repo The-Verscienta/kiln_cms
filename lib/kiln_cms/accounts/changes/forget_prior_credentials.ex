@@ -1,7 +1,10 @@
 defmodule KilnCMS.Accounts.Changes.ForgetPriorCredentials do
   @moduledoc """
-  Forgets every credential an unconfirmed account held when an invitation
-  takes it over (#2453), on `User.:accept_invitation_with_password`.
+  Forgets every credential an unconfirmed account held when the owner of its
+  address takes it over: an invitation accepted over it (#2453,
+  `User.:accept_invitation_with_password`), a password reset finished on it
+  (#2594, `User.:reset_password_with_token`), or a magic-link sign-in to it
+  (#2594, `User.:take_over_by_magic_link`).
 
   Anyone can register an unconfirmed account for any address. When the
   address's owner then accepts an invitation, they set a new password over
@@ -55,10 +58,20 @@ defmodule KilnCMS.Accounts.Changes.ForgetPriorCredentials do
   row first commits before this reads, and is removed here; one that reaches
   it after waits for this to commit, and is refused.
 
-  ## As the invitations system actor, failing closed
+  ## Only an unconfirmed account, decided on the locked row
 
-  Every read and write runs as `SystemActor.new(:invitations)`, which each of
-  those actions admits and nothing else does; no `authorize?: false`. The reads
+  With `unconfirmed_only?: true` (the reset), the change does nothing at all
+  when the row read under the lock is already confirmed. A confirmed account's
+  owner resetting a forgotten password keeps their second factor, passkeys and
+  keys: a reset proves the mailbox, which on a confirmed account is already
+  the owner's, so removing the factors there would turn a reset into a way
+  past two-step verification. The invitation's update is reached only for an
+  unconfirmed account (`Changes.AcceptInvitation`), so it needs no gate.
+
+  ## As the account-takeover system actor, failing closed
+
+  Every read and write runs as `SystemActor.new(:account_takeover)`, which each
+  of those actions admits and nothing else does; no `authorize?: false`. The reads
   pass `authorize_with: :error`, so a refused read is an error rather than an
   empty list that would leave every credential in place. Any error rolls the
   whole accept back: the invitee is told it failed and can retry, rather than
@@ -73,6 +86,10 @@ defmodule KilnCMS.Accounts.Changes.ForgetPriorCredentials do
 
   ## Options
 
+    * `:via` — the path taking the account over, recorded as the events'
+      `via`: `:invitation` (the default), `:password_reset` or `:magic_link`.
+    * `:unconfirmed_only?` — do nothing when the locked row is confirmed
+      (default `false`).
     * `:remove` — a `(changeset, user, opts) -> {:ok, boolean} | {:error,
       term}` function that stands in for the removals. Test-only, as
       `Changes.RevokeAllTokens`' `:revoke` is: it lets a test append a failing
@@ -105,29 +122,44 @@ defmodule KilnCMS.Accounts.Changes.ForgetPriorCredentials do
 
   @effects :forget_prior_credentials_after_commit
 
+  @vias [:invitation, :password_reset, :magic_link]
+
+  @impl true
+  def init(opts) do
+    if Keyword.get(opts, :via, :invitation) in @vias,
+      do: {:ok, opts},
+      else: {:error, "via: must be one of #{inspect(@vias)}"}
+  end
+
   @impl true
   def change(changeset, opts, _context) do
     remove = Keyword.get(opts, :remove, &remove/3)
+    unconfirmed_only? = Keyword.get(opts, :unconfirmed_only?, false)
 
     changeset
-    |> Ash.Changeset.before_action(&clear_totp/1)
+    |> Ash.Changeset.set_context(%{takeover_via: Keyword.get(opts, :via, :invitation)})
+    |> Ash.Changeset.before_action(&clear_totp(&1, unconfirmed_only?))
     |> Ash.Changeset.after_action(&forget(&1, &2, remove))
     |> Ash.Changeset.after_transaction(&replay/2)
   end
 
-  defp clear_totp(changeset) do
+  defp clear_totp(changeset, unconfirmed_only?) do
     case fresh(changeset.data.id) do
+      {:ok, %User{confirmed_at: %DateTime{}}} when unconfirmed_only? ->
+        Ash.Changeset.set_context(changeset, %{forget_prior_credentials?: false})
+
       {:ok, %User{} = row} ->
         fresh_totp = Map.take(row, Keyword.keys(@totp_cleared))
 
         %{changeset | data: struct(changeset.data, fresh_totp)}
         |> Ash.Changeset.force_change_attributes(@totp_cleared)
         |> Ash.Changeset.set_context(%{
+          forget_prior_credentials?: true,
           forgotten_totp?: not is_nil(row.totp_confirmed_at)
         })
 
       {:ok, nil} ->
-        changeset
+        Ash.Changeset.set_context(changeset, %{forget_prior_credentials?: true})
 
       {:error, error} ->
         Ash.Changeset.add_error(changeset, error)
@@ -135,16 +167,20 @@ defmodule KilnCMS.Accounts.Changes.ForgetPriorCredentials do
   end
 
   defp fresh(user_id) do
-    # authorize?: false — the system re-read of the unconfirmed account this
-    # accept is taking over, as `Changes.AcceptInvitation` and `InviteLive` read
-    # it (the emailed token is the credential); only its TOTP columns are used,
-    # and nothing read leaves this change.
+    # authorize?: false — the system re-read of the account this write is
+    # taking over, as `Changes.AcceptInvitation` and `InviteLive` read it (the
+    # emailed token is the credential); only its TOTP columns and
+    # `confirmed_at` are used, and nothing read leaves this change.
     Accounts.get_user(user_id,
       authorize?: false,
       not_found_error?: false,
       query: Ash.Query.lock(User, "FOR NO KEY UPDATE")
     )
   end
+
+  # A confirmed account under `unconfirmed_only?`: nothing to forget.
+  defp forget(%{context: %{forget_prior_credentials?: false}}, user, _remove),
+    do: {:ok, Ash.Resource.put_metadata(user, :forgotten_credentials, false)}
 
   defp forget(changeset, user, remove) do
     {result, effects} =
@@ -159,7 +195,7 @@ defmodule KilnCMS.Accounts.Changes.ForgetPriorCredentials do
   end
 
   @doc false
-  # Every removal, as the invitations system actor. `{:ok, forgotten?}`, or
+  # Every removal, as the account-takeover system actor. `{:ok, forgotten?}`, or
   # the first error.
   @spec remove(Ash.Changeset.t(), User.t(), keyword()) :: {:ok, boolean()} | {:error, term()}
   def remove(changeset, user, opts) do
@@ -177,21 +213,26 @@ defmodule KilnCMS.Accounts.Changes.ForgetPriorCredentials do
       changeset.context
       |> Map.take([Recorder.context_key(), Recorder.tenant_key()])
       |> Map.put(Recorder.tenant_key(), tenant(changeset))
+      |> Map.put(:takeover_via, via(changeset))
 
     [
-      actor: KilnCMS.SystemActor.new(:invitations),
+      actor: KilnCMS.SystemActor.new(:account_takeover),
       context: Map.merge(context, AfterCommit.context()),
       rollback_on_error?: false
     ]
   end
 
-  # The request's site, else the invited one: every event needs a log.
+  # The request's site, else the invited one, else the default site: every
+  # event needs a log.
   defp tenant(changeset) do
-    case changeset.context[Recorder.tenant_key()] do
-      org_id when is_binary(org_id) -> org_id
-      _none -> changeset.context.invitation.organization_id
+    case {changeset.context[Recorder.tenant_key()], changeset.context[:invitation]} do
+      {org_id, _invitation} when is_binary(org_id) -> org_id
+      {_none, %{organization_id: org_id}} when is_binary(org_id) -> org_id
+      _neither -> Accounts.default_org_id()
     end
   end
+
+  defp via(changeset), do: changeset.context |> Map.get(:takeover_via, :invitation) |> to_string()
 
   defp reads(opts),
     do: opts |> Keyword.take([:actor, :context]) |> Keyword.put(:authorize_with, :error)
@@ -233,7 +274,7 @@ defmodule KilnCMS.Accounts.Changes.ForgetPriorCredentials do
              user: nil,
              target_type: "user",
              target_id: user.id,
-             metadata: %{"kind" => "totp", "via" => "invitation"},
+             metadata: %{"kind" => "totp", "via" => context.takeover_via},
              request: context[Recorder.context_key()]
            ) do
         {:error, error} -> {:error, error}

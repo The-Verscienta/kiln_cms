@@ -9,7 +9,7 @@ defmodule KilnCMS.Accounts.InvitationTakeoverCredentialsTest do
   Also: the factors are read from the row, not the struct the caller passed;
   a failure rolls the whole accept back; a confirmed account's one-click
   accept keeps everything; and the actions the takeover uses are the
-  invitations system actor's alone.
+  account-takeover system actor's alone.
   """
   use KilnCMS.DataCase, async: true
 
@@ -480,23 +480,23 @@ defmodule KilnCMS.Accounts.InvitationTakeoverCredentialsTest do
 
     defp refused?(result), do: match?({:error, %Ash.Error.Forbidden{}}, result)
 
-    defp invitations, do: SystemActor.new(:invitations)
+    defp takeover, do: SystemActor.new(:account_takeover)
 
-    test "are the invitations system actor's", ctx do
-      opts = [actor: invitations(), authorize_with: :error]
+    test "are the account-takeover system actor's", ctx do
+      opts = [actor: takeover(), authorize_with: :error]
 
       assert {:ok, [_]} = Accounts.list_passkeys(ctx.owner.id, opts)
       assert {:ok, [_]} = Accounts.list_user_identities_for_takeover(ctx.owner.id, opts)
       assert {:ok, [_]} = Accounts.list_push_subscriptions(ctx.owner.id, opts)
       assert {:ok, [_]} = Accounts.list_api_keys(ctx.owner.id, opts)
 
-      assert :ok = Accounts.forget_passkey_on_takeover(ctx.passkey, actor: invitations())
-      assert :ok = Accounts.forget_user_identity_on_takeover(ctx.identity, actor: invitations())
+      assert :ok = Accounts.forget_passkey_on_takeover(ctx.passkey, actor: takeover())
+      assert :ok = Accounts.forget_user_identity_on_takeover(ctx.identity, actor: takeover())
 
       assert :ok =
-               Accounts.forget_push_subscription_on_takeover(ctx.device, actor: invitations())
+               Accounts.forget_push_subscription_on_takeover(ctx.device, actor: takeover())
 
-      assert {:ok, _} = Accounts.revoke_api_key(ctx.key, actor: invitations())
+      assert {:ok, _} = Accounts.revoke_api_key(ctx.key, actor: takeover())
     end
 
     test "refuse the account's owner, a platform admin and every other subsystem", ctx do
@@ -541,18 +541,18 @@ defmodule KilnCMS.Accounts.InvitationTakeoverCredentialsTest do
       end
     end
 
-    test "grant the invitations system actor nothing more than the takeover needs", ctx do
-      assert refused?(Accounts.remove_passkey(ctx.passkey, actor: invitations()))
-      assert refused?(Accounts.remove_push_subscription(ctx.device, actor: invitations()))
+    test "grant the account-takeover system actor nothing more than the takeover needs", ctx do
+      assert refused?(Accounts.remove_passkey(ctx.passkey, actor: takeover()))
+      assert refused?(Accounts.remove_push_subscription(ctx.device, actor: takeover()))
 
       assert refused?(
                Accounts.push_subscriptions_for([ctx.owner.id],
-                 actor: invitations(),
+                 actor: takeover(),
                  authorize_with: :error
                )
              )
 
-      assert refused?(Accounts.list_all_api_keys(actor: invitations(), authorize_with: :error))
+      assert refused?(Accounts.list_all_api_keys(actor: takeover(), authorize_with: :error))
     end
   end
 

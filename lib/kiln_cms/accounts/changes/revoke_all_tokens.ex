@@ -77,8 +77,10 @@ defmodule KilnCMS.Accounts.Changes.RevokeAllTokens do
 
   ## Options
 
-    * `:spare` — `:reset_token` to leave the jti of the action's `:reset_token`
-      argument out of the sweep (above).
+    * `:spare` — the name of a token argument whose jti is left out of the
+      sweep: `:reset_token` on the reset (above), `:token` on
+      `:take_over_by_magic_link`, whose magic link the sign-in revokes
+      single-use after it (#2594).
     * `:revoke` — a `(user, context) -> :ok | {:error, term}` function that
       stands in for the revocation. Test-only: it exists so a test can make the
       revocation fail and assert the rollback. It cannot be set from the DSL
@@ -100,8 +102,8 @@ defmodule KilnCMS.Accounts.Changes.RevokeAllTokens do
     end)
   end
 
-  defp default_revoke(changeset, :reset_token) do
-    case reset_token_jti(changeset) do
+  defp default_revoke(changeset, argument) when is_atom(argument) and not is_nil(argument) do
+    case token_jti(changeset, argument) do
       {:ok, jti} -> &revoke_spared(&1, &2, jti)
       # No readable jti: sweep everything. The strategy's own revocation then
       # finds the token revoked and fails the reset, which is the safe way to
@@ -112,8 +114,8 @@ defmodule KilnCMS.Accounts.Changes.RevokeAllTokens do
 
   defp default_revoke(_changeset, nil), do: &revoke/2
 
-  defp reset_token_jti(changeset) do
-    with token when is_binary(token) <- Ash.Changeset.get_argument(changeset, :reset_token),
+  defp token_jti(changeset, argument) do
+    with token when is_binary(token) <- Ash.Changeset.get_argument(changeset, argument),
          {:ok, %{"jti" => jti}} when is_binary(jti) and jti != "" <-
            AshAuthentication.Jwt.peek(token) do
       {:ok, jti}

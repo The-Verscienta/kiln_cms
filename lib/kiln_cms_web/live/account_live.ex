@@ -320,11 +320,11 @@ defmodule KilnCMSWeb.AccountLive do
               <% end %>
             </p>
             <%!-- An administrator can't approve an unconfirmed account
-                  (`KilnCMS.Accounts.Changes.DecideRegistration`), and a
-                  magic-link sign-in doesn't confirm one (#2516). A password
-                  reset always does: every unconfirmed account registered with
-                  a password. The confirmation link expires and can't be
-                  resent, so it comes second. --%>
+                  (`KilnCMS.Accounts.Changes.DecideRegistration`). A magic-link
+                  sign-in confirms one, and so never shows this (#2594). A
+                  password reset always does too: every unconfirmed account
+                  registered with a password. The confirmation link expires
+                  and can't be resent, so it comes second. --%>
             <div :if={@confirm_first?} id="confirm-first" class="space-y-1 pt-1">
               <p class="font-medium">
                 {gettext(

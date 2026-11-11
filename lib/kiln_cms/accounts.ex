@@ -56,8 +56,8 @@ defmodule KilnCMS.Accounts do
     end
 
     # External IdP links for OIDC SSO (#331) — managed by AshAuthentication.
-    # The two below are the invitation takeover's (#2453), as
-    # `SystemActor.new(:invitations)` only.
+    # The two below are an unconfirmed account's takeover's (#2453, #2594), as
+    # `SystemActor.new(:account_takeover)` only.
     resource KilnCMS.Accounts.UserIdentity do
       define :list_user_identities_for_takeover, action: :for_user, args: [:user_id]
       define :forget_user_identity_on_takeover, action: :forget_on_takeover
@@ -70,7 +70,7 @@ defmodule KilnCMS.Accounts do
       define :get_passkey, action: :read, get_by: [:id]
       define :get_passkey_by_credential_id, action: :read, get_by: [:credential_id]
       define :remove_passkey, action: :destroy
-      # The invitation takeover's (#2453), as `SystemActor.new(:invitations)`.
+      # An unconfirmed account's takeover (#2453, #2594), as `SystemActor.new(:account_takeover)`.
       define :forget_passkey_on_takeover, action: :forget_on_takeover
       # Ceremony-only writes (KilnCMS.Accounts.WebAuthn, `authorize?: false`
       # after Wax verification).
@@ -93,7 +93,7 @@ defmodule KilnCMS.Accounts do
 
       define :subscribe_to_push, action: :subscribe
       define :remove_push_subscription, action: :destroy
-      # The invitation takeover's (#2453), as `SystemActor.new(:invitations)`.
+      # An unconfirmed account's takeover (#2453, #2594), as `SystemActor.new(:account_takeover)`.
       define :forget_push_subscription_on_takeover, action: :forget_on_takeover
     end
 
@@ -262,6 +262,10 @@ defmodule KilnCMS.Accounts do
       define :register_with_invitation, action: :register_with_invitation
 
       define :accept_invitation_with_password, action: :accept_invitation_with_password
+      # A magic-link sign-in to an unconfirmed account takes it over for the
+      # address's owner (#2594) — system-only (`authorize?: false` from
+      # `Preparations.ClaimUnconfirmedAccount`; the link is the credential).
+      define :take_over_by_magic_link, action: :take_over_by_magic_link
       # The emailed link that lifts a sign-in pause (#2250) — both system-only
       # (`authorize?: false` from `KilnCMSWeb.SignInUnlockController`, with the
       # request host's org in `context:`; an actor-carrying call is refused).

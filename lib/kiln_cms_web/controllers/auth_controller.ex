@@ -267,7 +267,47 @@ defmodule KilnCMSWeb.AuthController do
     end
   end
 
+  # A confirmation asks for the sign-up password as well as the link (#2594).
+  # A wrong or missing password goes back to the page the link opened, with
+  # the link's token, which a refused confirmation does not use up. Only a
+  # token that checked out reaches the password check (`Actions.confirm`
+  # verifies it before the action runs), so a made-up or spent one still lands
+  # on sign-in like any other refusal: this tells the holder of a valid link,
+  # and no one else, that the password was wrong.
+  def failure(conn, {:confirm_new_user, :confirm} = activity, reason) do
+    case {password_refused?(reason), confirm_token(conn.params)} do
+      {true, token} when is_binary(token) ->
+        conn
+        |> put_flash(
+          :error,
+          gettext(
+            "That isn't the password this account was signed up with. " <>
+              "Try again, or reset the password instead."
+          )
+        )
+        |> redirect(to: ~p"/confirm_new_user/#{token}")
+
+      _other ->
+        rejected(conn, activity, reason)
+    end
+  end
+
   def failure(conn, activity, reason), do: rejected(conn, activity, reason)
+
+  defp password_refused?(%AshAuthentication.Errors.AuthenticationFailed{field: :password}),
+    do: true
+
+  defp password_refused?(%Ash.Error.Changes.Required{field: :password}), do: true
+
+  defp password_refused?(%{errors: errors}) when is_list(errors),
+    do: Enum.any?(errors, &password_refused?/1)
+
+  defp password_refused?(%{caused_by: cause}) when is_map(cause), do: password_refused?(cause)
+  defp password_refused?(_other), do: false
+
+  defp confirm_token(%{"user" => %{"confirm" => token}}) when is_binary(token), do: token
+  defp confirm_token(%{"confirm" => token}) when is_binary(token), do: token
+  defp confirm_token(_params), do: nil
 
   # The form POST behind the sign-in and registration pages was refused for
   # want of a human-verification challenge (#2249). Back to the page it came

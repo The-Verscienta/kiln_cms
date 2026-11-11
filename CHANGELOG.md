@@ -62,6 +62,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Confirmation links mailed before the upgrade keep working, but the page now asks for the password chosen at sign-up. A client that posts to `/auth/user/confirm_new_user` itself must send `password` with the token. A magic-link sign-in to an unconfirmed account now replaces its password: the owner sets one by reset.**
+  No migration; rolling back is safe.
+  ([#2594](https://github.com/The-Verscienta/kiln_cms/issues/2594) · [long form](docs/changelog/unreleased.md#pre-hijack-takeover-upgrade))
+
 - **Run `mix ash.migrate` (new table `instance_security_events`; moves existing `backup_canceled` events out of the default site's security log into it). Optional: `KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS` (default 365).**
   Rolling back moves them back to the default site's log before dropping the table; export the instance log first if you need it.
   ([#2541](https://github.com/The-Verscienta/kiln_cms/issues/2541) · [long form](docs/changelog/unreleased.md#instance-security-log-upgrade))
@@ -765,6 +769,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Accepting an invitation over an unconfirmed account now also removes its two-step verification, passkeys, identity-provider links and push devices, and revokes its API keys (#2453).**
   ([#2593](https://github.com/The-Verscienta/kiln_cms/pull/2593) · [long form](docs/changelog/unreleased.md#invitation-takeover-credentials))
+
+- **A stranger who registered someone else's address no longer keeps a way in once the owner confirms, resets or signs in by magic link: the confirmation link now asks for the sign-up password, and a reset or magic-link sign-in on an unconfirmed account removes the earlier password, two-step verification, passkeys, keys and sessions. Erasure clears two-step verification too (#2594).**
+  ([#2594](https://github.com/The-Verscienta/kiln_cms/issues/2594) · [long form](docs/changelog/unreleased.md#pre-hijack-takeover))
 
 - **Sign-in, reset, magic link, registration, newsletter, SSO and passkey answer a known and an unknown address alike; the per-surface matrix is in the threat model.**
   ([long form](docs/changelog/unreleased.md#account-enumeration-audit))

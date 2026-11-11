@@ -1922,6 +1922,11 @@ msgstr "Un lanzamiento necesita un nombre."
 msgid "A request whose Host header matches no organization is served the default organization's content, branding and analytics — including a bare hostname, an IP address, or a Host a caller made up. With one organization that is the same site either way. With more than one it is another tenant's."
 msgstr "Una petición cuya cabecera Host no coincide con ninguna organización recibe el contenido, la marca y las analíticas de la organización predeterminada, incluidos un nombre de host simple, una dirección IP o un Host inventado por quien llama. Con una sola organización se trata del mismo sitio en cualquier caso. Con más de una es el de otro inquilino."
 
+#: lib/kiln_cms_web/live/confirm_live.ex
+#, elixir-autogen, elixir-format
+msgid "A reset confirms the address too, and removes anything someone else set up on the account."
+msgstr "Un restablecimiento también confirma la dirección y elimina todo lo que otra persona haya configurado en la cuenta."
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "A restore puts the document back without a propagation record"
@@ -5489,6 +5494,7 @@ msgstr "Configurar"
 msgid "Configured"
 msgstr "Configurada"
 
+#: lib/kiln_cms_web/live/confirm_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -5510,6 +5516,11 @@ msgstr "Confirmar nueva contraseña"
 msgid "Confirm your email"
 msgstr "Confirmar su correo electrónico"
 
+#: lib/kiln_cms_web/live/confirm_live.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm your email address"
+msgstr "Confirma tu dirección de correo electrónico"
+
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
 msgid "Confirm your email address first: an administrator can't approve your registration until you do."
@@ -5530,6 +5541,11 @@ msgstr "Confirmaciones"
 #, elixir-autogen, elixir-format
 msgid "Confirmed"
 msgstr "Confirmado"
+
+#: lib/kiln_cms_web/live/confirm_live.ex
+#, elixir-autogen, elixir-format
+msgid "Confirming..."
+msgstr "Confirmando…"
 
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
@@ -7365,6 +7381,11 @@ msgstr "Dispositivos que reciben notificaciones"
 msgid "Did you mean “%{suggestion}”?"
 msgstr "¿Quiso decir «%{suggestion}»?"
 
+#: lib/kiln_cms_web/live/confirm_live.ex
+#, elixir-autogen, elixir-format
+msgid "Didn't sign up, or don't remember the password?"
+msgstr "¿No te registraste o no recuerdas la contraseña?"
+
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
 msgid "Didn't sign up? Close this page and you won't hear from us."
@@ -8450,6 +8471,11 @@ msgstr "Introduce el correo electrónico con el que inicias sesión."
 #, elixir-autogen, elixir-format
 msgid "Enter the email address you will sign in with."
 msgstr "Introduce la dirección de correo con la que iniciarás sesión."
+
+#: lib/kiln_cms_web/live/confirm_live.ex
+#, elixir-autogen, elixir-format
+msgid "Enter the password you chose when you signed up. It shows the account is yours as well as the address."
+msgstr "Introduce la contraseña que elegiste al registrarte. Demuestra que la cuenta es tuya, además de la dirección."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -16995,6 +17021,11 @@ msgstr "Reenviar"
 msgid "Resend the invitation to %{email}"
 msgstr "Reenviar la invitación a %{email}"
 
+#: lib/kiln_cms_web/live/confirm_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reset the password instead."
+msgstr "Restablece la contraseña en su lugar."
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reset this site to the default branding?"
@@ -20528,6 +20559,11 @@ msgstr "Esa imagen ya no está en la biblioteca de medios."
 #, elixir-autogen, elixir-format
 msgid "That is not a date this calendar can move something to."
 msgstr "Esa no es una fecha a la que este calendario pueda mover algo."
+
+#: lib/kiln_cms_web/controllers/auth_controller.ex
+#, elixir-autogen, elixir-format
+msgid "That isn't the password this account was signed up with. Try again, or reset the password instead."
+msgstr "Esa no es la contraseña con la que se registró esta cuenta. Inténtalo de nuevo o restablece la contraseña en su lugar."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

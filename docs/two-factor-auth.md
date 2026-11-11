@@ -259,8 +259,12 @@ and it is what a code is checked against while an enrolment is in progress
   unconfirmed account clears the live secret, the recovery codes and any
   pending enrollment, with no code asked for (#2453): whoever registered the
   address first may have enrolled them, and the invitee proved the mailbox
-  instead. Recorded as `second_factor_removed` with `via` `invitation` when a
-  confirmed factor was removed. See
+  instead. A password reset finished on an unconfirmed account, and a
+  magic-link sign-in to one, clear them the same way (#2594), recorded with
+  `via` `password_reset` or `magic_link`. A reset or magic link on a
+  **confirmed** account never touches the factor. Recorded as
+  `second_factor_removed` with `via` `invitation` when a confirmed factor was
+  removed by an invitation. See
   [What taking over an account removes](account-administration.md#what-taking-over-an-account-removes).
 - **QR-code image.** Enrolment renders the `otpauth://` URI as an inline SVG QR
   (`eqrcode`, pure Elixir) alongside the setup key.
