@@ -8,7 +8,11 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
 
     * `Bearer kiln_…` → delegated to `AshAuthentication.Strategy.ApiKey.Plug`,
       which validates the key and assigns `current_user` / the actor. An invalid,
-      expired or revoked key is rejected with `401`.
+      expired or revoked key is rejected with `401`. The key is found in any
+      `authorization` value, not only the first, and the scheme is matched
+      case-insensitively (`bearer kiln_…` works). When several values carry a
+      key the first one decides, and a key wins over a JWT sent alongside it
+      (#2633).
     * anything else (a JWT, or no header) → passed through untouched, so
       `:load_from_bearer` retains sole responsibility for JWT bearer tokens.
 
@@ -39,7 +43,7 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   `surface: :json_api | :graphql | :media | :other`, `read?: boolean()` (a
   `GET`/`HEAD`, or anything on `/gql`: the nearest cheap proxy for "a public
   route that never needed the token") and `reason: :expired | :malformed |
-  :invalid | :api_key_scheme` (`:api_key_scheme` is a `kiln_…` key sent with a non-canonical scheme such as `bearer`; read from the unverified payload, never sent to the client;
+  :invalid` (read from the unverified payload, never sent to the client;
   revoked, deleted-user and bad-signature tokens are all `:invalid`). No token,
   user or address is in the event.
 
@@ -48,7 +52,7 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   """
   @behaviour Plug
 
-  @prefix "Bearer " <> KilnCMS.Accounts.ApiKey.prefix() <> "_"
+  @key_prefix KilnCMS.Accounts.ApiKey.prefix() <> "_"
 
   # `required?: false` so requests *without* a key aren't rejected here (they may
   # be anonymous or JWT-authenticated); we only invoke this plug once we've
@@ -69,11 +73,23 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
 
   @impl true
   def call(conn, {opts, loads_bearer?}) do
-    cond do
-      api_key_request?(conn) -> AshAuthentication.Strategy.ApiKey.Plug.call(conn, opts)
-      loads_bearer? and unverified_bearer?(conn) -> stale_bearer(conn)
-      true -> conn
+    case api_key(conn) do
+      {:ok, key} -> authenticate_key(conn, key, opts)
+      :error when loads_bearer? -> if unverified_bearer?(conn), do: stale_bearer(conn), else: conn
+      :error -> conn
     end
+  end
+
+  # The key plug reads only the first `authorization` value and needs the
+  # exact `Bearer ` prefix, so it is handed one normalized header. The
+  # caller's headers are put back afterwards for everything downstream.
+  defp authenticate_key(conn, key, opts) do
+    original = conn.req_headers
+
+    conn
+    |> Plug.Conn.put_req_header("authorization", "Bearer " <> key)
+    |> AshAuthentication.Strategy.ApiKey.Plug.call(opts)
+    |> Map.put(:req_headers, original)
   end
 
   defp stale_bearer(conn) do
@@ -100,18 +116,14 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
 
   # Classified from the unverified payload, for telemetry only.
   defp reason(conn) do
-    token =
-      case bearer_headers(conn) do
-        [value | _] -> value |> String.trim() |> String.split(~r/\s+/, parts: 2) |> Enum.at(1)
-        _ -> nil
-      end
-
-    cond do
-      is_nil(token) -> :malformed
-      String.starts_with?(token, KilnCMS.Accounts.ApiKey.prefix() <> "_") -> :api_key_scheme
-      true -> token |> Joken.peek_claims() |> classify_claims()
+    case bearer_headers(conn) do
+      [value | _] -> value |> bearer_token() |> classify_token()
+      _ -> :malformed
     end
   end
+
+  defp classify_token(nil), do: :malformed
+  defp classify_token(token), do: token |> Joken.peek_claims() |> classify_claims()
 
   defp classify_claims({:ok, %{"exp" => exp}}) when is_number(exp),
     do: if(exp < System.os_time(:second), do: :expired, else: :invalid)
@@ -178,10 +190,20 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   defp send_error(conn),
     do: KilnCMSWeb.ApiError.send(conn, :unauthorized, "invalid_token", @message)
 
-  defp api_key_request?(conn) do
-    case Plug.Conn.get_req_header(conn, "authorization") do
-      [value | _] -> String.starts_with?(value, @prefix)
-      _ -> false
-    end
+  # The first `kiln_…` token under a `Bearer` scheme (any case) across every
+  # `authorization` value (#2633). It decides the request: a later key is
+  # ignored, and an invalid first key is a 401 even when a later one is valid.
+  defp api_key(conn) do
+    Enum.find_value(bearer_headers(conn), :error, fn value ->
+      case bearer_token(value) do
+        @key_prefix <> _ = token -> {:ok, token}
+        _ -> nil
+      end
+    end)
+  end
+
+  # The token after the scheme, or `nil` for a bare `Bearer`.
+  defp bearer_token(value) do
+    value |> String.trim() |> String.split(~r/\s+/, parts: 2) |> Enum.at(1)
   end
 end

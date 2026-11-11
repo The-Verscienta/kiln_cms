@@ -5154,6 +5154,26 @@ carries the reasoning.
   language has no catalog at all (`de` on a stock install) still shows
   English chrome; add a `priv/gettext/de` catalog for it.
 
+<a id="api-key-any-authorization-value"></a>
+
+- **A `kiln_` API key is found in any `Authorization` value, under any case
+  of `Bearer` (#2633).** `ApiKeyAuth` looked for a key only in the first
+  `authorization` value and only behind the exact prefix `Bearer kiln_`,
+  while the unverifiable-bearer check added for #2161 scans every value and
+  matches the scheme case-insensitively. A request carrying
+  `Basic …` then `Bearer kiln_<valid key>`, or `bearer kiln_<valid key>`,
+  therefore skipped the key and was refused `401 invalid_token`, the
+  stale-JWT answer. The key path now takes the first `kiln_…` token under a
+  `Bearer` scheme in any case, across every value, with surrounding
+  whitespace ignored. With several credentials in one request: the first
+  key decides, so an invalid first key is a `401` even beside a valid one
+  (no trying keys in turn), and a key wins over a JWT sent alongside it, as
+  it already did when the key came first. A bearer that is neither a key
+  nor a JWT that verified is still a `401` (#2161). The
+  `[:kiln_cms, :api, :invalid_bearer]` telemetry event no longer reports
+  `reason: :api_key_scheme`: a key under a non-canonical scheme now goes to
+  the key path, and an invalid one gets the key path's own `401`.
+
 <a id="backup-failure-manifest-stamp"></a>
 
 - **A failed backup is one run in History, not two (#2700).** An in-app backup takes
