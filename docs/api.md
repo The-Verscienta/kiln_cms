@@ -416,7 +416,10 @@ mints keys at **`/editor/api-keys`**; the plaintext is shown **once** at
 creation (only a hash is stored) and looks like `kiln_<base62>_<crc>`.
 
 Send it on the same `Authorization: Bearer` header — the `kiln_` prefix tells it
-apart from a JWT:
+apart from a JWT. The scheme is case-insensitive, and the key need not be the
+first `Authorization` value (a proxy may add its own). If a request carries
+more than one key, the first one decides, and a key wins over a JWT sent
+alongside it:
 
 ```bash
 curl -s 'http://localhost:4000/api/json/posts' \

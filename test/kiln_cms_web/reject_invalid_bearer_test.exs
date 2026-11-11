@@ -291,10 +291,10 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
       assert_receive {@event, _, %{surface: :graphql, read?: true}}
     end
 
-    test "a kiln_ key under a lower-case scheme is told apart from a stale JWT" do
+    test "a kiln_ key under a lower-case scheme goes to the key path, not this event (#2633)" do
       flag(true)
       assert api_get("bearer kiln_nonsense").status == 401
-      assert_receive {@event, _, %{reason: :api_key_scheme}}
+      refute_receive {@event, _, _}
     end
 
     test "bare and mixed-case schemes reach the event" do

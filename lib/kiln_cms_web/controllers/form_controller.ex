@@ -112,7 +112,7 @@ defmodule KilnCMSWeb.FormController do
 
       form ->
         conn
-        |> put_resp_header("cache-control", "public, max-age=#{@embed_max_age_seconds}")
+        |> KilnCMSWeb.SharedCache.put_public("public, max-age=#{@embed_max_age_seconds}")
         # The page is rendered through gettext in the URL's locale
         # (`Plugs.UrlLocale`, #2595). It used to fall back to the session's on
         # an unprefixed URL, which no `Vary` could key a shared cache on.
