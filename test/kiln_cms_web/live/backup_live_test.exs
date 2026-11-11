@@ -926,6 +926,111 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert has_element?(lv, ~s|#backup-in-flight [data-role="queued"]|)
     end
 
+    # A failed in-app run that kept its state, so it offers Resume (#2540).
+    defp resumable_run!(dir, stamp) do
+      run =
+        Backups.start_run!(%{stamp: stamp, trigger: "manual", components: [:db, :media]},
+          actor: Backups.system()
+        )
+
+      run = Backups.fail_run!(run, %{error: "tar exited 2"}, actor: Backups.system())
+      work = WorkState.path(dir, stamp)
+      File.mkdir_p!(work)
+      :ok = WorkState.write(work, WorkState.new(stamp))
+      run
+    end
+
+    defp queue_state do
+      row = lock_row()
+
+      {row.waiting_resume_stamp, row.waiting_requested_at, row.waiting_folds,
+       length(Backups.list_runs!(actor: Backups.system()))}
+    end
+
+    @tag :pg_tools
+    test "Back up now folds into a queued fresh backup and says the queued one covers it" do
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([trigger: "schedule"], Backups.system())
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+
+      html = lv |> element(~s|button[phx-click="backup_now"]|) |> render_click()
+
+      assert html =~ "that queued backup covers this request"
+      assert %{waiting: %{folds: 1}} = Backups.in_flight()
+    end
+
+    @tag :pg_tools
+    test "Resume folds into a queued resume of the same backup and says so", %{dir: dir} do
+      run = resumable_run!(dir, "20261101-101010")
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([resume: run.stamp], Backups.system())
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      html =
+        lv |> element(~s|#backup-run-#{run.id} button[data-role="resume"]|) |> render_click()
+
+      assert html =~ "a resume of this backup is already queued; that queued resume covers"
+      assert %{waiting: %{folds: 1}} = Backups.in_flight()
+    end
+
+    @tag :pg_tools
+    test "Back up now while a resume is queued is refused and leaves the queue alone",
+         %{dir: dir} do
+      run = resumable_run!(dir, "20261101-101010")
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([resume: run.stamp], Backups.system())
+      before = queue_state()
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+
+      html = lv |> element(~s|button[phx-click="backup_now"]|) |> render_click()
+
+      assert html =~
+               "A backup is running and a resume of 20261101-101010 is queued after it, so " <>
+                 "this backup was not queued. Try again once the queue clears."
+
+      assert queue_state() == before
+    end
+
+    @tag :pg_tools
+    test "Resume while a fresh backup is queued is refused and leaves the queue alone",
+         %{dir: dir} do
+      run = resumable_run!(dir, "20261101-101010")
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([trigger: "schedule"], Backups.system())
+      before = queue_state()
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      html =
+        lv |> element(~s|#backup-run-#{run.id} button[data-role="resume"]|) |> render_click()
+
+      assert html =~
+               "A backup is running and a new backup is queued after it, so this resume was " <>
+                 "not queued. Try again once the queue clears."
+
+      assert queue_state() == before
+    end
+
+    @tag :pg_tools
+    test "Resume while another backup's resume is queued is refused", %{dir: dir} do
+      queued = resumable_run!(dir, "20261101-101010")
+      run = resumable_run!(dir, "20261102-101010")
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([resume: queued.stamp], Backups.system())
+      before = queue_state()
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      html =
+        lv |> element(~s|#backup-run-#{run.id} button[data-role="resume"]|) |> render_click()
+
+      assert html =~
+               "a resume of 20261101-101010 is queued after it, so this resume was not queued"
+
+      assert queue_state() == before
+    end
+
     @tag :pg_tools
     test "the archive step reads part i of N", %{dir: dir} do
       %{stamp: stamp} = started!()

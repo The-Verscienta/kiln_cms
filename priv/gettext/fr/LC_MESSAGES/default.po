@@ -1540,6 +1540,26 @@ msgstr "Une sauvegarde ne peut pas s'exécuter sur cette installation."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "A backup is running and a new backup is queued after it, so this resume was not queued. Try again once the queue clears."
+msgstr "Une sauvegarde est en cours et une nouvelle sauvegarde attend après elle ; cette reprise n'a donc pas été mise en file d'attente. Réessayez une fois la file d'attente vidée."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running and a resume of %{stamp} is queued after it, so this backup was not queued. Try again once the queue clears."
+msgstr "Une sauvegarde est en cours et une reprise de %{stamp} attend après elle ; cette sauvegarde n'a donc pas été mise en file d'attente. Réessayez une fois la file d'attente vidée."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running and a resume of %{stamp} is queued after it, so this resume was not queued. Try again once the queue clears."
+msgstr "Une sauvegarde est en cours et une reprise de %{stamp} attend après elle ; cette reprise n'a donc pas été mise en file d'attente. Réessayez une fois la file d'attente vidée."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup is running and a resume of this backup is already queued; that queued resume covers this request."
+msgstr "Une sauvegarde est en cours et une reprise de cette sauvegarde attend déjà ; cette reprise en attente couvre cette demande."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "A backup is running and another is already queued; that queued backup covers this request."
 msgstr "Une sauvegarde est en cours et une autre est déjà en attente ; la sauvegarde en attente couvre cette demande."
 
@@ -1901,11 +1921,6 @@ msgstr "Une requête dont l'en-tête Host ne correspond à aucune organisation r
 #, elixir-autogen, elixir-format
 msgid "A restore puts the document back without a propagation record"
 msgstr "Une restauration remet le document en ligne sans enregistrement de propagation"
-
-#: lib/kiln_cms_web/live/backup_live.ex
-#, elixir-autogen, elixir-format
-msgid "A resume is queued that doesn't cover this backup. Try again once it starts."
-msgstr "Une reprise en attente ne couvre pas cette sauvegarde. Réessayez une fois qu'elle aura démarré."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format

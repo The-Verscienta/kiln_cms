@@ -1,7 +1,8 @@
 defmodule KilnCMS.Backups.Lock.Actions.Request do
   @moduledoc """
   `KilnCMS.Backups.Lock`'s `:request` action (#2218): start a backup, queue it
-  behind the running chain, or fold it into the queued one
+  behind the running chain, fold it into the queued one of the same kind, or
+  refuse it (`{:queue_busy, queued}`) when the queued one is of another kind
   (`KilnCMS.Backups.Chain.request/1`).
 
   The policy has decided who may ask by the time this runs; the lock itself is

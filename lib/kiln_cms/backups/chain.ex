@@ -6,8 +6,8 @@ defmodule KilnCMS.Backups.Chain do
   A backup is a chain of `KilnCMS.Backups.StepWorker` jobs (start, dump, plan,
   archive per part, checksum, prune, offsite, finish). One chain holds the
   backup pipeline at a time, recorded on the singleton `KilnCMS.Backups.Lock`
-  row; at most one request waits behind it, and later requests fold into that
-  one.
+  row; at most one request waits behind it, and later requests of the same kind
+  fold into that one (`request/1`).
 
   ## One transaction, one lock
 
@@ -49,12 +49,11 @@ defmodule KilnCMS.Backups.Chain do
   A queued request's are on the row (`waiting_components`, ...), and count only
   while their scope is that request's (`waiting_scope/1`). A fresh request that
   folds into a queued fresh one widens it to the union of the two; folding into
-  a queued request whose scope is not valid makes it cover everything. A fresh
-  request and a resume: a resume folding into a queued fresh request widens it
-  to everything. A queued resume records its run's components, and a fresh
-  request folds into it only when they cover the request; otherwise the
-  request is refused, `{:error, :resume_queued}`, and nothing is written. A
-  resume queued by a node from before #2219 covers everything.
+  a queued request whose scope is not valid makes it cover everything. A
+  queued resume records its run's components, and only a resume of the same
+  stamp folds into it (#2540): a fresh request and a resume never fold into
+  each other (`request/1`), so neither widens nor narrows the other. A resume
+  queued by a node from before #2219 covers everything.
   """
   import Ecto.Query
 
@@ -127,8 +126,20 @@ defmodule KilnCMS.Backups.Chain do
   `chain` is the new chain for `:started` and the running one otherwise; or
   `{:error, reason}`: `availability/0`'s reason, a resume refusal
   (`Backups.resumable_run/2`), `:in_flight` when the stamp to resume is the
-  one the running chain holds, or `:resume_queued` when a queued resume
-  doesn't cover a fresh request (#2219).
+  one the running chain holds, or `{:queue_busy, :backup | {:resume, stamp}}`
+  (the queued request's kind) when the queued request is not like this one.
+
+  ## Like folds only into like (#2540)
+
+  A request folds into the queued one only when that one does the same work: a
+  fresh backup into a queued fresh backup, a resume into a queued resume of the
+  same stamp. Anything else is refused and leaves the queue as it was, because
+  folding would drop it: a fresh backup folded into a queued resume never takes
+  its own (the resume backs up the old stamp), and a resume folded into a
+  queued fresh backup (or another stamp's resume) never resumes. The caller
+  asks again once the queue clears; a scheduler (#2219, not yet built) must
+  roll its window back and retry on a later tick, so a scheduled backup is
+  never folded into a Resume.
   """
   @spec request(map()) :: {:ok, map()} | {:error, term()}
   def request(attrs) do
@@ -199,39 +210,24 @@ defmodule KilnCMS.Backups.Chain do
 
         {:ok, %{status: :queued, chain: row.chain_id}}
 
-      is_binary(row.waiting_resume_stamp) and is_nil(req.resume) and
-          not resume_covers?(row, req) ->
-        {:error, :resume_queued}
-
-      true ->
+      row.waiting_resume_stamp == req.resume ->
         write!(&Backups.fold_backup_request!/3, row, fold_fields(row, req))
         {:ok, %{status: :folded, chain: row.chain_id}}
+
+      true ->
+        {:error, {:queue_busy, queued_kind(row)}}
     end
   end
 
-  # A queued resume backs up what its run did. A fresh request folds into it
-  # only when that covers the request (everything, for one that names no
-  # components, is what this deployment backs up); otherwise it is refused
-  # (`:resume_queued`) rather than reported folded and never run. A resume
-  # queued by a node from before #2219 (scope not valid) is of a run that
-  # backed up everything, as every run did then: it covers anything.
-  defp resume_covers?(row, req) do
-    case waiting_scope(row) do
-      %{valid?: false} -> true
-      %{components: nil} -> true
-      %{components: covered} -> Enum.all?(asked(req), &(&1 in covered))
-    end
-  end
+  # What the queued request is, for a request that may not fold into it.
+  defp queued_kind(%{waiting_resume_stamp: nil}), do: :backup
+  defp queued_kind(%{waiting_resume_stamp: stamp}), do: {:resume, stamp}
 
-  # What a fresh request would back up here: everything is what this
-  # deployment has.
-  defp asked(%{components: nil}), do: Backups.expected_components()
-  defp asked(%{components: components}), do: components
-
-  # What the queued request covers once `req` folds into it. A queued resume
-  # keeps its run's components (`decide/2` folds only a request it covers);
-  # anything folding into a queued fresh request widens it, and one whose
-  # scope is not valid covers everything (`waiting_scope/1`).
+  # What the queued request covers once `req` folds into it. Only like folds
+  # into like (#2540): a queued resume takes only a resume of its own stamp and
+  # keeps its run's components; a fresh request folding into a queued fresh
+  # one widens it, and one whose scope is not valid covers everything
+  # (`waiting_scope/1`).
   defp fold_fields(%{waiting_resume_stamp: stamp} = row, req) when is_binary(stamp) do
     case waiting_scope(row) do
       %{valid?: true} = scope ->
@@ -254,7 +250,7 @@ defmodule KilnCMS.Backups.Chain do
     case waiting_scope(row) do
       %{valid?: true} = scope ->
         %{
-          waiting_components: widen(scope.components, req_components(req)),
+          waiting_components: widen(scope.components, req.components),
           waiting_scheduled: Enum.uniq(scope.scheduled ++ req.scheduled),
           waiting_schedule_ids: Enum.uniq(scope.schedule_ids ++ req.schedule_ids)
         }
@@ -267,11 +263,6 @@ defmodule KilnCMS.Backups.Chain do
         }
     end
   end
-
-  # A resume covers what its run did, which a fresh request's list can't
-  # name: as components, everything.
-  defp req_components(%{resume: resume}) when is_binary(resume), do: nil
-  defp req_components(req), do: req.components
 
   defp widen(nil, _other), do: nil
   defp widen(_one, nil), do: nil

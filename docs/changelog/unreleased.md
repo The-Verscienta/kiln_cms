@@ -1599,13 +1599,10 @@ carries the reasoning.
     `"components"`. A resume keeps its run's components. A media-only backup
     whose media directory is gone by the time it starts is a `Skipped` run
     ("Refused: no_media_dir"), and the manifest is left alone.
-  - **Queued requests.** A request folding into a queued backup widens it to
-    the union of both (database-only plus media-only makes both); a resume
-    folding into a queued fresh backup makes it everything. A fresh request
-    that a queued resume doesn't cover is refused with the new
-    `{:error, :resume_queued}` and nothing is written; **Back up now** says
-    "A resume is queued that doesn't cover this backup. Try again once it
-    starts." The in-flight strip lists a queued backup's components
+  - **Queued requests.** A fresh request folding into a queued fresh backup
+    widens it to the union of both (database-only plus media-only makes
+    both). A fresh request and a resume never fold into each other
+    ([#2540](#backup-fold-like-into-like)). The in-flight strip lists a queued backup's components
     ("· Database + Media"), and `in_flight/0` gains `components` for the
     running backup and for the queued request.
   - **Status per component.** `KilnCMS.Backups.status/0` gains `expected`,
@@ -4048,6 +4045,37 @@ carries the reasoning.
   - Guide: [Constrain the values of a field](../extending-content.md#constrain-the-values-of-a-field).
 
 ## Changed
+
+<a id="backup-fold-like-into-like"></a>
+
+- **A backup request folds into the queued one only when it is the same kind
+  (#2540).** Since #2218 every request made while one backup ran and another
+  was queued folded into the queued one. That dropped work when the two
+  differed: a **Back up now** folded into a queued **Resume** never took its
+  own backup (the resume finishes the old backup), and a Resume folded into a
+  queued fresh backup (or a resume of another backup) never resumed anything.
+  Now:
+  - **Back up now** folds into a queued fresh backup, and **Resume** into a
+    queued resume of the same backup, as before. The page says "A backup is
+    running and a resume of this backup is already queued; that queued resume
+    covers this request." for the second.
+  - **Any other combination is refused.** The page says, for example, "A backup
+    is running and a resume of 20261101-101010 is queued after it, so this
+    backup was not queued. Try again once the queue clears." Nothing is queued,
+    no run is created and the fold count is unchanged.
+  - **From the console**, `KilnCMS.Backups.request/2` returns
+    `{:error, {:queue_busy, :backup | {:resume, stamp}}}`, naming what is
+    queued. A legacy `KilnCMS.Backups.Worker` job that gets it waits a minute
+    and asks again instead of being canceled.
+  - **This replaces the coverage rule from per-component backups (#2219)**,
+    under which a fresh request folded into a queued resume whose run covered
+    its components and was otherwise refused with `{:error, :resume_queued}`.
+    That error is gone; neither was released.
+  - **Scheduled backups** (#2219, not yet released) get the same answer when a
+    resume is queued, so a scheduled tick never folds into a Resume; the
+    scheduler must retry on a later tick.
+
+  See [backups.md](../backups.md#back-up-while-another-backup-runs).
 
 <a id="verified-search-engine-default"></a>
 

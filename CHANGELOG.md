@@ -469,6 +469,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **While a backup runs, a request folds into the queued one only when it is the same kind: Back up now into a queued fresh backup, Resume into a queued resume of the same backup. Any other request is refused with "Try again once the queue clears", and the queue is left as it was.**
+  ([#2540](https://github.com/The-Verscienta/kiln_cms/issues/2540) · [long form](docs/changelog/unreleased.md#backup-fold-like-into-like))
+
 - **An in-app backup with `BACKUP_RCLONE_REMOTE` set and no `rclone` in the image now fails (Run log and run error say so) instead of skipping the off-site copy; the Backups page's “Where backups go” says so ahead of time.**
   ([#2482](https://github.com/The-Verscienta/kiln_cms/issues/2482))
 

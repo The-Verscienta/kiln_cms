@@ -600,17 +600,38 @@ the rest of the page.
    queued resume doesn't say).
 3. Click it again. The page says "A backup is running and another is already
    queued; that queued backup covers this request." The strip adds "1 later
-   request folded into it". At most one backup waits; every later request
-   folds into it and is logged at `info`: "Backup request folded: a backup
-   (manual) was asked for while one runs and another is queued; the queued
-   backup covers it".
+   request folded into it". At most one backup waits; every later request of
+   the same kind folds into it and is logged at `info`: "Backup request
+   folded: a backup (manual) was asked for while one runs and another is
+   queued; the queued backup covers it".
 4. When the running backup ends (succeeded, failed or canceled), the queued
    one starts with a new stamp. Its log in History starts with "Started from
    the queue (requested at …); 1 later request(s) folded into it".
 
-A **Resume** click queues and folds the same way. Resuming the backup that is
-running right now is refused: "That backup is running right now." A queued
-request cannot be removed; cancel it once it has started.
+A **Resume** click queues the same way. Resuming the backup that is running
+right now is refused: "That backup is running right now." A queued request
+cannot be removed; cancel it once it has started.
+
+**Only like folds into like (#2540).** A request folds into the queued one
+only when the queued one does the same work:
+
+| You click | A fresh backup is queued | A resume of the same backup is queued | A resume of another backup is queued |
+|---|---|---|---|
+| **Back up now** | Folds | Refused | Refused |
+| **Resume** | Refused | Folds: "A backup is running and a resume of this backup is already queued; that queued resume covers this request." | Refused |
+
+A refused request changes nothing: no backup is queued, no run appears in
+History and the fold count stays the same. The page says what is queued, for
+example "A backup is running and a resume of 20261101-101010 is queued after
+it, so this backup was not queued. Try again once the queue clears." Click
+again once the queued backup has started (the strip no longer shows "1
+queued").
+
+Folding them would lose work: a resume finishes the old backup's stamp, so a
+fresh backup folded into it would never be taken, and a resume folded into a
+fresh backup would never resume. In-app schedules (#2219, not yet released)
+get the same answer: a scheduled tick is never folded into a queued Resume,
+and is retried on a later tick once the queue clears.
 
 **What the queued backup covers after a fold.** A request that folds into a
 queued backup never leaves it covering less than either asked for:
@@ -618,15 +639,11 @@ queued backup never leaves it covering less than either asked for:
 | Queued | Folding in | The queued backup then covers |
 |---|---|---|
 | A fresh backup of some components | A fresh backup | Both requests' components (database-only and media-only make both) |
-| A fresh backup | A resume | Everything |
-| A resume | A fresh backup that the resumed run covers | The resumed run's components (unchanged) |
-| A resume | A fresh backup that the resumed run doesn't cover | Nothing changes: the request is refused, and nothing is written |
-| A resume | A resume | The queued resume's run's components (unchanged) |
+| A resume | A resume of the same backup | The queued resume's run's components (unchanged) |
 
-The refusal in the fourth row only arises once a run covering part of the
-deployment has been resumed. **Back up now** then says "A resume is queued that
-doesn't cover this backup. Try again once it starts.", and
-`KilnCMS.Backups.request/2` returns `{:error, :resume_queued}`.
+Every other pairing is refused ([above](#back-up-while-another-backup-runs)),
+so a resume never widens a queued fresh backup and a fresh backup never folds
+into a resume, even one whose run covers the components it asks for.
 
 ### Cancel a running backup
 
@@ -752,8 +769,9 @@ is one of:
 |---|---|
 | `{:ok, %{status: :started, chain: chain}}` | It is running. |
 | `{:ok, %{status: :queued, chain: running}}` | Another backup is running; this one starts after it. `chain` is the running one. |
-| `{:ok, %{status: :folded, chain: running}}` | One is already queued, and it covers this request. |
-| `{:error, reason}` | `:disabled`, `:no_database_url`, `:no_pg_dump` or `:no_pg_restore`; for a resume, `:invalid_stamp`, `:in_flight`, `:no_such_run`, `{:not_resumable, status}` or `:no_state`; for `:components`, `:invalid_components`, `:components_with_resume` or `:no_media_dir` ([below](#back-up-only-the-database-or-only-the-media)); `:resume_queued` when a queued resume doesn't cover this request ([above](#back-up-while-another-backup-runs)); or `:forbidden` for an actor who may not ask. |
+| `{:ok, %{status: :folded, chain: running}}` | One of the same kind is already queued (a fresh backup, or a resume of the same stamp), and it covers this request. |
+| `{:error, {:queue_busy, queued}}` | One of another kind is queued (`queued` is `:backup` or `{:resume, stamp}`). Nothing changed; ask again once it has started ([above](#back-up-while-another-backup-runs)). |
+| `{:error, reason}` | `:disabled`, `:no_database_url`, `:no_pg_dump` or `:no_pg_restore`; for a resume, `:invalid_stamp`, `:in_flight`, `:no_such_run`, `{:not_resumable, status}` or `:no_state`; for `:components`, `:invalid_components`, `:components_with_resume` or `:no_media_dir` ([below](#back-up-only-the-database-or-only-the-media)); or `:forbidden` for an actor who may not ask. |
 
 The trigger is cut to 64 characters, with credentials redacted, before it is
 stored. Other calls:
@@ -780,7 +798,8 @@ and returns the same map (it returned the `Oban.Job` before #2218).
 `KilnCMS.Backups.Worker.run/3` no longer runs a backup inline in the console:
 it requests one and waits for it, returning `:ok` or `{:error, reason}`, and
 `{:error, :queued}` or `{:error, :folded}` without waiting when another backup
-is running. For an off-site failure the reason is the run's error text. Both,
+is running (`{:error, {:queue_busy, queued}}` when one of another kind is
+queued). For an off-site failure the reason is the run's error text. Both,
 the `backups` queue and `KilnCMS.Backups.Worker` are removed in the next minor
 release.
 
@@ -825,8 +844,8 @@ What a partial backup does differently:
   database-only run backs up only the database. A resume of a media-only run
   whose start step lands on a node without a media directory is refused there
   (server log: "Backup resume refused: :no_media_dir").
-- A request queued behind a running backup keeps its components, and a request
-  folding into it widens them
+- A request queued behind a running backup keeps its components, and a fresh
+  request folding into it widens them
   ([What the queued backup covers after a fold](#back-up-while-another-backup-runs)).
 
 What can go wrong:
@@ -836,7 +855,7 @@ What can go wrong:
 | `{:error, :invalid_components}` | `components:` is empty, not a list, names something other than `:db` or `:media`, or names one twice. |
 | `{:error, :components_with_resume}` | `components:` together with `resume:`. A resume backs up what its run did; leave `components:` out. |
 | `{:error, :no_media_dir}` | `components:` names `:media`, and this deployment has no media directory (S3 media, or no `MEDIA_DIR`). |
-| `{:error, :resume_queued}` | A resume is queued behind the running backup and its run doesn't cover what you asked for. Nothing was queued; ask again once it starts. |
+| `{:error, {:queue_busy, {:resume, stamp}}}` | A resume is queued behind the running backup. A fresh backup never folds into it; nothing was queued. Ask again once it starts. |
 | A `Skipped` row, "Refused: no_media_dir" | The media directory was gone by the time a media-only backup started. The manifest is left alone. |
 
 **During a rolling deploy.** The migration adds the columns before any node
