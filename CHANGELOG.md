@@ -233,6 +233,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **`GET /api/feed` streams the change feed as Server-Sent Events: `published`, `updated` and `withdrawn` with identifiers only, the anonymous view whatever the credential, resumable by `Last-Event-ID` (every id is a `/api/sync` cursor) for 24 hours or 1,000 events.**
+  Refusals are a `200` with `event: busy` that `EventSource` retries; caps are per node. A boot job records the documents already public, so `/api/sync` deletes may now name those too. Guide: [docs/headless-consumer-guide.md](docs/headless-consumer-guide.md#live-updates-follow-the-change-feed).
+  ([#2275](https://github.com/The-Verscienta/kiln_cms/issues/2275) · [long form](docs/changelog/unreleased.md#change-feed-sse))
+
 - **`GET /api/security/posture` returns the Security posture checks as JSON for monitoring: an administrator's JWT or API key (never `draft_write`), behind the site's admin allowlist, no details, cached 30 s per node.**
   The allowlist's JSON refusals now read "Not available from this network" / "Temporarily unavailable" (codes unchanged). Guide: [docs/api.md](docs/api.md#security-posture-monitoring).
   ([#2521](https://github.com/The-Verscienta/kiln_cms/issues/2521) · [#2648](https://github.com/The-Verscienta/kiln_cms/pull/2648) · [long form](docs/changelog/unreleased.md#security-posture-json))

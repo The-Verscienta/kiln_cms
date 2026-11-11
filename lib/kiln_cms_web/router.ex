@@ -144,6 +144,21 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.ApiDocs
   end
 
+  # `GET /api/feed` (#2275): `:api` without `accepts ["json"]`, which would
+  # answer an `EventSource`'s `Accept: text/event-stream` with a 406. The
+  # connect budget is charged first, ahead of `:api` and the credential
+  # plugs, like the `/ws/*` joins (`KilnCMSWeb.SocketJoinBudget`), and is
+  # refused with the stream's own `200` + `event: busy` rather than a 429,
+  # which a native `EventSource` would never retry. A bad bearer or key is
+  # the same 401 as on every other `/api` route.
+  pipeline :feed do
+    plug KilnCMSWeb.FeedStream.JoinBudget
+    plug KilnCMSWeb.Plugs.RateLimit, :api
+    plug :load_from_bearer
+    plug :set_actor, :user
+    plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
+  end
+
   # `:api` plus a guard against the specific query-param shapes `ash_json_api`
   # 1.6.6 has no parser clause for (#763) — a separate pipeline because the
   # guard is meaningless for our own hand-written `/api` handlers, which
@@ -959,6 +974,15 @@ defmodule KilnCMSWeb.Router do
 
     get "/content/:type/:slug", ArtifactController, :show
     get "/visual-editing/:type/:slug", VisualEditingController, :show
+  end
+
+  # The change feed over SSE (#2275): the site's published / updated /
+  # withdrawn events as they happen, anonymous visibility whoever calls, with
+  # `Last-Event-ID` resume through the sync cursor. KilnCMSWeb.FeedStream.
+  scope "/api", KilnCMSWeb do
+    pipe_through :feed
+
+    get "/feed", ChangeFeedController, :stream
   end
 
   # Headless delivery of fired artifacts (Kiln v2 — D9). The v2 content API serves

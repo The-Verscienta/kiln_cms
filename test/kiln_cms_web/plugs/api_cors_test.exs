@@ -70,6 +70,22 @@ defmodule KilnCMSWeb.Plugs.ApiCORSTest do
     end
   end
 
+  describe "the change feed's resume header (#2275)" do
+    test "a `Last-Event-ID` preflight to /api/feed is allowed", %{conn: conn} do
+      conn =
+        conn
+        |> put_req_header("origin", @allowed)
+        |> put_req_header("access-control-request-method", "GET")
+        |> put_req_header("access-control-request-headers", "last-event-id")
+        |> options(~p"/api/feed")
+
+      assert get_resp_header(conn, "access-control-allow-origin") == [@allowed]
+
+      assert conn |> get_resp_header("access-control-allow-headers") |> Enum.join(",") =~
+               "last-event-id"
+    end
+  end
+
   describe "actual cross-origin request" do
     test "an allowed origin gets the allow-origin header on a real GET", %{conn: conn} do
       conn =

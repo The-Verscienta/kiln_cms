@@ -283,11 +283,67 @@ On `main` (the table above) the 10,000-subscriber leg had publish p95
   custom dispatcher API), or having the 2.2 transports pace or batch
   delivery. Neither is done.
 
+### Change feed over SSE: fan-out
+
+The numbers above are for subscribers inside the BEAM. `GET /api/feed`
+(#2275, [api.md → Change feed (SSE)](api.md#change-feed-sse)) puts the feed
+on the network: each SSE connection is one request process subscribed to the
+site's topic, and the publisher encodes each event's frame and signs its ids
+once, so a stream only writes bytes it was handed. This measures what N real
+connections cost one node, and how long a publish takes to reach the last of
+them.
+
+Measured on the #2275 branch with
+[`scripts/benchmarks/feed_sse.sh`](https://github.com/The-Verscienta/kiln_cms/blob/main/scripts/benchmarks/README.md#change-feed-over-sse).
+
+| | |
+|---|---|
+| Machine | Apple Mac17,8, 18 cores, 24 GB, macOS 27.3; server, client and PostgreSQL on the same machine |
+| Build | `MIX_ENV=prod`, `POOL_SIZE=10`, its own database, no corpus (the feed's per-event work does not read one) |
+| Client | A second BEAM node on the same machine opening N connections with Mint over loopback, one process each, as an `EventSource` would: `Accept: text/event-stream`, no credential, so every stream gets the anonymous view |
+| Load | 30 posts created and published through the domain actions as an admin, 1 s apart, per leg. Every publish reached every connection in every leg |
+
+Milliseconds, except memory. "Publish call" is the RPC that creates and
+publishes the post; the feed's own work (the anonymous decision, the
+exposure write, encoding the frame) runs inside it, after the commit.
+"First client" and "last client" run from just before that call to the first
+and the last connection parsing the post's `event: published`. Memory per
+connection is the server's total BEAM memory with N streams open, less the
+total before, over N; and the mean memory of one stream's request process.
+
+| Connections | Open all (ms) | Publish call p50 / p95 | First client p50 / p95 | Last client p50 / p95 / max | Memory per connection: BEAM total / stream process |
+|---|---|---|---|---|---|
+| 1,000 | 79 | 44 / 67 | 33 / 50 | 45 / 68 / 165 | 29 KB / 23 KB |
+| 5,000 | 412 | 84 / 135 | 25 / 39 | 85 / 143 / 163 | 25 KB / 22 KB |
+| 10,000 | 782 | 156 / 174 | 40 / 53 | 172 / 196 / 212 | 24 KB / 22 KB |
+
+- **10,000 open streams cost about 240 MB** on the node, and an event
+  reaches the last of them within about 200 ms (p95 196 ms).
+- **The publish call grows with N**: from 44 to 156 ms at the median. The
+  likeliest cause is the same as in [With the feed relay](#with-the-feed-relay):
+  10,000 processes made runnable at once delay everything else on the node,
+  and here the client's 10,000 processes compete for the same cores. That is
+  not proven; a run with the client on another machine would separate the
+  two.
+- **The publisher does more per event.** Each document event now costs about
+  two or three extra queries after the commit (the anonymous decision and
+  the exposure record). This benchmark does not isolate that cost.
+- **An idle stream is small only because it collects its garbage once.**
+  Earlier runs of this benchmark measured up to 265 KB per connection: the
+  list the per-client cap lookup returned stayed on each idle stream's heap,
+  which may not collect again for hours. Counting the client's streams
+  instead of listing them, and one garbage collection once the stream is
+  live, brought it to the figures above.
+- **Not measured:** streams behind a real network or proxy, resumes (each
+  replays from the database, at most 8 at once per node), and a cluster. The
+  stream caps are per node: 20,000 by default.
+
 ### Rerunning
 
 ```bash
 scripts/benchmarks/live_blog.sh                                         # ~1 h 45 min
 BENCH_DURATION=120 BENCH_SUBSCRIBERS=0,1000 scripts/benchmarks/live_blog.sh   # a smoke run
+BENCH_CONNECTIONS=1000,5000,10000 scripts/benchmarks/feed_sse.sh       # the SSE fan-out table
 ```
 
 ## Content tree: moving a large subtree

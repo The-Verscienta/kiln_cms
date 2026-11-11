@@ -73,6 +73,7 @@ site of your own.
 | The **rendered body** of a published page/post (blocks, HTML, JSON-LD) | Artifact: `GET /api/content/:type/:slug?surface=json\|json_ld\|web` | Fired artifact — the immutable, pre-compiled output (Kiln v2 `_type` block model) |
 | To **preview a specific draft** by share link (draft mode) | Mint: `POST /api/content/:type/:id/preview-token` (editor key, server side) — or an editor's **Copy preview link**. Redeem: `GET /preview/:token` | The draft's raw, editable block tree (curated public fields) — the working copy for a live document — behind a signed, read-only 15-minute token for that one document |
 | To **mirror** the public site — a build cache, search index or edge store — and learn what was **taken down** | Sync: `GET /api/sync?initial=true`, then `?cursor=` | Upserts (with the fired artifact) and id-only deletes since your last cursor — see [api.md → Sync](api.md#sync-delta-api) |
+| To **hear about changes as they happen** — refresh an open page, invalidate a cache, re-run a build step | Change feed: `GET /api/feed` (Server-Sent Events) | `published` / `updated` / `withdrawn` events with identifiers only, resumable by `Last-Event-ID` — see [Live updates](#live-updates-follow-the-change-feed) |
 | **Filterable lists / metadata** (slug, title, SEO, dates, relationships), incl. drafts with a bearer token | JSON:API: `GET /api/json/...` | Resource attributes + relationship linkage. **No block body** (`blocks` is `public? false`) |
 | **Taxonomy** (categories, tags) | JSON:API `/api/json/categories`,`/tags` **or** GraphQL `categories`,`tags` | Name, slug, description |
 | **Search** (keyword, semantic, autocomplete) | JSON:API `/<type>/search`,`/semantic-search`,`/autocomplete` **or** GraphQL `search*`/`semanticSearch*`/`autocomplete*` | Matching records (metadata; no block body). Published-only **for anonymous callers** — with a bearer token, drafts match too. Delivery sites: use the `…/published` twins (`searchPublished*` etc.), which pin `state == :published` server-side (see "Drafts") |
@@ -585,6 +586,131 @@ left, or names one you were never sent.
 
 For an app on a phone, see [native-apps.md](native-apps.md#mirroring-with-sync)
 for where to keep the cursor and when (not) to start over.
+
+## Live updates: follow the change feed
+
+`GET /api/feed` pushes an event the moment a public document is published,
+updated or withdrawn, over [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/EventSource),
+so an open page or a cache can react without polling. It shows what an
+anonymous reader may learn, whatever key you use, and it carries identifiers,
+never content: you fetch the document the way you already do. The reference
+(every event, every refusal, the limits) is
+[api.md → Change feed (SSE)](api.md#change-feed-sse).
+
+You start with a Kiln site serving published, public content and a front end
+that already reads it through `/api/content` or `/api/sync`. At the end, the
+front end updates itself when an editor publishes, and catches up on what it
+missed after a dropped connection.
+
+1. **If the front end runs in a browser on another origin, allow that
+   origin.** An operator adds it to `CORS_ORIGINS` (for example
+   `CORS_ORIGINS=https://www.example.com`) and restarts. A front end served
+   from the Kiln host itself, or a server-side consumer, skips this step.
+2. **Open the stream by hand to see what it sends.**
+
+   ```bash
+   curl -N -H 'Accept: text/event-stream' 'https://cms.example.com/api/feed?type=post'
+   ```
+
+   The connection stays open. You see `retry: 3000`, then an `event: ready`
+   with an `id:` and `data: {"resumed":false}`. Every 25 seconds a `: ping`
+   line follows. Leave out `?type=` to hear every content type.
+3. **Publish a post** in the editor, or through the API. The open `curl`
+   prints:
+
+   ```text
+   event: published
+   id: SFMyNTY…
+   data: {"affected":[],"id":"6f1c…","locale":"en","published_at":"2026-11-10T09:30:00Z","slug":"hello","type":"post"}
+   ```
+
+   Unpublish it, and an `event: withdrawn` with only `type` and `id`
+   follows. A members-only or locked post publishes nothing on the stream.
+4. **Subscribe in the front end.** `EventSource` reconnects on its own after
+   a drop, sending the last `id:` it saw as `Last-Event-ID`, and the server
+   replays what the client missed before going live again:
+
+   ```ts
+   const KILN = "https://cms.example.com";
+   const saved = localStorage.getItem("kiln-feed-id");
+   const url = new URL("/api/feed", KILN);
+   url.searchParams.set("type", "post");
+   // EventSource cannot set headers, so a resume after a page load goes in
+   // the query string; later reconnects send Last-Event-ID themselves.
+   if (saved) url.searchParams.set("last_event_id", saved);
+
+   const feed = new EventSource(url);
+   const remember = (e: MessageEvent) => {
+     if (e.lastEventId) localStorage.setItem("kiln-feed-id", e.lastEventId);
+   };
+
+   for (const kind of ["published", "updated"]) {
+     feed.addEventListener(kind, async (e) => {
+       const { type, slug, locale } = JSON.parse(e.data);
+       const res = await fetch(`${KILN}/api/content/${type}/${slug}?locale=${locale}`);
+       if (res.ok) render(await res.json());
+       remember(e);
+     });
+   }
+
+   feed.addEventListener("withdrawn", (e) => {
+     const { id } = JSON.parse(e.data);
+     removeById(id); // a withdrawal names the id only, never the slug
+     remember(e);
+   });
+
+   feed.addEventListener("ready", remember);
+
+   feed.addEventListener("reset", async (e) => {
+     // The saved id is too old, or not valid: rebuild from a full sync.
+     // The stream itself stays open and live.
+     await resyncFrom(`${KILN}/api/sync?initial=true&type=post`);
+     remember(e);
+   });
+   ```
+
+   After a reconnect you see the missed events, then `ready` with
+   `{"resumed":true}`. Key your copy by `id`: a `withdrawn` event carries no
+   slug.
+5. **Make every handler safe to run twice.** The same event can arrive twice
+   (a resume starts 10 seconds before the id it was given, and live events
+   that arrive during the replay can repeat it). Refetching a document twice,
+   or removing an id you no longer hold, is harmless.
+
+You can switch transports at any point: every `id:` is also a
+`GET /api/sync?cursor=` cursor, so a build that only runs now and then can
+store the last id a long-running process saw and fetch the changes, with
+bodies, from sync.
+
+**What can go wrong.**
+
+* **`event: busy`, then the connection closes.** The server refused the
+  stream for now; `data` says why (`rate_limited`, `too_many_streams`,
+  `node_full`, `replay_busy` or `shutting_down`). It also sent a `retry:`, and
+  `EventSource` reconnects after it on its own. Do nothing. If it is
+  `too_many_streams`, open fewer streams per visitor: 50 per client address
+  (or per API key) is the cap, and visitors behind one NAT share an address.
+* **`event: shutdown`.** A deploy is stopping that server. `EventSource`
+  reconnects, with its last id, to whichever server answers next.
+* **`event: reset` with `invalid_cursor`.** The id was altered, belongs to
+  another site, or was signed before the server's `SECRET_KEY_BASE` was
+  rotated. With `too_far_behind`: the id is more than 24 hours old, or more
+  than 1,000 events have happened since. Re-sync with `/api/sync?initial=true`
+  as in step 4.
+* **The stream stops for good** (`EventSource.readyState` is `CLOSED`). The
+  server answered something other than `200`: a `429` (over the `api` rate
+  limit, which every connect is charged to), a `401` (a bad API key or bearer
+  token) or a `404` (the `type` does not exist, or no longer does). A native
+  `EventSource` never retries these; open a new one when the cause is fixed.
+* **The fetched document is the old version.** A CDN in front of Kiln can
+  serve `/api/content` from its cache for up to its `max-age` (300 s for an
+  artifact) unless the operator set `KILN_CDN_PURGE_URL`
+  ([Caching](#caching)). Fetching through `/api/sync` with the event's id
+  is never cached.
+* **Nothing arrives behind a proxy.** A proxy that buffers responses holds
+  the events back. Kiln sends `x-accel-buffering: no` for nginx; other
+  proxies need buffering turned off for `/api/feed`, and an idle timeout
+  above 25 seconds.
 
 ## Submitting drafts from your app: the `draft_write` key
 

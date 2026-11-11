@@ -289,7 +289,7 @@ Verscienta.com as the second consumer.
 | Release | Ships | Demo line | Number it produces |
 |---|---|---|---|
 | 2.1 | Public change feed, server side: `KilnCMS.Delivery.Feed` publishes `published`, `updated`, `withdrawn` events (type, id, slug, published_at, affected) per site over PubSub, from the same transition the webhooks use. Anonymous-safe by construction: the event carries identifiers, never content; the client fetches through the existing cached delivery routes. | 2 | Feed events per transition |
-| 2.2 | Two transports over the one feed: `GET /api/feed` as SSE with `Last-Event-ID` resume, and a `feed:<site>` Phoenix Channel on a new `/ws/feed` socket. Both charged by `SocketJoinBudget`, tenant-resolved from the host like `/ws/gql`. Covered from 2.2, not experimental. | 2 | Resume window, stated |
+| 2.2 | Two transports over the one feed: `GET /api/feed` as SSE with `Last-Event-ID` resume, and a `feed:<site>` Phoenix Channel on a new `/ws/feed` socket. Both charged by `SocketJoinBudget`, tenant-resolved from the host like `/ws/gql`. Covered from 2.2, not experimental. The SSE half landed in #2275 ([api.md → Change feed (SSE)](api.md#change-feed-sse)): its connects are charged to their own `:feed_join` bucket rather than `SocketJoinBudget`, and refused with a `200` and `event: busy` that `EventSource` retries; the `/ws/feed` channel is still to come. | 2 | Resume window, stated: 24 hours or 1,000 events, whichever comes first |
 | 2.3 | `kiln.subscribe({types, onChange})` in `@kiln-cms/client` and `KilnClient.subscribe/2` in Elixir, with reconnect and resume. verscienta-news wired to it. | 2 | Publish-to-open-page p95 on verscienta-news |
 | 2.4 | Fan-out benchmark: a script under `scripts/benchmarks/` opens 1k, 10k and 50k feed subscribers on one node and measures propagation p95 and memory per connection. Published with the hardware named. | 2 | Connections per node; propagation p95 per tier |
 | 2.5 | Withdrawal on open pages: the clients expose `withdrawn` so a page can blank or redirect, and Verscienta.com's cache invalidation reads the feed as a second source beside webhooks. The 1.4 number now ends at "last open page". | 3 | Unpublish-to-last-open-page p95 |
@@ -379,7 +379,8 @@ when the 2.0 gate passes and a wedge consumer needs it.
 - Does Verscienta.com need the feed at all, or does the richer webhook (1.3)
   cover it? Decide after 1.5's number.
 - How long should `/api/feed` replay on resume: one hour, one day, or until
-  the next full publish?
+  the next full publish? Answered in #2275: one day, capped at 1,000 events,
+  both configurable; past either, the client is told to re-sync.
 - Which external witness for 3.4: a second Kiln, an RFC 3161 timestamp
   authority, or both?
 - Is holisticacupuncture.net's one-page rebuild worth doing in Astro, or does

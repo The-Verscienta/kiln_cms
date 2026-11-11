@@ -23,7 +23,13 @@ defmodule KilnCMS.Firing.SyncExposure do
   has no row left to read its type from, and a type-scoped sync still has to
   file its tombstone under the right type.
 
-  Written and read only by the sync API, as the system actor.
+  Written and read by the sync API (`:sync`) and by the change feed's publisher
+  (`:feed`, `KilnCMS.Delivery.Feed`), each as its own system actor. The feed
+  discloses an id too — a public `published` / `updated` event is shown to
+  anonymous `GET /api/feed` streams — so it records the id the same way before
+  showing it, and reads this table to decide whether a withdrawal may name one.
+  `KilnCMS.Firing.SyncExposureBackfill` records the documents that were
+  already public when the feed started recording.
   """
   use Ash.Resource,
     domain: KilnCMS.Firing,
@@ -54,12 +60,13 @@ defmodule KilnCMS.Firing.SyncExposure do
   end
 
   policies do
-    # Bookkeeping for one subsystem. No person has a reason to read or write
-    # it: the ids it holds are only ever surfaced as tombstones, by the sync API,
-    # which runs as the system actor. `authorize_if` rather than a bypass — see
+    # Bookkeeping for the two anonymous delivery surfaces that disclose ids. No
+    # person has a reason to read or write it: the ids it holds are only ever
+    # surfaced as tombstones, by the sync API and the change feed, which run as
+    # system actors. `authorize_if` rather than a bypass — see
     # `KilnCMS.Checks.SystemActor`.
     policy always() do
-      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :sync}
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: [:sync, :feed]}
       forbid_if always()
     end
   end
