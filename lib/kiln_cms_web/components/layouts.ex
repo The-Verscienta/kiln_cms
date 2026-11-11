@@ -26,10 +26,15 @@ defmodule KilnCMSWeb.Layouts do
   resolution fails safe rather than trusting that. An error page carries no
   form to protect, so `nil` is a fine answer; on every normal path a session is
   present and this returns the real token, unchanged.
+
+  `nil` too for a response marked for a shared cache (#2630,
+  `KilnCMSWeb.SharedCache`): the token belongs to one session, and a CDN would
+  hand it to every later visitor. Asking for one would also mint it into a
+  visitor's session, so the shared response would carry a `set-cookie`.
   """
-  @spec csrf_token() :: String.t() | nil
-  def csrf_token do
-    get_csrf_token()
+  @spec csrf_token(map()) :: String.t() | nil
+  def csrf_token(assigns \\ %{}) do
+    if KilnCMSWeb.SharedCache.shared?(assigns[:conn]), do: nil, else: get_csrf_token()
   rescue
     _ -> nil
   end
@@ -1321,7 +1326,9 @@ defmodule KilnCMSWeb.Layouts do
   # Page or Post is the same document for every reader, and this layout has no
   # authoring nav to hang an account menu off. Passed only where a signed-in
   # reader is the point — the stock front page, which had these two links from
-  # `Layouts.app` before it moved here and must not lose them.
+  # `Layouts.app` before it moved here and must not lose them. A response
+  # marked for a shared cache has no user to pass: `KilnCMSWeb.SharedCache.put_public/2`
+  # clears `:current_user` from its assigns (#2630).
   attr :current_user, :any, default: nil, doc: "signed-in reader, for the account/sign-out pair"
 
   slot :inner_block, required: true

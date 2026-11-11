@@ -48,6 +48,7 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.Plugs.ChallengeCsp
   alias KilnCMSWeb.Plugs.UrlLocale
+  alias KilnCMSWeb.SharedCache
   alias KilnCMSWeb.StructuredData
   alias KilnCMSWeb.ViewTracking
 
@@ -202,7 +203,7 @@ defmodule KilnCMSWeb.ContentController do
     |> widen_for_forms([form])
     # Same window as the event index's: the page changes only when an admin
     # edits the form, and a form deactivated inside it refuses the POST anyway.
-    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> SharedCache.put_public()
     |> put_resp_header("vary", "Accept-Language")
     # Matches the embed document's `<meta name="robots" content="noindex">`: a
     # form is a destination for a link, not a page with content of its own, and
@@ -621,7 +622,7 @@ defmodule KilnCMSWeb.ContentController do
       )
 
     conn
-    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> SharedCache.put_public()
     |> put_resp_header("vary", "Accept-Language")
     |> assign(:locale, locale)
     |> assign(:page_title, gettext("Blog"))
@@ -664,7 +665,7 @@ defmodule KilnCMSWeb.ContentController do
     base = EventIndex.index_path(descriptor)
 
     conn
-    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> SharedCache.put_public()
     |> put_resp_header("vary", "Accept-Language")
     |> assign(:locale, locale)
     |> assign(:page_title, descriptor.label)
@@ -1595,7 +1596,7 @@ defmodule KilnCMSWeb.ContentController do
 
   defp put_delivery_cache_headers(conn, record, forms_digest) do
     conn
-    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> SharedCache.put_public()
     |> put_resp_header("vary", "Accept-Language")
     |> put_resp_header("etag", etag(record, current_org_id(conn), forms_digest, locale(conn)))
   end

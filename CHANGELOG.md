@@ -62,6 +62,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **If a CDN caches the site's pages, purge it after deploying (#2630).** Copies cached before the deploy still carry one visitor's CSRF token until they expire (up to about six minutes). No migration; ETags already change on deploy.
+  ([#2630](https://github.com/The-Verscienta/kiln_cms/issues/2630) · [long form](docs/changelog/unreleased.md#shared-cache-session-free-upgrade))
+
 - **Run `mix ash.migrate` (new table `instance_security_events`; moves existing `backup_canceled` events out of the default site's security log into it). Optional: `KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS` (default 365).**
   Rolling back moves them back to the default site's log before dropping the table; export the instance log first if you need it.
   ([#2541](https://github.com/The-Verscienta/kiln_cms/issues/2541) · [long form](docs/changelog/unreleased.md#instance-security-log-upgrade))
@@ -759,6 +762,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2596](https://github.com/The-Verscienta/kiln_cms/pull/2596) · [long form](docs/changelog/unreleased.md#scrollable-tables))
 
 ### Security
+
+- **A public page a CDN or browser may cache (`cache-control: public`) no longer carries the visitor's CSRF token or anything from their session, and no longer sets a session cookie (#2630).**
+  ([#2630](https://github.com/The-Verscienta/kiln_cms/issues/2630) · [long form](docs/changelog/unreleased.md#shared-cache-session-free))
 
 - **A connection-string `BACKUP_RCLONE_REMOTE` no longer puts its credentials in `rclone`'s arguments; they go to that `rclone` process as `RCLONE_CONFIG_*` variables (#2690).**
   ([#2690](https://github.com/The-Verscienta/kiln_cms/issues/2690) · [long form](docs/changelog/unreleased.md#rclone-remote-argv-credentials))

@@ -1165,7 +1165,10 @@ const toggleNavGroup = key => {
 
 syncNavGroups()
 
-const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
+// A page a shared cache may store carries no token (#2630,
+// KilnCMSWeb.SharedCache). Those pages mount no LiveView, so the socket never
+// needs one there; reading it must not throw and stop the rest of this file.
+const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
